@@ -39,7 +39,7 @@ static bool is_identity(const nt_anim_mat34_t *m, float tol) {
     for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 4; ++c) {
             const float expected = (r == c) ? 1.0F : 0.0F;
-            if (fabsf(m->r[r][c] - expected) > tol) {
+            if (!(fabsf(m->r[r][c] - expected) <= tol)) {
                 return false;
             }
         }

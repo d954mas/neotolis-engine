@@ -60,7 +60,7 @@ void nt_anim_fk(const nt_anim_skeleton_t *skel, const nt_anim_trs_t *restrict lo
     NT_ASSERT(skel->parent[first] == NT_ANIM_NO_PARENT || (uint32_t)first + (uint32_t)count <= (uint32_t)skel->subtree_end[first]);
     /* A model buffer overlapping the locals would feed later joints matrices
      * built from their own output. */
-    NT_ASSERT((const char *)(local + skel->joint_count) <= (const char *)model || (const char *)(model + skel->joint_count) <= (const char *)local);
+    NT_ASSERT((uintptr_t)(local + skel->joint_count) <= (uintptr_t)model || (uintptr_t)(model + skel->joint_count) <= (uintptr_t)local);
 
 #if NT_ANIM_CHECKS
     nt_anim_check_locals(skel, local, first, count);
@@ -114,7 +114,7 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_anim_mat34
     NT_ASSERT(model != NULL);
     NT_ASSERT(out != NULL);
     NT_ASSERT(binding->palette_count <= capacity);
-    NT_ASSERT(out + binding->palette_count <= model || model + model_count <= out);
+    NT_ASSERT((uintptr_t)(out + binding->palette_count) <= (uintptr_t)model || (uintptr_t)(model + model_count) <= (uintptr_t)out);
 
 #if NT_ANIM_CHECKS
     for (uint16_t p = 0; p < binding->palette_count; ++p) {

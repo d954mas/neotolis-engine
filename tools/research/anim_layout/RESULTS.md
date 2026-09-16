@@ -114,15 +114,17 @@ J = 100, T = 4; the tool aborts and prints the mismatch otherwise.
    ±2.5 % across the whole matrix (15.47 vs 15.30 ns at J=100, C=100, T=4) and FK
    sits in a 6.5–7.3 ns band for all three layouts, a spread under 12 %.
 2. **The padded 48 B layout wins only in mix**, by 21–28 %: 3.66 vs 4.82 ns at
-   T=1, 6.01 vs 8.32 at T=2, 12.71 vs 15.99 at T=4 (J=100, C=100). Aligned
-   16-byte `t`/`q`/`s` at a 48-byte stride vectorize where the 40-byte stride
-   with `q` at offset 12 does not.
+   T=1, 6.01 vs 8.32 at T=2, 12.71 vs 15.99 at T=4 (J=100, C=100). Both AoS
+   layouts use compiler-generated SIMD in the native Release build, including
+   vector quaternion arithmetic at the 40-byte stride. These timings do not
+   isolate the cause of the gap; alignment alone is not an established explanation.
 3. **That one stage is the whole total-column gap:** 8–10 % (34.82 vs 38.11 ns
    at J=100, C=100, T=4), bought with 20 % more pose memory in every local
    buffer, snapshot and scratch the game owns.
 4. **SoA loses every stage** — 27–31 % on total (49.64 vs 38.11 ns) and 60 % on
    sample alone — because each joint costs ten gathers and ten scatters that the
-   shared arithmetic cannot amortize without SIMD.
+   shared per-joint arithmetic does not vectorize across joints. Native compiler
+   SIMD within a joint is already present; this is not a baseline-WASM measurement.
 5. **Joint and character count barely matter:** per-joint cost is flat within
    2.5 % from J=30 to J=100 and from C=1 to C=1000, so at these sizes the
    workload is compute-bound in all three layouts, not bandwidth-bound.
