@@ -66,6 +66,12 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_skeletal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_skeletal)
 
+    # Clip sampler, object curve and the track clock, over hand-built clip views.
+    add_executable(test_skeletal_sample unit/test_skeletal_sample.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skeletal_sample PRIVATE nt_skeletal nt_hash nt_core nt_log_stub unity)
+    target_include_directories(test_skeletal_sample PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_skeletal_sample)
+
     add_executable(test_skin unit/test_skin.c unit/test_helpers/skeletal_rig.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_skin PRIVATE nt_skeletal nt_hash nt_core nt_log_stub nt_math unity)
     target_include_directories(test_skin PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")

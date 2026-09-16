@@ -118,13 +118,13 @@ typedef struct {
     double   time, duration;
     uint32_t clip_key;
     float    speed, gain;   /* gain = g_t of §7.3 */
-    uint32_t flags;         /* occupied, looping */
-} nt_skeletal_track_t;          /* 32 B */
+    uint32_t flags;         /* NT_SKELETAL_TRACK_OCCUPIED | NT_SKELETAL_TRACK_LOOPING */
+} nt_skeletal_track_t;      /* 32 B, pinned by a _Static_assert in nt_skeletal.h */
 ```
 
 - `clip_key` is an opaque game/content `uint32_t`; assigning a clip supplies key and duration (fixed for that assignment). Tracks store no clip, weights, resource or GPU pointer; the game supplies current clip and factor views per evaluation call after publication.
 - **Occupancy ≠ gain.** A gain-0 track keeps advancing (blend spaces need synchronized cycles); `speed = 0` pauses; the game releases a slot explicitly.
-- `nt_skeletal_tracks_advance(tracks, count, dt)` updates clocks only (wrap, clamp). It is the only engine function over tracks; assign/release/crossfade ramps are three-field writes that live in game code (the showcase's assign helper asserts when no slot is free — the engine has no assign function and no eviction policy). #491 extends advance with time spans and signed cycle crossings for root-motion/event consumers. Baked characters use the same tracks with a bank lookup instead of kernels.
+- `nt_skeletal_tracks_advance(tracks, count, dt)` updates clocks only (wrap, clamp), in `engine/skeletal/nt_skeletal_tracks.c` so a game that only advances clocks links no sampler. Per track: a slot without `NT_SKELETAL_TRACK_OCCUPIED` is untouched; `duration == 0` holds `time` at 0; otherwise `time += speed·dt`, then `NT_SKELETAL_TRACK_LOOPING` normalizes by `time − floor(time/duration)·duration` (one step for reverse and for several cycles at once, with a rounding residue on either boundary restarting the cycle at 0) and a non-looping track clamps to `[0, duration]`. `speed = 0` is a pause with no special case. `dt ≥ 0` and every `duration ≥ 0` are asserted; nothing else is written and nothing is called. It is the only engine function over tracks; assign/release/crossfade ramps are three-field writes that live in game code (the showcase's assign helper asserts when no slot is free — the engine has no assign function and no eviction policy). #491 extends advance with time spans and signed cycle crossings for root-motion/event consumers. Baked characters use the same tracks with a bank lookup instead of kernels.
 
 ## 7. Time, sampling and composition
 
@@ -134,7 +134,15 @@ typedef struct {
 
 ### 7.2 Sampling
 
-`nt_skeletal_sample(clip, time, defaults, out)`: absent channels take the supplied defaults; T/S lerp; rotations shortest-path normalized lerp; STEP exact at its timestamp; CUBICSPLINE is resampled by the builder with error checks; random seek/reverse need no cursor. Direct-access codec (§16). Output must not overlap input.
+**Runtime clip layout.** `nt_skeletal_clip_t` in `nt_skeletal.h` is an immutable borrowed view with the ownership contract of `nt_skeletal_skeleton_t`. It is not the wire layout: §16 describes the pack payload, and the activator decodes it into this view. Each channel has exactly one storage mode, so the tables never describe the same joint channel twice, and a channel in no table is absent.
+
+- **Sampled** channels share one uniform grid of `sample_count` samples on `[0, duration]` (`inv_step = (sample_count−1)/duration`, 0 when `sample_count == 1`) and live in `sample_count` frame blocks of `block_floats` floats, block `i` at `blocks + i·block_floats`, laid out as `t` rows `[n_t][3]`, then `q` rows `[n_q][4]`, then `s` rows `[n_s][3]`. Row `k` belongs to joint `t_joint[k]`/`q_joint[k]`/`s_joint[k]`. One sample therefore reads two adjacent blocks and nothing else instead of striding once per channel. `blocks` is NULL when the clip has no sampled channel.
+- **Constant** channels are `ct_joint`/`ct` (3 floats), `cq_joint`/`cq` (4), `cs_joint`/`cs` (3) with their counts.
+- **STEP** channels keep their authored timestamps: `steps[]` of `{first, count, joint, channel}` into the shared `step_times`/`step_values` (4 floats per key) tables.
+- The object curve (§7.5) is a separate one-element signal inside the clip, with its own grid and key ranges.
+- Identity and builder numbers travel with the view: `rig_compat_id`, `additive_ref_id`, `kind`, `joint_count`, `r_joints`, `r_root`, `s_max`, `bake_fps_min`, `bake_reach`.
+
+**Contract.** `nt_skeletal_sample(clip, time, defaults, out)` writes `joint_count` local transforms. `time` is a `double` in `[0, duration]`, asserted. Absent channels take the supplied defaults, constants copy, and STEP channels hold the last key at or before `time` (the first key when `time` precedes it). For sampled channels `f = time·inv_step` in double, `i = floor(f)` clamped so `i+1 ≤ sample_count−1`, `u = (float)(f − i)`; `u == 0` copies block `i` and `u == 1` (reachable only from that clamp at `time == duration`) copies block `i+1`, both bit for bit, so a grid time reproduces its stored sample exactly. Otherwise T/S lerp as `a·(1−u) + b·u` and Q takes the shortest-path normalized lerp (`d = dot(a,b)`, `b' = d < 0 ? −b : b`, `q = normalize(a·(1−u) + b'·u)`). Random seek and reverse need no cursor because the index is computed, not stepped. CUBICSPLINE is resampled by the builder with error checks. Direct-access codec (§16). `defaults` and `out` are caller-owned buffers of `joint_count` entries and must not overlap; `NT_SKELETAL_CHECKS` additionally validates the produced pose.
 
 ### 7.3 Composition kernels
 
@@ -156,7 +164,7 @@ A normal transition is a **live crossfade** (R1): both clips advance, the game r
 
 ### 7.5 Object curve
 
-R4 is a **separate one-element TRS signal**, not joint −1: `nt_skeletal_sample_object(curve, time, defaults, out)`; blended with the same kernels through one-element views and an explicit per-input object gain (never inferred from a pelvis weight). Missing curve = supplied defaults (identity). The game applies `E = E_game·O` or feeds it to its controller — in baked mode too: banks hold joint matrices only, and the crowd loop samples the object curve at the same track time. Extracted, loop-accumulating root motion and events over time spans are extension #491; differencing a blended absolute curve is not equivalent to blending deltas.
+R4 is a **separate one-element TRS signal**, not joint −1: `void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double time, const nt_skeletal_trs_t *defaults, nt_skeletal_trs_t *out)`; blended with the same kernels through one-element views and an explicit per-input object gain (never inferred from a pelvis weight). `nt_skeletal_object_curve_t` is self-contained — a mode per channel, its own constant value, sampled array, grid (`sample_count`, `inv_step`, `duration`) and STEP ranges into its own key tables — so it is sampled without a clip pointer and follows §7.2's per-channel rules over one element. Missing curve = supplied defaults (identity): a NULL curve and a curve whose three modes are all absent both copy `defaults`, so a clip without an object curve needs no branch at the call site. `out` must not alias `defaults`. The game applies `E = E_game·O` or feeds it to its controller — in baked mode too: banks hold joint matrices only, and the crowd loop samples the object curve at the same track time. Extracted, loop-accumulating root motion and events over time spans are extension #491; differencing a blended absolute curve is not equivalent to blending deltas.
 
 ## 8. FK, procedural edits, IK, sockets, physics
 
