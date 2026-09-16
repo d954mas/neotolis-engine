@@ -85,7 +85,7 @@ nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void);
  * The popup-nested scrollbar rides the SAME fill layer as the panel and floats above it (floating draws
  * over same-layer siblings), so the band ordering holds at any base the game picks. Mirrors menu/checkbox/
  * tabbar: layer comes from the CALL, NOT the style. The INTERACTIVE/selection/anim row id is KEY-STABLE
- * mix(combo_id, key) (duplicate sibling keys alias the SAME row state — DEBUG best-effort: scans the first
+ * mix(combo_id, key) (duplicate sibling keys alias the SAME row state — NT_UI_CHECKS best-effort: scans the first
  * NT_UI_COMBO_DUP_KEY_WINDOW rows, a complete scan of an unbounded list would need heap or O(N^2); keep
  * combo keys unique); row_idx is positional, used ONLY for the label-cell/probe id. Both fmix-derived —
  * never additive. */

@@ -20,6 +20,7 @@ Neotolis Engine is a minimalist **C17** game engine for **Web/WASM (WebGL 2)**. 
 
 - **Explicit, code-first, composable:** game owns gameplay, system order, render passes and content organization. Do not hide policy in the engine or replace modules with a monolith. See [principles](docs/spec/core/principles.md).
 - **Keep it simple and small:** avoid speculative abstractions and dependencies. Every byte counts; use only the modules needed.
+- **Explicit build configuration:** CMake options and presets select features and diagnostics. Do not infer them from Debug/Release, include order, or unrelated options; headers require target-provided configuration.
 - **Prebuilt assets:** source formats and heavy validation belong in the builder. Runtime loads binary packs and enforces its documented safety checks and recoverable contracts.
 - **Platform abstraction:** browser/OS calls go through the owning engine wrapper.
 - **Data-oriented where useful:** dense storage, typed handles and predictable access for renderers/components; input, window and app remain simple structs.
@@ -29,7 +30,7 @@ Neotolis Engine is a minimalist **C17** game engine for **Web/WASM (WebGL 2)**. 
 
 - Prefer `NT_ASSERT` for invariants and unexpected runtime states; use `NT_BUILD_ASSERT` for builder programmer invariants, unexpected states, OOM, missing/unreadable files and single-asset decode failures.
 - Error returns are valid for documented recoverable API outcomes, never to silently swallow bugs or broken data.
-- Release defaults to TRAP. OFF is an unsupported size escape hatch: violated asserted preconditions cause undefined behavior; no fallback is required solely for OFF.
+- Release presets select TRAP. OFF is a supported build mode with assertions disabled, without runtime guarantees; no fallback is required solely for OFF.
 - Assert expressions must be side-effect-free because OFF does not evaluate them. Hard guards belong at untrusted/runtime-input boundaries and where the API promises recoverable rejection.
 - ATLAS builder content failures use `nt_builder_get_errors`; keep the exact exception list in [builder error policy](docs/spec/builder/builder.md#asserts-vs-graceful-content-errors).
 

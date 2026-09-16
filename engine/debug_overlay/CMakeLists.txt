@@ -3,7 +3,7 @@
 if(NT_UI_DEBUG_TOOLS AND NOT NT_METRICS_ENABLED)
     message(FATAL_ERROR "NT_UI_DEBUG_TOOLS requires NT_METRICS_ENABLED (the debug overlay now consumes "
         "nt_metrics for fps/cpu/gpu/draws + user counters; with metrics OFF it would read no-op stubs — "
-        "an empty HUD). Enable both, e.g. -DNT_METRICS_ENABLED=ON (NT_UI_DEBUG_TOOLS defaults it ON).")
+        "an empty HUD). Enable metrics explicitly with -DNT_METRICS_ENABLED=ON.")
 endif()
 
 nt_add_module(nt_debug_overlay LOG_DOMAIN "debug_overlay"

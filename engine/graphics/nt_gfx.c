@@ -432,19 +432,12 @@ static void render_target_commit_attachment_backend(nt_texture_t tex, uint32_t b
     s_gfx.texture_metas[slot].default_sampler = nt_gfx_make_sampler(&sampler_desc);
 }
 
-static uint32_t render_target_create_attachment_backend(nt_texture_t tex, const nt_texture_desc_t *desc) {
-    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
-        return 0;
-    }
-    return nt_gfx_backend_create_texture(desc);
-}
-
 static bool render_target_recreate_attachment(nt_texture_t tex, const nt_texture_desc_t *desc) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         return false;
     }
     uint32_t slot = nt_pool_slot_index(tex.id);
-    uint32_t replacement = render_target_create_attachment_backend(tex, desc);
+    uint32_t replacement = nt_gfx_backend_create_texture(desc);
     if (replacement == 0) {
         return false;
     }
@@ -1044,9 +1037,6 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         return result;
     }
     if (local_desc.width > g_nt_gfx.gpu_caps.max_texture_size || local_desc.height > g_nt_gfx.gpu_caps.max_texture_size) {
-#ifdef NT_DEBUG
-        NT_ASSERT(0 && "make_texture: dimensions exceed GPU max_texture_size");
-#endif
         NT_LOG_ERROR("make_texture: %ux%u exceeds GPU max_texture_size %u", local_desc.width, local_desc.height, g_nt_gfx.gpu_caps.max_texture_size);
         return result;
     }
@@ -1066,9 +1056,6 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         /* WebGL BPTC requires block-aligned base dimensions, including tiny textures. */
         NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_BC7_RGBA || (local_desc.width % 4 == 0 && local_desc.height % 4 == 0)) && "make_texture: BC7 base dimensions must be multiples of 4");
         if (!texture_compressed_format_supported(local_desc.format)) {
-#ifdef NT_DEBUG
-            NT_ASSERT(0 && "make_texture: compressed format is not supported by the GPU");
-#endif
             NT_LOG_ERROR("make_texture: compressed format %u is not supported by this GPU", (unsigned)local_desc.format);
             return result;
         }

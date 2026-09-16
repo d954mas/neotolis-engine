@@ -9,7 +9,7 @@
 #include "atlas/nt_atlas.h"
 #include "clay.h"
 #include "color/nt_color.h" /* canonical packed<->float color home (Clay-free) */
-#include "core/nt_assert.h" /* NT_ASSERT_MODE/NT_ASSERT_OFF gate the debug-only combo dup-key window */
+#include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
 #include "ui/nt_ui.h"
@@ -173,10 +173,7 @@ typedef struct {
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
 
-/* DEBUG-only combo duplicate-key guard window: row ids are key-stable (mix(combo_id,key) only), so two
- * selectables sharing a key alias the SAME interactive/anim/Clay/selection id. BEST-EFFORT: only the first
- * N rows per combo are scanned for a collision (fail-early NT_ASSERT); a duplicate past N silently aliases.
- * A complete scan of an unbounded list would need heap or O(N^2), so the window is the no-heap design. */
+/* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
 #define NT_UI_COMBO_DUP_KEY_WINDOW 64
 #endif
@@ -335,8 +332,8 @@ struct nt_ui_context {
         uint8_t active;       /* a combo list is open between combo_begin/combo_end */
         uint8_t trigger_open; /* a custom trigger element is open between combo_preview_begin/end */
         uint8_t row_open;     /* a custom selectable element is open between selectable_begin/end */
-#if NT_ASSERT_MODE != NT_ASSERT_OFF
-        uint16_t dup_key_count;                           /* rows recorded into dup_key_ids this frame (debug-only) */
+#if NT_UI_CHECKS
+        uint16_t dup_key_count;                           /* rows recorded into dup_key_ids this frame */
         uint32_t dup_key_ids[NT_UI_COMBO_DUP_KEY_WINDOW]; /* first-N key-stable row ids; scanned for a duplicate key */
 #endif
     } pending_combo;

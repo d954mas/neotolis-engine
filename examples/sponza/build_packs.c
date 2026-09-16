@@ -417,13 +417,6 @@ static void add_meshes(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool 
     (void)printf("  Meshes added: %u\n", meshes_added);
 }
 
-/* --- Add all meshes and build scene manifest (for full pack) --- */
-
-static void add_meshes_and_manifest(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
-    add_meshes(ctx, scene, use_base_quality);
-    build_manifest_blob(ctx, scene);
-}
-
 /* --- Main --- */
 
 static nt_build_result_t build_pack(const char *out_dir, const char *hdr_dir, const char *cache_dir, const char *name, const nt_glb_scene_t *scene,
@@ -474,7 +467,8 @@ static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     nt_basisu_encode_opts_t color = nt_tex_compress_uastc_default();
     nt_basisu_encode_opts_t normal = nt_tex_compress_uastc_default();
     add_textures(ctx, scene, 0, color, normal);
-    add_meshes_and_manifest(ctx, scene, false);
+    add_meshes(ctx, scene, false);
+    build_manifest_blob(ctx, scene);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

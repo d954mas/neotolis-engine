@@ -417,6 +417,63 @@ void test_vertex_count_4_per_glyph(void) {
     TEST_ASSERT_EQUAL_UINT32(8, nt_text_renderer_test_vertex_count());
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- Unity assertions expand into branches.
+void test_quad_covers_fp16_rounded_tofu(void) {
+    static const struct {
+        uint16_t upm;
+        int16_t ascent;
+        int16_t descent;
+        float rounded_right;
+        float rounded_top;
+        float rounded_bottom;
+    } cases[] = {
+        {2048, 2051, -200, 1024.0F, 2052.0F, -200.0F},
+        {4102, 2051, -2051, 2052.0F, 2052.0F, -2052.0F},
+        {65534, 32767, -32767, 32768.0F, 32768.0F, -32768.0F},
+    };
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        uint32_t blob_size;
+        uint8_t *blob = build_test_font_blob(&blob_size);
+        NtFontAssetHeader hdr;
+        memcpy(&hdr, blob, sizeof hdr);
+        hdr.units_per_em = cases[i].upm;
+        hdr.ascent = cases[i].ascent;
+        hdr.descent = cases[i].descent;
+        memcpy(blob, &hdr, sizeof hdr);
+
+        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.curve_texture_width = 64, .curve_texture_height = 64, .band_texture_height = 16, .band_count = 4});
+        nt_font_add(font, register_font_resource("rounded_tofu", blob, blob_size));
+        nt_resource_step();
+        nt_font_step();
+        nt_text_renderer_set_font(font);
+        nt_text_renderer_draw("Z", s_identity, (float)cases[i].upm * 2.0F, s_white, 0.0F, 0.0F);
+        TEST_ASSERT_EQUAL_UINT32(4, nt_text_renderer_test_vertex_count());
+
+        const uint8_t *verts = (const uint8_t *)nt_text_renderer_test_vertices();
+        float bl[5];
+        float tr[5];
+        float bounds[4];
+        memcpy(bl, verts, sizeof bl);
+        memcpy(tr, verts + ((size_t)2U * 72U), sizeof tr);
+        memcpy(bounds, verts + 36U, sizeof bounds);
+        TEST_ASSERT_TRUE(bl[0] <= -0.5F);
+        TEST_ASSERT_TRUE(bl[1] <= (cases[i].rounded_bottom * 2.0F) - 0.5F);
+        TEST_ASSERT_TRUE(tr[0] >= (cases[i].rounded_right * 2.0F) + 0.5F);
+        TEST_ASSERT_TRUE(tr[1] >= (cases[i].rounded_top * 2.0F) + 0.5F);
+        TEST_ASSERT_TRUE(bl[3] <= -0.25F);
+        TEST_ASSERT_TRUE(bl[4] <= cases[i].rounded_bottom - 0.25F);
+        TEST_ASSERT_TRUE(tr[3] >= cases[i].rounded_right + 0.25F);
+        TEST_ASSERT_TRUE(tr[4] >= cases[i].rounded_top + 0.25F);
+        TEST_ASSERT_TRUE((float)cases[i].descent == bounds[1]);
+        TEST_ASSERT_TRUE((float)cases[i].ascent == bounds[3]);
+
+        nt_text_renderer_flush();
+        nt_text_renderer_set_font(s_font);
+        nt_font_destroy(font);
+        free(blob);
+    }
+}
+
 /* Units 0 and 1 carry the font's curve and band textures, so a text material
  * that declares its own would have them silently overwritten. */
 void test_text_material_with_textures_asserts_at_flush(void) {
@@ -1482,6 +1539,7 @@ int main(void) {
     RUN_TEST(test_measure_null_string);
     RUN_TEST(test_vertex_stride_72);
     RUN_TEST(test_vertex_count_4_per_glyph);
+    RUN_TEST(test_quad_covers_fp16_rounded_tofu);
     RUN_TEST(test_text_material_with_textures_asserts_at_flush);
     RUN_TEST(test_flush_resets_counts);
     RUN_TEST(test_measure_width_increases);

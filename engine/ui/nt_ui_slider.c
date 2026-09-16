@@ -85,10 +85,6 @@ static nt_ui_element_data_t *slider_make_data(void *user_data, uint8_t layer, fl
     return d;
 }
 
-static void assert_cell_valid(const nt_ui_slider_cell_t *st) {
-    NT_ASSERT(isfinite(st->opacity) && st->opacity >= 0.0F && st->opacity <= 1.0F && "nt_ui_slider: style cell opacity must be finite in [0,1]");
-}
-
 /* Salted derivations so the drag + view cells can't alias the slider's own id in the state pool. */
 static inline uint32_t slider_drag_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_SLIDER_DRAG_SALT); }
 static inline uint32_t slider_view_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_SLIDER_VIEW_SALT); }
@@ -263,7 +259,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     NT_ASSERT(isfinite(style->value_speed) && style->value_speed >= 0.0F && "nt_ui_slider: style.value_speed must be finite >= 0");
     NT_ASSERT(isfinite(min) && isfinite(max) && min != max && "nt_ui_slider: min must differ from max");
     for (int i = 0; i < 4; ++i) {
-        assert_cell_valid(&style->states[i]);
+        NT_ASSERT(isfinite(style->states[i].opacity) && style->states[i].opacity >= 0.0F && style->states[i].opacity <= 1.0F && "nt_ui_slider: style cell opacity must be finite in [0,1]");
     }
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_slider: decl->id must be 0 (id is the explicit param)");

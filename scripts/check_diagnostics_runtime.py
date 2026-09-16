@@ -38,8 +38,9 @@ def main():
             build = args.output / name
             # Existing consumer contract tests catch assertions through the FULL handler.
             targets = TARGETS + (("test_nt_ui_rich_parse", "test_font", "test_text_renderer",
-                                  "test_mesh_renderer", "test_gfx") if asserts == 2 else ())
+                                  "test_mesh_renderer", "test_gfx", "test_ui_menu", "test_ui_dropdown") if asserts == 2 else ())
             ui_debug = "ON" if floor == 1 else "OFF"
+            ui_checks = "ON" if floor == 0 else "OFF"
             obs = "ON" if metrics == "ON" else "OFF"
             if obs == "ON":
                 targets += ("test_devapi_obs",)
@@ -48,7 +49,7 @@ def main():
             run(["cmake", "--preset", "native-release-test", "-B", str(build),
                  f"-DNT_PRESET_NAME={name}", f"-DNT_LOG_MIN_LEVEL={floor}",
                  f"-DNT_RESOURCE_TIMING_ENABLED={resource}", f"-DNT_UI_TIMING_ENABLED={ui}", f"-DNT_GFX_GPU_TIMING_ENABLED={gpu}",
-                 f"-DNT_METRICS_ENABLED={metrics}", f"-DNT_UI_DEBUG_TOOLS={ui_debug}",
+                 f"-DNT_METRICS_ENABLED={metrics}", f"-DNT_UI_DEBUG_TOOLS={ui_debug}", f"-DNT_UI_CHECKS={ui_checks}",
                  "-DNT_LOG_RING_ENABLED=ON", "-DNT_INTROSPECT_ENABLED=ON",
                  "-DNT_INTROSPECT_WRITE_ENABLED=ON", f"-DNT_DEVAPI_ENABLED={obs}",
                  "-DNT_DEVAPI_GROUP_UI=OFF", f"-DNT_DEVAPI_GROUP_OBS={obs}",
@@ -58,7 +59,7 @@ def main():
                           "-R", "^(" + "|".join(targets) + ")$"], args.output / f"{name}-test.log")
             if f"100% tests passed, 0 tests failed out of {len(targets)}" not in output:
                 raise RuntimeError(f"{name}: expected all {len(targets)} registered tests\n{output}")
-            print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, resource={resource}, metrics={metrics}, inspector={ui_debug}, asserts={asserts}; {len(targets)} tests", flush=True)
+            print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, resource={resource}, metrics={metrics}, inspector={ui_debug}, UI checks={ui_checks}, asserts={asserts}; {len(targets)} tests", flush=True)
     except (OSError, RuntimeError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

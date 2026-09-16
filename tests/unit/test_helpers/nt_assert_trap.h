@@ -15,7 +15,7 @@ extern "C" {
  *   nt_test_assert_install();    // setUp (or once globally)
  *   NT_TEST_EXPECT_ASSERT(stmt); // stmt MUST fire NT_ASSERT, else FAIL
  *
- * Requires NT_ASSERT_MODE == NT_ASSERT_FULL (default in NT_DEBUG builds).
+ * Requires NT_ASSERT_MODE == NT_ASSERT_FULL, selected by the test preset.
  * The macro arms the trap, setjmp baseline, runs stmt; if NT_ASSERT
  * fires the installed handler longjmps back and the test continues.
  * If stmt returns normally, TEST_FAIL_MESSAGE. */

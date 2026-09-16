@@ -329,21 +329,22 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
         s_text.batch_pipeline = (s_text.material.id != 0) ? find_or_create_pipeline() : (nt_pipeline_t){0};
     }
 
-    /* 0.5 px screen-space dilation ("Decade of Slug" improvement): oversize
-     * the quad so fragments sample em-coords just past bbox where coverage
-     * falls cleanly to 0. Assumes 1 world unit = 1 screen pixel (nt_ui ortho). */
-    const float dilate_px = 0.5F;
-    const float dilate_em = dilate_px / scale;
+    /* FP16 rounding can move controls past bbox by at most maxabs/2048.
+     * Add 0.5 px for coverage falloff; assumes 1 world unit = 1 screen pixel. */
+    const float round_x = fmaxf(fabsf((float)g->bbox_x0), fabsf((float)g->bbox_x1)) / 2048.0F;
+    const float round_y = fmaxf(fabsf((float)g->bbox_y0), fabsf((float)g->bbox_y1)) / 2048.0F;
+    const float dilate_x = (0.5F / scale) + round_x;
+    const float dilate_y = (0.5F / scale) + round_y;
 
-    float x0 = pen_x + ((float)g->bbox_x0 * scale) - dilate_px;
-    float y0 = pen_y + ((float)g->bbox_y0 * scale) - dilate_px;
-    float x1 = pen_x + ((float)g->bbox_x1 * scale) + dilate_px;
-    float y1 = pen_y + ((float)g->bbox_y1 * scale) + dilate_px;
+    float x0 = pen_x + ((float)g->bbox_x0 * scale) - 0.5F - (round_x * scale);
+    float y0 = pen_y + ((float)g->bbox_y0 * scale) - 0.5F - (round_y * scale);
+    float x1 = pen_x + ((float)g->bbox_x1 * scale) + 0.5F + (round_x * scale);
+    float y1 = pen_y + ((float)g->bbox_y1 * scale) + 0.5F + (round_y * scale);
 
-    float em_x0 = (float)g->bbox_x0 - dilate_em;
-    float em_y0 = (float)g->bbox_y0 - dilate_em;
-    float em_x1 = (float)g->bbox_x1 + dilate_em;
-    float em_y1 = (float)g->bbox_y1 + dilate_em;
+    float em_x0 = (float)g->bbox_x0 - dilate_x;
+    float em_y0 = (float)g->bbox_y0 - dilate_y;
+    float em_x1 = (float)g->bbox_x1 + dilate_x;
+    float em_y1 = (float)g->bbox_y1 + dilate_y;
 
     /* Pack glyph data as uint bit patterns */
     float gd0;

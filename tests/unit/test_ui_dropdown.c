@@ -689,6 +689,7 @@ static void test_dropdown_combo_row_id_stable_across_reorder(void) {
 
 /* ---- two selectables sharing a key in one combo list alias the SAME id -> the debug duplicate-key
  *      NT_ASSERT must fire (keys must be unique within a list). ---- */
+#if NT_UI_CHECKS
 static void test_dropdown_combo_duplicate_key_asserts(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     bool open = true;
@@ -713,6 +714,7 @@ static void test_dropdown_combo_duplicate_key_asserts(void) {
     nt_test_assert_armed = false;
     TEST_ASSERT_TRUE_MESSAGE(tripped, "two selectables with the same key in one combo must trip the duplicate-key NT_ASSERT");
 }
+#endif
 
 /* One combo frame with a single CUSTOM row: combo_selectable_begin opens the row (void), an inner child
  * fills it, combo_selectable_end closes it and returns clicked. `*out_clicked` carries that click; the
@@ -786,7 +788,9 @@ int main(void) {
     RUN_TEST(test_dropdown_preview_trigger_draws_chevron);
     RUN_TEST(test_dropdown_preview_chevron_size_zero_opts_out);
     RUN_TEST(test_dropdown_combo_row_id_stable_across_reorder);
+#if NT_UI_CHECKS
     RUN_TEST(test_dropdown_combo_duplicate_key_asserts);
+#endif
     RUN_TEST(test_dropdown_custom_selectable_click_selects);
     return UNITY_END();
 }

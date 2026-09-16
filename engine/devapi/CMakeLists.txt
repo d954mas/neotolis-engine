@@ -88,8 +88,7 @@ if(NT_DEVAPI_GROUP_OBS AND (NOT NT_LOG_RING_ENABLED OR NOT NT_METRICS_ENABLED OR
         "NT_INTROSPECT_ENABLED (the obs group reads the dev-only log ring + metrics collector and walks "
         "entities through nt_introspect; with any dep OFF it would link no-op stubs — empty log.tail / "
         "zero perf.stats / core-fields-only entity.list — a false green). Enable all, e.g. "
-        "-DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON (or "
-        "NT_UI_DEBUG_TOOLS=ON, which defaults all three).")
+        "-DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON.")
 endif()
 
 # Obs group (log.*/perf.*/entity.*/resource.*): pure immediate reads. entity.* walks via nt_introspect
@@ -111,7 +110,7 @@ endif()
 if(NT_DEVAPI_GROUP_ENTITY_WRITE AND NOT NT_INTROSPECT_WRITE_ENABLED)
     message(FATAL_ERROR "NT_DEVAPI_GROUP_ENTITY_WRITE requires NT_INTROSPECT_WRITE_ENABLED (the component "
         "apply() hooks). With it OFF every component is read-only, so entity.set could only return "
-        "bad_params. Enable it, e.g. -DNT_INTROSPECT_WRITE_ENABLED=ON (or NT_UI_DEBUG_TOOLS=ON).")
+        "bad_params. Enable it with -DNT_INTROSPECT_WRITE_ENABLED=ON.")
 endif()
 
 if(NT_DEVAPI_GROUP_ENTITY_WRITE)

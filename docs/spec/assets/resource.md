@@ -463,6 +463,14 @@ Per-glyph data (at data_offset):
 
 Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier curves (lines promoted to degenerate quadratics). At lookup time, contours are decoded into float control points, decomposed into horizontal bands, and uploaded to GPU textures for Slug-style vector rendering. Glyphs are cached with LRU eviction — not immutable once loaded.
 
+Curve coordinates use round-to-nearest-even FP16. Band membership includes the
+FP16 rounding error bound (maximum absolute control coordinate / 2048 per axis).
+Text quads include the corresponding bbox-based font-unit padding plus 0.5 local
+unit for antialiasing, before the model transform. This equals 0.5 screen pixel
+only at a one-to-one local-unit-to-pixel mapping. Sample coordinates expand with
+the quad, while the undilated bbox still defines the shader's bands. Layout
+metrics stay unchanged.
+
 **v4 → v5 ADDITION (DECO-04, spec addition per AGENTS.md).** The header grew from 16 to 24 bytes with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`) and `NT_FONT_VERSION` bumped 4 → 5. The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net. The runtime version guard rejects stale v4 packs to tofu, so all font `.ntpack` assets must be rebuilt.
 
 ### NT_ASSET_ATLAS binary format
@@ -559,6 +567,11 @@ Subsequent publications merge by `name_hash` to preserve stable region indices a
 - the hash table keeps live and dead names; appended names are inserted without rebuilding unless its capacity must grow
 
 Snapshot allocation and capacity growth still use heap during resolve; replacement within existing capacities reuses all buffers. Geometry uses one byte capacity; growth discards the old allocation because its complete contents are replaced. Empty geometry retains a minimal allocation so the documented non-NULL slices remain valid. This remains a known deviation from the strict hot-path memory policy.
+
+`nt_atlas_resolve_ref` warns through `nt_log_warn_unique` when a ready atlas has
+never contained the requested name. Pending atlases produce no warning; removed
+regions retain a valid index. The warning follows the configured log level in
+every assert mode, including TRAP, and leaves the unresolved reference invalid.
 
 Page texture resource ids are copied during `on_resolve`. The actual `nt_resource_t` page handles are materialized in `on_post_resolve` and cached in the atlas snapshot, so `nt_atlas_get_page_resource()` remains O(1).
 

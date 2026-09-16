@@ -1,6 +1,10 @@
 #ifndef NT_UI_H
 #define NT_UI_H
 
+#ifndef NT_UI_CHECKS
+#error "NT_UI_CHECKS must be defined by the nt_ui_interface target"
+#endif
+
 #ifndef NT_UI_TIMING_ENABLED
 #error "NT_UI_TIMING_ENABLED must be defined by the nt_ui_interface target"
 #endif

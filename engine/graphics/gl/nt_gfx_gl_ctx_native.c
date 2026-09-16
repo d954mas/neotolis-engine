@@ -4,8 +4,6 @@
 
 #include <glad/gl.h>
 
-/* Unconditional: nt_assert.h pulls core/nt_platform.h, which DEFINES NT_DEBUG — the guards
-   below see it only if it is defined first. nt_log.h gives NT_LOG_ERROR. */
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
 
@@ -74,7 +72,7 @@ bool nt_gfx_gl_ctx_enable_debug_groups(void) {
 
 #endif
 
-#ifdef NT_DEBUG
+#if NT_GFX_NATIVE_GL_DEBUG
 /* GLAD_API_PTR matches GLDEBUGPROC's calling convention (__stdcall on Windows); a plain
    function pointer would mismatch the stack on the driver's callback. */
 static void GLAD_API_PTR nt_gl_debug_cb(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message, const void *user) {
@@ -87,7 +85,7 @@ static void GLAD_API_PTR nt_gl_debug_cb(GLenum source, GLenum type, GLuint id, G
 #endif
 
 bool nt_gfx_gl_ctx_enable_debug_callback(void) {
-#ifdef NT_DEBUG
+#if NT_GFX_NATIVE_GL_DEBUG
     if (GLAD_GL_KHR_debug == 0) {
         return false; /* driver lacks KHR_debug — silently no-op, mirrors enable_debug_groups. */
     }

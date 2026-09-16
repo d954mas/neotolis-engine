@@ -39,6 +39,15 @@ GPU segment timing is an optional producer selected by
 `NT_GFX_GPU_TIMING_ENABLED`, independent of metrics. Its compile-time and runtime
 OFF contracts are in [optional measurements](../debug/logging-errors-debugging.md#optional-measurements).
 
+Native GL diagnostics are selected explicitly by `NT_GFX_NATIVE_GL_DEBUG`.
+When enabled, the window requests a debug context and the backend installs a
+synchronous KHR_debug callback if the driver supports it. The callback logs
+messages and asserts on GL errors using the configured `NT_ASSERT_MODE`.
+
+`nt_gfx_make_texture` rejects dimensions above the GPU limit and unsupported
+compressed formats with an error log and an invalid handle before creating GPU
+storage. These are recoverable capability failures in every assert mode.
+
 Engine-oriented, not WebGL-mirror and not full WebGPU abstraction:
 
 ```c

@@ -62,7 +62,7 @@ The chapters below define engine behavior.
 | [io/input.md](io/input.md) | Polling input model, pointer state, capture |
 | [io/audio.md](io/audio.md) | Platform-agnostic audio module, clips, voices, JS bridge |
 | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) | Logging, asserts, errors, debug overlay, and the dev-only devapi |
-| [anim/skeletal-animation.md](anim/skeletal-animation.md) | Skeletal animation: NSKL/NANM/NSKN assets, pose ABI, tracks, mix/override/additive, FK, runtime banks, `anim_gpu`, `skinned_mesh_renderer`, bounds |
+| [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) | Skeletal animation: NSKL/NANM/NSKN assets, pose ABI, tracks, mix/override/additive, FK, runtime banks, `skeletal_gpu`, `skinned_mesh_renderer`, bounds |
 | [ui/nt-ui.md](ui/nt-ui.md) | `nt_ui`: Clay dependency contract, transforms, interaction, widgets, scroll, popups, menus |
 | [ui/radial-widgets.md](ui/radial-widgets.md) | Radial widgets and the custom-attr image path rationale |
 | [ui/rich-text.md](ui/rich-text.md) | Rich text: run-list, solver, decoration, effects, z-layers |
@@ -95,7 +95,8 @@ lifetime, and naming vocabulary.
 | `engine/ui` | [ui/nt-ui.md](ui/nt-ui.md) (`nt_ui`), [ui/radial-widgets.md](ui/radial-widgets.md), [ui/rich-text.md](ui/rich-text.md) (optional `nt_ui_rich` / `nt_ui_rich_fx`) |
 | `engine/input` | [io/input.md](io/input.md); automation: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | *(audio — planned module, no dir yet)* | [io/audio.md](io/audio.md) |
-| *(`engine/anim`, `engine/skin`, `engine/anim_bank`, `engine/anim_gpu`, `engine/skin_comp`, skinned renderer in `engine/renderers` — planned, epic #472)* | [anim/skeletal-animation.md](anim/skeletal-animation.md) |
+| `engine/skeletal` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (`nt_skeletal.h` pose ABI/FK/sockets/rig identity, skin binding + palette) |
+| *(`engine/skeletal_bank`, `engine/skeletal_gpu`, `engine/skin_comp`, skinned renderer in `engine/renderers` — planned, epic #472)* | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) |
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |
 | `engine/time` | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
 | `engine/window`, `engine/platform` | [runtime/platform.md](runtime/platform.md) |

@@ -27,13 +27,6 @@
 
 #define HEADER_DIR "examples/atlas/generated"
 
-static char s_path_buf[512];
-
-static const char *pack_path(const char *dir, const char *name) {
-    (void)snprintf(s_path_buf, sizeof(s_path_buf), "%s/%s", dir, name);
-    return s_path_buf;
-}
-
 /* Glob callback that adds sprites with an optional count limit */
 typedef struct {
     NtAtlasBuild *atlas;
@@ -86,7 +79,9 @@ int main(int argc, char *argv[]) {
     char pack_hdr[512];
     (void)snprintf(pack_hdr, sizeof(pack_hdr), "%s/atlas_demo.h", HEADER_DIR);
 
-    NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "atlas_demo.ntpack"));
+    char path[512];
+    (void)snprintf(path, sizeof(path), "%s/atlas_demo.ntpack", out_dir);
+    NtBuilderContext *ctx = nt_builder_start_pack(path);
     if (!ctx) {
         (void)fprintf(stderr, "Failed to start pack\n");
         return 1;

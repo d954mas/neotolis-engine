@@ -12,6 +12,7 @@
 #include "log/nt_log.h"
 #include "math/nt_math.h"
 #include "nt_font_format.h"
+#include "nt_half.h"
 #include "nt_pack_format.h"
 #include "pool/nt_pool.h"
 #include "resource/nt_resource.h"
@@ -485,12 +486,12 @@ static void generate_tofu(nt_font_slot_t *slot) {
 
         uint32_t t0 = (uint32_t)seg * 2 * 4;
         uint32_t t1 = t0 + 4;
-        s_curve_upload[t0 + 0] = nt_float32_to_float16(p0x);
-        s_curve_upload[t0 + 1] = nt_float32_to_float16(p0y);
-        s_curve_upload[t0 + 2] = nt_float32_to_float16(p1x);
-        s_curve_upload[t0 + 3] = nt_float32_to_float16(p1y);
-        s_curve_upload[t1 + 0] = nt_float32_to_float16(p2x);
-        s_curve_upload[t1 + 1] = nt_float32_to_float16(p2y);
+        s_curve_upload[t0 + 0] = nt_f32_to_f16(p0x);
+        s_curve_upload[t0 + 1] = nt_f32_to_f16(p0y);
+        s_curve_upload[t0 + 2] = nt_f32_to_f16(p1x);
+        s_curve_upload[t0 + 3] = nt_f32_to_f16(p1y);
+        s_curve_upload[t1 + 0] = nt_f32_to_f16(p2x);
+        s_curve_upload[t1 + 1] = nt_f32_to_f16(p2y);
         s_curve_upload[t1 + 2] = 0;
         s_curve_upload[t1 + 3] = 0;
     }
@@ -908,9 +909,6 @@ static double poly_inradius_pole(const int32_t *x, const int32_t *y, uint16_t n,
     return best > 0.0 ? best : 0.0;
 }
 
-/* Largest inscribed-disk radius (pole of inaccessibility); pole center discarded. */
-static double poly_inradius(const int32_t *x, const int32_t *y, uint16_t n) { return poly_inradius_pole(x, y, n, NULL, NULL); }
-
 /* Whole-glyph ORIGINAL outline (weight-0 curves) + its flat winding/distance tests: the reference
  * for the grower dilation-membership filter in resolve_and_emit. Built once per offset decode. */
 static nt_curve_t s_orig_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
@@ -1301,7 +1299,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         float w_eff = weight;
         double base_inrad = 0.0;
         if (is_shrinker) {
-            base_inrad = poly_inradius(pts_x, pts_y, point_count);
+            base_inrad = poly_inradius_pole(pts_x, pts_y, point_count, NULL, NULL);
             double rseal = counter_seal_radius(pts_x, pts_y, pts_on, point_count, a0, weight, base_inrad);
             float cap = 2.0F * (1.0F - NT_FONT_COUNTER_KEEP) * (float)rseal; /* keep >= KEEP of the narrowest opening; never seal */
             if (fabsf(weight) > cap) {
@@ -1373,11 +1371,9 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
 
     // #region Count Y-band and X-band curve pairs
-    /* Epsilon margin on band boundaries to avoid edge-case misses where
-     * floating-point rounding places a curve in one band but the shader
-     * maps the pixel to the adjacent band. */
-    float y_margin = band_height * 0.01F;
-    float x_margin = band_width * 0.01F;
+    /* Include FP16 control rounding as well as shader band-boundary error. */
+    float y_margin = fmaxf(band_height * 0.01F, fmaxf(fabsf(ext_y_min), fabsf(ext_y_max)) / 2048.0F);
+    float x_margin = fmaxf(band_width * 0.01F, fmaxf(fabsf(ext_x_min), fabsf(ext_x_max)) / 2048.0F);
 
     uint16_t yband_counts[NT_FONT_MAX_BANDS] = {0};
     uint16_t xband_counts[NT_FONT_MAX_BANDS] = {0};
@@ -1451,12 +1447,12 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
             uint16_t ci = band_sorted[i];
             uint32_t t0 = local_pos * 4;
             uint32_t t1 = t0 + 4;
-            s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
-            s_curve_upload[t0 + 1] = nt_float32_to_float16(curves[ci].p0y);
-            s_curve_upload[t0 + 2] = nt_float32_to_float16(curves[ci].p1x);
-            s_curve_upload[t0 + 3] = nt_float32_to_float16(curves[ci].p1y);
-            s_curve_upload[t1 + 0] = nt_float32_to_float16(curves[ci].p2x);
-            s_curve_upload[t1 + 1] = nt_float32_to_float16(curves[ci].p2y);
+            s_curve_upload[t0 + 0] = nt_f32_to_f16(curves[ci].p0x);
+            s_curve_upload[t0 + 1] = nt_f32_to_f16(curves[ci].p0y);
+            s_curve_upload[t0 + 2] = nt_f32_to_f16(curves[ci].p1x);
+            s_curve_upload[t0 + 3] = nt_f32_to_f16(curves[ci].p1y);
+            s_curve_upload[t1 + 0] = nt_f32_to_f16(curves[ci].p2x);
+            s_curve_upload[t1 + 1] = nt_f32_to_f16(curves[ci].p2y);
             s_curve_upload[t1 + 2] = 0;
             s_curve_upload[t1 + 3] = 0;
             local_pos += 2;
@@ -1495,12 +1491,12 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
                 uint16_t ci = band_sorted[i];
                 uint32_t t0 = local_pos * 4;
                 uint32_t t1 = t0 + 4;
-                s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
-                s_curve_upload[t0 + 1] = nt_float32_to_float16(curves[ci].p0y);
-                s_curve_upload[t0 + 2] = nt_float32_to_float16(curves[ci].p1x);
-                s_curve_upload[t0 + 3] = nt_float32_to_float16(curves[ci].p1y);
-                s_curve_upload[t1 + 0] = nt_float32_to_float16(curves[ci].p2x);
-                s_curve_upload[t1 + 1] = nt_float32_to_float16(curves[ci].p2y);
+                s_curve_upload[t0 + 0] = nt_f32_to_f16(curves[ci].p0x);
+                s_curve_upload[t0 + 1] = nt_f32_to_f16(curves[ci].p0y);
+                s_curve_upload[t0 + 2] = nt_f32_to_f16(curves[ci].p1x);
+                s_curve_upload[t0 + 3] = nt_f32_to_f16(curves[ci].p1y);
+                s_curve_upload[t1 + 0] = nt_f32_to_f16(curves[ci].p2x);
+                s_curve_upload[t1 + 1] = nt_f32_to_f16(curves[ci].p2y);
                 s_curve_upload[t1 + 2] = 0;
                 s_curve_upload[t1 + 3] = 0;
                 local_pos += 2;

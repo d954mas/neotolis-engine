@@ -35,8 +35,8 @@ double nt_gfx_gl_ctx_query_result(uint32_t query);
 #endif
 
 /* Install a KHR_debug message callback that routes GL errors to NT_LOG_ERROR + assert, synchronously
- * so a breakpoint lands on the offending call. Native + NT_DEBUG only; no-op (returns false) in
- * release, on web, or when the driver lacks KHR_debug. */
+ * so a breakpoint lands on the offending call. Requires NT_GFX_NATIVE_GL_DEBUG;
+ * returns false when disabled, on web, or when the driver lacks KHR_debug. */
 bool nt_gfx_gl_ctx_enable_debug_callback(void);
 
 #endif /* NT_GFX_GL_CTX_H */

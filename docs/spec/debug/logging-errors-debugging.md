@@ -89,10 +89,11 @@ groups retain their dependency errors.
 Asserts are contracts, not error handling. A failed assert means the program is broken beyond recovery — continuing would mask bugs.
 
 - **NT_ASSERT** — single macro, three compile-time modes via `NT_ASSERT_MODE`:
-  - `0 (OFF)` — `((void)0)`, zero overhead. Available via CMake override (`-DNT_ASSERT_MODE=0`) as an **unsupported**, size-oriented escape hatch. Once an asserted precondition is violated, runtime behavior is undefined.
-  - `1 (TRAP)` — `__builtin_trap()`, no strings, minimal binary impact. **Release default.**
-  - `2 (FULL)` — hookable handler with `expr/file/line` strings. **Debug default.** Tests use the handler to catch and verify assert failures via `setjmp`/`longjmp`.
-- Release ships with TRAP (1): contract violations crash immediately instead of continuing with corrupted state. No string bloat, no handler overhead — just a single branch + trap instruction per assert.
+  - `0 (OFF)` — `((void)0)`, zero overhead. Supported via CMake override (`-DNT_ASSERT_MODE=0`), without runtime guarantees. Assert expressions are not evaluated; an asserted precondition violation requires no detection or recovery.
+  - `1 (TRAP)` — `__builtin_trap()`, no strings, minimal binary impact. The CMake default and the production Release presets select this mode.
+  - `2 (FULL)` — hookable handler with `expr/file/line` strings. Debug and release-test presets select this mode. Tests use the handler to catch and verify assert failures via `setjmp`/`longjmp`.
+- `nt_core` exports the selected mode to consumers. `nt_assert.h` requires it explicitly; `NDEBUG` and `NT_DEBUG` do not select or alter it.
+- Production Release presets select TRAP (1): contract violations crash immediately instead of continuing with corrupted state. No string bloat, no handler overhead — just a single branch + trap instruction per assert.
 - Assert expressions are side-effect-free because OFF does not evaluate them. No fallback path is required solely to keep an OFF build running after an invariant breach.
 - Hard guards are required at untrusted/runtime-input boundaries and wherever a public API promises recoverable rejection; those guards implement the API contract, not support for OFF.
 - Never use asserts for conditions that can legitimately occur at runtime (missing files, user input, network errors) — those are error handling (see below).
@@ -114,7 +115,7 @@ Asserts are contracts, not error handling. A failed assert means the program is 
 
 ## Debug overlay
 
-`nt_debug_overlay` is a **pure consumer** of `nt_metrics` ([Observability](#observability-devapi-log--perf--entity--resource)): it formats an on-screen HUD (`nt_debug_overlay_format_lines` / `nt_debug_overlay_draw`) from `nt_metrics_fps()`, the last frame's cpu/gpu/draw_calls via `nt_metrics_last()`, and the user counters via `nt_metrics_user_count()` / `nt_metrics_user_get()`. It owns **no** measurement and **no** counter storage — the host pushes per-frame data into `nt_metrics` and the overlay reads it back. Because of that dependency, a CMake `FATAL_ERROR` guard requires `NT_UI_DEBUG_TOOLS` to be built with `NT_METRICS_ENABLED` (with metrics OFF the overlay would format from no-op stubs — an empty HUD); the production default (`NT_UI_DEBUG_TOOLS=OFF`) defaults metrics OFF too, so it never trips.
+`nt_debug_overlay` is a **pure consumer** of `nt_metrics` ([Observability](#observability-devapi-log--perf--entity--resource)): it formats an on-screen HUD (`nt_debug_overlay_format_lines` / `nt_debug_overlay_draw`) from `nt_metrics_fps()`, the last frame's cpu/gpu/draw_calls via `nt_metrics_last()`, and the user counters via `nt_metrics_user_count()` / `nt_metrics_user_get()`. It owns **no** measurement and **no** counter storage — the host pushes per-frame data into `nt_metrics` and the overlay reads it back. Because of that dependency, a CMake `FATAL_ERROR` guard requires `NT_UI_DEBUG_TOOLS` to be built with `NT_METRICS_ENABLED` (with metrics OFF the overlay would format from no-op stubs — an empty HUD); both options default OFF; presets enable each explicitly.
 
 Recommended stats: frame time, fps, cpu/gpu time, draw call count, plus any game-supplied user counters.
 
@@ -239,7 +240,7 @@ A bot inspects engine state through the devapi **obs** command group — a thin 
 
 **OFF semantics — dev-only, compiled out.** The whole obs group is gated by `NT_DEVAPI_GROUP_OBS` (default **OFF**, opt-in). When off, `nt_devapi_obs.c` is not compiled, the commands are **absent** from the registry (a `log.tail`/`perf.stats`/… request returns `unknown_method`), and the discovery surface does not list them. As with all of devapi it also vanishes entirely when `NT_DEVAPI_ENABLED` is OFF.
 
-**Build deps are hard, not silent.** A CMake `FATAL_ERROR` guard (mirroring the `ui` group's DEBUG_TOOLS guard) requires `NT_DEVAPI_GROUP_OBS` to be built with `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, **and** `NT_INTROSPECT_ENABLED` ON — those carry the real log-ring, metrics, and entity-introspection bodies the group reads (`perf.*` reads `nt_metrics` directly now; `entity.list` walks components through `nt_introspect`; the group does **not** link `nt_debug_overlay`, which is a sibling consumer, not a provider). With any dep OFF the group would link no-op stubs (an always-empty `log.tail`, a zero `perf.stats`, a core-fields-only `entity.list`) — a vacuously-passing false green — so configure fails fast instead. A second guard ties the debug overlay to metrics: `NT_UI_DEBUG_TOOLS` ⇒ `NT_METRICS_ENABLED` (the overlay HUD consumes `nt_metrics`). `NT_UI_DEBUG_TOOLS=ON` defaults all of `NT_LOG_RING_ENABLED` / `NT_METRICS_ENABLED` / `NT_INTROSPECT_ENABLED` on.
+**Build deps are hard, not silent.** A CMake `FATAL_ERROR` guard (mirroring the `ui` group's DEBUG_TOOLS guard) requires `NT_DEVAPI_GROUP_OBS` to be built with `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, **and** `NT_INTROSPECT_ENABLED` ON — those carry the real log-ring, metrics, and entity-introspection bodies the group reads (`perf.*` reads `nt_metrics` directly now; `entity.list` walks components through `nt_introspect`; the group does **not** link `nt_debug_overlay`, which is a sibling consumer, not a provider). With any dep OFF the group would link no-op stubs (an always-empty `log.tail`, a zero `perf.stats`, a core-fields-only `entity.list`) — a vacuously-passing false green — so configure fails fast instead. A second guard ties the debug overlay to metrics: `NT_UI_DEBUG_TOOLS` ⇒ `NT_METRICS_ENABLED` (the overlay HUD consumes `nt_metrics`). Each option defaults OFF and must be enabled explicitly; `NT_UI_DEBUG_TOOLS` does not enable its dependencies or other diagnostics.
 
 ### The `entity_write` group — a dev-only DEBUG write (`entity.set`)
 

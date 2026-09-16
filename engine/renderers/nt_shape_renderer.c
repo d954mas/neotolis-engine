@@ -237,14 +237,6 @@ static struct {
 
 /* ---- Helpers ---- */
 
-static nt_pipeline_t get_active_batch_pipeline(void) { return s_shape.depth_enabled ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay; }
-
-static nt_pipeline_t get_active_inst_pipeline(void) { return s_shape.depth_enabled ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay; }
-
-static nt_pipeline_t get_active_cap_inst_pipeline(void) { return s_shape.depth_enabled ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay; }
-
-static nt_pipeline_t get_active_line_pipeline(void) { return s_shape.depth_enabled ? s_shape.line_pip_depth : s_shape.line_pip_overlay; }
-
 /* Matching depth/overlay layouts share one vertex input per program. */
 static nt_vertex_layout_t batch_vertex_layout(void) {
     return (nt_vertex_layout_t){
@@ -963,10 +955,10 @@ void nt_shape_renderer_set_depth(bool enabled) {
     }
     nt_shape_renderer_flush();
     s_shape.depth_enabled = enabled;
-    s_shape.batch_pip_active = get_active_batch_pipeline();
-    s_shape.inst_pip_active = get_active_inst_pipeline();
-    s_shape.cap_inst_pip_active = get_active_cap_inst_pipeline();
-    s_shape.line_pip_active = get_active_line_pipeline();
+    s_shape.batch_pip_active = enabled ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay;
+    s_shape.inst_pip_active = enabled ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay;
+    s_shape.cap_inst_pip_active = enabled ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay;
+    s_shape.line_pip_active = enabled ? s_shape.line_pip_depth : s_shape.line_pip_overlay;
 }
 
 /* ---- Line ---- */
