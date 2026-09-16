@@ -321,6 +321,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/slice9_demo)
     add_subdirectory(examples/ui_3d_demo)
     add_subdirectory(examples/ui_showcase)
+    add_subdirectory(examples/skeletal_showcase)
     # A typo in the skip list would silently run the multi-hour build it tried to avoid.
     get_property(_nt_pack_names GLOBAL PROPERTY NT_EXAMPLE_PACK_NAMES)
     foreach(_nt_skip ${NT_SKIP_EXAMPLE_PACKS})

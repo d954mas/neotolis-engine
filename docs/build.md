@@ -167,7 +167,7 @@ same files and never regenerate them. The examples require the default set
 cmake --preset native-debug-test
 cmake --build --preset native-debug-test --target test_basisu_golden_produce
 ctest --preset native-debug-test --no-tests=error -R '^test_basisu_golden_produce$'
-skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
+skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase;skeletal_showcase"
 tests='^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
 # UASTC only (the smallest transcoder)
 cmake --preset native-debug-test -B build/_cmake/basisu-uastc-only -DNT_BASISU_HAS_ETC1S=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"

@@ -31,7 +31,7 @@ env:
   # single-codec decoders and upload+sample every compressed target through the runner's software GL.
   NT_BASISU_ROWS: "basisu-uastc-only:-DNT_BASISU_HAS_ETC1S=OFF basisu-etc1s-etc2:-DNT_BASISU_HAS_UASTC=OFF,-DNT_BASISU_HAS_BC7=OFF,-DNT_BASISU_HAS_ASTC=OFF basisu-bc7-only:-DNT_BASISU_HAS_ETC2=OFF,-DNT_BASISU_HAS_ASTC=OFF"
   # Examples require the default set (sponza uses both codecs), so restricted rows skip them.
-  NT_BASISU_SKIP_PACKS: "atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
+  NT_BASISU_SKIP_PACKS: "atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase;skeletal_showcase"
 
 jobs:
   wasm:
