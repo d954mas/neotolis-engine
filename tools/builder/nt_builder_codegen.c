@@ -64,10 +64,6 @@ typedef struct {
 
 static int sort_entry_cmp(const void *a, const void *b) { return strcmp(((const SortEntry *)a)->sort_key, ((const SortEntry *)b)->sort_key); }
 
-/* --- Header path derivation --- */
-
-static void derive_header_path(const char *pack_path, const char *header_dir, char *header_path, size_t size) { nt_builder_derive_header_path(pack_path, header_dir, header_path, size); }
-
 /* --- Include guard derivation --- */
 
 static void derive_include_guard(const char *header_path, char *guard, size_t guard_size) {
@@ -250,7 +246,7 @@ static void write_register_labels(FILE *f, const char *func_prefix, const Codege
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     char header_path[NT_BUILD_HEADER_PATH_MAX];
-    derive_header_path(ctx->output_path, ctx->header_dir, header_path, sizeof(header_path));
+    nt_builder_derive_header_path(ctx->output_path, ctx->header_dir, header_path, sizeof(header_path));
 
     char guard[256];
     derive_include_guard(header_path, guard, sizeof(guard));

@@ -432,19 +432,12 @@ static void render_target_commit_attachment_backend(nt_texture_t tex, uint32_t b
     s_gfx.texture_metas[slot].default_sampler = nt_gfx_make_sampler(&sampler_desc);
 }
 
-static uint32_t render_target_create_attachment_backend(nt_texture_t tex, const nt_texture_desc_t *desc) {
-    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
-        return 0;
-    }
-    return nt_gfx_backend_create_texture(desc);
-}
-
 static bool render_target_recreate_attachment(nt_texture_t tex, const nt_texture_desc_t *desc) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         return false;
     }
     uint32_t slot = nt_pool_slot_index(tex.id);
-    uint32_t replacement = render_target_create_attachment_backend(tex, desc);
+    uint32_t replacement = nt_gfx_backend_create_texture(desc);
     if (replacement == 0) {
         return false;
     }

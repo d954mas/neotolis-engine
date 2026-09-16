@@ -156,10 +156,6 @@ nt_vertex_type_t nt_stream_to_vertex_type(uint8_t type) {
     }
 }
 
-/* ---- Vertex layout offset computation helper ---- */
-
-static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_stream_type_size(s->type) * s->count); }
-
 /* ---- Pipeline cache lookup/create ---- */
 
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
@@ -232,7 +228,7 @@ static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat
             layout.attr_count++;
         }
 
-        offset += stream_byte_size(stream);
+        offset += (uint16_t)(nt_stream_type_size(stream->type) * stream->count);
     }
     *out_key = key;
     return layout;

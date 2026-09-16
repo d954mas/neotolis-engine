@@ -536,8 +536,6 @@ nt_build_result_t nt_builder_result_from_error(const nt_build_error_t *error) {
     }
 }
 
-static nt_build_result_t nt_builder_result_from_errors(const NtBuilderContext *ctx) { return nt_builder_result_from_error(ctx->error_count ? &ctx->errors[0] : NULL); }
-
 const nt_build_error_t *nt_builder_get_errors(const NtBuilderContext *ctx, uint32_t *out_count) {
     NT_BUILD_ASSERT(ctx && "get_errors: ctx is NULL");
     if (out_count) {
@@ -585,7 +583,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         if (invalidate_result != NT_BUILD_OK) {
             return invalidate_result;
         }
-        return nt_builder_result_from_errors(ctx);
+        return nt_builder_result_from_error(ctx->error_count ? &ctx->errors[0] : NULL);
     }
     NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");
 

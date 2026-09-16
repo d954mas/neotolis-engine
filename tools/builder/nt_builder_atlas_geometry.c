@@ -992,8 +992,6 @@ static double polygon_point_edge_distance_sq(const Point2D *poly, uint32_t poly_
     return min_d_sq;
 }
 
-static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_count, double cx, double cy) { return sqrt(polygon_point_edge_distance_sq(poly, poly_count, cx, cy)); }
-
 nt_polygon_coverage_metrics_t polygon_coverage_metrics(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th) {
     nt_polygon_coverage_metrics_t metrics = {0};
     if (!poly || poly_count < 3 || !binary) {
@@ -1235,7 +1233,7 @@ double polygon_max_outside_pixel_distance(const Point2D *poly, uint32_t poly_cou
             if ((n_ints - k) & 1) {
                 continue;
             }
-            double d = polygon_point_edge_distance(poly, poly_count, cx, cy);
+            double d = sqrt(polygon_point_edge_distance_sq(poly, poly_count, cx, cy));
             if (d > max_d) {
                 max_d = d;
             }

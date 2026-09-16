@@ -909,9 +909,6 @@ static double poly_inradius_pole(const int32_t *x, const int32_t *y, uint16_t n,
     return best > 0.0 ? best : 0.0;
 }
 
-/* Largest inscribed-disk radius (pole of inaccessibility); pole center discarded. */
-static double poly_inradius(const int32_t *x, const int32_t *y, uint16_t n) { return poly_inradius_pole(x, y, n, NULL, NULL); }
-
 /* Whole-glyph ORIGINAL outline (weight-0 curves) + its flat winding/distance tests: the reference
  * for the grower dilation-membership filter in resolve_and_emit. Built once per offset decode. */
 static nt_curve_t s_orig_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
@@ -1302,7 +1299,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         float w_eff = weight;
         double base_inrad = 0.0;
         if (is_shrinker) {
-            base_inrad = poly_inradius(pts_x, pts_y, point_count);
+            base_inrad = poly_inradius_pole(pts_x, pts_y, point_count, NULL, NULL);
             double rseal = counter_seal_radius(pts_x, pts_y, pts_on, point_count, a0, weight, base_inrad);
             float cap = 2.0F * (1.0F - NT_FONT_COUNTER_KEEP) * (float)rseal; /* keep >= KEEP of the narrowest opening; never seal */
             if (fabsf(weight) > cap) {
