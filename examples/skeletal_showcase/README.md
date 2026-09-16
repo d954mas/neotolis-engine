@@ -40,9 +40,10 @@ The properties panel shows the selected joint's local offset in degrees and its
 resulting model-space 3x4 matrix. Offsets are composed in the fixed order
 `q_offset = qz * qy * qx`, then `q_local = q_offset * q_rest`; the displayed
 matrix comes from the full `nt_skeletal_fk` pass. `Axes on` draws local X/Y/Z
-axes in RGB. `Reset` and `R` reset the active scene and shared camera; entering
-a scene for the first time initializes it, switching scenes resets the camera,
-and the Controls visibility setting is preserved.
+axes in RGB. The Controls panel header contains the common `Reset` button;
+`Reset` and `R` reset the active scene and shared camera. Entering a scene for
+the first time initializes it, switching scenes resets the camera, and the
+Controls visibility setting is preserved.
 
 To add a scene, define one typed state block and its callbacks in the scene
 region of `main.c`, then append one descriptor to `s_scene_registry` with its
