@@ -29,7 +29,7 @@ Neotolis Engine is a minimalist **C17** game engine for **Web/WASM (WebGL 2)**. 
 
 - Prefer `NT_ASSERT` for invariants and unexpected runtime states; use `NT_BUILD_ASSERT` for builder programmer invariants, unexpected states, OOM, missing/unreadable files and single-asset decode failures.
 - Error returns are valid for documented recoverable API outcomes, never to silently swallow bugs or broken data.
-- Release defaults to TRAP. OFF is an unsupported size escape hatch: violated asserted preconditions cause undefined behavior; no fallback is required solely for OFF.
+- Release defaults to TRAP. OFF is a supported build mode with assertions disabled, without runtime guarantees; no fallback is required solely for OFF.
 - Assert expressions must be side-effect-free because OFF does not evaluate them. Hard guards belong at untrusted/runtime-input boundaries and where the API promises recoverable rejection.
 - ATLAS builder content failures use `nt_builder_get_errors`; keep the exact exception list in [builder error policy](docs/spec/builder/builder.md#asserts-vs-graceful-content-errors).
 

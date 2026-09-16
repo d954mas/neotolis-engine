@@ -89,7 +89,7 @@ groups retain their dependency errors.
 Asserts are contracts, not error handling. A failed assert means the program is broken beyond recovery — continuing would mask bugs.
 
 - **NT_ASSERT** — single macro, three compile-time modes via `NT_ASSERT_MODE`:
-  - `0 (OFF)` — `((void)0)`, zero overhead. Available via CMake override (`-DNT_ASSERT_MODE=0`) as an **unsupported**, size-oriented escape hatch. Once an asserted precondition is violated, runtime behavior is undefined.
+  - `0 (OFF)` — `((void)0)`, zero overhead. Supported via CMake override (`-DNT_ASSERT_MODE=0`), without runtime guarantees. Assert expressions are not evaluated; an asserted precondition violation requires no detection or recovery.
   - `1 (TRAP)` — `__builtin_trap()`, no strings, minimal binary impact. **Release default.**
   - `2 (FULL)` — hookable handler with `expr/file/line` strings. **Debug default.** Tests use the handler to catch and verify assert failures via `setjmp`/`longjmp`.
 - Release ships with TRAP (1): contract violations crash immediately instead of continuing with corrupted state. No string bloat, no handler overhead — just a single branch + trap instruction per assert.

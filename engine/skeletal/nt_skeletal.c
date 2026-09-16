@@ -2,17 +2,6 @@
 
 #include <string.h>
 
-/* NT_ASSERT_OFF does not evaluate its expression, so everything that exists
- * only to feed an assert must disappear with it or it warns as unused. */
-#if NT_ASSERT_MODE != NT_ASSERT_OFF
-#include <stdbool.h>
-
-/* x - x is 0 only for a finite x; keeps the module free of <math.h> and libm.
- * It relies on strict IEEE semantics: -ffast-math/-ffinite-math-only would fold
- * it to true. Neither is set anywhere in this tree. */
-static bool nt_skeletal_is_finite(float x) { return (x - x) == 0.0F; }
-#endif
-
 void nt_skeletal_mat34_from_mat4(const float m[16], nt_skeletal_mat34_t *out) {
     NT_ASSERT(m != NULL);
     NT_ASSERT(out != NULL);
@@ -126,7 +115,8 @@ static uint32_t nt_skeletal_put_u32(uint8_t *bytes, uint32_t offset, uint32_t v)
 }
 
 static uint32_t nt_skeletal_put_f32(uint8_t *bytes, uint32_t offset, float v) {
-    NT_ASSERT(nt_skeletal_is_finite(v));
+    /* v - v rejects non-finite values without libm; requires strict IEEE math. */
+    NT_ASSERT((v - v) == 0.0F);
 
     /* -0 and +0 describe the same rest pose, so only +0 is ever hashed. */
     const float canonical = (v == 0.0F) ? 0.0F : v;

@@ -126,7 +126,7 @@ option(NT_DEVAPI_GROUP_ENTITY_WRITE "Build the devapi entity.set component-write
 # Default OFF (opt-in); the first DEFERRED data-returning group — links nt_gfx (readback) + nt_fpng (PNG encode).
 option(NT_DEVAPI_GROUP_CAPTURE "Build the devapi capture.frame/capture.region group (PNG framebuffer capture)." OFF)
 
-set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off (unsupported), 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap).")
+set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off (no runtime guarantees), 1=trap, 2=full. Empty=auto (debug->2 full, release->1 trap).")
 if(NOT NT_ASSERT_MODE STREQUAL "")
     add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
 endif()
