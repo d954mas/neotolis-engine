@@ -1680,16 +1680,15 @@ void test_gfx_make_texture_rejects_bad_level_counts_before_allocation(void) {
     }
 }
 
-void test_gfx_make_texture_compressed_requires_gpu_caps(void) {
+void test_gfx_make_texture_rejects_unsupported_gpu_requirements(void) {
     /* Fake caps report no compressed support. */
-    nt_texture_t tex = {0};
     uint32_t creates = nt_gfx_fake_texture_create_count();
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-    EXPECT_ASSERT(tex = make_compressed_texture(NT_TEXTURE_FORMAT_BC7_RGBA));
-#else
-    tex = make_compressed_texture(NT_TEXTURE_FORMAT_BC7_RGBA);
-#endif
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
+    for (size_t i = 0; i < sizeof(s_compressed_formats) / sizeof(s_compressed_formats[0]); i++) {
+        TEST_ASSERT_EQUAL_UINT32(0, make_compressed_texture(s_compressed_formats[i]).id);
+    }
+    const uint16_t too_large = (uint16_t)(nt_gfx_gpu_caps()->max_texture_size + 1U);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&(nt_texture_desc_t){.width = too_large, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8}).id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = too_large, .format = NT_TEXTURE_FORMAT_RGBA8}).id);
     /* Rejected before the backend: no GL name was ever asked for. */
     TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
 
@@ -3250,7 +3249,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_compressed_binds_with_color_samplers);
     RUN_TEST(test_gfx_make_texture_passes_level_count_through_to_the_backend);
     RUN_TEST(test_gfx_make_texture_rejects_bad_level_counts_before_allocation);
-    RUN_TEST(test_gfx_make_texture_compressed_requires_gpu_caps);
+    RUN_TEST(test_gfx_make_texture_rejects_unsupported_gpu_requirements);
     RUN_TEST(test_gfx_make_texture_hands_the_contiguous_mip_chain_to_the_backend);
     RUN_TEST(test_gfx_make_texture_create_failure_leaves_no_texture);
     RUN_TEST(test_gfx_make_texture_bc7_requires_aligned_base_dimensions);

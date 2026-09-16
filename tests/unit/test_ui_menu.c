@@ -1182,6 +1182,7 @@ static void test_menu_item_click_activates_leaf(void) {
 
 /* ---- Duplicate sibling key: two nt_ui_menu_item calls sharing a key in ONE open level alias the same
  *      scope-stack id -> the per-level duplicate-sibling-key NT_ASSERT must fire. ---- */
+#if NT_UI_CHECKS
 static void test_menu_duplicate_sibling_key_asserts(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_state_t st = {0};
@@ -1202,6 +1203,7 @@ static void test_menu_duplicate_sibling_key_asserts(void) {
     nt_test_assert_armed = false;
     TEST_ASSERT_TRUE_MESSAGE(tripped, "two sibling items sharing a key must trip the duplicate-sibling-key NT_ASSERT");
 }
+#endif
 
 /* One frame: a section header (separator_text) sits between two leaves. Used to assert Down focus skips
  * the header (it advances item_idx without recording a nav entry, exactly like a plain separator). */
@@ -1554,7 +1556,9 @@ int main(void) {
     RUN_TEST(test_menu_shortcut_cell_on_rich_row_only);
     RUN_TEST(test_menu_check_cell_when_selected);
     RUN_TEST(test_menu_item_click_activates_leaf);
+#if NT_UI_CHECKS
     RUN_TEST(test_menu_duplicate_sibling_key_asserts);
+#endif
     RUN_TEST(test_menu_separator_text_non_interactive);
     RUN_TEST(test_menu_item_ex_disabled_no_activate);
     RUN_TEST(test_menu_submenu_begin_ex_icon_disabled);

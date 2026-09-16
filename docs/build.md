@@ -66,6 +66,7 @@ is no longer a valid configuration.
 | `NT_RESOURCE_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_UI_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_GFX_GPU_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
+| `NT_UI_CHECKS` | OFF | Duplicate-key scans in menu/combo lists. Debug/release-test ON; production Release OFF. Independent of inspector and assert mode; ordinary pointer, index and capacity assertions remain active when this flag is OFF. |
 | `NT_UI_DEBUG_TOOLS` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, `NT_INTROSPECT_ENABLED` | OFF | Independent options. Debug/release-test presets select ON; production Release selects OFF. |
 | `NT_INTROSPECT_WRITE_ENABLED` | OFF | Debug/release-test presets select ON; production Release selects OFF. |
@@ -253,7 +254,8 @@ python scripts/check_diagnostics_runtime.py
 Run the scripts serially; they use separate build directories and also run in
 `check.sh --push`. The runtime matrix covers log/rich-parser consumers at every
 log floor with FULL asserts, TRAP positive paths, timing producers ON/OFF,
-metrics independence and inspector ON with UI timing OFF.
+metrics independence, UI key checks ON with inspector OFF and OFF with inspector ON,
+and inspector ON with UI timing OFF.
 
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,

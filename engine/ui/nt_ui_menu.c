@@ -98,7 +98,7 @@ static inline uint32_t menu_hash_id(uint32_t menu_id, uint32_t kind, uint32_t de
  * above). The id is POSITION-STABLE: a conditional sibling appearing/disappearing must NOT shift a later
  * row's id (that would reset its anim/Clay identity AND re-scope its submenu). The running index drives
  * layout order / focus / the frame record, but NEVER the identity. submenu_begin pushes THIS id as the
- * child scope, so a key need only be unique among siblings (asserted in DEBUG). Folds 0 to 1. */
+ * child scope, so a key need only be unique among siblings (asserted under NT_UI_CHECKS). Folds 0 to 1. */
 static inline uint32_t menu_item_id(uint32_t scope_id, uint32_t key) {
     uint32_t h = scope_id * 0x9E3779B1U;
     h = (h ^ ((key + 1U) * 0x85EBCA6BU));
@@ -443,13 +443,11 @@ static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint
  * 1-frame latency in the EFFECT, not the lookup. The scope stack derives each row id via
  * mix(scope_id[depth], key) (position-stable); submenu_begin pushes its row id as the child scope. */
 
-/* Append a recorded row into THIS frame's per-level frame record (fail-early assert on overflow).
- * DEBUG-only: ids are position-stable (mix(scope,key)), so two siblings sharing a key derive the SAME
- * id -> aliased anim/Clay/submenu identity. Assert sibling-key uniqueness (ImGui's duplicate-id contract);
- * the linear scan is O(items/level) over the small cap and compiles out with NT_ASSERT in OFF builds. */
+/* Duplicate sibling keys would alias interaction and submenu state.
+ * NT_UI_CHECKS scans this level; capacity remains an ordinary assert contract. */
 static void menu_record_append(nt_ui_menu_ctx_t *menu, uint8_t depth, uint32_t id, uint16_t idx, bool enabled, bool has_sub) {
     NT_ASSERT(menu->frame_record_count[depth] < NT_UI_MENU_MAX_ITEMS_PER_LEVEL && "nt_ui_menu: per-level item count exceeds NT_UI_MENU_MAX_ITEMS_PER_LEVEL");
-#if NT_ASSERT_MODE != NT_ASSERT_OFF
+#if NT_UI_CHECKS
     for (uint16_t k = 0; k < menu->frame_record_count[depth]; ++k) {
         NT_ASSERT(menu->frame_record[depth][k].id != id && "nt_ui_menu: duplicate sibling key (item keys must be unique among siblings)");
     }

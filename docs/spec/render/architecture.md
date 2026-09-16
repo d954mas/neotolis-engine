@@ -45,9 +45,8 @@ synchronous KHR_debug callback if the driver supports it. The callback logs
 messages and asserts on GL errors using the configured `NT_ASSERT_MODE`.
 
 `nt_gfx_make_texture` rejects dimensions above the GPU limit and unsupported
-compressed formats. FULL assert mode diagnoses these rejections with an assert;
-TRAP and OFF log an error and return an invalid handle. This selection depends
-on `NT_ASSERT_MODE`, not on `NDEBUG` or the build type.
+compressed formats with an error log and an invalid handle before creating GPU
+storage. These are recoverable capability failures in every assert mode.
 
 Engine-oriented, not WebGL-mirror and not full WebGPU abstraction:
 

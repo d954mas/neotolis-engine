@@ -246,7 +246,7 @@ color storage: 4x4 blocks, 8 bytes per block for `ETC2_RGB8` and 16 for the othe
 three. They require `data` and reject `gen_mipmaps`, because block data can only
 be uploaded, never generated. Each needs its capability bit (`has_etc2`,
 `has_bc7`, `has_astc`); a missing bit follows the `max_texture_size` precedent —
-assert in Debug, error log, invalid handle, no storage created. Compressed
+error log, invalid handle, no storage created in every assert mode. Compressed
 storage is ordinary sampled color everywhere else: `sampler2D` reads it, and
 `nt_gfx_update_texture` asserts on it, since a sub-rectangle of blocks is not a
 sub-rectangle of texels.

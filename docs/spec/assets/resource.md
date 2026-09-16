@@ -568,6 +568,11 @@ Subsequent publications merge by `name_hash` to preserve stable region indices a
 
 Snapshot allocation and capacity growth still use heap during resolve; replacement within existing capacities reuses all buffers. Geometry uses one byte capacity; growth discards the old allocation because its complete contents are replaced. Empty geometry retains a minimal allocation so the documented non-NULL slices remain valid. This remains a known deviation from the strict hot-path memory policy.
 
+`nt_atlas_resolve_ref` warns through `nt_log_warn_unique` when a ready atlas has
+never contained the requested name. Pending atlases produce no warning; removed
+regions retain a valid index. The warning follows the configured log level in
+every assert mode, including TRAP, and leaves the unresolved reference invalid.
+
 Page texture resource ids are copied during `on_resolve`. The actual `nt_resource_t` page handles are materialized in `on_post_resolve` and cached in the atlas snapshot, so `nt_atlas_get_page_resource()` remains O(1).
 
 Atlas registers `NT_RESOURCE_BEHAVIOR_AUX_BACKED`. A higher-priority atlas whose blob is currently missing becomes the target winner, but it is not published until its metadata snapshot has been rebuilt. If a lower-priority usable atlas is already published, it stays active until the target blob is reloaded and resolved.

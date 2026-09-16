@@ -19,6 +19,7 @@ _Static_assert(NT_ASSERT_MODE == NT426_EXPECT_ASSERT_MODE, "skeletal assert conf
 _Static_assert(NT_SKELETAL_CHECKS == NT426_EXPECT_SKELETAL_CHECKS, "skeletal check configuration");
 #elif defined(NT426_CHECK_UI) || defined(NT426_CHECK_UI_STUB)
 #include "ui/nt_ui.h"
+_Static_assert(NT_UI_CHECKS == NT426_EXPECT_UI_CHECKS, "UI check configuration");
 _Static_assert(NT_UI_TIMING_ENABLED == NT426_EXPECT_UI_TIMING, "UI timing configuration");
 #if defined(NT426_CHECK_UI_STUB)
 _Static_assert(NT_UI_DEBUG_TOOLS == 1, "UI stub keeps its existing probe contract");

@@ -53,14 +53,10 @@ static inline uint32_t combo_row_label_id(uint32_t combo_id, uint32_t row_idx) {
     return (h != 0U) ? h : 1U;
 }
 
-/* DEBUG-only duplicate-key guard: row ids are key-stable (mix(combo_id,key)), so two selectables sharing a
- * key alias the SAME interactive/anim/Clay/selection id. BEST-EFFORT: scans only the first
- * NT_UI_COMBO_DUP_KEY_WINDOW rows this frame for a collision — a complete scan of an unbounded list would
- * need heap or O(N^2), so a duplicate past the window silently aliases (keep combo keys unique). Unlike the
- * menu (bounded by the hard per-level cap, so its check is complete), the combo list has no per-row cap.
- * Compiles out in NT_ASSERT_OFF builds. */
+/* Remember only the first N row ids to bound duplicate-check storage and work.
+ * Later rows are compared with that window, not with each other. */
 static inline void combo_dup_key_check(nt_ui_context_t *ctx, uint32_t row_id) {
-#if NT_ASSERT_MODE != NT_ASSERT_OFF
+#if NT_UI_CHECKS
     const uint16_t n = ctx->pending_combo.dup_key_count;
     for (uint16_t k = 0; k < n; ++k) {
         NT_ASSERT(ctx->pending_combo.dup_key_ids[k] != row_id && "nt_ui_combo: duplicate selectable key (keys must be unique within one combo list)");
@@ -398,7 +394,7 @@ static bool combo_open_list(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t la
     ctx->pending_combo.id = id;
     ctx->pending_combo.open = open;
     ctx->pending_combo.row_idx = 0U;
-#if NT_ASSERT_MODE != NT_ASSERT_OFF
+#if NT_UI_CHECKS
     ctx->pending_combo.dup_key_count = 0U; /* fresh per-list dup-key window */
 #endif
     ctx->pending_combo.fill_layer = fill_layer;

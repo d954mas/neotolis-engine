@@ -59,6 +59,7 @@ option(NT_FONT_EMBOLDEN_ENABLED "Build synthetic font weight and outline support
 
 option(NT_UI_CLAY_DEBUG_VIEW "Build the upstream Clay debug view." OFF)
 
+option(NT_UI_CHECKS "Check duplicate keys in UI menu and combo lists." OFF)
 option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
 set(NT_LOG_MIN_LEVEL "0" CACHE STRING "Compiled log floor: 0=INFO, 1=WARN, 2=ERROR, 3=NONE.")
 set_property(CACHE NT_LOG_MIN_LEVEL PROPERTY STRINGS 0 1 2 3)

@@ -100,7 +100,7 @@ set(NT_UI_SOURCES
 # devapi ui group, or a stub-linked test) depends on this rather than the heavy nt_ui impl chain.
 nt_declare_interface(nt_ui)
 target_link_libraries(nt_ui_interface INTERFACE nt_core nt_gfx_interface)
-target_compile_definitions(nt_ui_interface INTERFACE NT_UI_TIMING_ENABLED=$<BOOL:${NT_UI_TIMING_ENABLED}>)
+target_compile_definitions(nt_ui_interface INTERFACE NT_UI_CHECKS=$<BOOL:${NT_UI_CHECKS}> NT_UI_TIMING_ENABLED=$<BOOL:${NT_UI_TIMING_ENABLED}>)
 
 nt_add_module(nt_ui LOG_DOMAIN "ui" ${NT_UI_SOURCES})
 
@@ -125,7 +125,7 @@ nt_add_module(nt_ui_stub LOG_DOMAIN "ui_stub"
     stub/nt_ui_stub.c
 )
 target_link_libraries(nt_ui_stub PUBLIC nt_core nt_gfx_interface)
-target_compile_definitions(nt_ui_stub PUBLIC NT_UI_DEBUG_TOOLS=1 NT_UI_TIMING_ENABLED=$<BOOL:${NT_UI_TIMING_ENABLED}>)
+target_compile_definitions(nt_ui_stub PUBLIC NT_UI_DEBUG_TOOLS=1 NT_UI_CHECKS=$<BOOL:${NT_UI_CHECKS}> NT_UI_TIMING_ENABLED=$<BOOL:${NT_UI_TIMING_ENABLED}>)
 
 # Clay vendored header -- PUBLIC include. Clay is part of the engine's
 # public surface: nt_ui wraps lifecycle (context, walker, themes) but

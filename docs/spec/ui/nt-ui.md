@@ -502,9 +502,13 @@ bounded by caps). Row identity is KEY-STABLE via a scope stack:
 `mix(scope_id, key)` (fmix, never additive — additive sibling ids collide in
 Clay's anonymous child-id space). A submenu pushes its own row id as the child
 scope (ImGui `PushID` model), so keys need only be unique among SIBLINGS; a
-duplicate sibling key aliases the same row state and is a DEBUG fail-early
-(complete for the menu's bounded per-level cap, best-effort window-scanned for
-the unbounded combo list — a complete scan there would need heap or O(N²)).
+duplicate sibling key aliases the same row state. `NT_UI_CHECKS` enables the
+asserting duplicate-key scans: complete within the menu's bounded per-level cap;
+each combo row is compared with the first `NT_UI_COMBO_DUP_KEY_WINDOW` row IDs,
+so duplicates exclusively outside that window are not detected. OFF removes
+these scans and the combo's duplicate-check storage. Ordinary pointer, index and
+capacity assertions remain independent of this flag. Configuration is explicit
+and independent of the inspector and assert mode; see [build options](../../build.md#build-options).
 Keyboard nav runs in `menu_end` against THIS frame's per-level record (built as
 rows declare, complete by `menu_end`); a focus or open-chain change re-declares
 the tree and becomes navigable NEXT frame — a 1-frame latency in the EFFECT,
