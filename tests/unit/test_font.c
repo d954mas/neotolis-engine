@@ -1781,6 +1781,43 @@ static uint32_t build_contour_blob_1(uint8_t *buf, const int16_t (*pts)[2], uint
     return (uint32_t)(wp - buf);
 }
 
+void test_fp16_rounding_keeps_curves_in_adjacent_bands(void) {
+    for (int axis = 0; axis < 2; axis++) {
+        int16_t x0 = axis == 0 ? 2048 : 0;
+        int16_t y0 = axis == 1 ? 2048 : 0;
+        const int16_t pts[4][2] = {{x0, y0}, {(int16_t)(x0 + 3), y0}, {(int16_t)(x0 + 3), (int16_t)(y0 + 3)}, {x0, (int16_t)(y0 + 3)}};
+        uint8_t blob[sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + 64] = {0};
+        NtFontAssetHeader hdr = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 2048, .ascent = 2064, .descent = 0};
+        NtFontGlyphEntry glyph = {
+            .codepoint = 'A',
+            .data_offset = sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry),
+            .advance = 16,
+            .bbox_x0 = x0,
+            .bbox_y0 = y0,
+            .bbox_x1 = (int16_t)(x0 + 16),
+            .bbox_y1 = (int16_t)(y0 + 16),
+            .curve_count = 4,
+        };
+        memcpy(blob, &hdr, sizeof hdr);
+        memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
+        uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, pts, 4);
+        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.curve_texture_width = 64, .curve_texture_height = 64, .band_texture_height = 16, .band_count = 16});
+        nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
+        nt_resource_step();
+        nt_font_step();
+
+        const nt_glyph_cache_entry_t *entry = nt_font_lookup_glyph(font, 'A');
+        TEST_ASSERT_NOT_NULL(entry);
+        TEST_ASSERT_FALSE(entry->is_tofu);
+        /* The 2051 edge rounds to 2052: that axis needs at least 13 curve-band
+         * pairs including both boundary bands; the exact axis needs 11. */
+        TEST_ASSERT_GREATER_OR_EQUAL_UINT16(24, entry->curve_count);
+        TEST_ASSERT_EQUAL_INT16(glyph.bbox_x0, entry->bbox_x0);
+        TEST_ASSERT_EQUAL_INT16(glyph.bbox_y1, entry->bbox_y1);
+        nt_font_destroy(font);
+    }
+}
+
 /* Append ONE all-on-curve closed contour at *wp; advance *wp. */
 #if NT_FONT_EMBOLDEN_ENABLED
 static void append_contour(uint8_t **wp, const int16_t (*pts)[2], uint16_t n) {
@@ -2809,6 +2846,7 @@ int main(void) {
     RUN_TEST(test_font_unmount_while_referenced_renders_tofu);
     /* embolden (offset_points) */
     RUN_TEST(test_embolden_w0_identity);
+    RUN_TEST(test_fp16_rounding_keeps_curves_in_adjacent_bands);
 #if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_embolden_monotonic_bbox);
     RUN_TEST(test_embolden_counter_shrinks);

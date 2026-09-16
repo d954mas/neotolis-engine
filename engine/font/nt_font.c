@@ -1374,11 +1374,9 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
 
     // #region Count Y-band and X-band curve pairs
-    /* Epsilon margin on band boundaries to avoid edge-case misses where
-     * floating-point rounding places a curve in one band but the shader
-     * maps the pixel to the adjacent band. */
-    float y_margin = band_height * 0.01F;
-    float x_margin = band_width * 0.01F;
+    /* Include FP16 control rounding as well as shader band-boundary error. */
+    float y_margin = fmaxf(band_height * 0.01F, fmaxf(fabsf(ext_y_min), fabsf(ext_y_max)) / 2048.0F);
+    float x_margin = fmaxf(band_width * 0.01F, fmaxf(fabsf(ext_x_min), fabsf(ext_x_max)) / 2048.0F);
 
     uint16_t yband_counts[NT_FONT_MAX_BANDS] = {0};
     uint16_t xband_counts[NT_FONT_MAX_BANDS] = {0};
