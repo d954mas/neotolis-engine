@@ -66,6 +66,12 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_skeletal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_skeletal)
 
+    # Clip sampler, object curve and the track clock, over hand-built clip views.
+    add_executable(test_skeletal_sample unit/test_skeletal_sample.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skeletal_sample PRIVATE nt_skeletal nt_hash nt_core nt_log_stub unity)
+    target_include_directories(test_skeletal_sample PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_skeletal_sample)
+
     add_executable(test_skin unit/test_skin.c unit/test_helpers/skeletal_rig.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_skin PRIVATE nt_skeletal nt_hash nt_core nt_log_stub nt_math unity)
     target_include_directories(test_skin PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
@@ -910,6 +916,26 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_builder PRIVATE nt_builder nt_log unity nt_meshwire)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # Skeletal wire formats live in their own target: test_builder.c is already
+    # ~10k lines and these tests need no atlas/glTF fixtures.
+    add_executable(test_builder_skeletal unit/test_builder_skeletal.c)
+    target_link_libraries(test_builder_skeletal PRIVATE nt_builder nt_log unity nt_meshwire)
+    target_compile_definitions(test_builder_skeletal PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_builder_skeletal WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+    # Builder -> pack -> runtime for the skeletal formats: the only place the
+    # encoders and the activators meet, so a format skew is visible here first.
+    add_executable(test_skeletal_assets unit/test_skeletal_assets.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skeletal_assets PRIVATE
+        nt_skeletal_assets nt_builder nt_resource nt_skeletal nt_hash nt_http_stub nt_fs_stub nt_log unity nt_meshwire)
+    target_include_directories(test_skeletal_assets PRIVATE
+        ${CMAKE_SOURCE_DIR}/shared/include
+        ${CMAKE_SOURCE_DIR}/tools/builder
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit
+    )
+    target_compile_definitions(test_skeletal_assets PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_skeletal_assets WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     add_executable(test_builder_codegen unit/test_builder_codegen.c)
     target_link_libraries(test_builder_codegen PRIVATE nt_builder nt_log unity nt_meshwire)

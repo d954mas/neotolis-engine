@@ -22,6 +22,12 @@ static const char *type_prefix_for_kind(nt_build_asset_kind_t kind) {
         return "ATLAS";
     case NT_BUILD_ASSET_ATLAS_REGION:
         return "ATLAS_REGION";
+    case NT_BUILD_ASSET_SKELETON:
+        return "SKELETON";
+    case NT_BUILD_ASSET_SKIN_BINDING:
+        return "SKIN_BINDING";
+    case NT_BUILD_ASSET_CLIP:
+        return "CLIP";
     }
     return "UNKNOWN";
 }
@@ -180,12 +186,12 @@ static void write_sorted_defines(FILE *f, const CodegenEntry *entries, uint32_t 
         return;
     }
     /* Build sort index per type group */
-    const char *type_order[] = {"MESH", "TEXTURE", "SHADER", "BLOB", "FONT", "ATLAS", "ATLAS_REGION"};
+    const char *type_order[] = {"MESH", "TEXTURE", "SHADER", "BLOB", "FONT", "ATLAS", "ATLAS_REGION", "SKELETON", "SKIN_BINDING", "CLIP"};
 
     SortEntry *sorted = (SortEntry *)malloc((size_t)count * sizeof(SortEntry));
     NT_BUILD_ASSERT(sorted && "codegen: sorted alloc failed");
 
-    for (int t = 0; t < 7; t++) {
+    for (size_t t = 0; t < sizeof(type_order) / sizeof(type_order[0]); t++) {
         uint32_t group_count = 0;
         for (uint32_t i = 0; i < count; i++) {
             const char *prefix = type_prefix_for_kind(entries[i].kind);
@@ -339,6 +345,15 @@ static nt_build_asset_kind_t kind_from_identifier(const char *id) {
     }
     if (strstr(id, "ASSET_ATLAS_") == id) {
         return NT_BUILD_ASSET_ATLAS;
+    }
+    if (strstr(id, "ASSET_SKELETON_") == id) {
+        return NT_BUILD_ASSET_SKELETON;
+    }
+    if (strstr(id, "ASSET_SKIN_BINDING_") == id) {
+        return NT_BUILD_ASSET_SKIN_BINDING;
+    }
+    if (strstr(id, "ASSET_CLIP_") == id) {
+        return NT_BUILD_ASSET_CLIP;
     }
     return NT_BUILD_ASSET_BLOB; /* fallback */
 }

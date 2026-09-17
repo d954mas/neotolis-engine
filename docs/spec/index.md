@@ -96,6 +96,7 @@ lifetime, and naming vocabulary.
 | `engine/input` | [io/input.md](io/input.md); automation: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | *(audio — planned module, no dir yet)* | [io/audio.md](io/audio.md) |
 | `engine/skeletal` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (`nt_skeletal.h` pose ABI/FK/sockets/rig identity, skin binding + palette) |
+| `engine/skeletal_assets` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (§15 NSKL/NSKN/NANM activators and views), [assets/resource.md](assets/resource.md) (activator contract) |
 | *(`engine/skeletal_bank`, `engine/skeletal_gpu`, `engine/skin_comp`, skinned renderer in `engine/renderers` — planned, epic #472)* | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) |
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |
 | `engine/time` | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |

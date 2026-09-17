@@ -251,7 +251,15 @@ Publication change detection uses three pieces of state: published asset identit
 
 ### Blob pinning
 
-Two consumption models exist for asset types that derive state from pack bytes:
+A plain activator (`activate`/`deactivate`, no resolve callbacks) is already
+copy-out: it turns the payload into a self-contained runtime object and never
+reads the blob again. MESH does it with GPU buffers; the skeletal types
+(`NSKL`, `NSKN`, `NANM`, `engine/skeletal_assets`) do it with one CPU allocation
+per asset holding a copy of the payload, which is already the runtime layout.
+Neither pins.
+
+Two consumption models exist for asset types that derive state from pack bytes
+through the resolve callbacks:
 
 - **Copy-out** (`NT_RESOURCE_BEHAVIOR_AUX_BACKED`, e.g. atlas): `on_resolve` copies the bytes it needs into a self-contained `user_data`. Once built, `user_data` never touches the blob again, so the pack blob can be evicted freely and the consumer keeps working. Copy-out consumers do **not** pin.
 - **Zero-copy** (`NT_RESOURCE_BEHAVIOR_PIN_BLOB`, e.g. font): the consumer reads the *live* pack blob on demand (glyph decode at cache-miss). Its `user_data` is only a `{blob, size}` view, so the blob must stay resident for as long as it is the published winner. Zero-copy consumers **pin** the blob.
@@ -422,8 +430,15 @@ typedef enum {
         NT_ASSET_BLOB = 4,  /* generic binary data (game-defined) */
         NT_ASSET_FONT = 5,  /* font glyph data (Slug format) */
         NT_ASSET_ATLAS = 6, /* atlas region metadata (vertices + UVs + origin) */
+        NT_ASSET_SKELETON = 7,     /* skeleton rig (NSKL) */
+        NT_ASSET_SKIN_BINDING = 8, /* skin binding: palette remap + inverse binds (NSKN) */
+        NT_ASSET_CLIP = 9,         /* animation clip (NANM) */
     } nt_asset_type_t;
 ```
+
+`NT_ASSET_LAST` is the highest defined type; the pack parser rejects a manifest
+type above it. The three skeletal formats are specified in
+[Skeletal animation §16](../skeletal/skeletal-animation.md).
 
 Additional types (material, audio) will be added as needed.
 

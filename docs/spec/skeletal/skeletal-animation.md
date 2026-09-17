@@ -1,6 +1,6 @@
 # Skeletal Animation
 
-**Status:** architecture specification v0.2 (2026-09-15), implementation in progress under epic #472; the core pose ABI, FK, binding math and rig identity are implemented (#473). Function names of unimplemented parts are provisional; responsibilities, coordinate spaces, ownership, memory and behavior are normative. Changes to this chapter land together with the code that implements them.
+**Status:** architecture specification v0.2 (2026-09-15), implementation in progress under epic #472; the pose ABI, FK, binding math, rig identity, clip sampling with the object curve, the track clock, the NSKL/NSKN/NANM wire formats, their builder encoders and the runtime adapters are implemented; mix/override/additive, banks, GPU staging, the renderer and glTF import are not. Function names of unimplemented parts are provisional; responsibilities, coordinate spaces, ownership, memory and behavior are normative. Changes to this chapter land together with the code that implements them.
 
 Related: [Principles](../core/principles.md), [API contracts](../core/api-contracts.md), [Render architecture](../render/architecture.md), [Items, sorting, batching](../render/items-sorting-batching.md), [Material](../render/material.md), [Resource](../assets/resource.md), [Builder](../builder/builder.md).
 
@@ -65,11 +65,11 @@ Published test vector — joint 0 id `0x11111111`, no parent, t (1, 2, 3), q (0,
 rig_compat_id = 0x03E59E1475239034
 ```
 
-`nt_skeletal_rig_compat_id(skel, scratch, size)` in `engine/skeletal` is the single implementation of this schema: the builder (#475) hashes the exported rig with it, and procedural rigs fill their own field with it. Clips and bindings are exported against the authoritative rig export; near-equal rigs from independent exports are different rigs by design. Joint indices `uint16_t`, `UINT16_MAX` = no parent. Builder orders joints in preorder; each subtree is a contiguous range; multiple roots allowed; helper nodes affecting transforms are retained. `subtree_end[j]` (`uint16_t`) closes that range — the subtree of `j` is `[j, subtree_end[j])` — and is part of the skeleton: the builder writes it into NSKL and the activator validates preorder and range nesting. With multiple roots `subtree_end[root_k]` is the next root, or `joint_count` for the last one. A joint is not an entity. Skeleton contains no meshes, clips, time, GPU handles, inverse binds or mutable buffers. Rest pose ≠ bind pose. Shared by every character and clip of the rig.
+`nt_skeletal_rig_compat_id(skel, scratch, size)` in `engine/skeletal` is the single implementation of this schema: `nt_builder_add_skeleton` hashes the exported rig with it, and procedural rigs fill their own field with it. Clips and bindings are exported against the authoritative rig export; near-equal rigs from independent exports are different rigs by design. Joint indices `uint16_t`, `UINT16_MAX` = no parent. Builder orders joints in preorder; each subtree is a contiguous range; multiple roots allowed; helper nodes affecting transforms are retained. `subtree_end[j]` (`uint16_t`) closes that range — the subtree of `j` is `[j, subtree_end[j])` — and is part of the skeleton: the builder writes it into NSKL and the activator validates preorder and range nesting. With multiple roots `subtree_end[root_k]` is the next root, or `joint_count` for the last one. A joint is not an entity. Skeleton contains no meshes, clips, time, GPU handles, inverse binds or mutable buffers. Rest pose ≠ bind pose. Shared by every character and clip of the rig.
 
 ### 3.2 Clip (`NANM`)
 
-Immutable, independently loadable resource: duration, `rig_compat_id`, absolute/additive kind with the additive reference identity, codec/version, joint tracks, interpolation rules, an optional **object curve** (one TRS signal for the whole character, §7.5), and builder-computed numbers: bounds `r_joints` (joint-origin distance), `r_root` (root translation length), and `s_max` (model-space linear stretch), all conservative over the entire decoded playback including interpolation (§14), and bake certificate `bake_fps_min`, `bake_reach` (§10). Skeleton owns no clips and declares no closed clip list. New clips are added by mounting new packs and resolving them by name (R6).
+Immutable, independently loadable resource: duration, `rig_compat_id`, the additive reference identity (`additive_ref_id`, 0 for an absolute clip), version, joint tracks, interpolation rules and an optional **object curve** (one TRS signal for the whole character, §7.5). The builder-computed bounds `r_joints`, `r_root`, `s_max` (§14) and the bake certificate `bake_fps_min`, `bake_reach` (§10) are added with their first consumer (#499); nothing in v1 reads them, so they are not in the payload. Skeleton owns no clips and declares no closed clip list. New clips are added by mounting new packs and resolving them by name (R6).
 
 ### 3.3 Pose ABI
 
@@ -77,7 +77,7 @@ Immutable, independently loadable resource: duration, `rig_compat_id`, absolute/
 
 The public `nt_skeletal_mat34_from_trs` helper checks finite translation/scale and a unit quaternion under `NT_SKELETAL_CHECKS`; FK and sockets use that check without repeating it. With `NT_SKELETAL_CHECKS=0` the validation is compiled out, including for direct calls to the helper.
 
-cglm rule: kernels that call cglm link `nt_math`, which sets `CGLM_ALL_UNALIGNED` (`engine/math/CMakeLists.txt`), so `vec4`/`versor` are unaligned and `q[4]` may be passed to `glm_quat_*`. `mat4` stays aligned (16, 32 with AVX) regardless; pose and model buffers are never cast to `mat4*`/`mat3*` — FK and palette build use the engine's own 3×4 row kernels or copy through aligned locals. The #473 kernels call no cglm: they are hand-written 3×4 math and link only `nt_core` + `nt_hash`.
+cglm rule: kernels that call cglm link `nt_math`, which sets `CGLM_ALL_UNALIGNED` (`engine/math/CMakeLists.txt`), so `vec4`/`versor` are unaligned and `q[4]` may be passed to `glm_quat_*`. `mat4` stays aligned (16, 32 with AVX) regardless; pose and model buffers are never cast to `mat4*`/`mat3*` — FK and palette build use the engine's own 3×4 row kernels or copy through aligned locals. The kernels call no cglm: they are hand-written 3×4 math, and `nt_skeletal` links only `nt_core`, `nt_hash` and libm (`sqrtf` in the sampler's nlerp).
 
 `ModelPose` is a separate array of `nt_skeletal_mat34_t` — float32 affine 3×4 (three vec4 matrix rows `[m_r0 m_r1 m_r2 m_r3]`, 48 bytes) — in skeleton space; it preserves shear from hierarchical TRS. `SkinPalette` uses the same element type. Neither is local TRS.
 
@@ -85,7 +85,7 @@ cglm rule: kernels that call cglm link `nt_math`, which sets `CGLM_ALL_UNALIGNED
 
 ### 3.4 SkinBinding (`NSKN`)
 
-Immutable resource describing how a mesh's vertices attach to the skeleton: `rig_compat_id`, palette→skeleton joint remap, inverse bind matrices (mesh space → joint space in the bind pose), input mesh-space convention, and two builder numbers: `reach` (max over bound vertices of `|inverse_bind[p]·v|`, the farthest a vertex sits from its joint) and `any_pose_radius` (§14). Vertex `joints` address the palette, not the skeleton. Every mesh exported from the same glTF skin shares one binding; a binding is the sharing key for baked banks (§10). Contains no mesh list, no per-mesh summaries and no geometry; the MESH asset is unchanged apart from its two streams, and the builder — which writes MESH and NSKN from one skin — guarantees that vertex indices lie inside the palette and weights are normalized. When the builder exports a further mesh against an existing NSKN it asserts that the mesh does not exceed the binding's `reach`.
+Immutable resource describing how a mesh's vertices attach to the skeleton: `rig_compat_id`, palette→skeleton joint remap and inverse bind matrices (mesh space → joint space in the bind pose, glTF mesh-node space). The two builder numbers `reach` (max over bound vertices of `|inverse_bind[p]·v|`, the farthest a vertex sits from its joint) and `any_pose_radius` (§14) are added with their first consumer (#499), together with the mesh-space byte that would let a retargeted binding be rejected. Vertex `joints` address the palette, not the skeleton. Every mesh exported from the same glTF skin shares one binding; a binding is the sharing key for baked banks (§10). Contains no mesh list, no per-mesh summaries and no geometry; the MESH asset is unchanged apart from its two streams, and the builder — which writes MESH and NSKN from one skin — guarantees that vertex indices lie inside the palette and weights are normalized. The builder check that a further mesh exported against an existing NSKN stays within its `reach` arrives with those numbers (#499).
 
 ### 3.5 Joint factors
 
@@ -118,13 +118,13 @@ typedef struct {
     double   time, duration;
     uint32_t clip_key;
     float    speed, gain;   /* gain = g_t of §7.3 */
-    uint32_t flags;         /* occupied, looping */
-} nt_skeletal_track_t;          /* 32 B */
+    uint32_t flags;         /* NT_SKELETAL_TRACK_OCCUPIED | NT_SKELETAL_TRACK_LOOPING */
+} nt_skeletal_track_t;      /* 32 B, pinned by a _Static_assert in nt_skeletal.h */
 ```
 
 - `clip_key` is an opaque game/content `uint32_t`; assigning a clip supplies key and duration (fixed for that assignment). Tracks store no clip, weights, resource or GPU pointer; the game supplies current clip and factor views per evaluation call after publication.
 - **Occupancy ≠ gain.** A gain-0 track keeps advancing (blend spaces need synchronized cycles); `speed = 0` pauses; the game releases a slot explicitly.
-- `nt_skeletal_tracks_advance(tracks, count, dt)` updates clocks only (wrap, clamp). It is the only engine function over tracks; assign/release/crossfade ramps are three-field writes that live in game code (the showcase's assign helper asserts when no slot is free — the engine has no assign function and no eviction policy). #491 extends advance with time spans and signed cycle crossings for root-motion/event consumers. Baked characters use the same tracks with a bank lookup instead of kernels.
+- `nt_skeletal_tracks_advance(tracks, count, dt)` updates clocks only (wrap, clamp). Per track: a slot without `NT_SKELETAL_TRACK_OCCUPIED` is untouched; `duration == 0` resets `time` to 0; otherwise `time += speed·dt`, then `NT_SKELETAL_TRACK_LOOPING` normalizes by `time − floor(time/duration)·duration` (one step for reverse and for several cycles at once, with a rounding residue on either boundary restarting the cycle at 0) and a non-looping track clamps to `[0, duration]`. `speed = 0` is a pause with no special case. A finite `dt ≥ 0` is asserted, and every occupied track is asserted to carry a `duration ≥ 0` and a finite `speed`, and a looping track's cycle count `time/duration` to lie within ±9.2·10¹⁸ (a NaN, an infinite step or a sub-attosecond duration would make the int64 floor undefined); nothing else is written and nothing is called. It is the only engine function over tracks; assign/release/crossfade ramps are three-field writes that live in game code (the showcase's assign helper asserts when no slot is free — the engine has no assign function and no eviction policy). #491 extends advance with time spans and signed cycle crossings for root-motion/event consumers. Baked characters use the same tracks with a bank lookup instead of kernels.
 
 ## 7. Time, sampling and composition
 
@@ -134,7 +134,15 @@ typedef struct {
 
 ### 7.2 Sampling
 
-`nt_skeletal_sample(clip, time, defaults, out)`: absent channels take the supplied defaults; T/S lerp; rotations shortest-path normalized lerp; STEP exact at its timestamp; CUBICSPLINE is resampled by the builder with error checks; random seek/reverse need no cursor. Direct-access codec (§16). Output must not overlap input.
+**Runtime clip layout.** `nt_skeletal_clip_t` in `nt_skeletal.h` is an immutable borrowed view with the ownership contract of `nt_skeletal_skeleton_t`. It is also the wire layout: the NANM payload (§16) holds exactly these tables, so the activator copies the payload once and points the view into the copy. Each channel has exactly one storage mode, so the tables never describe the same joint channel twice (a builder invariant by construction: one channel record per joint component; activation does not check it), and a channel in no table is absent.
+
+- **Sampled** channels share one uniform grid of `sample_count` samples on `[0, duration]` (`inv_step = (sample_count−1)/duration`, 0 when `sample_count == 1` or `duration == 0`) and live in `sample_count` frame blocks of `block_floats` floats, block `i` at `blocks + i·block_floats`, laid out as `t` rows `[n_t][3]`, then `q` rows `[n_q][4]`, then `s` rows `[n_s][3]`. Row `k` belongs to joint `t_joint[k]`/`q_joint[k]`/`s_joint[k]`. One sample therefore reads two adjacent blocks and nothing else instead of striding once per channel. `blocks` is NULL when the clip has no sampled channel.
+- **Constant** channels are `ct_joint`/`ct` (3 floats), `cq_joint`/`cq` (4), `cs_joint`/`cs` (3) with their counts.
+- **STEP** channels keep their authored timestamps: `steps[]` of `{first, count, joint, channel, pad}` into the shared `keys[]` table of `{time, v[4]}` (t/s use `v[0..2]` and leave `v[3]` at 0, q is unit xyzw). A track's value at `time` is found by binary search over its own range.
+- The object curve (§7.5) is a separate one-element signal inside the clip, with its own modes and key ranges over the clip's grid and key table.
+- Identity travels with the view: `rig_compat_id`, `additive_ref_id`, `joint_count`.
+
+**Contract.** `nt_skeletal_sample(clip, time, defaults, out)` writes `joint_count` local transforms. `time` is a `double` in `[0, duration]`, asserted. Absent channels take the supplied defaults, constants copy, and STEP channels hold the last key at or before `time` (the first key when `time` precedes it). For sampled channels `f = time·inv_step` in double, `i = floor(f)` clamped so `i+1 ≤ sample_count−1`, `u = (float)(f − i)`; `u == 0` copies block `i` and `u == 1` copies block `i+1`, both bit for bit, so a grid time reproduces its stored sample exactly. `u` within `2⁻²⁰` of 0 or 1 is snapped to it: `time·inv_step` lands a ulp off its integer for most grid times of a non-binary duration, and the snap keeps those exact copies instead of lerps (`2⁻²⁰` of one grid interval is far below any authored key spacing); the clamp at `time == duration` yields `u == 1` the same way. Otherwise T/S lerp as `a·(1−u) + b·u` and Q takes the shortest-path normalized lerp (`d = dot(a,b)`, `b' = d < 0 ? −b : b`, `q = normalize(a·(1−u) + b'·u)`). Random seek and reverse need no cursor because the index is computed, not stepped. CUBICSPLINE will be resampled by the importer (#499) with error checks. Direct-access codec (§16). `defaults` and `out` are caller-owned buffers of `joint_count` entries and must not overlap.
 
 ### 7.3 Composition kernels
 
@@ -146,7 +154,7 @@ This one kernel covers R1 (two full-body inputs with gains `1−a`, `a`, both ad
 
 **`nt_skeletal_override(base, top, mask, alpha, out)`** — `a = alpha·mask[j]`, both in [0,1]; T/S lerp, Q shortest-path nlerp. Provides independent strength: "80 % upper-body aim regardless of locomotion's internal gains" — not expressible through `mix` (needs per-joint compensation, and `normalize((1−a)·normalize(A) + a·q) ≠ normalize(A + w·q)`). Permits `out == base`.
 
-**`nt_skeletal_additive(base, delta, mask, alpha, out)`** — prepared deltas against an explicit reference: `T += a·ΔT`, `Q = normalize(Q·nlerp(identity, ΔQ, a))`, `S *= lerp(1, ΔS, a)`; missing prepared channels are neutral; `−identity` deltas take shortest-path nlerp. The builder reconstructs source channels, then computes deltas into the NANM kind/reference fields defined by #475 (#480 scope; consumers of additive data depend on #480).
+**`nt_skeletal_additive(base, delta, mask, alpha, out)`** — prepared deltas against an explicit reference: `T += a·ΔT`, `Q = normalize(Q·nlerp(identity, ΔQ, a))`, `S *= lerp(1, ΔS, a)`; missing prepared channels are neutral; `−identity` deltas take shortest-path nlerp. The builder reconstructs source channels, then computes deltas and stamps the reference pose identity into the NANM `additive_ref_id` (§16); the delta preparation and its consumers are #480 scope.
 
 ### 7.4 Transitions and interruption
 
@@ -156,7 +164,7 @@ A normal transition is a **live crossfade** (R1): both clips advance, the game r
 
 ### 7.5 Object curve
 
-R4 is a **separate one-element TRS signal**, not joint −1: `nt_skeletal_sample_object(curve, time, defaults, out)`; blended with the same kernels through one-element views and an explicit per-input object gain (never inferred from a pelvis weight). Missing curve = supplied defaults (identity). The game applies `E = E_game·O` or feeds it to its controller — in baked mode too: banks hold joint matrices only, and the crowd loop samples the object curve at the same track time. Extracted, loop-accumulating root motion and events over time spans are extension #491; differencing a blended absolute curve is not equivalent to blending deltas.
+R4 is a **separate one-element TRS signal**, not joint −1: `void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double time, const nt_skeletal_trs_t *defaults, nt_skeletal_trs_t *out)`; blended with the same kernels through one-element views and an explicit per-input object gain (never inferred from a pelvis weight). `nt_skeletal_object_curve_t` is self-contained — a mode per channel, its own constant value, its own sampled array, the grid (`sample_count`, `inv_step`, `duration`) and STEP ranges into the key table it borrows from the clip — so it is sampled without a clip pointer and follows §7.2's per-channel rules over one element. Missing curve = supplied defaults (identity): a NULL curve and a curve whose three modes are all absent both copy `defaults`, so a clip without an object curve needs no branch at the call site. `out` must not alias `defaults`. The game applies `E = E_game·O` or feeds it to its controller — in baked mode too: banks hold joint matrices only, and the crowd loop samples the object curve at the same track time. Extracted, loop-accumulating root motion and events over time spans are extension #491; differencing a blended absolute curve is not equivalent to blending deltas.
 
 ## 8. FK, procedural edits, IK, sockets, physics
 
@@ -186,13 +194,13 @@ The lookup result is `nt_skeletal_bank_lookup_t { uint16_t x0, y0, x1, y1; float
 
 **Deliberate divergence** from [Principles](../core/principles.md) §3 (the builder does heavy work, the runtime loads): the bake is a one-time explicit load-time operation on prebuilt data, chosen because the developer's rigs are small and the load-time cost is measured (#487); serialized banks in packs are the fallback if that measurement fails.
 
-**`init`** (CPU only, no gfx call) takes `desc.width` (0 = `min(2048, gpu_caps.max_texture_size)`) and computes the layout: `fpr = floor(width / 3P)` frames per texture row; a duration-zero clip stores exactly one frame at time 0, without extra endpoint or STEP frames, in either playback mode. For positive durations: `F = ceil(duration·fps)` frames at `k/fps`, plus one frame at exactly `duration` for non-looping clips, plus two frames per distinct STEP timestamp `t_s` (sampled at `t_s⁻` and `t_s`) with a small per-clip segment table; `height = ceil(frames_total / fpr)`. Asserts: `3P ≤ width` (P ≤ 682 at the WebGL2 minimum 2048), `height ≤ max_texture_size`, origins addressable in `uint16`, every clip absolute with equal `rig_compat_id`, and the certificate check below. GPU storage is `width·height·bytes_per_texel`; the CPU copy is the same size; descriptors and bake workspace are counted separately. Baked-only characters allocate no PoseInstance. Adding clips = a replacement bank (init + bake with the expanded list), swapped in after outstanding draws finish; no append API, no implicit growth.
+**`init`** (CPU only, no gfx call) takes `desc.width` (0 = `min(2048, gpu_caps.max_texture_size)`) and computes the layout: `fpr = floor(width / 3P)` frames per texture row; a duration-zero clip stores exactly one frame at time 0, without extra endpoint or STEP frames, in either playback mode. For positive durations: `F = ceil(duration·fps)` frames at `k/fps`, plus one frame at exactly `duration` for non-looping clips, plus two frames per distinct STEP timestamp `t_s` (sampled at `t_s⁻` and `t_s`) with a small per-clip segment table; `height = ceil(frames_total / fpr)`. Asserts: `3P ≤ width` (P ≤ 682 at the WebGL2 minimum 2048), `height ≤ max_texture_size`, origins addressable in `uint16`, every clip absolute (`additive_ref_id == 0`) with equal `rig_compat_id`, and the certificate check below once the certificate fields land (#499). GPU storage is `width·height·bytes_per_texel`; the CPU copy is the same size; descriptors and bake workspace are counted separately. Baked-only characters allocate no PoseInstance. Adding clips = a replacement bank (init + bake with the expanded list), swapped in after outstanding draws finish; no append API, no implicit growth.
 
 **`bake`** samples absent channels from the skeleton rest pose, runs the ordinary kernels frame by frame (`sample → fk → nt_skin_palette_build`), converts to the texel format (FP16 through the shared `nt_half.h` round-to-nearest-even), and creates the texture with `nt_gfx_make_texture(data = texels, NEAREST, no mips)` in one call; precondition: a live context. During FP16 conversion the bank asserts representability (`|x| ≤ 65504`) and a translation quantization error ≤ `desc.fp16_tolerance` in scene units — exact for the actual binding, so no builder flag is needed for FP16. **Context loss:** destroy the husk and recreate the texture from the CPU texels; nothing rebakes, no source views are needed.
 
 **Texel layout** (shared with dynamic palette textures, §12): a **frame** is `3·P` contiguous texels in one texture row starting at its origin `(x, y)`; palette entry `p` occupies texels `(x + 3p + r, y)`, `r = 0..2`, texel `r` = matrix row `r` of the 3×4 affine `[m_r0 m_r1 m_r2 m_r3]`. Frames are packed row-major; no frame spans a texture row; the two frames of an interpolated pair may lie in different texture rows (the binding carries two independent origins), so nothing is duplicated at row breaks. A duration-zero lookup returns the same frame as both origins with `alpha = 0`, without wrapping or seam interpolation. For positive durations, looping seam pair `(F−1, 0)` interpolates over the actual interval `duration − (F−1)/fps`; non-looping lookups clamp to the end frame; STEP: at `t_s` the lookup selects the new segment and never interpolates across the discontinuity.
 
-**Temporal certificate in the builder.** Interpolating two frames is not sampling the clip; the error between the lerp of grid frames and the exact decoded pose depends on the rate. For each clip the builder evaluates the decoded pose densely (source keyframe times, STEP boundaries and ≥ 4 sub-samples per grid interval) at the profile fps and bounds the model-space error `|ΔG|` of every joint over the interval, then writes `bake_fps_min` — the smallest admitted rate for which `max|ΔG|·bake_reach ≤ tolerance` — and `bake_reach`, the reach the certificate assumes (profile parameter, default: the largest `reach` among the skins in the export). This is computed in joint space, so it needs no skin and holds for every binding whose `reach ≤ bake_reach`. `bank_init` asserts `fps ≥ clip.bake_fps_min` and `binding.reach ≤ clip.bake_reach`; `bake_fps_min = 0` means uncertified and is rejected. The dominant interpolation term is the rotation-lerp scale shrink `cos(Δθ/2)` between frames. Clips with travelling root translation will need higher FP16 tolerances until #491 extracts root motion.
+**Temporal certificate in the builder** (#499, with the bank that consumes it; the NANM payload carries no certificate field until then). Interpolating two frames is not sampling the clip; the error between the lerp of grid frames and the exact decoded pose depends on the rate. For each clip the builder evaluates the decoded pose densely (source keyframe times, STEP boundaries and ≥ 4 sub-samples per grid interval) at the profile fps and bounds the model-space error `|ΔG|` of every joint over the interval, then writes `bake_fps_min` — the smallest admitted rate for which `max|ΔG|·bake_reach ≤ tolerance` — and `bake_reach`, the reach the certificate assumes (profile parameter, default: the largest `reach` among the skins in the export). This is computed in joint space, so it needs no skin and holds for every binding whose `reach ≤ bake_reach`. `bank_init` asserts `fps ≥ clip.bake_fps_min` and `binding.reach ≤ clip.bake_reach`; `bake_fps_min = 0` means uncertified and is rejected. The dominant interpolation term is the rotation-lerp scale shrink `cos(Δθ/2)` between frames. Clips with travelling root translation will need higher FP16 tolerances until #491 extracts root motion.
 
 **Memory arithmetic for `desc`:** a 100-joint frame is 300 texels = 2,400 B FP16 / 4,800 B FP32; at width 2048 six frames fit per row, so 20 clips × 60 frames ≈ 1,200 frames → 200 rows → 3.3 MB FP16 / 6.6 MB FP32 of texture plus the same again for the CPU texels; bake time ≈ frames × (sample + FK + palette + conversion) — tens of milliseconds for simple rigs, measured in #487. Banks are shared by every character on the same binding; different bindings need different banks (B depends on inverse binds). Baking G plus a per-binding inverse-bind texture is a measured alternative if binding duplication dominates, changing bank layout and shader together.
 
@@ -233,7 +241,7 @@ typedef struct {
 
 ## 14. Bounds and culling
 
-Numbers, no stored per-bone data. All radii below are in skeleton space. A sphere of radius `r` becomes a world-space sphere centred at `E·origin` with radius `s_E·r`, where `s_E = max(abs(scale(E)))` for the TRS world transform required by §4.
+Numbers, no stored per-bone data. All radii below are in skeleton space. A sphere of radius `r` becomes a world-space sphere centred at `E·origin` with radius `s_E·r`, where `s_E = max(abs(scale(E)))` for the TRS world transform required by §4. The numbers themselves (`r_joints`, `r_root`, `s_max` in NANM, `reach` and `any_pose_radius` in NSKN) land with the culling helper that reads them (#499); the rules below define what the builder must then compute.
 
 Single-clip playback uses `r = r_joints + reach·s_max`. `r_joints` bounds joint-origin distance from the skeleton origin, and `s_max` bounds the maximum stretch (largest singular value) of every model matrix's linear part, over the entire decoded playback including interpolation. Products of local maximum absolute scale components along each ancestor chain give a conservative stretch bound, including hierarchical shear; individual local scales or model-matrix column lengths do not.
 
@@ -245,7 +253,11 @@ The max of two clip radii is *not* a bound for their mix (two 80° bends mixed a
 
 ## 15. Resources and lifetimes
 
-`rig_compat_id` (`nt_hash64_t`) is shared by NSKL, NANM and NSKN (order, parents, rest semantics, units); binding a clip, skeleton and skin together asserts equality; nothing else is cross-checked at runtime (§2 item 5). Handles/generations still protect slots. Adapters validate their own payload, publish immutable views and own runtime memory. Order per frame: draws finished → `resource_step` → refresh views → advance/compose/prepare → build list → draw. A borrowed view lasts until its owner is deactivated/republished; a bank owns its texels and survives the unload of the clips it was baked from.
+`rig_compat_id` (`nt_hash64_t`) is shared by NSKL, NANM and NSKN (order, parents, rest semantics, units); binding a clip, skeleton and skin together asserts equality; nothing else is cross-checked at runtime (§2 item 5). Handles/generations still protect slots. Adapters validate their own payload, publish immutable views and own runtime memory.
+
+**The v1 adapters** are `nt_skeletal_assets_activate_skeleton/skin_binding/clip` and their deactivators (`engine/skeletal_assets`), registered by the application through `nt_resource_register_type` exactly like textures; resource core references none of them. Each one validates the structure of the *whole* payload before it allocates anything, copies the payload into **one** allocation and points the view of §7.2 into that copy — the wire layout is the runtime layout (§16), so nothing is transposed or re-indexed. A structurally broken payload logs one warning and returns 0, which leaves the asset FAILED with nothing allocated. Nothing reads the blob after activation, so any blob policy may drop it. `nt_skeletal_assets_init(max_assets)` allocates **one** pool for all three types, so the game sizes the peak mounted set once instead of guessing three splits; activating past the capacity is an assert, not a load failure. The capacity counts every *activated* asset, not every published one: when one resource id is present in two mounted packs both copies activate and hold a slot, only the winner is published, and the loser is released when its own pack unmounts. The runtime handle is a generational `nt_pool` id, so a stale handle fails `nt_pool_valid` instead of naming a reused slot. `nt_skeletal_assets_skeleton/skin_binding/clip(nt_resource_t)` return the views and assert the asset type and a live handle; a view stays valid until its asset is deactivated (unmount, reload, shutdown), so the game refetches it after `resource_step`. The adapters cross-check no `rig_compat_id` — no second asset exists at activation.
+
+Order per frame: draws finished → `resource_step` → refresh views → advance/compose/prepare → build list → draw. A borrowed view lasts until its owner is deactivated/republished; a bank owns its texels and survives the unload of the clips it was baked from.
 
 **Pack grouping.** Activation and unmount are whole-pack (default `NT_RESOURCE_MAX_PACKS` = 16), and mounting a pack that contains a non-BLOB type whose activator is not registered asserts (`nt_resource.c`, parse). Builder manifests therefore group by **co-residency**: a rig/mesh pack (MESH, NSKL, NSKN); clip-group packs (NANM, e.g. base locomotion vs. dances loaded mid-game). Applications that link animation register the three activators; the manifest keeps peak mounted packs (old + new + prefetch) within the limit or overrides it deliberately.
 
@@ -255,22 +267,154 @@ Not ready → the game continues old playback, holds a pose or omits the item. P
 
 Order: import → normalize spaces/units → canonical hierarchy/remap → validate clips/skin → prepare absolute/additive and object curves → retarget if requested → CPU codec → bounds and bake certificate (§10, §14) → pack. Clips stay independent. Rates and error budgets come from content profiles. Content errors (invalid rigs, channels, ranges, weights, failed certificates) are `NT_BUILD_ASSERT` after a logged diagnostic, per the existing builder policy; the ATLAS graceful-error channel is not extended.
 
-**v1 payloads:** `NSKL`, `NSKN`, `NANM` (F32 direct-access: constant/default tracks, uniform samples, exact STEP, kind/reference, object curve, bounds numbers, certificate; Q16 is #486). `NANM` uses an explicit little-endian header plus bounded `tag/offset/count/stride` section descriptors for its v1 sections (fixed parsing, no extensible registry); `NSKL`/`NSKN` keep simple fixed layouts. `NSKL` carries `subtree_end` next to the parent indices (§3.1), and the builder computes `rig_compat_id` by calling `nt_skeletal_rig_compat_id` rather than reimplementing the schema. Major version = incompatible layout or semantics; minor = explicitly skippable optional sections only, never flags that change decode semantics; unsupported required features/codecs are rejected; the outer pack still requires an exact version and a rebuild. The pack CRC32 detects accidental corruption, does not authenticate content and does not replace payload-local validation; no per-asset CRC. Asset types 7–9 extend the enum in `shared/include/nt_pack_format.h`; `NT_RESOURCE_MAX_ASSET_TYPES` (`engine/resource/nt_resource_internal.h`) goes 8 → 12; the parser's `> NT_ASSET_ATLAS` bound becomes `> NT_ASSET_LAST` (still recoverable pack validation; unregistered activators keep asserting); every enumeration site is updated (#475 lists them); activators are registered explicitly by applications that link them. A shared `shared/include/nt_half.h` provides FP32↔FP16 conversion for the builder (FLOAT16 weights) and the bank. Little-endian fields, magic/version, explicit counts/offsets, overflow and range checks before views; no struct casting; adapters copy into aligned memory when needed. glTF is the normative source reference; import selects the canonical rig (skin/node), helper joints and identity explicitly so independently imported clips reproduce the same identity; the current scene API (flattened nodes) gains parent/skin access. The importer reads every paired `JOINTS_n/WEIGHTS_n` set, keeps the four largest influences per vertex with deterministic tie-breaking, renormalizes (UINT8 weights sum to 255), and gates the reduction on decoded vertex error against the full source influences; it also gates runtime nlerp against the source quaternion interpolation at keys and interior samples (quarter points), refining resampling within the profile before failing.
+**v1 payloads:** `NSKL`, `NSKN` and `NANM`, all little-endian, all defined in
+`shared/include/nt_skeletal_format.h` and shared by builder and runtime. The
+codec is F32 direct-access (Q16 is #486). **The wire layout is the runtime
+layout:** the builder writes exactly the tables the sampler of §7.2 reads, and
+an activator validates the structure, copies the whole payload into one
+allocation and points the runtime view at it — no transpose, no per-field
+decode, no section table. Every target of this engine is little-endian, so
+headers travel as packed structs and arrays are copied as bytes; the builder
+pins that with a `__BYTE_ORDER__` static assert where the compiler defines it (GCC/Clang; MSVC targets are little-endian by platform). `NT_SKELETAL_FORMAT_VERSION`
+is a plain `uint16_t` (v1 of this layout = 2) compared **exactly** in all three
+payloads: the layout is the runtime layout, so any change to it is a rebuild.
+The builder computes `rig_compat_id` by calling `nt_skeletal_rig_compat_id`
+rather than reimplementing the schema, and `nt_builder_add_skeleton` returns
+the id it wrote, so clips and bindings are stamped with the identity that
+actually shipped. The pack CRC32 detects accidental corruption, does not
+authenticate content and does not replace payload-local validation; there is no
+per-asset CRC.
+
+**NSKL** — `NT_SKL_SIZE(J) = 16 + 48·J` bytes, exact:
+
+| offset | field | note |
+|---|---|---|
+| 0 | `u32 magic` | `"NSKL"` |
+| 4 | `u16 version` | exact match |
+| 6 | `u16 joint_count` (J) | ≥ 1 |
+| 8 | `u64 rig_compat_id` | computed by the encoder |
+| 16 | `u16 parent[J]` | `0xFFFF` = root, else `< j` (preorder) |
+| 16+2J | `u16 subtree_end[J]` | subtree of j = `[j, subtree_end[j])` |
+| 16+4J | `u32 joint_id[J]` | `nt_hash32_str(node name)`, unique |
+| 16+8J | `f32 rest[J][10]` | AoS `t[3] q[4] s[3]`, q unit xyzw |
+
+**NSKN** — `NT_SKN_SIZE(P) = 16 + 50·P` bytes, exact. The matrices come first so
+the `u16` table ends the payload without padding:
+
+| offset | field | note |
+|---|---|---|
+| 0 | `u32 magic` | `"NSKN"` |
+| 4 | `u16 version` | |
+| 6 | `u16 palette_count` (P) | ≥ 1 |
+| 8 | `u64 rig_compat_id` | |
+| 16 | `f32 inverse_bind[P][12]` | `nt_skeletal_mat34_t` row order `r[3][4]` |
+| 16+48P | `u16 remap[P]` | palette entry → skeleton joint |
+
+`remap[p]` is not bounded against a skeleton at activation — no skeleton is
+available there; `nt_skin_palette_build` asserts `remap[p] < model_count` where
+both exist.
+
+**NANM** — a 56-byte header, then the arrays in one fixed order. Every array
+before the `u16` tables is a multiple of 4 bytes, so each one starts aligned and
+nothing is padded:
+
+| offset | field | note |
+|---|---|---|
+| 0 | `u32 magic` | `"NANM"` |
+| 4 | `u16 version` | |
+| 6 | `u16 joint_count` (J) | ≥ 1 |
+| 8 | `u32 sample_count` (N) | ≥ 1 |
+| 12 | `f32 duration` | finite, ≥ 0 |
+| 16 | `u64 rig_compat_id` | |
+| 24 | `u64 additive_ref_id` | 0 = absolute |
+| 32 | `u16 n_t, n_q, n_s` | sampled joint rows per component kind |
+| 38 | `u16 n_ct, n_cq, n_cs` | constant joint channels per component kind |
+| 44 | `u32 n_steps` | joint STEP tracks |
+| 48 | `u32 n_keys` | keys of every STEP track, joints and object |
+| 52 | `u8 object_mode[3]` | 0 ABSENT, 1 CONSTANT, 2 SAMPLED, 3 STEP (t, q, s) |
+| 55 | `u8 _pad` | zero |
+
+| order | array | bytes |
+|---|---|---|
+| 1 | `f32 blocks[N][block_floats]` | `block_floats = 3n_t + 4n_q + 3n_s` |
+| 2 | `f32 ct[n_ct][3]`, `cq[n_cq][4]`, `cs[n_cs][3]` | constant values |
+| 3 | `steps[n_steps]` | 12 B: `{u32 first; u32 count; u16 joint; u8 channel; u8 pad}` |
+| 4 | `keys[n_keys]` | 20 B: `{f32 time; f32 v[4]}` |
+| 5 | `object` | 64 B `NtAnmObject`: `{f32 constant[10]; u32 step_first[3]; u32 step_count[3]}`, only when some `object_mode` is not ABSENT |
+| 6 | `f32 object_sampled[N][10]` | only when some `object_mode` is SAMPLED |
+| 7 | `u16 t_joint[n_t], q_joint[n_q], s_joint[n_s]` | joint of each sampled row |
+| 8 | `u16 ct_joint[n_ct], cq_joint[n_cq], cs_joint[n_cs]` | joint of each constant |
+
+The modes stay in the header because they decide whether the record and the
+sampled array exist at all; `constant` is `t[3] q[4] s[3]` with only the
+CONSTANT channels used, and `step_first`/`step_count` are 0 unless that mode is
+STEP.
+
+The payload size is exactly `nt_anm_size(header)`, computed in 64 bits on both
+sides. The STEP tracks partition `keys` exactly: the joint tracks in table order,
+then the object STEP channels in t, q, s order, each `first` being the running
+key total. `sample_count == 1` means no frame block — a clip built only from
+constant and step channels may still have a duration.
+
+**Activation checks structure only**, because a structurally sound payload can
+still only misbehave numerically, and numbers are the builder's contract
+(`NT_BUILD_ASSERT`) plus `NT_SKELETAL_CHECKS` in the kernels that consume a
+pose (`nt_skeletal_mat34_from_trs`). The list is:
+
+- all three: at least a header, magic, `version` equal, and a size equal to the
+  exact size the counts imply (computed in 64 bits).
+- NSKL: `joint_count ≥ 1`, `j < subtree_end[j] ≤ J`, and one exact-preorder rule
+  walked in joint order — **each joint's parent is the nearest earlier joint
+  whose range is still open** at that joint (`NO_PARENT` when none is) — plus
+  `subtree_end[j] ≤ subtree_end[parent[j]]` for a non-root. That single rule
+  carries preorder parents, sibling contiguity, root chaining and the last root
+  closing at `J`, which is what makes FK's parent-before-child read safe. The
+  walk pops each closed subtree once, so it is `O(J)` amortized.
+- NSKN: `palette_count ≥ 1`.
+- NANM: `joint_count ≥ 1`; `sample_count ≥ 1`; `duration` finite and ≥ 0; every
+  `object_mode[c] ≤ 3`; every entry of the six `u16` joint tables and every
+  `steps[s].joint` below `joint_count`, and `steps[s].channel ≤ 2` — these are
+  the write indices the sampler turns into positions in the caller's pose; the
+  key partition above, each count ≥ 1 and the running total ending at `n_keys`;
+  and `sample_count ≥ 2` with `duration > 0` whenever a frame block or an object
+  sampled array exists, because interpolation reads two adjacent grid entries.
+
+Asset types 7–9 extend the enum in `shared/include/nt_pack_format.h` and
+`NT_ASSET_LAST` bounds it; `NT_RESOURCE_MAX_ASSET_TYPES`
+(`engine/resource/nt_resource_internal.h`) is 12 and a `_Static_assert` there
+keeps it above `NT_ASSET_LAST`; the parser rejects an asset type above
+`NT_ASSET_LAST` (still recoverable pack validation; unregistered activators keep
+asserting); activators are registered explicitly by applications that link them.
+The builder's public API is `nt_builder_add_skeleton/skin_binding/clip`
+(`nt_builder.h`); each encodes an in-memory import result and registers it in
+one step, and the raw encoders stay builder-internal. A source violation of any
+rule above is `NT_BUILD_ASSERT`, because the importer is the only producer. The
+value rules it asserts: every float finite; every quaternion unit (squared norm
+within 1e-3 of 1); `v[3] == 0` for t/s constants and keys; STEP times strictly
+increasing, the first ≥ 0 and the last ≤ `duration`; a SAMPLED channel needs
+`sample_count ≥ 2` and `duration > 0`; joint ids unique. Activation re-checks
+none of these. The encoder
+zeroes the payload before writing it, so pad bytes and unused object-constant
+slots are deterministic and the payload hash is the clip's identity. A shared
+`shared/include/nt_half.h` provides FP32↔FP16 conversion for the builder
+(FLOAT16 weights) and the bank.
+
+glTF is the normative source reference; import selects the canonical rig (skin/node), helper joints and identity explicitly so independently imported clips reproduce the same identity; the current scene API (flattened nodes) gains parent/skin access. The importer (#499, not yet written) reads every paired `JOINTS_n/WEIGHTS_n` set, keeps the four largest influences per vertex with deterministic tie-breaking, renormalizes (UINT8 weights sum to 255), and gates the reduction on decoded vertex error against the full source influences; it also gates runtime nlerp against the source quaternion interpolation at keys and interior samples (quarter points), refining resampling within the profile before failing.
 
 ## 17. Modules and composition checks
 
-- `skeletal` (`engine/skeletal`, one module `nt_skeletal`): `nt_skeletal.h` — pose ABI, skeleton view, 3×4 kernels, FK, sockets, rig identity, skin binding view and palette build, plus sample and mix/override/additive, with `tracks_advance` in a separate object file. A radius bounds helper (§14) is added with its first consumer.
+- `skeletal` (`engine/skeletal`, one module `nt_skeletal`): `nt_skeletal.h` — pose ABI, skeleton view, 3×4 kernels, FK, sockets, rig identity, skin binding view and palette build, plus sample, the object curve and `tracks_advance`; mix/override/additive land with their issue. A radius bounds helper (§14) is added with its first consumer.
 - `skeletal_bank`: bank init/bake/lookup over `skeletal` + gfx interface.
 - `skeletal_gpu`: staging/upload, DeformationBinding; depends on the gfx interface.
 - `skinned_mesh_renderer` + `skin_comp`.
-- Optional asset adapters (NSKL/NSKN/NANM); `skeletal_ik`, `skeletal_retarget` as extensions. Track assign/release/crossfade helpers live in the showcase.
+- `skeletal_assets` (`engine/skeletal_assets`, one module `nt_skeletal_assets`): the optional NSKL/NSKN/NANM adapters (§15) over `skeletal` + `resource`. `skeletal` itself links neither, so a headless CPU build links no pack code. `skeletal_ik`, `skeletal_retarget` as extensions. Track assign/release/crossfade helpers live in the showcase.
 - Kernels retain no inputs and keep no mutable global evaluation state; concurrent calls (if a game ever schedules them) need immutable shared inputs, disjoint outputs/workspaces and caller synchronization — no engine job system, staging reservation or atomics exist or are planned.
 
-v1 composition checks without LTO (#488): no animation (no animation symbols at all); headless CPU without gfx (`skeletal` only); full v1. Extensions add CPU + IK (#481) and CPU + retarget (#483). A bank-only character allocates no PoseInstance.
+v1 composition checks without LTO (#488): no animation (no animation symbols at all, `skeletal_assets` included); headless CPU without gfx (`skeletal` only, no resource symbol through it); full v1. Extensions add CPU + IK (#481) and CPU + retarget (#483). A bank-only character allocates no PoseInstance.
 
 ## 18. Verification
 
-Math (helpers, roots, non-identity binds, `bind·inverse_bind = I` at the bind pose, two bindings one pose; CPU vs GPU agreement; ABI alignment under `-fsanitize=alignment`); clips (absent/constant channels, STEP, cubic resampling, reverse, seek, duration 0, multi-loop, object curve, certificate fields); composition (`q/−q` for every input incl. the first, exact zero-dot pair, `±170°`, zero totals, all-zero joint weights, asymmetric parent/child weights, non-unit scale, override strength under changing mix gains, interruption at fixed capacity with constant memory, object-curve blend); bank (FP16/32, row-crossing and seam pairs, STEP segments, non-integral `duration·fps`, `3·P ≤ width`, certificate asserts, FP16 tolerance assert, matrices equal to the CPU path at frame times, restore from CPU texels after clip unload); render (mixed static/skinned order, A/B/A deformation textures with full sampler reapply, per-instance frames in one batch, degenerate normals finite, one epoch across passes, stale epoch asserts); lifetimes (swap-and-pop, slot reuse, unload/reload, loss/restore); memory/linking (no hot heap, asserted overflow, composition symbol checks); performance (separate sample/mix/FK/palette/upload/bake timings, draws, bytes, resident memory, `.wasm.gz`; comparisons only on identical content and quality).
+Math (helpers, roots, non-identity binds, `bind·inverse_bind = I` at the bind pose, two bindings one pose; CPU vs GPU agreement; ABI alignment under `-fsanitize=alignment`); clips (absent/constant channels, STEP, cubic resampling (with the importer), reverse, seek, duration 0, multi-loop, non-binary grids and durations, object curve, structural payload rejections: exact size, write indices, key partition); composition (`q/−q` for every input incl. the first, exact zero-dot pair, `±170°`, zero totals, all-zero joint weights, asymmetric parent/child weights, non-unit scale, override strength under changing mix gains, interruption at fixed capacity with constant memory, object-curve blend); bank (FP16/32, row-crossing and seam pairs, STEP segments, non-integral `duration·fps`, `3·P ≤ width`, certificate asserts, FP16 tolerance assert, matrices equal to the CPU path at frame times, restore from CPU texels after clip unload); render (mixed static/skinned order, A/B/A deformation textures with full sampler reapply, per-instance frames in one batch, degenerate normals finite, one epoch across passes, stale epoch asserts); lifetimes (swap-and-pop, slot reuse, unload/reload, loss/restore); memory/linking (no hot heap, asserted overflow, composition symbol checks); performance (separate sample/mix/FK/palette/upload/bake timings, draws, bytes, resident memory, `.wasm.gz`; comparisons only on identical content and quality).
 
 **Benchmark workload.** Performance numbers come from one fixed workload: joints J ∈ {30, 60, 100}, characters C ∈ {1, 100, 1000}, tracks T ∈ {1, 2, 4}, a logical frame of `sample → mix → FK`. The layout microbenchmark times each stage in a separate repeated batch after a full-frame warm-up; its total is the sum of the three stage medians, not a separately measured full-frame time. The rig is a synthetic chain with branches (`parent[j] = j − 1` for 80 % of joints, otherwise a random earlier joint from a fixed LCG seed, relabelled to preorder) and the keyframes are deterministic random unit quaternions and translations. Poses for all characters are one contiguous C × J buffer per layout, so cache behaviour across characters is part of the measurement; every buffer is allocated once and reused. The reported metric is ns per skeleton joint per stage (the C × J joints of one frame, so a stage's cost scales visibly with T), median of 5 repetitions after a warm-up. `tools/research/skeletal_layout/` runs it today on synthetic kernels over three pose storages (AoS 40 B, padded AoS 48 B, ten-channel SoA) to justify the initial ABI; #487 measures the real kernels on the same workload and #492 revisits the layout with SIMD.
 

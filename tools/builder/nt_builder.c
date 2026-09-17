@@ -334,6 +334,15 @@ static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t 
         break;
     case NT_BUILD_ASSET_ATLAS_REGION:
         break; /* codegen-only, no counter */
+    case NT_BUILD_ASSET_SKELETON:
+        ctx->skeleton_count++;
+        break;
+    case NT_BUILD_ASSET_SKIN_BINDING:
+        ctx->skin_binding_count++;
+        break;
+    case NT_BUILD_ASSET_CLIP:
+        ctx->clip_count++;
+        break;
     }
 }
 
@@ -394,6 +403,9 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     case NT_BUILD_ASSET_FONT:
     case NT_BUILD_ASSET_ATLAS:
     case NT_BUILD_ASSET_ATLAS_REGION:
+    case NT_BUILD_ASSET_SKELETON:
+    case NT_BUILD_ASSET_SKIN_BINDING:
+    case NT_BUILD_ASSET_CLIP:
         return true; /* no encoding opts -- everything is in decoded_data */
     }
     return false;
@@ -421,6 +433,15 @@ static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_t
     case NT_BUILD_ASSET_ATLAS_REGION:
         *out_type = NT_ASSET_ATLAS;
         break;
+    case NT_BUILD_ASSET_SKELETON:
+        *out_type = NT_ASSET_SKELETON;
+        break;
+    case NT_BUILD_ASSET_SKIN_BINDING:
+        *out_type = NT_ASSET_SKIN_BINDING;
+        break;
+    case NT_BUILD_ASSET_CLIP:
+        *out_type = NT_ASSET_CLIP;
+        break;
     default:
         NT_BUILD_ASSERT(0 && "derive_asset_type: unknown asset kind");
         break;
@@ -435,7 +456,10 @@ static void encode_one_asset(const NtBuildEntry *pe, NtEncodeResult *result, uin
     case NT_BUILD_ASSET_BLOB:
     case NT_BUILD_ASSET_FONT:
     case NT_BUILD_ASSET_ATLAS:
-    case NT_BUILD_ASSET_ATLAS_REGION: {
+    case NT_BUILD_ASSET_ATLAS_REGION:
+    case NT_BUILD_ASSET_SKELETON:
+    case NT_BUILD_ASSET_SKIN_BINDING:
+    case NT_BUILD_ASSET_CLIP: {
         result->data = (uint8_t *)malloc(pe->decoded_size);
         NT_BUILD_ASSERT(result->data && "encode: alloc failed (OOM)");
         memcpy(result->data, pe->decoded_data, pe->decoded_size);
@@ -965,6 +989,15 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             break;
         case NT_BUILD_ASSET_ATLAS_REGION:
             break; /* codegen-only, no counter */
+        case NT_BUILD_ASSET_SKELETON:
+            ctx->skeleton_count++;
+            break;
+        case NT_BUILD_ASSET_SKIN_BINDING:
+            ctx->skin_binding_count++;
+            break;
+        case NT_BUILD_ASSET_CLIP:
+            ctx->clip_count++;
+            break;
         }
     }
 
@@ -1154,11 +1187,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
         NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
     }
-    static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB", "FONT"};
+    static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB", "FONT", "ATLAS", "REGION", "SKEL", "SKIN", "CLIP"};
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         const NtBuildEntry *pe = &ctx->pending[i];
         const char *display = pe->rename_key ? pe->rename_key : pe->path;
-        const char *type_name = ((uint32_t)pe->kind < 5) ? kind_names[pe->kind] : "UNKNOWN";
+        const char *type_name = ((size_t)pe->kind < (sizeof(kind_names) / sizeof(kind_names[0]))) ? kind_names[pe->kind] : "UNKNOWN";
 
         /* Find corresponding NtAssetEntry by resource_id */
         uint32_t raw_sz = 0;
@@ -1238,6 +1271,15 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
     if (ctx->atlas_count > 0) {
         NT_LOG_INFO("  ATLAS:   %u asset%s", ctx->atlas_count, ctx->atlas_count > 1 ? "s" : "");
+    }
+    if (ctx->skeleton_count > 0) {
+        NT_LOG_INFO("  SKEL:    %u asset%s", ctx->skeleton_count, ctx->skeleton_count > 1 ? "s" : "");
+    }
+    if (ctx->skin_binding_count > 0) {
+        NT_LOG_INFO("  SKIN:    %u asset%s", ctx->skin_binding_count, ctx->skin_binding_count > 1 ? "s" : "");
+    }
+    if (ctx->clip_count > 0) {
+        NT_LOG_INFO("  CLIP:    %u asset%s", ctx->clip_count, ctx->clip_count > 1 ? "s" : "");
     }
     if (total_gz > 0 && raw_total > 0) {
         char total_raw_str[16];

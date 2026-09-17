@@ -3,6 +3,7 @@
 #include "nt_atlas_format.h"
 #include "nt_crc32.h"
 #include "nt_font_format.h"
+#include "nt_skeletal_format.h"
 #include "nt_texture_format.h"
 #include "hash/nt_hash.h"
 #include "miniz.h"
@@ -176,6 +177,12 @@ static const char *nt_asset_type_name(uint8_t type) {
         return "FONT";
     case NT_ASSET_ATLAS:
         return "ATLAS"; /* also used for ATLAS_REGION (same asset_type) */
+    case NT_ASSET_SKELETON:
+        return "SKELETON";
+    case NT_ASSET_SKIN_BINDING:
+        return "SKIN";
+    case NT_ASSET_CLIP:
+        return "CLIP";
     default:
         return "UNKNOWN";
     }
@@ -283,6 +290,52 @@ static void print_atlas_details(const uint8_t *asset_data, uint32_t asset_size) 
     }
 }
 
+/* ---- Skeletal detail printers (NSKL / NSKN / NANM) ---- */
+
+/* The payload starts with its header struct, so the header is copied out and
+ * read through the struct the format defines. */
+static void print_skeleton_details(const uint8_t *asset_data, uint32_t asset_size) {
+    if (!asset_data || asset_size < sizeof(NtSklHeader)) {
+        return;
+    }
+    NtSklHeader header;
+    memcpy(&header, asset_data, sizeof(header));
+    if (header.magic != NT_SKL_MAGIC) {
+        return;
+    }
+    NT_LOG_INFO("    NSKL v%u joints:%u rig:0x%016llX bytes:%u (expect %u)", header.version, header.joint_count, (unsigned long long)header.rig_compat_id, asset_size,
+                (unsigned)NT_SKL_SIZE(header.joint_count));
+}
+
+static void print_skin_binding_details(const uint8_t *asset_data, uint32_t asset_size) {
+    if (!asset_data || asset_size < sizeof(NtSknHeader)) {
+        return;
+    }
+    NtSknHeader header;
+    memcpy(&header, asset_data, sizeof(header));
+    if (header.magic != NT_SKN_MAGIC) {
+        return;
+    }
+    NT_LOG_INFO("    NSKN v%u palette:%u rig:0x%016llX bytes:%u (expect %u)", header.version, header.palette_count, (unsigned long long)header.rig_compat_id, asset_size,
+                (unsigned)NT_SKN_SIZE(header.palette_count));
+}
+
+static void print_clip_details(const uint8_t *asset_data, uint32_t asset_size) {
+    if (!asset_data || asset_size < sizeof(NtAnmHeader)) {
+        return;
+    }
+    NtAnmHeader header;
+    memcpy(&header, asset_data, sizeof(header));
+    if (header.magic != NT_ANM_MAGIC) {
+        return;
+    }
+    NT_LOG_INFO("    NANM v%u joints:%u rig:0x%016llX ref:0x%016llX bytes:%u (expect %u)", header.version, header.joint_count, (unsigned long long)header.rig_compat_id,
+                (unsigned long long)header.additive_ref_id, asset_size, (unsigned)nt_anm_size(&header));
+    NT_LOG_INFO("    duration:%.3fs samples:%u sampled t:%u q:%u s:%u  constant t:%u q:%u s:%u", (double)header.duration, header.sample_count, header.n_t, header.n_q, header.n_s, header.n_ct,
+                header.n_cq, header.n_cs);
+    NT_LOG_INFO("    steps:%u keys:%u object modes t:%u q:%u s:%u", header.n_steps, header.n_keys, header.object_mode[0], header.object_mode[1], header.object_mode[2]);
+}
+
 /* ---- Per-type summary accumulators ---- */
 
 typedef struct {
@@ -301,6 +354,12 @@ typedef struct {
     uint32_t font_raw;
     uint32_t atlas_count;
     uint32_t atlas_raw;
+    uint32_t skeleton_count;
+    uint32_t skeleton_raw;
+    uint32_t skin_count;
+    uint32_t skin_raw;
+    uint32_t clip_count;
+    uint32_t clip_raw;
     uint32_t total_raw;
     uint32_t total_gz;
     uint32_t dup_count;
@@ -363,6 +422,18 @@ static void accumulate_stats(DumpStats *st, const NtAssetEntry *e, const uint8_t
         st->atlas_count++;
         st->atlas_raw += asset_size;
         break;
+    case NT_ASSET_SKELETON:
+        st->skeleton_count++;
+        st->skeleton_raw += asset_size;
+        break;
+    case NT_ASSET_SKIN_BINDING:
+        st->skin_count++;
+        st->skin_raw += asset_size;
+        break;
+    case NT_ASSET_CLIP:
+        st->clip_count++;
+        st->clip_raw += asset_size;
+        break;
     default:
         break;
     }
@@ -422,6 +493,15 @@ static void print_summary(const DumpStats *st) {
     }
     if (st->atlas_count > 0) {
         print_type_line("ATLAS:", st->atlas_count, st->atlas_raw);
+    }
+    if (st->skeleton_count > 0) {
+        print_type_line("SKEL:", st->skeleton_count, st->skeleton_raw);
+    }
+    if (st->skin_count > 0) {
+        print_type_line("SKIN:", st->skin_count, st->skin_raw);
+    }
+    if (st->clip_count > 0) {
+        print_type_line("CLIP:", st->clip_count, st->clip_raw);
     }
     if (st->dup_count > 0) {
         char sz[16];
@@ -641,6 +721,17 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         /* Atlas-specific detail line */
         if (e->asset_type == NT_ASSET_ATLAS && asset_data) {
             print_atlas_details(asset_data, asset_size);
+        }
+
+        /* Skeletal detail lines */
+        if (e->asset_type == NT_ASSET_SKELETON && asset_data) {
+            print_skeleton_details(asset_data, asset_size);
+        }
+        if (e->asset_type == NT_ASSET_SKIN_BINDING && asset_data) {
+            print_skin_binding_details(asset_data, asset_size);
+        }
+        if (e->asset_type == NT_ASSET_CLIP && asset_data) {
+            print_clip_details(asset_data, asset_size);
         }
 
         /* Accumulate per-type stats */

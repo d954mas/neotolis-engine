@@ -111,6 +111,9 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     case NT_BUILD_ASSET_BLOB:
     case NT_BUILD_ASSET_ATLAS:        /* atlas uses atlas-level caching during commit, not per-entry */
     case NT_BUILD_ASSET_ATLAS_REGION: /* codegen-only, no encode caching needed */
+    case NT_BUILD_ASSET_SKELETON:
+    case NT_BUILD_ASSET_SKIN_BINDING:
+    case NT_BUILD_ASSET_CLIP:
         /* No additional fields -- kind + version sufficient */
         break;
     }

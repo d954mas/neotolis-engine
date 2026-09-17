@@ -5,6 +5,8 @@
 
 #include <stdint.h>
 
+#include "nt_pack_format.h"
+
 /* ---- Asset state machine ----
  * Numeric order matters: resolve uses (state > scan_state) to pick the
  * best state across multiple assets for one slot.  READY > LOADING >
@@ -47,7 +49,10 @@ typedef enum {
 
 /* ---- Activator callbacks ---- */
 
-#define NT_RESOURCE_MAX_ASSET_TYPES 8
+#define NT_RESOURCE_MAX_ASSET_TYPES 12
+
+/* The registry indexes by asset type, so a new type must not outgrow it. */
+_Static_assert(NT_ASSET_LAST < NT_RESOURCE_MAX_ASSET_TYPES, "NT_RESOURCE_MAX_ASSET_TYPES must exceed the highest asset type");
 
 typedef struct {
     nt_resource_type_desc_t desc;

@@ -9,10 +9,11 @@
 #include <stdlib.h>
 
 #include "hash/nt_hash.h"
-#include "nt_atlas_format.h"   /* NT_ATLAS_XFORM_* stored transform values */
-#include "nt_font_format.h"    /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
-#include "nt_mesh_format.h"    /* nt_stream_type_t */
-#include "nt_texture_format.h" /* nt_texture_pixel_format_t */
+#include "nt_atlas_format.h"      /* NT_ATLAS_XFORM_* stored transform values */
+#include "nt_font_format.h"       /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
+#include "nt_mesh_format.h"       /* nt_stream_type_t */
+#include "nt_texture_format.h"    /* nt_texture_pixel_format_t */
+#include "skeletal/nt_skeletal.h" /* nt_skeletal_skeleton_t, nt_skin_binding_t */
 
 /* Always-on fatal assert for builder (never compiled out by NDEBUG).
  * The test hook may non-locally observe a failure; the builder context is not
@@ -527,6 +528,57 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 
 /* --- Blob API (generic binary data asset) --- */
 void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
+
+/* --- Skeletal API (NSKL skeleton, NSKN skin binding, NANM clip) ---
+ *
+ * Each add_* call turns an in-memory import result into exactly the bytes the
+ * pack stores and registers the asset in one step, like add_blob.
+ *
+ * Every rule of the wire format is an invariant of the importer that produced
+ * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
+ * diagnostic instead of returning a code (skeletal spec §16). */
+
+/* Computes rig_compat_id from the joints it writes and returns it, so the
+ * caller stamps clips and bindings with the identity that actually shipped;
+ * skel->rig_compat_id is ignored. Joint ids must be unique. */
+nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
+
+/* Inverse binds are mesh space -> joint space at the bind pose, in glTF
+ * mesh-node space. remap is not bounded against a skeleton here. */
+void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
+
+/* One channel of a clip. Channel c of nt_builder_clip_t::channels addresses
+ * joint c / 3 and component c % 3 (0 = translation, 1 = rotation, 2 = scale);
+ * the last three channels are the object curve (§7.5). comps = 4 for a
+ * rotation, 3 otherwise; only the fields the mode needs are read.
+ *
+ * ABSENT   nothing
+ * CONSTANT constant[0..comps-1]
+ * SAMPLED  samples, sample_count * comps floats on the clip's uniform grid
+ * STEP     step_times and step_values (always 4 floats per key), step_count
+ *          keys with strictly increasing times inside [0, duration]; the
+ *          sampler holds the first key before its time */
+typedef struct {
+    const float *samples;     /* SAMPLED: sample_count * comps floats, sample-major */
+    const float *step_times;  /* STEP: step_count seconds */
+    const float *step_values; /* STEP: 4 floats per key */
+    uint32_t step_count;      /* STEP: number of keys */
+    float constant[4];        /* CONSTANT: the channel value */
+    uint8_t mode;             /* nt_skeletal_channel_mode_t */
+} nt_builder_anim_channel_t;
+
+/* One clip ready to encode. sample_count is the uniform grid on [0, duration]
+ * every SAMPLED channel shares (1 = no sampled channel). */
+typedef struct {
+    nt_hash64_t rig_compat_id;
+    nt_hash64_t additive_ref_id; /* reference pose identity, 0 = absolute */
+    uint16_t joint_count;
+    uint32_t sample_count;
+    float duration;
+    const nt_builder_anim_channel_t *channels; /* 3 * (joint_count + 1) entries */
+} nt_builder_clip_t;
+
+void nt_builder_add_clip(NtBuilderContext *ctx, const nt_builder_clip_t *clip, const char *resource_id);
 
 /* --- Atlas API ---
  *

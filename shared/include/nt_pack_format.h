@@ -23,11 +23,17 @@
 typedef enum {
     NT_ASSET_MESH = 1,
     NT_ASSET_TEXTURE = 2,
-    NT_ASSET_SHADER_CODE = 3, /* individual VS or FS source */
-    NT_ASSET_BLOB = 4,        /* generic binary data (game-defined) */
-    NT_ASSET_FONT = 5,        /* font glyph data (contour-based vector outlines) */
-    NT_ASSET_ATLAS = 6,       /* atlas region metadata (polygon vertices + UVs + origin) */
+    NT_ASSET_SHADER_CODE = 3,  /* individual VS or FS source */
+    NT_ASSET_BLOB = 4,         /* generic binary data (game-defined) */
+    NT_ASSET_FONT = 5,         /* font glyph data (contour-based vector outlines) */
+    NT_ASSET_ATLAS = 6,        /* atlas region metadata (polygon vertices + UVs + origin) */
+    NT_ASSET_SKELETON = 7,     /* skeleton rig: parents, subtree ends, joint ids, rest pose (NSKL) */
+    NT_ASSET_SKIN_BINDING = 8, /* skin binding: palette remap + inverse bind matrices (NSKN) */
+    NT_ASSET_CLIP = 9,         /* animation clip: frame blocks, constants, step keys (NANM) */
 } nt_asset_type_t;
+
+/* Highest defined asset type; the pack parser rejects anything above it. */
+#define NT_ASSET_LAST NT_ASSET_CLIP
 
 /* PackHeader: 32 bytes; field offsets preserve natural alignment in an aligned blob. */
 #pragma pack(push, 1)
