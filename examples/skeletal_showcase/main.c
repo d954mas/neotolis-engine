@@ -768,6 +768,25 @@ static void draw_stage(const nt_ui_scale_t *scale, const mat4 vp, const float ey
     nt_shape_renderer_set_depth(true);
 }
 
+static const float s_helper_color[4] = {0.45F, 0.50F, 0.58F, 1.0F};
+
+/* Parent->child links whose parent is (or is not) a helper: helpers draw thin
+ * and grey, real bones in the subtree colours. */
+static void draw_links(const nt_skeletal_skeleton_t *skel, const bool helper[MAX_JOINTS], bool helper_pass, float scale) {
+    static const float bone_colors[2][4] = {{0.35F, 0.70F, 0.95F, 1.0F}, {1.0F, 0.65F, 0.18F, 1.0F}};
+    nt_shape_renderer_set_line_width((helper_pass ? 0.006F : 0.02F) * scale);
+    for (uint32_t j = 0; j < skel->joint_count; ++j) {
+        const uint16_t p = skel->parent[j];
+        if (p == NT_SKELETAL_NO_PARENT || helper[p] != helper_pass) {
+            continue;
+        }
+        const float a[3] = {s_skeleton_scene.model[p].r[0][3], s_skeleton_scene.model[p].r[1][3], s_skeleton_scene.model[p].r[2][3]};
+        const float b[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
+        const float *color = helper_pass ? s_helper_color : bone_colors[in_selected_subtree(j) ? 1 : 0];
+        nt_shape_renderer_line(a, b, color);
+    }
+}
+
 static void skeleton_draw(void) {
     static const float joint_colors[3][4] = {
         {1.0F, 0.9F, 0.2F, 1.0F},
@@ -779,30 +798,36 @@ static void skeleton_draw(void) {
         return;
     }
     const float scale = s_fit_scale;
-    nt_shape_renderer_set_line_width(0.02F * scale);
     draw_ground(scale);
 
+    /* Exporter wrappers (CesiumMan Z_UP/Armature, Fox root) are rig joints that
+     * sit at the origin at rest; the link from the last of them to the first
+     * translated joint reads as a limb, so wrappers and their links draw as
+     * thin grey scaffolding instead. Preorder: parent[j] < j. */
+    bool helper[MAX_JOINTS];
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
         const uint16_t p = skel->parent[j];
-        if (p == NT_SKELETAL_NO_PARENT) {
-            continue;
-        }
-        const float a[3] = {s_skeleton_scene.model[p].r[0][3], s_skeleton_scene.model[p].r[1][3], s_skeleton_scene.model[p].r[2][3]};
-        const float b[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
-        const float *color = in_selected_subtree(j) ? (const float[4]){1.0F, 0.65F, 0.18F, 1.0F} : (const float[4]){0.35F, 0.70F, 0.95F, 1.0F};
-        nt_shape_renderer_line(a, b, color);
+        const float *t = skel->rest[j].t;
+        helper[j] = (p == NT_SKELETAL_NO_PARENT || helper[p]) && t[0] == 0.0F && t[1] == 0.0F && t[2] == 0.0F;
     }
+    draw_links(skel, helper, true, scale);
+    draw_links(skel, helper, false, scale);
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
         const float p[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
         const float *color;
+        float radius = 0.075F;
         if (j == (uint32_t)s_skeleton_scene.selected_joint) {
             color = joint_colors[0];
+            radius = 0.105F;
+        } else if (helper[j]) {
+            color = s_helper_color;
+            radius = 0.04F;
         } else if (in_selected_subtree(j)) {
             color = joint_colors[1];
         } else {
             color = joint_colors[2];
         }
-        nt_shape_renderer_sphere(p, (j == (uint32_t)s_skeleton_scene.selected_joint ? 0.105F : 0.075F) * scale, color);
+        nt_shape_renderer_sphere(p, radius * scale, color);
         if (s_skeleton_scene.show_axes) {
             const float axis_colors[3][4] = {{1.0F, 0.2F, 0.2F, 1.0F}, {0.2F, 1.0F, 0.3F, 1.0F}, {0.2F, 0.5F, 1.0F, 1.0F}};
             const float axis_len = 0.23F * scale;

@@ -47,9 +47,11 @@ centroid and extent, aims the camera at the centroid, and scales the camera
 distance, near/far planes, bone width, joint spheres, axis length and the grid
 cell by `extent / humanoid extent` (Fox is authored in centimetres, CesiumMan
 is about 1.5 units tall). While an imported skeleton is not ready the stage
-stays empty and the panel shows `loading...`. Visual QA: CesiumMan stands
-upright (its `Z_UP`/`Armature` wrapper nodes are joints of the rig), Fox faces
-along its authored axis.
+stays empty and the panel shows `loading...`. Exporter wrapper nodes
+(CesiumMan `Z_UP`/`Armature`, Fox `root`) are joints of the rig that sit at
+the origin at rest; the stage draws them and their links as thin grey
+scaffolding so the link up to the first translated joint does not read as a
+limb. Visual QA: CesiumMan stands upright, Fox faces along its authored axis.
 
 Source: [examples/skeletal_showcase/main.c](main.c).
 
