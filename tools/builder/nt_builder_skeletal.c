@@ -166,8 +166,9 @@ void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t 
 
 // #region NANM clip
 /* Per-kind element counts collected in the validating pass; object channels are
- * counted only in n_keys, because their modes, constants and key ranges live in
- * the header and their samples in their own array, not in the joint tables. */
+ * counted only in n_keys, because their modes live in the header, their
+ * constants and key ranges in the object record and their samples in their own
+ * array, not in the joint tables. */
 typedef struct {
     uint16_t sampled[3]; /* joint rows per component kind: t, q, s */
     uint16_t constant[3];
@@ -253,10 +254,6 @@ static void clip_validate(const nt_builder_clip_t *clip, NtClipTally *tally) {
     }
 }
 
-/* Header counts plus the object curve's own storage. The key partition is one
- * ascending walk over the channels, so the joint tracks come first and the
- * object STEP channels follow in t, q, s order. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void clip_fill_header(const nt_builder_clip_t *clip, const NtClipTally *tally, NtAnmHeader *header) {
     memset(header, 0, sizeof(*header));
     header->magic = NT_ANM_MAGIC;
@@ -277,18 +274,29 @@ static void clip_fill_header(const nt_builder_clip_t *clip, const NtClipTally *t
     header->n_keys = (uint32_t)tally->keys;
 
     const uint32_t object_first = 3U * (uint32_t)clip->joint_count;
+    for (uint32_t kind = 0; kind < 3; kind++) {
+        header->object_mode[kind] = clip->channels[object_first + kind].mode;
+    }
+}
+
+/* The object curve's values and key ranges. The key partition is one ascending
+ * walk over the channels, so the joint tracks come first and the object STEP
+ * channels follow in t, q, s order. */
+static void clip_fill_object(const nt_builder_clip_t *clip, NtAnmObject *object) {
+    memset(object, 0, sizeof(*object));
+
+    const uint32_t object_first = 3U * (uint32_t)clip->joint_count;
     const uint32_t constant_offset[3] = {0U, 3U, 7U};
     uint32_t first_key = 0;
     for (uint32_t c = 0; c < object_first + 3U; c++) {
         const nt_builder_anim_channel_t *ch = &clip->channels[c];
         if (c >= object_first) {
             const uint32_t kind = c - object_first;
-            header->object_mode[kind] = ch->mode;
             if (ch->mode == NT_SKELETAL_CHANNEL_CONSTANT) {
-                memcpy(&header->object_constant[constant_offset[kind]], ch->constant, clip_comps(c) * sizeof(float));
+                memcpy(&object->constant[constant_offset[kind]], ch->constant, clip_comps(c) * sizeof(float));
             } else if (ch->mode == NT_SKELETAL_CHANNEL_STEP) {
-                header->object_step_first[kind] = first_key;
-                header->object_step_count[kind] = ch->step_count;
+                object->step_first[kind] = first_key;
+                object->step_count[kind] = ch->step_count;
             }
         }
         if (ch->mode == NT_SKELETAL_CHANNEL_STEP) {
@@ -313,7 +321,7 @@ void nt_builder_encode_clip(const nt_builder_clip_t *clip, uint8_t **out, uint32
     uint8_t *payload = (uint8_t *)malloc(size);
     NT_BUILD_ASSERT(payload && "encode_clip: alloc failed (OOM)");
     /* The payload hash is the clip's dedup key, so every pad byte and every
-     * object-constant slot no channel drives has to be deterministic. */
+     * slot no channel drives has to be deterministic. */
     memset(payload, 0, size);
 
     const uint32_t object_first = 3U * (uint32_t)clip->joint_count;
@@ -380,7 +388,13 @@ void nt_builder_encode_clip(const nt_builder_clip_t *clip, uint8_t **out, uint32
     }
     // #endregion
 
-    // #region object samples and joint tables
+    // #region object record, samples and joint tables
+    if (nt_anm_has_object(&header)) {
+        NtAnmObject object;
+        clip_fill_object(clip, &object);
+        memcpy(w, &object, sizeof(object));
+        w += sizeof(object);
+    }
     if (nt_anm_object_sampled(&header)) {
         for (uint32_t i = 0; i < clip->sample_count; i++) {
             nt_skeletal_trs_t sample;

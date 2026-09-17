@@ -314,7 +314,7 @@ the `u16` table ends the payload without padding:
 available there; `nt_skin_palette_build` asserts `remap[p] < model_count` where
 both exist.
 
-**NANM** — a 120-byte header, then the arrays in one fixed order. Every array
+**NANM** — a 56-byte header, then the arrays in one fixed order. Every array
 before the `u16` tables is a multiple of 4 bytes, so each one starts aligned and
 nothing is padded:
 
@@ -333,9 +333,6 @@ nothing is padded:
 | 48 | `u32 n_keys` | keys of every STEP track, joints and object |
 | 52 | `u8 object_mode[3]` | 0 ABSENT, 1 CONSTANT, 2 SAMPLED, 3 STEP (t, q, s) |
 | 55 | `u8 _pad` | zero |
-| 56 | `f32 object_constant[10]` | `t[3] q[4] s[3]`, only the CONSTANT channels used |
-| 96 | `u32 object_step_first[3]` | 0 unless that mode is STEP |
-| 108 | `u32 object_step_count[3]` | 0 unless that mode is STEP |
 
 | order | array | bytes |
 |---|---|---|
@@ -343,9 +340,15 @@ nothing is padded:
 | 2 | `f32 ct[n_ct][3]`, `cq[n_cq][4]`, `cs[n_cs][3]` | constant values |
 | 3 | `steps[n_steps]` | 12 B: `{u32 first; u32 count; u16 joint; u8 channel; u8 pad}` |
 | 4 | `keys[n_keys]` | 20 B: `{f32 time; f32 v[4]}` |
-| 5 | `f32 object_sampled[N][10]` | only when some `object_mode` is SAMPLED |
-| 6 | `u16 t_joint[n_t], q_joint[n_q], s_joint[n_s]` | joint of each sampled row |
-| 7 | `u16 ct_joint[n_ct], cq_joint[n_cq], cs_joint[n_cs]` | joint of each constant |
+| 5 | `object` | 64 B `NtAnmObject`: `{f32 constant[10]; u32 step_first[3]; u32 step_count[3]}`, only when some `object_mode` is not ABSENT |
+| 6 | `f32 object_sampled[N][10]` | only when some `object_mode` is SAMPLED |
+| 7 | `u16 t_joint[n_t], q_joint[n_q], s_joint[n_s]` | joint of each sampled row |
+| 8 | `u16 ct_joint[n_ct], cq_joint[n_cq], cs_joint[n_cs]` | joint of each constant |
+
+The modes stay in the header because they decide whether the record and the
+sampled array exist at all; `constant` is `t[3] q[4] s[3]` with only the
+CONSTANT channels used, and `step_first`/`step_count` are 0 unless that mode is
+STEP.
 
 The payload size is exactly `nt_anm_size(header)`, computed in 64 bits on both
 sides. The STEP tracks partition `keys` exactly: the joint tracks in table order,

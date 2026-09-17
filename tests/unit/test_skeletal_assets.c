@@ -221,13 +221,16 @@ static uint8_t *encode_fixture_clip(uint32_t *out_size) {
 /* Offsets of the fixture clip's payload, in the order §16 lists them; the
  * rejection tests patch bytes through these. */
 enum {
-    ANM_OFF_BLOCKS = 120,
+    ANM_OFF_BLOCKS = 56,
     ANM_OFF_CT = ANM_OFF_BLOCKS + (CLIP_SAMPLES * CLIP_BLOCK_FLOATS * 4),
     ANM_OFF_CQ = ANM_OFF_CT + 24,
     ANM_OFF_CS = ANM_OFF_CQ + 16,
     ANM_OFF_STEPS = ANM_OFF_CS + 12,
     ANM_OFF_KEYS = ANM_OFF_STEPS + 12,
-    ANM_OFF_OBJECT = ANM_OFF_KEYS + (5 * 20),
+    ANM_OFF_OBJECT_REC = ANM_OFF_KEYS + (5 * 20),
+    ANM_REC_STEP_FIRST = ANM_OFF_OBJECT_REC + 40,
+    ANM_REC_STEP_COUNT = ANM_OFF_OBJECT_REC + 52,
+    ANM_OFF_OBJECT = ANM_OFF_OBJECT_REC + 64,
     ANM_OFF_T_JOINT = ANM_OFF_OBJECT + (CLIP_SAMPLES * 40),
     ANM_OFF_Q_JOINT = ANM_OFF_T_JOINT + 4,
     ANM_OFF_S_JOINT = ANM_OFF_Q_JOINT + 4,
@@ -243,8 +246,6 @@ enum {
     ANM_HDR_SAMPLE_COUNT = 8,
     ANM_HDR_DURATION = 12,
     ANM_HDR_OBJECT_MODE = 52,
-    ANM_HDR_OBJECT_STEP_FIRST = 96,
-    ANM_HDR_OBJECT_STEP_COUNT = 108,
 };
 
 /* Distinct non-identity unit rotations, so "absent channel keeps the default"
@@ -689,7 +690,7 @@ void test_clip_header_rejections(void) {
     memcpy(buf, valid, size);
     EXPECT_CLIP_REJECTED(buf, size - 1U, "one byte short");
     EXPECT_CLIP_REJECTED(buf, size + 1U, "one byte long");
-    EXPECT_CLIP_REJECTED(buf, 64U, "shorter than the header");
+    EXPECT_CLIP_REJECTED(buf, 55U, "shorter than the header");
 
     memcpy(buf, valid, size);
     wr_u32(buf, 0xDEADBEEFU);
@@ -791,16 +792,23 @@ void test_clip_key_partition_rejections(void) {
     EXPECT_CLIP_REJECTED(buf, size, "a joint track that does not start at key 0");
 
     memcpy(buf, valid, size);
-    wr_u32(buf + ANM_HDR_OBJECT_STEP_FIRST + 4U, 4U);
+    wr_u32(buf + ANM_REC_STEP_FIRST + 4U, 4U);
     EXPECT_CLIP_REJECTED(buf, size, "a gap between the joint and object tracks");
 
     memcpy(buf, valid, size);
-    wr_u32(buf + ANM_HDR_OBJECT_STEP_FIRST + 4U, 2U);
+    wr_u32(buf + ANM_REC_STEP_FIRST + 4U, 2U);
     EXPECT_CLIP_REJECTED(buf, size, "an object track sharing a joint track's key");
 
     memcpy(buf, valid, size);
-    wr_u32(buf + ANM_HDR_OBJECT_STEP_COUNT + 4U, 0U);
+    wr_u32(buf + ANM_REC_STEP_COUNT + 4U, 0U);
     EXPECT_CLIP_REJECTED(buf, size, "an object step channel with no keys");
+
+    /* A second object STEP channel whose record range runs past the key table. */
+    memcpy(buf, valid, size);
+    buf[ANM_HDR_OBJECT_MODE + 2U] = NT_SKELETAL_CHANNEL_STEP;
+    wr_u32(buf + ANM_REC_STEP_FIRST + 8U, 5U);
+    wr_u32(buf + ANM_REC_STEP_COUNT + 8U, 1U);
+    EXPECT_CLIP_REJECTED(buf, size, "an object step range past the key table");
 
     /* Dropping the object channel to ABSENT leaves two keys no track owns. */
     memcpy(buf, valid, size);

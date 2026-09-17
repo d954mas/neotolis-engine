@@ -202,17 +202,18 @@ static void fixture_clip(nt_builder_clip_t *clip, nt_builder_anim_channel_t chan
     clip->channels = channels;
 }
 
-/* Hand-computed offsets of the fixture clip: header 120, blocks 5 x 10 floats,
- * no ct, one cq, one cs, one step track, five keys, five object samples, then
- * the joint tables. */
+/* Hand-computed offsets of the fixture clip: header 56, blocks 5 x 10 floats,
+ * no ct, one cq, one cs, one step track, five keys, the 64-byte object record,
+ * five object samples, then the joint tables. */
 enum {
-    FIX_OFF_BLOCKS = 120,
+    FIX_OFF_BLOCKS = 56,
     FIX_OFF_CT = FIX_OFF_BLOCKS + (CLIP_SAMPLES * 10 * 4),
     FIX_OFF_CQ = FIX_OFF_CT,
     FIX_OFF_CS = FIX_OFF_CQ + 16,
     FIX_OFF_STEPS = FIX_OFF_CS + 12,
     FIX_OFF_KEYS = FIX_OFF_STEPS + 12,
-    FIX_OFF_OBJECT = FIX_OFF_KEYS + (5 * 20),
+    FIX_OFF_OBJECT_REC = FIX_OFF_KEYS + (5 * 20),
+    FIX_OFF_OBJECT = FIX_OFF_OBJECT_REC + 64,
     FIX_OFF_T_JOINT = FIX_OFF_OBJECT + (CLIP_SAMPLES * 40),
     FIX_OFF_Q_JOINT = FIX_OFF_T_JOINT + 4,
     FIX_OFF_CQ_JOINT = FIX_OFF_Q_JOINT + 2,
@@ -333,14 +334,18 @@ void test_encode_clip_header_counts(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_STEP, header.object_mode[1]);
     TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_ABSENT, header.object_mode[2]);
     TEST_ASSERT_EQUAL_UINT8(0, header._pad);
+    TEST_ASSERT_TRUE(nt_anm_has_object(&header));
+
+    NtAnmObject object;
+    memcpy(&object, payload + FIX_OFF_OBJECT_REC, sizeof(object));
     for (size_t i = 0; i < 10; i++) {
-        TEST_ASSERT_EQUAL_HEX32(0U, f32_bits(header.object_constant[i]));
+        TEST_ASSERT_EQUAL_HEX32(0U, f32_bits(object.constant[i]));
     }
     /* The joint track owns keys [0, 3), the object rotation [3, 5). */
-    TEST_ASSERT_EQUAL_UINT32(0, header.object_step_first[0]);
-    TEST_ASSERT_EQUAL_UINT32(0, header.object_step_count[0]);
-    TEST_ASSERT_EQUAL_UINT32(3, header.object_step_first[1]);
-    TEST_ASSERT_EQUAL_UINT32(2, header.object_step_count[1]);
+    TEST_ASSERT_EQUAL_UINT32(0, object.step_first[0]);
+    TEST_ASSERT_EQUAL_UINT32(0, object.step_count[0]);
+    TEST_ASSERT_EQUAL_UINT32(3, object.step_first[1]);
+    TEST_ASSERT_EQUAL_UINT32(2, object.step_count[1]);
 
     free(payload);
 }
@@ -441,7 +446,8 @@ void test_encode_clip_with_only_an_object_sampled_channel(void) {
     uint32_t size = 0;
     nt_builder_encode_clip(&clip, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
-    TEST_ASSERT_EQUAL_UINT32(120U + (3U * 40U), size);
+    /* 56 header + 64 object record + 3 object samples. */
+    TEST_ASSERT_EQUAL_UINT32(56U + 64U + (3U * 40U), size);
 
     NtAnmHeader header;
     memcpy(&header, payload, sizeof(header));
@@ -452,7 +458,7 @@ void test_encode_clip_with_only_an_object_sampled_channel(void) {
     TEST_ASSERT_TRUE(nt_anm_object_sampled(&header));
 
     for (size_t i = 0; i < 3; i++) {
-        const uint8_t *trs = payload + 120 + (i * 40);
+        const uint8_t *trs = payload + 56 + 64 + (i * 40);
         for (size_t c = 0; c < 3; c++) {
             TEST_ASSERT_EQUAL_HEX32(f32_bits(k_object_only[(i * 3) + c]), rd_u32(trs + (4 * c)));
         }
@@ -486,7 +492,7 @@ void test_encode_clip_single_sample_has_no_blocks(void) {
     nt_builder_encode_clip(&clip, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
-    /* 120 header + 16 cq + 2 x 20 keys + 2 cq_joint */
+    /* 56 header + 16 cq + 2 x 20 keys + 64 object record + 2 cq_joint */
     TEST_ASSERT_EQUAL_UINT32(178U, size);
     NtAnmHeader header;
     memcpy(&header, payload, sizeof(header));
@@ -496,7 +502,12 @@ void test_encode_clip_single_sample_has_no_blocks(void) {
     TEST_ASSERT_EQUAL_UINT16(0, header.n_q);
     TEST_ASSERT_EQUAL_UINT16(0, header.n_s);
     TEST_ASSERT_EQUAL_UINT32(2, header.n_keys);
-    TEST_ASSERT_EQUAL_UINT32(0, header.object_step_first[0]);
+
+    /* The record follows the 16-byte cq array and the two 20-byte keys. */
+    NtAnmObject object;
+    memcpy(&object, payload + 56 + 16 + 40, sizeof(object));
+    TEST_ASSERT_EQUAL_UINT32(0, object.step_first[0]);
+    TEST_ASSERT_EQUAL_UINT32(2, object.step_count[0]);
 
     free(payload);
 }

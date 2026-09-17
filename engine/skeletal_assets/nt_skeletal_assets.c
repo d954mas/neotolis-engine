@@ -216,6 +216,7 @@ typedef struct {
     uint64_t ct, cq, cs;
     uint64_t steps;
     uint64_t keys;
+    uint64_t object_rec;
     uint64_t object;
     uint64_t t_joint, q_joint, s_joint;
     uint64_t ct_joint, cq_joint, cs_joint;
@@ -238,6 +239,10 @@ static void anm_offsets(const NtAnmHeader *header, anm_offsets_t *out) {
     at += (uint64_t)header->n_steps * NT_ANM_STEP_STRIDE;
     out->keys = at;
     at += (uint64_t)header->n_keys * NT_ANM_KEY_STRIDE;
+    out->object_rec = at;
+    if (nt_anm_has_object(header)) {
+        at += sizeof(NtAnmObject);
+    }
     out->object = at;
     if (nt_anm_object_sampled(header)) {
         at += (uint64_t)header->sample_count * sizeof(nt_skeletal_trs_t);
@@ -335,15 +340,19 @@ static bool anm_validate_steps(const uint8_t *data, const NtAnmHeader *header, c
         }
         total += count;
     }
+    NtAnmObject object = {{0}, {0}, {0}};
+    if (nt_anm_has_object(header)) {
+        memcpy(&object, data + off->object_rec, sizeof(object));
+    }
     for (uint32_t c = 0; c < 3; ++c) {
         if (header->object_mode[c] != NT_SKELETAL_CHANNEL_STEP) {
             continue;
         }
-        if (header->object_step_count[c] == 0U || (uint64_t)header->object_step_first[c] != total) {
-            NT_LOG_WARN("activate_clip: object channel %u holds keys [%u, +%u), expected %u keys onward", c, header->object_step_first[c], header->object_step_count[c], (unsigned)total);
+        if (object.step_count[c] == 0U || (uint64_t)object.step_first[c] != total) {
+            NT_LOG_WARN("activate_clip: object channel %u holds keys [%u, +%u), expected %u keys onward", c, object.step_first[c], object.step_count[c], (unsigned)total);
             return false;
         }
-        total += header->object_step_count[c];
+        total += object.step_count[c];
     }
     if (total != (uint64_t)header->n_keys) {
         NT_LOG_WARN("activate_clip: step tracks cover %u of the %u keys", (unsigned)total, header->n_keys);
@@ -413,11 +422,15 @@ uint32_t nt_skeletal_assets_activate_clip(const uint8_t *data, uint32_t size) {
     view.object.duration = view.duration;
     view.object.inv_step = inv_step;
     view.object.sample_count = header.sample_count;
-    memcpy(&view.object.constant, header.object_constant, sizeof(view.object.constant));
+    NtAnmObject object = {{0}, {0}, {0}};
+    if (nt_anm_has_object(&header)) {
+        memcpy(&object, skel_at(id, off.object_rec), sizeof(object));
+    }
+    memcpy(&view.object.constant, object.constant, sizeof(view.object.constant));
     for (uint32_t c = 0; c < 3; ++c) {
         view.object.mode[c] = header.object_mode[c];
-        view.object.step_first[c] = header.object_step_first[c];
-        view.object.step_count[c] = header.object_step_count[c];
+        view.object.step_first[c] = object.step_first[c];
+        view.object.step_count[c] = object.step_count[c];
     }
 
     s_assets.slots[nt_pool_slot_index(id)].view.clip = view;
