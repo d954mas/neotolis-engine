@@ -32,7 +32,12 @@
 
 /* Fixed pool capacities, allocated once at init: the game decides how many
  * skeletal assets may be live at a time, exactly like nt_font's max_fonts.
- * Activating past a capacity is a programming error, not a load failure. */
+ * Activating past a capacity is a programming error, not a load failure.
+ *
+ * A capacity counts every *activated* asset, not every published one: when one
+ * resource id sits in two mounted packs both copies activate and take a slot,
+ * only the winner is published, and the loser is released when its own pack
+ * unmounts. Size the pools for the peak mounted set, overlaps included. */
 typedef struct {
     uint16_t max_skeletons;
     uint16_t max_skin_bindings;

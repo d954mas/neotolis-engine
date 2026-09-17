@@ -66,7 +66,7 @@ nt_builder_add_asset_root   /* convention-based tree import */
  * encode_* returns the payload the pack stores, malloc'd for the caller;
  * add_* encodes and registers in one step, like add_blob. */
 nt_builder_encode_skeleton / add_skeleton          /* NSKL, from nt_skeletal_skeleton_t */
-nt_builder_encode_skin_binding / add_skin_binding  /* NSKN, binding + reach + any_pose_radius */
+nt_builder_encode_skin_binding / add_skin_binding  /* NSKN, from nt_skin_binding_t */
 nt_builder_encode_clip / add_clip                  /* NANM, from nt_builder_clip_t */
 /* Font opts: charset (required), name override, target_units_per_em. */
 

@@ -19,6 +19,9 @@ void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, dou
             continue;
         }
         NT_ASSERT(track->duration >= 0.0);
+        /* x - x rejects NaN and infinity without libm: a non-finite speed makes
+         * the int64 cast of the cycle count undefined and traps on wasm. */
+        NT_ASSERT((track->speed - track->speed) == 0.0F);
 
         if (track->duration == 0.0) {
             track->time = 0.0;

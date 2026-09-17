@@ -195,7 +195,9 @@ typedef struct {
 } NtAnmChannel;
 #pragma pack(pop)
 
-/* STPT element: the span of this step channel inside STPK. */
+/* STPT element: the span of this step channel inside STPK. The tracks partition
+ * STPK in channel order -- first_key is the running key total, so track 0 starts
+ * at 0 and the last track ends at STPK.count. No key is shared or unreferenced. */
 #pragma pack(push, 1)
 typedef struct {
     uint32_t first_key; /* 0: index of the first key in STPK */
@@ -203,9 +205,10 @@ typedef struct {
 } NtAnmStepTrack;
 #pragma pack(pop)
 
-/* STPK element: times are strictly increasing inside a track, start at 0 and
- * end at or before duration. A translation or scale key leaves v[3] at 0; a
- * rotation key holds a unit quaternion. */
+/* STPK element: the tracks concatenate in channel order and cover the table
+ * exactly. Times are strictly increasing inside a track, start at 0 and end at
+ * or before duration. A translation or scale key leaves v[3] at 0; a rotation
+ * key holds a unit quaternion. */
 #pragma pack(push, 1)
 typedef struct {
     float time; /* 0: seconds from clip start */

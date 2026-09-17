@@ -539,13 +539,17 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * Every rule of the wire format is an invariant of the importer that produced
  * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
  * diagnostic instead of returning a code (skeletal spec §16). */
+
+/* Asserts that skel->rig_compat_id is what nt_skeletal_rig_compat_id computes
+ * from these joints, so an edited rig cannot ship someone else's identity. */
 void nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
 void nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
 
-/* reach and any_pose_radius are the builder-computed bounds numbers of §3.4;
- * the mesh-space convention is glTF mesh-node space, the only one v1 stores. */
-void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, float reach, float any_pose_radius, uint8_t **out, uint32_t *out_size);
-void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, float reach, float any_pose_radius, const char *resource_id);
+/* The binding carries its own reach and any_pose_radius, the builder-computed
+ * bounds numbers of §3.4; the mesh-space convention is glTF mesh-node space,
+ * the only one v1 stores. */
+void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size);
+void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
 
 /* One channel of a clip. Channel c of nt_builder_clip_t::channels addresses
  * joint c / 3 and component c % 3 (0 = translation, 1 = rotation, 2 = scale);

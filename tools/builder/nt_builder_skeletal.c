@@ -62,22 +62,34 @@ void nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **ou
     NT_BUILD_ASSERT(skel->parent && skel->subtree_end && skel->joint_id && skel->rest && "skeleton view has a NULL array");
     NT_BUILD_ASSERT(skel->joint_count >= 1 && "skeleton has no joints");
 
+    /* Exact preorder, mirroring the activator: the parent of joint j is the
+     * nearest earlier joint whose subtree range is still open at j, which
+     * carries preorder, sibling contiguity, root chaining and the last root
+     * closing at joint_count. */
     const uint32_t joint_count = skel->joint_count;
-    uint32_t last_root = UINT32_MAX;
+    uint32_t top = NT_SKELETAL_NO_PARENT;
     for (uint32_t j = 0; j < joint_count; j++) {
         NT_BUILD_ASSERT(j < skel->subtree_end[j] && skel->subtree_end[j] <= joint_count && "subtree_end outside [j+1, joint_count]");
-        if (skel->parent[j] == NT_SKELETAL_NO_PARENT) {
-            NT_BUILD_ASSERT((last_root == UINT32_MAX || skel->subtree_end[last_root] == j) && "a root subtree must end where the next root starts");
-            last_root = j;
-        } else {
-            const uint32_t p = skel->parent[j];
-            NT_BUILD_ASSERT(p < j && "joints are not in preorder: parent index is not below the child");
-            NT_BUILD_ASSERT(j < skel->subtree_end[p] && skel->subtree_end[j] <= skel->subtree_end[p] && "child lies outside its parent's subtree range");
+        while (top != NT_SKELETAL_NO_PARENT && skel->subtree_end[top] <= j) {
+            top = skel->parent[top];
         }
+        NT_BUILD_ASSERT((uint32_t)skel->parent[j] == top && "a joint's parent must be the innermost joint whose subtree range is still open");
+        NT_BUILD_ASSERT((skel->parent[j] == NT_SKELETAL_NO_PARENT || skel->subtree_end[j] <= skel->subtree_end[skel->parent[j]]) && "child lies outside its parent's subtree range");
         NT_BUILD_ASSERT(skel_finite_n(skel->rest[j].t, 3) && skel_finite_n(skel->rest[j].s, 3) && "rest translation or scale is not finite");
         NT_BUILD_ASSERT(skel_unit_quat(skel->rest[j].q) && "rest rotation is not a unit quaternion");
+        top = j;
     }
-    NT_BUILD_ASSERT(last_root != UINT32_MAX && skel->subtree_end[last_root] == joint_count && "the last root subtree must end at joint_count");
+
+    /* The id travels as content identity and is never recomputed downstream, so
+     * this is the only place a rig edited after its id was taken is caught. */
+    {
+        const uint32_t scratch_size = NT_SKELETAL_RIG_ID_BYTES(joint_count);
+        void *scratch = malloc(scratch_size);
+        NT_BUILD_ASSERT(scratch && "encode_skeleton: alloc failed (OOM)");
+        const nt_hash64_t computed = nt_skeletal_rig_compat_id(skel, scratch, scratch_size);
+        free(scratch);
+        NT_BUILD_ASSERT(computed.value == skel->rig_compat_id.value && "rig_compat_id does not match its own joints");
+    }
 
     const uint32_t size = NT_SKL_SIZE(joint_count);
     uint8_t *payload = (uint8_t *)malloc(size);
@@ -126,12 +138,12 @@ void nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t
 
 // #region NSKN skin binding
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
-void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, float reach, float any_pose_radius, uint8_t **out, uint32_t *out_size) {
+void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size) {
     NT_BUILD_ASSERT(binding && out && out_size && "invalid encode_skin_binding args");
     NT_BUILD_ASSERT(binding->remap && binding->inverse_bind && "binding view has a NULL array");
     NT_BUILD_ASSERT(binding->palette_count >= 1 && "binding has no palette entries");
-    NT_BUILD_ASSERT(skel_finite(reach) && reach >= 0.0F && "reach must be finite and non-negative");
-    NT_BUILD_ASSERT(skel_finite(any_pose_radius) && any_pose_radius >= 0.0F && "any_pose_radius must be finite and non-negative");
+    NT_BUILD_ASSERT(skel_finite(binding->reach) && binding->reach >= 0.0F && "reach must be finite and non-negative");
+    NT_BUILD_ASSERT(skel_finite(binding->any_pose_radius) && binding->any_pose_radius >= 0.0F && "any_pose_radius must be finite and non-negative");
 
     const uint32_t palette_count = binding->palette_count;
     for (uint32_t p = 0; p < palette_count; p++) {
@@ -151,8 +163,8 @@ void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, float reac
     *w++ = 0;
     *w++ = 0;
     *w++ = 0;
-    w = skel_wr_f32(w, reach);
-    w = skel_wr_f32(w, any_pose_radius);
+    w = skel_wr_f32(w, binding->reach);
+    w = skel_wr_f32(w, binding->any_pose_radius);
     for (uint32_t p = 0; p < palette_count; p++) {
         w = skel_wr_u16(w, binding->remap[p]);
     }
@@ -169,11 +181,11 @@ void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, float reac
     *out_size = size;
 }
 
-void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, float reach, float any_pose_radius, const char *resource_id) {
+void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id) {
     NT_BUILD_ASSERT(ctx && resource_id && "invalid add_skin_binding args");
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    nt_builder_encode_skin_binding(binding, reach, any_pose_radius, &payload, &size);
+    nt_builder_encode_skin_binding(binding, &payload, &size);
     uint64_t hash = nt_hash64(payload, size).value;
     nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_SKIN_BINDING, NULL, payload, size, hash);
 }
@@ -273,7 +285,14 @@ void nt_builder_encode_clip(const nt_builder_clip_t *clip, uint8_t **out, uint32
     clip_validate(clip, &tally);
 
     const uint32_t channel_count = NT_ANM_CHANNEL_COUNT(clip->joint_count);
-    const uint32_t plane_stride[3] = {clip->sample_count * 12U, clip->sample_count * 16U, clip->sample_count * 12U};
+    /* The stride is a u32 wire field, so the product is formed in 64 bits and
+     * bounded before it is narrowed. */
+    uint32_t plane_stride[3] = {0, 0, 0};
+    for (uint32_t k = 0; k < 3; k++) {
+        const uint64_t stride = (uint64_t)clip->sample_count * ((k == 1U) ? 16U : 12U);
+        NT_BUILD_ASSERT(stride <= UINT32_MAX && "clip plane stride exceeds 4 GB");
+        plane_stride[k] = (uint32_t)stride;
+    }
 
     // #region header and section table
     /* Every stride is a multiple of 4 and the table ends 4-aligned, so each

@@ -276,7 +276,7 @@ typedef struct {
     uint16_t joint_count;              /* joints the clip and its poses address */
     uint16_t n_t, n_q, n_s;            /* sampled rows per component kind */
     uint16_t n_ct, n_cq, n_cs;         /* constant channels per component kind */
-    uint8_t kind;                      /* 0 absolute, 1 additive (nt_anm_kind_t) */
+    uint8_t kind;                      /* the validated NANM kind byte, stored as-is: 0 absolute, 1 additive */
 } nt_skeletal_clip_t;
 
 /* out[0, clip->joint_count) = the clip's local pose at time, absent channels

@@ -124,7 +124,7 @@ typedef struct {
 
 - `clip_key` is an opaque game/content `uint32_t`; assigning a clip supplies key and duration (fixed for that assignment). Tracks store no clip, weights, resource or GPU pointer; the game supplies current clip and factor views per evaluation call after publication.
 - **Occupancy ≠ gain.** A gain-0 track keeps advancing (blend spaces need synchronized cycles); `speed = 0` pauses; the game releases a slot explicitly.
-- `nt_skeletal_tracks_advance(tracks, count, dt)` updates clocks only (wrap, clamp), in `engine/skeletal/nt_skeletal_tracks.c` so a game that only advances clocks links no sampler. Per track: a slot without `NT_SKELETAL_TRACK_OCCUPIED` is untouched; `duration == 0` holds `time` at 0; otherwise `time += speed·dt`, then `NT_SKELETAL_TRACK_LOOPING` normalizes by `time − floor(time/duration)·duration` (one step for reverse and for several cycles at once, with a rounding residue on either boundary restarting the cycle at 0) and a non-looping track clamps to `[0, duration]`. `speed = 0` is a pause with no special case. `dt ≥ 0` and every `duration ≥ 0` are asserted; nothing else is written and nothing is called. It is the only engine function over tracks; assign/release/crossfade ramps are three-field writes that live in game code (the showcase's assign helper asserts when no slot is free — the engine has no assign function and no eviction policy). #491 extends advance with time spans and signed cycle crossings for root-motion/event consumers. Baked characters use the same tracks with a bank lookup instead of kernels.
+- `nt_skeletal_tracks_advance(tracks, count, dt)` updates clocks only (wrap, clamp), in `engine/skeletal/nt_skeletal_tracks.c` so a game that only advances clocks links no sampler. Per track: a slot without `NT_SKELETAL_TRACK_OCCUPIED` is untouched; `duration == 0` resets `time` to 0; otherwise `time += speed·dt`, then `NT_SKELETAL_TRACK_LOOPING` normalizes by `time − floor(time/duration)·duration` (one step for reverse and for several cycles at once, with a rounding residue on either boundary restarting the cycle at 0) and a non-looping track clamps to `[0, duration]`. `speed = 0` is a pause with no special case. `dt ≥ 0` is asserted, and every occupied track is asserted to carry a `duration ≥ 0` and a finite `speed` (a NaN or infinite speed would make the cycle count's integer conversion undefined); nothing else is written and nothing is called. It is the only engine function over tracks; assign/release/crossfade ramps are three-field writes that live in game code (the showcase's assign helper asserts when no slot is free — the engine has no assign function and no eviction policy). #491 extends advance with time spans and signed cycle crossings for root-motion/event consumers. Baked characters use the same tracks with a bank lookup instead of kernels.
 
 ## 7. Time, sampling and composition
 
@@ -136,13 +136,13 @@ typedef struct {
 
 **Runtime clip layout.** `nt_skeletal_clip_t` in `nt_skeletal.h` is an immutable borrowed view with the ownership contract of `nt_skeletal_skeleton_t`. It is not the wire layout: §16 describes the pack payload, and the activator decodes it into this view. Each channel has exactly one storage mode, so the tables never describe the same joint channel twice, and a channel in no table is absent.
 
-- **Sampled** channels share one uniform grid of `sample_count` samples on `[0, duration]` (`inv_step = (sample_count−1)/duration`, 0 when `sample_count == 1`) and live in `sample_count` frame blocks of `block_floats` floats, block `i` at `blocks + i·block_floats`, laid out as `t` rows `[n_t][3]`, then `q` rows `[n_q][4]`, then `s` rows `[n_s][3]`. Row `k` belongs to joint `t_joint[k]`/`q_joint[k]`/`s_joint[k]`. One sample therefore reads two adjacent blocks and nothing else instead of striding once per channel. `blocks` is NULL when the clip has no sampled channel.
+- **Sampled** channels share one uniform grid of `sample_count` samples on `[0, duration]` (`inv_step = (sample_count−1)/duration`, 0 when `sample_count == 1` or `duration == 0`) and live in `sample_count` frame blocks of `block_floats` floats, block `i` at `blocks + i·block_floats`, laid out as `t` rows `[n_t][3]`, then `q` rows `[n_q][4]`, then `s` rows `[n_s][3]`. Row `k` belongs to joint `t_joint[k]`/`q_joint[k]`/`s_joint[k]`. One sample therefore reads two adjacent blocks and nothing else instead of striding once per channel. `blocks` is NULL when the clip has no sampled channel.
 - **Constant** channels are `ct_joint`/`ct` (3 floats), `cq_joint`/`cq` (4), `cs_joint`/`cs` (3) with their counts.
 - **STEP** channels keep their authored timestamps: `steps[]` of `{first, count, joint, channel}` into the shared `step_times`/`step_values` (4 floats per key) tables.
 - The object curve (§7.5) is a separate one-element signal inside the clip, with its own grid and key ranges.
 - Identity and builder numbers travel with the view: `rig_compat_id`, `additive_ref_id`, `kind`, `joint_count`, `r_joints`, `r_root`, `s_max`, `bake_fps_min`, `bake_reach`.
 
-**Contract.** `nt_skeletal_sample(clip, time, defaults, out)` writes `joint_count` local transforms. `time` is a `double` in `[0, duration]`, asserted. Absent channels take the supplied defaults, constants copy, and STEP channels hold the last key at or before `time` (the first key when `time` precedes it). For sampled channels `f = time·inv_step` in double, `i = floor(f)` clamped so `i+1 ≤ sample_count−1`, `u = (float)(f − i)`; `u == 0` copies block `i` and `u == 1` (reachable only from that clamp at `time == duration`) copies block `i+1`, both bit for bit, so a grid time reproduces its stored sample exactly. Otherwise T/S lerp as `a·(1−u) + b·u` and Q takes the shortest-path normalized lerp (`d = dot(a,b)`, `b' = d < 0 ? −b : b`, `q = normalize(a·(1−u) + b'·u)`). Random seek and reverse need no cursor because the index is computed, not stepped. CUBICSPLINE is resampled by the builder with error checks. Direct-access codec (§16). `defaults` and `out` are caller-owned buffers of `joint_count` entries and must not overlap; `NT_SKELETAL_CHECKS` additionally validates the produced pose.
+**Contract.** `nt_skeletal_sample(clip, time, defaults, out)` writes `joint_count` local transforms. `time` is a `double` in `[0, duration]`, asserted. Absent channels take the supplied defaults, constants copy, and STEP channels hold the last key at or before `time` (the first key when `time` precedes it). For sampled channels `f = time·inv_step` in double, `i = floor(f)` clamped so `i+1 ≤ sample_count−1`, `u = (float)(f − i)`; `u == 0` copies block `i` and `u == 1` copies block `i+1`, both bit for bit, so a grid time reproduces its stored sample exactly. `u == 1` comes from the clamp at `time == duration` and also when the float conversion of `f − i` rounds up just below a grid point, which is benign: the result snaps to the nearer stored block. Otherwise T/S lerp as `a·(1−u) + b·u` and Q takes the shortest-path normalized lerp (`d = dot(a,b)`, `b' = d < 0 ? −b : b`, `q = normalize(a·(1−u) + b'·u)`). Random seek and reverse need no cursor because the index is computed, not stepped. CUBICSPLINE is resampled by the builder with error checks. Direct-access codec (§16). `defaults` and `out` are caller-owned buffers of `joint_count` entries and must not overlap; `NT_SKELETAL_CHECKS` additionally validates the produced pose.
 
 ### 7.3 Composition kernels
 
@@ -255,7 +255,7 @@ The max of two clip radii is *not* a bound for their mix (two 80° bends mixed a
 
 `rig_compat_id` (`nt_hash64_t`) is shared by NSKL, NANM and NSKN (order, parents, rest semantics, units); binding a clip, skeleton and skin together asserts equality; nothing else is cross-checked at runtime (§2 item 5). Handles/generations still protect slots. Adapters validate their own payload, publish immutable views and own runtime memory.
 
-**The v1 adapters** are `nt_skeletal_assets_activate_skeleton/skin_binding/clip` and their deactivators (`engine/skeletal_assets`), registered by the application through `nt_resource_register_type` exactly like textures; resource core references none of them. Each one validates the *whole* payload before it allocates or publishes anything, then copies the wire tables out into **one** allocation laid out as §7.2 describes and returns a handle; a rejected payload logs one warning and returns 0, which leaves the asset FAILED with nothing allocated. Nothing reads the blob after activation, so any blob policy may drop it. `nt_skeletal_assets_init` takes the pool capacities (`max_skeletons`, `max_skin_bindings`, `max_clips`; 8/16/64 by default) and allocates them once — activating past a capacity is an assert, not a load failure. `nt_skeletal_assets_skeleton/skin_binding/clip(nt_resource_t)` return the views; they stay valid until their asset is deactivated (unmount, reload, shutdown), so the game refetches them after `resource_step`. The adapters cross-check no `rig_compat_id` — no second asset exists at activation. The binding view carries the NSKN `reach`/`any_pose_radius` numbers; the §14 bounds helper that consumes them arrives with its first consumer.
+**The v1 adapters** are `nt_skeletal_assets_activate_skeleton/skin_binding/clip` and their deactivators (`engine/skeletal_assets`), registered by the application through `nt_resource_register_type` exactly like textures; resource core references none of them. Each one validates the *whole* payload before it allocates or publishes anything, then copies the wire tables out into **one** allocation laid out as §7.2 describes and returns a handle; a rejected payload logs one warning and returns 0, which leaves the asset FAILED with nothing allocated. Nothing reads the blob after activation, so any blob policy may drop it. `nt_skeletal_assets_init` takes the pool capacities (`max_skeletons`, `max_skin_bindings`, `max_clips`; 8/16/64 by default) and allocates them once — activating past a capacity is an assert, not a load failure. A capacity counts every *activated* asset, not every published one: when one resource id is present in two mounted packs both copies activate and hold a slot, only the winner is published, and the loser is released when its own pack unmounts. Pools are sized for the peak mounted set, overlaps included. `nt_skeletal_assets_skeleton/skin_binding/clip(nt_resource_t)` return the views; they stay valid until their asset is deactivated (unmount, reload, shutdown), so the game refetches them after `resource_step`. The adapters cross-check no `rig_compat_id` — no second asset exists at activation. The binding view carries the NSKN `reach`/`any_pose_radius` numbers; the §14 bounds helper that consumes them arrives with its first consumer.
 
 Order per frame: draws finished → `resource_step` → refresh views → advance/compose/prepare → build list → draw. A borrowed view lasts until its owner is deactivated/republished; a bank owns its texels and survives the unload of the clips it was baked from.
 
@@ -275,7 +275,10 @@ ranges and then copies fields and arrays out into the runtime layout the sampler
 (§7) defines. `NSKL` and `NSKN` are fixed layouts; `NANM` is an explicit header
 plus bounded `tag/offset/count/stride` section descriptors for its fixed v1
 section set (no extensible registry). The builder computes `rig_compat_id` by
-calling `nt_skeletal_rig_compat_id` rather than reimplementing the schema.
+calling `nt_skeletal_rig_compat_id` rather than reimplementing the schema, and
+`nt_builder_encode_skeleton` asserts that the id it is handed is the one that
+function computes from the joints it is about to write, so a rig edited after
+its id was taken cannot ship another rig's identity.
 
 `version` is `major << 8 | minor` in all three (v1 = `0x0100`). A major mismatch rejects the
 payload; a higher minor stays readable because the only minor-compatible change
@@ -299,10 +302,14 @@ per-asset CRC.
 | 16+4J | `u32 joint_id[J]` | `nt_hash32_str(node name)` |
 | 16+8J | `f32 rest[J][10]` | AoS `t[3] q[4] s[3]`, q unit xyzw |
 
-Activation checks the exact size, `joint_count ≥ 1`, preorder parents, nested
-`subtree_end` (`j < subtree_end[j] ≤ J`, a child inside its parent's range, a
-root subtree ending where the next root starts and the last at `J`), finite rest
-translations and scales, and unit quaternions.
+Activation checks the exact size, `joint_count ≥ 1`, `j < subtree_end[j] ≤ J`,
+and one exact-preorder rule walked in joint order: **each joint's parent is the
+nearest earlier joint whose range is still open** at that joint (`NO_PARENT` when
+none is), plus `subtree_end[j] ≤ subtree_end[parent[j]]` for a non-root. That
+single rule carries preorder parents, sibling contiguity, root chaining and the
+last root closing at `J`, so nothing else is checked for the hierarchy. The walk
+pops each closed subtree once, so it is `O(J)` amortized. Rest translations and
+scales must be finite and rest rotations unit quaternions.
 
 **NSKN** — `NT_SKN_SIZE(P) = 28 + 50·P` bytes, exact:
 
@@ -353,7 +360,7 @@ v1 set is exactly these seven, each once, in this order:
 | `PLNQ` | sampled q channels | `N·16` | `f32[N][4]`, unit xyzw |
 | `PLNS` | sampled s channels | `N·12` | `f32[N][3]` |
 | `CNST` | constant channels | 16 | `f32[4]`; t/s use `[0..2]` and leave `[3]` at 0, q is unit |
-| `STPT` | step channels | 8 | `{u32 first_key; u32 key_count}` in channel order |
+| `STPT` | step channels | 8 | `{u32 first_key; u32 key_count}` in channel order; the tracks partition `STPK` — `first_key` is the running key total, so track 0 starts at 0 and the last ends at `STPK.count` |
 | `STPK` | total step keys | 20 | `{f32 time; f32 v[4]}`, tracks concatenated |
 
 Channel `c` addresses joint `c / 3` and component `c % 3` (0 = t, 1 = q,
@@ -370,10 +377,9 @@ Every float in a payload is finite.
 
 Asset types 7–9 extend the enum in `shared/include/nt_pack_format.h` and
 `NT_ASSET_LAST` bounds it; `NT_RESOURCE_MAX_ASSET_TYPES`
-(`engine/resource/nt_resource_internal.h`) goes 8 → 12; the parser's
-`> NT_ASSET_ATLAS` bound becomes `> NT_ASSET_LAST` (still recoverable pack
-validation; unregistered activators keep asserting); every enumeration site is
-updated (#475 lists them); activators are registered explicitly by applications
+(`engine/resource/nt_resource_internal.h`) is 12; the parser rejects an asset
+type above `NT_ASSET_LAST` (still recoverable pack validation; unregistered
+activators keep asserting); activators are registered explicitly by applications
 that link them. The builder writes these payloads from in-memory import results
 through `nt_builder_encode_skeleton/skin_binding/clip` and registers them with
 `nt_builder_add_skeleton/skin_binding/clip`; a source violation of any rule above

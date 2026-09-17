@@ -2,6 +2,7 @@
  * back from the payload bytes as little-endian, never through the header structs. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +33,35 @@
 
 void setUp(void) {}
 void tearDown(void) {}
+
+// #region build-assert trap
+/* Same shape as test_builder.c, without the context: the encoders own no
+ * builder state and abort before they allocate, so nothing needs freeing. */
+static jmp_buf s_build_assert_jmp;
+static const char *s_build_assert_expr;
+
+static void test_build_assert_handler(const char *expr, const char *file, int line) {
+    s_build_assert_expr = expr;
+    (void)file;
+    (void)line;
+    longjmp(s_build_assert_jmp, 1);
+}
+
+/* Which rule fired is the claim: a death test that only sees "some assert"
+ * passes on an unrelated precondition too. */
+#define EXPECT_BUILD_ASSERT_MATCH(code, expected)                                                                                                                                                      \
+    do {                                                                                                                                                                                               \
+        s_build_assert_expr = NULL;                                                                                                                                                                    \
+        nt_build_assert_handler = test_build_assert_handler;                                                                                                                                           \
+        if (setjmp(s_build_assert_jmp) == 0) {                                                                                                                                                         \
+            code;                                                                                                                                                                                      \
+            nt_build_assert_handler = NULL;                                                                                                                                                            \
+            TEST_FAIL_MESSAGE("expected NT_BUILD_ASSERT to fire: " expected);                                                                                                                          \
+        }                                                                                                                                                                                              \
+        nt_build_assert_handler = NULL;                                                                                                                                                                \
+        TEST_ASSERT_TRUE_MESSAGE(s_build_assert_expr &&strstr(s_build_assert_expr, (expected)), "a different NT_BUILD_ASSERT fired: " expected);                                                       \
+    } while (0)
+// #endregion
 
 // #region little-endian readers
 static uint16_t rd_u16(const uint8_t *p) { return (uint16_t)((uint16_t)p[0] | (uint16_t)((uint16_t)p[1] << 8)); }
@@ -64,14 +94,17 @@ static const nt_skeletal_trs_t k_rest[FIXTURE_JOINTS] = {
     {{4.0F, -4.0F, 0.0F}, {0.0F, 1.0F, 0.0F, 0.0F}, {0.25F, 0.25F, 0.25F}},
 };
 
+/* The encoder asserts that the id matches these joints, so the fixture takes it
+ * from the one implementation of the schema instead of inventing a number. */
 static nt_skeletal_skeleton_t fixture_skeleton(void) {
     nt_skeletal_skeleton_t skel = {0};
-    skel.rig_compat_id = (nt_hash64_t){0xABCDEF0123456789ULL};
     skel.parent = k_parent;
     skel.subtree_end = k_subtree_end;
     skel.joint_id = k_joint_id;
     skel.rest = k_rest;
     skel.joint_count = FIXTURE_JOINTS;
+    uint8_t scratch[NT_SKELETAL_RIG_ID_BYTES(FIXTURE_JOINTS)];
+    skel.rig_compat_id = nt_skeletal_rig_compat_id(&skel, scratch, (uint32_t)sizeof(scratch));
     return skel;
 }
 
@@ -90,6 +123,8 @@ static nt_skin_binding_t fixture_binding(void) {
     binding.rig_compat_id = (nt_hash64_t){0xABCDEF0123456789ULL};
     binding.remap = k_remap;
     binding.inverse_bind = k_inverse_bind;
+    binding.reach = 1.75F;
+    binding.any_pose_radius = 4.5F;
     binding.palette_count = FIXTURE_PALETTE;
     return binding;
 }
@@ -171,7 +206,7 @@ void test_encode_skeleton_wire_layout(void) {
     TEST_ASSERT_EQUAL_HEX32(NT_SKL_MAGIC, rd_u32(payload));
     TEST_ASSERT_EQUAL_UINT16(NT_SKELETAL_FORMAT_VERSION, rd_u16(payload + 4));
     TEST_ASSERT_EQUAL_UINT16(FIXTURE_JOINTS, rd_u16(payload + 6));
-    TEST_ASSERT_EQUAL_HEX64(0xABCDEF0123456789ULL, rd_u64(payload + 8));
+    TEST_ASSERT_EQUAL_HEX64(skel.rig_compat_id.value, rd_u64(payload + 8));
 
     const uint8_t *parent = payload + 16;
     const uint8_t *subtree_end = parent + (size_t)(2 * FIXTURE_JOINTS);
@@ -203,7 +238,7 @@ void test_encode_skin_binding_wire_layout(void) {
     nt_skin_binding_t binding = fixture_binding();
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    nt_builder_encode_skin_binding(&binding, 1.75F, 4.5F, &payload, &size);
+    nt_builder_encode_skin_binding(&binding, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
     TEST_ASSERT_EQUAL_UINT32(28U + (50U * FIXTURE_PALETTE), size);
@@ -421,7 +456,7 @@ void test_add_skeletal_assets_writes_typed_entries(void) {
     fixture_clip(&clip, channels);
 
     nt_builder_add_skeleton(ctx, &skel, "rigs/hero.nskl");
-    nt_builder_add_skin_binding(ctx, &binding, 1.75F, 4.5F, "rigs/hero.nskn");
+    nt_builder_add_skin_binding(ctx, &binding, "rigs/hero.nskn");
     nt_builder_add_clip(ctx, &clip, "clips/hero_run.nanm");
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -471,6 +506,101 @@ void test_add_skeletal_assets_writes_typed_entries(void) {
 
     /* dump walks the three new per-type detail printers over this pack. */
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_dump_pack(PACK_PATH));
+    (void)remove(PACK_PATH);
+}
+// #endregion
+
+// #region content rules are asserts
+/* The importer is the only producer of this data, so every wire rule it can
+ * break is an NT_BUILD_ASSERT and not a return code. Each case violates exactly
+ * one rule and the trap checks that this is the rule that fired. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_encode_skeleton_asserts_on_a_broken_hierarchy(void) {
+    uint16_t parent[FIXTURE_JOINTS];
+    memcpy(parent, k_parent, sizeof(parent));
+    nt_skeletal_skeleton_t skel = fixture_skeleton();
+    skel.parent = parent;
+
+    uint8_t *payload = NULL;
+    uint32_t size = 0;
+
+    /* Forward parent: joint 2 names a joint that does not exist yet. */
+    parent[2] = 3;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skeleton(&skel, &payload, &size), "innermost joint whose subtree range is still open");
+
+    /* Sibling over-claim: joint 1 is still open at joint 2, so joint 2 may not
+     * reach past it to joint 0. Range nesting alone accepts this. */
+    parent[2] = 0;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skeleton(&skel, &payload, &size), "innermost joint whose subtree range is still open");
+
+    memcpy(parent, k_parent, sizeof(parent));
+    uint16_t subtree_end[FIXTURE_JOINTS];
+    memcpy(subtree_end, k_subtree_end, sizeof(subtree_end));
+    skel.subtree_end = subtree_end;
+    subtree_end[2] = 4; /* leaves the range of parent 1, which ends at 3 */
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skeleton(&skel, &payload, &size), "child lies outside its parent's subtree range");
+
+    TEST_ASSERT_NULL(payload);
+}
+
+void test_encode_skeleton_asserts_when_the_rig_id_is_not_its_own(void) {
+    nt_skeletal_skeleton_t skel = fixture_skeleton();
+    skel.rig_compat_id.value ^= 1ULL;
+
+    uint8_t *payload = NULL;
+    uint32_t size = 0;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skeleton(&skel, &payload, &size), "rig_compat_id does not match its own joints");
+    TEST_ASSERT_NULL(payload);
+}
+
+void test_encode_skin_binding_asserts_on_a_negative_reach(void) {
+    nt_skin_binding_t binding = fixture_binding();
+    uint8_t *payload = NULL;
+    uint32_t size = 0;
+
+    binding.reach = -1.0F;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skin_binding(&binding, &payload, &size), "reach must be finite and non-negative");
+
+    binding.reach = 1.75F;
+    binding.any_pose_radius = -1.0F;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skin_binding(&binding, &payload, &size), "any_pose_radius must be finite and non-negative");
+    TEST_ASSERT_NULL(payload);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_encode_clip_asserts_on_broken_channels(void) {
+    nt_builder_clip_t clip;
+    nt_builder_anim_channel_t channels[CLIP_CHANNELS];
+    uint8_t *payload = NULL;
+    uint32_t size = 0;
+
+    static const float k_non_unit_q[CLIP_SAMPLES * 4] = {
+        0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.5F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+    };
+    fixture_clip(&clip, channels);
+    channels[1].samples = k_non_unit_q;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "sampled rotation is not a unit quaternion");
+
+    /* One sample cannot carry a sampled channel, whatever the duration says. */
+    fixture_clip(&clip, channels);
+    clip.sample_count = 1;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "a sampled channel needs at least two samples over a positive duration");
+
+    fixture_clip(&clip, channels);
+    clip.kind = NT_ANM_KIND_ADDITIVE;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "additive_ref_id is set exactly for an additive clip");
+
+    static const float k_late_first_key[3] = {0.1F, 0.4F, 0.8F};
+    fixture_clip(&clip, channels);
+    channels[6].step_times = k_late_first_key;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "the first step key must sit at time 0");
+
+    static const float k_flat_step_times[3] = {0.0F, 0.4F, 0.4F};
+    fixture_clip(&clip, channels);
+    channels[6].step_times = k_flat_step_times;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "step times must increase strictly");
+
+    TEST_ASSERT_NULL(payload);
 }
 // #endregion
 
@@ -481,5 +611,9 @@ int main(void) {
     RUN_TEST(test_encode_clip_asymmetric_sections);
     RUN_TEST(test_encode_clip_single_sample_has_empty_planes);
     RUN_TEST(test_add_skeletal_assets_writes_typed_entries);
+    RUN_TEST(test_encode_skeleton_asserts_on_a_broken_hierarchy);
+    RUN_TEST(test_encode_skeleton_asserts_when_the_rig_id_is_not_its_own);
+    RUN_TEST(test_encode_skin_binding_asserts_on_a_negative_reach);
+    RUN_TEST(test_encode_clip_asserts_on_broken_channels);
     return UNITY_END();
 }

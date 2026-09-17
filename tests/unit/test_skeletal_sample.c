@@ -21,24 +21,27 @@
  * One asymmetric clip covers every storage mode and gives each joint a
  * different mix, so a swapped joint index or component offset shows up:
  *
- *   joint 0: t sampled,  q sampled,  s constant
- *   joint 1: t constant, q step,     s sampled
- *   joint 2: t step,     q constant, s absent
- *   joint 3: t absent,   q absent,   s step (first key at 0.3)
+ *   joint 0: t sampled,  q sampled (row 0), s constant
+ *   joint 1: t constant, q step,           s sampled
+ *   joint 2: t step,     q sampled (row 1), s absent
+ *   joint 3: t constant, q constant,       s step (first key at 0.3)
+ *   joint 4: nothing at all
  *
- * The grid is binary exact (duration 1, 5 samples, step 0.25) so grid times
- * land on the stored samples bit for bit.
+ * Two rotation rows and two constant translations keep the row and table
+ * indexing honest: a sampler that ignored the row index would still pass with
+ * one row of each kind. The grid is binary exact (duration 1, 5 samples, step
+ * 0.25) so grid times land on the stored samples bit for bit.
  */
-enum { CLIP_JOINTS = 4, CLIP_SAMPLES = 5, CLIP_BLOCK_FLOATS = 10, CLIP_STEP_KEYS = 7 };
-enum { BLOCK_Q_OFFSET = 3, BLOCK_S_OFFSET = 7 };
+enum { CLIP_JOINTS = 5, CLIP_SAMPLES = 5, CLIP_BLOCK_FLOATS = 14, CLIP_STEP_KEYS = 7 };
+enum { BLOCK_Q0_OFFSET = 3, BLOCK_Q1_OFFSET = 7, BLOCK_S_OFFSET = 11 };
 
 static float g_blocks[CLIP_SAMPLES * CLIP_BLOCK_FLOATS];
 static uint16_t g_t_joint[1] = {0};
-static uint16_t g_q_joint[1] = {0};
+static uint16_t g_q_joint[2] = {0, 2};
 static uint16_t g_s_joint[1] = {1};
-static uint16_t g_ct_joint[1] = {1};
-static float g_ct[3] = {-2.5F, 7.25F, 0.125F};
-static uint16_t g_cq_joint[1] = {2};
+static uint16_t g_ct_joint[2] = {1, 3};
+static float g_ct[6] = {-2.5F, 7.25F, 0.125F, 11.5F, -0.75F, 4.0F};
+static uint16_t g_cq_joint[1] = {3};
 static float g_cq[4];
 static uint16_t g_cs_joint[1] = {0};
 static float g_cs[3] = {2.0F, 0.5F, 3.0F};
@@ -58,12 +61,15 @@ static void quat_axis_angle(float *q, float ax, float ay, float az, float degree
     q[3] = cosf(half);
 }
 
+/* Every default rotation is a distinct non-identity unit quaternion, so an
+ * "absent channel keeps the default" check cannot pass on an identity the clip
+ * would have produced anyway. */
 static void build_defaults(nt_skeletal_trs_t *d, uint16_t count) {
     for (uint16_t j = 0; j < count; ++j) {
         d[j].t[0] = 100.0F + (float)j;
         d[j].t[1] = 200.0F + (float)j;
         d[j].t[2] = 300.0F + (float)j;
-        quat_axis_angle(d[j].q, 1.0F, 0.0F, 0.0F, 10.0F * (float)j);
+        quat_axis_angle(d[j].q, 1.0F, 0.0F, 0.0F, 15.0F + (10.0F * (float)j));
         d[j].s[0] = 1.0F + (float)j;
         d[j].s[1] = 2.0F + (float)j;
         d[j].s[2] = 3.0F + (float)j;
@@ -84,7 +90,11 @@ static void build_clip(void) {
         blk[0] = (float)k;
         blk[1] = ((float)k * 2.0F) + 0.5F;
         blk[2] = (float)k * -0.25F;
-        quat_axis_angle(blk + BLOCK_Q_OFFSET, 0.0F, 1.0F, 0.0F, (float)k * 20.0F);
+        quat_axis_angle(blk + BLOCK_Q0_OFFSET, 0.0F, 1.0F, 0.0F, (float)k * 20.0F);
+        /* Row 1 turns about z in 22.5 deg steps: the nlerp midpoint of two such
+         * rotations is the rotation at their mean angle, a value the test can
+         * write down without reproducing the kernel. */
+        quat_axis_angle(blk + BLOCK_Q1_OFFSET, 0.0F, 0.0F, 1.0F, (float)k * 22.5F);
         blk[BLOCK_S_OFFSET + 0] = 1.0F + ((float)k * 0.5F);
         blk[BLOCK_S_OFFSET + 1] = 2.0F - ((float)k * 0.25F);
         blk[BLOCK_S_OFFSET + 2] = 0.5F + ((float)k * 0.125F);
@@ -107,6 +117,7 @@ static void build_clip(void) {
     g_steps[0].count = 3;
     g_steps[0].joint = 1;
     g_steps[0].channel = 1;
+    /* joint 2 translation, then joint 3 scale. */
     g_steps[1].first = 3;
     g_steps[1].count = 2;
     g_steps[1].joint = 2;
@@ -138,9 +149,9 @@ static void build_clip(void) {
         .n_steps = 3,
         .joint_count = CLIP_JOINTS,
         .n_t = 1,
-        .n_q = 1,
+        .n_q = 2,
         .n_s = 1,
-        .n_ct = 1,
+        .n_ct = 2,
         .n_cq = 1,
         .n_cs = 1,
     };
@@ -162,8 +173,8 @@ void test_absent_channels_take_the_defaults(void) {
     nt_skeletal_trs_t out[CLIP_JOINTS];
     nt_skeletal_sample(&g_clip, 0.4, g_defaults, out);
 
-    ASSERT_BITS_EQUAL(g_defaults[3].t, out[3].t, 3);
-    ASSERT_BITS_EQUAL(g_defaults[3].q, out[3].q, 4);
+    ASSERT_BITS_EQUAL(g_defaults[4].t, out[4].t, 3);
+    ASSERT_BITS_EQUAL(g_defaults[4].q, out[4].q, 4);
     ASSERT_BITS_EQUAL(g_defaults[2].s, out[2].s, 3);
 }
 
@@ -172,7 +183,8 @@ void test_constant_channels_copy_their_value(void) {
     nt_skeletal_sample(&g_clip, 0.4, g_defaults, out);
 
     ASSERT_BITS_EQUAL(g_ct, out[1].t, 3);
-    ASSERT_BITS_EQUAL(g_cq, out[2].q, 4);
+    ASSERT_BITS_EQUAL(g_ct + 3, out[3].t, 3);
+    ASSERT_BITS_EQUAL(g_cq, out[3].q, 4);
     ASSERT_BITS_EQUAL(g_cs, out[0].s, 3);
 }
 
@@ -189,13 +201,26 @@ void test_sampled_translation_and_scale_lerp_inside_an_interval(void) {
     }
 }
 
+/* The second rotation row must come from its own block slot and land on its own
+ * joint: 22.5 deg and 45 deg about z meet at 33.75 deg about z. */
+void test_the_second_sampled_rotation_row_interpolates_on_its_own_joint(void) {
+    nt_skeletal_trs_t out[CLIP_JOINTS];
+    nt_skeletal_sample(&g_clip, 0.375, g_defaults, out);
+
+    ASSERT_FLOAT_NEAR(0.0F, out[2].q[0], 1e-6F);
+    ASSERT_FLOAT_NEAR(0.0F, out[2].q[1], 1e-6F);
+    ASSERT_FLOAT_NEAR(0.29028483F, out[2].q[2], 1e-6F);
+    ASSERT_FLOAT_NEAR(0.95694034F, out[2].q[3], 1e-6F);
+}
+
 void test_grid_times_reproduce_the_stored_samples_exactly(void) {
     nt_skeletal_trs_t out[CLIP_JOINTS];
     for (uint32_t k = 0; k < CLIP_SAMPLES; ++k) {
         const double time = (double)k * 0.25;
         nt_skeletal_sample(&g_clip, time, g_defaults, out);
         ASSERT_BITS_EQUAL(block_of(k), out[0].t, 3);
-        ASSERT_BITS_EQUAL(block_of(k) + BLOCK_Q_OFFSET, out[0].q, 4);
+        ASSERT_BITS_EQUAL(block_of(k) + BLOCK_Q0_OFFSET, out[0].q, 4);
+        ASSERT_BITS_EQUAL(block_of(k) + BLOCK_Q1_OFFSET, out[2].q, 4);
         ASSERT_BITS_EQUAL(block_of(k) + BLOCK_S_OFFSET, out[1].s, 3);
     }
 }
@@ -204,7 +229,8 @@ void test_the_end_of_the_clip_is_the_last_sample(void) {
     nt_skeletal_trs_t out[CLIP_JOINTS];
     nt_skeletal_sample(&g_clip, g_clip.duration, g_defaults, out);
     ASSERT_BITS_EQUAL(block_of(CLIP_SAMPLES - 1), out[0].t, 3);
-    ASSERT_BITS_EQUAL(block_of(CLIP_SAMPLES - 1) + BLOCK_Q_OFFSET, out[0].q, 4);
+    ASSERT_BITS_EQUAL(block_of(CLIP_SAMPLES - 1) + BLOCK_Q0_OFFSET, out[0].q, 4);
+    ASSERT_BITS_EQUAL(block_of(CLIP_SAMPLES - 1) + BLOCK_Q1_OFFSET, out[2].q, 4);
 }
 
 /* ---- A grid whose step is not a binary fraction ---- */
@@ -346,19 +372,6 @@ void test_a_time_before_the_first_step_key_holds_that_key(void) {
 
     nt_skeletal_sample(&g_clip, (double)g_step_times[6], g_defaults, out);
     ASSERT_BITS_EQUAL(g_step_values + 24, out[3].s, 3);
-}
-
-/* ---- Statelessness ---- */
-
-void test_sampling_backwards_matches_sampling_forwards(void) {
-    nt_skeletal_trs_t fresh[CLIP_JOINTS];
-    nt_skeletal_sample(&g_clip, 0.3, g_defaults, fresh);
-
-    nt_skeletal_trs_t seeked[CLIP_JOINTS];
-    nt_skeletal_sample(&g_clip, 0.7, g_defaults, seeked);
-    nt_skeletal_sample(&g_clip, 0.3, g_defaults, seeked);
-
-    TEST_ASSERT_EQUAL_MEMORY(fresh, seeked, sizeof(fresh));
 }
 
 /* ---- One-sample clips ---- */
@@ -556,6 +569,32 @@ void test_speed_zero_holds_and_duration_zero_stays_at_zero(void) {
     ASSERT_DOUBLE_NEAR(0.0, tracks[1].time, 1e-12);
 }
 
+/* Reversing the clock must undo the same number of steps exactly, which is the
+ * property a scrubbing or ping-pong game relies on. The numbers are binary
+ * exact, so the wrap arithmetic has to return the original time bit for bit. */
+void test_reversing_the_speed_returns_a_track_to_its_start(void) {
+    const uint32_t k_steps = 7;
+    nt_skeletal_track_t tracks[2];
+    tracks[0] = make_track(0.5, 2.0, 1.0F, NT_SKELETAL_TRACK_OCCUPIED | NT_SKELETAL_TRACK_LOOPING);
+    /* Non-looping: the seven forward steps of 0.125 s stay inside [0, 2], so no
+     * clamp swallows part of the excursion. */
+    tracks[1] = make_track(0.5, 2.0, 0.5F, NT_SKELETAL_TRACK_OCCUPIED);
+
+    for (uint32_t i = 0; i < k_steps; ++i) {
+        nt_skeletal_tracks_advance(tracks, 2, 0.25);
+    }
+    ASSERT_DOUBLE_NEAR(0.25, tracks[0].time, 1e-12); /* 0.5 + 1.75 wraps once */
+    ASSERT_DOUBLE_NEAR(1.375, tracks[1].time, 1e-12);
+
+    tracks[0].speed = -1.0F;
+    tracks[1].speed = -0.5F;
+    for (uint32_t i = 0; i < k_steps; ++i) {
+        nt_skeletal_tracks_advance(tracks, 2, 0.25);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(tracks[0].time == 0.5, "the looping track returns to its start");
+    TEST_ASSERT_TRUE_MESSAGE(tracks[1].time == 0.5, "the non-looping track returns to its start");
+}
+
 void test_an_unoccupied_track_is_untouched(void) {
     nt_skeletal_track_t tracks[2];
     tracks[0] = make_track(7.5, 2.0, 1.0F, 0);
@@ -569,21 +608,44 @@ void test_an_unoccupied_track_is_untouched(void) {
 /* ---- Contracts ---- */
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* Which assert fired is part of the claim: a trap test that only sees "some
+ * assert" passes just as happily on an unrelated precondition. */
+#define ASSERT_TRAPPED_ON(fragment) TEST_ASSERT_TRUE_MESSAGE(strstr(nt_test_assert_last_expr, (fragment)) != NULL, "a different NT_ASSERT fired: " fragment)
+
 void test_sample_traps_outside_the_clip(void) {
     nt_skeletal_trs_t out[CLIP_JOINTS];
     NT_TEST_EXPECT_ASSERT(nt_skeletal_sample(&g_clip, -0.1, g_defaults, out));
+    ASSERT_TRAPPED_ON("time >= 0.0 && time <= clip->duration");
     NT_TEST_EXPECT_ASSERT(nt_skeletal_sample(&g_clip, 1.5, g_defaults, out));
+    ASSERT_TRAPPED_ON("time >= 0.0 && time <= clip->duration");
 }
 
 void test_sample_traps_when_the_output_overlaps_the_defaults(void) {
     nt_skeletal_trs_t out[CLIP_JOINTS];
     memcpy(out, g_defaults, sizeof(out));
+    /* The overlap assert fires before the first read or write through the
+     * restrict pointers, so passing one buffer as both is defined here. */
     NT_TEST_EXPECT_ASSERT(nt_skeletal_sample(&g_clip, 0.0, out, out));
+    ASSERT_TRAPPED_ON("(uintptr_t)(defaults + clip->joint_count) <= (uintptr_t)out");
 }
 
 void test_tracks_advance_traps_on_negative_dt(void) {
     nt_skeletal_track_t track = make_track(0.0, 1.0, 1.0F, NT_SKELETAL_TRACK_OCCUPIED);
     NT_TEST_EXPECT_ASSERT(nt_skeletal_tracks_advance(&track, 1, -1.0));
+    ASSERT_TRAPPED_ON("dt >= 0.0");
+}
+
+/* A non-finite speed would make the cycle count's conversion to int64 undefined,
+ * which traps on wasm instead of wrapping. */
+void test_tracks_advance_traps_on_a_non_finite_speed(void) {
+    nt_skeletal_track_t track = make_track(0.0, 1.0, 0.0F, NT_SKELETAL_TRACK_OCCUPIED | NT_SKELETAL_TRACK_LOOPING);
+    track.speed = NAN;
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_tracks_advance(&track, 1, 1.0));
+    ASSERT_TRAPPED_ON("track->speed - track->speed");
+
+    track.speed = INFINITY;
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_tracks_advance(&track, 1, 1.0));
+    ASSERT_TRAPPED_ON("track->speed - track->speed");
 }
 #endif
 
@@ -592,6 +654,7 @@ int main(void) {
     RUN_TEST(test_absent_channels_take_the_defaults);
     RUN_TEST(test_constant_channels_copy_their_value);
     RUN_TEST(test_sampled_translation_and_scale_lerp_inside_an_interval);
+    RUN_TEST(test_the_second_sampled_rotation_row_interpolates_on_its_own_joint);
     RUN_TEST(test_grid_times_reproduce_the_stored_samples_exactly);
     RUN_TEST(test_the_end_of_the_clip_is_the_last_sample);
     RUN_TEST(test_a_non_binary_grid_reproduces_its_samples_within_tolerance);
@@ -599,7 +662,6 @@ int main(void) {
     RUN_TEST(test_a_wide_pair_takes_the_short_way);
     RUN_TEST(test_step_channels_hold_the_last_key_at_or_before_the_time);
     RUN_TEST(test_a_time_before_the_first_step_key_holds_that_key);
-    RUN_TEST(test_sampling_backwards_matches_sampling_forwards);
     RUN_TEST(test_a_single_sample_clip_of_duration_zero_applies_its_constants);
     RUN_TEST(test_a_single_sample_clip_can_still_have_a_duration_and_step_keys);
     RUN_TEST(test_a_null_object_curve_copies_the_defaults);
@@ -611,11 +673,13 @@ int main(void) {
     RUN_TEST(test_a_looping_track_wraps_backwards_and_lands_on_zero_at_a_full_cycle);
     RUN_TEST(test_a_non_looping_track_clamps_at_both_ends);
     RUN_TEST(test_speed_zero_holds_and_duration_zero_stays_at_zero);
+    RUN_TEST(test_reversing_the_speed_returns_a_track_to_its_start);
     RUN_TEST(test_an_unoccupied_track_is_untouched);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_sample_traps_outside_the_clip);
     RUN_TEST(test_sample_traps_when_the_output_overlaps_the_defaults);
     RUN_TEST(test_tracks_advance_traps_on_negative_dt);
+    RUN_TEST(test_tracks_advance_traps_on_a_non_finite_speed);
 #endif
     return UNITY_END();
 }

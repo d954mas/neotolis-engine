@@ -8,6 +8,17 @@
 #include "nt_pack_format.h"
 #include "nt_skeletal_format.h"
 
+/* The runtime channel modes repeat the wire values so a headless CPU build links
+ * no pack code (nt_skeletal.h); this is the one translation unit that sees both,
+ * so it is where the two enumerations are pinned together. The clip kind needs
+ * no pin: the activator stores the validated wire byte unchanged. The wire side
+ * is compared as the byte it travels as, which is also what keeps the two enum
+ * types out of one comparison. */
+_Static_assert((uint8_t)NT_ANM_CHANNEL_ABSENT == NT_SKELETAL_CHANNEL_ABSENT, "wire and runtime ABSENT must agree");
+_Static_assert((uint8_t)NT_ANM_CHANNEL_CONSTANT == NT_SKELETAL_CHANNEL_CONSTANT, "wire and runtime CONSTANT must agree");
+_Static_assert((uint8_t)NT_ANM_CHANNEL_SAMPLED == NT_SKELETAL_CHANNEL_SAMPLED, "wire and runtime SAMPLED must agree");
+_Static_assert((uint8_t)NT_ANM_CHANNEL_STEP == NT_SKELETAL_CHANNEL_STEP, "wire and runtime STEP must agree");
+
 // #region module state
 /* A slot is live exactly while it owns an allocation, so mem doubles as the
  * occupancy flag; a payload whose runtime tables are all empty still takes one
@@ -143,33 +154,30 @@ static bool skl_validate(const uint8_t *data, uint32_t size, skl_parse_t *p) {
     p->joint_id = p->subtree_end + ((size_t)2U * p->joint_count);
     p->rest = p->joint_id + ((size_t)4U * p->joint_count);
 
-    /* Preorder plus nested ranges: a child sits inside its parent's range and
-     * each root's range ends where the next root starts. */
-    uint32_t last_root = UINT32_MAX;
+    /* Exact preorder: the parent of joint j must be the nearest earlier joint
+     * whose subtree range is still open at j. That single rule carries preorder
+     * parents, sibling contiguity, root chaining and the last root closing at
+     * joint_count. Each subtree is popped once, so the walk is O(J) amortized. */
+    uint32_t top = NT_SKELETAL_NO_PARENT;
     for (uint32_t j = 0; j < p->joint_count; ++j) {
         const uint16_t parent = rd_u16(p->parent + ((size_t)2U * j));
         const uint16_t end = rd_u16(p->subtree_end + ((size_t)2U * j));
-        if (parent != NT_SKELETAL_NO_PARENT && (uint32_t)parent >= j) {
-            NT_LOG_WARN("activate_skeleton: joint %u has parent %u, which is not preorder", j, (unsigned)parent);
-            return false;
-        }
         if ((uint32_t)end <= j || (uint32_t)end > p->joint_count) {
             NT_LOG_WARN("activate_skeleton: joint %u has subtree_end %u outside (%u, %u]", j, (unsigned)end, j, (unsigned)p->joint_count);
             return false;
         }
-        if (parent == NT_SKELETAL_NO_PARENT) {
-            if (last_root != UINT32_MAX && (uint32_t)rd_u16(p->subtree_end + ((size_t)2U * last_root)) != j) {
-                NT_LOG_WARN("activate_skeleton: root %u does not end where root %u starts", last_root, j);
-                return false;
-            }
-            last_root = j;
-        } else {
-            const uint16_t parent_end = rd_u16(p->subtree_end + ((size_t)2U * parent));
-            if (end > parent_end || j >= (uint32_t)parent_end) {
-                NT_LOG_WARN("activate_skeleton: joint %u escapes the subtree of its parent %u", j, (unsigned)parent);
-                return false;
-            }
+        while (top != NT_SKELETAL_NO_PARENT && (uint32_t)rd_u16(p->subtree_end + ((size_t)2U * top)) <= j) {
+            top = rd_u16(p->parent + ((size_t)2U * top));
         }
+        if ((uint32_t)parent != top) {
+            NT_LOG_WARN("activate_skeleton: joint %u names parent %u, but the innermost open subtree is %u", j, (unsigned)parent, top);
+            return false;
+        }
+        if (parent != NT_SKELETAL_NO_PARENT && end > rd_u16(p->subtree_end + ((size_t)2U * parent))) {
+            NT_LOG_WARN("activate_skeleton: joint %u escapes the subtree of its parent %u", j, (unsigned)parent);
+            return false;
+        }
+        top = j;
         float trs[10];
         rd_f32n(p->rest + ((size_t)40U * j), trs, 10);
         if (!skel_finite_n(trs, 10)) {
@@ -180,10 +188,6 @@ static bool skl_validate(const uint8_t *data, uint32_t size, skl_parse_t *p) {
             NT_LOG_WARN("activate_skeleton: joint %u has a non-unit rest rotation", j);
             return false;
         }
-    }
-    if (last_root == UINT32_MAX || (uint32_t)rd_u16(p->subtree_end + ((size_t)2U * last_root)) != p->joint_count) {
-        NT_LOG_WARN("activate_skeleton: the last root subtree does not end at joint_count");
-        return false;
     }
     return true;
 }
@@ -201,6 +205,9 @@ uint32_t nt_skeletal_assets_activate_skeleton(const uint8_t *data, uint32_t size
         ++slot;
     }
     if (slot == s_assets.max_skeletons) {
+        /* An OFF build has no assert to read, so the log is what explains the
+         * FAILED asset. */
+        NT_LOG_WARN("activate_skeleton: skeleton pool of %u is full", (unsigned)s_assets.max_skeletons);
         NT_ASSERT(false && "skeleton pool exhausted -- raise nt_skeletal_assets_desc_t.max_skeletons");
         return 0;
     }
@@ -248,6 +255,7 @@ void nt_skeletal_assets_deactivate_skeleton(uint32_t runtime_handle) {
     NT_ASSERT(s_assets.initialized && "nt_skeletal_assets_shutdown ran before the skeleton deactivator");
     NT_ASSERT(runtime_handle != 0 && runtime_handle <= s_assets.max_skeletons && "skeleton handle out of range");
     nt_skl_slot_t *slot = &s_assets.skeletons[runtime_handle - 1U];
+    NT_ASSERT(slot->mem != NULL && "skeleton slot is already free");
     free(slot->mem);
     slot->mem = NULL;
     slot->view = (nt_skeletal_skeleton_t){0};
@@ -327,6 +335,7 @@ uint32_t nt_skeletal_assets_activate_skin_binding(const uint8_t *data, uint32_t 
         ++slot;
     }
     if (slot == s_assets.max_bindings) {
+        NT_LOG_WARN("activate_skin_binding: skin binding pool of %u is full", (unsigned)s_assets.max_bindings);
         NT_ASSERT(false && "skin binding pool exhausted -- raise nt_skeletal_assets_desc_t.max_skin_bindings");
         return 0;
     }
@@ -366,6 +375,7 @@ void nt_skeletal_assets_deactivate_skin_binding(uint32_t runtime_handle) {
     NT_ASSERT(s_assets.initialized && "nt_skeletal_assets_shutdown ran before the skin binding deactivator");
     NT_ASSERT(runtime_handle != 0 && runtime_handle <= s_assets.max_bindings && "skin binding handle out of range");
     nt_skn_slot_t *slot = &s_assets.bindings[runtime_handle - 1U];
+    NT_ASSERT(slot->mem != NULL && "skin binding slot is already free");
     free(slot->mem);
     slot->mem = NULL;
     slot->view = (nt_skin_binding_t){0};
@@ -565,9 +575,11 @@ static bool anm_validate_constant(const anm_parse_t *p, uint32_t index, uint32_t
     return true;
 }
 
-/* The STPT track a STEP channel of comps components points at, with its keys. */
+/* The STPT track a STEP channel of comps components points at, with its keys.
+ * keys_seen is the running key total: tracks partition STPK in channel order,
+ * so every key is reached exactly once and no key is left unvalidated. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool anm_validate_step_track(const anm_parse_t *p, uint32_t index, uint32_t comps) {
+static bool anm_validate_step_track(const anm_parse_t *p, uint32_t index, uint32_t comps, uint32_t *keys_seen) {
     const uint8_t *track = p->data + p->sec[SEC_STPT].offset + ((size_t)8U * index);
     const uint32_t first = rd_u32(track);
     const uint32_t count = rd_u32(track + 4);
@@ -575,6 +587,12 @@ static bool anm_validate_step_track(const anm_parse_t *p, uint32_t index, uint32
         NT_LOG_WARN("activate_clip: step track %u has no keys", index);
         return false;
     }
+    if (first != *keys_seen) {
+        NT_LOG_WARN("activate_clip: step track %u starts at key %u, expected %u", index, first, *keys_seen);
+        return false;
+    }
+    /* Bounded before the keys are read; the partition total is only complete
+     * once every track has been walked. */
     if ((uint64_t)first + count > (uint64_t)p->sec[SEC_STPK].count) {
         NT_LOG_WARN("activate_clip: step track %u spans keys [%u, %u) outside STPK", index, first, first + count);
         return false;
@@ -604,6 +622,7 @@ static bool anm_validate_step_track(const anm_parse_t *p, uint32_t index, uint32
         NT_LOG_WARN("activate_clip: step track %u ends past the clip duration", index);
         return false;
     }
+    *keys_seen += count;
     return true;
 }
 
@@ -619,6 +638,7 @@ static bool anm_validate_channels(anm_parse_t *p) {
     uint32_t joint_const[3] = {0, 0, 0};
     uint32_t joint_steps = 0;
     uint32_t steps = 0;
+    uint32_t keys_seen = 0;
     for (uint32_t c = 0; c < p->channel_count; ++c) {
         const uint8_t *entry = p->data + chan->offset + ((size_t)4U * c);
         const uint8_t mode = entry[0];
@@ -665,7 +685,7 @@ static bool anm_validate_channels(anm_parse_t *p) {
                 NT_LOG_WARN("activate_clip: channel %u names step track %u of %u", c, index, p->sec[SEC_STPT].count);
                 return false;
             }
-            if (!anm_validate_step_track(p, index, comps)) {
+            if (!anm_validate_step_track(p, index, comps, &keys_seen)) {
                 return false;
             }
             steps++;
@@ -691,6 +711,10 @@ static bool anm_validate_channels(anm_parse_t *p) {
     }
     if (p->sec[SEC_STPT].count != steps) {
         NT_LOG_WARN("activate_clip: STPT holds %u tracks, but %u channels step", p->sec[SEC_STPT].count, steps);
+        return false;
+    }
+    if (keys_seen != p->sec[SEC_STPK].count) {
+        NT_LOG_WARN("activate_clip: step tracks cover %u of the %u STPK keys", keys_seen, p->sec[SEC_STPK].count);
         return false;
     }
 
@@ -937,6 +961,7 @@ uint32_t nt_skeletal_assets_activate_clip(const uint8_t *data, uint32_t size) {
         ++slot;
     }
     if (slot == s_assets.max_clips) {
+        NT_LOG_WARN("activate_clip: clip pool of %u is full", (unsigned)s_assets.max_clips);
         NT_ASSERT(false && "clip pool exhausted -- raise nt_skeletal_assets_desc_t.max_clips");
         return 0;
     }
@@ -966,6 +991,7 @@ void nt_skeletal_assets_deactivate_clip(uint32_t runtime_handle) {
     NT_ASSERT(s_assets.initialized && "nt_skeletal_assets_shutdown ran before the clip deactivator");
     NT_ASSERT(runtime_handle != 0 && runtime_handle <= s_assets.max_clips && "clip handle out of range");
     nt_anm_slot_t *slot = &s_assets.clips[runtime_handle - 1U];
+    NT_ASSERT(slot->mem != NULL && "clip slot is already free");
     free(slot->mem);
     slot->mem = NULL;
     slot->view = (nt_skeletal_clip_t){0};
@@ -1017,21 +1043,21 @@ void nt_skeletal_assets_shutdown(void) {
 const nt_skeletal_skeleton_t *nt_skeletal_assets_skeleton(nt_resource_t skeleton) {
     NT_ASSERT(nt_resource_get_asset_type(skeleton) == NT_ASSET_SKELETON && "nt_skeletal_assets_skeleton: handle is not a skeleton resource");
     const uint32_t handle = nt_resource_get(skeleton);
-    NT_ASSERT(handle != 0 && handle <= s_assets.max_skeletons && "nt_skeletal_assets_skeleton on an unready skeleton");
+    NT_ASSERT(handle != 0 && handle <= s_assets.max_skeletons && s_assets.skeletons[handle - 1U].mem != NULL && "nt_skeletal_assets_skeleton on an unready skeleton");
     return &s_assets.skeletons[handle - 1U].view;
 }
 
 const nt_skin_binding_t *nt_skeletal_assets_skin_binding(nt_resource_t binding) {
     NT_ASSERT(nt_resource_get_asset_type(binding) == NT_ASSET_SKIN_BINDING && "nt_skeletal_assets_skin_binding: handle is not a skin binding resource");
     const uint32_t handle = nt_resource_get(binding);
-    NT_ASSERT(handle != 0 && handle <= s_assets.max_bindings && "nt_skeletal_assets_skin_binding on an unready binding");
+    NT_ASSERT(handle != 0 && handle <= s_assets.max_bindings && s_assets.bindings[handle - 1U].mem != NULL && "nt_skeletal_assets_skin_binding on an unready binding");
     return &s_assets.bindings[handle - 1U].view;
 }
 
 const nt_skeletal_clip_t *nt_skeletal_assets_clip(nt_resource_t clip) {
     NT_ASSERT(nt_resource_get_asset_type(clip) == NT_ASSET_CLIP && "nt_skeletal_assets_clip: handle is not a clip resource");
     const uint32_t handle = nt_resource_get(clip);
-    NT_ASSERT(handle != 0 && handle <= s_assets.max_clips && "nt_skeletal_assets_clip on an unready clip");
+    NT_ASSERT(handle != 0 && handle <= s_assets.max_clips && s_assets.clips[handle - 1U].mem != NULL && "nt_skeletal_assets_clip on an unready clip");
     return &s_assets.clips[handle - 1U].view;
 }
 // #endregion
