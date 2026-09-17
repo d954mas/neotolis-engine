@@ -94,6 +94,9 @@ static uint64_t fixture_rig_id(void) {
 }
 
 #define SKIN_PALETTE 3
+/* Two different exact values, so a swapped pair of header floats fails here. */
+#define SKIN_REACH 1.25F
+#define SKIN_ANY_POSE_RADIUS 3.5F
 
 static const uint16_t k_remap[SKIN_PALETTE] = {0, 2, 1};
 
@@ -108,6 +111,8 @@ static nt_skin_binding_t fixture_binding(void) {
         .rig_compat_id = (nt_hash64_t){.value = fixture_rig_id()},
         .remap = k_remap,
         .inverse_bind = k_inverse_bind,
+        .reach = SKIN_REACH,
+        .any_pose_radius = SKIN_ANY_POSE_RADIUS,
         .palette_count = SKIN_PALETTE,
     };
 }
@@ -349,6 +354,9 @@ void test_skin_binding_round_trip(void) {
     const nt_skin_binding_t *view = nt_skeletal_assets_skin_binding(publish_handle("rigs/hero.nskn", NT_ASSET_SKIN_BINDING, handle));
     TEST_ASSERT_EQUAL_UINT16(SKIN_PALETTE, view->palette_count);
     TEST_ASSERT_EQUAL_HEX64(fixture_rig_id(), view->rig_compat_id.value);
+    const float k_radii[2] = {SKIN_REACH, SKIN_ANY_POSE_RADIUS};
+    ASSERT_BITS_EQUAL(k_radii, &view->reach, 1);
+    ASSERT_BITS_EQUAL(&k_radii[1], &view->any_pose_radius, 1);
     for (uint16_t p = 0; p < SKIN_PALETTE; ++p) {
         TEST_ASSERT_EQUAL_UINT16(k_remap[p], view->remap[p]);
         ASSERT_BITS_EQUAL(&k_inverse_bind[p].r[0][0], &view->inverse_bind[p].r[0][0], 12);
@@ -667,6 +675,11 @@ void test_skin_binding_rejections(void) {
     memcpy(buf, valid, size);
     wr_u16(buf + 6, 0U);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "palette_count 0");
+
+    /* The pre-bounds payload of the same palette is exactly the header short of
+     * this one, and a pack built before the bounds must not activate. */
+    memcpy(buf, valid, size);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, 16U + (50U * SKIN_PALETTE)), "the payload size NSKN had before reach and any_pose_radius");
 
     memcpy(buf, valid, size);
     const uint32_t handle = nt_skeletal_assets_activate_skin_binding(buf, size);

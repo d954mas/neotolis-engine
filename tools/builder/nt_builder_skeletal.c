@@ -130,6 +130,10 @@ void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **
     for (uint32_t p = 0; p < palette_count; p++) {
         NT_BUILD_ASSERT(skel_finite_n(&binding->inverse_bind[p].r[0][0], 12) && "inverse bind matrix is not finite");
     }
+    /* Both radii bound a sphere; a NaN or a negative one would cull the
+     * character away instead of drawing it. */
+    NT_BUILD_ASSERT(skel_finite(binding->reach) && binding->reach >= 0.0F && "binding reach must be finite and non-negative");
+    NT_BUILD_ASSERT(skel_finite(binding->any_pose_radius) && binding->any_pose_radius >= 0.0F && "binding any_pose_radius must be finite and non-negative");
 
     const uint32_t size = (uint32_t)NT_SKN_SIZE(palette_count); /* fits: palette_count is u16 */
     uint8_t *payload = (uint8_t *)malloc(size);
@@ -140,6 +144,8 @@ void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **
         .version = NT_SKELETAL_FORMAT_VERSION,
         .palette_count = (uint16_t)palette_count,
         .rig_compat_id = binding->rig_compat_id.value,
+        .reach = binding->reach,
+        .any_pose_radius = binding->any_pose_radius,
     };
     uint8_t *w = payload;
     memcpy(w, &header, sizeof(header));

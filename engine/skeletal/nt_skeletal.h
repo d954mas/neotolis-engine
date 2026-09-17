@@ -162,7 +162,9 @@ void nt_skeletal_socket(const float world[16], const nt_skeletal_mat34_t *g_join
 /*
  * A binding describes how one mesh's vertices attach to a skeleton: a palette of
  * joints the vertices address by palette index, and one inverse bind matrix per
- * palette entry taking mesh space to that joint's space at the bind pose. Every
+ * palette entry taking mesh space to that joint's space at the bind pose. Mesh
+ * space is the primitive's vertex space; the skinned mesh node's transform is
+ * ignored, which is the glTF rule for a skinned primitive. Every
  * mesh exported from the same skin shares one binding, and a binding is only
  * valid with the skeleton whose rig_compat_id it carries.
  *
@@ -177,6 +179,8 @@ typedef struct {
     nt_hash64_t rig_compat_id;
     const uint16_t *remap;                   /* palette entry p -> skeleton joint */
     const nt_skeletal_mat34_t *inverse_bind; /* mesh space -> joint space at the bind pose, per palette entry */
+    float reach;                             /* skeleton space: farthest a bound vertex sits from its joint (§3.4) */
+    float any_pose_radius;                   /* skeleton space: bound for composed or edited poses (§14) */
     uint16_t palette_count;
 } nt_skin_binding_t;
 

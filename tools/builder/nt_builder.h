@@ -595,8 +595,11 @@ void nt_builder_free_rig(nt_builder_rig_t *rig);
  * skel->rig_compat_id is ignored. Joint ids must be unique. */
 nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
 
-/* Inverse binds are mesh space -> joint space at the bind pose, in glTF
- * mesh-node space. remap is not bounded against a skeleton here. */
+/* Inverse binds are mesh space -> joint space at the bind pose, where mesh space
+ * is the primitive's vertex space and the skinned mesh node's transform is
+ * ignored (the glTF rule). reach and any_pose_radius are skeleton-space bounds
+ * and must be finite and non-negative. remap is not bounded against a skeleton
+ * here. */
 void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
 
 /* One channel of a clip. Channel c of nt_builder_clip_t::channels addresses

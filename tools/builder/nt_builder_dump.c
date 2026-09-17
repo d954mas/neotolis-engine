@@ -316,8 +316,8 @@ static void print_skin_binding_details(const uint8_t *asset_data, uint32_t asset
     if (header.magic != NT_SKN_MAGIC) {
         return;
     }
-    NT_LOG_INFO("    NSKN v%u palette:%u rig:0x%016llX bytes:%u (expect %u)", header.version, header.palette_count, (unsigned long long)header.rig_compat_id, asset_size,
-                (unsigned)NT_SKN_SIZE(header.palette_count));
+    NT_LOG_INFO("    NSKN v%u palette:%u rig:0x%016llX reach:%.4f any_pose:%.4f bytes:%u (expect %u)", header.version, header.palette_count, (unsigned long long)header.rig_compat_id,
+                (double)header.reach, (double)header.any_pose_radius, asset_size, (unsigned)NT_SKN_SIZE(header.palette_count));
 }
 
 static void print_clip_details(const uint8_t *asset_data, uint32_t asset_size) {
