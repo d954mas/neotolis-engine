@@ -99,6 +99,9 @@ enum {
     SEC_SCALE9,
     SEC_TIMES2,
     SEC_TRANS2,
+    SEC_FAR_POSITION,
+    SEC_FAR_JOINTS,
+    SEC_FAR_WEIGHTS,
     SEC_COUNT
 };
 
@@ -141,8 +144,6 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     const float mesh_q[4] = {0.0F, 0.38268343F, 0.0F, 0.92387953F};
     const float mesh_s[3] = {1.5F, 1.5F, 1.5F};
     const float object_t[3] = {0.0F, 0.0F, 5.0F};
-    const float object_q[4] = {0.0F, 0.0F, 0.0F, 1.0F};
-    const float object_s[3] = {1.0F, 1.0F, 1.0F};
     // #endregion
 
     // #region vertex data
@@ -178,6 +179,25 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         weights0[12] = 0.0F;
         weights0[13] = 0.0F;
     }
+    if (o.weights_half) {
+        weights0[12] = 0.5F;
+        weights0[13] = 0.5F;
+    }
+    /* Only the accessor type matters for the bad-type knob; the bytes are the
+     * weights scaled, which a normalized reader would accept. Built only for
+     * that knob, since a negative or NaN weight has no byte. */
+    uint8_t weights0_u8[RIGGED_GLB_VERTEX_COUNT * 4] = {0};
+    if (o.weights_bad_type) {
+        for (uint32_t i = 0; i < RIGGED_GLB_VERTEX_COUNT * 4; i++) {
+            weights0_u8[i] = (uint8_t)(weights0[i] * 255.0F);
+        }
+    }
+
+    /* The far triangle: one vertex ten units out on X, bound wholly to palette
+     * entry 0; the other two sit at the origin on entries 1 and 2. */
+    const float far_positions[RIGGED_GLB_FAR_VERTEX_COUNT * 3] = {10.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+    const uint8_t far_joints[RIGGED_GLB_FAR_VERTEX_COUNT * 4] = {0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0};
+    const float far_weights[RIGGED_GLB_FAR_VERTEX_COUNT * 4] = {1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F};
 
     float joints0_f32[RIGGED_GLB_VERTEX_COUNT * 4];
     float joints1_f32[RIGGED_GLB_VERTEX_COUNT * 4];
@@ -203,6 +223,9 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         m[12] = -((float)p + 1.0F);
         m[13] = 0.5F * (float)p;
         m[14] = -1.0F;
+    }
+    if (o.ibm_nan) {
+        ibm[5] = NAN;
     }
 
     const float times3[3] = {0.0F, 0.25F, 0.5F};
@@ -233,7 +256,11 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         sec[SEC_JOINTS0] = (rigged_sec_t){joints0, vertex_count * 4U};
         sec[SEC_JOINTS1] = (rigged_sec_t){joints1, vertex_count * 4U};
     }
-    sec[SEC_WEIGHTS0] = (rigged_sec_t){weights0, vertex_count * 4U * (uint32_t)sizeof(float)};
+    if (o.weights_bad_type) {
+        sec[SEC_WEIGHTS0] = (rigged_sec_t){weights0_u8, vertex_count * 4U};
+    } else {
+        sec[SEC_WEIGHTS0] = (rigged_sec_t){weights0, vertex_count * 4U * (uint32_t)sizeof(float)};
+    }
     sec[SEC_WEIGHTS1] = (rigged_sec_t){weights1, vertex_count * 4U * (uint32_t)sizeof(float)};
     sec[SEC_INDICES] = (rigged_sec_t){indices, (uint32_t)sizeof(indices)};
     sec[SEC_IBM] = (rigged_sec_t){ibm, joint_count * 16U * (uint32_t)sizeof(float)};
@@ -243,6 +270,9 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     sec[SEC_SCALE9] = (rigged_sec_t){scale9, (uint32_t)sizeof(scale9)};
     sec[SEC_TIMES2] = (rigged_sec_t){times2, (uint32_t)sizeof(times2)};
     sec[SEC_TRANS2] = (rigged_sec_t){trans2, (uint32_t)sizeof(trans2)};
+    sec[SEC_FAR_POSITION] = (rigged_sec_t){far_positions, (uint32_t)sizeof(far_positions)};
+    sec[SEC_FAR_JOINTS] = (rigged_sec_t){far_joints, (uint32_t)sizeof(far_joints)};
+    sec[SEC_FAR_WEIGHTS] = (rigged_sec_t){far_weights, (uint32_t)sizeof(far_weights)};
 
     uint32_t offset[SEC_COUNT];
     uint32_t bin_size = 0;
@@ -290,14 +320,15 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, "{\"name\":\"MeshNode\",");
     jb_trs(&jb, mesh_t, mesh_q, mesh_s);
     jb_addf(&jb, ",\"mesh\":0,\"skin\":%u},", mesh_skin);
-    jb_addf(&jb, "{\"name\":\"Object\",");
-    jb_trs(&jb, object_t, object_q, object_s);
+    jb_addf(&jb, "{\"name\":\"Object\",\"translation\":");
+    jb_floats(&jb, object_t, 3);
     jb_addf(&jb, "}],");
 
+    const char *second_set = o.nonconsecutive_sets ? "2" : "1";
     jb_addf(&jb, "\"meshes\":[{\"name\":\"Quad\",\"primitives\":[{\"attributes\":{");
-    jb_addf(&jb, "\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2,\"JOINTS_0\":3,\"WEIGHTS_0\":5,\"JOINTS_1\":4");
+    jb_addf(&jb, "\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2,\"JOINTS_0\":3,\"WEIGHTS_0\":5,\"JOINTS_%s\":4", second_set);
     if (!o.unpaired_sets) {
-        jb_addf(&jb, ",\"WEIGHTS_1\":6");
+        jb_addf(&jb, ",\"WEIGHTS_%s\":6", second_set);
     }
     jb_addf(&jb, "}");
     if (!o.no_indices) {
@@ -306,13 +337,17 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     if (o.morph_target) {
         jb_addf(&jb, ",\"targets\":[{\"POSITION\":0}]");
     }
-    jb_addf(&jb, "}]}],");
+    jb_addf(&jb, "}");
+    if (o.second_primitive_far) {
+        jb_addf(&jb, ",{\"attributes\":{\"POSITION\":15,\"JOINTS_0\":16,\"WEIGHTS_0\":17}}");
+    }
+    jb_addf(&jb, "]}],");
 
     jb_addf(&jb, "\"skins\":[{\"name\":\"RigSkin\",");
     if (!o.no_ibm) {
         jb_addf(&jb, "\"inverseBindMatrices\":8,");
     }
-    jb_addf(&jb, "\"joints\":[2,3,4,5,6%s]}", joint_count > RIGGED_GLB_SKIN_JOINT_COUNT ? ",8" : "");
+    jb_addf(&jb, "\"joints\":[4,6,2,3,5%s]}", joint_count > RIGGED_GLB_SKIN_JOINT_COUNT ? ",8" : "");
     if (o.mesh_other_skin) {
         jb_addf(&jb, ",{\"name\":\"OtherSkin\",\"joints\":[2,3]}");
     }
@@ -336,16 +371,19 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, "{\"bufferView\":2,\"componentType\":5126,\"count\":%u,\"type\":\"VEC2\"},", vertex_count);
     jb_addf(&jb, "{\"bufferView\":3,\"componentType\":%u,\"count\":%u,\"type\":\"VEC4\"},", joints_ctype, vertex_count);
     jb_addf(&jb, "{\"bufferView\":4,\"componentType\":%u,\"count\":%u,\"type\":\"VEC4\"},", joints_ctype, vertex_count);
-    jb_addf(&jb, "{\"bufferView\":5,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"},", vertex_count);
+    jb_addf(&jb, "{\"bufferView\":5,\"componentType\":%u,\"count\":%u,\"type\":\"VEC4\"},", o.weights_bad_type ? 5121U : 5126U, vertex_count);
     jb_addf(&jb, "{\"bufferView\":6,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"},", vertex_count);
     jb_addf(&jb, "{\"bufferView\":7,\"componentType\":5123,\"count\":6,\"type\":\"SCALAR\"},");
-    jb_addf(&jb, "{\"bufferView\":8,\"componentType\":5126,\"count\":%u,\"type\":\"MAT4\"},", o.ibm_short ? joint_count - 1U : joint_count);
+    jb_addf(&jb, "{\"bufferView\":8,\"componentType\":5126,\"count\":%u,\"type\":\"%s\"},", o.ibm_short ? joint_count - 1U : joint_count, o.ibm_bad_type ? "VEC4" : "MAT4");
     jb_addf(&jb, "{\"bufferView\":9,\"componentType\":5126,\"count\":3,\"type\":\"SCALAR\",\"min\":[0],\"max\":[0.5]},");
     jb_addf(&jb, "{\"bufferView\":10,\"componentType\":5126,\"count\":3,\"type\":\"VEC4\"},");
     jb_addf(&jb, "{\"bufferView\":11,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},");
     jb_addf(&jb, "{\"bufferView\":12,\"componentType\":5126,\"count\":9,\"type\":\"VEC3\"},");
     jb_addf(&jb, "{\"bufferView\":13,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\",\"min\":[0],\"max\":[1.5]},");
-    jb_addf(&jb, "{\"bufferView\":14,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"}],");
+    jb_addf(&jb, "{\"bufferView\":14,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"},");
+    jb_addf(&jb, "{\"bufferView\":15,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[10,0,0]},", (uint32_t)RIGGED_GLB_FAR_VERTEX_COUNT);
+    jb_addf(&jb, "{\"bufferView\":16,\"componentType\":5121,\"count\":%u,\"type\":\"VEC4\"},", (uint32_t)RIGGED_GLB_FAR_VERTEX_COUNT);
+    jb_addf(&jb, "{\"bufferView\":17,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"}],", (uint32_t)RIGGED_GLB_FAR_VERTEX_COUNT);
 
     jb_addf(&jb, "\"bufferViews\":[");
     for (uint32_t i = 0; i < SEC_COUNT; i++) {
