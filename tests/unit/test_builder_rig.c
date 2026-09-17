@@ -730,8 +730,9 @@ static void skin_expected_weights(uint32_t vertex, float out[4]) {
     }
 }
 
-/* The drop tolerance that admits the whole fixture: vertex 1 loses 0.10. */
-#define SKIN_FIXTURE_TOLERANCE 0.1F
+/* The drop tolerance that admits the whole fixture: vertex 1 loses 0.10, so the
+ * margin keeps the gate's rounding out of the happy-path tests. */
+#define SKIN_FIXTURE_TOLERANCE 0.15F
 
 void test_skinned_mesh_keeps_the_four_heaviest_influences(void) {
     NtStreamLayout layout[3];
