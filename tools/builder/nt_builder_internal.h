@@ -282,8 +282,38 @@ static inline void nt_builder_narrow_stream_floats(float *data, uint32_t vertex_
         }
     }
 }
+/* What the skinned decode path needs about the rig: how many palette entries a
+ * joint lane may address, and how much weight mass one vertex may lose to the
+ * top-four reduction. */
+typedef struct {
+    uint16_t palette_count;
+    float drop_tolerance;
+} nt_builder_skin_ctx_t;
+
+struct cgltf_primitive;
+
 nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
                                                nt_tangent_mode_t tangent_mode, uint8_t **out_data, uint32_t *out_size);
+/* Same decode with the two skin streams filled from every JOINTS_n/WEIGHTS_n set
+ * of the primitive; skin == NULL is the unskinned entry above. */
+nt_build_result_t nt_builder_decode_scene_mesh_skinned(const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
+                                                       nt_tangent_mode_t tangent_mode, const nt_builder_skin_ctx_t *skin, uint8_t **out_data, uint32_t *out_size);
+
+/* Every JOINTS_n/WEIGHTS_n pair of one primitive, unpacked to floats and
+ * validated as a set (paired, consecutive, one element per vertex, the glTF
+ * component types). Both arrays hold set_count * vertex_count * 4 floats,
+ * set-major; a joint lane is an exact integer. label prefixes diagnostics.
+ * Shared by the skinned mesh export and the binding's reach scan, which read the
+ * same influences with and without the top-four reduction. */
+typedef struct {
+    float *joints;
+    float *weights;
+    uint32_t set_count;
+    uint32_t vertex_count;
+} nt_builder_influences_t;
+
+void nt_builder_read_influences(const struct cgltf_primitive *prim, const char *label, uint32_t vertex_count, nt_builder_influences_t *out);
+void nt_builder_free_influences(nt_builder_influences_t *inf);
 
 /* Font decode: TTF -> final NT_ASSET_FONT binary (like mesh path).
  * target_units_per_em: 0 = natural UPM; non-zero rescales metrics/contours to that UPM. */

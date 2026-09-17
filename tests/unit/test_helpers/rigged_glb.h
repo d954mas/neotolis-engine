@@ -101,7 +101,7 @@ typedef struct {
     bool zero_weights;       /* v3 weights sum to zero */
     bool joints_float_type;  /* JOINTS accessors become FLOAT */
     bool morph_target;       /* the skinned primitive gains a morph target */
-    bool no_indices;         /* the primitive drops its index accessor */
+    bool no_indices;         /* the primitive drops its index accessor and keeps v0..v2, one triangle */
     bool mesh_other_skin;    /* MeshNode uses a second skin; skin 0 has no mesh */
     bool no_ibm;             /* skin 0 drops inverseBindMatrices */
 } rigged_glb_opts_t;

@@ -81,6 +81,41 @@ static uint32_t f32_bits(float v) {
 }
 #define ASSERT_F32(expected, actual) TEST_ASSERT_EQUAL_HEX32(f32_bits(expected), f32_bits(actual))
 
+/* The payload of the pack's first asset of a type, so a test reads the bytes
+ * the build shipped rather than an encoder's return value. Caller frees. */
+static uint8_t *read_pack_asset(const char *pack_path, nt_asset_type_t type, uint32_t *out_size) {
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    TEST_ASSERT_EQUAL(0, fseek(f, 0, SEEK_END));
+    const long file_size = ftell(f);
+    TEST_ASSERT_TRUE(file_size > (long)sizeof(NtPackHeader));
+    TEST_ASSERT_EQUAL(0, fseek(f, 0, SEEK_SET));
+    uint8_t *file = (uint8_t *)malloc((size_t)file_size);
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL((size_t)file_size, fread(file, 1, (size_t)file_size, f));
+    (void)fclose(f);
+
+    NtPackHeader hdr;
+    memcpy(&hdr, file, sizeof(hdr));
+    for (uint16_t i = 0; i < hdr.asset_count; i++) {
+        NtAssetEntry entry;
+        memcpy(&entry, file + sizeof(NtPackHeader) + ((size_t)i * sizeof(NtAssetEntry)), sizeof(entry));
+        if (entry.asset_type != (uint8_t)type) {
+            continue;
+        }
+        TEST_ASSERT_TRUE((size_t)entry.offset + entry.size <= (size_t)file_size);
+        uint8_t *payload = (uint8_t *)malloc(entry.size);
+        TEST_ASSERT_NOT_NULL(payload);
+        memcpy(payload, file + entry.offset, entry.size);
+        free(file);
+        *out_size = entry.size;
+        return payload;
+    }
+    free(file);
+    TEST_FAIL_MESSAGE("the pack holds no asset of the requested type");
+    return NULL;
+}
+
 // #region tests
 void test_rigged_fixture_parses(void) {
     rigged_glb_write(RIG_GLB, NULL);
@@ -592,6 +627,333 @@ void test_import_asserts_on_an_object_node_inside_the_rig(void) {
 }
 // #endregion
 
+// #region skinned mesh export
+/* The layout under test: POSITION keeps the primitive a mesh, and the two skin
+ * streams carry the reduced lanes. Offsets and stride satisfy the WebGL2
+ * alignment rules for every type combination used below. */
+static void skin_layout(NtStreamLayout out[3], nt_stream_type_t joints_type, nt_stream_type_t weights_type, bool weights_normalized) {
+    out[0] = (NtStreamLayout){"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0};
+    out[1] = (NtStreamLayout){"joints", "JOINTS", joints_type, 4, false, 0};
+    out[2] = (NtStreamLayout){"weights", "WEIGHTS", weights_type, 4, weights_normalized, 0};
+}
+
+static uint8_t *skin_decode(const rigged_glb_opts_t *opts, const NtStreamLayout *layout, float drop_tolerance, uint16_t palette_count) {
+    rigged_glb_write(RIG_GLB, opts);
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
+    const nt_builder_skin_ctx_t skin = {.palette_count = palette_count, .drop_tolerance = drop_tolerance};
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_decode_scene_mesh_skinned(&scene, 0, 0, layout, 3, NT_TANGENT_AUTO, &skin, &data, &size));
+    TEST_ASSERT_NOT_NULL(data);
+    nt_builder_free_glb_scene(&scene);
+    return data;
+}
+
+/* Same decode without the success expectation, so a death test can wrap it. */
+static void skin_try_decode(const nt_glb_scene_t *scene, const NtStreamLayout *layout, float drop_tolerance, uint16_t palette_count) {
+    const nt_builder_skin_ctx_t skin = {.palette_count = palette_count, .drop_tolerance = drop_tolerance};
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+    (void)nt_builder_decode_scene_mesh_skinned(scene, 0, 0, layout, 3, NT_TANGENT_AUTO, &skin, &data, &size);
+    free(data);
+}
+
+/* One defect knob, one assert text: the fixture is written, parsed and decoded
+ * with the ordinary UINT8/UINT8 layout. */
+#define EXPECT_SKIN_ASSERT(field, expected)                                                                                                                                                            \
+    do {                                                                                                                                                                                               \
+        rigged_glb_opts_t knob_opts = {0};                                                                                                                                                             \
+        knob_opts.field = true;                                                                                                                                                                        \
+        rigged_glb_write(RIG_GLB, &knob_opts);                                                                                                                                                         \
+        nt_glb_scene_t knob_scene;                                                                                                                                                                     \
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&knob_scene, RIG_GLB));                                                                                                              \
+        NtStreamLayout knob_layout[3];                                                                                                                                                                 \
+        skin_layout(knob_layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);                                                                                                                              \
+        EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&knob_scene, knob_layout, 0.1F, RIGGED_GLB_SKIN_JOINT_COUNT), expected);                                                                             \
+        nt_builder_free_glb_scene(&knob_scene);                                                                                                                                                        \
+    } while (0)
+
+static NtMeshAssetHeader mesh_header(const uint8_t *data) {
+    NtMeshAssetHeader hdr;
+    memcpy(&hdr, data, sizeof(hdr));
+    return hdr;
+}
+
+/* Plane s of the SOA vertex block: whole attributes, never split per component. */
+static const uint8_t *mesh_plane(const uint8_t *data, uint32_t stream_count, uint32_t stream) {
+    const NtMeshAssetHeader hdr = mesh_header(data);
+    const uint8_t *plane = data + sizeof(NtMeshAssetHeader) + ((size_t)stream_count * sizeof(NtStreamDesc));
+    for (uint32_t s = 0; s < stream; s++) {
+        NtStreamDesc desc;
+        memcpy(&desc, data + sizeof(NtMeshAssetHeader) + ((size_t)s * sizeof(NtStreamDesc)), sizeof(desc));
+        plane += (size_t)hdr.vertex_count * nt_stream_type_size(desc.type) * desc.count;
+    }
+    return plane;
+}
+
+/* The wire is byte-addressed, so lanes are copied out rather than aliased. */
+static float mesh_lane_f32(const uint8_t *plane, uint32_t lane) {
+    float v = 0.0F;
+    memcpy(&v, plane + ((size_t)lane * sizeof(float)), sizeof(v));
+    return v;
+}
+
+static uint16_t mesh_lane_u16(const uint8_t *plane, uint32_t lane) {
+    uint16_t v = 0;
+    memcpy(&v, plane + ((size_t)lane * sizeof(uint16_t)), sizeof(v));
+    return v;
+}
+
+/* The four lanes the reduction must keep, and their source weights, as
+ * rigged_glb.h documents them. Vertex 1 is the tie: three influences share 0.10
+ * and the two lowest joint indices win. */
+static const uint32_t k_kept_joint[RIGGED_GLB_VERTEX_COUNT][4] = {{0, 1, 2, 3}, {1, 0, 2, 3}, {0, 1, 2, 3}, {0, 1, 0, 0}};
+static const float k_kept_weight[RIGGED_GLB_VERTEX_COUNT][4] = {
+    {0.40F, 0.30F, 0.20F, 0.09F},
+    {0.40F, 0.30F, 0.10F, 0.10F},
+    {0.40F, 0.30F, 0.15F, 0.10F},
+    {0.75F, 0.25F, 0.0F, 0.0F},
+};
+
+/* The kept lanes renormalized to a unit sum, computed here from the fixture's
+ * numbers rather than from the builder's. */
+static void skin_expected_weights(uint32_t vertex, float out[4]) {
+    double sum = 0.0;
+    for (uint32_t c = 0; c < 4U; c++) {
+        sum += (double)k_kept_weight[vertex][c];
+    }
+    for (uint32_t c = 0; c < 4U; c++) {
+        out[c] = (float)((double)k_kept_weight[vertex][c] / sum);
+    }
+}
+
+/* The drop tolerance that admits the whole fixture: vertex 1 loses 0.10. */
+#define SKIN_FIXTURE_TOLERANCE 0.1F
+
+void test_skinned_mesh_keeps_the_four_heaviest_influences(void) {
+    NtStreamLayout layout[3];
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+    uint8_t *data = skin_decode(NULL, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT);
+
+    const NtMeshAssetHeader hdr = mesh_header(data);
+    TEST_ASSERT_EQUAL_UINT32(RIGGED_GLB_VERTEX_COUNT, hdr.vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(RIGGED_GLB_INDEX_COUNT, hdr.index_count);
+
+    const uint8_t *joints = mesh_plane(data, 3, 1);
+    const uint8_t *weights = mesh_plane(data, 3, 2);
+    for (uint32_t v = 0; v < RIGGED_GLB_VERTEX_COUNT; v++) {
+        float expected[4];
+        skin_expected_weights(v, expected);
+        uint32_t sum = 0;
+        for (uint32_t c = 0; c < 4U; c++) {
+            TEST_ASSERT_EQUAL_UINT8(k_kept_joint[v][c], joints[(v * 4U) + c]);
+            /* Largest-remainder rounding stays within one step of the exact
+             * lane; the sum below is what makes the choice of step visible. */
+            const int32_t stored = (int32_t)weights[(v * 4U) + c];
+            const int32_t ideal = (int32_t)((expected[c] * 255.0F) + 0.5F);
+            TEST_ASSERT_INT_WITHIN(1, ideal, stored);
+            sum += (uint32_t)stored;
+        }
+        TEST_ASSERT_EQUAL_UINT32(255, sum);
+    }
+
+    free(data);
+}
+
+void test_skinned_mesh_float32_weights_are_the_renormalized_values(void) {
+    NtStreamLayout layout[3];
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_FLOAT32, false);
+    uint8_t *data = skin_decode(NULL, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT);
+
+    const uint8_t *weights = mesh_plane(data, 3, 2);
+    for (uint32_t v = 0; v < RIGGED_GLB_VERTEX_COUNT; v++) {
+        float expected[4];
+        skin_expected_weights(v, expected);
+        for (uint32_t c = 0; c < 4U; c++) {
+            const float d = mesh_lane_f32(weights, (v * 4U) + c) - expected[c];
+            TEST_ASSERT_TRUE(((d < 0.0F) ? -d : d) <= 1e-6F);
+        }
+    }
+    /* Vertex 3 drops nothing and its two weights already sum to one, so the
+     * float path stores exactly what the glTF carried. */
+    ASSERT_F32(0.75F, mesh_lane_f32(weights, 12));
+    ASSERT_F32(0.25F, mesh_lane_f32(weights, 13));
+    ASSERT_F32(0.0F, mesh_lane_f32(weights, 14));
+    ASSERT_F32(0.0F, mesh_lane_f32(weights, 15));
+
+    free(data);
+}
+
+void test_skinned_mesh_float16_weights_round_trip(void) {
+    NtStreamLayout layout[3];
+    skin_layout(layout, NT_STREAM_UINT16, NT_STREAM_FLOAT16, false);
+    uint8_t *data = skin_decode(NULL, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT);
+
+    const uint8_t *joints = mesh_plane(data, 3, 1);
+    const uint8_t *weights = mesh_plane(data, 3, 2);
+    for (uint32_t v = 0; v < RIGGED_GLB_VERTEX_COUNT; v++) {
+        float expected[4];
+        skin_expected_weights(v, expected);
+        for (uint32_t c = 0; c < 4U; c++) {
+            TEST_ASSERT_EQUAL_UINT16(k_kept_joint[v][c], mesh_lane_u16(joints, (v * 4U) + c));
+            const float d = nt_f16_to_f32(mesh_lane_u16(weights, (v * 4U) + c)) - expected[c];
+            /* binary16 carries 11 significant bits over [0.5, 1]. */
+            TEST_ASSERT_TRUE(((d < 0.0F) ? -d : d) <= 1.0F / 2048.0F);
+        }
+    }
+
+    free(data);
+}
+
+void test_skinned_mesh_rejects_a_drop_above_the_tolerance(void) {
+    rigged_glb_write(RIG_GLB, NULL);
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
+    NtStreamLayout layout[3];
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+
+    const nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
+    ASSERT_F32(0.02F, profile.skin_drop_tolerance);
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, profile.skin_drop_tolerance, RIGGED_GLB_SKIN_JOINT_COUNT), "drops more weight than the tolerance allows");
+
+    nt_builder_free_glb_scene(&scene);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_skinned_mesh_rejects_an_invalid_skin_layout(void) {
+    rigged_glb_write(RIG_GLB, NULL);
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
+
+    NtStreamLayout layout[3];
+
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+    layout[1].normalized = true;
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT), "JOINTS stream has an invalid type");
+
+    skin_layout(layout, NT_STREAM_FLOAT32, NT_STREAM_UINT8, true);
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT), "JOINTS stream has an invalid type");
+
+    /* A palette of 300 entries needs UINT16 lanes, whatever the fixture's own
+     * palette size is; the ctx is what the export would carry. */
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, SKIN_FIXTURE_TOLERANCE, 300), "cannot address this palette");
+
+    /* Three FLOAT32 weight lanes keep the stride WebGL2-legal, so the component
+     * count is the only rule left to fire. */
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_FLOAT32, false);
+    layout[2].count = 3;
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT), "must declare 4 components");
+
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, false);
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT), "WEIGHTS stream has an invalid type");
+
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_INT16, true);
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT), "WEIGHTS stream has an invalid type");
+
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_skinned_mesh_rejects_a_negative_weight(void) { EXPECT_SKIN_ASSERT(negative_weight, "influence weight is negative"); }
+
+void test_skinned_mesh_rejects_a_nan_weight(void) { EXPECT_SKIN_ASSERT(nan_weight, "influence weight is not finite"); }
+
+void test_skinned_mesh_rejects_a_vertex_without_weight(void) { EXPECT_SKIN_ASSERT(zero_weights, "sum to zero"); }
+
+void test_skinned_mesh_rejects_a_repeated_joint(void) { EXPECT_SKIN_ASSERT(duplicate_joint, "weights one joint twice"); }
+
+void test_skinned_mesh_rejects_an_index_past_the_palette(void) { EXPECT_SKIN_ASSERT(index_ge_palette, "outside the palette"); }
+
+void test_skinned_mesh_rejects_an_unpaired_set(void) { EXPECT_SKIN_ASSERT(unpaired_sets, "unpaired JOINTS_n/WEIGHTS_n set"); }
+
+void test_skinned_mesh_rejects_float_joint_indices(void) { EXPECT_SKIN_ASSERT(joints_float_type, "JOINTS accessor has an invalid type"); }
+
+void test_skinned_mesh_rejects_a_morph_target(void) { EXPECT_SKIN_ASSERT(morph_target, "morph targets"); }
+
+void test_skinned_mesh_accepts_a_primitive_without_indices(void) {
+    rigged_glb_opts_t opts = {0};
+    opts.no_indices = true;
+    NtStreamLayout layout[3];
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+    uint8_t *data = skin_decode(&opts, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT);
+
+    const NtMeshAssetHeader hdr = mesh_header(data);
+    TEST_ASSERT_EQUAL_UINT32(3, hdr.vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(0, hdr.index_count);
+
+    /* The reduction ran over the same vertices it runs over when indices exist. */
+    const uint8_t *joints = mesh_plane(data, 3, 1);
+    for (uint32_t v = 0; v < 3U; v++) {
+        for (uint32_t c = 0; c < 4U; c++) {
+            TEST_ASSERT_EQUAL_UINT8(k_kept_joint[v][c], joints[(v * 4U) + c]);
+        }
+    }
+
+    free(data);
+}
+
+void test_add_scene_skinned_mesh_ships_the_decoded_bytes(void) {
+    nt_glb_scene_t scene;
+    nt_builder_rig_t rig;
+    import_fixture_rig(&scene, &rig);
+
+    NtStreamLayout layout[3];
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+    const nt_mesh_opts_t opts = {.layout = layout, .stream_count = 3, .tangent_mode = NT_TANGENT_AUTO};
+    nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
+    profile.skin_drop_tolerance = SKIN_FIXTURE_TOLERANCE;
+
+    (void)remove(PACK_PATH);
+    NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_scene_skinned_mesh(ctx, &scene, 0, 0, &rig, &profile, "meshes/quad.mesh", &opts);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    uint32_t size = 0;
+    uint8_t *packed = read_pack_asset(PACK_PATH, NT_ASSET_MESH, &size);
+    const nt_builder_skin_ctx_t skin = {.palette_count = rig.palette_count, .drop_tolerance = SKIN_FIXTURE_TOLERANCE};
+    uint8_t *direct = NULL;
+    uint32_t direct_size = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_decode_scene_mesh_skinned(&scene, 0, 0, layout, 3, NT_TANGENT_AUTO, &skin, &direct, &direct_size));
+    TEST_ASSERT_EQUAL_UINT32(direct_size, size);
+    TEST_ASSERT_EQUAL_MEMORY(direct, packed, size);
+
+    free(direct);
+    free(packed);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_add_scene_skinned_mesh_asserts_when_no_node_binds_the_skin(void) {
+    rigged_glb_opts_t opts = {0};
+    opts.mesh_other_skin = true;
+    rigged_glb_write(RIG_GLB, &opts);
+
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
+    const nt_builder_rig_selection_t sel = rig_selection();
+    nt_builder_rig_t rig;
+    nt_builder_import_rig(&scene, &sel, &rig);
+
+    NtStreamLayout layout[3];
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+    const nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = 3, .tangent_mode = NT_TANGENT_AUTO};
+    nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
+    profile.skin_drop_tolerance = SKIN_FIXTURE_TOLERANCE;
+
+    (void)remove(PACK_PATH);
+    NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
+    TEST_ASSERT_NOT_NULL(ctx);
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skinned_mesh(ctx, &scene, 0, 0, &rig, &profile, "meshes/quad.mesh", &mesh_opts), "not skinned by this rig's skin");
+    nt_builder_free_pack(ctx);
+
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+// #endregion
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_rigged_fixture_parses);
@@ -614,5 +976,21 @@ int main(void) {
     RUN_TEST(test_import_asserts_on_joints_under_several_scene_roots);
     RUN_TEST(test_import_asserts_on_a_joint_outside_the_cut);
     RUN_TEST(test_import_asserts_on_an_object_node_inside_the_rig);
+    RUN_TEST(test_skinned_mesh_keeps_the_four_heaviest_influences);
+    RUN_TEST(test_skinned_mesh_float32_weights_are_the_renormalized_values);
+    RUN_TEST(test_skinned_mesh_float16_weights_round_trip);
+    RUN_TEST(test_skinned_mesh_rejects_a_drop_above_the_tolerance);
+    RUN_TEST(test_skinned_mesh_rejects_an_invalid_skin_layout);
+    RUN_TEST(test_skinned_mesh_rejects_a_negative_weight);
+    RUN_TEST(test_skinned_mesh_rejects_a_nan_weight);
+    RUN_TEST(test_skinned_mesh_rejects_a_vertex_without_weight);
+    RUN_TEST(test_skinned_mesh_rejects_a_repeated_joint);
+    RUN_TEST(test_skinned_mesh_rejects_an_index_past_the_palette);
+    RUN_TEST(test_skinned_mesh_rejects_an_unpaired_set);
+    RUN_TEST(test_skinned_mesh_rejects_float_joint_indices);
+    RUN_TEST(test_skinned_mesh_rejects_a_morph_target);
+    RUN_TEST(test_skinned_mesh_accepts_a_primitive_without_indices);
+    RUN_TEST(test_add_scene_skinned_mesh_ships_the_decoded_bytes);
+    RUN_TEST(test_add_scene_skinned_mesh_asserts_when_no_node_binds_the_skin);
     return UNITY_END();
 }

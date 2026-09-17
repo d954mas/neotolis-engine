@@ -590,6 +590,36 @@ typedef struct {
 void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_selection_t *sel, nt_builder_rig_t *out);
 void nt_builder_free_rig(nt_builder_rig_t *rig);
 
+/* Content profile for the skeletal importers: the rates and error budgets the
+ * spec keeps out of the code (§16). Only skin_drop_tolerance is read by the
+ * skinned-mesh export; every other field is consumed by clip import. */
+typedef struct {
+    float sample_fps;         /* uniform grid a clip is resampled onto */
+    float max_sample_fps;     /* ceiling the importer may raise sample_fps to */
+    float nlerp_tolerance;    /* radians a rotation channel may deviate from the source */
+    float sample_tolerance;   /* scene units a translation or scale channel may deviate */
+    float bake_rates[8];      /* candidate bank rates the certificate is evaluated at */
+    uint32_t bake_rate_count; /* entries of bake_rates in use */
+    float bake_tolerance;     /* scene units of model-space error the certificate admits */
+    float bake_reach;         /* reach the certificate assumes, 0 = the largest exported reach */
+    /* Weight mass one vertex may lose to the top-four reduction, in [0, 1].
+     * Raising it is the supported way to accept a heavy asset; the dropped mass
+     * is logged either way. */
+    float skin_drop_tolerance;
+} nt_builder_skeletal_profile_t;
+
+nt_builder_skeletal_profile_t nt_builder_skeletal_profile_defaults(void);
+
+/* Exports one primitive of a skinned mesh: the ordinary streams plus the two
+ * the skin adds. The layout addresses them by the gltf_name "JOINTS" and
+ * "WEIGHTS" -- not "JOINTS_0" -- because the builder reads every
+ * JOINTS_n/WEIGHTS_n set of the primitive and reduces them to the four heaviest
+ * influences per vertex, and their NtStreamLayout is the only authority on how
+ * those lanes are stored. Some node must instantiate this mesh with the rig's
+ * skin; joint lanes address the rig's palette, not the skeleton. */
+void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const nt_builder_rig_t *rig,
+                                       const nt_builder_skeletal_profile_t *profile, const char *resource_id, const nt_mesh_opts_t *opts);
+
 /* Computes rig_compat_id from the joints it writes and returns it, so the
  * caller stamps clips and bindings with the identity that actually shipped;
  * skel->rig_compat_id is ignored. Joint ids must be unique. */

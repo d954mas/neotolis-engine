@@ -366,3 +366,49 @@ void nt_builder_free_rig(nt_builder_rig_t *rig) {
     memset(rig, 0, sizeof(*rig));
 }
 // #endregion
+
+// #region skinned mesh
+nt_builder_skeletal_profile_t nt_builder_skeletal_profile_defaults(void) {
+    return (nt_builder_skeletal_profile_t){
+        .sample_fps = 30.0F,
+        .max_sample_fps = 120.0F,
+        .nlerp_tolerance = 0.002F,
+        .sample_tolerance = 0.001F,
+        .bake_rates = {15.0F, 30.0F, 60.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F},
+        .bake_rate_count = 3,
+        .bake_tolerance = 0.01F,
+        .bake_reach = 0.0F,
+        .skin_drop_tolerance = 0.02F,
+    };
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
+void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const nt_builder_rig_t *rig,
+                                       const nt_builder_skeletal_profile_t *profile, const char *resource_id, const nt_mesh_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && scene && rig && profile && resource_id && opts && opts->layout && "invalid scene_skinned_mesh args");
+    NT_BUILD_ASSERT(mesh_index < scene->mesh_count && "mesh_index out of range");
+    NT_BUILD_ASSERT(primitive_index < scene->meshes[mesh_index].primitive_count && "primitive_index out of range");
+    NT_BUILD_ASSERT(rig->palette_count >= 1 && "rig has no palette entries");
+    NT_BUILD_ASSERT(profile->skin_drop_tolerance >= 0.0F && profile->skin_drop_tolerance <= 1.0F && "skin_drop_tolerance must lie in [0, 1]");
+
+    /* The joint lanes address this rig's palette, so a mesh no node instantiates
+     * with this skin would ship indices into someone else's joints. */
+    bool skinned_here = false;
+    for (uint32_t n = 0; n < scene->node_count && !skinned_here; n++) {
+        skinned_here = scene->nodes[n].mesh_index == mesh_index && scene->nodes[n].skin_index == rig->skin_index;
+    }
+    if (!skinned_here) {
+        NT_LOG_ERROR("add_scene_skinned_mesh: no node instantiates mesh[%u] with skin[%u], the skin of this rig", mesh_index, rig->skin_index);
+        NT_BUILD_ASSERT(0 && "mesh is not skinned by this rig's skin");
+    }
+
+    const nt_builder_skin_ctx_t skin = {.palette_count = rig->palette_count, .drop_tolerance = profile->skin_drop_tolerance};
+    uint8_t *mesh_data = NULL;
+    uint32_t mesh_size = 0;
+    const nt_build_result_t r = nt_builder_decode_scene_mesh_skinned(scene, mesh_index, primitive_index, opts->layout, opts->stream_count, opts->tangent_mode, &skin, &mesh_data, &mesh_size);
+    NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_scene_skinned_mesh: decode failed");
+
+    const uint64_t hash = nt_hash64(mesh_data, mesh_size).value;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_MESH, NULL, mesh_data, mesh_size, hash);
+}
+// #endregion

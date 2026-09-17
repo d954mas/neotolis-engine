@@ -217,19 +217,24 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     // #endregion
 
     // #region section table
+    /* Without indices the primitive draws its vertices directly, and four of
+     * them are not a whole number of triangles, so that variant keeps the first
+     * three: the two vertices the skin tests read stay v0 and v1. */
+    const uint32_t vertex_count = o.no_indices ? 3U : RIGGED_GLB_VERTEX_COUNT;
+
     rigged_sec_t sec[SEC_COUNT];
-    sec[SEC_POSITION] = (rigged_sec_t){positions, (uint32_t)sizeof(positions)};
-    sec[SEC_NORMAL] = (rigged_sec_t){normals, (uint32_t)sizeof(normals)};
-    sec[SEC_TEXCOORD] = (rigged_sec_t){uvs, (uint32_t)sizeof(uvs)};
+    sec[SEC_POSITION] = (rigged_sec_t){positions, vertex_count * 3U * (uint32_t)sizeof(float)};
+    sec[SEC_NORMAL] = (rigged_sec_t){normals, vertex_count * 3U * (uint32_t)sizeof(float)};
+    sec[SEC_TEXCOORD] = (rigged_sec_t){uvs, vertex_count * 2U * (uint32_t)sizeof(float)};
     if (o.joints_float_type) {
-        sec[SEC_JOINTS0] = (rigged_sec_t){joints0_f32, (uint32_t)sizeof(joints0_f32)};
-        sec[SEC_JOINTS1] = (rigged_sec_t){joints1_f32, (uint32_t)sizeof(joints1_f32)};
+        sec[SEC_JOINTS0] = (rigged_sec_t){joints0_f32, vertex_count * 4U * (uint32_t)sizeof(float)};
+        sec[SEC_JOINTS1] = (rigged_sec_t){joints1_f32, vertex_count * 4U * (uint32_t)sizeof(float)};
     } else {
-        sec[SEC_JOINTS0] = (rigged_sec_t){joints0, (uint32_t)sizeof(joints0)};
-        sec[SEC_JOINTS1] = (rigged_sec_t){joints1, (uint32_t)sizeof(joints1)};
+        sec[SEC_JOINTS0] = (rigged_sec_t){joints0, vertex_count * 4U};
+        sec[SEC_JOINTS1] = (rigged_sec_t){joints1, vertex_count * 4U};
     }
-    sec[SEC_WEIGHTS0] = (rigged_sec_t){weights0, (uint32_t)sizeof(weights0)};
-    sec[SEC_WEIGHTS1] = (rigged_sec_t){weights1, (uint32_t)sizeof(weights1)};
+    sec[SEC_WEIGHTS0] = (rigged_sec_t){weights0, vertex_count * 4U * (uint32_t)sizeof(float)};
+    sec[SEC_WEIGHTS1] = (rigged_sec_t){weights1, vertex_count * 4U * (uint32_t)sizeof(float)};
     sec[SEC_INDICES] = (rigged_sec_t){indices, (uint32_t)sizeof(indices)};
     sec[SEC_IBM] = (rigged_sec_t){ibm, joint_count * 16U * (uint32_t)sizeof(float)};
     sec[SEC_TIMES3] = (rigged_sec_t){times3, (uint32_t)sizeof(times3)};
@@ -326,13 +331,13 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, "\"channels\":[{\"sampler\":0,\"target\":{\"node\":2,\"path\":\"translation\"}}]}],");
 
     jb_addf(&jb, "\"accessors\":[");
-    jb_addf(&jb, "{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[1,1,0]},");
-    jb_addf(&jb, "{\"bufferView\":1,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\"},");
-    jb_addf(&jb, "{\"bufferView\":2,\"componentType\":5126,\"count\":4,\"type\":\"VEC2\"},");
-    jb_addf(&jb, "{\"bufferView\":3,\"componentType\":%u,\"count\":4,\"type\":\"VEC4\"},", joints_ctype);
-    jb_addf(&jb, "{\"bufferView\":4,\"componentType\":%u,\"count\":4,\"type\":\"VEC4\"},", joints_ctype);
-    jb_addf(&jb, "{\"bufferView\":5,\"componentType\":5126,\"count\":4,\"type\":\"VEC4\"},");
-    jb_addf(&jb, "{\"bufferView\":6,\"componentType\":5126,\"count\":4,\"type\":\"VEC4\"},");
+    jb_addf(&jb, "{\"bufferView\":0,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[1,1,0]},", vertex_count);
+    jb_addf(&jb, "{\"bufferView\":1,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\"},", vertex_count);
+    jb_addf(&jb, "{\"bufferView\":2,\"componentType\":5126,\"count\":%u,\"type\":\"VEC2\"},", vertex_count);
+    jb_addf(&jb, "{\"bufferView\":3,\"componentType\":%u,\"count\":%u,\"type\":\"VEC4\"},", joints_ctype, vertex_count);
+    jb_addf(&jb, "{\"bufferView\":4,\"componentType\":%u,\"count\":%u,\"type\":\"VEC4\"},", joints_ctype, vertex_count);
+    jb_addf(&jb, "{\"bufferView\":5,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"},", vertex_count);
+    jb_addf(&jb, "{\"bufferView\":6,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"},", vertex_count);
     jb_addf(&jb, "{\"bufferView\":7,\"componentType\":5123,\"count\":6,\"type\":\"SCALAR\"},");
     jb_addf(&jb, "{\"bufferView\":8,\"componentType\":5126,\"count\":%u,\"type\":\"MAT4\"},", joint_count);
     jb_addf(&jb, "{\"bufferView\":9,\"componentType\":5126,\"count\":3,\"type\":\"SCALAR\",\"min\":[0],\"max\":[0.5]},");
