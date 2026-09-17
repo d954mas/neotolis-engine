@@ -105,7 +105,16 @@ static uint32_t nt_skeletal_grid_index(double time, double inv_step, uint32_t sa
     if (i >= last) {
         i = last - 1U;
     }
-    *out_u = (float)(f - (double)i);
+    float u = (float)(f - (double)i);
+    /* time * inv_step lands a ulp off an integer for most grid times of a
+     * non-binary duration; the snap keeps those exact copies instead of lerps.
+     * 2^-20 of one grid interval is far below any authored key spacing. */
+    if (u < 0x1p-20F) {
+        u = 0.0F;
+    } else if (u > 1.0F - 0x1p-20F) {
+        u = 1.0F;
+    }
+    *out_u = u;
     return i;
 }
 
@@ -171,12 +180,15 @@ static void nt_skeletal_apply_sampled(const nt_skeletal_clip_t *clip, double tim
     if (u == 0.0F || u == 1.0F) {
         const float *blk = (u == 0.0F) ? a : b;
         for (uint16_t k = 0; k < clip->n_t; ++k) {
+            NT_ASSERT(clip->t_joint[k] < clip->joint_count);
             memcpy(out[clip->t_joint[k]].t, blk + ((size_t)3U * k), 3U * sizeof(float));
         }
         for (uint16_t k = 0; k < clip->n_q; ++k) {
+            NT_ASSERT(clip->q_joint[k] < clip->joint_count);
             memcpy(out[clip->q_joint[k]].q, blk + q_off + ((size_t)4U * k), 4U * sizeof(float));
         }
         for (uint16_t k = 0; k < clip->n_s; ++k) {
+            NT_ASSERT(clip->s_joint[k] < clip->joint_count);
             memcpy(out[clip->s_joint[k]].s, blk + s_off + ((size_t)3U * k), 3U * sizeof(float));
         }
         return;
@@ -184,12 +196,15 @@ static void nt_skeletal_apply_sampled(const nt_skeletal_clip_t *clip, double tim
     // #endregion
 
     for (uint16_t k = 0; k < clip->n_t; ++k) {
+        NT_ASSERT(clip->t_joint[k] < clip->joint_count);
         nt_skeletal_lerp3(a + ((size_t)3U * k), b + ((size_t)3U * k), u, out[clip->t_joint[k]].t);
     }
     for (uint16_t k = 0; k < clip->n_q; ++k) {
+        NT_ASSERT(clip->q_joint[k] < clip->joint_count);
         nt_skeletal_nlerp(a + q_off + ((size_t)4U * k), b + q_off + ((size_t)4U * k), u, out[clip->q_joint[k]].q);
     }
     for (uint16_t k = 0; k < clip->n_s; ++k) {
+        NT_ASSERT(clip->s_joint[k] < clip->joint_count);
         nt_skeletal_lerp3(a + s_off + ((size_t)3U * k), b + s_off + ((size_t)3U * k), u, out[clip->s_joint[k]].s);
     }
 }
@@ -489,6 +504,9 @@ void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, dou
              * and a step spanning several cycles both normalize in one go.
              * Truncate-then-correct floor keeps the module free of libm. */
             const double cycles = time / track->duration;
+            /* The int64 cast is undefined past 2^63 and traps on wasm; only a
+             * caller passing an absurd dt or a sub-attosecond duration gets there. */
+            NT_ASSERT(cycles > -9.2e18 && cycles < 9.2e18);
             double whole = (double)(int64_t)cycles;
             if (whole > cycles) {
                 whole -= 1.0;

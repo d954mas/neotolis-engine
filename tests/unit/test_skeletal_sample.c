@@ -256,17 +256,20 @@ static void build_grid31(nt_skeletal_clip_t *clip, double duration) {
     *clip = c;
 }
 
-void test_a_non_binary_grid_reproduces_its_samples_within_tolerance(void) {
-    nt_skeletal_clip_t clip;
-    build_grid31(&clip, 1.0);
-    nt_skeletal_trs_t defaults;
-    build_defaults(&defaults, 1);
+/* k/30 * 30 lands a ulp off k for many k, and so does k/29 * 29 over a 0.7 s
+ * clip; both grids must still copy their stored block bit for bit. */
+void test_a_non_binary_grid_reproduces_its_samples_exactly(void) {
+    const double durations[2] = {1.0, (double)0.7F};
+    for (uint32_t d = 0; d < 2; ++d) {
+        nt_skeletal_clip_t clip;
+        build_grid31(&clip, durations[d]);
+        nt_skeletal_trs_t defaults;
+        build_defaults(&defaults, 1);
 
-    nt_skeletal_trs_t out;
-    for (uint32_t k = 0; k < GRID31_SAMPLES; ++k) {
-        nt_skeletal_sample(&clip, (double)k / (double)(GRID31_SAMPLES - 1), &defaults, &out);
-        for (int c = 0; c < 3; ++c) {
-            ASSERT_FLOAT_NEAR(g_grid31[(k * 3U) + (uint32_t)c], out.t[c], 1e-6F);
+        nt_skeletal_trs_t out;
+        for (uint32_t k = 0; k < GRID31_SAMPLES; ++k) {
+            nt_skeletal_sample(&clip, ((double)k / (double)(GRID31_SAMPLES - 1)) * durations[d], &defaults, &out);
+            ASSERT_BITS_EQUAL(g_grid31 + ((size_t)k * 3U), out.t, 3);
         }
     }
 }
@@ -708,7 +711,7 @@ int main(void) {
     RUN_TEST(test_the_second_sampled_rotation_row_interpolates_on_its_own_joint);
     RUN_TEST(test_grid_times_reproduce_the_stored_samples_exactly);
     RUN_TEST(test_the_end_of_the_clip_is_the_last_sample);
-    RUN_TEST(test_a_non_binary_grid_reproduces_its_samples_within_tolerance);
+    RUN_TEST(test_a_non_binary_grid_reproduces_its_samples_exactly);
     RUN_TEST(test_the_end_of_a_non_binary_clip_is_still_the_last_block);
     RUN_TEST(test_a_negated_endpoint_gives_the_same_rotation);
     RUN_TEST(test_a_wide_pair_takes_the_short_way);

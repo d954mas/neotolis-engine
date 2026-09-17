@@ -175,7 +175,7 @@ typedef struct {
     uint16_t sampled[3]; /* joint rows per component kind: t, q, s */
     uint16_t constant[3];
     uint32_t steps;
-    uint32_t keys;
+    uint64_t keys; /* summed in 64 bits, narrowed once the total is known to fit the wire field */
 } NtClipTally;
 
 /* Components a channel stores: 4 for a rotation, 3 for a translation or scale. */
@@ -279,7 +279,8 @@ static void clip_fill_header(const nt_builder_clip_t *clip, const NtClipTally *t
     header->n_cq = tally->constant[1];
     header->n_cs = tally->constant[2];
     header->n_steps = tally->steps;
-    header->n_keys = tally->keys;
+    NT_BUILD_ASSERT(tally->keys <= UINT32_MAX && "clip step keys exceed the u32 wire field");
+    header->n_keys = (uint32_t)tally->keys;
 
     const uint32_t object_first = 3U * (uint32_t)clip->joint_count;
     const uint32_t constant_offset[3] = {0U, 3U, 7U};
