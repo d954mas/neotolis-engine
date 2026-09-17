@@ -1,61 +1,61 @@
-# Size Report: bench_shapes (wasm-analysis-paired)
+# Size Report: skeletal_showcase (wasm-analysis-paired)
 # Commit: bb381da
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 219 B
-Import               570 B
-Function             100 B
+Type                 349 B
+Import               605 B
+Function             221 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
-Export                65 B
-Elem                  22 B
-Code               73865 B
-Data                8187 B
-Custom              4123 B
+Export                89 B
+Elem                  53 B
+Code              259574 B
+Data               16654 B
+Custom              7420 B
 ---------------- ----------
-TOTAL              87172 B
+TOTAL             284986 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-14700 B   frame
-13824 B   main
- 3009 B   rebuild_shapes
- 3002 B   fmt_fp
- 2613 B   printf_core
- 2399 B   emit_capsule_wire
- 2057 B   nt_shape_renderer_flush
- 1950 B   emit_cylinder_wire
- 1924 B   render_target_recreate_attachment
- 1843 B   __rem_pio2f
- 1718 B   nt_gfx_make_program
- 1252 B   nt_gfx_make_vertex_input
- 1140 B   nt_gfx_bind_pipeline
- 1119 B   nt_input_web_on_blur
- 1100 B   nt_hash32_str
-  961 B   nt_shape_renderer_triangle
-  847 B   nt_gfx_make_pipeline
-  842 B   nt_input_web_on_pointer_move
-  802 B   nt_input_web_on_pointer_down
-  690 B   pop_arg_long_double
-  540 B   claim_more_memory
-  519 B   __memcpy
-  504 B   emmalloc_memalign
-  485 B   nt_gfx_make_buffer
-  430 B   push_instance
-  416 B   nt_gfx_bind_instance_buffer
-  409 B   attempt_allocate
-  407 B   nt_log_write
-  395 B   nt_shape_renderer_shutdown
-  385 B   sinf
+62929 B   frame
+18275 B   dispatch_command
+11406 B   main
+11051 B   nt_shape_renderer_init
+ 8796 B   Clay__ConfigureOpenElementPtr
+ 7737 B   nt_font_lookup_glyph_offset
+ 6666 B   nt_ui_combo_begin
+ 6038 B   Clay__SizeContainersAlongAxis
+ 5986 B   nt_ui_slider_float
+ 5873 B   nt_ui_scroll_begin
+ 5616 B   Clay__InitializeEphemeralMemory
+ 3992 B   Clay__MeasureTextCached
+ 3353 B   Clay__CloseElement
+ 3309 B   nt_sprite_renderer_set_material
+ 3096 B   nt_ui_label
+ 3007 B   fmt_fp
+ 2629 B   scrollbar_emit_axis
+ 2605 B   nt_http_request
+ 2428 B   printf_core
+ 2367 B   atlas_on_resolve
+ 1989 B   nt_ui_button_begin
+ 1906 B   nt_sprite_renderer_emit_region
+ 1887 B   Clay__InitializePersistentMemory
+ 1859 B   emit_text
+ 1850 B   __rem_pio2f
+ 1747 B   nt_hash64
+ 1746 B   nt_sprite_renderer_emit_geometry
+ 1724 B   nt_gfx_make_program
+ 1722 B   nt_ui_combo_selectable
+ 1551 B   nt_shape_renderer_flush
 
-Total functions: 99
-Total code size: 73701 B
+Total functions: 219
+Total code size: 259200 B
 
 ## Built Engine Archives
 
@@ -123,5 +123,5 @@ TOTAL (archives)         4222936 B
 
 ## Data Segments Summary
 
-Segments: 29
-Total data size: 7986 B
+Segments: 61
+Total data size: 16221 B

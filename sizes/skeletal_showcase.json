@@ -1,0 +1,15 @@
+[{
+  "commit": "bb381da",
+  "date": "2026-09-17T11:34:16Z",
+  "files": {
+    "index.html": { "raw": 2561, "gzip": 1286 },
+    "index_simd.wasm": { "raw": 283123, "gzip": 112692 },
+    "index.wasm": { "raw": 277604, "gzip": 114593 },
+    "index_simd.js": { "raw": 19888, "gzip": 8018 },
+    "index.js": { "raw": 19888, "gzip": 8013 },
+    "assets/skeletal_showcase.ntpack": { "raw": 149308, "gzip": 11059 }
+  },
+  "engine": { "raw": 305572, "gzip": 121996 },
+  "resources": { "raw": 149308, "gzip": 11059 },
+  "total": { "raw": 454880, "gzip": 133055 }
+}]
