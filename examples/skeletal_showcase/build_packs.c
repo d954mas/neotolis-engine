@@ -1,10 +1,11 @@
-/* Build the small Skeleton & Pose UI pack.
+/* Build the small Skeleton & Pose pack: UI atlas, font and the two Khronos rigs.
  * The font is reused from ui_showcase and is distributed under Apache 2.0. */
 
 /* clang-format off */
 #include "nt_builder.h"
 /* clang-format on */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -24,6 +25,24 @@ static char s_path[512];
 static const char *pack_path(const char *dir, const char *name) {
     (void)snprintf(s_path, sizeof s_path, "%s/%s", dir, name);
     return s_path;
+}
+
+/* Skeleton only: the rig of skin 0 up to the scene root, so the showcase shows
+ * the rest pose exactly as the importer publishes it. Bindings and meshes are
+ * not exported here. */
+static bool add_rig_skeleton(NtBuilderContext *ctx, const char *glb_path, const char *resource_id) {
+    nt_glb_scene_t scene;
+    if (nt_builder_parse_glb_scene(&scene, glb_path) != NT_BUILD_OK) {
+        (void)fprintf(stderr, "Failed to parse %s\n", glb_path);
+        return false;
+    }
+    const nt_builder_rig_selection_t sel = {.skin_index = 0, .skeleton_root = UINT32_MAX, .object_node = UINT32_MAX};
+    nt_builder_rig_t rig;
+    nt_builder_import_rig(&scene, &sel, &rig);
+    (void)nt_builder_add_skeleton(ctx, &rig.skeleton, resource_id);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+    return true;
 }
 
 int main(int argc, char *argv[]) {
@@ -84,6 +103,12 @@ int main(int argc, char *argv[]) {
     (void)nt_atlas_commit(atlas);
 
     nt_builder_add_font(ctx, FONT_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII, .resource_name = "skeletal_showcase/font"});
+
+    if (!add_rig_skeleton(ctx, "examples/skeletal_showcase/raw/Fox.glb", "skeletal_showcase/fox.nskl") ||
+        !add_rig_skeleton(ctx, "examples/skeletal_showcase/raw/CesiumMan.glb", "skeletal_showcase/cesiumman.nskl")) {
+        nt_builder_free_pack(ctx);
+        return 1;
+    }
 
     const nt_build_result_t result = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);
