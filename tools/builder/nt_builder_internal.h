@@ -282,6 +282,25 @@ static inline void nt_builder_narrow_stream_floats(float *data, uint32_t vertex_
         }
     }
 }
+/* x - x rejects NaN and infinities without libm; requires strict IEEE math. */
+static inline bool nt_builder_finite(float v) { return (v - v) == 0.0F; }
+
+static inline bool nt_builder_finite_n(const float *v, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (!nt_builder_finite(v[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Same tolerance as nt_skeletal_mat34_from_trs: a stored pose must satisfy the
+ * kernels' unit-quaternion contract. NaN fails both comparisons. */
+static inline bool nt_builder_unit_quat(const float *q) {
+    const float n = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
+    return (n - 1.0F) < 1e-3F && (1.0F - n) < 1e-3F;
+}
+
 /* What the skinned decode path needs about the rig: how many palette entries a
  * joint lane may address, and how much weight mass one vertex may lose to the
  * top-four reduction. */
@@ -301,10 +320,12 @@ nt_build_result_t nt_builder_decode_scene_mesh_skinned(const nt_glb_scene_t *sce
 
 /* Every JOINTS_n/WEIGHTS_n pair of one primitive, unpacked to floats and
  * validated as a set (paired, consecutive, one element per vertex, the glTF
- * component types). Both arrays hold set_count * vertex_count * 4 floats,
- * set-major; a joint lane is an exact integer. label prefixes diagnostics.
- * Shared by the skinned mesh export and the binding's reach scan, which read the
- * same influences with and without the top-four reduction. */
+ * component types, no morph targets) and per vertex (finite non-negative
+ * weights, no palette entry weighted twice, a non-zero total). Both arrays hold
+ * set_count * vertex_count * 4 floats, set-major; a joint lane is an exact
+ * integer that the caller bounds against its palette. label prefixes
+ * diagnostics. Shared by the skinned mesh export and the binding's reach scan,
+ * which read the same influences with and without the top-four reduction. */
 typedef struct {
     float *joints;
     float *weights;

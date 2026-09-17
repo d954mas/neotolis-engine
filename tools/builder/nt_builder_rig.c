@@ -84,6 +84,18 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
     NT_BUILD_ASSERT(m && out && "invalid decompose_trs args");
     const char *label = (name != NULL) ? name : "(unnamed)";
 
+    for (int i = 0; i < 16; i++) {
+        if (!nt_builder_finite(m[i])) {
+            NT_LOG_ERROR("node %s: matrix element %d is not a finite number", label, i);
+            NT_BUILD_ASSERT(0 && "matrix is not finite");
+        }
+    }
+    /* A projective bottom row has no TRS; column-major puts it at 3, 7, 11, 15. */
+    if (m[3] != 0.0F || m[7] != 0.0F || m[11] != 0.0F || m[15] != 1.0F) {
+        NT_LOG_ERROR("node %s: matrix bottom row is (%g, %g, %g, %g), an affine matrix ends in (0, 0, 0, 1)", label, (double)m[3], (double)m[7], (double)m[11], (double)m[15]);
+        NT_BUILD_ASSERT(0 && "matrix is not affine");
+    }
+
     /* Column lengths in double: a float32 length of a float32 column loses the
      * precision the recompose check below spends its whole budget on. */
     double scale[3];
@@ -221,6 +233,21 @@ static uint32_t rig_mark_path(const nt_glb_scene_t *scene, uint8_t *mark, uint32
 // #endregion
 
 // #region import
+typedef struct {
+    uint32_t id;
+    uint32_t joint;
+} rig_id_slot_t;
+
+/* By id, then by joint, so a collision names the lower joint first. */
+static int rig_id_slot_cmp(const void *a, const void *b) {
+    const rig_id_slot_t *x = (const rig_id_slot_t *)a;
+    const rig_id_slot_t *y = (const rig_id_slot_t *)b;
+    if (x->id != y->id) {
+        return (x->id > y->id) ? 1 : -1;
+    }
+    return (x->joint > y->joint) - (x->joint < y->joint);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
 void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_selection_t *sel, nt_builder_rig_t *out) {
     NT_BUILD_ASSERT(scene && sel && out && "invalid import_rig args");
@@ -232,6 +259,10 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_sel
         NT_BUILD_ASSERT(0 && "rig skin index out of range");
     }
     const cgltf_skin *skin = &data->skins[sel->skin_index];
+    if (skin->joints_count == 0) {
+        NT_LOG_ERROR("import_rig: skin[%u] has no joints", sel->skin_index);
+        NT_BUILD_ASSERT(0 && "skin has no joints");
+    }
     const uint32_t palette_count = (uint32_t)skin->joints_count;
     NT_BUILD_ASSERT(palette_count >= 1 && palette_count <= UINT16_MAX && "skin palette size outside [1, 65535]");
     const uint32_t node_count = scene->node_count;
@@ -322,6 +353,38 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_sel
             memcpy(rest[j].q, gn->local_q, sizeof(rest[j].q));
             memcpy(rest[j].s, gn->local_s, sizeof(rest[j].s));
         }
+        /* The encoder asserts the same two rules; here they name the node. */
+        if (!nt_builder_finite_n(rest[j].t, 3) || !nt_builder_finite_n(rest[j].s, 3)) {
+            NT_LOG_ERROR("import_rig: node %s has a non-finite rest translation or scale", gn->name);
+            NT_BUILD_ASSERT(0 && "rest translation or scale is not finite");
+        }
+        if (!nt_builder_unit_quat(rest[j].q)) {
+            NT_LOG_ERROR("import_rig: node %s rest rotation (%g, %g, %g, %g) is not a unit quaternion", gn->name, (double)rest[j].q[0], (double)rest[j].q[1], (double)rest[j].q[2],
+                         (double)rest[j].q[3]);
+            NT_BUILD_ASSERT(0 && "rest rotation is not a unit quaternion");
+        }
+    }
+
+    /* Joint ids are name hashes, so two rig nodes may collide by name or by
+     * hash; either way the skeleton could not tell them apart. */
+    {
+        rig_id_slot_t *slots = (rig_id_slot_t *)malloc((size_t)joint_count * sizeof(rig_id_slot_t));
+        NT_BUILD_ASSERT(slots && "import_rig: alloc failed (OOM)");
+        for (uint32_t j = 0; j < joint_count; j++) {
+            slots[j] = (rig_id_slot_t){.id = joint_id[j], .joint = j};
+        }
+        qsort(slots, joint_count, sizeof(rig_id_slot_t), rig_id_slot_cmp);
+        for (uint32_t i = 1; i < joint_count; i++) {
+            if (slots[i].id == slots[i - 1U].id) {
+                const uint32_t a = slots[i - 1U].joint;
+                const uint32_t b = slots[i].joint;
+                NT_LOG_ERROR("import_rig: rig nodes \"%s\" (node[%u]) and \"%s\" (node[%u]) share joint id 0x%08X", scene->nodes[node_index[a]].name, node_index[a], scene->nodes[node_index[b]].name,
+                             node_index[b], slots[i].id);
+                free(slots);
+                NT_BUILD_ASSERT(0 && "two rig nodes share one joint id");
+            }
+        }
+        free(slots);
     }
 
     for (uint32_t p = 0; p < palette_count; p++) {
@@ -414,6 +477,13 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene
 // #endregion
 
 // #region skin binding
+/* A bound measured in double must still contain its vertices once stored as
+ * float, so the conversion rounds towards +infinity. */
+static float rig_round_up(double x) {
+    const float f = (float)x;
+    return ((double)f < x) ? nextafterf(f, INFINITY) : f;
+}
+
 /* |inverse_bind * v| with v a mesh-space point: how far the vertex sits from
  * the joint it is bound to, which is what reach bounds. */
 static double rig_bound_distance(const nt_skeletal_mat34_t *ib, const float v[3]) {
@@ -448,11 +518,19 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
                 NT_LOG_ERROR("%s: skinned primitive has no POSITION accessor, so its reach cannot be measured", label);
                 NT_BUILD_ASSERT(0 && "skinned primitive has no positions");
             }
+            if (pos->type != cgltf_type_vec3) {
+                NT_LOG_ERROR("%s: POSITION accessor has type %d, a position is a VEC3", label, (int)pos->type);
+                NT_BUILD_ASSERT(0 && "POSITION accessor is not VEC3");
+            }
             const uint32_t vertex_count = (uint32_t)pos->count;
             const cgltf_size want = (cgltf_size)vertex_count * 3U;
             float *xyz = (float *)calloc(want, sizeof(float));
             NT_BUILD_ASSERT(xyz && "skin reach: alloc failed (OOM)");
-            NT_BUILD_ASSERT(cgltf_accessor_unpack_floats(pos, xyz, want) == want && "POSITION accessor could not be unpacked as VEC3");
+            const cgltf_size got = cgltf_accessor_unpack_floats(pos, xyz, want);
+            if (got != want) {
+                NT_LOG_ERROR("%s: POSITION unpacked %u of %u floats", label, (uint32_t)got, (uint32_t)want);
+                NT_BUILD_ASSERT(0 && "POSITION accessor could not be unpacked as VEC3");
+            }
 
             nt_builder_influences_t inf;
             nt_builder_read_influences(prim, label, vertex_count, &inf);
@@ -470,6 +548,10 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
                             NT_BUILD_ASSERT(0 && "joint index lies outside the palette");
                         }
                         const double d = rig_bound_distance(&inverse_bind[p], &xyz[(size_t)v * 3U]);
+                        if (!isfinite(d)) {
+                            NT_LOG_ERROR("%s: vertex %u bound to palette entry %u sits at a non-finite distance from its joint", label, v, p);
+                            NT_BUILD_ASSERT(0 && "skinned position is not finite");
+                        }
                         if (d > reach) {
                             reach = d;
                         }
@@ -491,7 +573,7 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
 /* Section 14 over the rest hierarchy: a bounds accumulated stretch, d bounds
  * distance from the root, and the binding stores the palette maximum. parent[j]
  * precedes j, so one forward pass is the whole recurrence. */
-static float rig_any_pose_radius(const nt_skeletal_skeleton_t *skel, const uint16_t *remap, uint16_t palette_count, double reach) {
+static double rig_any_pose_radius(const nt_skeletal_skeleton_t *skel, const uint16_t *remap, uint16_t palette_count, double reach) {
     const uint32_t joint_count = skel->joint_count;
     double *stretch = (double *)calloc(joint_count, sizeof(double));
     double *distance = (double *)calloc(joint_count, sizeof(double));
@@ -530,7 +612,7 @@ static float rig_any_pose_radius(const nt_skeletal_skeleton_t *skel, const uint1
     }
     free(stretch);
     free(distance);
-    return (float)radius;
+    return radius;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
@@ -566,18 +648,27 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_glb_scene
         const cgltf_size want = ibm->count * 16U;
         float *m = (float *)calloc(want, sizeof(float));
         NT_BUILD_ASSERT(m && "add_scene_skin_binding: alloc failed (OOM)");
-        NT_BUILD_ASSERT(cgltf_accessor_unpack_floats(ibm, m, want) == want && "inverseBindMatrices could not be unpacked");
+        const cgltf_size got = cgltf_accessor_unpack_floats(ibm, m, want);
+        if (got != want) {
+            NT_LOG_ERROR("add_scene_skin_binding: inverseBindMatrices unpacked %u of %u floats", (uint32_t)got, (uint32_t)want);
+            NT_BUILD_ASSERT(0 && "inverseBindMatrices could not be unpacked");
+        }
         for (uint32_t p = 0; p < palette_count; p++) {
-            nt_skeletal_mat34_from_mat4(&m[(size_t)p * 16U], &inverse_bind[p]);
-            for (int r = 0; r < 3; r++) {
-                for (int c = 0; c < 4; c++) {
-                    const float e = inverse_bind[p].r[r][c];
-                    if ((e - e) != 0.0F) {
-                        NT_LOG_ERROR("add_scene_skin_binding: inverse bind matrix %u holds a non-finite element", p);
-                        NT_BUILD_ASSERT(0 && "inverse bind matrix is not finite");
-                    }
+            const float *src = &m[(size_t)p * 16U];
+            for (int i = 0; i < 16; i++) {
+                if (!nt_builder_finite(src[i])) {
+                    NT_LOG_ERROR("add_scene_skin_binding: inverse bind matrix %u element %d is not a finite number", p, i);
+                    NT_BUILD_ASSERT(0 && "inverse bind matrix is not finite");
                 }
             }
+            /* The 3x4 view drops the bottom row, so a projective one would
+             * vanish silently; column-major puts it at 3, 7, 11, 15. */
+            if (src[3] != 0.0F || src[7] != 0.0F || src[11] != 0.0F || src[15] != 1.0F) {
+                NT_LOG_ERROR("add_scene_skin_binding: inverse bind matrix %u bottom row is (%g, %g, %g, %g), an affine matrix ends in (0, 0, 0, 1)", p, (double)src[3], (double)src[7], (double)src[11],
+                             (double)src[15]);
+                NT_BUILD_ASSERT(0 && "inverse bind matrix is not affine");
+            }
+            nt_skeletal_mat34_from_mat4(src, &inverse_bind[p]);
         }
         free(m);
     }
@@ -593,8 +684,8 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_glb_scene
         .rig_compat_id = rig->skeleton.rig_compat_id,
         .remap = remap,
         .inverse_bind = inverse_bind,
-        .reach = (float)reach,
-        .any_pose_radius = rig_any_pose_radius(&rig->skeleton, remap, (uint16_t)palette_count, reach),
+        .reach = rig_round_up(reach),
+        .any_pose_radius = rig_round_up(rig_any_pose_radius(&rig->skeleton, remap, (uint16_t)palette_count, reach)),
         .palette_count = (uint16_t)palette_count,
     };
     nt_builder_add_skin_binding(ctx, &binding, resource_id);

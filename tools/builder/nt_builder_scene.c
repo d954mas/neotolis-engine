@@ -241,12 +241,56 @@ void nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scen
 }
 
 // #region skin influences
-/* x - x rejects NaN and infinities without libm; requires strict IEEE math. */
-static bool nt_scene_finite(float v) { return (v - v) == 0.0F; }
+/* Every lane of one vertex across every set: finite non-negative weights, no
+ * palette entry weighted twice, some weight at all. Both readers of the
+ * influences depend on these, so the check lives with the read. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
+static void nt_scene_validate_vertex_influences(const nt_builder_influences_t *inf, const char *label, uint32_t v) {
+    const size_t set_floats = (size_t)inf->vertex_count * 4U;
+    const uint32_t lane_count = inf->set_count * 4U;
+    double total = 0.0;
+    for (uint32_t lane = 0; lane < lane_count; lane++) {
+        const uint32_t s = lane / 4U;
+        const uint32_t c = lane % 4U;
+        const size_t at = ((size_t)s * set_floats) + ((size_t)v * 4U) + c;
+        const float w = inf->weights[at];
+        if (!nt_builder_finite(w)) {
+            NT_LOG_ERROR("%s: vertex %u weight %u of set %u is not a finite number", label, v, c, s);
+            NT_BUILD_ASSERT(0 && "influence weight is not finite");
+        }
+        if (w < 0.0F) {
+            NT_LOG_ERROR("%s: vertex %u weight %u of set %u is %g; a weight is a non-negative fraction", label, v, c, s, (double)w);
+            NT_BUILD_ASSERT(0 && "influence weight is negative");
+        }
+        if (w == 0.0F) {
+            continue;
+        }
+        total += (double)w;
+        const float joint = inf->joints[at];
+        for (uint32_t earlier = 0; earlier < lane; earlier++) {
+            const size_t e_at = ((size_t)(earlier / 4U) * set_floats) + ((size_t)v * 4U) + (earlier % 4U);
+            if (inf->weights[e_at] != 0.0F && inf->joints[e_at] == joint) {
+                NT_LOG_ERROR("%s: vertex %u weights palette entry %u twice", label, v, (uint32_t)joint);
+                NT_BUILD_ASSERT(0 && "vertex weights one joint twice");
+            }
+        }
+    }
+    if (!(total > 0.0)) {
+        NT_LOG_ERROR("%s: vertex %u has no influence with a non-zero weight", label, v);
+        NT_BUILD_ASSERT(0 && "vertex influence weights sum to zero");
+    }
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
 void nt_builder_read_influences(const struct cgltf_primitive *prim, const char *label, uint32_t vertex_count, nt_builder_influences_t *out) {
     NT_BUILD_ASSERT(prim && label && out && "invalid read_influences args");
+
+    /* A morph target moves the bound vertices, so the binding's reach would no
+     * longer hold; morphs are deferred rather than silently unbounded. */
+    if (prim->targets_count != 0) {
+        NT_LOG_ERROR("%s: skinned primitive carries %u morph targets, which the skeletal importer does not support", label, (uint32_t)prim->targets_count);
+        NT_BUILD_ASSERT(0 && "skinned primitive has morph targets");
+    }
 
     uint32_t joint_sets = 0;
     uint32_t weight_sets = 0;
@@ -293,8 +337,20 @@ void nt_builder_read_influences(const struct cgltf_primitive *prim, const char *
         }
         /* unpack_floats is sparse-capable and exact for u8/u16 integers. */
         const cgltf_size want = (cgltf_size)set_floats;
-        NT_BUILD_ASSERT(cgltf_accessor_unpack_floats(ja, joints + ((size_t)n * set_floats), want) == want && "JOINTS accessor could not be unpacked");
-        NT_BUILD_ASSERT(cgltf_accessor_unpack_floats(wa, weights + ((size_t)n * set_floats), want) == want && "WEIGHTS accessor could not be unpacked");
+        const cgltf_size got_joints = cgltf_accessor_unpack_floats(ja, joints + ((size_t)n * set_floats), want);
+        if (got_joints != want) {
+            NT_LOG_ERROR("%s: JOINTS_%u unpacked %u of %u floats", label, n, (uint32_t)got_joints, (uint32_t)want);
+            NT_BUILD_ASSERT(0 && "JOINTS accessor could not be unpacked");
+        }
+        const cgltf_size got_weights = cgltf_accessor_unpack_floats(wa, weights + ((size_t)n * set_floats), want);
+        if (got_weights != want) {
+            NT_LOG_ERROR("%s: WEIGHTS_%u unpacked %u of %u floats", label, n, (uint32_t)got_weights, (uint32_t)want);
+            NT_BUILD_ASSERT(0 && "WEIGHTS accessor could not be unpacked");
+        }
+    }
+
+    for (uint32_t v = 0; v < vertex_count; v++) {
+        nt_scene_validate_vertex_influences(out, label, v);
     }
 }
 
@@ -352,13 +408,6 @@ static void nt_scene_extract_skin(const cgltf_primitive *prim, uint32_t mesh_ind
     char label[64];
     (void)snprintf(label, sizeof(label), "mesh[%u] prim[%u]", mesh_index, primitive_index);
 
-    /* A morph target moves the bound vertices, so the binding's reach would no
-     * longer hold; morphs are deferred rather than silently unbounded. */
-    if (prim->targets_count != 0) {
-        NT_LOG_ERROR("%s: skinned primitive carries %u morph targets, which the skeletal importer does not support", label, (uint32_t)prim->targets_count);
-        NT_BUILD_ASSERT(0 && "skinned primitive has morph targets");
-    }
-
     nt_builder_influences_t inf;
     nt_builder_read_influences(prim, label, vertex_count, &inf);
 
@@ -367,22 +416,18 @@ static void nt_scene_extract_skin(const cgltf_primitive *prim, uint32_t mesh_ind
     nt_scene_influence_t *cand = (nt_scene_influence_t *)calloc(lane_count, sizeof(nt_scene_influence_t));
     NT_BUILD_ASSERT(cand && "skin reduction: alloc failed (OOM)");
 
+    uint32_t reduced_count = 0;
+    double max_dropped = 0.0;
     for (uint32_t v = 0; v < vertex_count; v++) {
-        // #region collect and validate
+        // #region collect
+        /* read_influences already rejected non-finite, negative, duplicated and
+         * all-zero weights; the palette bound is the one rule it cannot know. */
         uint32_t n_cand = 0;
         double total = 0.0;
         for (uint32_t s = 0; s < inf.set_count; s++) {
             for (uint32_t c = 0; c < 4U; c++) {
                 const size_t at = ((size_t)s * set_floats) + ((size_t)v * 4U) + c;
                 const float w = inf.weights[at];
-                if (!nt_scene_finite(w)) {
-                    NT_LOG_ERROR("%s: vertex %u weight %u of set %u is not a finite number", label, v, c, s);
-                    NT_BUILD_ASSERT(0 && "influence weight is not finite");
-                }
-                if (w < 0.0F) {
-                    NT_LOG_ERROR("%s: vertex %u weight %u of set %u is %g; a weight is a non-negative fraction", label, v, c, s, (double)w);
-                    NT_BUILD_ASSERT(0 && "influence weight is negative");
-                }
                 if (w == 0.0F) {
                     continue;
                 }
@@ -391,21 +436,11 @@ static void nt_scene_extract_skin(const cgltf_primitive *prim, uint32_t mesh_ind
                     NT_LOG_ERROR("%s: vertex %u addresses palette entry %u, the skin has %u", label, v, joint, (uint32_t)skin->palette_count);
                     NT_BUILD_ASSERT(0 && "joint index lies outside the palette");
                 }
-                for (uint32_t k = 0; k < n_cand; k++) {
-                    if (cand[k].joint == joint) {
-                        NT_LOG_ERROR("%s: vertex %u weights palette entry %u twice", label, v, joint);
-                        NT_BUILD_ASSERT(0 && "vertex weights one joint twice");
-                    }
-                }
                 cand[n_cand].joint = joint;
                 cand[n_cand].weight = w;
                 n_cand++;
                 total += (double)w;
             }
-        }
-        if (!(total > 0.0)) {
-            NT_LOG_ERROR("%s: vertex %u has no influence with a non-zero weight", label, v);
-            NT_BUILD_ASSERT(0 && "vertex influence weights sum to zero");
         }
         // #endregion
 
@@ -429,10 +464,16 @@ static void nt_scene_extract_skin(const cgltf_primitive *prim, uint32_t mesh_ind
         for (uint32_t i = 0; i < n_keep; i++) {
             kept += (double)cand[i].weight;
         }
-        const double dropped = (total - kept) / total;
+        /* A vertex that keeps everything drops nothing: total - kept is then
+         * float noise, not mass. */
+        const double dropped = (n_cand <= 4U) ? 0.0 : (total - kept) / total;
         if (dropped > (double)skin->drop_tolerance) {
             NT_LOG_ERROR("%s: vertex %u has %u influences and loses %.4f of its weight to the four heaviest, tolerance %.4f", label, v, n_cand, dropped, (double)skin->drop_tolerance);
             NT_BUILD_ASSERT(0 && "skinned vertex drops more weight than the tolerance allows");
+        }
+        if (n_cand > 4U) {
+            reduced_count++;
+            max_dropped = (dropped > max_dropped) ? dropped : max_dropped;
         }
 
         float lane_w[4] = {0.0F, 0.0F, 0.0F, 0.0F};
@@ -449,6 +490,10 @@ static void nt_scene_extract_skin(const cgltf_primitive *prim, uint32_t mesh_ind
             weights_out[((size_t)v * 4U) + c] = lane_w[c];
         }
         // #endregion
+    }
+    if (reduced_count != 0) {
+        NT_LOG_WARN("%s: %u of %u vertices reduced to four influences, dropping at most %.4f of a vertex's weight (tolerance %.4f)", label, reduced_count, vertex_count, max_dropped,
+                    (double)skin->drop_tolerance);
     }
 
     free(cand);
