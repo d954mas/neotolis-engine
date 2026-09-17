@@ -239,15 +239,15 @@ enum { GRID31_SAMPLES = 31 };
 static float g_grid31[GRID31_SAMPLES * 3];
 static uint16_t g_grid31_joint[1] = {0};
 
-static void build_grid31(nt_skeletal_clip_t *clip) {
+static void build_grid31(nt_skeletal_clip_t *clip, double duration) {
     for (uint32_t k = 0; k < GRID31_SAMPLES; ++k) {
         g_grid31[(k * 3U) + 0U] = (float)k * 0.1F;
         g_grid31[(k * 3U) + 1U] = 5.0F - ((float)k * 0.2F);
         g_grid31[(k * 3U) + 2U] = (float)k * (float)k * 0.01F;
     }
     const nt_skeletal_clip_t c = {
-        .duration = 1.0,
-        .inv_step = (double)(GRID31_SAMPLES - 1),
+        .duration = duration,
+        .inv_step = (double)(GRID31_SAMPLES - 1) / duration,
         .blocks = g_grid31,
         .t_joint = g_grid31_joint,
         .sample_count = GRID31_SAMPLES,
@@ -260,7 +260,7 @@ static void build_grid31(nt_skeletal_clip_t *clip) {
 
 void test_a_non_binary_grid_reproduces_its_samples_within_tolerance(void) {
     nt_skeletal_clip_t clip;
-    build_grid31(&clip);
+    build_grid31(&clip, 1.0);
     nt_skeletal_trs_t defaults;
     build_defaults(&defaults, 1);
 
@@ -271,6 +271,20 @@ void test_a_non_binary_grid_reproduces_its_samples_within_tolerance(void) {
             ASSERT_FLOAT_NEAR(g_grid31[(k * 3U) + (uint32_t)c], out.t[c], 1e-6F);
         }
     }
+}
+
+/* 30 intervals over a duration that is neither a binary fraction nor a whole
+ * number: duration * inv_step lands a ulp off the last sample, and only the
+ * clamp keeps the end of the clip an exact copy of the stored block. */
+void test_the_end_of_a_non_binary_clip_is_still_the_last_block(void) {
+    nt_skeletal_clip_t clip;
+    build_grid31(&clip, (double)0.7F);
+    nt_skeletal_trs_t defaults;
+    build_defaults(&defaults, 1);
+
+    nt_skeletal_trs_t out;
+    nt_skeletal_sample(&clip, clip.duration, &defaults, &out);
+    ASSERT_BITS_EQUAL(g_grid31 + ((size_t)(GRID31_SAMPLES - 1U) * 3U), out.t, 3);
 }
 
 /* ---- Rotation interpolation ---- */
@@ -451,6 +465,19 @@ void test_an_absent_object_curve_copies_the_defaults(void) {
     TEST_ASSERT_EQUAL_MEMORY(&defaults, &out, sizeof(out));
 }
 
+/* A curve with no channel is the same as no curve, so the caller owes it no
+ * time range: a clip whose object curve is empty is sampled at the track time
+ * of whatever else it is blended with. */
+void test_an_absent_object_curve_accepts_a_time_past_its_duration(void) {
+    nt_skeletal_trs_t defaults;
+    build_defaults(&defaults, 1);
+    const nt_skeletal_object_curve_t curve = {.duration = 1.0, .sample_count = 1};
+
+    nt_skeletal_trs_t out;
+    nt_skeletal_sample_object(&curve, 5.0, &defaults, &out);
+    TEST_ASSERT_EQUAL_MEMORY(&defaults, &out, sizeof(out));
+}
+
 void test_a_constant_object_channel_copies_its_value(void) {
     nt_skeletal_trs_t defaults;
     build_defaults(&defaults, 1);
@@ -595,6 +622,28 @@ void test_reversing_the_speed_returns_a_track_to_its_start(void) {
     TEST_ASSERT_TRUE_MESSAGE(tracks[1].time == 0.5, "the non-looping track returns to its start");
 }
 
+/* Five cycles of reverse in one step: the floor/modulo takes them all at once
+ * instead of subtracting duration repeatedly. */
+void test_a_looping_track_wraps_several_cycles_backwards(void) {
+    nt_skeletal_track_t track = make_track(0.5, 2.0, -5.0F, NT_SKELETAL_TRACK_OCCUPIED | NT_SKELETAL_TRACK_LOOPING);
+
+    nt_skeletal_tracks_advance(&track, 1, 1.0);
+    ASSERT_DOUBLE_NEAR(1.5, track.time, 1e-12);
+}
+
+/* Non-binary duration and step: after three reverse frames the quotient and the
+ * product round so that the residue comes back as the duration itself, which is
+ * the start of the next cycle, not a time past its end. */
+void test_a_looping_track_restarts_when_the_residue_lands_on_the_duration(void) {
+    nt_skeletal_track_t track = make_track(0.0, 0.35, -7.0F, NT_SKELETAL_TRACK_OCCUPIED | NT_SKELETAL_TRACK_LOOPING);
+
+    for (uint32_t i = 0; i < 3U; ++i) {
+        nt_skeletal_tracks_advance(&track, 1, 1.0 / 60.0);
+        TEST_ASSERT_TRUE_MESSAGE(track.time >= 0.0 && track.time < track.duration, "a looping track stays inside [0, duration)");
+    }
+    TEST_ASSERT_TRUE_MESSAGE(track.time == 0.0, "the residue of a full reverse cycle restarts the cycle at 0");
+}
+
 void test_an_unoccupied_track_is_untouched(void) {
     nt_skeletal_track_t tracks[2];
     tracks[0] = make_track(7.5, 2.0, 1.0F, 0);
@@ -635,6 +684,13 @@ void test_tracks_advance_traps_on_negative_dt(void) {
     ASSERT_TRAPPED_ON("dt >= 0.0");
 }
 
+/* A non-finite dt reaches the same int64 conversion a non-finite speed does. */
+void test_tracks_advance_traps_on_a_non_finite_dt(void) {
+    nt_skeletal_track_t track = make_track(0.0, 1.0, 1.0F, NT_SKELETAL_TRACK_OCCUPIED | NT_SKELETAL_TRACK_LOOPING);
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_tracks_advance(&track, 1, (double)INFINITY));
+    ASSERT_TRAPPED_ON("dt - dt");
+}
+
 /* A non-finite speed would make the cycle count's conversion to int64 undefined,
  * which traps on wasm instead of wrapping. */
 void test_tracks_advance_traps_on_a_non_finite_speed(void) {
@@ -658,6 +714,7 @@ int main(void) {
     RUN_TEST(test_grid_times_reproduce_the_stored_samples_exactly);
     RUN_TEST(test_the_end_of_the_clip_is_the_last_sample);
     RUN_TEST(test_a_non_binary_grid_reproduces_its_samples_within_tolerance);
+    RUN_TEST(test_the_end_of_a_non_binary_clip_is_still_the_last_block);
     RUN_TEST(test_a_negated_endpoint_gives_the_same_rotation);
     RUN_TEST(test_a_wide_pair_takes_the_short_way);
     RUN_TEST(test_step_channels_hold_the_last_key_at_or_before_the_time);
@@ -666,6 +723,7 @@ int main(void) {
     RUN_TEST(test_a_single_sample_clip_can_still_have_a_duration_and_step_keys);
     RUN_TEST(test_a_null_object_curve_copies_the_defaults);
     RUN_TEST(test_an_absent_object_curve_copies_the_defaults);
+    RUN_TEST(test_an_absent_object_curve_accepts_a_time_past_its_duration);
     RUN_TEST(test_a_constant_object_channel_copies_its_value);
     RUN_TEST(test_a_sampled_object_curve_interpolates_and_hits_its_grid);
     RUN_TEST(test_a_step_object_channel_holds_the_last_key);
@@ -674,11 +732,14 @@ int main(void) {
     RUN_TEST(test_a_non_looping_track_clamps_at_both_ends);
     RUN_TEST(test_speed_zero_holds_and_duration_zero_stays_at_zero);
     RUN_TEST(test_reversing_the_speed_returns_a_track_to_its_start);
+    RUN_TEST(test_a_looping_track_wraps_several_cycles_backwards);
+    RUN_TEST(test_a_looping_track_restarts_when_the_residue_lands_on_the_duration);
     RUN_TEST(test_an_unoccupied_track_is_untouched);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_sample_traps_outside_the_clip);
     RUN_TEST(test_sample_traps_when_the_output_overlaps_the_defaults);
     RUN_TEST(test_tracks_advance_traps_on_negative_dt);
+    RUN_TEST(test_tracks_advance_traps_on_a_non_finite_dt);
     RUN_TEST(test_tracks_advance_traps_on_a_non_finite_speed);
 #endif
     return UNITY_END();

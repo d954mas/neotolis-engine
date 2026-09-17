@@ -10,7 +10,7 @@
 /*
  * nt_skeletal — pose ABI, skeleton view, 3x4 affine kernels, FK, sockets, rig
  * identity, skin binding view and palette build, clip view and sampler, and
- * the track clock (nt_skeletal_tracks.c).
+ * the track clock.
  *
  * Column vectors: L = T*R*S, G[j] = G[parent[j]]*L[j], roots G = L.
  * Every kernel is void, allocates nothing and retains no pointer past the
@@ -322,9 +322,8 @@ _Static_assert(sizeof(nt_skeletal_track_t) == 32, "nt_skeletal_track_t is 32 byt
 #endif
 
 /* Advances the clock of every occupied track by speed * dt and nothing else:
- * no callback, no event, no clip access. dt >= 0 and every duration >= 0 are
- * asserted. Lives in its own translation unit so a game that only advances
- * clocks does not link the sampler. */
+ * no callback, no event, no clip access. A finite dt >= 0 and every duration
+ * >= 0 are asserted. */
 void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, double dt);
 // #endregion
 

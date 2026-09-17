@@ -91,8 +91,8 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_m
  * lands on the grid yields u == 0, or u == 1 at the very end, which the callers
  * turn into an exact copy of a stored sample. */
 static uint32_t nt_skeletal_grid_index(double time, double inv_step, uint32_t sample_count, float *out_u) {
+    NT_ASSERT(sample_count >= 2U);
     const uint32_t last = sample_count - 1U;
-    NT_ASSERT(last >= 1U);
 
     double f = time * inv_step;
     /* inv_step is a rounded quotient, so duration * inv_step can land a ulp
@@ -135,18 +135,25 @@ static void nt_skeletal_nlerp(const float *a, const float *b, float u, float *ou
 }
 
 /* Value of the last key at or before time, or the first key when time precedes
- * it. Authored step tracks hold a handful of keys, so a linear scan from the
- * start of the range costs less than a binary search's branches. */
+ * it. Binary search, so a random seek into a long track costs log2(count)
+ * instead of walking every earlier key. */
 static const float *nt_skeletal_step_value(const float *times, const float *values, uint32_t first, uint32_t count, double time) {
     NT_ASSERT(times != NULL);
     NT_ASSERT(values != NULL);
     NT_ASSERT(count >= 1U);
 
-    const uint32_t end = first + count;
-    uint32_t k = first;
-    while ((k + 1U) < end && (double)times[k + 1U] <= time) {
-        ++k;
+    /* lo ends as the number of keys at or before time. */
+    uint32_t lo = 0;
+    uint32_t hi = count;
+    while (lo < hi) {
+        const uint32_t mid = lo + ((hi - lo) / 2U);
+        if ((double)times[first + mid] <= time) {
+            lo = mid + 1U;
+        } else {
+            hi = mid;
+        }
     }
+    const uint32_t k = (lo == 0U) ? first : (first + lo - 1U);
     return values + ((size_t)k * 4U);
 }
 
@@ -281,11 +288,16 @@ void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double t
     if (curve == NULL) {
         return;
     }
-    NT_ASSERT(time >= 0.0 && time <= curve->duration);
 
     const uint8_t mt = curve->mode[0];
     const uint8_t mq = curve->mode[1];
     const uint8_t ms = curve->mode[2];
+    /* A curve with no channel is the same as no curve, so it carries no grid and
+     * no time range to hold the caller to. */
+    if (mt == NT_SKELETAL_CHANNEL_ABSENT && mq == NT_SKELETAL_CHANNEL_ABSENT && ms == NT_SKELETAL_CHANNEL_ABSENT) {
+        return;
+    }
+    NT_ASSERT(time >= 0.0 && time <= curve->duration);
 
     // #region sampled pair
     const nt_skeletal_trs_t *a = NULL;
@@ -445,6 +457,57 @@ nt_hash64_t nt_skeletal_rig_compat_id(const nt_skeletal_skeleton_t *skel, void *
 
     NT_ASSERT(offset == size);
     return nt_hash64(bytes, size);
+}
+
+// #endregion
+
+// #region tracks
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, double dt) {
+    NT_ASSERT(tracks != NULL);
+    NT_ASSERT(dt >= 0.0);
+    /* x - x rejects NaN and infinity without libm: a non-finite step would reach
+     * the int64 cast of the cycle count below. */
+    NT_ASSERT((dt - dt) == 0.0);
+
+    for (uint32_t i = 0; i < count; ++i) {
+        nt_skeletal_track_t *track = &tracks[i];
+        if ((track->flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U) {
+            continue;
+        }
+        NT_ASSERT(track->duration >= 0.0);
+        NT_ASSERT((track->speed - track->speed) == 0.0F);
+
+        if (track->duration == 0.0) {
+            track->time = 0.0;
+            continue;
+        }
+
+        double time = track->time + ((double)track->speed * dt);
+        if ((track->flags & NT_SKELETAL_TRACK_LOOPING) != 0U) {
+            /* Floor/modulo rather than repeated subtraction: reverse playback
+             * and a step spanning several cycles both normalize in one go.
+             * Truncate-then-correct floor keeps the module free of libm. */
+            const double cycles = time / track->duration;
+            double whole = (double)(int64_t)cycles;
+            if (whole > cycles) {
+                whole -= 1.0;
+            }
+            time -= whole * track->duration;
+            /* The quotient and the product round, so an exact cycle boundary
+             * can come back as duration or a hair below zero; the cycle starts
+             * over at 0 either way. */
+            if (time < 0.0 || time >= track->duration) {
+                time = 0.0;
+            }
+        } else if (time < 0.0) {
+            time = 0.0;
+        } else if (time > track->duration) {
+            time = track->duration;
+        }
+        track->time = time;
+    }
 }
 
 // #endregion

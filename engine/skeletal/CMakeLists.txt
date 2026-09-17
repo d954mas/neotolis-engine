@@ -1,6 +1,5 @@
 nt_add_module(nt_skeletal LOG_DOMAIN "skeletal"
     nt_skeletal.c
-    nt_skeletal_tracks.c
     nt_skeletal.h
 )
 
