@@ -561,6 +561,35 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
  * diagnostic instead of returning a code (skeletal spec §16). */
 
+/* Which rig to import out of a parsed scene. */
+typedef struct {
+    uint32_t skin_index;    /* index into scene.skins[] */
+    uint32_t skeleton_root; /* cut the hierarchy here, UINT32_MAX = up to the scene root */
+    uint32_t object_node;   /* node driving the object curve, UINT32_MAX = none */
+} nt_builder_rig_selection_t;
+
+/* One imported rig. The joints are every node on the paths from the scene root
+ * of the joints' hierarchy to each skin joint, identity wrappers included, in
+ * preorder; a matrix node's rest pose is its decomposed local matrix, and a
+ * matrix that is not T*R*S is a content error. skeleton_root is an explicit cut:
+ * that node becomes joint 0, its parent space becomes skeleton space, and the
+ * game's E must carry the omitted ancestors.
+ *
+ * Every array is a view into storage and stays valid until nt_builder_free_rig;
+ * joint names come from the scene, so the scene must outlive the rig. */
+typedef struct {
+    nt_skeletal_skeleton_t skeleton; /* rig_compat_id filled by the import */
+    const uint32_t *node_index;      /* joint j -> scene node */
+    const uint16_t *palette_joint;   /* skin joint p -> rig joint (the binding's remap) */
+    uint32_t skin_index;
+    uint32_t object_node; /* UINT32_MAX = none */
+    uint16_t palette_count;
+    void *storage; /* one allocation behind every array above */
+} nt_builder_rig_t;
+
+void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_selection_t *sel, nt_builder_rig_t *out);
+void nt_builder_free_rig(nt_builder_rig_t *rig);
+
 /* Computes rig_compat_id from the joints it writes and returns it, so the
  * caller stamps clips and bindings with the identity that actually shipped;
  * skel->rig_compat_id is ignored. Joint ids must be unique. */

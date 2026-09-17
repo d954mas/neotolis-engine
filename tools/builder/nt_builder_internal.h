@@ -483,6 +483,12 @@ void nt_builder_ensure_cache_dir(const char *dir);
 /* Skeletal encoders (nt_builder_skeletal.c): exactly the bytes the pack stores,
  * caller frees the buffer. The public entry points are the nt_builder_add_*
  * wrappers; tests call these to inspect payloads without a pack. */
+/* Rig import (nt_builder_rig.c): decomposes one glTF column-major local matrix
+ * into the rest TRS. name labels diagnostics; a matrix that is not T*R*S, or one
+ * with a degenerate scale, is a content error and asserts. Public only to tests,
+ * which pin the decomposition on matrices no fixture file needs to carry. */
+void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_trs_t *out);
+
 nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
 void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size);
 void nt_builder_encode_clip(const nt_builder_clip_t *clip, uint8_t **out, uint32_t *out_size);
