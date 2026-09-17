@@ -255,7 +255,8 @@ A plain activator (`activate`/`deactivate`, no resolve callbacks) is already
 copy-out: it turns the payload into a self-contained runtime object and never
 reads the blob again. MESH does it with GPU buffers; the skeletal types
 (`NSKL`, `NSKN`, `NANM`, `engine/skeletal_assets`) do it with one CPU allocation
-per asset holding the decoded runtime tables. Neither pins.
+per asset holding a copy of the payload, which is already the runtime layout.
+Neither pins.
 
 Two consumption models exist for asset types that derive state from pack bytes
 through the resolve callbacks:

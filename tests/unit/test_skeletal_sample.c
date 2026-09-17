@@ -46,8 +46,7 @@ static float g_cq[4];
 static uint16_t g_cs_joint[1] = {0};
 static float g_cs[3] = {2.0F, 0.5F, 3.0F};
 static nt_skeletal_step_t g_steps[3];
-static float g_step_times[CLIP_STEP_KEYS];
-static float g_step_values[CLIP_STEP_KEYS * 4];
+static nt_skeletal_step_key_t g_keys[CLIP_STEP_KEYS];
 static nt_skeletal_clip_t g_clip;
 static nt_skeletal_trs_t g_defaults[CLIP_JOINTS];
 
@@ -77,11 +76,11 @@ static void build_defaults(nt_skeletal_trs_t *d, uint16_t count) {
 }
 
 static void set_step_key(uint32_t key, float time, float a, float b, float c, float d) {
-    g_step_times[key] = time;
-    g_step_values[(key * 4U) + 0U] = a;
-    g_step_values[(key * 4U) + 1U] = b;
-    g_step_values[(key * 4U) + 2U] = c;
-    g_step_values[(key * 4U) + 3U] = d;
+    g_keys[key].time = time;
+    g_keys[key].v[0] = a;
+    g_keys[key].v[1] = b;
+    g_keys[key].v[2] = c;
+    g_keys[key].v[3] = d;
 }
 
 static void build_clip(void) {
@@ -102,12 +101,12 @@ static void build_clip(void) {
 
     quat_axis_angle(g_cq, 0.0F, 0.0F, 1.0F, 30.0F);
 
-    quat_axis_angle(g_step_values + 0, 1.0F, 0.0F, 0.0F, 0.0F);
-    g_step_times[0] = 0.0F;
-    quat_axis_angle(g_step_values + 4, 1.0F, 0.0F, 0.0F, 45.0F);
-    g_step_times[1] = 0.25F;
-    quat_axis_angle(g_step_values + 8, 1.0F, 0.0F, 0.0F, 90.0F);
-    g_step_times[2] = 0.6F;
+    quat_axis_angle(g_keys[0].v, 1.0F, 0.0F, 0.0F, 0.0F);
+    g_keys[0].time = 0.0F;
+    quat_axis_angle(g_keys[1].v, 1.0F, 0.0F, 0.0F, 45.0F);
+    g_keys[1].time = 0.25F;
+    quat_axis_angle(g_keys[2].v, 1.0F, 0.0F, 0.0F, 90.0F);
+    g_keys[2].time = 0.6F;
     set_step_key(3, 0.0F, 1.0F, 2.0F, 3.0F, 0.0F);
     set_step_key(4, 0.5F, -4.0F, -5.0F, -6.0F, 0.0F);
     set_step_key(5, 0.3F, 1.5F, 2.5F, 3.5F, 0.0F);
@@ -142,8 +141,7 @@ static void build_clip(void) {
         .cs_joint = g_cs_joint,
         .cs = g_cs,
         .steps = g_steps,
-        .step_times = g_step_times,
-        .step_values = g_step_values,
+        .keys = g_keys,
         .sample_count = CLIP_SAMPLES,
         .block_floats = CLIP_BLOCK_FLOATS,
         .n_steps = 3,
@@ -362,38 +360,37 @@ void test_a_wide_pair_takes_the_short_way(void) {
 void test_step_channels_hold_the_last_key_at_or_before_the_time(void) {
     nt_skeletal_trs_t out[CLIP_JOINTS];
 
-    nt_skeletal_sample(&g_clip, (double)g_step_times[1], g_defaults, out);
-    ASSERT_BITS_EQUAL(g_step_values + 4, out[1].q, 4);
+    nt_skeletal_sample(&g_clip, (double)g_keys[1].time, g_defaults, out);
+    ASSERT_BITS_EQUAL(g_keys[1].v, out[1].q, 4);
 
-    nt_skeletal_sample(&g_clip, nextafter((double)g_step_times[1], 0.0), g_defaults, out);
-    ASSERT_BITS_EQUAL(g_step_values + 0, out[1].q, 4);
+    nt_skeletal_sample(&g_clip, nextafter((double)g_keys[1].time, 0.0), g_defaults, out);
+    ASSERT_BITS_EQUAL(g_keys[0].v, out[1].q, 4);
 
-    nt_skeletal_sample(&g_clip, (double)g_step_times[2], g_defaults, out);
-    ASSERT_BITS_EQUAL(g_step_values + 8, out[1].q, 4);
+    nt_skeletal_sample(&g_clip, (double)g_keys[2].time, g_defaults, out);
+    ASSERT_BITS_EQUAL(g_keys[2].v, out[1].q, 4);
 
     nt_skeletal_sample(&g_clip, 0.0, g_defaults, out);
-    ASSERT_BITS_EQUAL(g_step_values + 12, out[2].t, 3);
-    nt_skeletal_sample(&g_clip, (double)g_step_times[4], g_defaults, out);
-    ASSERT_BITS_EQUAL(g_step_values + 16, out[2].t, 3);
-    nt_skeletal_sample(&g_clip, nextafter((double)g_step_times[4], 0.0), g_defaults, out);
-    ASSERT_BITS_EQUAL(g_step_values + 12, out[2].t, 3);
+    ASSERT_BITS_EQUAL(g_keys[3].v, out[2].t, 3);
+    nt_skeletal_sample(&g_clip, (double)g_keys[4].time, g_defaults, out);
+    ASSERT_BITS_EQUAL(g_keys[4].v, out[2].t, 3);
+    nt_skeletal_sample(&g_clip, nextafter((double)g_keys[4].time, 0.0), g_defaults, out);
+    ASSERT_BITS_EQUAL(g_keys[3].v, out[2].t, 3);
 }
 
 void test_a_time_before_the_first_step_key_holds_that_key(void) {
     nt_skeletal_trs_t out[CLIP_JOINTS];
     nt_skeletal_sample(&g_clip, 0.0, g_defaults, out);
-    ASSERT_BITS_EQUAL(g_step_values + 20, out[3].s, 3);
+    ASSERT_BITS_EQUAL(g_keys[5].v, out[3].s, 3);
 
-    nt_skeletal_sample(&g_clip, (double)g_step_times[6], g_defaults, out);
-    ASSERT_BITS_EQUAL(g_step_values + 24, out[3].s, 3);
+    nt_skeletal_sample(&g_clip, (double)g_keys[6].time, g_defaults, out);
+    ASSERT_BITS_EQUAL(g_keys[6].v, out[3].s, 3);
 }
 
 /* ---- One-sample clips ---- */
 
 static uint16_t g_one_ct_joint[1] = {0};
 static float g_one_ct[3] = {9.0F, -8.0F, 7.5F};
-static float g_one_step_times[2] = {0.0F, 0.5F};
-static float g_one_step_values[8] = {1.0F, 1.0F, 1.0F, 0.0F, 4.0F, 5.0F, 6.0F, 0.0F};
+static nt_skeletal_step_key_t g_one_keys[2] = {{0.0F, {1.0F, 1.0F, 1.0F, 0.0F}}, {0.5F, {4.0F, 5.0F, 6.0F, 0.0F}}};
 static nt_skeletal_step_t g_one_step[1];
 
 void test_a_single_sample_clip_of_duration_zero_applies_its_constants(void) {
@@ -427,8 +424,7 @@ void test_a_single_sample_clip_can_still_have_a_duration_and_step_keys(void) {
     const nt_skeletal_clip_t clip = {
         .duration = 2.0,
         .steps = g_one_step,
-        .step_times = g_one_step_times,
-        .step_values = g_one_step_values,
+        .keys = g_one_keys,
         .sample_count = 1,
         .n_steps = 1,
         .joint_count = 1,
@@ -436,16 +432,15 @@ void test_a_single_sample_clip_can_still_have_a_duration_and_step_keys(void) {
 
     nt_skeletal_trs_t out;
     nt_skeletal_sample(&clip, 2.0, &defaults, &out);
-    ASSERT_BITS_EQUAL(g_one_step_values + 4, out.s, 3);
+    ASSERT_BITS_EQUAL(g_one_keys[1].v, out.s, 3);
     nt_skeletal_sample(&clip, 0.25, &defaults, &out);
-    ASSERT_BITS_EQUAL(g_one_step_values + 0, out.s, 3);
+    ASSERT_BITS_EQUAL(g_one_keys[0].v, out.s, 3);
 }
 
 /* ---- Object curve ---- */
 
 static nt_skeletal_trs_t g_object_samples[2];
-static float g_object_step_times[2] = {0.0F, 0.75F};
-static float g_object_step_values[8] = {0.0F, 0.0F, 0.0F, 0.0F, 3.0F, -3.0F, 1.5F, 0.0F};
+static nt_skeletal_step_key_t g_object_keys[2] = {{0.0F, {0.0F, 0.0F, 0.0F, 0.0F}}, {0.75F, {3.0F, -3.0F, 1.5F, 0.0F}}};
 
 void test_a_null_object_curve_copies_the_defaults(void) {
     nt_skeletal_trs_t defaults;
@@ -532,16 +527,16 @@ void test_a_step_object_channel_holds_the_last_key(void) {
     nt_skeletal_trs_t defaults;
     build_defaults(&defaults, 1);
 
-    nt_skeletal_object_curve_t curve = {.step_times = g_object_step_times, .step_values = g_object_step_values, .duration = 1.0, .sample_count = 1};
+    nt_skeletal_object_curve_t curve = {.keys = g_object_keys, .duration = 1.0, .sample_count = 1};
     curve.mode[0] = NT_SKELETAL_CHANNEL_STEP;
     curve.step_first[0] = 0;
     curve.step_count[0] = 2;
 
     nt_skeletal_trs_t out;
     nt_skeletal_sample_object(&curve, 0.74, &defaults, &out);
-    ASSERT_BITS_EQUAL(g_object_step_values + 0, out.t, 3);
-    nt_skeletal_sample_object(&curve, (double)g_object_step_times[1], &defaults, &out);
-    ASSERT_BITS_EQUAL(g_object_step_values + 4, out.t, 3);
+    ASSERT_BITS_EQUAL(g_object_keys[0].v, out.t, 3);
+    nt_skeletal_sample_object(&curve, (double)g_object_keys[1].time, &defaults, &out);
+    ASSERT_BITS_EQUAL(g_object_keys[1].v, out.t, 3);
 }
 
 /* ---- Track clock ---- */

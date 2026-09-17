@@ -1,5 +1,6 @@
-/* Wire-format coverage for the NSKL / NSKN / NANM encoders: every field is read
- * back from the payload bytes as little-endian, never through the header structs. */
+/* Wire-format coverage for the NSKL / NSKN / NANM encoders: the payload bytes
+ * are read back at hand-computed offsets, so a moved field or a reordered array
+ * fails here and not only in the round-trip suite. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <setjmp.h>
@@ -94,18 +95,23 @@ static const nt_skeletal_trs_t k_rest[FIXTURE_JOINTS] = {
     {{4.0F, -4.0F, 0.0F}, {0.0F, 1.0F, 0.0F, 0.0F}, {0.25F, 0.25F, 0.25F}},
 };
 
-/* The encoder asserts that the id matches these joints, so the fixture takes it
- * from the one implementation of the schema instead of inventing a number. */
+/* rig_compat_id is an output of the encoder, so the fixture leaves the field at
+ * a value that is deliberately not the rig's own identity. */
 static nt_skeletal_skeleton_t fixture_skeleton(void) {
     nt_skeletal_skeleton_t skel = {0};
+    skel.rig_compat_id = (nt_hash64_t){0xDEADBEEFDEADBEEFULL};
     skel.parent = k_parent;
     skel.subtree_end = k_subtree_end;
     skel.joint_id = k_joint_id;
     skel.rest = k_rest;
     skel.joint_count = FIXTURE_JOINTS;
-    uint8_t scratch[NT_SKELETAL_RIG_ID_BYTES(FIXTURE_JOINTS)];
-    skel.rig_compat_id = nt_skeletal_rig_compat_id(&skel, scratch, (uint32_t)sizeof(scratch));
     return skel;
+}
+
+static uint64_t fixture_rig_id(void) {
+    nt_skeletal_skeleton_t skel = fixture_skeleton();
+    uint8_t scratch[NT_SKELETAL_RIG_ID_BYTES(FIXTURE_JOINTS)];
+    return nt_skeletal_rig_compat_id(&skel, scratch, (uint32_t)sizeof(scratch)).value;
 }
 
 #define FIXTURE_PALETTE 3
@@ -123,73 +129,95 @@ static nt_skin_binding_t fixture_binding(void) {
     binding.rig_compat_id = (nt_hash64_t){0xABCDEF0123456789ULL};
     binding.remap = k_remap;
     binding.inverse_bind = k_inverse_bind;
-    binding.reach = 1.75F;
-    binding.any_pose_radius = 4.5F;
     binding.palette_count = FIXTURE_PALETTE;
     return binding;
 }
 
-/* Asymmetric clip: three joints with a different mode per component, one STEP
- * track and an object curve whose translation is sampled. */
+/*
+ * Asymmetric clip: two sampled translation rows against one sampled rotation
+ * row, constants of two different component kinds, a joint STEP track and an
+ * object curve that is sampled in t and stepped in q -- so the block layout,
+ * the per-kind tables and the joint/object key partition all carry more than
+ * one element and cannot pass by coincidence.
+ *
+ *   joint 0: t sampled (row 0), q constant, s absent
+ *   joint 1: t absent, q sampled (row 0), s constant
+ *   joint 2: t sampled (row 1), q absent, s step (3 keys)
+ *   object : t sampled, q step (2 keys), s absent
+ */
 #define CLIP_JOINTS 3
 #define CLIP_SAMPLES 5
 #define CLIP_CHANNELS (3 * (CLIP_JOINTS + 1))
 
-static const float k_q_samples[CLIP_SAMPLES * 4] = {
+static const float k_t_row0[CLIP_SAMPLES * 3] = {0.0F, 0.0F, 0.0F, 1.0F, 0.5F, 0.0F, 2.0F, 1.0F, 0.0F, 3.0F, 1.5F, 0.0F, 4.0F, 2.0F, 0.0F};
+static const float k_t_row1[CLIP_SAMPLES * 3] = {10.0F, -1.0F, 0.5F, 10.5F, -2.0F, 1.5F, 11.0F, -3.0F, 2.5F, 11.5F, -4.0F, 3.5F, 12.0F, -5.0F, 4.5F};
+static const float k_q_row0[CLIP_SAMPLES * 4] = {
     0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.38268343F, 0.92387953F, 0.0F, 0.0F, 0.70710678F, 0.70710678F, 0.0F, 0.0F, 0.92387953F, 0.38268343F, 0.0F, 0.0F, 1.0F, 0.0F,
 };
-static const float k_t_samples[CLIP_SAMPLES * 3] = {0.0F, 0.0F, 0.0F, 1.0F, 0.5F, 0.0F, 2.0F, 1.0F, 0.0F, 3.0F, 1.5F, 0.0F, 4.0F, 2.0F, 0.0F};
-static const float k_s_samples[CLIP_SAMPLES * 3] = {1.0F, 1.0F, 1.0F, 1.1F, 1.0F, 0.9F, 1.2F, 1.0F, 0.8F, 1.3F, 1.0F, 0.7F, 1.4F, 1.0F, 0.6F};
-static const float k_object_t_samples[CLIP_SAMPLES * 3] = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.25F, 0.0F, 0.0F, 0.5F, 0.0F, 0.0F, 0.75F, 0.0F, 0.0F, 1.0F};
+static const float k_object_t[CLIP_SAMPLES * 3] = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.25F, 0.0F, 0.0F, 0.5F, 0.0F, 0.0F, 0.75F, 0.0F, 0.0F, 1.0F};
+
+static const float k_const_q0[4] = {0.0F, 0.0F, 0.70710678F, 0.70710678F};
+static const float k_const_s1[4] = {2.0F, 3.0F, 4.0F, 0.0F};
 
 static const float k_step_times[3] = {0.0F, 0.4F, 0.8F};
-static const float k_step_values[3 * 4] = {0.0F, 0.0F, 0.0F, 0.0F, 5.0F, 0.0F, 0.0F, 0.0F, 5.0F, 5.0F, 0.0F, 0.0F};
+static const float k_step_values[3 * 4] = {1.0F, 1.0F, 1.0F, 0.0F, 2.0F, 0.5F, 3.0F, 0.0F, 0.25F, 4.0F, 0.5F, 0.0F};
+static const float k_object_step_times[2] = {0.0F, 0.5F};
+static const float k_object_step_values[2 * 4] = {0.38268343F, 0.0F, 0.0F, 0.92387953F, 0.0F, 0.0F, 0.70710678F, 0.70710678F};
 
 /* channels[c]: joint c/3, component c%3 (0 = t, 1 = q, 2 = s). */
 static void fixture_clip(nt_builder_clip_t *clip, nt_builder_anim_channel_t channels[CLIP_CHANNELS]) {
     memset(channels, 0, sizeof(nt_builder_anim_channel_t) * (size_t)CLIP_CHANNELS);
 
-    channels[0].mode = NT_ANM_CHANNEL_ABSENT;
-    channels[1].mode = NT_ANM_CHANNEL_SAMPLED;
-    channels[1].samples = k_q_samples;
-    channels[2].mode = NT_ANM_CHANNEL_CONSTANT;
-    channels[2].constant[0] = 2.0F;
-    channels[2].constant[1] = 2.0F;
-    channels[2].constant[2] = 2.0F;
+    channels[0].mode = NT_SKELETAL_CHANNEL_SAMPLED;
+    channels[0].samples = k_t_row0;
+    channels[1].mode = NT_SKELETAL_CHANNEL_CONSTANT;
+    memcpy(channels[1].constant, k_const_q0, sizeof(k_const_q0));
 
-    channels[3].mode = NT_ANM_CHANNEL_SAMPLED;
-    channels[3].samples = k_t_samples;
-    channels[4].mode = NT_ANM_CHANNEL_CONSTANT;
-    channels[4].constant[3] = 1.0F; /* identity rotation */
-    channels[5].mode = NT_ANM_CHANNEL_ABSENT;
+    channels[4].mode = NT_SKELETAL_CHANNEL_SAMPLED;
+    channels[4].samples = k_q_row0;
+    channels[5].mode = NT_SKELETAL_CHANNEL_CONSTANT;
+    memcpy(channels[5].constant, k_const_s1, sizeof(k_const_s1));
 
-    channels[6].mode = NT_ANM_CHANNEL_STEP;
-    channels[6].step_times = k_step_times;
-    channels[6].step_values = k_step_values;
-    channels[6].step_count = 3;
-    channels[7].mode = NT_ANM_CHANNEL_ABSENT;
-    channels[8].mode = NT_ANM_CHANNEL_SAMPLED;
-    channels[8].samples = k_s_samples;
+    channels[6].mode = NT_SKELETAL_CHANNEL_SAMPLED;
+    channels[6].samples = k_t_row1;
+    channels[8].mode = NT_SKELETAL_CHANNEL_STEP;
+    channels[8].step_times = k_step_times;
+    channels[8].step_values = k_step_values;
+    channels[8].step_count = 3;
 
-    channels[9].mode = NT_ANM_CHANNEL_SAMPLED;
-    channels[9].samples = k_object_t_samples;
-    channels[10].mode = NT_ANM_CHANNEL_ABSENT;
-    channels[11].mode = NT_ANM_CHANNEL_ABSENT;
+    channels[9].mode = NT_SKELETAL_CHANNEL_SAMPLED;
+    channels[9].samples = k_object_t;
+    channels[10].mode = NT_SKELETAL_CHANNEL_STEP;
+    channels[10].step_times = k_object_step_times;
+    channels[10].step_values = k_object_step_values;
+    channels[10].step_count = 2;
 
     memset(clip, 0, sizeof(*clip));
     clip->rig_compat_id = 0xABCDEF0123456789ULL;
     clip->additive_ref_id = 0;
-    clip->kind = NT_ANM_KIND_ABSOLUTE;
     clip->joint_count = CLIP_JOINTS;
     clip->sample_count = CLIP_SAMPLES;
     clip->duration = 1.0F;
-    clip->r_joints = 3.5F;
-    clip->r_root = 4.0F;
-    clip->s_max = 2.5F;
-    clip->bake_fps_min = 30.0F;
-    clip->bake_reach = 1.25F;
     clip->channels = channels;
 }
+
+/* Hand-computed offsets of the fixture clip: header 120, blocks 5 x 10 floats,
+ * no ct, one cq, one cs, one step track, five keys, five object samples, then
+ * the joint tables. */
+enum {
+    FIX_OFF_BLOCKS = 120,
+    FIX_OFF_CT = FIX_OFF_BLOCKS + (CLIP_SAMPLES * 10 * 4),
+    FIX_OFF_CQ = FIX_OFF_CT,
+    FIX_OFF_CS = FIX_OFF_CQ + 16,
+    FIX_OFF_STEPS = FIX_OFF_CS + 12,
+    FIX_OFF_KEYS = FIX_OFF_STEPS + 12,
+    FIX_OFF_OBJECT = FIX_OFF_KEYS + (5 * 20),
+    FIX_OFF_T_JOINT = FIX_OFF_OBJECT + (CLIP_SAMPLES * 40),
+    FIX_OFF_Q_JOINT = FIX_OFF_T_JOINT + 4,
+    FIX_OFF_CQ_JOINT = FIX_OFF_Q_JOINT + 2,
+    FIX_OFF_CS_JOINT = FIX_OFF_CQ_JOINT + 2,
+    FIX_SIZE = FIX_OFF_CS_JOINT + 2,
+};
 // #endregion
 
 // #region NSKL
@@ -198,15 +226,18 @@ void test_encode_skeleton_wire_layout(void) {
     nt_skeletal_skeleton_t skel = fixture_skeleton();
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    nt_builder_encode_skeleton(&skel, &payload, &size);
+    const nt_hash64_t rig = nt_builder_encode_skeleton(&skel, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
+    /* The encoder computes the identity and ignores the field it was handed. */
+    TEST_ASSERT_EQUAL_HEX64(fixture_rig_id(), rig.value);
+    TEST_ASSERT_EQUAL_HEX64(rig.value, rd_u64(payload + 8));
+
     TEST_ASSERT_EQUAL_UINT32(16U + (48U * FIXTURE_JOINTS), size);
-    TEST_ASSERT_EQUAL_UINT32(NT_SKL_SIZE(FIXTURE_JOINTS), size);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_SKL_SIZE(FIXTURE_JOINTS), size);
     TEST_ASSERT_EQUAL_HEX32(NT_SKL_MAGIC, rd_u32(payload));
     TEST_ASSERT_EQUAL_UINT16(NT_SKELETAL_FORMAT_VERSION, rd_u16(payload + 4));
     TEST_ASSERT_EQUAL_UINT16(FIXTURE_JOINTS, rd_u16(payload + 6));
-    TEST_ASSERT_EQUAL_HEX64(skel.rig_compat_id.value, rd_u64(payload + 8));
 
     const uint8_t *parent = payload + 16;
     const uint8_t *subtree_end = parent + (size_t)(2 * FIXTURE_JOINTS);
@@ -241,21 +272,16 @@ void test_encode_skin_binding_wire_layout(void) {
     nt_builder_encode_skin_binding(&binding, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
-    TEST_ASSERT_EQUAL_UINT32(28U + (50U * FIXTURE_PALETTE), size);
-    TEST_ASSERT_EQUAL_UINT32(NT_SKN_SIZE(FIXTURE_PALETTE), size);
+    TEST_ASSERT_EQUAL_UINT32(16U + (50U * FIXTURE_PALETTE), size);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_SKN_SIZE(FIXTURE_PALETTE), size);
     TEST_ASSERT_EQUAL_HEX32(NT_SKN_MAGIC, rd_u32(payload));
     TEST_ASSERT_EQUAL_UINT16(NT_SKELETAL_FORMAT_VERSION, rd_u16(payload + 4));
     TEST_ASSERT_EQUAL_UINT16(FIXTURE_PALETTE, rd_u16(payload + 6));
     TEST_ASSERT_EQUAL_HEX64(0xABCDEF0123456789ULL, rd_u64(payload + 8));
-    TEST_ASSERT_EQUAL_UINT8(NT_SKN_MESH_SPACE_GLTF_NODE, payload[16]);
-    TEST_ASSERT_EQUAL_UINT8(0, payload[17]);
-    TEST_ASSERT_EQUAL_UINT8(0, payload[18]);
-    TEST_ASSERT_EQUAL_UINT8(0, payload[19]);
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(1.75F), rd_u32(payload + 20));
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(4.5F), rd_u32(payload + 24));
 
-    const uint8_t *remap = payload + 28;
-    const uint8_t *inverse_bind = remap + (size_t)(2 * FIXTURE_PALETTE);
+    /* Matrices come first, so the u16 remap can end the payload unpadded. */
+    const uint8_t *inverse_bind = payload + 16;
+    const uint8_t *remap = inverse_bind + (size_t)(48 * FIXTURE_PALETTE);
     for (size_t p = 0; p < FIXTURE_PALETTE; p++) {
         TEST_ASSERT_EQUAL_UINT16(k_remap[p], rd_u16(remap + (2 * p)));
         for (size_t row = 0; row < 3; row++) {
@@ -270,11 +296,56 @@ void test_encode_skin_binding_wire_layout(void) {
 // #endregion
 
 // #region NANM
-/* Section descriptor s of the payload. */
-static const uint8_t *section_at(const uint8_t *payload, size_t s) { return payload + sizeof(NtAnmHeader) + (s * sizeof(NtAnmSection)); }
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_encode_clip_header_counts(void) {
+    nt_builder_clip_t clip;
+    nt_builder_anim_channel_t channels[CLIP_CHANNELS];
+    fixture_clip(&clip, channels);
+
+    uint8_t *payload = NULL;
+    uint32_t size = 0;
+    nt_builder_encode_clip(&clip, &payload, &size);
+    TEST_ASSERT_NOT_NULL(payload);
+    TEST_ASSERT_EQUAL_UINT32(FIX_SIZE, size);
+
+    NtAnmHeader header;
+    memcpy(&header, payload, sizeof(header));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)nt_anm_size(&header), size);
+    TEST_ASSERT_EQUAL_HEX32(NT_ANM_MAGIC, header.magic);
+    TEST_ASSERT_EQUAL_UINT16(NT_SKELETAL_FORMAT_VERSION, header.version);
+    TEST_ASSERT_EQUAL_UINT16(CLIP_JOINTS, header.joint_count);
+    TEST_ASSERT_EQUAL_UINT32(CLIP_SAMPLES, header.sample_count);
+    TEST_ASSERT_EQUAL_HEX32(f32_bits(1.0F), f32_bits(header.duration));
+    TEST_ASSERT_EQUAL_HEX64(0xABCDEF0123456789ULL, header.rig_compat_id);
+    TEST_ASSERT_EQUAL_HEX64(0ULL, header.additive_ref_id);
+
+    TEST_ASSERT_EQUAL_UINT16(2, header.n_t);
+    TEST_ASSERT_EQUAL_UINT16(1, header.n_q);
+    TEST_ASSERT_EQUAL_UINT16(0, header.n_s);
+    TEST_ASSERT_EQUAL_UINT16(0, header.n_ct);
+    TEST_ASSERT_EQUAL_UINT16(1, header.n_cq);
+    TEST_ASSERT_EQUAL_UINT16(1, header.n_cs);
+    TEST_ASSERT_EQUAL_UINT32(1, header.n_steps);
+    TEST_ASSERT_EQUAL_UINT32(5, header.n_keys);
+
+    TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_SAMPLED, header.object_mode[0]);
+    TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_STEP, header.object_mode[1]);
+    TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_ABSENT, header.object_mode[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, header._pad);
+    for (size_t i = 0; i < 10; i++) {
+        TEST_ASSERT_EQUAL_HEX32(0U, f32_bits(header.object_constant[i]));
+    }
+    /* The joint track owns keys [0, 3), the object rotation [3, 5). */
+    TEST_ASSERT_EQUAL_UINT32(0, header.object_step_first[0]);
+    TEST_ASSERT_EQUAL_UINT32(0, header.object_step_count[0]);
+    TEST_ASSERT_EQUAL_UINT32(3, header.object_step_first[1]);
+    TEST_ASSERT_EQUAL_UINT32(2, header.object_step_count[1]);
+
+    free(payload);
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_encode_clip_asymmetric_sections(void) {
+void test_encode_clip_array_layout(void) {
     nt_builder_clip_t clip;
     nt_builder_anim_channel_t channels[CLIP_CHANNELS];
     fixture_clip(&clip, channels);
@@ -284,101 +355,119 @@ void test_encode_clip_asymmetric_sections(void) {
     nt_builder_encode_clip(&clip, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
-    /* 56 header + 7*16 table + 12*4 CHAN + 2*60 PLNT + 1*80 PLNQ + 1*60 PLNS
-     * + 2*16 CNST + 1*8 STPT + 3*20 STPK */
-    TEST_ASSERT_EQUAL_UINT32(576U, size);
-
-    TEST_ASSERT_EQUAL_HEX32(NT_ANM_MAGIC, rd_u32(payload));
-    TEST_ASSERT_EQUAL_UINT16(NT_SKELETAL_FORMAT_VERSION, rd_u16(payload + 4));
-    TEST_ASSERT_EQUAL_UINT16(NT_ANM_SECTION_COUNT, rd_u16(payload + 6));
-    TEST_ASSERT_EQUAL_UINT16(CLIP_JOINTS, rd_u16(payload + 8));
-    TEST_ASSERT_EQUAL_UINT8(NT_ANM_KIND_ABSOLUTE, payload[10]);
-    TEST_ASSERT_EQUAL_UINT8(NT_ANM_CODEC_F32, payload[11]);
-    TEST_ASSERT_EQUAL_HEX64(0xABCDEF0123456789ULL, rd_u64(payload + 12));
-    TEST_ASSERT_EQUAL_HEX64(0ULL, rd_u64(payload + 20));
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(1.0F), rd_u32(payload + 28));
-    TEST_ASSERT_EQUAL_UINT32(CLIP_SAMPLES, rd_u32(payload + 32));
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(3.5F), rd_u32(payload + 36));
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(4.0F), rd_u32(payload + 40));
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(2.5F), rd_u32(payload + 44));
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(30.0F), rd_u32(payload + 48));
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(1.25F), rd_u32(payload + 52));
-
-    const uint32_t tags[NT_ANM_SECTION_COUNT] = {NT_ANM_TAG_CHAN, NT_ANM_TAG_PLNT, NT_ANM_TAG_PLNQ, NT_ANM_TAG_PLNS, NT_ANM_TAG_CNST, NT_ANM_TAG_STPT, NT_ANM_TAG_STPK};
-    const uint32_t counts[NT_ANM_SECTION_COUNT] = {CLIP_CHANNELS, 2, 1, 1, 2, 1, 3};
-    const uint32_t strides[NT_ANM_SECTION_COUNT] = {4, CLIP_SAMPLES * 12, CLIP_SAMPLES * 16, CLIP_SAMPLES * 12, 16, 8, 20};
-    uint32_t expect_offset = (uint32_t)sizeof(NtAnmHeader) + (NT_ANM_SECTION_COUNT * (uint32_t)sizeof(NtAnmSection));
-    uint32_t section_offset[NT_ANM_SECTION_COUNT];
-    for (size_t s = 0; s < NT_ANM_SECTION_COUNT; s++) {
-        const uint8_t *sec = section_at(payload, s);
-        TEST_ASSERT_EQUAL_HEX32(tags[s], rd_u32(sec));
-        TEST_ASSERT_EQUAL_UINT32(expect_offset, rd_u32(sec + 4));
-        TEST_ASSERT_EQUAL_UINT32(counts[s], rd_u32(sec + 8));
-        TEST_ASSERT_EQUAL_UINT32(strides[s], rd_u32(sec + 12));
-        TEST_ASSERT_EQUAL_UINT32(0, rd_u32(sec + 4) % 4U);
-        section_offset[s] = expect_offset;
-        expect_offset += counts[s] * strides[s];
-    }
-    TEST_ASSERT_EQUAL_UINT32(size, expect_offset);
-
-    /* CHAN: mode per channel, index counting within its own table. */
-    const uint8_t k_expect_mode[CLIP_CHANNELS] = {
-        NT_ANM_CHANNEL_ABSENT, NT_ANM_CHANNEL_SAMPLED, NT_ANM_CHANNEL_CONSTANT, NT_ANM_CHANNEL_SAMPLED, NT_ANM_CHANNEL_CONSTANT, NT_ANM_CHANNEL_ABSENT,
-        NT_ANM_CHANNEL_STEP,   NT_ANM_CHANNEL_ABSENT,  NT_ANM_CHANNEL_SAMPLED,  NT_ANM_CHANNEL_SAMPLED, NT_ANM_CHANNEL_ABSENT,   NT_ANM_CHANNEL_ABSENT,
-    };
-    const uint16_t k_expect_index[CLIP_CHANNELS] = {0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0};
-    const uint8_t *chan = payload + section_offset[0];
-    for (size_t c = 0; c < (size_t)CLIP_CHANNELS; c++) {
-        TEST_ASSERT_EQUAL_UINT8(k_expect_mode[c], chan[4 * c]);
-        TEST_ASSERT_EQUAL_UINT8(0, chan[(4 * c) + 1]);
-        TEST_ASSERT_EQUAL_UINT16(k_expect_index[c], rd_u16(chan + (4 * c) + 2));
+    /* Blocks are sample-major: t row 0, t row 1, then the q row. */
+    for (size_t i = 0; i < CLIP_SAMPLES; i++) {
+        const uint8_t *block = payload + FIX_OFF_BLOCKS + (i * 10 * 4);
+        for (size_t c = 0; c < 3; c++) {
+            TEST_ASSERT_EQUAL_HEX32(f32_bits(k_t_row0[(i * 3) + c]), rd_u32(block + (4 * c)));
+            TEST_ASSERT_EQUAL_HEX32(f32_bits(k_t_row1[(i * 3) + c]), rd_u32(block + 12 + (4 * c)));
+        }
+        for (size_t c = 0; c < 4; c++) {
+            TEST_ASSERT_EQUAL_HEX32(f32_bits(k_q_row0[(i * 4) + c]), rd_u32(block + 24 + (4 * c)));
+        }
     }
 
-    /* PLNT rows follow channel order: joint 1 translation, then the object curve. */
-    const uint8_t *plnt = payload + section_offset[1];
-    for (size_t i = 0; i < (size_t)(CLIP_SAMPLES * 3); i++) {
-        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_t_samples[i]), rd_u32(plnt + (4 * i)));
-        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_object_t_samples[i]), rd_u32(plnt + strides[1] + (4 * i)));
+    for (size_t c = 0; c < 4; c++) {
+        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_const_q0[c]), rd_u32(payload + FIX_OFF_CQ + (4 * c)));
     }
-    const uint8_t *plnq = payload + section_offset[2];
-    for (size_t i = 0; i < (size_t)(CLIP_SAMPLES * 4); i++) {
-        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_q_samples[i]), rd_u32(plnq + (4 * i)));
-    }
-    const uint8_t *plns = payload + section_offset[3];
-    for (size_t i = 0; i < (size_t)(CLIP_SAMPLES * 3); i++) {
-        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_s_samples[i]), rd_u32(plns + (4 * i)));
+    for (size_t c = 0; c < 3; c++) {
+        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_const_s1[c]), rd_u32(payload + FIX_OFF_CS + (4 * c)));
     }
 
-    /* CNST holds joint 0 scale then joint 1 rotation, four floats each. */
-    const uint8_t *cnst = payload + section_offset[4];
-    const float k_expect_const[8] = {2.0F, 2.0F, 2.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F};
-    for (size_t i = 0; i < 8; i++) {
-        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_expect_const[i]), rd_u32(cnst + (4 * i)));
-    }
+    /* One step track: keys [0, 3) of joint 2's scale, with a zero pad byte. */
+    TEST_ASSERT_EQUAL_UINT32(0, rd_u32(payload + FIX_OFF_STEPS));
+    TEST_ASSERT_EQUAL_UINT32(3, rd_u32(payload + FIX_OFF_STEPS + 4));
+    TEST_ASSERT_EQUAL_UINT16(2, rd_u16(payload + FIX_OFF_STEPS + 8));
+    TEST_ASSERT_EQUAL_UINT8(2, payload[FIX_OFF_STEPS + 10]);
+    TEST_ASSERT_EQUAL_UINT8(0, payload[FIX_OFF_STEPS + 11]);
 
-    const uint8_t *stpt = payload + section_offset[5];
-    TEST_ASSERT_EQUAL_UINT32(0, rd_u32(stpt));
-    TEST_ASSERT_EQUAL_UINT32(3, rd_u32(stpt + 4));
-
-    const uint8_t *stpk = payload + section_offset[6];
+    /* Keys: the joint track first, then the object rotation. */
     for (size_t k = 0; k < 3; k++) {
-        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_step_times[k]), rd_u32(stpk + (20 * k)));
-        for (size_t i = 0; i < 4; i++) {
-            TEST_ASSERT_EQUAL_HEX32(f32_bits(k_step_values[(4 * k) + i]), rd_u32(stpk + (20 * k) + 4 + (4 * i)));
+        const uint8_t *key = payload + FIX_OFF_KEYS + (20 * k);
+        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_step_times[k]), rd_u32(key));
+        for (size_t c = 0; c < 4; c++) {
+            TEST_ASSERT_EQUAL_HEX32(f32_bits(k_step_values[(4 * k) + c]), rd_u32(key + 4 + (4 * c)));
+        }
+    }
+    for (size_t k = 0; k < 2; k++) {
+        const uint8_t *key = payload + FIX_OFF_KEYS + (20 * (3 + k));
+        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_object_step_times[k]), rd_u32(key));
+        for (size_t c = 0; c < 4; c++) {
+            TEST_ASSERT_EQUAL_HEX32(f32_bits(k_object_step_values[(4 * k) + c]), rd_u32(key + 4 + (4 * c)));
+        }
+    }
+
+    /* The object sampled array is one TRS per sample; the channels no object
+     * mode drives stay at the zeroed payload. */
+    for (size_t i = 0; i < CLIP_SAMPLES; i++) {
+        const uint8_t *trs = payload + FIX_OFF_OBJECT + (i * 40);
+        for (size_t c = 0; c < 3; c++) {
+            TEST_ASSERT_EQUAL_HEX32(f32_bits(k_object_t[(i * 3) + c]), rd_u32(trs + (4 * c)));
+        }
+        for (size_t c = 0; c < 7; c++) {
+            TEST_ASSERT_EQUAL_HEX32(0U, rd_u32(trs + 12 + (4 * c)));
+        }
+    }
+
+    TEST_ASSERT_EQUAL_UINT16(0, rd_u16(payload + FIX_OFF_T_JOINT));
+    TEST_ASSERT_EQUAL_UINT16(2, rd_u16(payload + FIX_OFF_T_JOINT + 2));
+    TEST_ASSERT_EQUAL_UINT16(1, rd_u16(payload + FIX_OFF_Q_JOINT));
+    TEST_ASSERT_EQUAL_UINT16(0, rd_u16(payload + FIX_OFF_CQ_JOINT));
+    TEST_ASSERT_EQUAL_UINT16(1, rd_u16(payload + FIX_OFF_CS_JOINT));
+
+    free(payload);
+}
+
+/* A clip whose only sampled signal is the object curve: no joint row, no frame
+ * block, and the object array carries the whole grid. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_encode_clip_with_only_an_object_sampled_channel(void) {
+    static const float k_object_only[3 * 3] = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F, 9.0F};
+    nt_builder_anim_channel_t channels[6];
+    memset(channels, 0, sizeof(channels));
+    channels[3].mode = NT_SKELETAL_CHANNEL_SAMPLED;
+    channels[3].samples = k_object_only;
+
+    nt_builder_clip_t clip;
+    memset(&clip, 0, sizeof(clip));
+    clip.rig_compat_id = 7ULL;
+    clip.joint_count = 1;
+    clip.sample_count = 3;
+    clip.duration = 1.0F;
+    clip.channels = channels;
+
+    uint8_t *payload = NULL;
+    uint32_t size = 0;
+    nt_builder_encode_clip(&clip, &payload, &size);
+    TEST_ASSERT_NOT_NULL(payload);
+    TEST_ASSERT_EQUAL_UINT32(120U + (3U * 40U), size);
+
+    NtAnmHeader header;
+    memcpy(&header, payload, sizeof(header));
+    TEST_ASSERT_EQUAL_UINT16(0, header.n_t);
+    TEST_ASSERT_EQUAL_UINT32(0, header.n_steps);
+    TEST_ASSERT_EQUAL_UINT32(0, header.n_keys);
+    TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_SAMPLED, header.object_mode[0]);
+    TEST_ASSERT_TRUE(nt_anm_object_sampled(&header));
+
+    for (size_t i = 0; i < 3; i++) {
+        const uint8_t *trs = payload + 120 + (i * 40);
+        for (size_t c = 0; c < 3; c++) {
+            TEST_ASSERT_EQUAL_HEX32(f32_bits(k_object_only[(i * 3) + c]), rd_u32(trs + (4 * c)));
         }
     }
 
     free(payload);
 }
 
-/* A clip made only of constant and step channels keeps its duration while every
- * plane stays empty at sample_count 1. */
-void test_encode_clip_single_sample_has_empty_planes(void) {
+/* A clip made only of constant and step channels keeps its duration while the
+ * grid holds a single sample and no block. */
+void test_encode_clip_single_sample_has_no_blocks(void) {
     nt_builder_anim_channel_t channels[6];
     memset(channels, 0, sizeof(channels));
-    channels[1].mode = NT_ANM_CHANNEL_CONSTANT;
+    channels[1].mode = NT_SKELETAL_CHANNEL_CONSTANT;
     channels[1].constant[3] = 1.0F;
-    channels[3].mode = NT_ANM_CHANNEL_STEP;
+    channels[3].mode = NT_SKELETAL_CHANNEL_STEP;
     channels[3].step_times = k_step_times;
     channels[3].step_values = k_step_values;
     channels[3].step_count = 2;
@@ -386,7 +475,6 @@ void test_encode_clip_single_sample_has_empty_planes(void) {
     nt_builder_clip_t clip;
     memset(&clip, 0, sizeof(clip));
     clip.rig_compat_id = 7ULL;
-    clip.kind = NT_ANM_KIND_ABSOLUTE;
     clip.joint_count = 1;
     clip.sample_count = 1;
     clip.duration = 2.0F;
@@ -397,13 +485,17 @@ void test_encode_clip_single_sample_has_empty_planes(void) {
     nt_builder_encode_clip(&clip, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
-    /* 56 + 112 + 6*4 CHAN + 0 planes + 16 CNST + 8 STPT + 2*20 STPK */
-    TEST_ASSERT_EQUAL_UINT32(256U, size);
-    TEST_ASSERT_EQUAL_UINT32(1U, rd_u32(payload + 32));
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(2.0F), rd_u32(payload + 28));
-    for (size_t s = 1; s <= 3; s++) {
-        TEST_ASSERT_EQUAL_UINT32(0, rd_u32(section_at(payload, s) + 8));
-    }
+    /* 120 header + 16 cq + 2 x 20 keys + 2 cq_joint */
+    TEST_ASSERT_EQUAL_UINT32(178U, size);
+    NtAnmHeader header;
+    memcpy(&header, payload, sizeof(header));
+    TEST_ASSERT_EQUAL_UINT32(1U, header.sample_count);
+    TEST_ASSERT_EQUAL_HEX32(f32_bits(2.0F), f32_bits(header.duration));
+    TEST_ASSERT_EQUAL_UINT16(0, header.n_t);
+    TEST_ASSERT_EQUAL_UINT16(0, header.n_q);
+    TEST_ASSERT_EQUAL_UINT16(0, header.n_s);
+    TEST_ASSERT_EQUAL_UINT32(2, header.n_keys);
+    TEST_ASSERT_EQUAL_UINT32(0, header.object_step_first[0]);
 
     free(payload);
 }
@@ -455,7 +547,8 @@ void test_add_skeletal_assets_writes_typed_entries(void) {
     nt_builder_anim_channel_t channels[CLIP_CHANNELS];
     fixture_clip(&clip, channels);
 
-    nt_builder_add_skeleton(ctx, &skel, "rigs/hero.nskl");
+    const nt_hash64_t rig = nt_builder_add_skeleton(ctx, &skel, "rigs/hero.nskl");
+    TEST_ASSERT_EQUAL_HEX64(fixture_rig_id(), rig.value);
     nt_builder_add_skin_binding(ctx, &binding, "rigs/hero.nskn");
     nt_builder_add_clip(ctx, &clip, "clips/hero_run.nanm");
 
@@ -543,27 +636,33 @@ void test_encode_skeleton_asserts_on_a_broken_hierarchy(void) {
     TEST_ASSERT_NULL(payload);
 }
 
-void test_encode_skeleton_asserts_when_the_rig_id_is_not_its_own(void) {
+/* Joint ids are how clips name joints, so a duplicate makes a rig that cannot
+ * be addressed. */
+void test_encode_skeleton_asserts_on_a_duplicate_joint_id(void) {
+    uint32_t joint_id[FIXTURE_JOINTS];
+    memcpy(joint_id, k_joint_id, sizeof(joint_id));
+    joint_id[3] = joint_id[1];
+
     nt_skeletal_skeleton_t skel = fixture_skeleton();
-    skel.rig_compat_id.value ^= 1ULL;
+    skel.joint_id = joint_id;
 
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skeleton(&skel, &payload, &size), "rig_compat_id does not match its own joints");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skeleton(&skel, &payload, &size), "two joints share one joint_id");
     TEST_ASSERT_NULL(payload);
 }
 
-void test_encode_skin_binding_asserts_on_a_negative_reach(void) {
+void test_encode_skin_binding_asserts_on_a_non_finite_matrix(void) {
+    nt_skeletal_mat34_t inverse_bind[FIXTURE_PALETTE];
+    memcpy(inverse_bind, k_inverse_bind, sizeof(inverse_bind));
+    inverse_bind[1].r[2][3] = (float)(1e300 * 1e300);
+
     nt_skin_binding_t binding = fixture_binding();
+    binding.inverse_bind = inverse_bind;
+
     uint8_t *payload = NULL;
     uint32_t size = 0;
-
-    binding.reach = -1.0F;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skin_binding(&binding, &payload, &size), "reach must be finite and non-negative");
-
-    binding.reach = 1.75F;
-    binding.any_pose_radius = -1.0F;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skin_binding(&binding, &payload, &size), "any_pose_radius must be finite and non-negative");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skin_binding(&binding, &payload, &size), "inverse bind matrix is not finite");
     TEST_ASSERT_NULL(payload);
 }
 
@@ -578,7 +677,7 @@ void test_encode_clip_asserts_on_broken_channels(void) {
         0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.5F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F,
     };
     fixture_clip(&clip, channels);
-    channels[1].samples = k_non_unit_q;
+    channels[4].samples = k_non_unit_q;
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "sampled rotation is not a unit quaternion");
 
     /* One sample cannot carry a sampled channel, whatever the duration says. */
@@ -586,19 +685,20 @@ void test_encode_clip_asserts_on_broken_channels(void) {
     clip.sample_count = 1;
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "a sampled channel needs at least two samples over a positive duration");
 
-    fixture_clip(&clip, channels);
-    clip.kind = NT_ANM_KIND_ADDITIVE;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "additive_ref_id is set exactly for an additive clip");
-
     static const float k_late_first_key[3] = {0.1F, 0.4F, 0.8F};
     fixture_clip(&clip, channels);
-    channels[6].step_times = k_late_first_key;
+    channels[8].step_times = k_late_first_key;
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "the first step key must sit at time 0");
 
     static const float k_flat_step_times[3] = {0.0F, 0.4F, 0.4F};
     fixture_clip(&clip, channels);
-    channels[6].step_times = k_flat_step_times;
+    channels[8].step_times = k_flat_step_times;
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "step times must increase strictly");
+
+    static const float k_late_last_key[3] = {0.0F, 0.4F, 1.5F};
+    fixture_clip(&clip, channels);
+    channels[8].step_times = k_late_last_key;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "the last step key lies past the clip duration");
 
     TEST_ASSERT_NULL(payload);
 }
@@ -608,12 +708,14 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_encode_skeleton_wire_layout);
     RUN_TEST(test_encode_skin_binding_wire_layout);
-    RUN_TEST(test_encode_clip_asymmetric_sections);
-    RUN_TEST(test_encode_clip_single_sample_has_empty_planes);
+    RUN_TEST(test_encode_clip_header_counts);
+    RUN_TEST(test_encode_clip_array_layout);
+    RUN_TEST(test_encode_clip_with_only_an_object_sampled_channel);
+    RUN_TEST(test_encode_clip_single_sample_has_no_blocks);
     RUN_TEST(test_add_skeletal_assets_writes_typed_entries);
     RUN_TEST(test_encode_skeleton_asserts_on_a_broken_hierarchy);
-    RUN_TEST(test_encode_skeleton_asserts_when_the_rig_id_is_not_its_own);
-    RUN_TEST(test_encode_skin_binding_asserts_on_a_negative_reach);
+    RUN_TEST(test_encode_skeleton_asserts_on_a_duplicate_joint_id);
+    RUN_TEST(test_encode_skin_binding_asserts_on_a_non_finite_matrix);
     RUN_TEST(test_encode_clip_asserts_on_broken_channels);
     return UNITY_END();
 }

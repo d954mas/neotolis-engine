@@ -64,7 +64,9 @@ nt_builder_add_asset_root   /* convention-based tree import */
 
 /* Skeletal assets from in-memory import results (wire formats: skeletal §16).
  * encode_* returns the payload the pack stores, malloc'd for the caller;
- * add_* encodes and registers in one step, like add_blob. */
+ * add_* encodes and registers in one step, like add_blob.
+ * The two skeleton calls also return the rig_compat_id they computed and wrote,
+ * which is what clips and bindings of that rig must carry. */
 nt_builder_encode_skeleton / add_skeleton          /* NSKL, from nt_skeletal_skeleton_t */
 nt_builder_encode_skin_binding / add_skin_binding  /* NSKN, from nt_skin_binding_t */
 nt_builder_encode_clip / add_clip                  /* NANM, from nt_builder_clip_t */

@@ -12,7 +12,6 @@
 #include "nt_atlas_format.h"      /* NT_ATLAS_XFORM_* stored transform values */
 #include "nt_font_format.h"       /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
 #include "nt_mesh_format.h"       /* nt_stream_type_t */
-#include "nt_skeletal_format.h"   /* nt_anm_kind_t, nt_anm_channel_mode_t */
 #include "nt_texture_format.h"    /* nt_texture_pixel_format_t */
 #include "skeletal/nt_skeletal.h" /* nt_skeletal_skeleton_t, nt_skin_binding_t */
 
@@ -540,14 +539,14 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
  * diagnostic instead of returning a code (skeletal spec §16). */
 
-/* Asserts that skel->rig_compat_id is what nt_skeletal_rig_compat_id computes
- * from these joints, so an edited rig cannot ship someone else's identity. */
-void nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
-void nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
+/* Computes rig_compat_id from the joints it writes and returns it, so the
+ * caller stamps clips and bindings with the identity that actually shipped;
+ * skel->rig_compat_id is ignored. Joint ids must be unique. */
+nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
+nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
 
-/* The binding carries its own reach and any_pose_radius, the builder-computed
- * bounds numbers of §3.4; the mesh-space convention is glTF mesh-node space,
- * the only one v1 stores. */
+/* Inverse binds are mesh space -> joint space at the bind pose, in glTF
+ * mesh-node space. remap is not bounded against a skeleton here. */
 void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size);
 void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
 
@@ -567,24 +566,17 @@ typedef struct {
     const float *step_values; /* STEP: 4 floats per key */
     uint32_t step_count;      /* STEP: number of keys */
     float constant[4];        /* CONSTANT: the channel value */
-    uint8_t mode;             /* nt_anm_channel_mode_t */
+    uint8_t mode;             /* nt_skeletal_channel_mode_t */
 } nt_builder_anim_channel_t;
 
-/* One clip ready to encode. duration, bounds and the bake certificate are the
- * builder's own numbers (§10, §14); sample_count is the uniform grid on
- * [0, duration] every SAMPLED channel shares (1 = no sampled channel). */
+/* One clip ready to encode. sample_count is the uniform grid on [0, duration]
+ * every SAMPLED channel shares (1 = no sampled channel). */
 typedef struct {
     uint64_t rig_compat_id;
-    uint64_t additive_ref_id; /* 0 iff kind is NT_ANM_KIND_ABSOLUTE */
-    uint8_t kind;             /* nt_anm_kind_t */
+    uint64_t additive_ref_id; /* reference pose identity, 0 = absolute */
     uint16_t joint_count;
     uint32_t sample_count;
     float duration;
-    float r_joints;
-    float r_root;
-    float s_max;
-    float bake_fps_min;
-    float bake_reach;
     const nt_builder_anim_channel_t *channels; /* 3 * (joint_count + 1) entries */
 } nt_builder_clip_t;
 

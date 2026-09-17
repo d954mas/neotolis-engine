@@ -3,18 +3,20 @@
 
 #include <stdint.h>
 
-#include "core/nt_types.h"
 #include "resource/nt_resource.h"
 #include "skeletal/nt_skeletal.h"
 
 /*
  * nt_skeletal_assets — the NSKL / NSKN / NANM adapters.
  *
- * Each activator validates the whole pack payload before it allocates or
- * publishes anything, then copies the wire tables out into one allocation laid
- * out the way the sampler reads them (spec §7.2); the pack blob is never read
- * again, so any blob policy may drop it after activation. A rejected payload
- * logs one warning and returns 0, which leaves the asset FAILED.
+ * Each activator validates the structure of the whole pack payload, copies it
+ * into one allocation and points a runtime view at the copy: the wire layout is
+ * the runtime layout (spec §16), so nothing is transposed or re-indexed. The
+ * pack blob is never read again, so any blob policy may drop it after
+ * activation. A structurally broken payload logs one warning and returns 0,
+ * which leaves the asset FAILED. Values inside a structurally sound payload
+ * (finite floats, unit quaternions, key order) are the builder's contract and
+ * the sampler's NT_SKELETAL_CHECKS, not re-validated here.
  *
  * The module registers nothing itself. An application that links animation
  * registers the three pairs like any other type:
@@ -30,35 +32,21 @@
  * skeleton, a binding and a clip.
  */
 
-/* Fixed pool capacities, allocated once at init: the game decides how many
+/* One fixed pool for all three types, allocated once: the game decides how many
  * skeletal assets may be live at a time, exactly like nt_font's max_fonts.
- * Activating past a capacity is a programming error, not a load failure.
+ * Activating past the capacity is a programming error, not a load failure.
  *
- * A capacity counts every *activated* asset, not every published one: when one
- * resource id sits in two mounted packs both copies activate and take a slot,
- * only the winner is published, and the loser is released when its own pack
- * unmounts. Size the pools for the peak mounted set, overlaps included. */
-typedef struct {
-    uint16_t max_skeletons;
-    uint16_t max_skin_bindings;
-    uint16_t max_clips;
-} nt_skeletal_assets_desc_t;
-
-static inline nt_skeletal_assets_desc_t nt_skeletal_assets_desc_defaults(void) {
-    return (nt_skeletal_assets_desc_t){
-        .max_skeletons = 8,
-        .max_skin_bindings = 16,
-        .max_clips = 64,
-    };
-}
-
-/* NULL desc takes the defaults. A second init without shutdown asserts. Call
- * after nt_resource_init and before the first mount that carries skeletal
- * assets. */
-nt_result_t nt_skeletal_assets_init(const nt_skeletal_assets_desc_t *desc);
-/* Frees every still-live asset and the pools themselves; every view published
- * by this module is dangling afterwards. Shut the resource system down first:
- * a deactivate callback arriving after this call asserts. */
+ * The capacity counts every *activated* asset, not every published one: when
+ * one resource id sits in two mounted packs both copies activate and take a
+ * slot, only the winner is published, and the loser is released when its own
+ * pack unmounts. Size the pool for the peak mounted set, overlaps included.
+ *
+ * A second init without shutdown asserts. Call after nt_resource_init and
+ * before the first mount that carries skeletal assets. */
+void nt_skeletal_assets_init(uint16_t max_assets);
+/* Frees every still-live asset and the pool itself; every view published by
+ * this module is dangling afterwards. Shut the resource system down first: a
+ * deactivate callback arriving after this call asserts. */
 void nt_skeletal_assets_shutdown(void);
 
 /* ---- Activators (nt_activate_fn / nt_deactivate_fn, registered by the app) ---- */

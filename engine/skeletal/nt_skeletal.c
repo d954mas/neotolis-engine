@@ -137,9 +137,8 @@ static void nt_skeletal_nlerp(const float *a, const float *b, float u, float *ou
 /* Value of the last key at or before time, or the first key when time precedes
  * it. Binary search, so a random seek into a long track costs log2(count)
  * instead of walking every earlier key. */
-static const float *nt_skeletal_step_value(const float *times, const float *values, uint32_t first, uint32_t count, double time) {
-    NT_ASSERT(times != NULL);
-    NT_ASSERT(values != NULL);
+static const float *nt_skeletal_step_value(const nt_skeletal_step_key_t *keys, uint32_t first, uint32_t count, double time) {
+    NT_ASSERT(keys != NULL);
     NT_ASSERT(count >= 1U);
 
     /* lo ends as the number of keys at or before time. */
@@ -147,14 +146,14 @@ static const float *nt_skeletal_step_value(const float *times, const float *valu
     uint32_t hi = count;
     while (lo < hi) {
         const uint32_t mid = lo + ((hi - lo) / 2U);
-        if ((double)times[first + mid] <= time) {
+        if ((double)keys[first + mid].time <= time) {
             lo = mid + 1U;
         } else {
             hi = mid;
         }
     }
     const uint32_t k = (lo == 0U) ? first : (first + lo - 1U);
-    return values + ((size_t)k * 4U);
+    return keys[k].v;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -261,7 +260,7 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_sk
         const nt_skeletal_step_t *track = &clip->steps[s];
         NT_ASSERT(track->joint < clip->joint_count);
         NT_ASSERT(track->channel <= 2U);
-        const float *v = nt_skeletal_step_value(clip->step_times, clip->step_values, track->first, track->count, time);
+        const float *v = nt_skeletal_step_value(clip->keys, track->first, track->count, time);
         nt_skeletal_trs_t *o = &out[track->joint];
         if (track->channel == 0U) {
             memcpy(o->t, v, 3U * sizeof(float));
@@ -326,7 +325,7 @@ void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double t
             nt_skeletal_lerp3(a->t, b->t, u, out->t);
         }
     } else if (mt == NT_SKELETAL_CHANNEL_STEP) {
-        memcpy(out->t, nt_skeletal_step_value(curve->step_times, curve->step_values, curve->step_first[0], curve->step_count[0], time), sizeof(out->t));
+        memcpy(out->t, nt_skeletal_step_value(curve->keys, curve->step_first[0], curve->step_count[0], time), sizeof(out->t));
     }
 
     if (mq == NT_SKELETAL_CHANNEL_CONSTANT) {
@@ -338,7 +337,7 @@ void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double t
             nt_skeletal_nlerp(a->q, b->q, u, out->q);
         }
     } else if (mq == NT_SKELETAL_CHANNEL_STEP) {
-        memcpy(out->q, nt_skeletal_step_value(curve->step_times, curve->step_values, curve->step_first[1], curve->step_count[1], time), sizeof(out->q));
+        memcpy(out->q, nt_skeletal_step_value(curve->keys, curve->step_first[1], curve->step_count[1], time), sizeof(out->q));
     }
 
     if (ms == NT_SKELETAL_CHANNEL_CONSTANT) {
@@ -350,7 +349,7 @@ void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double t
             nt_skeletal_lerp3(a->s, b->s, u, out->s);
         }
     } else if (ms == NT_SKELETAL_CHANNEL_STEP) {
-        memcpy(out->s, nt_skeletal_step_value(curve->step_times, curve->step_values, curve->step_first[2], curve->step_count[2], time), sizeof(out->s));
+        memcpy(out->s, nt_skeletal_step_value(curve->keys, curve->step_first[2], curve->step_count[2], time), sizeof(out->s));
     }
 
 #if NT_SKELETAL_CHECK_POSE

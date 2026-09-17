@@ -292,90 +292,48 @@ static void print_atlas_details(const uint8_t *asset_data, uint32_t asset_size) 
 
 /* ---- Skeletal detail printers (NSKL / NSKN / NANM) ---- */
 
-/* Skeletal payloads are byte streams read field by field, never cast to their
- * header structs -- the runtime reads them the same way. */
-static uint16_t skel_rd_u16(const uint8_t *p) { return (uint16_t)((uint16_t)p[0] | (uint16_t)((uint16_t)p[1] << 8)); }
-static uint32_t skel_rd_u32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
-static uint64_t skel_rd_u64(const uint8_t *p) { return (uint64_t)skel_rd_u32(p) | ((uint64_t)skel_rd_u32(p + 4) << 32); }
-
-static float skel_rd_f32(const uint8_t *p) {
-    uint32_t bits = skel_rd_u32(p);
-    float v = 0.0F;
-    memcpy(&v, &bits, sizeof(v));
-    return v;
-}
-
+/* The payload starts with its header struct, so the header is copied out and
+ * read through the struct the format defines. */
 static void print_skeleton_details(const uint8_t *asset_data, uint32_t asset_size) {
-    if (!asset_data || asset_size < sizeof(NtSklHeader) || skel_rd_u32(asset_data) != NT_SKL_MAGIC) {
+    if (!asset_data || asset_size < sizeof(NtSklHeader)) {
         return;
     }
-    uint16_t joint_count = skel_rd_u16(asset_data + 6);
-    NT_LOG_INFO("    NSKL v%u joints:%u rig:0x%016llX bytes:%u (expect %u)", skel_rd_u16(asset_data + 4), joint_count, (unsigned long long)skel_rd_u64(asset_data + 8), asset_size,
-                NT_SKL_SIZE(joint_count));
+    NtSklHeader header;
+    memcpy(&header, asset_data, sizeof(header));
+    if (header.magic != NT_SKL_MAGIC) {
+        return;
+    }
+    NT_LOG_INFO("    NSKL v%u joints:%u rig:0x%016llX bytes:%u (expect %u)", header.version, header.joint_count, (unsigned long long)header.rig_compat_id, asset_size,
+                (unsigned)NT_SKL_SIZE(header.joint_count));
 }
 
 static void print_skin_binding_details(const uint8_t *asset_data, uint32_t asset_size) {
-    if (!asset_data || asset_size < sizeof(NtSknHeader) || skel_rd_u32(asset_data) != NT_SKN_MAGIC) {
+    if (!asset_data || asset_size < sizeof(NtSknHeader)) {
         return;
     }
-    uint16_t palette_count = skel_rd_u16(asset_data + 6);
-    NT_LOG_INFO("    NSKN v%u palette:%u rig:0x%016llX space:%u reach:%.3f any_pose_r:%.3f bytes:%u (expect %u)", skel_rd_u16(asset_data + 4), palette_count,
-                (unsigned long long)skel_rd_u64(asset_data + 8), asset_data[16], (double)skel_rd_f32(asset_data + 20), (double)skel_rd_f32(asset_data + 24), asset_size, NT_SKN_SIZE(palette_count));
-}
-
-/* Channel modes of the CHAN section, or zeros when it is absent or truncated. */
-static void count_clip_channel_modes(const uint8_t *asset_data, uint32_t asset_size, uint32_t section_count, uint32_t out_modes[4]) {
-    for (uint32_t s = 0; s < section_count; s++) {
-        const uint8_t *sec = asset_data + sizeof(NtAnmHeader) + ((size_t)s * sizeof(NtAnmSection));
-        if (skel_rd_u32(sec) != NT_ANM_TAG_CHAN) {
-            continue;
-        }
-        uint32_t offset = skel_rd_u32(sec + 4);
-        uint32_t count = skel_rd_u32(sec + 8);
-        uint32_t stride = skel_rd_u32(sec + 12);
-        if (stride != sizeof(NtAnmChannel) || (uint64_t)offset + ((uint64_t)count * stride) > asset_size) {
-            return;
-        }
-        for (uint32_t c = 0; c < count; c++) {
-            uint8_t mode = asset_data[offset + ((size_t)c * stride)];
-            if (mode < 4) {
-                out_modes[mode]++;
-            }
-        }
+    NtSknHeader header;
+    memcpy(&header, asset_data, sizeof(header));
+    if (header.magic != NT_SKN_MAGIC) {
         return;
     }
+    NT_LOG_INFO("    NSKN v%u palette:%u rig:0x%016llX bytes:%u (expect %u)", header.version, header.palette_count, (unsigned long long)header.rig_compat_id, asset_size,
+                (unsigned)NT_SKN_SIZE(header.palette_count));
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void print_clip_details(const uint8_t *asset_data, uint32_t asset_size) {
-    if (!asset_data || asset_size < sizeof(NtAnmHeader) || skel_rd_u32(asset_data) != NT_ANM_MAGIC) {
+    if (!asset_data || asset_size < sizeof(NtAnmHeader)) {
         return;
     }
-    uint32_t section_count = skel_rd_u16(asset_data + 6);
-    if (sizeof(NtAnmHeader) + ((uint64_t)section_count * sizeof(NtAnmSection)) > asset_size) {
-        section_count = 0;
+    NtAnmHeader header;
+    memcpy(&header, asset_data, sizeof(header));
+    if (header.magic != NT_ANM_MAGIC) {
+        return;
     }
-
-    NT_LOG_INFO("    NANM v%u joints:%u kind:%s codec:%u rig:0x%016llX ref:0x%016llX", skel_rd_u16(asset_data + 4), skel_rd_u16(asset_data + 8),
-                asset_data[10] == NT_ANM_KIND_ADDITIVE ? "additive" : "absolute", asset_data[11], (unsigned long long)skel_rd_u64(asset_data + 12), (unsigned long long)skel_rd_u64(asset_data + 20));
-
-    uint32_t modes[4] = {0, 0, 0, 0};
-    count_clip_channel_modes(asset_data, asset_size, section_count, modes);
-    NT_LOG_INFO("    duration:%.3fs samples:%u channels absent:%u const:%u sampled:%u step:%u", (double)skel_rd_f32(asset_data + 28), skel_rd_u32(asset_data + 32), modes[NT_ANM_CHANNEL_ABSENT],
-                modes[NT_ANM_CHANNEL_CONSTANT], modes[NT_ANM_CHANNEL_SAMPLED], modes[NT_ANM_CHANNEL_STEP]);
-    NT_LOG_INFO("    bounds r_joints:%.3f r_root:%.3f s_max:%.3f  certificate fps_min:%.1f reach:%.3f", (double)skel_rd_f32(asset_data + 36), (double)skel_rd_f32(asset_data + 40),
-                (double)skel_rd_f32(asset_data + 44), (double)skel_rd_f32(asset_data + 48), (double)skel_rd_f32(asset_data + 52));
-
-    for (uint32_t s = 0; s < section_count; s++) {
-        const uint8_t *sec = asset_data + sizeof(NtAnmHeader) + ((size_t)s * sizeof(NtAnmSection));
-        uint32_t tag = skel_rd_u32(sec);
-        uint32_t count = skel_rd_u32(sec + 8);
-        uint32_t stride = skel_rd_u32(sec + 12);
-        char sz[16];
-        nt_format_size((uint32_t)((uint64_t)count * stride > UINT32_MAX ? UINT32_MAX : (uint64_t)count * stride), sz, sizeof(sz));
-        NT_LOG_INFO("      %c%c%c%c off:%u count:%u stride:%u %s", (char)(tag & 0xFFU), (char)((tag >> 8) & 0xFFU), (char)((tag >> 16) & 0xFFU), (char)((tag >> 24) & 0xFFU), skel_rd_u32(sec + 4),
-                    count, stride, sz);
-    }
+    NT_LOG_INFO("    NANM v%u joints:%u rig:0x%016llX ref:0x%016llX bytes:%u (expect %u)", header.version, header.joint_count, (unsigned long long)header.rig_compat_id,
+                (unsigned long long)header.additive_ref_id, asset_size, (unsigned)nt_anm_size(&header));
+    NT_LOG_INFO("    duration:%.3fs samples:%u sampled t:%u q:%u s:%u  constant t:%u q:%u s:%u", (double)header.duration, header.sample_count, header.n_t, header.n_q, header.n_s, header.n_ct,
+                header.n_cq, header.n_cs);
+    NT_LOG_INFO("    steps:%u keys:%u object modes t:%u q:%u s:%u", header.n_steps, header.n_keys, header.object_mode[0], header.object_mode[1], header.object_mode[2]);
 }
 
 /* ---- Per-type summary accumulators ---- */

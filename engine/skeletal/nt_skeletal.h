@@ -177,8 +177,6 @@ typedef struct {
     nt_hash64_t rig_compat_id;
     const uint16_t *remap;                   /* palette entry p -> skeleton joint */
     const nt_skeletal_mat34_t *inverse_bind; /* mesh space -> joint space at the bind pose, per palette entry */
-    float reach;                             /* builder: max |inverse_bind[p] * v| over bound vertices */
-    float any_pose_radius;                   /* builder: conservative skinned radius over any pose */
     uint16_t palette_count;
 } nt_skin_binding_t;
 
@@ -199,18 +197,17 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_m
  * A clip is an immutable borrowed view with the same ownership contract as
  * nt_skeletal_skeleton_t: the owner (a clip activator or a test fixture) built
  * the arrays, keeps them alive and unchanged until it republishes or destroys
- * them, and the kernels neither store nor free them. The wire format
- * (shared/include/nt_skeletal_format.h) is a different layout; decoding it into
- * this one is the activator's job.
+ * them, and the kernels neither store nor free them. The NANM payload
+ * (shared/include/nt_skeletal_format.h) holds exactly these tables, so an
+ * activator copies the payload and points this view into the copy.
  *
  * Every animated channel has exactly one storage mode, so the tables below
  * never describe the same joint channel twice, and a channel in no table takes
  * the caller's default.
  */
 
-/* Storage mode of one channel. Mirrors nt_anm_channel_mode_t by value; the
- * runtime module repeats the four values instead of including the wire header,
- * so a headless CPU build links no pack code. */
+/* Storage mode of one channel. Only the object curve carries a mode at runtime:
+ * a joint channel is described by the table it appears in. */
 typedef enum {
     NT_SKELETAL_CHANNEL_ABSENT = 0,
     NT_SKELETAL_CHANNEL_CONSTANT = 1,
@@ -218,29 +215,40 @@ typedef enum {
     NT_SKELETAL_CHANNEL_STEP = 3,
 } nt_skeletal_channel_mode_t;
 
-/* One STEP track: keys [first, first + count) of the clip's key tables, held at
+/* One STEP track: keys [first, first + count) of the clip's key table, held at
  * their authored timestamps instead of on the uniform grid. */
 typedef struct {
-    uint32_t first;  /* first key index in step_times / step_values */
+    uint32_t first;  /* first key index in the clip's keys */
     uint32_t count;  /* keys, >= 1 */
     uint16_t joint;  /* < joint_count */
     uint8_t channel; /* 0 translation, 1 rotation, 2 scale */
+    uint8_t pad;     /* zero on the wire, so the payload hash is the clip's identity */
 } nt_skeletal_step_t;
 
+/* One STEP key: t/s use v[0..2] and leave v[3] at 0, q is unit xyzw. */
+typedef struct {
+    float time; /* seconds, strictly increasing inside a track */
+    float v[4];
+} nt_skeletal_step_key_t;
+
+#ifndef __cplusplus
+_Static_assert(sizeof(nt_skeletal_step_t) == 12, "nt_skeletal_step_t is 12 bytes");
+_Static_assert(sizeof(nt_skeletal_step_key_t) == 20, "nt_skeletal_step_key_t is 20 bytes");
+#endif
+
 /* The object curve (§7.5) is one TRS signal for the whole character, not joint
- * -1, so it carries its own grid and key tables and is sampled without a clip
+ * -1, so it carries its own modes and key ranges and is sampled without a clip
  * pointer. A curve whose three modes are all ABSENT is the same as no curve. */
 typedef struct {
-    uint8_t mode[3];                  /* nt_skeletal_channel_mode_t per channel: t, q, s */
-    nt_skeletal_trs_t constant;       /* value of the CONSTANT channels; other fields unused */
-    const nt_skeletal_trs_t *sampled; /* sample_count grid entries; only SAMPLED fields meaningful */
-    const float *step_times;          /* seconds, strictly increasing inside a range */
-    const float *step_values;         /* 4 floats per key: t/s in [0..2], q xyzw */
-    uint32_t step_first[3];           /* per channel: first key in the tables above */
-    uint32_t step_count[3];           /* per channel: keys, 0 unless the mode is STEP */
-    double duration;                  /* seconds, >= 0 */
-    double inv_step;                  /* (sample_count - 1) / duration, 0 when sample_count == 1 */
-    uint32_t sample_count;            /* >= 1 */
+    uint8_t mode[3];                    /* nt_skeletal_channel_mode_t per channel: t, q, s */
+    nt_skeletal_trs_t constant;         /* value of the CONSTANT channels; other fields unused */
+    const nt_skeletal_trs_t *sampled;   /* sample_count grid entries; only SAMPLED fields meaningful */
+    const nt_skeletal_step_key_t *keys; /* the clip's key table */
+    uint32_t step_first[3];             /* per channel: first key in the table above */
+    uint32_t step_count[3];             /* per channel: keys, 0 unless the mode is STEP */
+    double duration;                    /* seconds, >= 0 */
+    double inv_step;                    /* (sample_count - 1) / duration, 0 when sample_count == 1 or duration == 0 */
+    uint32_t sample_count;              /* >= 1 */
 } nt_skeletal_object_curve_t;
 
 /* Sampled channels live in sample_count frame blocks of block_floats floats
@@ -250,33 +258,29 @@ typedef struct {
  * two adjacent blocks and nothing else, instead of striding through the clip
  * once per channel. blocks is NULL when the clip has no sampled channel. */
 typedef struct {
-    nt_hash64_t rig_compat_id;         /* rig this clip plays on */
-    nt_hash64_t additive_ref_id;       /* reference pose identity, 0 iff kind is absolute */
-    double duration;                   /* seconds, >= 0 */
-    double inv_step;                   /* (sample_count - 1) / duration, 0 when sample_count == 1 */
-    const float *blocks;               /* sample_count frame blocks, see above */
-    const uint16_t *t_joint;           /* joint of sampled t row k */
-    const uint16_t *q_joint;           /* joint of sampled q row k */
-    const uint16_t *s_joint;           /* joint of sampled s row k */
-    const uint16_t *ct_joint;          /* joint of constant translation i */
-    const float *ct;                   /* 3 floats per constant translation */
-    const uint16_t *cq_joint;          /* joint of constant rotation i */
-    const float *cq;                   /* 4 floats per constant rotation, unit xyzw */
-    const uint16_t *cs_joint;          /* joint of constant scale i */
-    const float *cs;                   /* 3 floats per constant scale */
-    const nt_skeletal_step_t *steps;   /* n_steps tracks */
-    const float *step_times;           /* seconds, shared by every track */
-    const float *step_values;          /* 4 floats per key: t/s in [0..2], q xyzw */
-    nt_skeletal_object_curve_t object; /* all modes ABSENT when the clip has no object curve */
-    uint32_t sample_count;             /* samples on the uniform grid over [0, duration], >= 1 */
-    uint32_t block_floats;             /* 3*n_t + 4*n_q + 3*n_s */
-    uint32_t n_steps;                  /* STEP tracks */
-    float r_joints, r_root, s_max;     /* bounds (§14), conservative over the whole clip */
-    float bake_fps_min, bake_reach;    /* bake certificate (§10) */
-    uint16_t joint_count;              /* joints the clip and its poses address */
-    uint16_t n_t, n_q, n_s;            /* sampled rows per component kind */
-    uint16_t n_ct, n_cq, n_cs;         /* constant channels per component kind */
-    uint8_t kind;                      /* the validated NANM kind byte, stored as-is: 0 absolute, 1 additive */
+    nt_hash64_t rig_compat_id;          /* rig this clip plays on */
+    nt_hash64_t additive_ref_id;        /* reference pose identity, 0 for an absolute clip */
+    double duration;                    /* seconds, >= 0 */
+    double inv_step;                    /* (sample_count - 1) / duration, 0 when sample_count == 1 or duration == 0 */
+    const float *blocks;                /* sample_count frame blocks, see above */
+    const uint16_t *t_joint;            /* joint of sampled t row k */
+    const uint16_t *q_joint;            /* joint of sampled q row k */
+    const uint16_t *s_joint;            /* joint of sampled s row k */
+    const uint16_t *ct_joint;           /* joint of constant translation i */
+    const float *ct;                    /* 3 floats per constant translation */
+    const uint16_t *cq_joint;           /* joint of constant rotation i */
+    const float *cq;                    /* 4 floats per constant rotation, unit xyzw */
+    const uint16_t *cs_joint;           /* joint of constant scale i */
+    const float *cs;                    /* 3 floats per constant scale */
+    const nt_skeletal_step_t *steps;    /* n_steps tracks */
+    const nt_skeletal_step_key_t *keys; /* shared by every track, joints and object */
+    nt_skeletal_object_curve_t object;  /* all modes ABSENT when the clip has no object curve */
+    uint32_t sample_count;              /* samples on the uniform grid over [0, duration], >= 1 */
+    uint32_t block_floats;              /* 3*n_t + 4*n_q + 3*n_s */
+    uint32_t n_steps;                   /* STEP tracks */
+    uint16_t joint_count;               /* joints the clip and its poses address */
+    uint16_t n_t, n_q, n_s;             /* sampled rows per component kind */
+    uint16_t n_ct, n_cq, n_cs;          /* constant channels per component kind */
 } nt_skeletal_clip_t;
 
 /* out[0, clip->joint_count) = the clip's local pose at time, absent channels
