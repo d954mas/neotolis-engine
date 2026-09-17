@@ -26,6 +26,7 @@
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
 #include "nt_builder.h"
+#include "nt_builder_internal.h"
 #include "nt_pack_format.h"
 #include "nt_skeletal_format.h"
 #include "unity.h"
@@ -154,8 +155,9 @@ static const float k_const_s0[4] = {2.0F, 3.0F, 4.0F, 0.0F};
 static const float k_const_q1[4] = {0.0F, 0.0F, 0.70710678F, 0.70710678F};
 static const float k_const_t3[4] = {-5.5F, 6.25F, -7.125F, 0.0F};
 
-/* joint 3 scale: three keys inside the duration. */
-static const float k_step_times[3] = {0.0F, 0.4F, 0.8F};
+/* joint 3 scale: three keys inside the duration, the first one authored after
+ * the clip start so the builder keeps it and the sampler holds it until then. */
+static const float k_step_times[3] = {0.2F, 0.4F, 0.8F};
 static const float k_step_values[3 * 4] = {1.0F, 1.0F, 1.0F, 0.0F, 2.0F, 0.5F, 3.0F, 0.0F, 0.25F, 4.0F, 0.5F, 0.0F};
 
 /* object rotation: an eighth turn about x, then a quarter turn about z. */
@@ -199,7 +201,7 @@ static void fixture_clip(nt_builder_clip_t *clip, nt_builder_anim_channel_t chan
     channels[13].step_count = 2;
 
     memset(clip, 0, sizeof(*clip));
-    clip->rig_compat_id = fixture_rig_id();
+    clip->rig_compat_id = (nt_hash64_t){.value = fixture_rig_id()};
     clip->joint_count = CLIP_JOINTS;
     clip->sample_count = CLIP_SAMPLES;
     clip->duration = 1.0F;
@@ -512,7 +514,10 @@ void test_clip_interpolates_between_samples(void) {
         ASSERT_FLOAT_NEAR(k_q_row1_mid[c], pose[2].q[c], 1e-6F);
     }
 
-    /* STEP holds the previous key up to but excluding its own timestamp. */
+    /* STEP holds the first key before its time, then the previous key up to
+     * but excluding the next timestamp. */
+    nt_skeletal_sample(clip, 0.1, defaults, pose);
+    ASSERT_BITS_EQUAL(&k_step_values[0], pose[3].s, 3);
     nt_skeletal_sample(clip, (double)k_step_times[1] - 1e-6, defaults, pose);
     ASSERT_BITS_EQUAL(&k_step_values[0], pose[3].s, 3);
     nt_skeletal_sample(clip, (double)k_step_times[1], defaults, pose);

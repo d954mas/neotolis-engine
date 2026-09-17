@@ -233,7 +233,7 @@ static void clip_validate(const nt_builder_clip_t *clip, NtClipTally *tally) {
             break;
         case NT_SKELETAL_CHANNEL_STEP: {
             NT_BUILD_ASSERT(ch->step_times && ch->step_values && ch->step_count >= 1 && "step channel has no keys");
-            NT_BUILD_ASSERT(ch->step_times[0] == 0.0F && "the first step key must sit at time 0");
+            NT_BUILD_ASSERT(ch->step_times[0] >= 0.0F && "the first step key precedes the clip");
             for (uint32_t k = 0; k < ch->step_count; k++) {
                 NT_BUILD_ASSERT(skel_finite(ch->step_times[k]) && "step time is not finite");
                 NT_BUILD_ASSERT((k == 0 || ch->step_times[k] > ch->step_times[k - 1]) && "step times must increase strictly");
@@ -270,8 +270,8 @@ static void clip_fill_header(const nt_builder_clip_t *clip, const NtClipTally *t
     header->joint_count = clip->joint_count;
     header->sample_count = clip->sample_count;
     header->duration = clip->duration;
-    header->rig_compat_id = clip->rig_compat_id;
-    header->additive_ref_id = clip->additive_ref_id;
+    header->rig_compat_id = clip->rig_compat_id.value;
+    header->additive_ref_id = clip->additive_ref_id.value;
     header->n_t = tally->sampled[0];
     header->n_q = tally->sampled[1];
     header->n_s = tally->sampled[2];

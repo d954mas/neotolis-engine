@@ -16,6 +16,7 @@
 
 /* clang-format off */
 #include "nt_builder.h"
+#include "nt_builder_internal.h"
 #include "nt_pack_format.h"
 #include "nt_skeletal_format.h"
 #include "unity.h"
@@ -193,8 +194,8 @@ static void fixture_clip(nt_builder_clip_t *clip, nt_builder_anim_channel_t chan
     channels[10].step_count = 2;
 
     memset(clip, 0, sizeof(*clip));
-    clip->rig_compat_id = 0xABCDEF0123456789ULL;
-    clip->additive_ref_id = 0;
+    clip->rig_compat_id = (nt_hash64_t){0xABCDEF0123456789ULL};
+    clip->additive_ref_id = (nt_hash64_t){0};
     clip->joint_count = CLIP_JOINTS;
     clip->sample_count = CLIP_SAMPLES;
     clip->duration = 1.0F;
@@ -430,7 +431,7 @@ void test_encode_clip_with_only_an_object_sampled_channel(void) {
 
     nt_builder_clip_t clip;
     memset(&clip, 0, sizeof(clip));
-    clip.rig_compat_id = 7ULL;
+    clip.rig_compat_id = (nt_hash64_t){7ULL};
     clip.joint_count = 1;
     clip.sample_count = 3;
     clip.duration = 1.0F;
@@ -474,7 +475,7 @@ void test_encode_clip_single_sample_has_no_blocks(void) {
 
     nt_builder_clip_t clip;
     memset(&clip, 0, sizeof(clip));
-    clip.rig_compat_id = 7ULL;
+    clip.rig_compat_id = (nt_hash64_t){7ULL};
     clip.joint_count = 1;
     clip.sample_count = 1;
     clip.duration = 2.0F;
@@ -685,10 +686,10 @@ void test_encode_clip_asserts_on_broken_channels(void) {
     clip.sample_count = 1;
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "a sampled channel needs at least two samples over a positive duration");
 
-    static const float k_late_first_key[3] = {0.1F, 0.4F, 0.8F};
+    static const float k_negative_first_key[3] = {-0.1F, 0.4F, 0.8F};
     fixture_clip(&clip, channels);
-    channels[8].step_times = k_late_first_key;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "the first step key must sit at time 0");
+    channels[8].step_times = k_negative_first_key;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "the first step key precedes the clip");
 
     static const float k_flat_step_times[3] = {0.0F, 0.4F, 0.4F};
     fixture_clip(&clip, channels);

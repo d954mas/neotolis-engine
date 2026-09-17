@@ -306,6 +306,7 @@ void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double t
     const uint8_t mt = curve->mode[0];
     const uint8_t mq = curve->mode[1];
     const uint8_t ms = curve->mode[2];
+    NT_ASSERT(mt <= NT_SKELETAL_CHANNEL_STEP && mq <= NT_SKELETAL_CHANNEL_STEP && ms <= NT_SKELETAL_CHANNEL_STEP);
     /* A curve with no channel is the same as no curve, so it carries no grid and
      * no time range to hold the caller to. */
     if (mt == NT_SKELETAL_CHANNEL_ABSENT && mq == NT_SKELETAL_CHANNEL_ABSENT && ms == NT_SKELETAL_CHANNEL_ABSENT) {

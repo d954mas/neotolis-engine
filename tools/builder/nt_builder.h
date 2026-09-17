@@ -542,12 +542,10 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
 /* Computes rig_compat_id from the joints it writes and returns it, so the
  * caller stamps clips and bindings with the identity that actually shipped;
  * skel->rig_compat_id is ignored. Joint ids must be unique. */
-nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
 nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
 
 /* Inverse binds are mesh space -> joint space at the bind pose, in glTF
  * mesh-node space. remap is not bounded against a skeleton here. */
-void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size);
 void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
 
 /* One channel of a clip. Channel c of nt_builder_clip_t::channels addresses
@@ -559,7 +557,8 @@ void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t 
  * CONSTANT constant[0..comps-1]; a translation or scale leaves constant[3] at 0
  * SAMPLED  samples, sample_count * comps floats on the clip's uniform grid
  * STEP     step_times and step_values (always 4 floats per key), step_count
- *          keys with strictly increasing times starting at 0 */
+ *          keys with strictly increasing times at or after 0; the sampler
+ *          holds the first key before its time */
 typedef struct {
     const float *samples;     /* SAMPLED: sample_count * comps floats, sample-major */
     const float *step_times;  /* STEP: step_count seconds */
@@ -572,15 +571,14 @@ typedef struct {
 /* One clip ready to encode. sample_count is the uniform grid on [0, duration]
  * every SAMPLED channel shares (1 = no sampled channel). */
 typedef struct {
-    uint64_t rig_compat_id;
-    uint64_t additive_ref_id; /* reference pose identity, 0 = absolute */
+    nt_hash64_t rig_compat_id;
+    nt_hash64_t additive_ref_id; /* reference pose identity, 0 = absolute */
     uint16_t joint_count;
     uint32_t sample_count;
     float duration;
     const nt_builder_anim_channel_t *channels; /* 3 * (joint_count + 1) entries */
 } nt_builder_clip_t;
 
-void nt_builder_encode_clip(const nt_builder_clip_t *clip, uint8_t **out, uint32_t *out_size);
 void nt_builder_add_clip(NtBuilderContext *ctx, const nt_builder_clip_t *clip, const char *resource_id);
 
 /* --- Atlas API ---
