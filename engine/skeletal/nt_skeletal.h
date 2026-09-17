@@ -179,7 +179,7 @@ typedef struct {
     nt_hash64_t rig_compat_id;
     const uint16_t *remap;                   /* palette entry p -> skeleton joint */
     const nt_skeletal_mat34_t *inverse_bind; /* mesh space -> joint space at the bind pose, per palette entry */
-    float reach;                             /* skeleton space: farthest a bound vertex sits from its joint (§3.4) */
+    float reach;                             /* joint space: the farthest a bound vertex sits from its joint (§3.4); skeleton-space only after the §14 stretch */
     float any_pose_radius;                   /* skeleton space: bound for composed or edited poses (§14) */
     uint16_t palette_count;
 } nt_skin_binding_t;

@@ -622,7 +622,8 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene
 
 /* Exports the binding every mesh of this rig's skin shares: the skin's inverse
  * bind matrices (identity where the glTF has none), the palette remap of the
- * rig, and the two skeleton-space bounds of the spec. reach is measured over
+ * rig, and the two bounds of the spec: reach in joint space, any_pose_radius
+ * in skeleton space. reach is measured over
  * every vertex of every primitive the skin deforms and every source influence,
  * before the top-four reduction, so it bounds the mesh the game actually draws;
  * any_pose_radius follows from it and the rig's rest hierarchy. */
@@ -635,9 +636,9 @@ nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_ske
 
 /* Inverse binds are mesh space -> joint space at the bind pose, where mesh space
  * is the primitive's vertex space and the skinned mesh node's transform is
- * ignored (the glTF rule). reach and any_pose_radius are skeleton-space bounds
- * and must be finite and non-negative. remap is not bounded against a skeleton
- * here. */
+ * ignored (the glTF rule). reach (joint space) and any_pose_radius (skeleton
+ * space) must be finite and non-negative; the activator copies them unchecked.
+ * remap is not bounded against a skeleton here. */
 void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
 
 /* One channel of a clip. Channel c of nt_builder_clip_t::channels addresses
