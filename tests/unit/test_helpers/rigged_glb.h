@@ -90,7 +90,7 @@
 typedef struct {
     bool matrix_shear;       /* Helper's matrix gets a 1e-3 shear, so it is not TRS */
     bool unnamed_node;       /* Helper loses its name */
-    bool cycle;              /* Root becomes a child of Joint4: a parent cycle */
+    bool cycle;              /* Helper moves under Joint4, closing a parent cycle */
     bool joint_outside_root; /* Object joins the skin, outside a cut at Helper */
     bool multi_root;         /* Object becomes a second scene root and a skin joint */
     bool negative_weight;    /* v3 weight 1 turns negative */

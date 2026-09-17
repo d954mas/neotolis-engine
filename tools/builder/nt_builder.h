@@ -185,9 +185,28 @@ typedef struct {
 
 typedef struct {
     float transform[16]; /* world transform mat4 */
+    /* Node-local TRS, defined only when has_matrix is false. A matrix node's
+     * local matrix is read from the cgltf node behind scene._internal: parse
+     * never decomposes, so a sheared matrix cannot fail a static-mesh build. */
+    float local_t[3];
+    float local_q[4]; /* xyzw */
+    float local_s[3];
+    uint32_t parent;     /* index into scene.nodes[], UINT32_MAX if root */
     uint32_t mesh_index; /* index into scene.meshes[], UINT32_MAX if no mesh */
-    const char *name;
+    uint32_t skin_index; /* index into scene.skins[], UINT32_MAX if no skin */
+    bool has_matrix;
+    const char *name; /* node name from glTF (NULL if unnamed) */
 } nt_glb_node_t;
+
+typedef struct {
+    const char *name; /* skin name from glTF (NULL if unnamed) */
+    uint32_t joint_count;
+} nt_glb_skin_t;
+
+typedef struct {
+    const char *name; /* animation name from glTF (NULL if unnamed) */
+    float duration;   /* last key time over all its samplers, 0 if it has none */
+} nt_glb_animation_t;
 
 typedef struct {
     nt_glb_mesh_t *meshes;
@@ -198,6 +217,10 @@ typedef struct {
     uint32_t texture_count;
     nt_glb_node_t *nodes;
     uint32_t node_count;
+    nt_glb_skin_t *skins;
+    uint32_t skin_count;
+    nt_glb_animation_t *animations;
+    uint32_t animation_count;
     void *_internal; /* opaque cgltf_data pointer */
 } nt_glb_scene_t;
 

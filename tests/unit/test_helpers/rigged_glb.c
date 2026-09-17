@@ -258,7 +258,9 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, "\"nodes\":[");
     jb_addf(&jb, "{\"name\":\"Root\",\"matrix\":");
     jb_floats(&jb, root_matrix, 16);
-    jb_addf(&jb, ",\"children\":[1,7%s]},", o.multi_root ? "" : ",8");
+    /* cgltf rejects a scene root that has a parent, so the cycle closes below
+     * Root: Helper leaves Root's children and becomes a child of Joint4. */
+    jb_addf(&jb, ",\"children\":[%s7%s]},", o.cycle ? "" : "1,", o.multi_root ? "" : ",8");
     if (o.unnamed_node) {
         jb_addf(&jb, "{\"matrix\":");
     } else {
@@ -276,7 +278,7 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         } else if (j == 3) {
             jb_addf(&jb, ",\"children\":[6]");
         } else if (j == 4 && o.cycle) {
-            jb_addf(&jb, ",\"children\":[0]");
+            jb_addf(&jb, ",\"children\":[1]");
         }
         jb_addf(&jb, "},");
     }
