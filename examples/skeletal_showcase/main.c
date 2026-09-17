@@ -305,6 +305,7 @@ static float rig_extent(uint16_t joint_count, float center[3]) {
 static void fit_rig(void) {
     float center[3];
     const float extent = rig_extent(s_skeleton_scene.view->joint_count, center);
+    NT_ASSERT(extent > 0.0F && "skeletal_showcase: rig joints all rest at one point");
     const float scale = extent / s_humanoid_extent;
     s_skeleton_scene.fit_pending = false;
     nt_log_info("skeletal_showcase: rig %s joints=%u centroid=(%.3f, %.3f, %.3f) extent=%.3f scale=%.3f", s_rig_names[s_skeleton_scene.rig_source], (unsigned)s_skeleton_scene.view->joint_count,
@@ -328,6 +329,17 @@ static void set_rest_pose(void) {
     apply_pose();
 }
 
+/* out[j]: j and its whole ancestor chain rest at the origin. NSKL marks no
+ * wrappers, so this also covers a skin joint sitting there (Fox _rootJoint,
+ * b_Root_00). Preorder: parent[j] < j. */
+static void rig_at_origin(const nt_skeletal_skeleton_t *skel, bool out[MAX_JOINTS]) {
+    for (uint32_t j = 0; j < skel->joint_count; ++j) {
+        const uint16_t p = skel->parent[j];
+        const float *t = skel->rest[j].t;
+        out[j] = (p == NT_SKELETAL_NO_PARENT || out[p]) && t[0] == 0.0F && t[1] == 0.0F && t[2] == 0.0F;
+    }
+}
+
 static void set_test_pose(void) {
     memset(s_skeleton_scene.angles, 0, sizeof s_skeleton_scene.angles);
     if (s_skeleton_scene.rig_source == RIG_HUMANOID) {
@@ -338,9 +350,15 @@ static void set_test_pose(void) {
         s_skeleton_scene.angles[14][2] = -0.45F;
         s_skeleton_scene.angles[15][2] = 0.25F;
     } else {
-        /* Imported joints have no names to pick from: bend every third joint. */
-        for (uint32_t j = 1; j < MAX_JOINTS; j += 3) {
-            s_skeleton_scene.angles[j][2] = 0.35F;
+        /* Imported joints have no names to pick from: bend every third joint
+         * that is not origin scaffolding, so the tilt lands on limbs. */
+        const nt_skeletal_skeleton_t *skel = s_skeleton_scene.view;
+        bool at_origin[MAX_JOINTS];
+        rig_at_origin(skel, at_origin);
+        for (uint32_t j = 1, n = 0; j < skel->joint_count; ++j) {
+            if (!at_origin[j] && (n++ % 3U) == 0U) {
+                s_skeleton_scene.angles[j][2] = 0.35F;
+            }
         }
     }
     apply_pose();
@@ -350,6 +368,7 @@ static void set_test_pose(void) {
 static void select_rig(rig_source_t rig) {
     s_skeleton_scene.rig_source = rig;
     s_skeleton_scene.selected_joint = 0;
+    s_skeleton_scene.combo_open = false;
     s_skeleton_scene.fit_pending = true;
     memset(s_skeleton_scene.angles, 0, sizeof s_skeleton_scene.angles);
     skeleton_update();
@@ -738,6 +757,7 @@ static void declare_ui(const nt_ui_scale_t *scale) {
 // #region stage rendering
 static void draw_ground(float scale) {
     const float grid[4] = {0.16F, 0.22F, 0.30F, 1.0F};
+    nt_shape_renderer_set_line_width(0.02F * scale); /* renderer width is retained across frames */
     const float cell = 0.6F * scale;
     const float half_x = 3.4F * scale;
     const float half_z = 3.0F * scale;
@@ -768,21 +788,21 @@ static void draw_stage(const nt_ui_scale_t *scale, const mat4 vp, const float ey
     nt_shape_renderer_set_depth(true);
 }
 
-static const float s_helper_color[4] = {0.45F, 0.50F, 0.58F, 1.0F};
+static const float s_scaffold_color[4] = {0.45F, 0.50F, 0.58F, 1.0F};
 
-/* Parent->child links whose parent is (or is not) a helper: helpers draw thin
- * and grey, real bones in the subtree colours. */
-static void draw_links(const nt_skeletal_skeleton_t *skel, const bool helper[MAX_JOINTS], bool helper_pass, float scale) {
+/* Parent->child links whose parent is (or is not) origin scaffolding: those
+ * draw thin and grey, real bones in the subtree colours. */
+static void draw_links(const nt_skeletal_skeleton_t *skel, const bool at_origin[MAX_JOINTS], bool scaffold_pass, float scale) {
     static const float bone_colors[2][4] = {{0.35F, 0.70F, 0.95F, 1.0F}, {1.0F, 0.65F, 0.18F, 1.0F}};
-    nt_shape_renderer_set_line_width((helper_pass ? 0.006F : 0.02F) * scale);
+    nt_shape_renderer_set_line_width((scaffold_pass ? 0.006F : 0.02F) * scale);
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
         const uint16_t p = skel->parent[j];
-        if (p == NT_SKELETAL_NO_PARENT || helper[p] != helper_pass) {
+        if (p == NT_SKELETAL_NO_PARENT || at_origin[p] != scaffold_pass) {
             continue;
         }
         const float a[3] = {s_skeleton_scene.model[p].r[0][3], s_skeleton_scene.model[p].r[1][3], s_skeleton_scene.model[p].r[2][3]};
         const float b[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
-        const float *color = helper_pass ? s_helper_color : bone_colors[in_selected_subtree(j) ? 1 : 0];
+        const float *color = scaffold_pass ? s_scaffold_color : bone_colors[in_selected_subtree(j) ? 1 : 0];
         nt_shape_renderer_line(a, b, color);
     }
 }
@@ -800,18 +820,12 @@ static void skeleton_draw(void) {
     const float scale = s_fit_scale;
     draw_ground(scale);
 
-    /* Exporter wrappers (CesiumMan Z_UP/Armature, Fox root) are rig joints that
-     * sit at the origin at rest; the link from the last of them to the first
-     * translated joint reads as a limb, so wrappers and their links draw as
-     * thin grey scaffolding instead. Preorder: parent[j] < j. */
-    bool helper[MAX_JOINTS];
-    for (uint32_t j = 0; j < skel->joint_count; ++j) {
-        const uint16_t p = skel->parent[j];
-        const float *t = skel->rest[j].t;
-        helper[j] = (p == NT_SKELETAL_NO_PARENT || helper[p]) && t[0] == 0.0F && t[1] == 0.0F && t[2] == 0.0F;
-    }
-    draw_links(skel, helper, true, scale);
-    draw_links(skel, helper, false, scale);
+    /* The link from origin scaffolding up to the first translated joint would
+     * read as a limb, so those joints and links draw thin and grey. */
+    bool at_origin[MAX_JOINTS];
+    rig_at_origin(skel, at_origin);
+    draw_links(skel, at_origin, true, scale);
+    draw_links(skel, at_origin, false, scale);
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
         const float p[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
         const float *color;
@@ -819,8 +833,8 @@ static void skeleton_draw(void) {
         if (j == (uint32_t)s_skeleton_scene.selected_joint) {
             color = joint_colors[0];
             radius = 0.105F;
-        } else if (helper[j]) {
-            color = s_helper_color;
+        } else if (at_origin[j]) {
+            color = s_scaffold_color;
             radius = 0.04F;
         } else if (in_selected_subtree(j)) {
             color = joint_colors[1];
@@ -921,12 +935,12 @@ static void frame(void) {
         nt_app_quit();
     }
 #endif
-    if (nt_input_key_is_pressed(NT_KEY_R)) {
-        reset_active_scene();
-    }
     nt_resource_step();
     link_programs();
     try_bind_resources();
+    if (nt_input_key_is_pressed(NT_KEY_R)) {
+        reset_active_scene();
+    }
     /* Scene views are borrowed from resources, so the scene composes after resource_step. */
     if (s_active_scene >= 0 && s_scene_registry[s_active_scene].update != NULL) {
         s_scene_registry[s_active_scene].update();

@@ -11,8 +11,11 @@ Build and run the native example with:
 ```bash
 cmake --preset native-debug
 cmake --build --preset native-debug --target skeletal_showcase
-build/examples/skeletal_showcase/native-debug/skeletal_showcase.exe
+cd build/examples/skeletal_showcase/native-debug && ./skeletal_showcase.exe
 ```
+
+The pack is loaded from `assets/skeletal_showcase.ntpack` relative to the
+working directory, so run the executable from its own build directory.
 
 The WASM shell is built after the native pack exists:
 
@@ -47,11 +50,15 @@ centroid and extent, aims the camera at the centroid, and scales the camera
 distance, near/far planes, bone width, joint spheres, axis length and the grid
 cell by `extent / humanoid extent` (Fox is authored in centimetres, CesiumMan
 is about 1.5 units tall). While an imported skeleton is not ready the stage
-stays empty and the panel shows `loading...`. Exporter wrapper nodes
-(CesiumMan `Z_UP`/`Armature`, Fox `root`) are joints of the rig that sit at
-the origin at rest; the stage draws them and their links as thin grey
-scaffolding so the link up to the first translated joint does not read as a
-limb. Visual QA: CesiumMan stands upright, Fox faces along its authored axis.
+stays empty and the panel shows `loading...`. Joints whose whole ancestor
+chain, themselves included, has zero rest translation draw as thin grey
+scaffolding, so the link up to the first translated joint does not read as a
+limb. NSKL does not mark exporter wrappers, so besides CesiumMan
+`Z_UP`/`Armature` and Fox `root` this also covers Fox's skin joints
+`_rootJoint` and `b_Root_00`, which rest at the origin. `Test` on an imported
+rig bends every third joint outside that scaffolding about Z. The scene holds
+at most 32 joints; the pack builder asserts it. Visual QA: CesiumMan stands
+upright, Fox faces along its authored axis.
 
 Source: [examples/skeletal_showcase/main.c](main.c).
 
