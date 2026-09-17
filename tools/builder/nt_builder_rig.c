@@ -412,3 +412,195 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene
     nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_MESH, NULL, mesh_data, mesh_size, hash);
 }
 // #endregion
+
+// #region skin binding
+/* |inverse_bind * v| with v a mesh-space point: how far the vertex sits from
+ * the joint it is bound to, which is what reach bounds. */
+static double rig_bound_distance(const nt_skeletal_mat34_t *ib, const float v[3]) {
+    double len2 = 0.0;
+    for (int r = 0; r < 3; r++) {
+        const double e = ((double)ib->r[r][0] * (double)v[0]) + ((double)ib->r[r][1] * (double)v[1]) + ((double)ib->r[r][2] * (double)v[2]) + (double)ib->r[r][3];
+        len2 += e * e;
+    }
+    return sqrt(len2);
+}
+
+/* Over every primitive of every node this skin deforms, every vertex and every
+ * source influence with a non-zero weight -- all sets, unreduced: the top-four
+ * reduction is a property of one exported mesh, the binding is shared. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- four nested ranges plus NT_BUILD_ASSERT expansions
+static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data, const nt_builder_rig_t *rig, const nt_skeletal_mat34_t *inverse_bind) {
+    double reach = 0.0;
+    bool scanned = false;
+    for (uint32_t n = 0; n < scene->node_count; n++) {
+        if (scene->nodes[n].skin_index != rig->skin_index || scene->nodes[n].mesh_index == UINT32_MAX) {
+            continue;
+        }
+        const uint32_t mesh_index = scene->nodes[n].mesh_index;
+        const cgltf_mesh *mesh = &data->meshes[mesh_index];
+        for (cgltf_size pi = 0; pi < mesh->primitives_count; pi++) {
+            const cgltf_primitive *prim = &mesh->primitives[pi];
+            char label[64];
+            (void)snprintf(label, sizeof(label), "mesh[%u] prim[%u]", mesh_index, (uint32_t)pi);
+
+            const cgltf_accessor *pos = cgltf_find_accessor(prim, cgltf_attribute_type_position, 0);
+            if (pos == NULL || pos->count == 0) {
+                NT_LOG_ERROR("%s: skinned primitive has no POSITION accessor, so its reach cannot be measured", label);
+                NT_BUILD_ASSERT(0 && "skinned primitive has no positions");
+            }
+            const uint32_t vertex_count = (uint32_t)pos->count;
+            const cgltf_size want = (cgltf_size)vertex_count * 3U;
+            float *xyz = (float *)calloc(want, sizeof(float));
+            NT_BUILD_ASSERT(xyz && "skin reach: alloc failed (OOM)");
+            NT_BUILD_ASSERT(cgltf_accessor_unpack_floats(pos, xyz, want) == want && "POSITION accessor could not be unpacked as VEC3");
+
+            nt_builder_influences_t inf;
+            nt_builder_read_influences(prim, label, vertex_count, &inf);
+            const size_t set_floats = (size_t)vertex_count * 4U;
+            for (uint32_t v = 0; v < vertex_count; v++) {
+                for (uint32_t s = 0; s < inf.set_count; s++) {
+                    for (uint32_t c = 0; c < 4U; c++) {
+                        const size_t at = ((size_t)s * set_floats) + ((size_t)v * 4U) + c;
+                        if (inf.weights[at] == 0.0F) {
+                            continue;
+                        }
+                        const uint32_t p = (uint32_t)inf.joints[at];
+                        if (p >= (uint32_t)rig->palette_count) {
+                            NT_LOG_ERROR("%s: vertex %u addresses palette entry %u, the skin has %u", label, v, p, (uint32_t)rig->palette_count);
+                            NT_BUILD_ASSERT(0 && "joint index lies outside the palette");
+                        }
+                        const double d = rig_bound_distance(&inverse_bind[p], &xyz[(size_t)v * 3U]);
+                        if (d > reach) {
+                            reach = d;
+                        }
+                    }
+                }
+            }
+            nt_builder_free_influences(&inf);
+            free(xyz);
+            scanned = true;
+        }
+    }
+    if (!scanned) {
+        NT_LOG_ERROR("add_scene_skin_binding: no node instantiates a mesh with skin[%u], so the binding would carry a zero reach", rig->skin_index);
+        NT_BUILD_ASSERT(0 && "no mesh is skinned by this rig's skin");
+    }
+    return reach;
+}
+
+/* Section 14 over the rest hierarchy: a bounds accumulated stretch, d bounds
+ * distance from the root, and the binding stores the palette maximum. parent[j]
+ * precedes j, so one forward pass is the whole recurrence. */
+static float rig_any_pose_radius(const nt_skeletal_skeleton_t *skel, const uint16_t *remap, uint16_t palette_count, double reach) {
+    const uint32_t joint_count = skel->joint_count;
+    double *stretch = (double *)calloc(joint_count, sizeof(double));
+    double *distance = (double *)calloc(joint_count, sizeof(double));
+    NT_BUILD_ASSERT(stretch && distance && "any_pose_radius: alloc failed (OOM)");
+
+    for (uint32_t j = 0; j < joint_count; j++) {
+        const nt_skeletal_trs_t *rest = &skel->rest[j];
+        double m = 0.0;
+        for (int c = 0; c < 3; c++) {
+            const double s = fabs((double)rest->s[c]);
+            if (s > m) {
+                m = s;
+            }
+        }
+        const uint16_t parent = skel->parent[j];
+        if (parent == NT_SKELETAL_NO_PARENT) {
+            stretch[j] = m;
+            distance[j] = 0.0;
+        } else {
+            double t2 = 0.0;
+            for (int c = 0; c < 3; c++) {
+                t2 += (double)rest->t[c] * (double)rest->t[c];
+            }
+            stretch[j] = stretch[parent] * m;
+            distance[j] = distance[parent] + (stretch[parent] * sqrt(t2));
+        }
+    }
+
+    double radius = 0.0;
+    for (uint16_t p = 0; p < palette_count; p++) {
+        const uint16_t j = remap[p];
+        const double r = distance[j] + (stretch[j] * reach);
+        if (r > radius) {
+            radius = r;
+        }
+    }
+    free(stretch);
+    free(distance);
+    return (float)radius;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
+void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const nt_builder_rig_t *rig, const char *resource_id) {
+    NT_BUILD_ASSERT(ctx && scene && rig && resource_id && "invalid scene_skin_binding args");
+    const cgltf_data *data = (const cgltf_data *)scene->_internal;
+    NT_BUILD_ASSERT(data != NULL && "add_scene_skin_binding: the scene holds no parsed glTF");
+    NT_BUILD_ASSERT(rig->skin_index < scene->skin_count && "rig skin index out of range");
+    const uint32_t palette_count = rig->palette_count;
+    NT_BUILD_ASSERT(palette_count >= 1 && "rig has no palette entries");
+    const cgltf_skin *skin = &data->skins[rig->skin_index];
+    NT_BUILD_ASSERT((uint32_t)skin->joints_count == palette_count && "the rig's palette does not match its skin");
+
+    nt_skeletal_mat34_t *inverse_bind = (nt_skeletal_mat34_t *)calloc(palette_count, sizeof(nt_skeletal_mat34_t));
+    uint16_t *remap = (uint16_t *)calloc(palette_count, sizeof(uint16_t));
+    NT_BUILD_ASSERT(inverse_bind && remap && "add_scene_skin_binding: alloc failed (OOM)");
+
+    // #region inverse binds
+    const cgltf_accessor *ibm = skin->inverse_bind_matrices;
+    if (ibm == NULL) {
+        /* glTF: an absent accessor means identity, never inverse(rest). */
+        for (uint32_t p = 0; p < palette_count; p++) {
+            for (int r = 0; r < 3; r++) {
+                inverse_bind[p].r[r][r] = 1.0F;
+            }
+        }
+    } else {
+        if (ibm->type != cgltf_type_mat4 || ibm->component_type != cgltf_component_type_r_32f || (uint32_t)ibm->count < palette_count) {
+            NT_LOG_ERROR("add_scene_skin_binding: inverseBindMatrices must be MAT4 FLOAT over at least %u joints, the skin declares %u elements of type %d", palette_count, (uint32_t)ibm->count,
+                         (int)ibm->type);
+            NT_BUILD_ASSERT(0 && "inverseBindMatrices accessor is invalid");
+        }
+        const cgltf_size want = ibm->count * 16U;
+        float *m = (float *)calloc(want, sizeof(float));
+        NT_BUILD_ASSERT(m && "add_scene_skin_binding: alloc failed (OOM)");
+        NT_BUILD_ASSERT(cgltf_accessor_unpack_floats(ibm, m, want) == want && "inverseBindMatrices could not be unpacked");
+        for (uint32_t p = 0; p < palette_count; p++) {
+            nt_skeletal_mat34_from_mat4(&m[(size_t)p * 16U], &inverse_bind[p]);
+            for (int r = 0; r < 3; r++) {
+                for (int c = 0; c < 4; c++) {
+                    const float e = inverse_bind[p].r[r][c];
+                    if ((e - e) != 0.0F) {
+                        NT_LOG_ERROR("add_scene_skin_binding: inverse bind matrix %u holds a non-finite element", p);
+                        NT_BUILD_ASSERT(0 && "inverse bind matrix is not finite");
+                    }
+                }
+            }
+        }
+        free(m);
+    }
+    // #endregion
+
+    for (uint32_t p = 0; p < palette_count; p++) {
+        remap[p] = rig->palette_joint[p];
+        NT_BUILD_ASSERT(remap[p] < rig->skeleton.joint_count && "palette entry addresses a joint outside the rig");
+    }
+
+    const double reach = rig_skin_reach(scene, data, rig, inverse_bind);
+    const nt_skin_binding_t binding = {
+        .rig_compat_id = rig->skeleton.rig_compat_id,
+        .remap = remap,
+        .inverse_bind = inverse_bind,
+        .reach = (float)reach,
+        .any_pose_radius = rig_any_pose_radius(&rig->skeleton, remap, (uint16_t)palette_count, reach),
+        .palette_count = (uint16_t)palette_count,
+    };
+    nt_builder_add_skin_binding(ctx, &binding, resource_id);
+
+    NT_LOG_INFO("Imported skin binding from skin[%u]: %u palette entries, reach %g, any-pose radius %g", rig->skin_index, palette_count, (double)binding.reach, (double)binding.any_pose_radius);
+    free(inverse_bind);
+    free(remap);
+}
+// #endregion

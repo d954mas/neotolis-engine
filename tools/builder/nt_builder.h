@@ -620,6 +620,14 @@ nt_builder_skeletal_profile_t nt_builder_skeletal_profile_defaults(void);
 void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const nt_builder_rig_t *rig,
                                        const nt_builder_skeletal_profile_t *profile, const char *resource_id, const nt_mesh_opts_t *opts);
 
+/* Exports the binding every mesh of this rig's skin shares: the skin's inverse
+ * bind matrices (identity where the glTF has none), the palette remap of the
+ * rig, and the two skeleton-space bounds of the spec. reach is measured over
+ * every vertex of every primitive the skin deforms and every source influence,
+ * before the top-four reduction, so it bounds the mesh the game actually draws;
+ * any_pose_radius follows from it and the rig's rest hierarchy. */
+void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const nt_builder_rig_t *rig, const char *resource_id);
+
 /* Computes rig_compat_id from the joints it writes and returns it, so the
  * caller stamps clips and bindings with the identity that actually shipped;
  * skel->rig_compat_id is ignored. Joint ids must be unique. */

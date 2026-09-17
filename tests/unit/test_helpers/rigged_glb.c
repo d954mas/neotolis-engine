@@ -339,7 +339,7 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, "{\"bufferView\":5,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"},", vertex_count);
     jb_addf(&jb, "{\"bufferView\":6,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"},", vertex_count);
     jb_addf(&jb, "{\"bufferView\":7,\"componentType\":5123,\"count\":6,\"type\":\"SCALAR\"},");
-    jb_addf(&jb, "{\"bufferView\":8,\"componentType\":5126,\"count\":%u,\"type\":\"MAT4\"},", joint_count);
+    jb_addf(&jb, "{\"bufferView\":8,\"componentType\":5126,\"count\":%u,\"type\":\"MAT4\"},", o.ibm_short ? joint_count - 1U : joint_count);
     jb_addf(&jb, "{\"bufferView\":9,\"componentType\":5126,\"count\":3,\"type\":\"SCALAR\",\"min\":[0],\"max\":[0.5]},");
     jb_addf(&jb, "{\"bufferView\":10,\"componentType\":5126,\"count\":3,\"type\":\"VEC4\"},");
     jb_addf(&jb, "{\"bufferView\":11,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},");

@@ -5,6 +5,7 @@
  * expectation here names a value documented in rigged_glb.h. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <math.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,7 @@
 /* clang-format off */
 #include "nt_builder.h"
 #include "nt_builder_internal.h"
+#include "nt_skeletal_format.h"
 #include "hash/nt_hash.h"
 #include "test_helpers/rigged_glb.h"
 #include "unity.h"
@@ -954,6 +956,326 @@ void test_add_scene_skinned_mesh_asserts_when_no_node_binds_the_skin(void) {
 }
 // #endregion
 
+// #region skin binding export
+/* Every source influence of the fixture, as rigged_glb.h documents it: the
+ * binding's reach is measured before any reduction, so all five count. */
+#define SKIN_SOURCE_INFLUENCES 5
+static const uint32_t k_src_joint[RIGGED_GLB_VERTEX_COUNT][SKIN_SOURCE_INFLUENCES] = {{0, 1, 2, 3, 4}, {1, 0, 3, 2, 4}, {0, 1, 2, 3, 4}, {0, 1, 0, 0, 0}};
+static const float k_src_weight[RIGGED_GLB_VERTEX_COUNT][SKIN_SOURCE_INFLUENCES] = {
+    {0.40F, 0.30F, 0.20F, 0.09F, 0.01F},
+    {0.40F, 0.30F, 0.10F, 0.10F, 0.10F},
+    {0.40F, 0.30F, 0.15F, 0.10F, 0.05F},
+    {0.75F, 0.25F, 0.0F, 0.0F, 0.0F},
+};
+static const float k_position[RIGGED_GLB_VERTEX_COUNT][3] = {{0.0F, 0.0F, 0.0F}, {1.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 0.0F}, {0.0F, 1.0F, 0.0F}};
+
+/* Inverse bind p is the pure translation the fixture writes into its accessor. */
+static void ref_inverse_bind_t(uint32_t p, double out[3]) {
+    out[0] = -((double)p + 1.0);
+    out[1] = 0.5 * (double)p;
+    out[2] = -1.0;
+}
+
+/* max |inverse_bind[p] * v| over the influences above, computed here from the
+ * fixture's numbers rather than from the builder's scan. identity_ibm covers
+ * the skin that carries no inverseBindMatrices. */
+static double ref_reach(bool identity_ibm) {
+    double best = 0.0;
+    for (uint32_t v = 0; v < RIGGED_GLB_VERTEX_COUNT; v++) {
+        for (uint32_t i = 0; i < SKIN_SOURCE_INFLUENCES; i++) {
+            if (k_src_weight[v][i] == 0.0F) {
+                continue;
+            }
+            double t[3] = {0.0, 0.0, 0.0};
+            if (!identity_ibm) {
+                ref_inverse_bind_t(k_src_joint[v][i], t);
+            }
+            double len2 = 0.0;
+            for (uint32_t c = 0; c < 3U; c++) {
+                const double e = (double)k_position[v][c] + t[c];
+                len2 += e * e;
+            }
+            const double d = sqrt(len2);
+            if (d > best) {
+                best = d;
+            }
+        }
+    }
+    return best;
+}
+
+/* The recurrence of skeletal-animation.md 14 over the rig reference table. */
+static double ref_any_pose_radius(double reach) {
+    double stretch[RIG_JOINT_COUNT];
+    double distance[RIG_JOINT_COUNT];
+    for (uint32_t j = 0; j < RIG_JOINT_COUNT; j++) {
+        double m = 0.0;
+        for (uint32_t c = 0; c < 3U; c++) {
+            const double s = fabs((double)k_rig[j].s[c]);
+            if (s > m) {
+                m = s;
+            }
+        }
+        if (k_rig[j].parent == NT_SKELETAL_NO_PARENT) {
+            stretch[j] = m;
+            distance[j] = 0.0;
+        } else {
+            const uint16_t parent = k_rig[j].parent;
+            double t2 = 0.0;
+            for (uint32_t c = 0; c < 3U; c++) {
+                t2 += (double)k_rig[j].t[c] * (double)k_rig[j].t[c];
+            }
+            stretch[j] = stretch[parent] * m;
+            distance[j] = distance[parent] + (stretch[parent] * sqrt(t2));
+        }
+    }
+    double best = 0.0;
+    for (uint32_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
+        /* Palette entry p is skin joint node p + 2, which the preorder makes rig joint p + 2. */
+        const uint32_t j = p + 2U;
+        const double r = distance[j] + (stretch[j] * reach);
+        if (r > best) {
+            best = r;
+        }
+    }
+    return best;
+}
+
+/* The NSKN payload the pack shipped, plus a binding view into it. */
+typedef struct {
+    uint8_t *payload;
+    uint32_t size;
+    NtSknHeader header;
+    nt_skeletal_mat34_t inverse_bind[RIGGED_GLB_SKIN_JOINT_COUNT];
+    uint16_t remap[RIGGED_GLB_SKIN_JOINT_COUNT];
+    nt_skin_binding_t binding; /* view over the two arrays above */
+} skn_result_t;
+
+/* The wire layout is the runtime layout, so the arrays are copied out of the
+ * payload unchanged and the view is built over them. */
+static void skn_read(skn_result_t *out) {
+    out->payload = read_pack_asset(PACK_PATH, NT_ASSET_SKIN_BINDING, &out->size);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_SKN_SIZE(RIGGED_GLB_SKIN_JOINT_COUNT), out->size);
+    memcpy(&out->header, out->payload, sizeof(out->header));
+    TEST_ASSERT_EQUAL_UINT16(RIGGED_GLB_SKIN_JOINT_COUNT, out->header.palette_count);
+    memcpy(out->inverse_bind, out->payload + sizeof(NtSknHeader), sizeof(out->inverse_bind));
+    memcpy(out->remap, out->payload + sizeof(NtSknHeader) + sizeof(out->inverse_bind), sizeof(out->remap));
+    out->binding = (nt_skin_binding_t){
+        .rig_compat_id = (nt_hash64_t){out->header.rig_compat_id},
+        .remap = out->remap,
+        .inverse_bind = out->inverse_bind,
+        .reach = out->header.reach,
+        .any_pose_radius = out->header.any_pose_radius,
+        .palette_count = out->header.palette_count,
+    };
+}
+
+/* Writes the fixture, imports the rig and packs its binding; skinned_first adds
+ * the mesh before the binding, to pin that reach does not depend on the order. */
+static void skn_export(const rigged_glb_opts_t *opts, bool skinned_first, nt_glb_scene_t *scene, nt_builder_rig_t *rig, skn_result_t *out) {
+    rigged_glb_write(RIG_GLB, opts);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(scene, RIG_GLB));
+    const nt_builder_rig_selection_t sel = rig_selection();
+    nt_builder_import_rig(scene, &sel, rig);
+
+    (void)remove(PACK_PATH);
+    NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
+    TEST_ASSERT_NOT_NULL(ctx);
+    if (skinned_first) {
+        NtStreamLayout layout[3];
+        skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+        const nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = 3, .tangent_mode = NT_TANGENT_AUTO};
+        nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
+        profile.skin_drop_tolerance = SKIN_FIXTURE_TOLERANCE;
+        nt_builder_add_scene_skinned_mesh(ctx, scene, 0, 0, rig, &profile, "meshes/quad.mesh", &mesh_opts);
+    }
+    nt_builder_add_scene_skin_binding(ctx, scene, rig, "rigs/fixture.nskn");
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    skn_read(out);
+}
+
+static void assert_close(double expected, double actual) {
+    const double scale = (expected < 0.0 ? -expected : expected) + 1.0;
+    TEST_ASSERT_TRUE(fabs(expected - actual) <= 1e-6 * scale);
+}
+
+void test_skin_binding_bounds_match_an_independent_computation(void) {
+    nt_glb_scene_t scene;
+    nt_builder_rig_t rig;
+    skn_result_t skn;
+    skn_export(NULL, false, &scene, &rig, &skn);
+
+    const double reach = ref_reach(false);
+    assert_close(reach, (double)skn.header.reach);
+    assert_close(ref_any_pose_radius(reach), (double)skn.header.any_pose_radius);
+    TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, skn.header.rig_compat_id);
+    for (uint16_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
+        TEST_ASSERT_EQUAL_UINT16(rig.palette_joint[p], skn.binding.remap[p]);
+    }
+
+    free(skn.payload);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_skin_binding_reach_is_the_same_in_either_export_order(void) {
+    nt_glb_scene_t scene;
+    nt_builder_rig_t rig;
+    skn_result_t binding_first;
+    skn_export(NULL, false, &scene, &rig, &binding_first);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+
+    skn_result_t mesh_first;
+    skn_export(NULL, true, &scene, &rig, &mesh_first);
+
+    TEST_ASSERT_EQUAL_UINT32(binding_first.size, mesh_first.size);
+    TEST_ASSERT_EQUAL_MEMORY(binding_first.payload, mesh_first.payload, mesh_first.size);
+
+    free(binding_first.payload);
+    free(mesh_first.payload);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_skin_binding_imports_the_inverse_binds_instead_of_deriving_them(void) {
+    nt_glb_scene_t scene;
+    nt_builder_rig_t rig;
+    skn_result_t skn;
+    skn_export(NULL, false, &scene, &rig, &skn);
+
+    for (uint32_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
+        double t[3];
+        ref_inverse_bind_t(p, t);
+        const nt_skeletal_mat34_t *ib = &skn.binding.inverse_bind[p];
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                ASSERT_F32((r == c) ? 1.0F : 0.0F, ib->r[r][c]);
+            }
+            ASSERT_F32((float)t[r], ib->r[r][3]);
+        }
+    }
+
+    free(skn.payload);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_skin_binding_uses_identity_when_the_skin_has_no_inverse_binds(void) {
+    rigged_glb_opts_t opts = {0};
+    opts.no_ibm = true;
+    nt_glb_scene_t scene;
+    nt_builder_rig_t rig;
+    skn_result_t skn;
+    skn_export(&opts, false, &scene, &rig, &skn);
+
+    for (uint32_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
+        const nt_skeletal_mat34_t *ib = &skn.binding.inverse_bind[p];
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 4; c++) {
+                ASSERT_F32((r == c) ? 1.0F : 0.0F, ib->r[r][c]);
+            }
+        }
+    }
+    /* Identity binds measure the vertices from the mesh origin. */
+    assert_close(ref_reach(true), (double)skn.header.reach);
+
+    free(skn.payload);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_skin_binding_rejects_a_short_inverse_bind_accessor(void) {
+    rigged_glb_opts_t opts = {0};
+    opts.ibm_short = true;
+    rigged_glb_write(RIG_GLB, &opts);
+
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
+    const nt_builder_rig_selection_t sel = rig_selection();
+    nt_builder_rig_t rig;
+    nt_builder_import_rig(&scene, &sel, &rig);
+
+    (void)remove(PACK_PATH);
+    NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
+    TEST_ASSERT_NOT_NULL(ctx);
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skin_binding(ctx, &scene, &rig, "rigs/fixture.nskn"), "inverseBindMatrices accessor is invalid");
+    nt_builder_free_pack(ctx);
+
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+
+/* v transformed by a 3x4 affine, written out so the reference path calls no
+ * engine kernel. */
+static void ref_apply(const nt_skeletal_mat34_t *m, const float v[3], float out[3]) {
+    for (int r = 0; r < 3; r++) {
+        out[r] = (m->r[r][0] * v[0]) + (m->r[r][1] * v[1]) + (m->r[r][2] * v[2]) + m->r[r][3];
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_skin_binding_ignores_the_skinned_mesh_node_transform(void) {
+    nt_glb_scene_t scene;
+    nt_builder_rig_t rig;
+    skn_result_t skn;
+    skn_export(NULL, false, &scene, &rig, &skn);
+
+    nt_skeletal_mat34_t model[RIG_JOINT_COUNT];
+    nt_skeletal_fk(&rig.skeleton, rig.skeleton.rest, model, 0, RIG_JOINT_COUNT);
+    nt_skeletal_mat34_t palette[RIGGED_GLB_SKIN_JOINT_COUNT];
+    nt_skin_palette_build(&skn.binding, model, RIG_JOINT_COUNT, palette, RIGGED_GLB_SKIN_JOINT_COUNT);
+
+    /* MeshNode's own TRS, which glTF says a skinned primitive ignores. */
+    const nt_skeletal_trs_t mesh_node = {.t = {2.0F, 0.0F, -1.0F}, .q = {0.0F, 0.38268343F, 0.0F, 0.92387953F}, .s = {1.5F, 1.5F, 1.5F}};
+    nt_skeletal_mat34_t mesh_node_m;
+    nt_skeletal_mat34_from_trs(&mesh_node, &mesh_node_m);
+
+    const float v[3] = {1.0F, 1.0F, 0.0F};
+    bool differs_from_folded = false;
+    for (uint32_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
+        nt_skeletal_mat34_t ib;
+        double t[3];
+        ref_inverse_bind_t(p, t);
+        memset(&ib, 0, sizeof(ib));
+        for (int r = 0; r < 3; r++) {
+            ib.r[r][r] = 1.0F;
+            ib.r[r][3] = (float)t[r];
+        }
+
+        float bind_space[3];
+        float expected[3];
+        ref_apply(&ib, v, bind_space);
+        ref_apply(&model[skn.binding.remap[p]], bind_space, expected);
+
+        float got[3];
+        ref_apply(&palette[p], v, got);
+        for (int c = 0; c < 3; c++) {
+            assert_close((double)expected[c], (double)got[c]);
+        }
+
+        /* Folding the mesh node in would move the vertex, so the equality above
+         * is a claim and not an identity. */
+        float moved[3];
+        float folded[3];
+        ref_apply(&mesh_node_m, v, moved);
+        ref_apply(&ib, moved, bind_space);
+        ref_apply(&model[skn.binding.remap[p]], bind_space, folded);
+        for (int c = 0; c < 3; c++) {
+            const float d = folded[c] - got[c];
+            differs_from_folded = differs_from_folded || ((d < 0.0F ? -d : d) > 1e-3F);
+        }
+    }
+    TEST_ASSERT_TRUE(differs_from_folded);
+
+    free(skn.payload);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+// #endregion
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_rigged_fixture_parses);
@@ -992,5 +1314,11 @@ int main(void) {
     RUN_TEST(test_skinned_mesh_accepts_a_primitive_without_indices);
     RUN_TEST(test_add_scene_skinned_mesh_ships_the_decoded_bytes);
     RUN_TEST(test_add_scene_skinned_mesh_asserts_when_no_node_binds_the_skin);
+    RUN_TEST(test_skin_binding_bounds_match_an_independent_computation);
+    RUN_TEST(test_skin_binding_reach_is_the_same_in_either_export_order);
+    RUN_TEST(test_skin_binding_imports_the_inverse_binds_instead_of_deriving_them);
+    RUN_TEST(test_skin_binding_uses_identity_when_the_skin_has_no_inverse_binds);
+    RUN_TEST(test_skin_binding_rejects_a_short_inverse_bind_accessor);
+    RUN_TEST(test_skin_binding_ignores_the_skinned_mesh_node_transform);
     return UNITY_END();
 }

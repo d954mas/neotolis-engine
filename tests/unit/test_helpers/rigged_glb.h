@@ -104,6 +104,7 @@ typedef struct {
     bool no_indices;         /* the primitive drops its index accessor and keeps v0..v2, one triangle */
     bool mesh_other_skin;    /* MeshNode uses a second skin; skin 0 has no mesh */
     bool no_ibm;             /* skin 0 drops inverseBindMatrices */
+    bool ibm_short;          /* the inverseBindMatrices accessor covers one joint too few */
 } rigged_glb_opts_t;
 
 /* opts may be NULL, which means every knob off. */
