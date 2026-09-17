@@ -924,6 +924,17 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_builder_skeletal PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder_skeletal WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+    # Rig import from glTF: node graph, skins, animations and the skinned mesh
+    # path, over the hand-written rigged .glb fixture. nt_math is the test's own
+    # independent cglm reference path, not a builder dependency.
+    add_executable(test_builder_rig unit/test_builder_rig.c unit/test_helpers/rigged_glb.c unit/test_helpers/skeletal_rig.c)
+    target_link_libraries(test_builder_rig PRIVATE nt_builder nt_log nt_math unity nt_meshwire)
+    target_include_directories(test_builder_rig PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_compile_definitions(test_builder_rig PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_builder_rig WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # Assert-trip tests longjmp out of the importer past live allocations.
+    set_tests_properties(test_builder_rig PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
+
     # Builder -> pack -> runtime for the skeletal formats: the only place the
     # encoders and the activators meet, so a format skew is visible here first.
     add_executable(test_skeletal_assets unit/test_skeletal_assets.c unit/test_helpers/nt_assert_trap.c)
