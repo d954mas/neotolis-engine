@@ -472,7 +472,7 @@ void test_clip_samples_grid_times_exactly(void) {
         ASSERT_BITS_EQUAL(&k_q_row1[(size_t)i * 4U], pose[2].q, 4);
         ASSERT_BITS_EQUAL(&k_s_row0[(size_t)i * 3U], pose[2].s, 3);
 
-        /* keys at 0, 0.4 and 0.8 over a grid of 0.25. */
+        /* keys at 0.2, 0.4 and 0.8 over a grid of 0.25; times before 0.2 hold the first key. */
         uint32_t key = 0U;
         if (i >= 4U) {
             key = 2U;

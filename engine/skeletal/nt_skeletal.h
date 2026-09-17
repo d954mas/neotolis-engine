@@ -256,7 +256,7 @@ typedef struct {
  * then q rows [n_q][4], then s rows [n_s][3]; row k belongs to joint
  * t_joint[k] / q_joint[k] / s_joint[k]. One interpolated sample therefore reads
  * two adjacent blocks and nothing else, instead of striding through the clip
- * once per channel. blocks is NULL when the clip has no sampled channel. */
+ * once per channel. blocks is NULL when no joint channel is sampled. */
 typedef struct {
     nt_hash64_t rig_compat_id;          /* rig this clip plays on */
     nt_hash64_t additive_ref_id;        /* reference pose identity, 0 for an absolute clip */
@@ -290,8 +290,7 @@ typedef struct {
  * Constants copy, sampled T/S lerp and sampled Q take the shortest-path
  * normalized lerp, and a grid time reproduces its stored block exactly. STEP
  * channels hold the last key at or before time. defaults and out are
- * caller-owned buffers of joint_count entries and must not overlap.
- * NT_SKELETAL_CHECKS additionally validates the produced pose. */
+ * caller-owned buffers of joint_count entries and must not overlap. */
 void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_skeletal_trs_t *restrict defaults, nt_skeletal_trs_t *restrict out);
 
 /* Same rules over the one-element object signal. A NULL curve or one with three
@@ -326,8 +325,9 @@ _Static_assert(sizeof(nt_skeletal_track_t) == 32, "nt_skeletal_track_t is 32 byt
 #endif
 
 /* Advances the clock of every occupied track by speed * dt and nothing else:
- * no callback, no event, no clip access. A finite dt >= 0 and every duration
- * >= 0 are asserted. */
+ * no callback, no event, no clip access. A finite dt >= 0 is asserted, and for
+ * every occupied track a duration >= 0, a finite speed and a cycle count inside
+ * the int64 range. */
 void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, double dt);
 // #endregion
 

@@ -9,8 +9,8 @@
 #include "nt_skeletal_format.h"
 #include "pool/nt_pool.h"
 
-/* This is the one translation unit that sees both the wire strides and the
- * runtime structs they hold, so it is where the two are pinned together. */
+/* The runtime reads the wire through these structs, so their sizes are pinned
+ * to the strides the format declares. */
 _Static_assert(sizeof(nt_skeletal_step_t) == NT_ANM_STEP_STRIDE, "nt_skeletal_step_t must match the NANM step stride");
 _Static_assert(sizeof(nt_skeletal_step_key_t) == NT_ANM_KEY_STRIDE, "nt_skeletal_step_key_t must match the NANM key stride");
 _Static_assert(sizeof(nt_skeletal_trs_t) == 40, "the object sampled array is one nt_skeletal_trs_t per sample");
@@ -59,9 +59,6 @@ static bool skel_finite(float v) { return (v - v) == 0.0F; }
 static uint32_t skel_take_slot(const uint8_t *data, uint32_t size) {
     const uint32_t id = nt_pool_alloc(&s_assets.pool);
     NT_ASSERT(id != 0 && "skeletal asset pool exhausted -- raise nt_skeletal_assets_init(max_assets)");
-    if (id == 0) {
-        return 0;
-    }
     nt_skeletal_slot_t *slot = &s_assets.slots[nt_pool_slot_index(id)];
     slot->mem = malloc(size);
     NT_ASSERT(slot->mem != NULL);
@@ -147,9 +144,6 @@ uint32_t nt_skeletal_assets_activate_skeleton(const uint8_t *data, uint32_t size
     }
 
     const uint32_t id = skel_take_slot(data, size);
-    if (id == 0) {
-        return 0;
-    }
 
     const uint32_t joints = header.joint_count;
     s_assets.slots[nt_pool_slot_index(id)].view.skeleton = (nt_skeletal_skeleton_t){
@@ -201,9 +195,6 @@ uint32_t nt_skeletal_assets_activate_skin_binding(const uint8_t *data, uint32_t 
     }
 
     const uint32_t id = skel_take_slot(data, size);
-    if (id == 0) {
-        return 0;
-    }
 
     s_assets.slots[nt_pool_slot_index(id)].view.binding = (nt_skin_binding_t){
         .rig_compat_id = (nt_hash64_t){.value = header.rig_compat_id},
@@ -382,9 +373,6 @@ uint32_t nt_skeletal_assets_activate_clip(const uint8_t *data, uint32_t size) {
     }
 
     const uint32_t id = skel_take_slot(data, size);
-    if (id == 0) {
-        return 0;
-    }
 
     /* The grid step is exact only in double, and a clip with one sample or no
      * duration has no interval to step through. */

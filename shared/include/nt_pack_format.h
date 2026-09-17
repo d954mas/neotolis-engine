@@ -29,7 +29,7 @@ typedef enum {
     NT_ASSET_ATLAS = 6,        /* atlas region metadata (polygon vertices + UVs + origin) */
     NT_ASSET_SKELETON = 7,     /* skeleton rig: parents, subtree ends, joint ids, rest pose (NSKL) */
     NT_ASSET_SKIN_BINDING = 8, /* skin binding: palette remap + inverse bind matrices (NSKN) */
-    NT_ASSET_CLIP = 9,         /* animation clip: channel planes, constants, step keys (NANM) */
+    NT_ASSET_CLIP = 9,         /* animation clip: frame blocks, constants, step keys (NANM) */
 } nt_asset_type_t;
 
 /* Highest defined asset type; the pack parser rejects anything above it. */

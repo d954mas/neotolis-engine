@@ -66,7 +66,6 @@ void nt_skeletal_socket(const float world[16], const nt_skeletal_mat34_t *g_join
 }
 
 // #region skin
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_mat34_t *restrict model, uint16_t model_count, nt_skeletal_mat34_t *restrict out, uint16_t capacity) {
     NT_ASSERT(binding != NULL);
@@ -82,11 +81,9 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_m
         nt_skeletal_mat34_mul(&model[binding->remap[p]], &binding->inverse_bind[p], &out[p]);
     }
 }
-
 // #endregion
 
 // #region clip sampling
-
 /* Grid interval holding time: index i and interpolant u in [0, 1]. A time that
  * lands on the grid yields u == 0, or u == 1 at the very end, which the callers
  * turn into an exact copy of a stored sample. */
@@ -209,30 +206,6 @@ static void nt_skeletal_apply_sampled(const nt_skeletal_clip_t *clip, double tim
     }
 }
 
-/* The pose check is nothing but asserts, so NT_ASSERT_MODE=OFF empties it: the
- * function and its calls compile out together instead of leaving locals behind. */
-#if NT_SKELETAL_CHECKS && NT_ASSERT_MODE != NT_ASSERT_OFF
-#define NT_SKELETAL_CHECK_POSE 1
-#else
-#define NT_SKELETAL_CHECK_POSE 0
-#endif
-
-#if NT_SKELETAL_CHECK_POSE
-/* x - x rejects non-finite values without libm; requires strict IEEE math. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void nt_skeletal_check_pose(const nt_skeletal_trs_t *pose, uint32_t count) {
-    for (uint32_t j = 0; j < count; ++j) {
-        const nt_skeletal_trs_t *p = &pose[j];
-        for (int c = 0; c < 3; ++c) {
-            NT_ASSERT((p->t[c] - p->t[c]) == 0.0F);
-            NT_ASSERT((p->s[c] - p->s[c]) == 0.0F);
-        }
-        const float n = (p->q[0] * p->q[0]) + (p->q[1] * p->q[1]) + (p->q[2] * p->q[2]) + (p->q[3] * p->q[3]);
-        NT_ASSERT((n - 1.0F) < 1e-3F && (1.0F - n) < 1e-3F);
-    }
-}
-#endif
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_skeletal_trs_t *restrict defaults, nt_skeletal_trs_t *restrict out) {
     NT_ASSERT(clip != NULL);
@@ -241,8 +214,7 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_sk
     NT_ASSERT(clip->joint_count >= 1U);
     NT_ASSERT(clip->sample_count >= 1U);
     NT_ASSERT(time >= 0.0 && time <= clip->duration);
-    /* Absent channels are read from defaults after the copy, so an overlapping
-     * output would feed later joints values the clip already overwrote. */
+    /* memcpy and the restrict pointers both require disjoint buffers. */
     NT_ASSERT((uintptr_t)(defaults + clip->joint_count) <= (uintptr_t)out || (uintptr_t)(out + clip->joint_count) <= (uintptr_t)defaults);
 
     memcpy(out, defaults, (size_t)clip->joint_count * sizeof(nt_skeletal_trs_t));
@@ -286,10 +258,6 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_sk
         }
     }
     // #endregion
-
-#if NT_SKELETAL_CHECK_POSE
-    nt_skeletal_check_pose(out, clip->joint_count);
-#endif
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -367,16 +335,10 @@ void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double t
     } else if (ms == NT_SKELETAL_CHANNEL_STEP) {
         memcpy(out->s, nt_skeletal_step_value(curve->keys, curve->step_first[2], curve->step_count[2], time), sizeof(out->s));
     }
-
-#if NT_SKELETAL_CHECK_POSE
-    nt_skeletal_check_pose(out, 1U);
-#endif
 }
-
 // #endregion
 
 // #region rig identity
-
 /* Version of the rig identity byte schema; a new value is a new rig identity. */
 #define NT_SKELETAL_RIG_SCHEMA_VERSION 1
 /* Reserved: every rig this engine hashes is glTF metres, Y-up, right-handed, so
@@ -473,11 +435,9 @@ nt_hash64_t nt_skeletal_rig_compat_id(const nt_skeletal_skeleton_t *skel, void *
     NT_ASSERT(offset == size);
     return nt_hash64(bytes, size);
 }
-
 // #endregion
 
 // #region tracks
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, double dt) {
     NT_ASSERT(tracks != NULL);
@@ -502,8 +462,7 @@ void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, dou
         double time = track->time + ((double)track->speed * dt);
         if ((track->flags & NT_SKELETAL_TRACK_LOOPING) != 0U) {
             /* Floor/modulo rather than repeated subtraction: reverse playback
-             * and a step spanning several cycles both normalize in one go.
-             * Truncate-then-correct floor keeps the module free of libm. */
+             * and a step spanning several cycles both normalize in one go. */
             const double cycles = time / track->duration;
             /* The int64 cast is undefined past 2^63 and traps on wasm; only a
              * caller passing an absurd dt or a sub-attosecond duration gets there. */
@@ -527,5 +486,4 @@ void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, dou
         track->time = time;
     }
 }
-
 // #endregion

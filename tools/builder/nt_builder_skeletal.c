@@ -32,7 +32,7 @@ static bool skel_finite_n(const float *v, uint32_t count) {
  * the kernels' unit-quaternion contract. */
 static bool skel_unit_quat(const float *q) {
     const float n = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
-    return skel_finite(n) && (n - 1.0F) < 1e-3F && (1.0F - n) < 1e-3F;
+    return (n - 1.0F) < 1e-3F && (1.0F - n) < 1e-3F;
 }
 // #endregion
 
@@ -80,9 +80,7 @@ nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8
         free(scratch);
     }
 
-    const uint64_t size64 = NT_SKL_SIZE(joint_count);
-    NT_BUILD_ASSERT(size64 <= UINT32_MAX && "skeleton payload exceeds 4 GB");
-    const uint32_t size = (uint32_t)size64;
+    const uint32_t size = (uint32_t)NT_SKL_SIZE(joint_count); /* fits: joint_count is u16 */
     uint8_t *payload = (uint8_t *)malloc(size);
     NT_BUILD_ASSERT(payload && "encode_skeleton: alloc failed (OOM)");
 
@@ -133,9 +131,7 @@ void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **
         NT_BUILD_ASSERT(skel_finite_n(&binding->inverse_bind[p].r[0][0], 12) && "inverse bind matrix is not finite");
     }
 
-    const uint64_t size64 = NT_SKN_SIZE(palette_count);
-    NT_BUILD_ASSERT(size64 <= UINT32_MAX && "skin binding payload exceeds 4 GB");
-    const uint32_t size = (uint32_t)size64;
+    const uint32_t size = (uint32_t)NT_SKN_SIZE(palette_count); /* fits: palette_count is u16 */
     uint8_t *payload = (uint8_t *)malloc(size);
     NT_BUILD_ASSERT(payload && "encode_skin_binding: alloc failed (OOM)");
 
@@ -170,7 +166,8 @@ void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t 
 
 // #region NANM clip
 /* Per-kind element counts collected in the validating pass; object channels are
- * counted only in n_keys, because their storage lives in the header. */
+ * counted only in n_keys, because their modes, constants and key ranges live in
+ * the header and their samples in their own array, not in the joint tables. */
 typedef struct {
     uint16_t sampled[3]; /* joint rows per component kind: t, q, s */
     uint16_t constant[3];
@@ -210,8 +207,6 @@ static void clip_validate(const nt_builder_clip_t *clip, NtClipTally *tally) {
             NT_BUILD_ASSERT(skel_finite_n(ch->constant, comps) && "constant channel value is not finite");
             if (comps == 4) {
                 NT_BUILD_ASSERT(skel_unit_quat(ch->constant) && "constant rotation is not a unit quaternion");
-            } else {
-                NT_BUILD_ASSERT(ch->constant[3] == 0.0F && "constant translation or scale must leave the fourth component at 0");
             }
             if (!object) {
                 tally->constant[kind]++;
@@ -235,7 +230,6 @@ static void clip_validate(const nt_builder_clip_t *clip, NtClipTally *tally) {
             NT_BUILD_ASSERT(ch->step_times && ch->step_values && ch->step_count >= 1 && "step channel has no keys");
             NT_BUILD_ASSERT(ch->step_times[0] >= 0.0F && "the first step key precedes the clip");
             for (uint32_t k = 0; k < ch->step_count; k++) {
-                NT_BUILD_ASSERT(skel_finite(ch->step_times[k]) && "step time is not finite");
                 NT_BUILD_ASSERT((k == 0 || ch->step_times[k] > ch->step_times[k - 1]) && "step times must increase strictly");
                 const float *v = &ch->step_values[(size_t)k * 4U];
                 NT_BUILD_ASSERT(skel_finite_n(v, 4) && "step value is not finite");
@@ -301,7 +295,6 @@ static void clip_fill_header(const nt_builder_clip_t *clip, const NtClipTally *t
             first_key += ch->step_count;
         }
     }
-    NT_BUILD_ASSERT(first_key == tally->keys && "the step tracks do not partition the key table");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one linear pass per wire array

@@ -15,8 +15,9 @@
  * pack blob is never read again, so any blob policy may drop it after
  * activation. A structurally broken payload logs one warning and returns 0,
  * which leaves the asset FAILED. Values inside a structurally sound payload
- * (finite floats, unit quaternions, key order) are the builder's contract and
- * the sampler's NT_SKELETAL_CHECKS, not re-validated here.
+ * (finite samples, unit quaternions, key order) are the builder's contract and
+ * the kernels' NT_SKELETAL_CHECKS, not re-validated here; duration is checked
+ * because it sizes the grid.
  *
  * The module registers nothing itself. An application that links animation
  * registers the three pairs like any other type:

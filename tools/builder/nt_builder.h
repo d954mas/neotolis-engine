@@ -531,9 +531,8 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
 
 /* --- Skeletal API (NSKL skeleton, NSKN skin binding, NANM clip) ---
  *
- * The encoders turn in-memory import results into exactly the bytes the pack
- * stores; the caller owns the returned buffer and releases it with free(). The
- * add_* calls encode and register the asset in one step, like add_blob.
+ * Each add_* call turns an in-memory import result into exactly the bytes the
+ * pack stores and registers the asset in one step, like add_blob.
  *
  * Every rule of the wire format is an invariant of the importer that produced
  * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
@@ -554,11 +553,11 @@ void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t 
  * rotation, 3 otherwise; only the fields the mode needs are read.
  *
  * ABSENT   nothing
- * CONSTANT constant[0..comps-1]; a translation or scale leaves constant[3] at 0
+ * CONSTANT constant[0..comps-1]
  * SAMPLED  samples, sample_count * comps floats on the clip's uniform grid
  * STEP     step_times and step_values (always 4 floats per key), step_count
- *          keys with strictly increasing times at or after 0; the sampler
- *          holds the first key before its time */
+ *          keys with strictly increasing times inside [0, duration]; the
+ *          sampler holds the first key before its time */
 typedef struct {
     const float *samples;     /* SAMPLED: sample_count * comps floats, sample-major */
     const float *step_times;  /* STEP: step_count seconds */

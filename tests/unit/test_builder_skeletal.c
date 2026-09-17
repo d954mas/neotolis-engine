@@ -598,7 +598,7 @@ void test_add_skeletal_assets_writes_typed_entries(void) {
     free(expected);
     free(buf);
 
-    /* dump walks the three new per-type detail printers over this pack. */
+    /* dump walks the three per-type detail printers over this pack. */
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_dump_pack(PACK_PATH));
     (void)remove(PACK_PATH);
 }

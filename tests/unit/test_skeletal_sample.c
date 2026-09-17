@@ -256,8 +256,8 @@ static void build_grid31(nt_skeletal_clip_t *clip, double duration) {
     *clip = c;
 }
 
-/* k/30 * 30 lands a ulp off k for many k, and so does k/29 * 29 over a 0.7 s
- * clip; both grids must still copy their stored block bit for bit. */
+/* k/30 * 30 lands a ulp off k for many k, and so does (k/30 * 0.7) * (30/0.7)
+ * over a 0.7 s clip; both grids must still copy their stored block bit for bit. */
 void test_a_non_binary_grid_reproduces_its_samples_exactly(void) {
     const double durations[2] = {1.0, (double)0.7F};
     for (uint32_t d = 0; d < 2; ++d) {

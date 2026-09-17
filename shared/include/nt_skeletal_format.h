@@ -47,8 +47,8 @@ typedef struct {
 } NtSklHeader;
 #pragma pack(pop)
 
-/* 16 header bytes + 2 + 2 + 4 + 40 per joint, in 64 bits so a UINT16_MAX rig
- * cannot wrap the comparison it is checked against. */
+/* 16 header bytes + 2 + 2 + 4 + 40 per joint; 64-bit like nt_anm_size so all
+ * three sizes compare the same way. */
 #define NT_SKL_SIZE(joint_count) (16ULL + (48ULL * (uint64_t)(joint_count)))
 // #endregion
 

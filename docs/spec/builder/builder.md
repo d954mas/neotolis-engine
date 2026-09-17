@@ -41,7 +41,7 @@ tools/builder/
     nt_builder_atlas.c         nt_builder_atlas_geometry.c  nt_builder_atlas_vpack.c
     nt_builder_cache.c         nt_builder_codegen.c     nt_builder_dump.c
     nt_builder_glob.c          nt_builder_hash.c        nt_builder_include.c
-    nt_builder_tangent.c
+    nt_builder_tangent.c       nt_builder_skeletal.c
 ```
 
 ## Core builder API
@@ -62,14 +62,13 @@ nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
 nt_builder_add_blob         /* opaque bytes under a resource id */
 nt_builder_add_asset_root   /* convention-based tree import */
 
-/* Skeletal assets from in-memory import results (wire formats: skeletal §16).
- * encode_* returns the payload the pack stores, malloc'd for the caller;
- * add_* encodes and registers in one step, like add_blob.
- * The two skeleton calls also return the rig_compat_id they computed and wrote,
- * which is what clips and bindings of that rig must carry. */
-nt_builder_encode_skeleton / add_skeleton          /* NSKL, from nt_skeletal_skeleton_t */
-nt_builder_encode_skin_binding / add_skin_binding  /* NSKN, from nt_skin_binding_t */
-nt_builder_encode_clip / add_clip                  /* NANM, from nt_builder_clip_t */
+/* Skeletal assets from in-memory import results (wire formats: skeletal §16);
+ * each call encodes and registers in one step, like add_blob. add_skeleton
+ * returns the rig_compat_id it computed and wrote, which clips and bindings of
+ * that rig must carry. The raw encoders are internal (nt_builder_internal.h). */
+nt_builder_add_skeleton      /* NSKL, from nt_skeletal_skeleton_t */
+nt_builder_add_skin_binding  /* NSKN, from nt_skin_binding_t */
+nt_builder_add_clip          /* NANM, from nt_builder_clip_t */
 /* Font opts: charset (required), name override, target_units_per_em. */
 
 /* Atlas: groups N source sprites into 1 metadata blob + M texture pages.
