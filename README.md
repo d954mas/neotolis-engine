@@ -156,3 +156,7 @@ The module → chapter map and a task → entry-point table live in
 ## License
 
 MIT -- see [LICENSE](LICENSE) for details.
+
+The examples ship third-party assets (fonts, sample models) under their own
+licences; each one has an attribution file next to it in the example's `raw`
+directory.

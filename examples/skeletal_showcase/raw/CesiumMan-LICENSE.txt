@@ -1,0 +1,28 @@
+CesiumMan.glb -- third-party sample asset
+=========================================
+
+Source: https://github.com/KhronosGroup/glTF-Sample-Assets, model "Cesium Man"
+File:   Models/CesiumMan/glTF-Binary/CesiumMan.glb
+Fetched from
+https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/CesiumMan/glTF-Binary/CesiumMan.glb
+
+The upstream Models/CesiumMan/README.md states:
+
+  (c) 2017, Cesium. Creative Commons Attribution 4.0 International
+  https://creativecommons.org/licenses/by/4.0/legalcode
+    - Cesium for Everything
+
+  (c) 2015, Cesium. Cesium Trademark or Logo
+  (LICENSES/LicenseRef-LegalMark-Cesium.txt in the upstream repository)
+    - Non-copyrightable logo for Cesium logo
+
+The model is CC-BY 4.0. The Cesium logo on its texture is a mark owned by
+Cesium and used by permission under the Legal Mark Usage Guidelines at
+https://github.com/AnalyticalGraphicsInc/cesium/wiki/CesiumTrademark.pdf. The
+model licence confers no rights in the mark beyond that use, and Cesium
+reserves the right to withdraw it.
+
+Modifications: none. The file is the upstream binary, byte for byte.
+
+Used by tests/unit/test_builder_rig.c, which imports its rig, skin binding and
+skinned mesh.

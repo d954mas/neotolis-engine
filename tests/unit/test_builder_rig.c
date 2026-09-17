@@ -1277,6 +1277,160 @@ void test_skin_binding_ignores_the_skinned_mesh_node_transform(void) {
 }
 // #endregion
 
+// #region Khronos sample assets
+/* The two rigs examples/skeletal_showcase/raw ships, imported end to end. The
+ * fixture pins every rule; these pin that the rules hold on glTF nobody here
+ * authored -- CesiumMan's two matrix wrappers above the joints, Fox's 24-entry
+ * palette. Every importer diagnostic precedes an NT_BUILD_ASSERT, so a call
+ * that returns at all logged no error. */
+
+typedef struct {
+    const char *path;
+    uint16_t joint_count;   /* nodes on the paths from the scene root to the skin joints */
+    uint16_t palette_count; /* entries of skin.joints */
+    bool has_normal;        /* the primitives carry a NORMAL accessor */
+    const char *joint_name[2];
+} khronos_rig_t;
+
+static const khronos_rig_t k_khronos[2] = {
+    {"examples/skeletal_showcase/raw/Fox.glb", 25, 24, false, {"root", NULL}},
+    {"examples/skeletal_showcase/raw/CesiumMan.glb", 21, 19, true, {"Z_UP", "Armature"}},
+};
+
+/* Both palettes fit in a byte, so the joint lanes are UINT8; returns the stream
+ * count, since NORMAL is present in one asset and absent in the other. */
+static uint32_t khronos_layout(NtStreamLayout out[4], bool has_normal) {
+    uint32_t n = 0;
+    out[n++] = (NtStreamLayout){"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0};
+    if (has_normal) {
+        out[n++] = (NtStreamLayout){"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0};
+    }
+    out[n++] = (NtStreamLayout){"joints", "JOINTS", NT_STREAM_UINT8, 4, false, 0};
+    out[n++] = (NtStreamLayout){"weights", "WEIGHTS", NT_STREAM_UINT8, 4, true, 0};
+    return n;
+}
+
+/* The node whose mesh this rig's skin deforms; its primitives are what the
+ * export walks and what the binding measures reach over. */
+static uint32_t khronos_skinned_node(const nt_glb_scene_t *scene, uint32_t skin_index) {
+    for (uint32_t i = 0; i < scene->node_count; i++) {
+        if (scene->nodes[i].skin_index == skin_index && scene->nodes[i].mesh_index != UINT32_MAX) {
+            return i;
+        }
+    }
+    TEST_FAIL_MESSAGE("no node instantiates a mesh with the rig's skin");
+    return UINT32_MAX;
+}
+
+/* The NSKN the pack shipped: the two bounds and a remap that stays inside the
+ * rig the same build imported. */
+static void khronos_check_binding(const khronos_rig_t *asset, const nt_builder_rig_t *rig) {
+    uint32_t size = 0;
+    uint8_t *skn = read_pack_asset(PACK_PATH, NT_ASSET_SKIN_BINDING, &size);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_SKN_SIZE(asset->palette_count), size);
+    NtSknHeader header;
+    memcpy(&header, skn, sizeof(header));
+    TEST_ASSERT_EQUAL_UINT16(asset->palette_count, header.palette_count);
+    TEST_ASSERT_EQUAL_HEX64(rig->skeleton.rig_compat_id.value, header.rig_compat_id);
+    TEST_ASSERT_TRUE_MESSAGE(header.reach > 0.0F, "a skinned vertex sits away from the joint that weights it");
+    TEST_ASSERT_TRUE_MESSAGE(header.any_pose_radius >= header.reach, "the any-pose bound contains the rest reach");
+
+    const size_t remap_at = sizeof(NtSknHeader) + (sizeof(nt_skeletal_mat34_t) * (size_t)header.palette_count);
+    for (uint16_t p = 0; p < header.palette_count; p++) {
+        uint16_t remap = 0;
+        memcpy(&remap, skn + remap_at + ((size_t)p * sizeof(remap)), sizeof(remap));
+        TEST_ASSERT_TRUE(remap < rig->skeleton.joint_count);
+    }
+    free(skn);
+}
+
+/* The first MESH of the pack is primitive 0 of the skinned node. Its lanes are
+ * the reduction's output on thousands of real vertices, which the fixture
+ * cannot show: every index addresses the palette and every quantized vertex
+ * sums to exactly 255. */
+static void khronos_check_mesh(const khronos_rig_t *asset, uint32_t stream_count) {
+    uint32_t size = 0;
+    uint8_t *packed = read_pack_asset(PACK_PATH, NT_ASSET_MESH, &size);
+    const NtMeshAssetHeader header = mesh_header(packed);
+    TEST_ASSERT_EQUAL_UINT8(stream_count, header.stream_count);
+    TEST_ASSERT_TRUE(header.vertex_count > 0U);
+
+    const uint8_t *joints = mesh_plane(packed, stream_count, stream_count - 2U);
+    const uint8_t *weights = mesh_plane(packed, stream_count, stream_count - 1U);
+    for (uint32_t v = 0; v < header.vertex_count; v++) {
+        uint32_t sum = 0;
+        for (uint32_t c = 0; c < 4U; c++) {
+            TEST_ASSERT_TRUE(joints[((size_t)v * 4U) + c] < asset->palette_count);
+            sum += weights[((size_t)v * 4U) + c];
+        }
+        TEST_ASSERT_EQUAL_UINT32(255, sum);
+    }
+    free(packed);
+}
+
+static void khronos_import_case(const khronos_rig_t *asset) {
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL_MESSAGE(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, asset->path), asset->path);
+
+    const nt_builder_rig_selection_t sel = rig_selection();
+    nt_builder_rig_t rig;
+    nt_builder_import_rig(&scene, &sel, &rig);
+
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(asset->joint_count, rig.skeleton.joint_count, asset->path);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(asset->palette_count, rig.palette_count, asset->path);
+    TEST_ASSERT_EQUAL_UINT16(NT_SKELETAL_NO_PARENT, rig.skeleton.parent[0]);
+    for (uint32_t j = 0; j < 2U; j++) {
+        if (asset->joint_name[j] != NULL) {
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(nt_hash32_str(asset->joint_name[j]).value, rig.skeleton.joint_id[j], asset->joint_name[j]);
+        }
+    }
+
+    NtStreamLayout layout[4];
+    const uint32_t stream_count = khronos_layout(layout, asset->has_normal);
+    const nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = stream_count, .tangent_mode = NT_TANGENT_AUTO};
+    /* The default budget carries both assets: neither vertex list loses weight
+     * to the reduction, because both primitives declare one influence set. */
+    const nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
+    TEST_ASSERT_EQUAL_HEX32(f32_bits(0.02F), f32_bits(profile.skin_drop_tolerance));
+
+    const uint32_t node = khronos_skinned_node(&scene, rig.skin_index);
+    const uint32_t mesh = scene.nodes[node].mesh_index;
+    const uint32_t primitive_count = scene.meshes[mesh].primitive_count;
+    TEST_ASSERT_TRUE(primitive_count > 0U);
+
+    (void)remove(PACK_PATH);
+    NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
+    TEST_ASSERT_NOT_NULL(ctx);
+    for (uint32_t p = 0; p < primitive_count; p++) {
+        char rid[64];
+        (void)snprintf(rid, sizeof(rid), "meshes/khronos_%u.mesh", p);
+        nt_builder_add_scene_skinned_mesh(ctx, &scene, mesh, p, &rig, &profile, rid, &mesh_opts);
+    }
+    nt_builder_add_scene_skin_binding(ctx, &scene, &rig, "rigs/khronos.nskn");
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    khronos_check_binding(asset, &rig);
+    khronos_check_mesh(asset, stream_count);
+
+    /* Identity is a property of the asset, not of one traversal. */
+    nt_glb_scene_t again;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&again, asset->path));
+    nt_builder_rig_t reimported;
+    nt_builder_import_rig(&again, &sel, &reimported);
+    TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, reimported.skeleton.rig_compat_id.value);
+    nt_builder_free_rig(&reimported);
+    nt_builder_free_glb_scene(&again);
+
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+
+void test_fox_imports_rig_binding_and_skinned_mesh(void) { khronos_import_case(&k_khronos[0]); }
+
+void test_cesiumman_imports_rig_binding_and_skinned_mesh(void) { khronos_import_case(&k_khronos[1]); }
+// #endregion
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_rigged_fixture_parses);
@@ -1321,5 +1475,7 @@ int main(void) {
     RUN_TEST(test_skin_binding_uses_identity_when_the_skin_has_no_inverse_binds);
     RUN_TEST(test_skin_binding_rejects_a_short_inverse_bind_accessor);
     RUN_TEST(test_skin_binding_ignores_the_skinned_mesh_node_transform);
+    RUN_TEST(test_fox_imports_rig_binding_and_skinned_mesh);
+    RUN_TEST(test_cesiumman_imports_rig_binding_and_skinned_mesh);
     return UNITY_END();
 }

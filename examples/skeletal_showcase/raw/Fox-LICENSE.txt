@@ -1,0 +1,31 @@
+Fox.glb -- third-party sample asset
+===================================
+
+Source: https://github.com/KhronosGroup/glTF-Sample-Assets, model "Fox"
+File:   Models/Fox/glTF-Binary/Fox.glb
+Fetched from
+https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Fox/glTF-Binary/Fox.glb
+
+The upstream Models/Fox/README.md states three separate rights holders:
+
+  (c) 2014, Public. Creative Commons Zero v1.0 Universal
+  https://creativecommons.org/publicdomain/zero/1.0/legalcode
+    - PixelMannen for Model
+
+  (c) 2014, tomkranis. Creative Commons Attribution 4.0 International
+  https://creativecommons.org/licenses/by/4.0/legalcode
+    - tomkranis for Rigging & Animation
+
+  (c) 2017, @AsoboStudio and @scurest. Creative Commons Attribution 4.0
+  International
+  https://creativecommons.org/licenses/by/4.0/legalcode
+    - @AsoboStudio and @scurest for Conversion to glTF
+
+The mesh is CC0; the rigging, the animation and the glTF conversion are
+CC-BY 4.0, so this file as a whole is redistributed under CC-BY 4.0 with the
+attribution above preserved.
+
+Modifications: none. The file is the upstream binary, byte for byte.
+
+Used by tests/unit/test_builder_rig.c, which imports its rig, skin binding and
+skinned mesh.
