@@ -1,6 +1,6 @@
 # Skeletal Animation
 
-**Status:** architecture specification v0.2 (2026-09-15), implementation in progress under epic #472; the pose ABI, FK, binding math, rig identity, clip sampling with the object curve, the track clock, the NSKL/NSKN/NANM wire formats, their builder encoders and the runtime adapters are implemented; mix/override/additive, banks, GPU staging, the renderer and glTF import are not. Function names of unimplemented parts are provisional; responsibilities, coordinate spaces, ownership, memory and behavior are normative. Changes to this chapter land together with the code that implements them.
+**Status:** architecture specification v0.3 (2026-09-17), implementation in progress under epic #472; the pose ABI, FK, binding math, rig identity, clip sampling with the object curve, the track clock, the NSKL/NSKN/NANM wire formats including the NSKN bounds, their builder encoders, the runtime adapters and the glTF import of a rig, its skin binding and its skinned meshes are implemented; mix/override/additive, banks, GPU staging, the renderer, clip import with its resampling gates, the bake certificate and the §14 culling helper are not. Function names of unimplemented parts are provisional; responsibilities, coordinate spaces, ownership, memory and behavior are normative. Changes to this chapter land together with the code that implements them.
 
 Related: [Principles](../core/principles.md), [API contracts](../core/api-contracts.md), [Render architecture](../render/architecture.md), [Items, sorting, batching](../render/items-sorting-batching.md), [Material](../render/material.md), [Resource](../assets/resource.md), [Builder](../builder/builder.md).
 
@@ -65,7 +65,11 @@ Published test vector — joint 0 id `0x11111111`, no parent, t (1, 2, 3), q (0,
 rig_compat_id = 0x03E59E1475239034
 ```
 
-`nt_skeletal_rig_compat_id(skel, scratch, size)` in `engine/skeletal` is the single implementation of this schema: `nt_builder_add_skeleton` hashes the exported rig with it, and procedural rigs fill their own field with it. Clips and bindings are exported against the authoritative rig export; near-equal rigs from independent exports are different rigs by design. Joint indices `uint16_t`, `UINT16_MAX` = no parent. Builder orders joints in preorder; each subtree is a contiguous range; multiple roots allowed; helper nodes affecting transforms are retained. `subtree_end[j]` (`uint16_t`) closes that range — the subtree of `j` is `[j, subtree_end[j])` — and is part of the skeleton: the builder writes it into NSKL and the activator validates preorder and range nesting. With multiple roots `subtree_end[root_k]` is the next root, or `joint_count` for the last one. A joint is not an entity. Skeleton contains no meshes, clips, time, GPU handles, inverse binds or mutable buffers. Rest pose ≠ bind pose. Shared by every character and clip of the rig.
+`nt_skeletal_rig_compat_id(skel, scratch, size)` in `engine/skeletal` is the single implementation of this schema: `nt_builder_add_skeleton` hashes the exported rig with it, and procedural rigs fill their own field with it. Clips and bindings are exported against the authoritative rig export; near-equal rigs from independent exports are different rigs by design. Joint indices `uint16_t`, `UINT16_MAX` = no parent. Builder orders joints in preorder; each subtree is a contiguous range; multiple roots allowed; helpers are every node on the path from the scene root, or from the cut node of the rule below, to a skin joint — identity or not — and all of them are retained. `subtree_end[j]` (`uint16_t`) closes that range — the subtree of `j` is `[j, subtree_end[j])` — and is part of the skeleton: the builder writes it into NSKL and the activator validates preorder and range nesting. With multiple roots `subtree_end[root_k]` is the next root, or `joint_count` for the last one. A joint is not an entity. Skeleton contains no meshes, clips, time, GPU handles, inverse binds or mutable buffers. Rest pose ≠ bind pose. Shared by every character and clip of the rig.
+
+**Skeleton space is glTF scene space.** The joints of an imported rig are every node on the paths from the *scene root* of the joints' hierarchy to each skin joint, identity wrappers included. `skin.skeleton` is a hint and is not used for selection: a rig that drops an identity ancestor silently moves skeleton space. Skin joints reaching two scene roots are a content error — one rig has one root. The optional skeleton-root override is an explicit **cut**: the cut node becomes joint 0, its parent space becomes skeleton space, the game's `E` must carry the omitted ancestors, and a skin joint outside the cut subtree is a content error rather than a second root.
+
+**A `matrix` node on a rig path is decomposed** in the builder's rig importer — never in `engine/skeletal`, and never during parse, because a sheared matrix in a static-mesh scene must not abort a mesh-only build. Column lengths and the rotation run in double: a column shorter than `1e-6` cannot recover a rotation and is rejected, the normalized columns must be perpendicular, a negative determinant becomes a negative X scale, and the quaternion comes from the largest-diagonal branch canonicalized to `w ≥ 0` so the stored bits do not depend on which branch ran. The decomposition is accepted only if `nt_skeletal_mat34_from_trs` recomposes every linear element within `64·FLT_EPSILON·max(1, max|m|)` and the translation exactly; anything else is shear the runtime cannot represent, and shear is a logged diagnostic followed by `NT_BUILD_ASSERT`. The decomposed bits are the rest bits `rig_compat_id` hashes.
 
 ### 3.2 Clip (`NANM`)
 
@@ -85,7 +89,7 @@ cglm rule: kernels that call cglm link `nt_math`, which sets `CGLM_ALL_UNALIGNED
 
 ### 3.4 SkinBinding (`NSKN`)
 
-Immutable resource describing how a mesh's vertices attach to the skeleton: `rig_compat_id`, palette→skeleton joint remap and inverse bind matrices (mesh space → joint space in the bind pose, glTF mesh-node space). The two builder numbers `reach` (max over bound vertices of `|inverse_bind[p]·v|`, the farthest a vertex sits from its joint) and `any_pose_radius` (§14) are added with their first consumer (#499), together with the mesh-space byte that would let a retargeted binding be rejected. Vertex `joints` address the palette, not the skeleton. Every mesh exported from the same glTF skin shares one binding; a binding is the sharing key for baked banks (§10). Contains no mesh list, no per-mesh summaries and no geometry; the MESH asset is unchanged apart from its two streams, and the builder — which writes MESH and NSKN from one skin — guarantees that vertex indices lie inside the palette and weights are normalized. The builder check that a further mesh exported against an existing NSKN stays within its `reach` arrives with those numbers (#499).
+Immutable resource describing how a mesh's vertices attach to the skeleton: `rig_compat_id`, palette→skeleton joint remap and inverse bind matrices (mesh space → joint space in the bind pose, where mesh space is the primitive's vertex space; the skinned mesh node's transform is ignored, which is the glTF rule rather than a builder choice). The two builder numbers `reach` (max over bound vertices of `|inverse_bind[p]·v|`, the farthest a vertex sits from its joint) and `any_pose_radius` (§14) are present in NSKN and in the view. Vertex `joints` address the palette, not the skeleton. Every mesh exported from the same glTF skin shares one binding; a binding is the sharing key for baked banks (§10). Contains no mesh list, no per-mesh summaries and no geometry; the MESH asset is unchanged apart from its two streams, and the builder — which writes MESH and NSKN from one skin — guarantees that vertex indices lie inside the palette and weights are normalized.
 
 ### 3.5 Joint factors
 
@@ -95,11 +99,11 @@ One view type `nt_joint_factors_t { const float *v; uint16_t count; }`. `mix` ta
 
 ## 4. Coordinate spaces
 
-Column vectors. `L = T·R·S`; `G[j] = G[parent[j]]·L[j]`, roots `G = L`. Palette entry `p`: `j = remap[p]`, `B[p] = G[j]·inverse_bind[p]`, `vertex_world = E·Σ w[p]·B[p]·vertex_mesh`. `E` maps skeleton space to world. Entity/model transforms are neither baked into B nor applied twice. glTF import normalizes mesh-node/skin spaces explicitly; absent inverse binds mean identity, not inverse(rest). cglm mat4 → three vec4 rows is the explicit conversion `nt_skeletal_mat34_from_mat4`; its input and output must not overlap. Sockets (R5): `socket_world = E·G[j]·socket_local` after final FK, computed by `nt_skeletal_socket(world[16], G[j], socket_local, out)`, which writes an exact affine 3×4 and never decomposes to TRS (shear and nonuniform scale survive); a decomposition helper appears with its first consumer (#481), as does the two-handed composition.
+Column vectors. `L = T·R·S`; `G[j] = G[parent[j]]·L[j]`, roots `G = L`. Palette entry `p`: `j = remap[p]`, `B[p] = G[j]·inverse_bind[p]`, `vertex_world = E·Σ w[p]·B[p]·vertex_mesh`. `E` maps skeleton space to world. Entity/model transforms are neither baked into B nor applied twice. glTF import takes skeleton space to be scene space — the joints are every node from the scene root of the joints' hierarchy down to each skin joint, unless an explicit skeleton root cuts the hierarchy and its parent space becomes skeleton space (§3.1); absent inverse binds mean identity, not inverse(rest). cglm mat4 → three vec4 rows is the explicit conversion `nt_skeletal_mat34_from_mat4`; its input and output must not overlap. Sockets (R5): `socket_world = E·G[j]·socket_local` after final FK, computed by `nt_skeletal_socket(world[16], G[j], socket_local, out)`, which writes an exact affine 3×4 and never decomposes to TRS (shear and nonuniform scale survive); a decomposition helper appears with its first consumer (#481), as does the two-handed composition.
 
 **E for multi-mesh characters.** `transform_comp` currently computes standalone `T·R·S` without parent inheritance (`nt_transform_comp.c`), diverging from [Transform](../data/transform.md). v1 rule: the game writes the same world TRS to every mesh entity of a character before list construction; mesh entities are roots. General transform inheritance is a separate engine issue, not an animation prerequisite. With an object curve (§7.5), `E = E_game · O_blended` must stay TRS-representable for this component.
 
-Skeleton math handles nonuniform scale; operations needing rigid/uniform transforms state that precondition. Imported shear is normalized under an explicit builder option with error checks or rejected.
+Skeleton math handles nonuniform scale; operations needing rigid/uniform transforms state that precondition. Imported shear is rejected (§3.1 matrix rule); no normalization option exists.
 
 ## 5. Components and ownership
 
@@ -233,7 +237,7 @@ typedef struct {
 
 **Batching.** `batch_key(material, mesh)` stays the exact two-slot packing; equal key is a candidate run, and the run also requires equal deformation texture and pass state. Frame origins, alpha, world and color are per-instance. Only adjacent compatible items merge; the game's order wins.
 
-**Instance layout** is owned by the renderer header (world rows 3, color 1, frame origins 1 as four UINT16, alpha 1 = 6 of 8 instance attributes; stride 64–76 B, independent of the mesh renderer's 64-byte cap). `joints` are UINT16×4 through float attributes with shader integer conversion; `weights` are normalized UINT8×4 or FLOAT16×4 per builder profile. Locations are not part of this specification.
+**Instance layout** is owned by the renderer header (world rows 3, color 1, frame origins 1 as four UINT16, alpha 1 = 6 of 8 instance attributes; stride 64–76 B, independent of the mesh renderer's 64-byte cap). `joints` are UINT8×4 or UINT16×4, never normalized, through float attributes with shader integer conversion; `weights` are normalized UINT8×4 — whose four lanes sum to exactly 255 by largest-remainder rounding — FLOAT16×4 or FLOAT32×4, per the mesh layout; the builder validates both streams. FLOAT16 lane sums deviate from 1 by at most `4·2⁻¹¹`, and no builder gate exists for that deviation. Locations are not part of this specification.
 
 **Normals/tangents.** LBS approximation with the linear part of the blended matrix and the world normal transform. One guard: `len2 = dot(n,n); n = (len2 > EPS && len2 < BIG) ? n·inversesqrt(len2) : FIXED_UNIT` with `EPS = 1e-12`, `BIG = 1e30` in `highp` — a two-sided comparison rather than `isnan`/`isinf`, because NaN generation is optional in GLSL ES; tangent orthogonalized against the final normal with the same guard. Finite output is promised for finite matrices and weights (bank matrices come from finite CPU math; CPU palettes are finite by construction), not correct lighting on collapsed geometry. The fast profile is named `POSITIVE_UNIFORM_SCALE_FAST`: positive-uniform joint and world scale, validated by the builder over the full mesh→joint→skeleton chain; CPU skeleton math still supports nonuniform scale. It is a named restriction, not a runtime enum.
 
@@ -241,7 +245,7 @@ typedef struct {
 
 ## 14. Bounds and culling
 
-Numbers, no stored per-bone data. All radii below are in skeleton space. A sphere of radius `r` becomes a world-space sphere centred at `E·origin` with radius `s_E·r`, where `s_E = max(abs(scale(E)))` for the TRS world transform required by §4. The numbers themselves (`r_joints`, `r_root`, `s_max` in NANM, `reach` and `any_pose_radius` in NSKN) land with the culling helper that reads them (#499); the rules below define what the builder must then compute.
+Numbers, no stored per-bone data. All radii below are in skeleton space. A sphere of radius `r` becomes a world-space sphere centred at `E·origin` with radius `s_E·r`, where `s_E = max(abs(scale(E)))` for the TRS world transform required by §4. `reach` and `any_pose_radius` are present in NSKN and written by the skin-binding import; `r_joints`, `r_root` and `s_max` in NANM, and the culling helper that reads all five, are still pending. The rules below define what the builder computes.
 
 Single-clip playback uses `r = r_joints + reach·s_max`. `r_joints` bounds joint-origin distance from the skeleton origin, and `s_max` bounds the maximum stretch (largest singular value) of every model matrix's linear part, over the entire decoded playback including interpolation. Products of local maximum absolute scale components along each ancestor chain give a conservative stretch bound, including hierarchical shear; individual local scales or model-matrix column lengths do not.
 
@@ -265,7 +269,7 @@ Not ready → the game continues old playback, holds a pose or omits the item. P
 
 ## 16. Builder, codec, wire formats
 
-Order: import → normalize spaces/units → canonical hierarchy/remap → validate clips/skin → prepare absolute/additive and object curves → retarget if requested → CPU codec → bounds and bake certificate (§10, §14) → pack. Clips stay independent. Rates and error budgets come from content profiles. Content errors (invalid rigs, channels, ranges, weights, failed certificates) are `NT_BUILD_ASSERT` after a logged diagnostic, per the existing builder policy; the ATLAS graceful-error channel is not extended.
+Order: import → canonical hierarchy/remap → validate clips/skin → prepare absolute/additive and object curves → retarget if requested → CPU codec → bounds and bake certificate (§10, §14) → pack. Clips stay independent. Rates and error budgets come from content profiles. Content errors (invalid rigs, channels, ranges, weights, failed certificates) are `NT_BUILD_ASSERT` after a logged diagnostic, per the existing builder policy; the ATLAS graceful-error channel is not extended.
 
 **v1 payloads:** `NSKL`, `NSKN` and `NANM`, all little-endian, all defined in
 `shared/include/nt_skeletal_format.h` and shared by builder and runtime. The
@@ -276,7 +280,7 @@ allocation and points the runtime view at it — no transpose, no per-field
 decode, no section table. Every target of this engine is little-endian, so
 headers travel as packed structs and arrays are copied as bytes; the builder
 pins that with a `__BYTE_ORDER__` static assert where the compiler defines it (GCC/Clang; MSVC targets are little-endian by platform). `NT_SKELETAL_FORMAT_VERSION`
-is a plain `uint16_t` (v1 of this layout = 2) compared **exactly** in all three
+is a plain `uint16_t` (v1 of this layout = 3) compared **exactly** in all three
 payloads: the layout is the runtime layout, so any change to it is a rebuild.
 The builder computes `rig_compat_id` by calling `nt_skeletal_rig_compat_id`
 rather than reimplementing the schema, and `nt_builder_add_skeleton` returns
@@ -298,8 +302,10 @@ per-asset CRC.
 | 16+4J | `u32 joint_id[J]` | `nt_hash32_str(node name)`, unique |
 | 16+8J | `f32 rest[J][10]` | AoS `t[3] q[4] s[3]`, q unit xyzw |
 
-**NSKN** — `NT_SKN_SIZE(P) = 16 + 50·P` bytes, exact. The matrices come first so
-the `u16` table ends the payload without padding:
+**NSKN** — `NT_SKN_SIZE(P) = 24 + 50·P` bytes, exact. The two radii sit in the
+header, before the matrices, because a culling consumer reads them alone and a
+fixed offset costs it no arithmetic over P; the matrices then come first among
+the arrays so the `u16` table ends the payload without padding:
 
 | offset | field | note |
 |---|---|---|
@@ -307,8 +313,10 @@ the `u16` table ends the payload without padding:
 | 4 | `u16 version` | |
 | 6 | `u16 palette_count` (P) | ≥ 1 |
 | 8 | `u64 rig_compat_id` | |
-| 16 | `f32 inverse_bind[P][12]` | `nt_skeletal_mat34_t` row order `r[3][4]` |
-| 16+48P | `u16 remap[P]` | palette entry → skeleton joint |
+| 16 | `f32 reach` | skeleton space (§3.4), finite and ≥ 0 |
+| 20 | `f32 any_pose_radius` | skeleton space (§14), finite and ≥ 0 |
+| 24 | `f32 inverse_bind[P][12]` | `nt_skeletal_mat34_t` row order `r[3][4]` |
+| 24+48P | `u16 remap[P]` | palette entry → skeleton joint |
 
 `remap[p]` is not bounded against a skeleton at activation — no skeleton is
 available there; `nt_skin_palette_build` asserts `remap[p] < model_count` where
@@ -387,7 +395,11 @@ keeps it above `NT_ASSET_LAST`; the parser rejects an asset type above
 asserting); activators are registered explicitly by applications that link them.
 The builder's public API is `nt_builder_add_skeleton/skin_binding/clip`
 (`nt_builder.h`); each encodes an in-memory import result and registers it in
-one step, and the raw encoders stay builder-internal. A source violation of any
+one step, and the raw encoders stay builder-internal. The glTF side of the same
+header is `nt_builder_import_rig`/`nt_builder_free_rig` over a
+`nt_builder_rig_t`, the content profile `nt_builder_skeletal_profile_t` with
+`nt_builder_skeletal_profile_defaults`, `nt_builder_add_scene_skinned_mesh` and
+`nt_builder_add_scene_skin_binding`. A source violation of any
 rule above is `NT_BUILD_ASSERT`, because the importer is the only producer. The
 value rules it asserts: every float finite; every quaternion unit (squared norm
 within 1e-3 of 1); `v[3] == 0` for t/s constants and keys; STEP times strictly
@@ -399,7 +411,11 @@ slots are deterministic and the payload hash is the clip's identity. A shared
 `shared/include/nt_half.h` provides FP32↔FP16 conversion for the builder
 (FLOAT16 weights) and the bank.
 
-glTF is the normative source reference; import selects the canonical rig (skin/node), helper joints and identity explicitly so independently imported clips reproduce the same identity; the current scene API (flattened nodes) gains parent/skin access. The importer (#499, not yet written) reads every paired `JOINTS_n/WEIGHTS_n` set, keeps the four largest influences per vertex with deterministic tie-breaking, renormalizes (UINT8 weights sum to 255), and gates the reduction on decoded vertex error against the full source influences; it also gates runtime nlerp against the source quaternion interpolation at keys and interior samples (quarter points), refining resampling within the profile before failing.
+glTF is the normative source reference; import selects the canonical rig (skin/node), helper joints and identity explicitly so independently imported clips reproduce the same identity. The scene API publishes the flattened nodes with their parent, local TRS, `has_matrix` flag and skin index, plus the scene's skins and animations.
+
+**Implemented.** `nt_builder_import_rig` builds the rig of §3.1 out of one skin. `nt_builder_add_scene_skinned_mesh` exports one primitive: it reads every `JOINTS_n/WEIGHTS_n` pair through sparse-capable unpacking, checks each source accessor's type (`JOINTS_n` VEC4 unsigned byte or short and not normalized, `WEIGHTS_n` VEC4 float or normalized unsigned byte/short — the integer read returns 0 on a float accessor, so the type is checked before anything reads it), keeps the four largest influences per vertex with ties broken towards the lower joint index, gates each vertex on `Σ dropped / Σ source ≤ skin_drop_tolerance` (profile default 0.02) after a logged diagnostic, and renormalizes what it kept. `nt_builder_add_scene_skin_binding` writes the binding from the same rig: inverse binds from the skin's accessor (identity when it has none), the rig's palette remap, `reach` measured over the *source* influences of every primitive of every node that uses the skin — so the order in which meshes and binding are exported does not matter — and `any_pose_radius` from the rest hierarchy per §14. Rejected as content errors, each a diagnostic then `NT_BUILD_ASSERT`: a parent cycle in the node graph (checked in parse, before any world transform); an unpaired or non-consecutive influence set, or one whose accessor count is not the vertex count; a vertex that weights one palette entry twice, or carries a negative, non-finite or all-zero weight set, or addresses an index at or above the palette count; an `inverseBindMatrices` accessor that is not MAT4 float over at least the palette, or holds a non-finite element; morph targets on a skinned primitive (they move the bound vertices `reach` is measured over); an unnamed rig node (a joint id is the hash of its name); an object node inside the rig; and joints spanning several scene roots.
+
+**Pending** (#512): clip import — resampling CUBICSPLINE and the authored keys onto the profile's grid, and the gate of runtime nlerp against the source quaternion interpolation at keys and interior samples (quarter points), refining the resampling within the profile before failing.
 
 ## 17. Modules and composition checks
 

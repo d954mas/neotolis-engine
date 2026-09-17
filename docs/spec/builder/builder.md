@@ -41,7 +41,7 @@ tools/builder/
     nt_builder_atlas.c         nt_builder_atlas_geometry.c  nt_builder_atlas_vpack.c
     nt_builder_cache.c         nt_builder_codegen.c     nt_builder_dump.c
     nt_builder_glob.c          nt_builder_hash.c        nt_builder_include.c
-    nt_builder_tangent.c       nt_builder_skeletal.c
+    nt_builder_tangent.c       nt_builder_skeletal.c    nt_builder_rig.c
 ```
 
 ## Core builder API
@@ -69,6 +69,12 @@ nt_builder_add_asset_root   /* convention-based tree import */
 nt_builder_add_skeleton      /* NSKL, from nt_skeletal_skeleton_t */
 nt_builder_add_skin_binding  /* NSKN, from nt_skin_binding_t */
 nt_builder_add_clip          /* NANM, from nt_builder_clip_t */
+
+/* glTF rig import: the scene API side of the same header. */
+nt_builder_import_rig / nt_builder_free_rig   /* canonical rig out of one glTF skin */
+nt_builder_skeletal_profile_defaults          /* rates, error budgets, skin_drop_tolerance */
+nt_builder_add_scene_skinned_mesh   /* MESH: one primitive plus its JOINTS/WEIGHTS lanes */
+nt_builder_add_scene_skin_binding   /* NSKN: inverse binds, remap, reach, any_pose_radius */
 /* Font opts: charset (required), name override, target_units_per_em. */
 
 /* Atlas: groups N source sprites into 1 metadata blob + M texture pages.
@@ -205,6 +211,10 @@ provoking vertex included. MikkTSpace, AABB and vertex data are
 computed before canonicalization and are invariant under it.
 
 **Tangent model.** The layout expresses tangent presence (a TANGENT stream or not); `tangent_mode` only says where the data comes from: `AUTO` (glTF, else MikkTSpace), `COMPUTE` (always MikkTSpace), `REQUIRE` (glTF or build error). A mesh without normal mapping simply omits the TANGENT stream. Tangent computation exists only in the scene API; `add_mesh` reads TANGENT from the glTF and asserts on any mode other than `AUTO`.
+
+**Skin streams.** A skinned primitive's `JOINTS`/`WEIGHTS` lanes are produced, not extracted — the builder reads every `JOINTS_n/WEIGHTS_n` set of the primitive and reduces it to four influences — so the layout addresses them by the `gltf_name`s `"JOINTS"` and `"WEIGHTS"` and its `NtStreamLayout` is the only authority on how they are stored: both declare exactly 4 components, `JOINTS` is UINT8 or UINT16 and never normalized (UINT8 only while the palette holds at most 256 entries), `WEIGHTS` is normalized UINT8, FLOAT16 or FLOAT32. Declaring one stream without the other, or declaring them without a skin (or a skin without them), asserts. UINT8 weight lanes are quantized by largest remainder, so a vertex's four bytes sum to exactly 255.
+
+**glTF skin content** is validated explicitly rather than through `cgltf_validate`, which only warns. `nt_builder_parse_glb_scene` rejects a parent cycle before it computes any world transform. The rig import rejects an unnamed rig node, an object node inside the rig, joints spanning several scene roots, and a `matrix` node whose decomposition does not recompose (skeletal §3.1). The skinned-mesh and binding exports reject unpaired or non-consecutive influence sets, an accessor whose count is not the vertex count, source accessor types outside the glTF list, a vertex weighting one palette entry twice or carrying a negative, non-finite or all-zero weight set, an index at or above the palette count, a vertex losing more than the profile's `skin_drop_tolerance` to the top-four reduction, morph targets on a skinned primitive, and an `inverseBindMatrices` accessor that is not MAT4 float over at least the palette or holds a non-finite element. Each is a logged diagnostic followed by `NT_BUILD_ASSERT`, per the skeletal chapter's builder policy.
 
 ## Asserts vs. graceful content errors
 
