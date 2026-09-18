@@ -66,7 +66,12 @@ void setUp(void) {
     s_log_last[0] = '\0';
     nt_log_add_sink(log_sink, NULL);
 }
-void tearDown(void) { nt_log_remove_sink(log_sink, NULL); }
+/* A Unity failure inside a trapped call leaves the trap installed; the next
+ * NT_BUILD_ASSERT must abort, not jump into a dead frame. */
+void tearDown(void) {
+    nt_log_remove_sink(log_sink, NULL);
+    nt_build_assert_handler = NULL;
+}
 // #endregion
 
 /* The test config excludes Unity's float asserts, and comparing the exact bits
@@ -334,6 +339,9 @@ void test_rig_cut_at_helper_drops_the_scene_root(void) {
     for (uint16_t j = 0; j < rig.skeleton.joint_count; j++) {
         TEST_ASSERT_EQUAL_HEX32(nt_hash32_str(k_rig[j + 1].name).value, rig.skeleton.joint_id[j]);
         TEST_ASSERT_EQUAL_UINT16(k_rig[j + 1].subtree_end - 1U, rig.skeleton.subtree_end[j]);
+        if (j > 0) {
+            TEST_ASSERT_EQUAL_UINT16(k_rig[j + 1].parent - 1U, rig.skeleton.parent[j]);
+        }
     }
     for (uint16_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
         TEST_ASSERT_EQUAL_UINT16(ref_palette_joint(p) - 1U, rig.palette_joint[p]);
@@ -396,6 +404,31 @@ void test_decompose_asserts_on_a_zero_scale(void) {
     } while (0)
 
 void test_import_asserts_on_a_sheared_matrix(void) { EXPECT_IMPORT_ASSERT(matrix_shear, "matrix is not TRS"); }
+
+/* The recompose budget follows the column length: a 0.01-scale wrapper with a
+ * 1e-3 rad shear is off by ~5e-6 absolute, inside a unit-scale budget but far
+ * outside its own. */
+void test_import_asserts_on_a_sheared_small_scale_matrix(void) { EXPECT_IMPORT_ASSERT(root_small_shear, "matrix is not TRS"); }
+
+/* The same wrapper without shear is a plain uniform scale. */
+void test_import_decomposes_a_small_scale_wrapper(void) {
+    rigged_glb_opts_t opts = {0};
+    opts.root_small_scale = true;
+    rigged_glb_write(RIG_GLB, &opts);
+
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
+    nt_builder_rig_t rig;
+    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
+    for (int c = 0; c < 3; c++) {
+        ASSERT_F32(0.01F, rig.skeleton.rest[0].s[c]);
+        ASSERT_F32(0.0F, rig.skeleton.rest[0].t[c]);
+        ASSERT_F32(0.0F, rig.skeleton.rest[0].q[c]);
+    }
+    ASSERT_F32(1.0F, rig.skeleton.rest[0].q[3]);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
 
 void test_import_asserts_on_an_unnamed_rig_node(void) { EXPECT_IMPORT_ASSERT(unnamed_node, "no name"); }
 
@@ -1138,6 +1171,10 @@ void test_skin_binding_rejects_a_nan_inverse_bind_element(void) { EXPECT_BINDING
 
 void test_skin_binding_rejects_a_projective_inverse_bind(void) { EXPECT_BINDING_ASSERT(ibm_projective, "inverse bind matrix is not affine"); }
 
+/* The reach scan bounds every weighted lane itself; it does not rely on the
+ * mesh export having run first. */
+void test_skin_binding_rejects_an_index_past_the_palette(void) { EXPECT_BINDING_ASSERT(index_ge_palette, "outside the palette"); }
+
 /* reach is a property of the skin, so a primitive the build never exports
  * still counts: the far triangle's first vertex sets it, while only the quad
  * (primitive 0) goes into the pack. */
@@ -1253,9 +1290,9 @@ static uint32_t khronos_skinned_node(const nt_glb_scene_t *scene, uint32_t skin_
     return UINT32_MAX;
 }
 
-/* The section 14 recurrence over the imported rig, so the any-pose bound of a
- * real asset is checked against an independent pass and not only against
- * reach. */
+/* The section 14 recurrence over the imported rig's own tables: it pins that
+ * the stored bound came from this rig's rest, remap and reach, not the formula
+ * itself, which the fixture test pins against k_rig. */
 static double khronos_ref_any_pose_radius(const nt_builder_rig_t *rig, double reach) {
     const uint32_t joint_count = rig->skeleton.joint_count;
     double *stretch = (double *)calloc(joint_count, sizeof(double));
@@ -1302,9 +1339,7 @@ static void khronos_check_binding(const khronos_rig_t *asset, const nt_builder_r
     TEST_ASSERT_EQUAL_UINT16(asset->palette_count, header.palette_count);
     TEST_ASSERT_EQUAL_HEX64(rig->skeleton.rig_compat_id.value, header.rig_compat_id);
     TEST_ASSERT_TRUE_MESSAGE(header.reach > 0.0F, "a skinned vertex sits away from the joint that weights it");
-    const double any_pose = khronos_ref_any_pose_radius(rig, (double)header.reach);
-    TEST_ASSERT_TRUE((double)header.any_pose_radius >= any_pose);
-    assert_close(any_pose, (double)header.any_pose_radius);
+    assert_close(khronos_ref_any_pose_radius(rig, (double)header.reach), (double)header.any_pose_radius);
 
     const size_t remap_at = sizeof(NtSknHeader) + (sizeof(nt_skeletal_mat34_t) * (size_t)header.palette_count);
     for (uint16_t p = 0; p < header.palette_count; p++) {
@@ -1416,6 +1451,8 @@ int main(void) {
     RUN_TEST(test_decompose_asserts_on_a_projective_bottom_row);
     RUN_TEST(test_decompose_asserts_on_a_non_finite_element);
     RUN_TEST(test_import_asserts_on_a_sheared_matrix);
+    RUN_TEST(test_import_asserts_on_a_sheared_small_scale_matrix);
+    RUN_TEST(test_import_decomposes_a_small_scale_wrapper);
     RUN_TEST(test_import_asserts_on_a_missing_skin);
     RUN_TEST(test_import_asserts_on_an_unnamed_rig_node);
     RUN_TEST(test_import_asserts_on_an_empty_rig_node_name);
@@ -1454,6 +1491,7 @@ int main(void) {
     RUN_TEST(test_skin_binding_rejects_a_non_mat4_inverse_bind_accessor);
     RUN_TEST(test_skin_binding_rejects_a_nan_inverse_bind_element);
     RUN_TEST(test_skin_binding_rejects_a_projective_inverse_bind);
+    RUN_TEST(test_skin_binding_rejects_an_index_past_the_palette);
     RUN_TEST(test_skin_binding_reach_covers_a_primitive_that_is_not_exported);
     RUN_TEST(test_fox_imports_rig_binding_and_skinned_mesh);
     RUN_TEST(test_cesiumman_imports_rig_binding_and_skinned_mesh);

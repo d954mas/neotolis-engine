@@ -80,7 +80,17 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
 
     // #region node transforms
     /* Pure rotation, 90 degrees about Y (column-major). */
-    const float root_matrix[16] = {0.0F, 0.0F, -1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F};
+    float root_matrix[16] = {0.0F, 0.0F, -1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F};
+    if (o.root_small_scale || o.root_small_shear) {
+        memset(root_matrix, 0, sizeof(root_matrix));
+        root_matrix[0] = 0.01F;
+        root_matrix[5] = 0.01F;
+        root_matrix[10] = 0.01F;
+        root_matrix[15] = 1.0F;
+        if (o.root_small_shear) {
+            root_matrix[1] = 1e-5F;
+        }
+    }
     /* Rotation 90 degrees about Z times scale (2, 1, 0.5), translated. */
     float helper_matrix[16] = {0.0F, 2.0F, 0.0F, 0.0F, -1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.5F, 0.0F, 0.25F, -0.5F, 1.0F, 1.0F};
     if (o.matrix_shear) {

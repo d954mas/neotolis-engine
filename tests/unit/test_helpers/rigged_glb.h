@@ -101,6 +101,8 @@
 /* One defect per knob; all false writes the valid fixture. */
 typedef struct {
     bool matrix_shear;           /* Helper's matrix gets a 1e-3 shear, so it is not TRS */
+    bool root_small_scale;       /* Root's matrix becomes a uniform 0.01 scale, the usual cm-to-m wrapper */
+    bool root_small_shear;       /* the 0.01-scale Root gets a 1e-3 rad shear (element 1e-5): not TRS at any scale */
     bool unnamed_node;           /* Helper loses its name */
     bool empty_name;             /* Helper is named "" */
     bool duplicate_name;         /* Joint4 is named "Joint3", so two rig nodes share one joint id */

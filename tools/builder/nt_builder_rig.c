@@ -136,22 +136,15 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
     }
 
     /* The decomposition is the rest pose only if it rebuilds the matrix the
-     * artist authored; anything else is shear the runtime cannot represent. */
+     * artist authored; anything else is shear the runtime cannot represent.
+     * The budget scales with each column: float rounding of an element is a
+     * fraction of its column's length, so a 0.01-scale wrapper gets no more
+     * absolute slack than a unit one. */
     nt_skeletal_mat34_t re;
     nt_skeletal_mat34_from_trs(out, &re);
-    float max_abs = 1.0F;
     for (int row = 0; row < 3; row++) {
         for (int col = 0; col < 3; col++) {
-            const float v = m[(col * 4) + row];
-            const float a = (v < 0.0F) ? -v : v;
-            if (a > max_abs) {
-                max_abs = a;
-            }
-        }
-    }
-    const float tolerance = 64.0F * FLT_EPSILON * max_abs;
-    for (int row = 0; row < 3; row++) {
-        for (int col = 0; col < 3; col++) {
+            const float tolerance = 64.0F * FLT_EPSILON * (float)fabs(scale[col]);
             const float d = re.r[row][col] - m[(col * 4) + row];
             if (((d < 0.0F) ? -d : d) > tolerance) {
                 NT_LOG_ERROR("node %s: recomposed element (%d,%d) is %g, the matrix holds %g", label, row, col, (double)re.r[row][col], (double)m[(col * 4) + row]);
@@ -165,7 +158,6 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
 
 // #region joint selection and preorder
 typedef struct {
-    const nt_glb_scene_t *scene;
     const cgltf_data *data;
     const uint8_t *mark;
     uint16_t *joint_of; /* scene node -> joint index */
@@ -303,7 +295,6 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
 
     // #region preorder and rest pose
     rig_walk_t walk = {
-        .scene = scene,
         .data = data,
         .mark = mark,
         .joint_of = joint_of,
@@ -357,7 +348,6 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
                 const uint32_t b = slots[i].joint;
                 NT_LOG_ERROR("import_rig: rig nodes \"%s\" (node[%u]) and \"%s\" (node[%u]) share joint id 0x%08X", data->nodes[node_index[a]].name, node_index[a], data->nodes[node_index[b]].name,
                              node_index[b], slots[i].id);
-                free(slots);
                 NT_BUILD_ASSERT(0 && "two rig nodes share one joint id");
             }
         }

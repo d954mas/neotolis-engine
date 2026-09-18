@@ -34,7 +34,7 @@
 #define PACK_PATH TMP_DIR "/builder_skeletal.ntpack"
 
 void setUp(void) {}
-void tearDown(void) {}
+void tearDown(void) { nt_build_assert_handler = NULL; }
 
 // #region little-endian readers
 static uint16_t rd_u16(const uint8_t *p) { return (uint16_t)((uint16_t)p[0] | (uint16_t)((uint16_t)p[1] << 8)); }
