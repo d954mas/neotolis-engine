@@ -248,8 +248,8 @@ static void set_camera_fit(const float center[3], float scale) {
     reset_camera();
 }
 
-/* Refreshes the borrowed view (spec §15: refetch after resource_step, the
- * pointer may change on reload). NULL means the imported skeleton is not ready. */
+/* Refreshes the borrowed view: the pointer may change on reload, so it is
+ * refetched after resource_step. NULL means the imported skeleton is not ready. */
 static void refresh_view(void) {
     const rig_source_t rig = s_skeleton_scene.rig_source;
     if (rig == RIG_HUMANOID) {

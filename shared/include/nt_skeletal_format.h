@@ -13,7 +13,7 @@
  * headers below travel as structs; every array after a header is bytes the two
  * sides agree on. All fields are little-endian, which every target of this
  * engine is, so headers and arrays are memcpy'd rather than composed byte by
- * byte. See docs/spec/skeletal/skeletal-animation.md §16.
+ * byte. See docs/spec/skeletal/skeletal-animation.md, Builder, codec, wire formats.
  */
 
 /* FourCC read as a little-endian uint32_t, like NT_PACK_MAGIC. */
@@ -68,8 +68,8 @@ typedef struct {
     uint16_t version;       /* 4:  NT_SKELETAL_FORMAT_VERSION */
     uint16_t palette_count; /* 6:  >= 1 */
     uint64_t rig_compat_id; /* 8:  rig this binding is valid with */
-    float reach;            /* 16: joint space (spec 3.4); skeleton space only through the 14 stretch */
-    float any_pose_radius;  /* 20: skeleton space (spec 14) */
+    float reach;            /* 16: joint space; a skeleton-space radius needs the chain stretch */
+    float any_pose_radius;  /* 20: skeleton space */
 } NtSknHeader;
 #pragma pack(pop)
 

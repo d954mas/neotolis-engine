@@ -49,7 +49,7 @@ alternative, what each catches. The developer decides.
 
 ## Code and design
 
-- Comments explain a non-obvious WHY, preferably one line, at most 2–3. No history, commit/issue references, Phase/REVIEW/CHUNK tags, test-name pins, user quotes or experimental boilerplate in source; explanations of changes belong in commits/PRs.
+- Comments explain a non-obvious WHY, preferably one line, at most 2–3. No history, commit/issue references, Phase/REVIEW/CHUNK tags, test-name pins, user quotes or experimental boilerplate in source; explanations of changes belong in commits/PRs. Point at a spec only for a contract the code cannot show (a coordinate space, a wire invariant), by chapter and section title, never by section number.
 - Use `// #region name` / `// #endregion` in long functions, with no blank line just inside either marker. Preserve existing short inline comments.
 - Organize large files with regions rather than extra translation units; cross-TU calls inhibit inlining without LTO.
 - Before adding a subsystem: diagram data/coordinate transforms, compare parallel APIs, check mobile-WASM types/ranges, prototype the riskiest integration, and test asymmetric data.

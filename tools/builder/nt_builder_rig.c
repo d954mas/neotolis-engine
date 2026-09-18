@@ -548,9 +548,10 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
     return reach;
 }
 
-/* Section 14 over the rest hierarchy: a bounds accumulated stretch, d bounds
- * distance from the root, and the binding stores the palette maximum. parent[j]
- * precedes j, so one forward pass is the whole recurrence. */
+/* The any-pose recurrence of the skeletal spec (Bounds and culling) over the rest
+ * hierarchy: a bounds accumulated stretch, d bounds distance from the root, and
+ * the binding stores the palette maximum. parent[j] precedes j, so one forward
+ * pass is the whole recurrence. */
 static double rig_any_pose_radius(const nt_skeletal_skeleton_t *skel, const uint16_t *remap, uint16_t palette_count, double reach) {
     const uint32_t joint_count = skel->joint_count;
     double *stretch = (double *)calloc(joint_count, sizeof(double));
