@@ -28,6 +28,9 @@
 #define CLIP_MIN_Q_LEN2 0.5
 /* Interior sub-samples per grid interval of the dense pass. */
 #define CLIP_SUBSAMPLES 3U
+/* A source length this close to a whole number of frames is float noise from
+ * the exporter, not an authored fraction; anything beyond it is reported. */
+#define CLIP_FRAME_SNAP_TOLERANCE 1e-3
 
 /* Bit-identical floats: the fold and the rest check compare representations,
  * not values, so -0 and 0 or two NaNs stay distinct. */
@@ -319,37 +322,46 @@ static void clip_eval(const clip_track_t *track, double time, double *out) {
  * duration, so the last grid time is duration itself. */
 static double clip_grid_time(uint32_t i, uint32_t n, float duration) { return ((double)i * (double)duration) / (double)(n - 1U); }
 
-/* Fills one clip channel from its track: samples on the grid for LINEAR and
- * CUBICSPLINE, the authored keys for STEP, one value when nothing changes.
- * scratch holds n_grid * 4 floats, or key_count * 5 for STEP. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void clip_fill_channel(const clip_track_t *track, uint32_t n_grid, float duration, float *scratch, nt_builder_anim_channel_t *ch) {
+/* Fills one STEP channel from its keys at or before duration (a key past the
+ * clip's snapped end is never reached), or one value when nothing changes.
+ * scratch holds key_count * 5 floats. */
+static void clip_fill_step_channel(const clip_track_t *track, float duration, float *scratch, nt_builder_anim_channel_t *ch) {
+    const uint32_t comps = track->comps;
+    float *times = scratch;
+    float *values = scratch + track->key_count;
+    uint32_t kept = 0;
+    for (uint32_t k = 0; k < track->key_count; k++) {
+        /* The first key holds before its time, so it stays even past the end. */
+        if (k > 0 && track->times[k] > (double)duration) {
+            break;
+        }
+        times[kept] = (float)track->times[k];
+        for (uint32_t c = 0; c < 4U; c++) {
+            values[((size_t)kept * 4U) + c] = (c < comps) ? (float)track->values[((size_t)k * comps) + c] : 0.0F;
+        }
+        kept++;
+    }
+    bool constant = true;
+    for (uint32_t k = 1; k < kept && constant; k++) {
+        constant = clip_bits_equal(values, values + ((size_t)k * 4U), 4U);
+    }
+    memset(ch, 0, sizeof(*ch));
+    if (constant) {
+        ch->mode = NT_SKELETAL_CHANNEL_CONSTANT;
+        memcpy(ch->constant, values, sizeof(ch->constant));
+    } else {
+        ch->mode = NT_SKELETAL_CHANNEL_STEP;
+        ch->step_times = times;
+        ch->step_values = values;
+        ch->step_count = kept;
+    }
+}
+
+/* Fills one LINEAR or CUBICSPLINE channel: samples on the grid, or one value
+ * when every sample is the same. scratch holds n_grid * 4 floats. */
+static void clip_fill_sampled_channel(const clip_track_t *track, uint32_t n_grid, float duration, float *scratch, nt_builder_anim_channel_t *ch) {
     const uint32_t comps = track->comps;
     memset(ch, 0, sizeof(*ch));
-    if (track->interpolation == cgltf_interpolation_type_step) {
-        float *times = scratch;
-        float *values = scratch + track->key_count;
-        for (uint32_t k = 0; k < track->key_count; k++) {
-            times[k] = (float)track->times[k];
-            for (uint32_t c = 0; c < 4U; c++) {
-                values[((size_t)k * 4U) + c] = (c < comps) ? (float)track->values[((size_t)k * comps) + c] : 0.0F;
-            }
-        }
-        bool constant = true;
-        for (uint32_t k = 1; k < track->key_count && constant; k++) {
-            constant = clip_bits_equal(values, values + ((size_t)k * 4U), 4U);
-        }
-        if (constant) {
-            ch->mode = NT_SKELETAL_CHANNEL_CONSTANT;
-            memcpy(ch->constant, values, sizeof(ch->constant));
-        } else {
-            ch->mode = NT_SKELETAL_CHANNEL_STEP;
-            ch->step_times = times;
-            ch->step_values = values;
-            ch->step_count = track->key_count;
-        }
-        return;
-    }
     double v[4] = {0.0, 0.0, 0.0, 0.0};
     for (uint32_t i = 0; i < n_grid; i++) {
         clip_eval(track, clip_grid_time(i, n_grid, duration), v);
@@ -574,12 +586,19 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
         }
     }
     free(scratch);
+    const float source_duration = duration;
     // #endregion
 
     // #region resample
-    const double grid = (double)llround((double)duration * (double)sample_fps) + 1.0;
-    NT_BUILD_ASSERT(grid < 4294967295.0 && "add_scene_clip: duration * sample_fps overflows the sample grid");
-    const uint32_t n_grid = (grid < 2.0) ? 2U : (uint32_t)grid;
+    /* The grid step is exactly 1 / sample_fps, so the source keys of a clip
+     * authored at that rate land on grid samples: the frame count is the
+     * nearest whole number and the clip's duration follows it, the way Unreal
+     * imports a sequence. A clip that is not a whole number of frames at this
+     * rate holds its last pose for the fraction, or loses it, and says so. */
+    const double frames = (double)llround((double)source_duration * (double)sample_fps);
+    NT_BUILD_ASSERT(frames < 4294967294.0 && "add_scene_clip: duration * sample_fps overflows the sample grid");
+    const uint32_t n_grid = (frames < 1.0) ? 2U : ((uint32_t)frames + 1U);
+    const float grid_duration = (float)((double)(n_grid - 1U) / (double)sample_fps);
     size_t out_floats = 0;
     for (uint32_t t = 0; t < track_count; t++) {
         out_floats += (tracks[t].interpolation == cgltf_interpolation_type_step) ? ((size_t)tracks[t].key_count * 5U) : ((size_t)n_grid * 4U);
@@ -590,10 +609,28 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     float *out_next = out_arena;
     bool sampled = false;
     for (uint32_t t = 0; t < track_count; t++) {
+        if (tracks[t].interpolation == cgltf_interpolation_type_step) {
+            continue;
+        }
         const uint32_t c = (3U * tracks[t].joint) + tracks[t].kind;
-        clip_fill_channel(&tracks[t], n_grid, duration, out_next, &channels[c]);
-        out_next += (tracks[t].interpolation == cgltf_interpolation_type_step) ? ((size_t)tracks[t].key_count * 5U) : ((size_t)n_grid * 4U);
+        clip_fill_sampled_channel(&tracks[t], n_grid, grid_duration, out_next, &channels[c]);
+        out_next += (size_t)n_grid * 4U;
         sampled = sampled || channels[c].mode == NT_SKELETAL_CHANNEL_SAMPLED;
+    }
+    /* Without a grid there is nothing to align, so the clip keeps its exact
+     * source length. */
+    duration = sampled ? grid_duration : source_duration;
+    if (sampled && fabs(((double)source_duration * (double)sample_fps) - frames) > CLIP_FRAME_SNAP_TOLERANCE) {
+        NT_LOG_WARN("%s: %.9g s is %.4g frames at %g fps, not a whole number; the clip ships %u frames, %.9g s", label, (double)source_duration, (double)source_duration * (double)sample_fps,
+                    (double)sample_fps, n_grid - 1U, (double)duration);
+    }
+    for (uint32_t t = 0; t < track_count; t++) {
+        if (tracks[t].interpolation != cgltf_interpolation_type_step) {
+            continue;
+        }
+        const uint32_t c = (3U * tracks[t].joint) + tracks[t].kind;
+        clip_fill_step_channel(&tracks[t], duration, out_next, &channels[c]);
+        out_next += (size_t)tracks[t].key_count * 5U;
     }
     nt_builder_clip_t clip = {
         .rig_compat_id = skel->rig_compat_id,
@@ -616,6 +653,7 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
 
     memset(report, 0, sizeof(*report));
     report->sample_count = clip.sample_count;
+    report->duration = duration;
     clip_pass_t pass = {
         .skel = skel,
         .view = &view,

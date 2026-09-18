@@ -77,7 +77,30 @@
  * first vertex sits at (10, 0, 0) bound wholly to palette entry 0: through
  * inverse bind 0 that is (9, 0, -1), a distance of sqrt(82), farther than any
  * vertex of the quad (sqrt(30) for v0 through entry 4). second_node_far puts
- * the same triangle into a mesh of its own on a second node with skin 0. */
+ * the same triangle into a mesh of its own on a second node with skin 0.
+ *
+ * With animation, the file gains one animation "Clip" over [0, 1] s whose
+ * channels cover every interpolation the clip importer handles; the test
+ * values are chosen so a closed form exists at the 24 fps grid times:
+ *
+ *   Joint1 rotation  LINEAR  keys 0, 0.25, 0.5, 1.0:
+ *                    identity, identity, 90 deg about Z (0, 0, s, s) with
+ *                    s = 0.70710678, 180 deg about Z (0, 0, 1, 0). The
+ *                    identical first pair is a degenerate slerp step inside a
+ *                    channel that does not fold.
+ *   Joint2 translation CUBICSPLINE keys 0.25, 0.75 (interval 0.5):
+ *                    key0 in (100, 100, 100) value (0, 0, 0) out (8, 0, 0)
+ *                    key1 in (0, 8, 0) value (1, 2, 4) out (100, 100, 100)
+ *                    The unused tangents are loud so a swapped tangent order
+ *                    shows; at t = 0.5 the spline is exactly (1, 0.5, 2).
+ *   Joint2 rotation  CUBICSPLINE keys 0, 1.0: identity to (0, 0, 1, 0), both
+ *                    used tangents (0, 0, 2, 0), the unused ones (7, 7, 7, 7);
+ *                    the Hermite result is not unit and must be normalized.
+ *   Joint3 scale     STEP keys 0.25, 0.75: (1, 1, 1) then (2, 2, 2).
+ *   Joint4 translation LINEAR keys 0, 1.0: (0, 0.5, 0) twice -- constant.
+ *
+ * animation_step_only keeps only the Joint3 and Joint4 channels, so nothing
+ * is sampled. The other animation knobs add one defective channel each. */
 
 #define RIGGED_GLB_NODE_ROOT 0
 #define RIGGED_GLB_NODE_HELPER 1
@@ -94,6 +117,7 @@
 #define RIGGED_GLB_VERTEX_COUNT 4
 #define RIGGED_GLB_INDEX_COUNT 6
 #define RIGGED_GLB_FAR_VERTEX_COUNT 3
+#define RIGGED_GLB_ANIM_DURATION 1.0F
 
 /* Node behind palette entry p of skin 0, in the table order above. */
 #define RIGGED_GLB_PALETTE_NODES {RIGGED_GLB_NODE_JOINT2, RIGGED_GLB_NODE_JOINT4, RIGGED_GLB_NODE_JOINT0, RIGGED_GLB_NODE_JOINT1, RIGGED_GLB_NODE_JOINT3}
@@ -135,6 +159,13 @@ typedef struct {
     bool ibm_bad_type;           /* the inverseBindMatrices accessor is VEC4 FLOAT */
     bool ibm_nan;                /* inverse bind matrix 0 holds one NaN element */
     bool ibm_projective;         /* inverse bind matrix 0 has a bottom row other than (0, 0, 0, 1) */
+    bool animation;              /* the animation "Clip" described above; every knob below implies it */
+    bool animation_step_only;    /* "Clip" keeps only its STEP and constant channels */
+    bool animation_outside_rig;  /* "Clip" also translates MeshNode, which is not a joint */
+    bool animation_weights;      /* "Clip" also animates the morph weights of MeshNode (implies morph_target) */
+    bool animation_duplicate;    /* "Clip" lists the Joint1 rotation channel twice */
+    bool animation_matrix_node;  /* "Clip" also translates Helper, a matrix node */
+    bool rest_mismatch;          /* the rest translation y of Joint2 is one ulp above 0.75 */
 } rigged_glb_opts_t;
 
 /* opts may be NULL, which means every knob off. */

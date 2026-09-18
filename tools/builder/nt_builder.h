@@ -595,7 +595,9 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_r
 
 /* What the clip export measured, so the build script decides whether the
  * sample rate was enough: the builder never fails a build on interpolation
- * error. Both errors compare the runtime (nt_skeletal_sample on the encoded
+ * error. duration is the length the clip ships, a whole number of frames at
+ * sample_fps when anything is sampled; a source that was not one is snapped
+ * to the nearest frame and logged. Both errors compare the runtime (nt_skeletal_sample on the encoded
  * clip, then FK) against the exact glTF curves (evaluated in double, then the
  * same FK) over a dense set of times -- every grid time, every authored key,
  * and three sub-samples per grid interval. cpu_error_lin is the largest
@@ -605,6 +607,7 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_r
  * and joint it was found at; (0, 0) when the error is zero everywhere. */
 typedef struct {
     uint32_t sample_count; /* grid samples the clip shipped, 1 = no sampled channel */
+    float duration;        /* seconds the clip shipped, (sample_count - 1) / sample_fps when sampled */
     float cpu_error_lin;
     double worst_time_lin;
     uint16_t worst_joint_lin;
@@ -617,9 +620,10 @@ typedef struct {
  * joints by name hash, the same path for the rig's own scene and for another
  * scene: every animated node must be a rig joint whose local rest TRS is
  * bit-identical to the rig's (a differing rest is a different rig). Every
- * LINEAR and CUBICSPLINE channel is resampled onto one uniform grid of
- * round(duration * sample_fps) + 1 samples, STEP channels keep their authored
- * keys, a channel whose samples or keys are all identical folds to a constant,
+ * LINEAR and CUBICSPLINE channel is resampled onto one uniform grid with a
+ * step of exactly 1 / sample_fps, round(duration * sample_fps) + 1 samples
+ * over a duration snapped to that whole number of frames, STEP channels keep
+ * their authored keys, a channel whose samples or keys are all identical folds to a constant,
  * and the object curve stays absent. The three header bounds are measured
  * over the same dense pass as the report (skeletal spec, Bounds and culling).
  * Content errors -- a target outside the rig, a rest mismatch, an unnamed or
