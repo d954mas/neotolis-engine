@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "core/nt_builtins.h"
+#include "nt_skeletal_format.h"
 
 void nt_skeletal_mat34_from_mat4(const float m[16], nt_skeletal_mat34_t *out) {
     NT_ASSERT(m != NULL);
@@ -334,6 +335,108 @@ void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double t
         }
     } else if (ms == NT_SKELETAL_CHANNEL_STEP) {
         memcpy(out->s, nt_skeletal_step_value(curve->keys, curve->step_first[2], curve->step_count[2], time), sizeof(out->s));
+    }
+}
+// #endregion
+
+// #region clip view
+/* The runtime reads the wire through these structs, so their sizes are pinned
+ * to the strides the format declares. */
+_Static_assert(sizeof(nt_skeletal_step_t) == NT_ANM_STEP_STRIDE, "nt_skeletal_step_t must match the NANM step stride");
+_Static_assert(sizeof(nt_skeletal_step_key_t) == NT_ANM_KEY_STRIDE, "nt_skeletal_step_key_t must match the NANM key stride");
+_Static_assert(sizeof(nt_skeletal_trs_t) == 40, "the object sampled array is one nt_skeletal_trs_t per sample");
+/* nt_anm_object_sampled spells the SAMPLED mode as the byte it travels as. */
+_Static_assert(NT_SKELETAL_CHANNEL_SAMPLED == 2, "wire and runtime SAMPLED must agree");
+
+void nt_skeletal_clip_view(const uint8_t *payload, nt_skeletal_clip_t *out) {
+    NT_ASSERT(payload != NULL && out != NULL);
+    NT_ASSERT((((uintptr_t)payload) & 3U) == 0U && "NANM payload must be 4-aligned: the view reads its arrays in place");
+
+    NtAnmHeader header;
+    memcpy(&header, payload, sizeof(header));
+    const uint32_t block_floats = (3U * (uint32_t)header.n_t) + (4U * (uint32_t)header.n_q) + (3U * (uint32_t)header.n_s);
+
+    /* Walk the arrays in the one order the format defines; the encoder writes
+     * them in exactly this sequence. */
+    const uint8_t *at = payload + sizeof(NtAnmHeader);
+    const float *blocks = (const float *)at;
+    at += (size_t)header.sample_count * block_floats * 4U;
+    const float *ct = (const float *)at;
+    at += (size_t)header.n_ct * 12U;
+    const float *cq = (const float *)at;
+    at += (size_t)header.n_cq * 16U;
+    const float *cs = (const float *)at;
+    at += (size_t)header.n_cs * 12U;
+    const nt_skeletal_step_t *steps = (const nt_skeletal_step_t *)at;
+    at += (size_t)header.n_steps * NT_ANM_STEP_STRIDE;
+    const nt_skeletal_step_key_t *keys = (const nt_skeletal_step_key_t *)at;
+    at += (size_t)header.n_keys * NT_ANM_KEY_STRIDE;
+    NtAnmObject object = {{0}, {0}, {0}};
+    if (nt_anm_has_object(&header)) {
+        memcpy(&object, at, sizeof(object));
+        at += sizeof(NtAnmObject);
+    }
+    const nt_skeletal_trs_t *object_sampled = (const nt_skeletal_trs_t *)at;
+    if (nt_anm_object_sampled(&header)) {
+        at += (size_t)header.sample_count * sizeof(nt_skeletal_trs_t);
+    }
+    const uint16_t *t_joint = (const uint16_t *)at;
+    at += (size_t)header.n_t * 2U;
+    const uint16_t *q_joint = (const uint16_t *)at;
+    at += (size_t)header.n_q * 2U;
+    const uint16_t *s_joint = (const uint16_t *)at;
+    at += (size_t)header.n_s * 2U;
+    const uint16_t *ct_joint = (const uint16_t *)at;
+    at += (size_t)header.n_ct * 2U;
+    const uint16_t *cq_joint = (const uint16_t *)at;
+    at += (size_t)header.n_cq * 2U;
+    const uint16_t *cs_joint = (const uint16_t *)at;
+
+    /* The grid step is exact only in double, and a clip with one sample or no
+     * duration has no interval to step through. */
+    const double inv_step = (header.sample_count > 1U && header.duration > 0.0F) ? ((double)(header.sample_count - 1U) / (double)header.duration) : 0.0;
+
+    *out = (nt_skeletal_clip_t){
+        .rig_compat_id = (nt_hash64_t){.value = header.rig_compat_id},
+        .additive_ref_id = (nt_hash64_t){.value = header.additive_ref_id},
+        .duration = (double)header.duration,
+        .inv_step = inv_step,
+        .blocks = (block_floats != 0U) ? blocks : NULL,
+        .t_joint = t_joint,
+        .q_joint = q_joint,
+        .s_joint = s_joint,
+        .ct_joint = ct_joint,
+        .ct = ct,
+        .cq_joint = cq_joint,
+        .cq = cq,
+        .cs_joint = cs_joint,
+        .cs = cs,
+        .steps = (header.n_steps != 0U) ? steps : NULL,
+        .keys = (header.n_keys != 0U) ? keys : NULL,
+        .r_joints = header.r_joints,
+        .r_root = header.r_root,
+        .s_max = header.s_max,
+        .sample_count = header.sample_count,
+        .block_floats = block_floats,
+        .n_steps = header.n_steps,
+        .joint_count = header.joint_count,
+        .n_t = header.n_t,
+        .n_q = header.n_q,
+        .n_s = header.n_s,
+        .n_ct = header.n_ct,
+        .n_cq = header.n_cq,
+        .n_cs = header.n_cs,
+    };
+    out->object.sampled = nt_anm_object_sampled(&header) ? object_sampled : NULL;
+    out->object.keys = out->keys;
+    out->object.duration = out->duration;
+    out->object.inv_step = inv_step;
+    out->object.sample_count = header.sample_count;
+    memcpy(&out->object.constant, object.constant, sizeof(out->object.constant));
+    for (uint32_t c = 0; c < 3; ++c) {
+        out->object.mode[c] = header.object_mode[c];
+        out->object.step_first[c] = object.step_first[c];
+        out->object.step_count[c] = object.step_count[c];
     }
 }
 // #endregion

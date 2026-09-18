@@ -178,6 +178,8 @@ static void clip_validate(const nt_builder_clip_t *clip, NtClipTally *tally) {
     NT_BUILD_ASSERT(clip->joint_count >= 1 && "clip has no joints");
     NT_BUILD_ASSERT(clip->sample_count >= 1 && "clip needs at least one sample");
     NT_BUILD_ASSERT(nt_builder_finite(clip->duration) && clip->duration >= 0.0F && "duration must be finite and non-negative");
+    NT_BUILD_ASSERT(nt_builder_finite(clip->r_joints) && clip->r_joints >= 0.0F && nt_builder_finite(clip->r_root) && clip->r_root >= 0.0F && nt_builder_finite(clip->s_max) && clip->s_max >= 0.0F &&
+                    "clip bounds must be finite and non-negative");
 
     const uint32_t object_first = 3U * (uint32_t)clip->joint_count;
     const uint32_t channel_count = object_first + 3U;
@@ -246,6 +248,9 @@ static void clip_fill_header(const nt_builder_clip_t *clip, const NtClipTally *t
     header->joint_count = clip->joint_count;
     header->sample_count = clip->sample_count;
     header->duration = clip->duration;
+    header->r_joints = clip->r_joints;
+    header->r_root = clip->r_root;
+    header->s_max = clip->s_max;
     header->rig_compat_id = clip->rig_compat_id.value;
     header->additive_ref_id = clip->additive_ref_id.value;
     header->n_t = tally->sampled[0];

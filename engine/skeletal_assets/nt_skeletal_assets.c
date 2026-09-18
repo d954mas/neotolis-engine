@@ -9,14 +9,6 @@
 #include "nt_skeletal_format.h"
 #include "pool/nt_pool.h"
 
-/* The runtime reads the wire through these structs, so their sizes are pinned
- * to the strides the format declares. */
-_Static_assert(sizeof(nt_skeletal_step_t) == NT_ANM_STEP_STRIDE, "nt_skeletal_step_t must match the NANM step stride");
-_Static_assert(sizeof(nt_skeletal_step_key_t) == NT_ANM_KEY_STRIDE, "nt_skeletal_step_key_t must match the NANM key stride");
-_Static_assert(sizeof(nt_skeletal_trs_t) == 40, "the object sampled array is one nt_skeletal_trs_t per sample");
-/* nt_anm_object_sampled spells the SAMPLED mode as the byte it travels as. */
-_Static_assert(NT_SKELETAL_CHANNEL_SAMPLED == 2, "wire and runtime SAMPLED must agree");
-
 // #region module state
 /* One pool for all three asset types: the resource layer already types the
  * handle, so a slot only has to hold its allocation and its view. */
@@ -41,12 +33,6 @@ static struct {
  * so every read goes through memcpy. */
 static uint16_t rd_u16(const uint8_t *p) {
     uint16_t v = 0;
-    memcpy(&v, p, sizeof(v));
-    return v;
-}
-
-static uint32_t rd_u32(const uint8_t *p) {
-    uint32_t v = 0;
     memcpy(&v, p, sizeof(v));
     return v;
 }
@@ -211,57 +197,6 @@ void nt_skeletal_assets_deactivate_skin_binding(uint32_t runtime_handle) { skel_
 // #endregion
 
 // #region NANM clip
-/* Byte offset of every array of a validated payload, in the one order the
- * format defines; the encoder writes them in exactly this sequence. */
-typedef struct {
-    uint64_t blocks;
-    uint64_t ct, cq, cs;
-    uint64_t steps;
-    uint64_t keys;
-    uint64_t object_rec;
-    uint64_t object;
-    uint64_t t_joint, q_joint, s_joint;
-    uint64_t ct_joint, cq_joint, cs_joint;
-    uint32_t block_floats;
-} anm_offsets_t;
-
-static void anm_offsets(const NtAnmHeader *header, anm_offsets_t *out) {
-    out->block_floats = (3U * (uint32_t)header->n_t) + (4U * (uint32_t)header->n_q) + (3U * (uint32_t)header->n_s);
-
-    uint64_t at = sizeof(NtAnmHeader);
-    out->blocks = at;
-    at += (uint64_t)header->sample_count * out->block_floats * 4ULL;
-    out->ct = at;
-    at += (uint64_t)header->n_ct * 12ULL;
-    out->cq = at;
-    at += (uint64_t)header->n_cq * 16ULL;
-    out->cs = at;
-    at += (uint64_t)header->n_cs * 12ULL;
-    out->steps = at;
-    at += (uint64_t)header->n_steps * NT_ANM_STEP_STRIDE;
-    out->keys = at;
-    at += (uint64_t)header->n_keys * NT_ANM_KEY_STRIDE;
-    out->object_rec = at;
-    if (nt_anm_has_object(header)) {
-        at += sizeof(NtAnmObject);
-    }
-    out->object = at;
-    if (nt_anm_object_sampled(header)) {
-        at += (uint64_t)header->sample_count * sizeof(nt_skeletal_trs_t);
-    }
-    out->t_joint = at;
-    at += (uint64_t)header->n_t * 2ULL;
-    out->q_joint = at;
-    at += (uint64_t)header->n_q * 2ULL;
-    out->s_joint = at;
-    at += (uint64_t)header->n_s * 2ULL;
-    out->ct_joint = at;
-    at += (uint64_t)header->n_ct * 2ULL;
-    out->cq_joint = at;
-    at += (uint64_t)header->n_cq * 2ULL;
-    out->cs_joint = at;
-}
-
 static bool anm_validate_header(const uint8_t *data, uint32_t size, NtAnmHeader *out) {
     if (data == NULL || size < sizeof(NtAnmHeader)) {
         NT_LOG_WARN("activate_clip: payload shorter than the NANM header");
@@ -288,6 +223,10 @@ static bool anm_validate_header(const uint8_t *data, uint32_t size, NtAnmHeader 
         NT_LOG_WARN("activate_clip: duration is negative or not finite");
         return false;
     }
+    if (!skel_finite(out->r_joints) || out->r_joints < 0.0F || !skel_finite(out->r_root) || out->r_root < 0.0F || !skel_finite(out->s_max) || out->s_max < 0.0F) {
+        NT_LOG_WARN("activate_clip: a bound is negative or not finite");
+        return false;
+    }
     for (uint32_t c = 0; c < 3; ++c) {
         if (out->object_mode[c] > NT_SKELETAL_CHANNEL_STEP) {
             NT_LOG_WARN("activate_clip: object channel %u has unknown mode %u", c, (unsigned)out->object_mode[c]);
@@ -302,14 +241,14 @@ static bool anm_validate_header(const uint8_t *data, uint32_t size, NtAnmHeader 
 }
 
 /* Every table entry the sampler uses as a write index into the caller's pose. */
-static bool anm_validate_joint_tables(const uint8_t *data, const NtAnmHeader *header, const anm_offsets_t *off) {
-    const uint64_t table[6] = {off->t_joint, off->q_joint, off->s_joint, off->ct_joint, off->cq_joint, off->cs_joint};
-    const uint16_t counts[6] = {header->n_t, header->n_q, header->n_s, header->n_ct, header->n_cq, header->n_cs};
+static bool anm_validate_joint_tables(const nt_skeletal_clip_t *view) {
+    const uint16_t *const table[6] = {view->t_joint, view->q_joint, view->s_joint, view->ct_joint, view->cq_joint, view->cs_joint};
+    const uint16_t counts[6] = {view->n_t, view->n_q, view->n_s, view->n_ct, view->n_cq, view->n_cs};
     for (uint32_t t = 0; t < 6; ++t) {
         for (uint32_t k = 0; k < counts[t]; ++k) {
-            const uint16_t joint = rd_u16(data + table[t] + ((size_t)2U * k));
-            if (joint >= header->joint_count) {
-                NT_LOG_WARN("activate_clip: joint table %u entry %u names joint %u of %u", t, k, (unsigned)joint, (unsigned)header->joint_count);
+            const uint16_t joint = table[t][k];
+            if (joint >= view->joint_count) {
+                NT_LOG_WARN("activate_clip: joint table %u entry %u names joint %u of %u", t, k, (unsigned)joint, (unsigned)view->joint_count);
                 return false;
             }
         }
@@ -320,44 +259,36 @@ static bool anm_validate_joint_tables(const uint8_t *data, const NtAnmHeader *he
 /* The STEP tracks partition the key table exactly: the joint tracks in table
  * order, then the object STEP channels in t, q, s order. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool anm_validate_steps(const uint8_t *data, const NtAnmHeader *header, const anm_offsets_t *off) {
+static bool anm_validate_steps(const nt_skeletal_clip_t *view, uint32_t n_keys) {
     uint64_t total = 0;
-    for (uint32_t s = 0; s < header->n_steps; ++s) {
-        const uint8_t *track = data + off->steps + ((size_t)NT_ANM_STEP_STRIDE * s);
-        const uint32_t first = rd_u32(track);
-        const uint32_t count = rd_u32(track + 4);
-        const uint16_t joint = rd_u16(track + 8);
-        const uint8_t channel = track[10];
-        if (joint >= header->joint_count) {
-            NT_LOG_WARN("activate_clip: step track %u names joint %u of %u", s, (unsigned)joint, (unsigned)header->joint_count);
+    for (uint32_t s = 0; s < view->n_steps; ++s) {
+        const nt_skeletal_step_t *track = &view->steps[s];
+        if (track->joint >= view->joint_count) {
+            NT_LOG_WARN("activate_clip: step track %u names joint %u of %u", s, (unsigned)track->joint, (unsigned)view->joint_count);
             return false;
         }
-        if (channel > 2U) {
-            NT_LOG_WARN("activate_clip: step track %u names component %u", s, (unsigned)channel);
+        if (track->channel > 2U) {
+            NT_LOG_WARN("activate_clip: step track %u names component %u", s, (unsigned)track->channel);
             return false;
         }
-        if (count == 0U || (uint64_t)first != total) {
-            NT_LOG_WARN("activate_clip: step track %u holds keys [%u, +%u), expected %u keys onward", s, first, count, (unsigned)total);
+        if (track->count == 0U || (uint64_t)track->first != total) {
+            NT_LOG_WARN("activate_clip: step track %u holds keys [%u, +%u), expected %u keys onward", s, track->first, track->count, (unsigned)total);
             return false;
         }
-        total += count;
-    }
-    NtAnmObject object = {{0}, {0}, {0}};
-    if (nt_anm_has_object(header)) {
-        memcpy(&object, data + off->object_rec, sizeof(object));
+        total += track->count;
     }
     for (uint32_t c = 0; c < 3; ++c) {
-        if (header->object_mode[c] != NT_SKELETAL_CHANNEL_STEP) {
+        if (view->object.mode[c] != NT_SKELETAL_CHANNEL_STEP) {
             continue;
         }
-        if (object.step_count[c] == 0U || (uint64_t)object.step_first[c] != total) {
-            NT_LOG_WARN("activate_clip: object channel %u holds keys [%u, +%u), expected %u keys onward", c, object.step_first[c], object.step_count[c], (unsigned)total);
+        if (view->object.step_count[c] == 0U || (uint64_t)view->object.step_first[c] != total) {
+            NT_LOG_WARN("activate_clip: object channel %u holds keys [%u, +%u), expected %u keys onward", c, view->object.step_first[c], view->object.step_count[c], (unsigned)total);
             return false;
         }
-        total += object.step_count[c];
+        total += view->object.step_count[c];
     }
-    if (total != (uint64_t)header->n_keys) {
-        NT_LOG_WARN("activate_clip: step tracks cover %u of the %u keys", (unsigned)total, header->n_keys);
+    if (total != (uint64_t)n_keys) {
+        NT_LOG_WARN("activate_clip: step tracks cover %u of the %u keys", (unsigned)total, n_keys);
         return false;
     }
     return true;
@@ -370,72 +301,23 @@ uint32_t nt_skeletal_assets_activate_clip(const uint8_t *data, uint32_t size) {
     if (!anm_validate_header(data, size, &header)) {
         return 0;
     }
-
-    anm_offsets_t off = {0};
-    anm_offsets(&header, &off);
-    if (!anm_validate_joint_tables(data, &header, &off) || !anm_validate_steps(data, &header, &off)) {
-        return 0;
-    }
     /* Interpolation reads two adjacent grid entries, so anything on the grid
      * needs a second sample and an interval to step through. */
-    if ((off.block_floats != 0U || nt_anm_object_sampled(&header)) && (header.sample_count < 2U || !(header.duration > 0.0F))) {
+    const bool sampled = (header.n_t | header.n_q | header.n_s) != 0U || nt_anm_object_sampled(&header);
+    if (sampled && (header.sample_count < 2U || !(header.duration > 0.0F))) {
         NT_LOG_WARN("activate_clip: sampled data needs at least two samples over a positive duration");
         return 0;
     }
 
+    /* The table checks read through the view, so the copy comes first; a
+     * rejected payload gives its slot back. */
     const uint32_t id = skel_take_slot(data, size);
-
-    /* The grid step is exact only in double, and a clip with one sample or no
-     * duration has no interval to step through. */
-    const double inv_step = (header.sample_count > 1U && header.duration > 0.0F) ? ((double)(header.sample_count - 1U) / (double)header.duration) : 0.0;
-    const nt_skeletal_step_key_t *keys = (header.n_keys != 0U) ? (const nt_skeletal_step_key_t *)skel_at(id, off.keys) : NULL;
-
-    nt_skeletal_clip_t view = {
-        .rig_compat_id = (nt_hash64_t){.value = header.rig_compat_id},
-        .additive_ref_id = (nt_hash64_t){.value = header.additive_ref_id},
-        .duration = (double)header.duration,
-        .inv_step = inv_step,
-        .blocks = (off.block_floats != 0U) ? (const float *)skel_at(id, off.blocks) : NULL,
-        .t_joint = (const uint16_t *)skel_at(id, off.t_joint),
-        .q_joint = (const uint16_t *)skel_at(id, off.q_joint),
-        .s_joint = (const uint16_t *)skel_at(id, off.s_joint),
-        .ct_joint = (const uint16_t *)skel_at(id, off.ct_joint),
-        .ct = (const float *)skel_at(id, off.ct),
-        .cq_joint = (const uint16_t *)skel_at(id, off.cq_joint),
-        .cq = (const float *)skel_at(id, off.cq),
-        .cs_joint = (const uint16_t *)skel_at(id, off.cs_joint),
-        .cs = (const float *)skel_at(id, off.cs),
-        .steps = (header.n_steps != 0U) ? (const nt_skeletal_step_t *)skel_at(id, off.steps) : NULL,
-        .keys = keys,
-        .sample_count = header.sample_count,
-        .block_floats = off.block_floats,
-        .n_steps = header.n_steps,
-        .joint_count = header.joint_count,
-        .n_t = header.n_t,
-        .n_q = header.n_q,
-        .n_s = header.n_s,
-        .n_ct = header.n_ct,
-        .n_cq = header.n_cq,
-        .n_cs = header.n_cs,
-    };
-
-    view.object.sampled = nt_anm_object_sampled(&header) ? (const nt_skeletal_trs_t *)skel_at(id, off.object) : NULL;
-    view.object.keys = keys;
-    view.object.duration = view.duration;
-    view.object.inv_step = inv_step;
-    view.object.sample_count = header.sample_count;
-    NtAnmObject object = {{0}, {0}, {0}};
-    if (nt_anm_has_object(&header)) {
-        memcpy(&object, skel_at(id, off.object_rec), sizeof(object));
+    nt_skeletal_clip_t *view = &s_assets.slots[nt_pool_slot_index(id)].view.clip;
+    nt_skeletal_clip_view((const uint8_t *)s_assets.slots[nt_pool_slot_index(id)].mem, view);
+    if (!anm_validate_joint_tables(view) || !anm_validate_steps(view, header.n_keys)) {
+        skel_release_slot(id);
+        return 0;
     }
-    memcpy(&view.object.constant, object.constant, sizeof(view.object.constant));
-    for (uint32_t c = 0; c < 3; ++c) {
-        view.object.mode[c] = header.object_mode[c];
-        view.object.step_first[c] = object.step_first[c];
-        view.object.step_count[c] = object.step_count[c];
-    }
-
-    s_assets.slots[nt_pool_slot_index(id)].view.clip = view;
     return id;
 }
 

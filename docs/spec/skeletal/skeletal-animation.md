@@ -73,7 +73,7 @@ rig_compat_id = 0x03E59E1475239034
 
 ### 3.2 Clip (`NANM`)
 
-Immutable, independently loadable resource: duration, `rig_compat_id`, the additive reference identity (`additive_ref_id`, 0 for an absolute clip), version, joint tracks, interpolation rules and an optional **object curve** (one TRS signal for the whole character, §7.5). The builder-computed bounds `r_joints`, `r_root`, `s_max` (§14) and the bake certificate `bake_fps_min`, `bake_reach` (§10) are added with their first consumer (#512); nothing in v1 reads them, so they are not in the payload. Skeleton owns no clips and declares no closed clip list. New clips are added by mounting new packs and resolving them by name (R6).
+Immutable, independently loadable resource: duration, `rig_compat_id`, the additive reference identity (`additive_ref_id`, 0 for an absolute clip), version, joint tracks, interpolation rules and an optional **object curve** (one TRS signal for the whole character, §7.5). The builder-computed bounds `r_joints`, `r_root`, `s_max` (§14) travel in the NANM header; the glTF clip import measures them, and a hand-built clip may leave them 0 (unknown). There is no bake certificate: the bank bakes the clip's own grid (§10). Skeleton owns no clips and declares no closed clip list. New clips are added by mounting new packs and resolving them by name (R6).
 
 ### 3.3 Pose ABI
 
@@ -138,7 +138,7 @@ typedef struct {
 
 ### 7.2 Sampling
 
-**Runtime clip layout.** `nt_skeletal_clip_t` in `nt_skeletal.h` is an immutable borrowed view with the ownership contract of `nt_skeletal_skeleton_t`. It is also the wire layout: the NANM payload (§16) holds exactly these tables, so the activator copies the payload once and points the view into the copy. Each channel has exactly one storage mode, so the tables never describe the same joint channel twice (a builder invariant by construction: one channel record per joint component; activation does not check it), and a channel in no table is absent.
+**Runtime clip layout.** `nt_skeletal_clip_t` in `nt_skeletal.h` is an immutable borrowed view with the ownership contract of `nt_skeletal_skeleton_t`. It is also the wire layout: the NANM payload (§16) holds exactly these tables, so the activator copies the payload once and points the view into the copy through `nt_skeletal_clip_view(payload, out)` — the one payload → view function, pure and unvalidating, that the builder also measures its own encoder output through. Each channel has exactly one storage mode, so the tables never describe the same joint channel twice (a builder invariant by construction: one channel record per joint component; activation does not check it), and a channel in no table is absent.
 
 - **Sampled** channels share one uniform grid of `sample_count` samples on `[0, duration]` (`inv_step = (sample_count−1)/duration`, 0 when `sample_count == 1` or `duration == 0`) and live in `sample_count` frame blocks of `block_floats` floats, block `i` at `blocks + i·block_floats`, laid out as `t` rows `[n_t][3]`, then `q` rows `[n_q][4]`, then `s` rows `[n_s][3]`. Row `k` belongs to joint `t_joint[k]`/`q_joint[k]`/`s_joint[k]`. One sample therefore reads two adjacent blocks and nothing else instead of striding once per channel. `blocks` is NULL when the clip has no sampled channel.
 - **Constant** channels are `ct_joint`/`ct` (3 floats), `cq_joint`/`cq` (4), `cs_joint`/`cs` (3) with their counts.
@@ -245,7 +245,7 @@ typedef struct {
 
 ## 14. Bounds and culling
 
-Numbers, no stored per-bone data. All radii below are in skeleton space, except `reach`, which is joint space and enters through the stretch bound `a`; the builder validates every stored radius as finite and ≥ 0 and the activator copies them unchecked. A sphere of radius `r` becomes a world-space sphere centred at `E·origin` with radius `s_E·r`, where `s_E = max(abs(scale(E)))` for the TRS world transform required by §4. `reach` and `any_pose_radius` are present in NSKN and written by the skin-binding import; `r_joints`, `r_root` and `s_max` in NANM, and the culling helper that reads all five, are still pending. The rules below define what the builder computes.
+Numbers, no stored per-bone data. All radii below are in skeleton space, except `reach`, which is joint space and enters through the stretch bound `a`; the builder validates every stored radius as finite and ≥ 0 and the activator rejects a negative or non-finite one. A sphere of radius `r` becomes a world-space sphere centred at `E·origin` with radius `s_E·r`, where `s_E = max(abs(scale(E)))` for the TRS world transform required by §4. `reach` and `any_pose_radius` are present in NSKN and written by the skin-binding import; `r_joints`, `r_root` and `s_max` are present in NANM and measured by the glTF clip import (§16); the culling helper that reads all five is still pending. The rules below define what the builder computes.
 
 Single-clip playback uses `r = r_joints + reach·s_max`. `r_joints` bounds joint-origin distance from the skeleton origin, and `s_max` bounds the maximum stretch (largest singular value) of every model matrix's linear part, over the entire decoded playback including interpolation. Products of local maximum absolute scale components along each ancestor chain give a conservative stretch bound, including hierarchical shear; individual local scales or model-matrix column lengths do not.
 
@@ -322,7 +322,7 @@ the arrays so the `u16` table ends the payload without padding:
 available there; `nt_skin_palette_build` asserts `remap[p] < model_count` where
 both exist.
 
-**NANM** — a 56-byte header, then the arrays in one fixed order. Every array
+**NANM** — a 68-byte header, then the arrays in one fixed order. Every array
 before the `u16` tables is a multiple of 4 bytes, so each one starts aligned and
 nothing is padded:
 
@@ -341,6 +341,9 @@ nothing is padded:
 | 48 | `u32 n_keys` | keys of every STEP track, joints and object |
 | 52 | `u8 object_mode[3]` | 0 ABSENT, 1 CONSTANT, 2 SAMPLED, 3 STEP (t, q, s) |
 | 55 | `u8 _pad` | zero |
+| 56 | `f32 r_joints` | finite, ≥ 0; §14, 0 = unknown |
+| 60 | `f32 r_root` | finite, ≥ 0; §14, 0 = unknown |
+| 64 | `f32 s_max` | finite, ≥ 0; §14, 0 = unknown |
 
 | order | array | bytes |
 |---|---|---|

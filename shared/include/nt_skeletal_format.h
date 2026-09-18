@@ -25,7 +25,7 @@
 
 /* One version for all three payloads, compared exactly: the layout is the
  * runtime layout, so any change to it is a rebuild. */
-#define NT_SKELETAL_FORMAT_VERSION 3
+#define NT_SKELETAL_FORMAT_VERSION 4
 
 // #region NSKL skeleton
 /*
@@ -85,7 +85,7 @@ typedef struct {
 #define NT_ANM_KEY_STRIDE 20
 
 /*
- * NtAnmHeader (56 bytes), then, each array a multiple of 4 bytes so the next
+ * NtAnmHeader (68 bytes), then, each array a multiple of 4 bytes so the next
  * one stays aligned and the uint16 tables need only the 2 they end on:
  *
  *   float    blocks[sample_count][block_floats]   block_floats = 3n_t+4n_q+3n_s
@@ -101,6 +101,12 @@ typedef struct {
  * uniform grid of sample_count samples over [0, duration]; STEP channels keep
  * their authored timestamps in keys. The joint step tracks partition keys in
  * table order, followed by the object STEP channels in t, q, s order.
+ *
+ * The three bounds are measured by the builder over the clip's own evaluated
+ * poses (skeleton-animation spec, Bounds): r_joints = max joint-origin distance
+ * from the skeleton origin, r_root = max root translation length, s_max = max
+ * over joints of the product of max|s| along the ancestor chain. Hand-built
+ * clips may carry zeros; a consumer treats them as "no bound".
  */
 #pragma pack(push, 1)
 typedef struct {
@@ -121,6 +127,9 @@ typedef struct {
     uint32_t n_keys;          /* 48:  keys of every STEP track, joints and object */
     uint8_t object_mode[3];   /* 52:  nt_skeletal_channel_mode_t per channel: t, q, s */
     uint8_t _pad;             /* 55:  zero, keeps the arrays after the header 4-aligned */
+    float r_joints;           /* 56:  skeleton space, finite and >= 0 */
+    float r_root;             /* 60:  skeleton space, finite and >= 0 */
+    float s_max;              /* 64:  unitless, finite and >= 0 */
 } NtAnmHeader;
 #pragma pack(pop)
 
@@ -167,7 +176,7 @@ static inline uint64_t nt_anm_size(const NtAnmHeader *header) {
 #ifndef __cplusplus
 _Static_assert(sizeof(NtSklHeader) == 16, "NtSklHeader must be 16 bytes");
 _Static_assert(sizeof(NtSknHeader) == 24, "NtSknHeader must be 24 bytes");
-_Static_assert(sizeof(NtAnmHeader) == 56, "NtAnmHeader must be 56 bytes");
+_Static_assert(sizeof(NtAnmHeader) == 68, "NtAnmHeader must be 68 bytes");
 _Static_assert(sizeof(NtAnmObject) == 64, "NtAnmObject must be 64 bytes");
 #endif
 

@@ -184,11 +184,11 @@ static void fixture_clip(nt_builder_clip_t *clip, nt_builder_anim_channel_t chan
     clip->channels = channels;
 }
 
-/* Hand-computed offsets of the fixture clip: header 56, blocks 5 x 10 floats,
+/* Hand-computed offsets of the fixture clip: header 68, blocks 5 x 10 floats,
  * no ct, one cq, one cs, one step track, five keys, the 64-byte object record,
  * five object samples, then the joint tables. */
 enum {
-    FIX_OFF_BLOCKS = 56,
+    FIX_OFF_BLOCKS = 68,
     FIX_OFF_CT = FIX_OFF_BLOCKS + (CLIP_SAMPLES * 10 * 4),
     FIX_OFF_CQ = FIX_OFF_CT,
     FIX_OFF_CS = FIX_OFF_CQ + 16,
@@ -430,8 +430,8 @@ void test_encode_clip_with_only_an_object_sampled_channel(void) {
     uint32_t size = 0;
     nt_builder_encode_clip(&clip, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
-    /* 56 header + 64 object record + 3 object samples. */
-    TEST_ASSERT_EQUAL_UINT32(56U + 64U + (3U * 40U), size);
+    /* 68 header + 64 object record + 3 object samples. */
+    TEST_ASSERT_EQUAL_UINT32(68U + 64U + (3U * 40U), size);
 
     NtAnmHeader header;
     memcpy(&header, payload, sizeof(header));
@@ -442,7 +442,7 @@ void test_encode_clip_with_only_an_object_sampled_channel(void) {
     TEST_ASSERT_TRUE(nt_anm_object_sampled(&header));
 
     for (size_t i = 0; i < 3; i++) {
-        const uint8_t *trs = payload + 56 + 64 + (i * 40);
+        const uint8_t *trs = payload + 68 + 64 + (i * 40);
         for (size_t c = 0; c < 3; c++) {
             TEST_ASSERT_EQUAL_HEX32(f32_bits(k_object_only[(i * 3) + c]), rd_u32(trs + (4 * c)));
         }
@@ -476,8 +476,8 @@ void test_encode_clip_single_sample_has_no_blocks(void) {
     nt_builder_encode_clip(&clip, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
-    /* 56 header + 16 cq + 2 x 20 keys + 64 object record + 2 cq_joint */
-    TEST_ASSERT_EQUAL_UINT32(178U, size);
+    /* 68 header + 16 cq + 2 x 20 keys + 64 object record + 2 cq_joint */
+    TEST_ASSERT_EQUAL_UINT32(190U, size);
     NtAnmHeader header;
     memcpy(&header, payload, sizeof(header));
     TEST_ASSERT_EQUAL_UINT32(1U, header.sample_count);
@@ -489,7 +489,7 @@ void test_encode_clip_single_sample_has_no_blocks(void) {
 
     /* The record follows the 16-byte cq array and the two 20-byte keys. */
     NtAnmObject object;
-    memcpy(&object, payload + 56 + 16 + 40, sizeof(object));
+    memcpy(&object, payload + 68 + 16 + 40, sizeof(object));
     TEST_ASSERT_EQUAL_UINT32(0, object.step_first[0]);
     TEST_ASSERT_EQUAL_UINT32(2, object.step_count[0]);
 

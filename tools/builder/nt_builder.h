@@ -619,13 +619,17 @@ typedef struct {
 } nt_builder_anim_channel_t;
 
 /* One clip ready to encode. sample_count is the uniform grid on [0, duration]
- * every SAMPLED channel shares (1 = no sampled channel). */
+ * every SAMPLED channel shares (1 = no sampled channel). The three bounds are
+ * written as given (finite, >= 0); a hand-built clip may leave them 0. */
 typedef struct {
     nt_hash64_t rig_compat_id;
     nt_hash64_t additive_ref_id; /* reference pose identity, 0 = absolute */
     uint16_t joint_count;
     uint32_t sample_count;
     float duration;
+    float r_joints;                            /* max joint-origin distance from the skeleton origin */
+    float r_root;                              /* max root translation length */
+    float s_max;                               /* max product of max|s| along an ancestor chain */
     const nt_builder_anim_channel_t *channels; /* 3 * (joint_count + 1) entries */
 } nt_builder_clip_t;
 

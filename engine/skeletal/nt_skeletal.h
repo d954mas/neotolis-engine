@@ -203,7 +203,8 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_m
  * the arrays, keeps them alive and unchanged until it republishes or destroys
  * them, and the kernels neither store nor free them. The NANM payload
  * (shared/include/nt_skeletal_format.h) holds exactly these tables, so an
- * activator copies the payload and points this view into the copy.
+ * activator copies the payload and points this view into the copy through
+ * nt_skeletal_clip_view.
  *
  * Every animated channel has exactly one storage mode, so the tables below
  * never describe the same joint channel twice, and a channel in no table takes
@@ -279,6 +280,9 @@ typedef struct {
     const nt_skeletal_step_t *steps;    /* n_steps tracks */
     const nt_skeletal_step_key_t *keys; /* shared by every track, joints and object */
     nt_skeletal_object_curve_t object;  /* all modes ABSENT when the clip has no object curve */
+    float r_joints;                     /* max joint-origin distance from the skeleton origin, 0 = unknown */
+    float r_root;                       /* max root translation length, 0 = unknown */
+    float s_max;                        /* max product of max|s| along an ancestor chain, 0 = unknown */
     uint32_t sample_count;              /* samples on the uniform grid over [0, duration], >= 1 */
     uint32_t block_floats;              /* 3*n_t + 4*n_q + 3*n_s */
     uint32_t n_steps;                   /* STEP tracks */
@@ -301,6 +305,13 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_sk
  * ABSENT channels copies defaults, so a clip without an object curve needs no
  * branch at the call site. out must not alias defaults. */
 void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double time, const nt_skeletal_trs_t *defaults, nt_skeletal_trs_t *out);
+
+/* Points *out at the tables of a NANM payload in place: no validation, no
+ * allocation, no copy. payload must be 4-aligned and stay alive as long as the
+ * view; a structurally validated payload (the activator's job) is the
+ * precondition for using the view, and the builder measures its own encoder
+ * output through the same function. */
+void nt_skeletal_clip_view(const uint8_t *payload, nt_skeletal_clip_t *out);
 // #endregion
 
 // #region tracks
