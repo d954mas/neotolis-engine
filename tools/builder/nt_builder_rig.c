@@ -168,9 +168,17 @@ typedef struct {
 } rig_walk_t;
 
 /* Preorder over the marked nodes, children in glTF order, so each subtree is
- * the contiguous range [j, subtree_end[j]) the skeleton format requires. */
-// NOLINTNEXTLINE(misc-no-recursion) -- the walk follows the node hierarchy, which the parse already proved acyclic
-static void rig_visit(rig_walk_t *w, uint32_t node, uint16_t parent_joint) {
+ * the contiguous range [j, subtree_end[j]) the skeleton format requires. The
+ * recursion is as deep as the joint chain, so the chain is capped well below
+ * the native stack; no rig comes near it. */
+#define RIG_MAX_DEPTH 256U
+
+// NOLINTNEXTLINE(misc-no-recursion) -- the walk follows the node hierarchy, which cgltf_validate proved acyclic
+static void rig_visit(rig_walk_t *w, uint32_t node, uint16_t parent_joint, uint32_t depth) {
+    if (depth > RIG_MAX_DEPTH) {
+        NT_LOG_ERROR("import_rig: node[%u] sits %u joints below the rig root, the importer walks at most %u", node, depth, RIG_MAX_DEPTH);
+        NT_BUILD_ASSERT(0 && "rig hierarchy is too deep");
+    }
     const uint16_t j = w->next++;
     w->joint_of[node] = j;
     w->parent[j] = parent_joint;
@@ -180,7 +188,7 @@ static void rig_visit(rig_walk_t *w, uint32_t node, uint16_t parent_joint) {
     for (cgltf_size i = 0; i < cn->children_count; i++) {
         const uint32_t child = (uint32_t)(cn->children[i] - w->data->nodes);
         if (w->mark[child] != 0U) {
-            rig_visit(w, child, j);
+            rig_visit(w, child, j, depth + 1U);
         }
     }
     w->subtree_end[j] = w->next;
@@ -246,14 +254,22 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
 
     // #region select
     uint8_t *mark = (uint8_t *)calloc(node_count, 1);
+    uint8_t *in_palette = (uint8_t *)calloc(node_count, 1);
     uint16_t *joint_of = (uint16_t *)calloc(node_count, sizeof(uint16_t));
-    NT_BUILD_ASSERT(mark && joint_of && "import_rig: alloc failed (OOM)");
+    NT_BUILD_ASSERT(mark && in_palette && joint_of && "import_rig: alloc failed (OOM)");
 
     uint32_t root = UINT32_MAX;
     for (uint32_t p = 0; p < palette_count; p++) {
         NT_BUILD_ASSERT(skin->joints[p] != NULL && "skin joint is null");
         const uint32_t node = (uint32_t)(skin->joints[p] - data->nodes);
         NT_BUILD_ASSERT(node < node_count && "skin joint is not a node of this scene");
+        /* glTF lists each joint once; twice would give one joint two palette
+         * entries, each free to carry its own inverse bind. */
+        if (in_palette[node] != 0U) {
+            NT_LOG_ERROR("import_rig: skin[%u] lists node[%u] twice in its joints", skin_index, node);
+            NT_BUILD_ASSERT(0 && "skin lists one joint twice");
+        }
+        in_palette[node] = 1U;
         const uint32_t reached = rig_mark_path(scene, mark, node, skeleton_root);
         if (root == UINT32_MAX) {
             root = reached;
@@ -303,7 +319,7 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
         .node_index = node_index,
         .next = 0,
     };
-    rig_visit(&walk, root, NT_SKELETAL_NO_PARENT);
+    rig_visit(&walk, root, NT_SKELETAL_NO_PARENT, 0);
     NT_BUILD_ASSERT(walk.next == joint_count && "preorder visited a different joint set than the selection marked");
 
     for (uint32_t j = 0; j < joint_count; j++) {
@@ -314,6 +330,12 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
             NT_BUILD_ASSERT(0 && "rig node has no name");
         }
         joint_id[j] = nt_hash32_str(cn->name).value;
+        /* glTF allows one form of transform per node; a matrix next to TRS
+         * would have the TRS silently lose. */
+        if (cn->has_matrix && (cn->has_translation || cn->has_rotation || cn->has_scale)) {
+            NT_LOG_ERROR("import_rig: node %s carries both a matrix and translation/rotation/scale", cn->name);
+            NT_BUILD_ASSERT(0 && "rig node has both a matrix and TRS");
+        }
         if (cn->has_matrix) {
             nt_builder_decompose_trs(cn->matrix, cn->name, &rest[j]);
         } else {
@@ -382,6 +404,7 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
 
     free(node_index);
     free(joint_of);
+    free(in_palette);
     free(mark);
 
     NT_LOG_INFO("Imported rig from skin[%u]: %u joints, %u palette entries, rig 0x%016llX", skin_index, joint_count, palette_count, (unsigned long long)out->skeleton.rig_compat_id.value);

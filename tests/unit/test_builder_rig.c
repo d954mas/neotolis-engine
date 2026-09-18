@@ -151,14 +151,20 @@ void test_scene_publishes_the_node_graph(void) {
     nt_builder_free_glb_scene(&scene);
 }
 
-void test_parse_asserts_on_a_parent_cycle(void) {
-    rigged_glb_opts_t opts = {0};
-    opts.cycle = true;
-    rigged_glb_write(RIG_GLB, &opts);
+/* One knob that fails cgltf_validate, one assert text: the parse stops before
+ * any reader trusts the data. */
+#define EXPECT_PARSE_ASSERT(field)                                                                                                                                                                     \
+    do {                                                                                                                                                                                               \
+        rigged_glb_opts_t knob_opts = {0};                                                                                                                                                             \
+        knob_opts.field = true;                                                                                                                                                                        \
+        rigged_glb_write(RIG_GLB, &knob_opts);                                                                                                                                                         \
+        nt_glb_scene_t knob_scene;                                                                                                                                                                     \
+        EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_parse_glb_scene(&knob_scene, RIG_GLB), "fails cgltf_validate");                                                                                     \
+    } while (0)
 
-    nt_glb_scene_t scene;
-    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_parse_glb_scene(&scene, RIG_GLB), "cycle");
-}
+void test_parse_asserts_on_a_parent_cycle(void) { EXPECT_PARSE_ASSERT(cycle); }
+
+void test_parse_asserts_on_an_accessor_covering_fewer_vertices(void) { EXPECT_PARSE_ASSERT(weights1_short); }
 // #endregion
 
 // #region rig reference
@@ -435,6 +441,12 @@ void test_import_asserts_on_an_unnamed_rig_node(void) { EXPECT_IMPORT_ASSERT(unn
 void test_import_asserts_on_an_empty_rig_node_name(void) { EXPECT_IMPORT_ASSERT(empty_name, "no name"); }
 
 void test_import_asserts_on_a_non_unit_rest_rotation(void) { EXPECT_IMPORT_ASSERT(bad_rotation, "not a unit quaternion"); }
+
+void test_import_asserts_on_a_matrix_node_with_trs(void) { EXPECT_IMPORT_ASSERT(matrix_and_trs, "both a matrix and TRS"); }
+
+void test_import_asserts_on_a_skin_listing_one_joint_twice(void) { EXPECT_IMPORT_ASSERT(duplicate_skin_joint, "lists one joint twice"); }
+
+void test_import_asserts_on_a_joint_chain_deeper_than_the_cap(void) { EXPECT_IMPORT_ASSERT(deep_chain, "too deep"); }
 
 void test_import_asserts_on_joints_under_several_scene_roots(void) { EXPECT_IMPORT_ASSERT(multi_root, "span several scene roots"); }
 
@@ -773,8 +785,6 @@ void test_skinned_mesh_rejects_an_index_past_the_palette(void) { EXPECT_SKIN_ASS
 void test_skinned_mesh_rejects_an_unpaired_set(void) { EXPECT_SKIN_ASSERT(unpaired_sets, "unpaired JOINTS_n/WEIGHTS_n set"); }
 
 void test_skinned_mesh_rejects_a_gap_in_the_set_numbering(void) { EXPECT_SKIN_ASSERT(nonconsecutive_sets, "sets are not consecutive"); }
-
-void test_skinned_mesh_rejects_an_accessor_covering_fewer_vertices(void) { EXPECT_SKIN_ASSERT(weights1_short, "different vertex count"); }
 
 void test_skinned_mesh_rejects_float_joint_indices(void) { EXPECT_SKIN_ASSERT(joints_float_type, "JOINTS accessor has an invalid type"); }
 
@@ -1443,6 +1453,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scene_publishes_the_node_graph);
     RUN_TEST(test_parse_asserts_on_a_parent_cycle);
+    RUN_TEST(test_parse_asserts_on_an_accessor_covering_fewer_vertices);
     RUN_TEST(test_rig_import_preorder_and_subtree_ranges);
     RUN_TEST(test_rig_compat_id_matches_the_hand_written_schema);
     RUN_TEST(test_rig_cut_at_helper_drops_the_scene_root);
@@ -1458,6 +1469,9 @@ int main(void) {
     RUN_TEST(test_import_asserts_on_an_empty_rig_node_name);
     RUN_TEST(test_import_asserts_on_two_rig_nodes_sharing_one_joint_id);
     RUN_TEST(test_import_asserts_on_a_non_unit_rest_rotation);
+    RUN_TEST(test_import_asserts_on_a_matrix_node_with_trs);
+    RUN_TEST(test_import_asserts_on_a_skin_listing_one_joint_twice);
+    RUN_TEST(test_import_asserts_on_a_joint_chain_deeper_than_the_cap);
     RUN_TEST(test_import_asserts_on_joints_under_several_scene_roots);
     RUN_TEST(test_import_asserts_on_a_joint_outside_the_cut);
     RUN_TEST(test_skinned_mesh_keeps_the_four_heaviest_influences);
@@ -1474,7 +1488,6 @@ int main(void) {
     RUN_TEST(test_skinned_mesh_rejects_an_index_past_the_palette);
     RUN_TEST(test_skinned_mesh_rejects_an_unpaired_set);
     RUN_TEST(test_skinned_mesh_rejects_a_gap_in_the_set_numbering);
-    RUN_TEST(test_skinned_mesh_rejects_an_accessor_covering_fewer_vertices);
     RUN_TEST(test_skinned_mesh_rejects_float_joint_indices);
     RUN_TEST(test_skinned_mesh_rejects_unnormalized_byte_weights);
     RUN_TEST(test_skinned_mesh_rejects_a_morph_target);

@@ -1948,24 +1948,14 @@ static void write_test_glb_tangent4(const char *path) {
 }
 
 void test_scene_mesh_tangent_rejects_out_of_range_index(void) {
-    /* The OOB index must be rejected at UNPACK time -- before MikkTSpace reads
-     * position/normal/uv through it (sanitizers would flag the OOB access) */
+    /* The OOB index is rejected at parse, before MikkTSpace could read
+     * position/normal/uv through it (sanitizers would flag the OOB access). */
     const char *glb_path = TMP_DIR "/scene_tan_oob.glb";
     static const uint16_t tri[3] = {0, 1, 7};
     write_test_glb_tangent4_indices(glb_path, tri);
 
     nt_glb_scene_t scene = {0};
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, glb_path));
-
-    NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
-        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false, 0},
-    };
-    uint8_t *data = NULL;
-    uint32_t size = 0;
-    TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 2, NT_TANGENT_COMPUTE, &data, &size));
-
-    nt_builder_free_glb_scene(&scene);
+    EXPECT_BUILD_ASSERT_MATCH(NULL, (void)nt_builder_parse_glb_scene(&scene, glb_path), "fails cgltf_validate");
 }
 
 void test_scene_mesh_tangent_auto_prefers_gltf(void) {

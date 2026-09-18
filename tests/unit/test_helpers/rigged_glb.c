@@ -12,9 +12,10 @@
 #include <string.h>
 
 // #region json buffer
-/* The JSON is ~3 KB; a fixed buffer with an abort on overflow needs no growth. */
+/* The JSON is ~3 KB, ~11 KB with the deep chain; a fixed buffer with an abort
+ * on overflow needs no growth. */
 typedef struct {
-    char data[8192];
+    char data[16384];
     size_t len;
 } json_buf_t;
 
@@ -181,9 +182,11 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
 
     // #region skin data
     uint32_t joint_count = RIGGED_GLB_SKIN_JOINT_COUNT;
-    if (o.joint_outside_root || o.multi_root) {
+    if (o.joint_outside_root || o.multi_root || o.deep_chain) {
         joint_count = RIGGED_GLB_SKIN_JOINT_COUNT + 1;
     }
+    const uint32_t chain_len = o.deep_chain ? 260U : 0U;
+    const uint32_t extra_joint = o.deep_chain ? RIGGED_GLB_NODE_COUNT + chain_len - 1U : RIGGED_GLB_NODE_OBJECT;
 
     float ibm[(RIGGED_GLB_SKIN_JOINT_COUNT + 1) * 16] = {0};
     for (uint32_t p = 0; p < joint_count; p++) {
@@ -259,6 +262,9 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         jb_addf(&jb, "{\"name\":\"%s\",\"matrix\":", o.empty_name ? "" : "Helper");
     }
     jb_floats(&jb, helper_matrix, 16);
+    if (o.matrix_and_trs) {
+        jb_addf(&jb, ",\"translation\":[0,1,0]");
+    }
     jb_addf(&jb, ",\"children\":[2]},");
     for (uint32_t j = 0; j < RIGGED_GLB_SKIN_JOINT_COUNT; j++) {
         jb_addf(&jb, "{\"name\":\"Joint%u\",", (j == 4 && o.duplicate_name) ? 3U : j);
@@ -279,7 +285,20 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, ",\"mesh\":0,\"skin\":%u},", mesh_skin);
     jb_addf(&jb, "{\"name\":\"Object\",\"translation\":");
     jb_floats(&jb, object_t, 3);
-    jb_addf(&jb, "}],");
+    if (o.deep_chain) {
+        jb_addf(&jb, ",\"children\":[%u]}", (uint32_t)RIGGED_GLB_NODE_COUNT);
+        for (uint32_t i = 0; i < chain_len; i++) {
+            const uint32_t node = RIGGED_GLB_NODE_COUNT + i;
+            jb_addf(&jb, ",{\"name\":\"D%u\"", i);
+            if (i + 1U < chain_len) {
+                jb_addf(&jb, ",\"children\":[%u]", node + 1U);
+            }
+            jb_addf(&jb, "}");
+        }
+        jb_addf(&jb, "],");
+    } else {
+        jb_addf(&jb, "}],");
+    }
 
     const char *second_set = o.nonconsecutive_sets ? "2" : "1";
     jb_addf(&jb, "\"meshes\":[{\"name\":\"Quad\",\"primitives\":[{\"attributes\":{");
@@ -304,7 +323,11 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     if (!o.no_ibm) {
         jb_addf(&jb, "\"inverseBindMatrices\":6,");
     }
-    jb_addf(&jb, "\"joints\":[4,6,2,3,5%s]}", joint_count > RIGGED_GLB_SKIN_JOINT_COUNT ? ",8" : "");
+    jb_addf(&jb, "\"joints\":[4,6,2,3,%s", o.duplicate_skin_joint ? "3" : "5");
+    if (joint_count > RIGGED_GLB_SKIN_JOINT_COUNT) {
+        jb_addf(&jb, ",%u", extra_joint);
+    }
+    jb_addf(&jb, "]}");
     if (o.mesh_other_skin) {
         jb_addf(&jb, ",{\"name\":\"OtherSkin\",\"joints\":[2,3]}");
     }

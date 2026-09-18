@@ -41,26 +41,15 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
         NT_BUILD_ASSERT(0 && "failed to load glTF buffers");
     }
 
-    /* cgltf_node_transform_world walks parents until a root, so a parent cycle
-     * hangs the parse. Checked before anything is allocated, with the
-     * two-pointer walk of cgltf_validate. */
-    for (cgltf_size i = 0; i < data->nodes_count; i++) {
-        const cgltf_node *slow = data->nodes[i].parent;
-        const cgltf_node *fast = slow != NULL ? slow->parent : NULL;
-        while (slow != NULL && fast != NULL) {
-            if (slow == fast) {
-                NT_LOG_ERROR("%s: node[%u] is on a parent cycle", path, (uint32_t)i);
-                cgltf_free(data);
-                NT_BUILD_ASSERT(0 && "glTF node hierarchy has a parent cycle");
-            }
-            slow = slow->parent;
-            fast = fast->parent != NULL ? fast->parent->parent : NULL;
-        }
-    }
-
+    /* cgltf_validate proves what every reader below relies on: accessors
+     * inside their buffer views, one vertex count per primitive, indices and
+     * sparse indices in range, an acyclic node hierarchy. Reading past it
+     * would be reading past a buffer. */
     result = cgltf_validate(data);
     if (result != cgltf_result_success) {
-        NT_LOG_WARN("%s: glTF validation issues (cgltf error %d)", path, (int)result);
+        NT_LOG_ERROR("%s: glTF fails cgltf_validate (cgltf error %d)", path, (int)result);
+        cgltf_free(data);
+        NT_BUILD_ASSERT(0 && "glTF fails cgltf_validate");
     }
 
     /* Meshes */
@@ -271,10 +260,8 @@ void nt_builder_read_influences(const struct cgltf_primitive *prim, const char *
             NT_LOG_ERROR("%s: influence set %u is absent although the primitive carries %u sets; sets run from 0 without gaps", label, n, joint_sets);
             NT_BUILD_ASSERT(0 && "JOINTS_n/WEIGHTS_n sets are not consecutive");
         }
-        if ((uint32_t)ja->count != vertex_count || (uint32_t)wa->count != vertex_count) {
-            NT_LOG_ERROR("%s: influence set %u covers %u/%u elements, the primitive has %u vertices", label, n, (uint32_t)ja->count, (uint32_t)wa->count, vertex_count);
-            NT_BUILD_ASSERT(0 && "influence accessor covers a different vertex count");
-        }
+        /* cgltf_validate already holds every attribute to the primitive's count. */
+        NT_BUILD_ASSERT(ja->count == (cgltf_size)vertex_count && wa->count == (cgltf_size)vertex_count && "influence accessor covers a different vertex count");
         /* cgltf_accessor_read_uint returns 0 on a FLOAT accessor, so the joint
          * component type is checked before anything reads it. */
         if (ja->type != cgltf_type_vec4 || (ja->component_type != cgltf_component_type_r_8u && ja->component_type != cgltf_component_type_r_16u) || ja->normalized) {

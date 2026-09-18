@@ -108,6 +108,9 @@ typedef struct {
     bool duplicate_name;         /* Joint4 is named "Joint3", so two rig nodes share one joint id */
     bool bad_rotation;           /* Joint2's rotation is (0, 0, 0, 2), not a unit quaternion */
     bool cycle;                  /* Helper moves under Joint4, closing a parent cycle */
+    bool matrix_and_trs;         /* Helper carries a translation next to its matrix */
+    bool duplicate_skin_joint;   /* skin 0 lists Joint1 twice */
+    bool deep_chain;             /* a 260-node chain under Object whose last node joins the skin */
     bool joint_outside_root;     /* Object joins the skin, outside a cut at Helper */
     bool multi_root;             /* Object becomes a second scene root and a skin joint */
     bool negative_weight;        /* v3 weight 1 turns negative */
