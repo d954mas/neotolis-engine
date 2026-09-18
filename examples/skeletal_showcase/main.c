@@ -59,6 +59,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "showcase_limits.h"
+
 #ifdef NT_PLATFORM_WEB
 #include "platform/web/nt_platform_web.h"
 #endif
@@ -66,7 +68,6 @@
 
 // #region constants and state
 #define HUMANOID_JOINT_COUNT 21U
-#define MAX_JOINTS 32U
 #define UI_ARENA_SIZE ((size_t)2 * 1024 * 1024)
 #define SCRATCH_ARENA_SIZE ((size_t)128 * 1024)
 #define STAGE_ID "skeletal_showcase/stage"
@@ -119,9 +120,9 @@ typedef struct {
     nt_skeletal_skeleton_t humanoid;    /* the code-defined rig over the static arrays above */
     const nt_skeletal_skeleton_t *view; /* active rig; NULL while an imported skeleton is not ready */
     rig_source_t rig_source;
-    nt_skeletal_trs_t local[MAX_JOINTS];
-    nt_skeletal_mat34_t model[MAX_JOINTS];
-    float angles[MAX_JOINTS][3];
+    nt_skeletal_trs_t local[SKELETAL_SHOWCASE_MAX_JOINTS];
+    nt_skeletal_mat34_t model[SKELETAL_SHOWCASE_MAX_JOINTS];
+    float angles[SKELETAL_SHOWCASE_MAX_JOINTS][3];
     uint32_t joint_ids[HUMANOID_JOINT_COUNT];
     bool fit_pending;
     int selected_joint;
@@ -258,7 +259,7 @@ static void refresh_view(void) {
         s_skeleton_scene.view = NULL;
     }
     if (s_skeleton_scene.view != NULL) {
-        NT_ASSERT(s_skeleton_scene.view->joint_count <= MAX_JOINTS && "skeletal_showcase: rig exceeds MAX_JOINTS");
+        NT_ASSERT(s_skeleton_scene.view->joint_count <= SKELETAL_SHOWCASE_MAX_JOINTS && "skeletal_showcase: rig exceeds SKELETAL_SHOWCASE_MAX_JOINTS");
         if (s_skeleton_scene.selected_joint >= (int)s_skeleton_scene.view->joint_count) {
             s_skeleton_scene.selected_joint = 0;
         }
@@ -332,7 +333,7 @@ static void set_rest_pose(void) {
 /* out[j]: j and its whole ancestor chain rest at the origin. NSKL marks no
  * wrappers, so this also covers a skin joint sitting there (Fox _rootJoint,
  * b_Root_00). Preorder: parent[j] < j. */
-static void rig_at_origin(const nt_skeletal_skeleton_t *skel, bool out[MAX_JOINTS]) {
+static void rig_at_origin(const nt_skeletal_skeleton_t *skel, bool out[SKELETAL_SHOWCASE_MAX_JOINTS]) {
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
         const uint16_t p = skel->parent[j];
         const float *t = skel->rest[j].t;
@@ -353,7 +354,7 @@ static void set_test_pose(void) {
         /* Imported joints have no names to pick from: bend every third joint
          * that is not origin scaffolding, so the tilt lands on limbs. */
         const nt_skeletal_skeleton_t *skel = s_skeleton_scene.view;
-        bool at_origin[MAX_JOINTS];
+        bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS];
         rig_at_origin(skel, at_origin);
         for (uint32_t j = 1, n = 0; j < skel->joint_count; ++j) {
             if (!at_origin[j] && (n++ % 3U) == 0U) {
@@ -792,7 +793,7 @@ static const float s_scaffold_color[4] = {0.45F, 0.50F, 0.58F, 1.0F};
 
 /* Parent->child links whose parent is (or is not) origin scaffolding: those
  * draw thin and grey, real bones in the subtree colours. */
-static void draw_links(const nt_skeletal_skeleton_t *skel, const bool at_origin[MAX_JOINTS], bool scaffold_pass, float scale) {
+static void draw_links(const nt_skeletal_skeleton_t *skel, const bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS], bool scaffold_pass, float scale) {
     static const float bone_colors[2][4] = {{0.35F, 0.70F, 0.95F, 1.0F}, {1.0F, 0.65F, 0.18F, 1.0F}};
     nt_shape_renderer_set_line_width((scaffold_pass ? 0.006F : 0.02F) * scale);
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
@@ -822,7 +823,7 @@ static void skeleton_draw(void) {
 
     /* The link from origin scaffolding up to the first translated joint would
      * read as a limb, so those joints and links draw thin and grey. */
-    bool at_origin[MAX_JOINTS];
+    bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS];
     rig_at_origin(skel, at_origin);
     draw_links(skel, at_origin, true, scale);
     draw_links(skel, at_origin, false, scale);

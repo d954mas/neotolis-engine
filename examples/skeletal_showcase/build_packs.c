@@ -5,6 +5,8 @@
 #include "nt_builder.h"
 /* clang-format on */
 
+#include "showcase_limits.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -38,7 +40,7 @@ static bool add_rig_skeleton(NtBuilderContext *ctx, const char *glb_path, const 
     }
     nt_builder_rig_t rig;
     nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
-    NT_BUILD_ASSERT(rig.skeleton.joint_count <= 32U && "skeletal_showcase: rig exceeds MAX_JOINTS of main.c");
+    NT_BUILD_ASSERT(rig.skeleton.joint_count <= SKELETAL_SHOWCASE_MAX_JOINTS && "skeletal_showcase: rig exceeds the pose buffers of main.c");
     (void)nt_builder_add_skeleton(ctx, &rig.skeleton, resource_id);
     nt_builder_free_rig(&rig);
     nt_builder_free_glb_scene(&scene);
