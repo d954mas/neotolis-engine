@@ -16,28 +16,6 @@ static uint32_t nt_scene_texture_image_index(const cgltf_texture_view *view, con
     return (uint32_t)(view->texture->image - data->images);
 }
 
-/* --- Helper: last key time over an animation's samplers --- */
-
-static float nt_scene_animation_duration(const cgltf_animation *anim) {
-    float duration = 0.0F;
-    for (cgltf_size s = 0; s < anim->samplers_count; s++) {
-        const cgltf_accessor *input = anim->samplers[s].input;
-        if (input == NULL || input->count == 0) {
-            continue;
-        }
-        float last = 0.0F;
-        if (input->has_max) {
-            last = input->max[0];
-        } else if (cgltf_accessor_read_float(input, input->count - 1, &last, 1) == 0) {
-            continue;
-        }
-        if (last > duration) {
-            duration = last;
-        }
-    }
-    return duration;
-}
-
 /* --- Parse glb scene --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -146,15 +124,6 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
         }
     }
 
-    /* Skins */
-    uint32_t skin_count = (uint32_t)data->skins_count;
-    scene->skins = (nt_glb_skin_t *)calloc(skin_count > 0 ? skin_count : 1, sizeof(nt_glb_skin_t));
-    scene->skin_count = skin_count;
-    for (uint32_t i = 0; i < skin_count; i++) {
-        scene->skins[i].name = data->skins[i].name;
-        scene->skins[i].joint_count = (uint32_t)data->skins[i].joints_count;
-    }
-
     /* Nodes */
     uint32_t node_count = (uint32_t)data->nodes_count;
     scene->nodes = (nt_glb_node_t *)calloc(node_count > 0 ? node_count : 1, sizeof(nt_glb_node_t));
@@ -178,29 +147,14 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
         } else {
             node->parent = UINT32_MAX;
         }
-        node->has_matrix = cn->has_matrix != 0;
-        if (!node->has_matrix) {
-            memcpy(node->local_t, cn->translation, sizeof(node->local_t));
-            memcpy(node->local_q, cn->rotation, sizeof(node->local_q));
-            memcpy(node->local_s, cn->scale, sizeof(node->local_s));
-        }
         cgltf_node_transform_world(cn, node->transform);
-    }
-
-    /* Animations */
-    uint32_t anim_count = (uint32_t)data->animations_count;
-    scene->animations = (nt_glb_animation_t *)calloc(anim_count > 0 ? anim_count : 1, sizeof(nt_glb_animation_t));
-    scene->animation_count = anim_count;
-    for (uint32_t i = 0; i < anim_count; i++) {
-        scene->animations[i].name = data->animations[i].name;
-        scene->animations[i].duration = nt_scene_animation_duration(&data->animations[i]);
     }
 
     scene->_internal = data;
 
     NT_LOG_INFO("Parsed glTF scene: %s", path);
-    NT_LOG_INFO("  Meshes: %u, Materials: %u, Textures: %u, Nodes: %u, Skins: %u, Animations: %u", scene->mesh_count, scene->material_count, scene->texture_count, scene->node_count, scene->skin_count,
-                scene->animation_count);
+    NT_LOG_INFO("  Meshes: %u, Materials: %u, Textures: %u, Nodes: %u, Skins: %u, Animations: %u", scene->mesh_count, scene->material_count, scene->texture_count, scene->node_count,
+                (uint32_t)data->skins_count, (uint32_t)data->animations_count);
 
     return NT_BUILD_OK;
 }
@@ -215,8 +169,6 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene) {
     free(scene->materials);
     free(scene->textures);
     free(scene->nodes);
-    free(scene->skins);
-    free(scene->animations);
     if (scene->_internal != NULL) {
         cgltf_free((cgltf_data *)scene->_internal);
     }

@@ -185,28 +185,11 @@ typedef struct {
 
 typedef struct {
     float transform[16]; /* world transform mat4 */
-    /* Node-local TRS, defined only when has_matrix is false. A matrix node's
-     * local matrix is read from the cgltf node behind scene._internal: parse
-     * never decomposes, so a sheared matrix cannot fail a static-mesh build. */
-    float local_t[3];
-    float local_q[4]; /* xyzw */
-    float local_s[3];
     uint32_t parent;     /* index into scene.nodes[], UINT32_MAX if root */
     uint32_t mesh_index; /* index into scene.meshes[], UINT32_MAX if no mesh */
-    uint32_t skin_index; /* index into scene.skins[], UINT32_MAX if no skin */
-    bool has_matrix;
-    const char *name; /* node name from glTF (NULL if unnamed) */
+    uint32_t skin_index; /* index into the glTF skins, UINT32_MAX if no skin */
+    const char *name;    /* node name from glTF (NULL if unnamed) */
 } nt_glb_node_t;
-
-typedef struct {
-    const char *name; /* skin name from glTF (NULL if unnamed) */
-    uint32_t joint_count;
-} nt_glb_skin_t;
-
-typedef struct {
-    const char *name; /* animation name from glTF (NULL if unnamed) */
-    float duration;   /* last key time over all its samplers, 0 if it has none */
-} nt_glb_animation_t;
 
 typedef struct {
     nt_glb_mesh_t *meshes;
@@ -217,10 +200,6 @@ typedef struct {
     uint32_t texture_count;
     nt_glb_node_t *nodes;
     uint32_t node_count;
-    nt_glb_skin_t *skins;
-    uint32_t skin_count;
-    nt_glb_animation_t *animations;
-    uint32_t animation_count;
     void *_internal; /* opaque cgltf_data pointer */
 } nt_glb_scene_t;
 
@@ -561,54 +540,29 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
  * diagnostic instead of returning a code (skeletal spec §16). */
 
-/* Which rig to import out of a parsed scene. */
-typedef struct {
-    uint32_t skin_index;    /* index into scene.skins[] */
-    uint32_t skeleton_root; /* cut the hierarchy here, UINT32_MAX = up to the scene root */
-    uint32_t object_node;   /* node driving the object curve, UINT32_MAX = none */
-} nt_builder_rig_selection_t;
-
-/* One imported rig. The joints are every node on the paths from the scene root
- * of the joints' hierarchy to each skin joint, identity wrappers included, in
- * preorder; a matrix node's rest pose is its decomposed local matrix, and a
- * matrix that is not T*R*S is a content error. skeleton_root is an explicit cut:
- * that node becomes joint 0, its parent space becomes skeleton space, and the
- * game's E must carry the omitted ancestors.
- *
- * Every array is a view into storage and stays valid until nt_builder_free_rig;
- * joint names come from the scene, so the scene must outlive the rig. */
+/* One imported rig out of one glTF skin. The joints are every node on the
+ * paths from the scene root of the joints' hierarchy to each skin joint,
+ * identity wrappers included, in preorder; a matrix node's rest pose is its
+ * decomposed local matrix, and a matrix that is not T*R*S is a content error.
+ * skeleton_root is an explicit cut: that node becomes joint 0, its parent space
+ * becomes skeleton space, and the game's E must carry the omitted ancestors;
+ * UINT32_MAX cuts nothing. Every array lives in storage until
+ * nt_builder_free_rig; the exports take the scene again. */
 typedef struct {
     nt_skeletal_skeleton_t skeleton; /* rig_compat_id filled by the import */
-    const uint32_t *node_index;      /* joint j -> scene node */
     const uint16_t *palette_joint;   /* skin joint p -> rig joint (the binding's remap) */
     uint32_t skin_index;
-    uint32_t object_node; /* UINT32_MAX = none */
     uint16_t palette_count;
     void *storage; /* one allocation behind every array above */
 } nt_builder_rig_t;
 
-void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_selection_t *sel, nt_builder_rig_t *out);
+void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uint32_t skeleton_root, nt_builder_rig_t *out);
 void nt_builder_free_rig(nt_builder_rig_t *rig);
 
-/* Content profile for the skeletal importers: the rates and error budgets the
- * spec keeps out of the code (§16). Only skin_drop_tolerance is read by the
- * skinned-mesh export; every other field is consumed by clip import. */
-typedef struct {
-    float sample_fps;         /* uniform grid a clip is resampled onto */
-    float max_sample_fps;     /* ceiling the importer may raise sample_fps to */
-    float nlerp_tolerance;    /* radians a rotation channel may deviate from the source */
-    float sample_tolerance;   /* scene units a translation or scale channel may deviate */
-    float bake_rates[8];      /* candidate bank rates the certificate is evaluated at */
-    uint32_t bake_rate_count; /* entries of bake_rates in use */
-    float bake_tolerance;     /* scene units of model-space error the certificate admits */
-    float bake_reach;         /* reach the certificate assumes, 0 = the largest exported reach */
-    /* Weight mass one vertex may lose to the top-four reduction, in [0, 1].
-     * Raising it is the supported way to accept a heavy asset; the dropped mass
-     * is logged either way. */
-    float skin_drop_tolerance;
-} nt_builder_skeletal_profile_t;
-
-nt_builder_skeletal_profile_t nt_builder_skeletal_profile_defaults(void);
+/* Weight mass one vertex may lose to the top-four reduction, in [0, 1].
+ * Raising it is the supported way to accept a heavy asset; the dropped mass is
+ * logged either way. */
+#define NT_BUILDER_SKIN_DROP_TOLERANCE 0.02F
 
 /* Exports one primitive of a skinned mesh: the ordinary streams plus the two
  * the skin adds. The layout addresses them by the gltf_name "JOINTS" and
@@ -617,8 +571,8 @@ nt_builder_skeletal_profile_t nt_builder_skeletal_profile_defaults(void);
  * influences per vertex, and their NtStreamLayout is the only authority on how
  * those lanes are stored. Some node must instantiate this mesh with the rig's
  * skin; joint lanes address the rig's palette, not the skeleton. */
-void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const nt_builder_rig_t *rig,
-                                       const nt_builder_skeletal_profile_t *profile, const char *resource_id, const nt_mesh_opts_t *opts);
+void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const nt_builder_rig_t *rig, float skin_drop_tolerance,
+                                       const char *resource_id, const nt_mesh_opts_t *opts);
 
 /* Exports the binding every mesh of this rig's skin shares: the skin's inverse
  * bind matrices (identity where the glTF has none), the palette remap of the

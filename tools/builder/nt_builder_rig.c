@@ -21,9 +21,6 @@
 // #region matrix decomposition
 /* Dividing a column by a length this small cannot recover a rotation. */
 #define RIG_MIN_SCALE 1e-6
-/* Normalized columns of a T*R*S matrix are orthonormal; anything above this is
- * authored shear, not float32 rounding of a conformant matrix. */
-#define RIG_ORTHO_TOLERANCE 1e-5
 
 /* glTF matrices are column-major: element (row, col) is m[(col * 4) + row]. */
 static double rig_m(const float m[16], int row, int col) { return (double)m[(col * 4) + row]; }
@@ -113,19 +110,6 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
         }
         for (int row = 0; row < 3; row++) {
             rot[row][col] = rig_m(m, row, col) / scale[col];
-        }
-    }
-
-    for (int a = 0; a < 3; a++) {
-        for (int b = a + 1; b < 3; b++) {
-            double dot = 0.0;
-            for (int row = 0; row < 3; row++) {
-                dot += rot[row][a] * rot[row][b];
-            }
-            if (fabs(dot) > RIG_ORTHO_TOLERANCE) {
-                NT_LOG_ERROR("node %s: matrix columns %d and %d are not perpendicular (dot %g)", label, a, b, dot);
-                NT_BUILD_ASSERT(0 && "matrix is not TRS");
-            }
         }
     }
 
@@ -249,25 +233,24 @@ static int rig_id_slot_cmp(const void *a, const void *b) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
-void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_selection_t *sel, nt_builder_rig_t *out) {
-    NT_BUILD_ASSERT(scene && sel && out && "invalid import_rig args");
+void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uint32_t skeleton_root, nt_builder_rig_t *out) {
+    NT_BUILD_ASSERT(scene && out && "invalid import_rig args");
     const cgltf_data *data = (const cgltf_data *)scene->_internal;
     NT_BUILD_ASSERT(data != NULL && "import_rig: the scene holds no parsed glTF");
 
-    if (sel->skin_index >= scene->skin_count) {
-        NT_LOG_ERROR("import_rig: skin index %u, the scene has %u skins", sel->skin_index, scene->skin_count);
+    if (skin_index >= (uint32_t)data->skins_count) {
+        NT_LOG_ERROR("import_rig: skin index %u, the scene has %u skins", skin_index, (uint32_t)data->skins_count);
         NT_BUILD_ASSERT(0 && "rig skin index out of range");
     }
-    const cgltf_skin *skin = &data->skins[sel->skin_index];
+    const cgltf_skin *skin = &data->skins[skin_index];
     if (skin->joints_count == 0) {
-        NT_LOG_ERROR("import_rig: skin[%u] has no joints", sel->skin_index);
+        NT_LOG_ERROR("import_rig: skin[%u] has no joints", skin_index);
         NT_BUILD_ASSERT(0 && "skin has no joints");
     }
     const uint32_t palette_count = (uint32_t)skin->joints_count;
     NT_BUILD_ASSERT(palette_count >= 1 && palette_count <= UINT16_MAX && "skin palette size outside [1, 65535]");
     const uint32_t node_count = scene->node_count;
-    NT_BUILD_ASSERT((sel->skeleton_root == UINT32_MAX || sel->skeleton_root < node_count) && "skeleton_root out of range");
-    NT_BUILD_ASSERT((sel->object_node == UINT32_MAX || sel->object_node < node_count) && "object_node out of range");
+    NT_BUILD_ASSERT((skeleton_root == UINT32_MAX || skeleton_root < node_count) && "skeleton_root out of range");
 
     // #region select
     uint8_t *mark = (uint8_t *)calloc(node_count, 1);
@@ -279,7 +262,7 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_sel
         NT_BUILD_ASSERT(skin->joints[p] != NULL && "skin joint is null");
         const uint32_t node = (uint32_t)(skin->joints[p] - data->nodes);
         NT_BUILD_ASSERT(node < node_count && "skin joint is not a node of this scene");
-        const uint32_t reached = rig_mark_path(scene, mark, node, sel->skeleton_root);
+        const uint32_t reached = rig_mark_path(scene, mark, node, skeleton_root);
         if (root == UINT32_MAX) {
             root = reached;
         } else if (root != reached) {
@@ -288,11 +271,6 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_sel
         }
     }
     NT_BUILD_ASSERT(root != UINT32_MAX && "rig has no root");
-
-    if (sel->object_node != UINT32_MAX && mark[sel->object_node] != 0U) {
-        NT_LOG_ERROR("import_rig: object node[%u] is a joint of the rig; the object curve drives the character, not a bone", sel->object_node);
-        NT_BUILD_ASSERT(0 && "object node lies inside the rig");
-    }
 
     uint32_t joint_count = 0;
     for (uint32_t n = 0; n < node_count; n++) {
@@ -310,18 +288,17 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_sel
      * the u16 tables need no padding of their own. */
     const size_t rest_bytes = (size_t)joint_count * sizeof(nt_skeletal_trs_t);
     const size_t id_bytes = (size_t)joint_count * sizeof(uint32_t);
-    const size_t index_bytes = (size_t)joint_count * sizeof(uint32_t);
     const size_t parent_bytes = (size_t)joint_count * sizeof(uint16_t);
     const size_t palette_bytes = (size_t)palette_count * sizeof(uint16_t);
-    uint8_t *storage = (uint8_t *)malloc(rest_bytes + id_bytes + index_bytes + (2U * parent_bytes) + palette_bytes);
-    NT_BUILD_ASSERT(storage && "import_rig: alloc failed (OOM)");
+    uint8_t *storage = (uint8_t *)malloc(rest_bytes + id_bytes + (2U * parent_bytes) + palette_bytes);
+    uint32_t *node_index = (uint32_t *)malloc((size_t)joint_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(storage && node_index && "import_rig: alloc failed (OOM)");
 
     nt_skeletal_trs_t *rest = (nt_skeletal_trs_t *)storage;
     uint32_t *joint_id = (uint32_t *)(storage + rest_bytes);
-    uint32_t *node_index = (uint32_t *)(storage + rest_bytes + id_bytes);
-    uint16_t *parent = (uint16_t *)(storage + rest_bytes + id_bytes + index_bytes);
-    uint16_t *subtree_end = (uint16_t *)(storage + rest_bytes + id_bytes + index_bytes + parent_bytes);
-    uint16_t *palette_joint = (uint16_t *)(storage + rest_bytes + id_bytes + index_bytes + (2U * parent_bytes));
+    uint16_t *parent = (uint16_t *)(storage + rest_bytes + id_bytes);
+    uint16_t *subtree_end = (uint16_t *)(storage + rest_bytes + id_bytes + parent_bytes);
+    uint16_t *palette_joint = (uint16_t *)(storage + rest_bytes + id_bytes + (2U * parent_bytes));
     // #endregion
 
     // #region preorder and rest pose
@@ -340,26 +317,26 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_sel
 
     for (uint32_t j = 0; j < joint_count; j++) {
         const uint32_t node = node_index[j];
-        const nt_glb_node_t *gn = &scene->nodes[node];
-        if (gn->name == NULL || gn->name[0] == '\0') {
+        const cgltf_node *cn = &data->nodes[node];
+        if (cn->name == NULL || cn->name[0] == '\0') {
             NT_LOG_ERROR("import_rig: rig node[%u] has no name, and a joint id is the hash of its name", node);
             NT_BUILD_ASSERT(0 && "rig node has no name");
         }
-        joint_id[j] = nt_hash32_str(gn->name).value;
-        if (gn->has_matrix) {
-            nt_builder_decompose_trs(data->nodes[node].matrix, gn->name, &rest[j]);
+        joint_id[j] = nt_hash32_str(cn->name).value;
+        if (cn->has_matrix) {
+            nt_builder_decompose_trs(cn->matrix, cn->name, &rest[j]);
         } else {
-            memcpy(rest[j].t, gn->local_t, sizeof(rest[j].t));
-            memcpy(rest[j].q, gn->local_q, sizeof(rest[j].q));
-            memcpy(rest[j].s, gn->local_s, sizeof(rest[j].s));
+            memcpy(rest[j].t, cn->translation, sizeof(rest[j].t));
+            memcpy(rest[j].q, cn->rotation, sizeof(rest[j].q));
+            memcpy(rest[j].s, cn->scale, sizeof(rest[j].s));
         }
         /* The encoder asserts the same two rules; here they name the node. */
         if (!nt_builder_finite_n(rest[j].t, 3) || !nt_builder_finite_n(rest[j].s, 3)) {
-            NT_LOG_ERROR("import_rig: node %s has a non-finite rest translation or scale", gn->name);
+            NT_LOG_ERROR("import_rig: node %s has a non-finite rest translation or scale", cn->name);
             NT_BUILD_ASSERT(0 && "rest translation or scale is not finite");
         }
         if (!nt_builder_unit_quat(rest[j].q)) {
-            NT_LOG_ERROR("import_rig: node %s rest rotation (%g, %g, %g, %g) is not a unit quaternion", gn->name, (double)rest[j].q[0], (double)rest[j].q[1], (double)rest[j].q[2],
+            NT_LOG_ERROR("import_rig: node %s rest rotation (%g, %g, %g, %g) is not a unit quaternion", cn->name, (double)rest[j].q[0], (double)rest[j].q[1], (double)rest[j].q[2],
                          (double)rest[j].q[3]);
             NT_BUILD_ASSERT(0 && "rest rotation is not a unit quaternion");
         }
@@ -378,7 +355,7 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_sel
             if (slots[i].id == slots[i - 1U].id) {
                 const uint32_t a = slots[i - 1U].joint;
                 const uint32_t b = slots[i].joint;
-                NT_LOG_ERROR("import_rig: rig nodes \"%s\" (node[%u]) and \"%s\" (node[%u]) share joint id 0x%08X", scene->nodes[node_index[a]].name, node_index[a], scene->nodes[node_index[b]].name,
+                NT_LOG_ERROR("import_rig: rig nodes \"%s\" (node[%u]) and \"%s\" (node[%u]) share joint id 0x%08X", data->nodes[node_index[a]].name, node_index[a], data->nodes[node_index[b]].name,
                              node_index[b], slots[i].id);
                 free(slots);
                 NT_BUILD_ASSERT(0 && "two rig nodes share one joint id");
@@ -408,17 +385,16 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, const nt_builder_rig_sel
         out->skeleton.rig_compat_id = nt_skeletal_rig_compat_id(&out->skeleton, scratch, scratch_size);
         free(scratch);
     }
-    out->node_index = node_index;
     out->palette_joint = palette_joint;
-    out->skin_index = sel->skin_index;
-    out->object_node = sel->object_node;
+    out->skin_index = skin_index;
     out->palette_count = (uint16_t)palette_count;
     out->storage = storage;
 
+    free(node_index);
     free(joint_of);
     free(mark);
 
-    NT_LOG_INFO("Imported rig from skin[%u]: %u joints, %u palette entries, rig 0x%016llX", sel->skin_index, joint_count, palette_count, (unsigned long long)out->skeleton.rig_compat_id.value);
+    NT_LOG_INFO("Imported rig from skin[%u]: %u joints, %u palette entries, rig 0x%016llX", skin_index, joint_count, palette_count, (unsigned long long)out->skeleton.rig_compat_id.value);
 }
 
 void nt_builder_free_rig(nt_builder_rig_t *rig) {
@@ -431,28 +407,14 @@ void nt_builder_free_rig(nt_builder_rig_t *rig) {
 // #endregion
 
 // #region skinned mesh
-nt_builder_skeletal_profile_t nt_builder_skeletal_profile_defaults(void) {
-    return (nt_builder_skeletal_profile_t){
-        .sample_fps = 30.0F,
-        .max_sample_fps = 120.0F,
-        .nlerp_tolerance = 0.002F,
-        .sample_tolerance = 0.001F,
-        .bake_rates = {15.0F, 30.0F, 60.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F},
-        .bake_rate_count = 3,
-        .bake_tolerance = 0.01F,
-        .bake_reach = 0.0F,
-        .skin_drop_tolerance = 0.02F,
-    };
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
-void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const nt_builder_rig_t *rig,
-                                       const nt_builder_skeletal_profile_t *profile, const char *resource_id, const nt_mesh_opts_t *opts) {
-    NT_BUILD_ASSERT(ctx && scene && rig && profile && resource_id && opts && opts->layout && "invalid scene_skinned_mesh args");
+void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const nt_builder_rig_t *rig, float skin_drop_tolerance,
+                                       const char *resource_id, const nt_mesh_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && scene && rig && resource_id && opts && opts->layout && "invalid scene_skinned_mesh args");
     NT_BUILD_ASSERT(mesh_index < scene->mesh_count && "mesh_index out of range");
     NT_BUILD_ASSERT(primitive_index < scene->meshes[mesh_index].primitive_count && "primitive_index out of range");
     NT_BUILD_ASSERT(rig->palette_count >= 1 && "rig has no palette entries");
-    NT_BUILD_ASSERT(profile->skin_drop_tolerance >= 0.0F && profile->skin_drop_tolerance <= 1.0F && "skin_drop_tolerance must lie in [0, 1]");
+    NT_BUILD_ASSERT(skin_drop_tolerance >= 0.0F && skin_drop_tolerance <= 1.0F && "skin_drop_tolerance must lie in [0, 1]");
 
     /* The joint lanes address this rig's palette, so a mesh no node instantiates
      * with this skin would ship indices into someone else's joints. */
@@ -465,7 +427,7 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene
         NT_BUILD_ASSERT(0 && "mesh is not skinned by this rig's skin");
     }
 
-    const nt_builder_skin_ctx_t skin = {.palette_count = rig->palette_count, .drop_tolerance = profile->skin_drop_tolerance};
+    const nt_builder_skin_ctx_t skin = {.palette_count = rig->palette_count, .drop_tolerance = skin_drop_tolerance};
     uint8_t *mesh_data = NULL;
     uint32_t mesh_size = 0;
     const nt_build_result_t r = nt_builder_decode_scene_mesh_skinned(scene, mesh_index, primitive_index, opts->layout, opts->stream_count, opts->tangent_mode, &skin, &mesh_data, &mesh_size);
@@ -620,15 +582,14 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_glb_scene
     NT_BUILD_ASSERT(ctx && scene && rig && resource_id && "invalid scene_skin_binding args");
     const cgltf_data *data = (const cgltf_data *)scene->_internal;
     NT_BUILD_ASSERT(data != NULL && "add_scene_skin_binding: the scene holds no parsed glTF");
-    NT_BUILD_ASSERT(rig->skin_index < scene->skin_count && "rig skin index out of range");
+    NT_BUILD_ASSERT(rig->skin_index < (uint32_t)data->skins_count && "rig skin index out of range");
     const uint32_t palette_count = rig->palette_count;
     NT_BUILD_ASSERT(palette_count >= 1 && "rig has no palette entries");
     const cgltf_skin *skin = &data->skins[rig->skin_index];
     NT_BUILD_ASSERT((uint32_t)skin->joints_count == palette_count && "the rig's palette does not match its skin");
 
     nt_skeletal_mat34_t *inverse_bind = (nt_skeletal_mat34_t *)calloc(palette_count, sizeof(nt_skeletal_mat34_t));
-    uint16_t *remap = (uint16_t *)calloc(palette_count, sizeof(uint16_t));
-    NT_BUILD_ASSERT(inverse_bind && remap && "add_scene_skin_binding: alloc failed (OOM)");
+    NT_BUILD_ASSERT(inverse_bind && "add_scene_skin_binding: alloc failed (OOM)");
 
     // #region inverse binds
     const cgltf_accessor *ibm = skin->inverse_bind_matrices;
@@ -674,24 +635,18 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_glb_scene
     }
     // #endregion
 
-    for (uint32_t p = 0; p < palette_count; p++) {
-        remap[p] = rig->palette_joint[p];
-        NT_BUILD_ASSERT(remap[p] < rig->skeleton.joint_count && "palette entry addresses a joint outside the rig");
-    }
-
     const double reach = rig_skin_reach(scene, data, rig, inverse_bind);
     const nt_skin_binding_t binding = {
         .rig_compat_id = rig->skeleton.rig_compat_id,
-        .remap = remap,
+        .remap = rig->palette_joint,
         .inverse_bind = inverse_bind,
         .reach = rig_round_up(reach),
-        .any_pose_radius = rig_round_up(rig_any_pose_radius(&rig->skeleton, remap, (uint16_t)palette_count, reach)),
+        .any_pose_radius = rig_round_up(rig_any_pose_radius(&rig->skeleton, rig->palette_joint, (uint16_t)palette_count, reach)),
         .palette_count = (uint16_t)palette_count,
     };
     nt_builder_add_skin_binding(ctx, &binding, resource_id);
 
     NT_LOG_INFO("Imported skin binding from skin[%u]: %u palette entries, reach %g, any-pose radius %g", rig->skin_index, palette_count, (double)binding.reach, (double)binding.any_pose_radius);
     free(inverse_bind);
-    free(remap);
 }
 // #endregion

@@ -36,9 +36,8 @@ static bool add_rig_skeleton(NtBuilderContext *ctx, const char *glb_path, const 
         (void)fprintf(stderr, "Failed to parse %s\n", glb_path);
         return false;
     }
-    const nt_builder_rig_selection_t sel = {.skin_index = 0, .skeleton_root = UINT32_MAX, .object_node = UINT32_MAX};
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, &sel, &rig);
+    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
     NT_BUILD_ASSERT(rig.skeleton.joint_count <= 32U && "skeletal_showcase: rig exceeds MAX_JOINTS of main.c");
     (void)nt_builder_add_skeleton(ctx, &rig.skeleton, resource_id);
     nt_builder_free_rig(&rig);
