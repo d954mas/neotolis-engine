@@ -135,11 +135,9 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
         out->q[c] = (float)q[c];
     }
 
-    /* The decomposition is the rest pose only if it rebuilds the matrix the
-     * artist authored; anything else is shear the runtime cannot represent.
-     * The budget scales with each column: float rounding of an element is a
-     * fraction of its column's length, so a 0.01-scale wrapper gets no more
-     * absolute slack than a unit one. */
+    /* Anything the recompose does not rebuild is shear the runtime cannot
+     * represent. The budget follows each column: float rounding is a fraction
+     * of the column length, so a 0.01-scale wrapper gets no extra absolute slack. */
     nt_skeletal_mat34_t re;
     nt_skeletal_mat34_from_trs(out, &re);
     for (int row = 0; row < 3; row++) {
@@ -170,7 +168,7 @@ typedef struct {
 /* Preorder over the marked nodes, children in glTF order, so each subtree is
  * the contiguous range [j, subtree_end[j]) the skeleton format requires. The
  * recursion is as deep as the joint chain, so the chain is capped well below
- * the native stack; no rig comes near it. */
+ * the native stack. */
 #define RIG_MAX_DEPTH 256U
 
 // NOLINTNEXTLINE(misc-no-recursion) -- the walk follows the node hierarchy, which cgltf_validate proved acyclic
@@ -248,7 +246,10 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
         NT_BUILD_ASSERT(0 && "skin has no joints");
     }
     const uint32_t palette_count = (uint32_t)skin->joints_count;
-    NT_BUILD_ASSERT(palette_count >= 1 && palette_count <= UINT16_MAX && "skin palette size outside [1, 65535]");
+    if (palette_count > UINT16_MAX) {
+        NT_LOG_ERROR("import_rig: skin[%u] lists %u joints, the palette index is a u16", skin_index, palette_count);
+        NT_BUILD_ASSERT(0 && "skin palette exceeds the u16 palette index");
+    }
     const uint32_t node_count = scene->node_count;
     NT_BUILD_ASSERT((skeleton_root == UINT32_MAX || skeleton_root < node_count) && "skeleton_root out of range");
 
@@ -309,7 +310,7 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
     uint16_t *palette_joint = (uint16_t *)(storage + rest_bytes + id_bytes + (2U * parent_bytes));
     // #endregion
 
-    // #region preorder and rest pose
+    // #region preorder, rest pose and ids
     rig_walk_t walk = {
         .data = data,
         .mark = mark,
@@ -475,7 +476,7 @@ static double rig_bound_distance(const nt_skeletal_mat34_t *ib, const float v[3]
 /* Over every primitive of every node this skin deforms, every vertex and every
  * source influence with a non-zero weight -- all sets, unreduced: the top-four
  * reduction is a property of one exported mesh, the binding is shared. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- four nested ranges plus NT_BUILD_ASSERT expansions
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- five nested ranges plus NT_BUILD_ASSERT expansions
 static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data, const nt_builder_rig_t *rig, const nt_skeletal_mat34_t *inverse_bind) {
     double reach = 0.0;
     bool scanned = false;

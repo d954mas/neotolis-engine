@@ -662,9 +662,9 @@ void test_encode_skin_binding_asserts_on_a_non_finite_matrix(void) {
     TEST_ASSERT_NULL(payload);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 /* Both radii bound a culling sphere, so a NaN or a negative one would hide the
  * character instead of drawing it. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_encode_skin_binding_asserts_on_broken_radii(void) {
     uint8_t *payload = NULL;
     uint32_t size = 0;

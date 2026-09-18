@@ -581,10 +581,9 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_r
  * rig, and the two bounds of the spec: reach in joint space, any_pose_radius
  * in skeleton space. reach is measured over every vertex of every primitive
  * the skin deforms and every source influence, before the top-four reduction,
- * so it bounds every mesh the game can export from the skin; a lossy POSITION
- * or WEIGHTS layout moves a stored vertex by at most 2^-10 relative past it
- * (skeletal spec 3.4), which the consumer allows for. any_pose_radius follows
- * from it and the rig's rest hierarchy. */
+ * so it bounds every mesh the game can export from the skin up to the slack a
+ * lossy POSITION or WEIGHTS layout adds (skeletal spec 3.4), which the consumer
+ * pads for. any_pose_radius follows from it and the rig's rest hierarchy. */
 void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_rig_t *rig, const char *resource_id);
 
 /* Computes rig_compat_id from the joints it writes and returns it, so the

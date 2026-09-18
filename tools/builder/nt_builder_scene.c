@@ -262,8 +262,8 @@ void nt_builder_read_influences(const struct cgltf_primitive *prim, const char *
         }
         /* cgltf_validate already holds every attribute to the primitive's count. */
         NT_BUILD_ASSERT(ja->count == (cgltf_size)vertex_count && wa->count == (cgltf_size)vertex_count && "influence accessor covers a different vertex count");
-        /* cgltf_accessor_read_uint returns 0 on a FLOAT accessor, so the joint
-         * component type is checked before anything reads it. */
+        /* A FLOAT or normalized joint lane would unpack to a fraction, not a
+         * palette index, so the type is checked before the read. */
         if (ja->type != cgltf_type_vec4 || (ja->component_type != cgltf_component_type_r_8u && ja->component_type != cgltf_component_type_r_16u) || ja->normalized) {
             NT_LOG_ERROR("%s: JOINTS_%u must be VEC4 UNSIGNED_BYTE or UNSIGNED_SHORT and not normalized", label, n);
             NT_BUILD_ASSERT(0 && "JOINTS accessor has an invalid type");
@@ -523,7 +523,7 @@ nt_build_result_t nt_builder_decode_scene_mesh_skinned(const nt_glb_scene_t *sce
 
     bool weights_uint8 = false;
     if (has_skin_streams) {
-        /* D3: the NtStreamLayout of the two streams is the only authority on how
+        /* The NtStreamLayout of the two streams is the only authority on how
          * the lanes are stored, so the whole rule set is checked here. */
         const NtStreamLayout *jl = &layout[joints_stream_idx];
         const NtStreamLayout *wl = &layout[weights_stream_idx];

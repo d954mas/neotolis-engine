@@ -51,11 +51,10 @@
  * Mesh 0 is one indexed quad, 4 vertices, indices {0, 1, 2, 0, 2, 3}, with
  * POSITION / JOINTS_0 / JOINTS_1 / WEIGHTS_0 / WEIGHTS_1. JOINTS are
  * UNSIGNED_BYTE VEC4 (not normalized) holding palette indices, WEIGHTS are
- * FLOAT VEC4. The weights below are written with nine significant digits, so
- * the binary32 the parse reads back is the binary32 written here; their
- * decimal sums are 1 but the binary32 sums are not exact, and the drop gate
- * divides by the source total rather than assuming 1. Later tests assert on
- * these numbers:
+ * FLOAT VEC4. The weights are raw binary32 in the BIN chunk; their decimal
+ * sums are 1 but the binary32 sums are not exact, and the drop gate divides by
+ * the source total rather than assuming 1. Later tests assert on these
+ * numbers:
  *
  *   v0  five influences, dropped mass 0.01 (below the 0.02 default tolerance)
  *       JOINTS_0 (0, 1, 2, 3)  WEIGHTS_0 (0.40, 0.30, 0.20, 0.09)

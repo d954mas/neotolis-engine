@@ -591,8 +591,9 @@ static void skin_expected_weights(uint32_t vertex, float out[4]) {
  *
  *   v0  103.03 77.27 51.52 23.18 -> floors sum 254, +1 to lane 2
  *   v1  113.33 85.00 28.33 28.33 -> floors sum 254; lanes 0, 2, 3 tie at a
- *       third, and lane 0's binary32 quotient 0.4/0.9 is the larger by one
- *       ulp, so it takes the +1
+ *       third in exact arithmetic; every binary32 quotient rounds up by the
+ *       same relative amount, so lane 0's excess is the largest once scaled
+ *       by 255 and it takes the +1
  *   v2  107.37 80.53 40.26 26.84 -> floors sum 253, +1 to lane 3, then lane 1
  *   v3  191.25 63.75  0     0    -> floors sum 254, +1 to lane 1 */
 static const uint8_t k_kept_u8[RIGGED_GLB_VERTEX_COUNT][4] = {{103, 77, 52, 23}, {114, 85, 28, 28}, {107, 81, 40, 27}, {191, 64, 0, 0}};

@@ -210,7 +210,7 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     // #region section table
     /* Without indices the primitive draws its vertices directly, and four of
      * them are not a whole number of triangles, so that variant keeps the first
-     * three: the two vertices the skin tests read stay v0 and v1. */
+     * three, so the lanes the test checks are still v0..v2. */
     const uint32_t vertex_count = o.no_indices ? 3U : RIGGED_GLB_VERTEX_COUNT;
 
     rigged_sec_t sec[SEC_COUNT];
