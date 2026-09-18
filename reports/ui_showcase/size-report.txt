@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: bb381da
+# Commit: c296e7c
 
 ## WASM Section Sizes
 
@@ -104,7 +104,7 @@ libnt_render.a              7674 B
 libnt_resource.a          215122 B
 libnt_shape_renderer.a   1144652 B
 libnt_skeletal.a            8136 B
-libnt_skeletal_assets.a    10962 B
+libnt_skeletal_assets.a    10992 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8864 B
 libnt_sprite_renderer.a    49806 B
@@ -119,7 +119,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4222936 B
+TOTAL (archives)         4222966 B
 
 ## Data Segments Summary
 

@@ -1,5 +1,5 @@
 # Size Report: skeletal_showcase (wasm-analysis-paired)
-# Commit: bb381da
+# Commit: c296e7c
 
 ## WASM Section Sizes
 
@@ -7,55 +7,55 @@ Section                Size
 ---------------- ----------
 Type                 349 B
 Import               605 B
-Function             221 B
+Function             225 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
-Elem                  53 B
-Code              259574 B
-Data               16654 B
-Custom              7420 B
+Elem                  57 B
+Code              263161 B
+Data               17276 B
+Custom              7566 B
 ---------------- ----------
-TOTAL             284986 B
+TOTAL             289349 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-62929 B   frame
+63854 B   frame
 18275 B   dispatch_command
-11406 B   main
-11051 B   nt_shape_renderer_init
+11565 B   main
+11052 B   nt_shape_renderer_init
  8796 B   Clay__ConfigureOpenElementPtr
  7737 B   nt_font_lookup_glyph_offset
  6666 B   nt_ui_combo_begin
  6038 B   Clay__SizeContainersAlongAxis
  5986 B   nt_ui_slider_float
  5873 B   nt_ui_scroll_begin
- 5616 B   Clay__InitializeEphemeralMemory
+ 5643 B   Clay__InitializeEphemeralMemory
  3992 B   Clay__MeasureTextCached
  3353 B   Clay__CloseElement
- 3309 B   nt_sprite_renderer_set_material
+ 3310 B   nt_sprite_renderer_set_material
  3096 B   nt_ui_label
  3007 B   fmt_fp
  2629 B   scrollbar_emit_axis
  2605 B   nt_http_request
- 2428 B   printf_core
- 2367 B   atlas_on_resolve
+ 2429 B   printf_core
+ 2368 B   atlas_on_resolve
  1989 B   nt_ui_button_begin
+ 1908 B   skeleton_enter
  1906 B   nt_sprite_renderer_emit_region
- 1887 B   Clay__InitializePersistentMemory
+ 1896 B   Clay__InitializePersistentMemory
  1859 B   emit_text
  1850 B   __rem_pio2f
  1747 B   nt_hash64
  1746 B   nt_sprite_renderer_emit_geometry
  1724 B   nt_gfx_make_program
  1722 B   nt_ui_combo_selectable
- 1551 B   nt_shape_renderer_flush
 
-Total functions: 219
-Total code size: 259200 B
+Total functions: 223
+Total code size: 262782 B
 
 ## Built Engine Archives
 
@@ -104,7 +104,7 @@ libnt_render.a              7674 B
 libnt_resource.a          215122 B
 libnt_shape_renderer.a   1144652 B
 libnt_skeletal.a            8136 B
-libnt_skeletal_assets.a    10962 B
+libnt_skeletal_assets.a    10992 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8864 B
 libnt_sprite_renderer.a    49806 B
@@ -119,9 +119,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4222936 B
+TOTAL (archives)         4222966 B
 
 ## Data Segments Summary
 
 Segments: 61
-Total data size: 16221 B
+Total data size: 16843 B

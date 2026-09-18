@@ -1,15 +1,86 @@
-[{
-  "commit": "bb381da",
-  "date": "2026-09-17T11:34:16Z",
-  "files": {
-    "index.html": { "raw": 2561, "gzip": 1286 },
-    "index_simd.wasm": { "raw": 283123, "gzip": 112692 },
-    "index.wasm": { "raw": 277604, "gzip": 114593 },
-    "index_simd.js": { "raw": 19888, "gzip": 8018 },
-    "index.js": { "raw": 19888, "gzip": 8013 },
-    "assets/skeletal_showcase.ntpack": { "raw": 149308, "gzip": 11059 }
+[
+  {
+    "commit": "bb381da",
+    "date": "2026-09-17T11:34:16Z",
+    "files": {
+      "index.html": {
+        "raw": 2561,
+        "gzip": 1286
+      },
+      "index_simd.wasm": {
+        "raw": 283123,
+        "gzip": 112692
+      },
+      "index.wasm": {
+        "raw": 277604,
+        "gzip": 114593
+      },
+      "index_simd.js": {
+        "raw": 19888,
+        "gzip": 8018
+      },
+      "index.js": {
+        "raw": 19888,
+        "gzip": 8013
+      },
+      "assets/skeletal_showcase.ntpack": {
+        "raw": 149308,
+        "gzip": 11059
+      }
+    },
+    "engine": {
+      "raw": 305572,
+      "gzip": 121996
+    },
+    "resources": {
+      "raw": 149308,
+      "gzip": 11059
+    },
+    "total": {
+      "raw": 454880,
+      "gzip": 133055
+    }
   },
-  "engine": { "raw": 305572, "gzip": 121996 },
-  "resources": { "raw": 149308, "gzip": 11059 },
-  "total": { "raw": 454880, "gzip": 133055 }
-}]
+  {
+    "commit": "c296e7c",
+    "date": "2026-09-18T16:06:27Z",
+    "files": {
+      "index.html": {
+        "raw": 2561,
+        "gzip": 1286
+      },
+      "index_simd.wasm": {
+        "raw": 286566,
+        "gzip": 115062
+      },
+      "index.wasm": {
+        "raw": 281821,
+        "gzip": 115391
+      },
+      "index_simd.js": {
+        "raw": 19888,
+        "gzip": 8018
+      },
+      "index.js": {
+        "raw": 19888,
+        "gzip": 8013
+      },
+      "assets/skeletal_showcase.ntpack": {
+        "raw": 151596,
+        "gzip": 12365
+      }
+    },
+    "engine": {
+      "raw": 309015,
+      "gzip": 124366
+    },
+    "resources": {
+      "raw": 151596,
+      "gzip": 12365
+    },
+    "total": {
+      "raw": 460611,
+      "gzip": 136731
+    }
+  }
+]
