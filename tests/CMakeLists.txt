@@ -921,13 +921,12 @@ if(NOT EMSCRIPTEN)
     # ~10k lines and these tests need no atlas/glTF fixtures.
     add_executable(test_builder_skeletal unit/test_builder_skeletal.c)
     target_link_libraries(test_builder_skeletal PRIVATE nt_builder nt_log unity nt_meshwire)
+    target_include_directories(test_builder_skeletal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_builder_skeletal PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder_skeletal WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-    # Rig import from glTF: node graph, skins, animations, skinned mesh and
-    # binding paths, over the hand-written rigged .glb fixture and the two
-    # Khronos sample assets. Death tests scope their abandoned allocations with
-    # __lsan_disable inside the test, so LSan stays on for the happy paths.
+    # Rig import from glTF: node graph, rig, skinned mesh and binding paths, over
+    # the hand-written rigged .glb fixture and the two Khronos sample assets.
     add_executable(test_builder_rig unit/test_builder_rig.c unit/test_helpers/rigged_glb.c)
     target_link_libraries(test_builder_rig PRIVATE nt_builder nt_log unity nt_meshwire)
     target_include_directories(test_builder_rig PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")

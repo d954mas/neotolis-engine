@@ -3,7 +3,6 @@
  * fails here and not only in the round-trip suite. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
-#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +18,7 @@
 #include "nt_builder_internal.h"
 #include "nt_pack_format.h"
 #include "nt_skeletal_format.h"
+#include "test_helpers/build_assert_trap.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -35,35 +35,6 @@
 
 void setUp(void) {}
 void tearDown(void) {}
-
-// #region build-assert trap
-/* Same shape as test_builder.c, without the context: the encoders own no
- * builder state and abort before they allocate, so nothing needs freeing. */
-static jmp_buf s_build_assert_jmp;
-static const char *s_build_assert_expr;
-
-static void test_build_assert_handler(const char *expr, const char *file, int line) {
-    s_build_assert_expr = expr;
-    (void)file;
-    (void)line;
-    longjmp(s_build_assert_jmp, 1);
-}
-
-/* Which rule fired is the claim: a death test that only sees "some assert"
- * passes on an unrelated precondition too. */
-#define EXPECT_BUILD_ASSERT_MATCH(code, expected)                                                                                                                                                      \
-    do {                                                                                                                                                                                               \
-        s_build_assert_expr = NULL;                                                                                                                                                                    \
-        nt_build_assert_handler = test_build_assert_handler;                                                                                                                                           \
-        if (setjmp(s_build_assert_jmp) == 0) {                                                                                                                                                         \
-            code;                                                                                                                                                                                      \
-            nt_build_assert_handler = NULL;                                                                                                                                                            \
-            TEST_FAIL_MESSAGE("expected NT_BUILD_ASSERT to fire: " expected);                                                                                                                          \
-        }                                                                                                                                                                                              \
-        nt_build_assert_handler = NULL;                                                                                                                                                                \
-        TEST_ASSERT_TRUE_MESSAGE(s_build_assert_expr &&strstr(s_build_assert_expr, (expected)), "a different NT_BUILD_ASSERT fired: " expected);                                                       \
-    } while (0)
-// #endregion
 
 // #region little-endian readers
 static uint16_t rd_u16(const uint8_t *p) { return (uint16_t)((uint16_t)p[0] | (uint16_t)((uint16_t)p[1] << 8)); }

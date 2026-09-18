@@ -12,16 +12,18 @@
  *   0  "Root"      matrix, pure rotation 90 deg about Y; the single scene root
  *   1  "Helper"    matrix, rotation 90 deg about Z * scale (2, 1, 0.5),
  *                  translation (0.25, -0.5, 1); child of Root
- *   2  "Joint0"    TRS, child of Helper, children Joint1 and Joint3
+ *   2  "Joint0"    TRS, child of Helper, children [Joint3, Joint1] in that order
  *   3  "Joint1"    TRS, child of Joint0, child Joint2
  *   4  "Joint2"    TRS, child of Joint1
  *   5  "Joint3"    TRS, child of Joint0, child Joint4
  *   6  "Joint4"    TRS, child of Joint3
  *   7  "MeshNode"  TRS (2, 0, -1) / 45 deg about Y / scale 1.5; child of Root,
  *                  instantiates mesh 0 with skin 0; not a joint
- *   8  "Object"    translation (0, 0, 5) only, so the parse's default rotation
- *                  and scale are what a reader sees; child of Root, outside
- *                  the rig
+ *   8  "Object"    translation (0, 0, 5) only; child of Root, outside the rig
+ *
+ * Joint0 lists Joint3 before Joint1, so the rig's preorder is not the node
+ * order: Root, Helper, Joint0, Joint3, Joint4, Joint1, Joint2. A walk that
+ * emitted marked nodes by index would differ from the rig at joint 3.
  *
  * Only Root and Helper carry a glTF "matrix"; every other node carries TRS.
  * Rest values of Joint0 and Joint1 are the published test vector of
@@ -47,13 +49,13 @@
  * palette index, which no import step can reproduce by accident.
  *
  * Mesh 0 is one indexed quad, 4 vertices, indices {0, 1, 2, 0, 2, 3}, with
- * POSITION / NORMAL / TEXCOORD_0 / JOINTS_0 / JOINTS_1 / WEIGHTS_0 / WEIGHTS_1.
- * JOINTS are UNSIGNED_BYTE VEC4 (not normalized) holding palette indices,
- * WEIGHTS are FLOAT VEC4. The weights below are written with nine significant
- * digits, so the binary32 the parse reads back is the binary32 written here;
- * their decimal sums are 1 but the binary32 sums are not exact, and the drop
- * gate divides by the source total rather than assuming 1. Later tests assert
- * on these numbers:
+ * POSITION / JOINTS_0 / JOINTS_1 / WEIGHTS_0 / WEIGHTS_1. JOINTS are
+ * UNSIGNED_BYTE VEC4 (not normalized) holding palette indices, WEIGHTS are
+ * FLOAT VEC4. The weights below are written with nine significant digits, so
+ * the binary32 the parse reads back is the binary32 written here; their
+ * decimal sums are 1 but the binary32 sums are not exact, and the drop gate
+ * divides by the source total rather than assuming 1. Later tests assert on
+ * these numbers:
  *
  *   v0  five influences, dropped mass 0.01 (below the 0.02 default tolerance)
  *       JOINTS_0 (0, 1, 2, 3)  WEIGHTS_0 (0.40, 0.30, 0.20, 0.09)
@@ -64,8 +66,8 @@
  *       JOINTS_1 (4, 0, 0, 0)  WEIGHTS_1 (0.10, 0, 0, 0)
  *       top 4 = joints 1, 0 and the two lowest tied indices 2 and 3; joint 4 is
  *       dropped
- *   v2  five influences, dropped mass 0.05: a mid case between v0 and v1 that
- *       the tests' 0.15 fixture tolerance admits and the 0.02 default rejects
+ *   v2  five influences, dropped mass 0.05, admitted by the tests' 0.15
+ *       fixture tolerance
  *       JOINTS_0 (0, 1, 2, 3)  WEIGHTS_0 (0.40, 0.30, 0.15, 0.10)
  *       JOINTS_1 (4, 0, 0, 0)  WEIGHTS_1 (0.05, 0, 0, 0)
  *   v3  two influences; every per-vertex defect knob mutates this vertex
@@ -75,16 +77,7 @@
  * With second_primitive_far, mesh 0 gains a second non-indexed triangle whose
  * first vertex sits at (10, 0, 0) bound wholly to palette entry 0: through
  * inverse bind 0 that is (9, 0, -1), a distance of sqrt(82), farther than any
- * vertex of the quad (sqrt(30) for v0 through entry 4).
- *
- * Animations:
- *
- *   0 "Walk" duration 0.5, keys at 0, 0.25, 0.5
- *       Joint1 rotation LINEAR, Joint2 translation STEP,
- *       Joint3 scale CUBICSPLINE (9 output elements), Object translation LINEAR
- *   1 "Idle" duration 1.5, keys at 0 and 1.5, one constant translation channel
- *       on Joint0
- */
+ * vertex of the quad (sqrt(30) for v0 through entry 4). */
 
 #define RIGGED_GLB_NODE_ROOT 0
 #define RIGGED_GLB_NODE_HELPER 1
@@ -105,34 +98,37 @@
 /* Node behind palette entry p of skin 0, in the table order above. */
 #define RIGGED_GLB_PALETTE_NODES {RIGGED_GLB_NODE_JOINT2, RIGGED_GLB_NODE_JOINT4, RIGGED_GLB_NODE_JOINT0, RIGGED_GLB_NODE_JOINT1, RIGGED_GLB_NODE_JOINT3}
 
-#define RIGGED_GLB_WALK_DURATION 0.5F
-#define RIGGED_GLB_IDLE_DURATION 1.5F
-
 /* One defect per knob; all false writes the valid fixture. */
 typedef struct {
-    bool matrix_shear;         /* Helper's matrix gets a 1e-3 shear, so it is not TRS */
-    bool unnamed_node;         /* Helper loses its name */
-    bool cycle;                /* Helper moves under Joint4, closing a parent cycle */
-    bool joint_outside_root;   /* Object joins the skin, outside a cut at Helper */
-    bool multi_root;           /* Object becomes a second scene root and a skin joint */
-    bool negative_weight;      /* v3 weight 1 turns negative */
-    bool nan_weight;           /* v3 weight 1 turns NaN */
-    bool index_ge_palette;     /* v3 joint 1 addresses palette entry 5 */
-    bool unpaired_sets;        /* JOINTS_1 without WEIGHTS_1 */
-    bool nonconsecutive_sets;  /* the second pair is named JOINTS_2/WEIGHTS_2 */
-    bool duplicate_joint;      /* v3 weights joint 0 twice with non-zero weight */
-    bool zero_weights;         /* v3 weights sum to zero */
-    bool weights_half;         /* v3 weights become 0.5/0.5, a quantization tie */
-    bool joints_float_type;    /* JOINTS accessors become FLOAT */
-    bool weights_bad_type;     /* WEIGHTS_0 becomes UNSIGNED_BYTE without normalized */
-    bool morph_target;         /* the skinned primitive gains a morph target */
-    bool no_indices;           /* the primitive drops its index accessor and keeps v0..v2, one triangle */
-    bool second_primitive_far; /* mesh 0 gains the far triangle described above */
-    bool mesh_other_skin;      /* MeshNode uses a second skin; skin 0 has no mesh */
-    bool no_ibm;               /* skin 0 drops inverseBindMatrices */
-    bool ibm_short;            /* the inverseBindMatrices accessor covers one joint too few */
-    bool ibm_bad_type;         /* the inverseBindMatrices accessor is VEC4 FLOAT */
-    bool ibm_nan;              /* inverse bind matrix 0 holds one NaN element */
+    bool matrix_shear;           /* Helper's matrix gets a 1e-3 shear, so it is not TRS */
+    bool unnamed_node;           /* Helper loses its name */
+    bool empty_name;             /* Helper is named "" */
+    bool duplicate_name;         /* Joint4 is named "Joint3", so two rig nodes share one joint id */
+    bool bad_rotation;           /* Joint2's rotation is (0, 0, 0, 2), not a unit quaternion */
+    bool cycle;                  /* Helper moves under Joint4, closing a parent cycle */
+    bool joint_outside_root;     /* Object joins the skin, outside a cut at Helper */
+    bool multi_root;             /* Object becomes a second scene root and a skin joint */
+    bool negative_weight;        /* v3 weight 1 turns negative */
+    bool nan_weight;             /* v3 weight 1 turns NaN */
+    bool index_ge_palette;       /* v3 joint 1 addresses palette entry 5 */
+    bool zero_weight_lane_index; /* v3 joint 2, whose weight is 0, addresses palette entry 200 */
+    bool unpaired_sets;          /* JOINTS_1 without WEIGHTS_1 */
+    bool nonconsecutive_sets;    /* the second pair is named JOINTS_2/WEIGHTS_2 */
+    bool weights1_short;         /* the WEIGHTS_1 accessor covers one vertex too few */
+    bool duplicate_joint;        /* v3 weights joint 0 twice with non-zero weight */
+    bool zero_weights;           /* v3 weights sum to zero */
+    bool weights_half;           /* v3 weights become 0.5/0.5, a quantization tie */
+    bool joints_float_type;      /* JOINTS accessors become FLOAT */
+    bool weights_bad_type;       /* WEIGHTS_0 becomes UNSIGNED_BYTE without normalized */
+    bool morph_target;           /* the skinned primitive gains a morph target */
+    bool no_indices;             /* the primitive drops its index accessor and keeps v0..v2, one triangle */
+    bool second_primitive_far;   /* mesh 0 gains the far triangle described above */
+    bool mesh_other_skin;        /* MeshNode uses a second skin; skin 0 has no mesh */
+    bool no_ibm;                 /* skin 0 drops inverseBindMatrices */
+    bool ibm_short;              /* the inverseBindMatrices accessor covers one joint too few */
+    bool ibm_bad_type;           /* the inverseBindMatrices accessor is VEC4 FLOAT */
+    bool ibm_nan;                /* inverse bind matrix 0 holds one NaN element */
+    bool ibm_projective;         /* inverse bind matrix 0 has a bottom row other than (0, 0, 0, 1) */
 } rigged_glb_opts_t;
 
 /* opts may be NULL, which means every knob off. */

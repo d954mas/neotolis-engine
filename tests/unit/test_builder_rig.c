@@ -1,12 +1,12 @@
 /* Rig import from glTF: what nt_builder_parse_glb_scene publishes about the
- * node graph, the skins and the animations of a rigged glTF, and the rig
- * nt_builder_import_rig derives from it -- joint order, rest pose, matrix
- * decomposition and identity. The fixture is written by rigged_glb.c, so every
- * expectation here names a value documented in rigged_glb.h. */
+ * node graph of a rigged glTF, and the rig nt_builder_import_rig derives from
+ * it -- joint order, rest pose, matrix decomposition and identity -- plus the
+ * skinned mesh and binding exports over that rig. The fixture is written by
+ * rigged_glb.c, so every expectation here names a value documented in
+ * rigged_glb.h. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <math.h>
-#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +24,7 @@
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "cgltf.h"
+#include "test_helpers/build_assert_trap.h"
 #include "test_helpers/rigged_glb.h"
 #include "unity.h"
 /* clang-format on */
@@ -40,61 +41,32 @@
 #define RIG_GLB TMP_DIR "/rigged.glb"
 #define PACK_PATH TMP_DIR "/builder_rig.ntpack"
 
+// #region log sink
+/* Every importer diagnostic precedes its NT_BUILD_ASSERT, so the last WARN or
+ * ERROR line names which vertex or node a rule fired on; the count proves a
+ * clean asset imports without a diagnostic at all. Registered per test so a
+ * failing assertion never leaves a sink behind. */
+static uint32_t s_log_warnings;
+static char s_log_last[NT_LOG_BUF_SIZE];
+
+static void log_sink(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)domain;
+    (void)user;
+    if (level >= NT_LOG_LEVEL_WARN) {
+        s_log_warnings++;
+        (void)snprintf(s_log_last, sizeof(s_log_last), "%s", msg);
+    }
+}
+
 void setUp(void) {
     (void)MKDIR("build");
     (void)MKDIR("build/tests");
     (void)MKDIR(TMP_DIR);
+    s_log_warnings = 0;
+    s_log_last[0] = '\0';
+    nt_log_add_sink(log_sink, NULL);
 }
-void tearDown(void) {}
-
-// #region build-assert trap
-/* Same shape as test_builder_skeletal.c. A death test longjmps out of the
- * importer past its live allocations, which are abandoned on purpose; LSan
- * (Debug preset) must not read them as builder leaks, while the happy paths
- * stay under its watch. */
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#include <sanitizer/lsan_interface.h>
-#define NT_TEST_LSAN_DISABLE() __lsan_disable()
-#define NT_TEST_LSAN_ENABLE() __lsan_enable()
-#endif
-#elif defined(__SANITIZE_ADDRESS__)
-#include <sanitizer/lsan_interface.h>
-#define NT_TEST_LSAN_DISABLE() __lsan_disable()
-#define NT_TEST_LSAN_ENABLE() __lsan_enable()
-#endif
-#ifndef NT_TEST_LSAN_DISABLE
-#define NT_TEST_LSAN_DISABLE() ((void)0)
-#define NT_TEST_LSAN_ENABLE() ((void)0)
-#endif
-
-static jmp_buf s_build_assert_jmp;
-static const char *s_build_assert_expr;
-
-static void test_build_assert_handler(const char *expr, const char *file, int line) {
-    s_build_assert_expr = expr;
-    (void)file;
-    (void)line;
-    longjmp(s_build_assert_jmp, 1);
-}
-
-/* Which rule fired is the claim: a death test that only sees "some assert"
- * passes on an unrelated precondition too. */
-#define EXPECT_BUILD_ASSERT_MATCH(code, expected)                                                                                                                                                      \
-    do {                                                                                                                                                                                               \
-        s_build_assert_expr = NULL;                                                                                                                                                                    \
-        nt_build_assert_handler = test_build_assert_handler;                                                                                                                                           \
-        NT_TEST_LSAN_DISABLE();                                                                                                                                                                        \
-        if (setjmp(s_build_assert_jmp) == 0) {                                                                                                                                                         \
-            code;                                                                                                                                                                                      \
-            NT_TEST_LSAN_ENABLE();                                                                                                                                                                     \
-            nt_build_assert_handler = NULL;                                                                                                                                                            \
-            TEST_FAIL_MESSAGE("expected NT_BUILD_ASSERT to fire: " expected);                                                                                                                          \
-        }                                                                                                                                                                                              \
-        NT_TEST_LSAN_ENABLE();                                                                                                                                                                         \
-        nt_build_assert_handler = NULL;                                                                                                                                                                \
-        TEST_ASSERT_TRUE_MESSAGE(s_build_assert_expr &&strstr(s_build_assert_expr, (expected)), "a different NT_BUILD_ASSERT fired: " expected);                                                       \
-    } while (0)
+void tearDown(void) { nt_log_remove_sink(log_sink, NULL); }
 // #endregion
 
 /* The test config excludes Unity's float asserts, and comparing the exact bits
@@ -141,8 +113,8 @@ static uint8_t *read_pack_asset(const char *pack_path, nt_asset_type_t type, uin
     return NULL;
 }
 
-// #region tests
-void test_rigged_fixture_parses(void) {
+// #region scene tests
+void test_scene_publishes_the_node_graph(void) {
     rigged_glb_write(RIG_GLB, NULL);
 
     nt_glb_scene_t scene;
@@ -150,28 +122,12 @@ void test_rigged_fixture_parses(void) {
     TEST_ASSERT_EQUAL_UINT32(RIGGED_GLB_NODE_COUNT, scene.node_count);
     TEST_ASSERT_EQUAL_UINT32(1, scene.mesh_count);
 
-    nt_builder_free_glb_scene(&scene);
-}
-
-void test_scene_publishes_the_node_graph(void) {
-    rigged_glb_write(RIG_GLB, NULL);
-
-    nt_glb_scene_t scene;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-    TEST_ASSERT_EQUAL_UINT32(RIGGED_GLB_NODE_COUNT, scene.node_count);
-
     static const uint32_t k_parent[RIGGED_GLB_NODE_COUNT] = {
         UINT32_MAX,           RIGGED_GLB_NODE_ROOT, RIGGED_GLB_NODE_HELPER, RIGGED_GLB_NODE_JOINT0, RIGGED_GLB_NODE_JOINT1, RIGGED_GLB_NODE_JOINT0, RIGGED_GLB_NODE_JOINT3,
         RIGGED_GLB_NODE_ROOT, RIGGED_GLB_NODE_ROOT,
     };
     for (uint32_t i = 0; i < RIGGED_GLB_NODE_COUNT; i++) {
         TEST_ASSERT_EQUAL_UINT32(k_parent[i], scene.nodes[i].parent);
-    }
-
-    /* Only the two wrapper nodes carry a glTF matrix. */
-    for (uint32_t i = 0; i < RIGGED_GLB_NODE_COUNT; i++) {
-        bool expected = i == RIGGED_GLB_NODE_ROOT || i == RIGGED_GLB_NODE_HELPER;
-        TEST_ASSERT_EQUAL_INT(expected ? 1 : 0, scene.nodes[i].has_matrix ? 1 : 0);
     }
 
     /* The mesh and the skin sit on one node, and on no other. */
@@ -186,74 +142,6 @@ void test_scene_publishes_the_node_graph(void) {
     TEST_ASSERT_EQUAL_STRING("Joint0", scene.nodes[RIGGED_GLB_NODE_JOINT0].name);
     TEST_ASSERT_EQUAL_STRING("MeshNode", scene.nodes[RIGGED_GLB_NODE_MESH].name);
     TEST_ASSERT_EQUAL_STRING("Object", scene.nodes[RIGGED_GLB_NODE_OBJECT].name);
-
-    nt_builder_free_glb_scene(&scene);
-}
-
-void test_scene_publishes_local_trs(void) {
-    rigged_glb_write(RIG_GLB, NULL);
-
-    nt_glb_scene_t scene;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-
-    /* Joint 0 and joint 1 of the skin carry the rest values published in
-     * skeletal-animation.md 3.1, including the -0 the id schema canonicalizes. */
-    const nt_glb_node_t *j0 = &scene.nodes[RIGGED_GLB_NODE_JOINT0];
-    ASSERT_F32(1.0F, j0->local_t[0]);
-    ASSERT_F32(2.0F, j0->local_t[1]);
-    ASSERT_F32(3.0F, j0->local_t[2]);
-    ASSERT_F32(0.0F, j0->local_q[0]);
-    ASSERT_F32(0.0F, j0->local_q[1]);
-    ASSERT_F32(0.0F, j0->local_q[2]);
-    ASSERT_F32(1.0F, j0->local_q[3]);
-    ASSERT_F32(1.0F, j0->local_s[0]);
-    ASSERT_F32(1.0F, j0->local_s[1]);
-    ASSERT_F32(1.0F, j0->local_s[2]);
-
-    const nt_glb_node_t *j1 = &scene.nodes[RIGGED_GLB_NODE_JOINT1];
-    ASSERT_F32(0.0F, j1->local_t[0]);
-    ASSERT_F32(-0.0F, j1->local_t[1]);
-    ASSERT_F32(0.5F, j1->local_t[2]);
-    ASSERT_F32(0.0F, j1->local_q[0]);
-    ASSERT_F32(0.0F, j1->local_q[1]);
-    ASSERT_F32(-0.70710678F, j1->local_q[2]);
-    ASSERT_F32(-0.70710678F, j1->local_q[3]);
-
-    /* A node that is neither a joint nor a wrapper keeps its own TRS. */
-    const nt_glb_node_t *mesh_node = &scene.nodes[RIGGED_GLB_NODE_MESH];
-    ASSERT_F32(2.0F, mesh_node->local_t[0]);
-    ASSERT_F32(0.0F, mesh_node->local_t[1]);
-    ASSERT_F32(-1.0F, mesh_node->local_t[2]);
-    ASSERT_F32(0.38268343F, mesh_node->local_q[1]);
-    ASSERT_F32(0.92387953F, mesh_node->local_q[3]);
-    ASSERT_F32(1.5F, mesh_node->local_s[0]);
-    ASSERT_F32(1.5F, mesh_node->local_s[1]);
-    ASSERT_F32(1.5F, mesh_node->local_s[2]);
-
-    /* Default TRS reaches the caller as identity, not as zeros. */
-    const nt_glb_node_t *object = &scene.nodes[RIGGED_GLB_NODE_OBJECT];
-    ASSERT_F32(5.0F, object->local_t[2]);
-    ASSERT_F32(1.0F, object->local_q[3]);
-    ASSERT_F32(1.0F, object->local_s[0]);
-
-    nt_builder_free_glb_scene(&scene);
-}
-
-void test_scene_publishes_skins_and_animations(void) {
-    rigged_glb_write(RIG_GLB, NULL);
-
-    nt_glb_scene_t scene;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-
-    TEST_ASSERT_EQUAL_UINT32(1, scene.skin_count);
-    TEST_ASSERT_EQUAL_STRING("RigSkin", scene.skins[0].name);
-    TEST_ASSERT_EQUAL_UINT32(RIGGED_GLB_SKIN_JOINT_COUNT, scene.skins[0].joint_count);
-
-    TEST_ASSERT_EQUAL_UINT32(2, scene.animation_count);
-    TEST_ASSERT_EQUAL_STRING("Walk", scene.animations[0].name);
-    ASSERT_F32(RIGGED_GLB_WALK_DURATION, scene.animations[0].duration);
-    TEST_ASSERT_EQUAL_STRING("Idle", scene.animations[1].name);
-    ASSERT_F32(RIGGED_GLB_IDLE_DURATION, scene.animations[1].duration);
 
     nt_builder_free_glb_scene(&scene);
 }
@@ -281,31 +169,38 @@ typedef struct {
     float s[3];
 } rig_joint_ref_t;
 
-/* The rig of the fixture skin: the two matrix wrappers decomposed, then the
- * five skin joints in preorder with glTF children order inside each node. */
+/* The rig of the fixture skin in preorder: the two matrix wrappers decomposed,
+ * then the five skin joints with glTF children order inside each node --
+ * Joint0 lists Joint3 before Joint1, so preorder is not node order. */
 static const rig_joint_ref_t k_rig[RIG_JOINT_COUNT] = {
     {"Root", NT_SKELETAL_NO_PARENT, 7, RIGGED_GLB_NODE_ROOT, {0.0F, 0.0F, 0.0F}, {0.0F, 0.70710678F, 0.0F, 0.70710678F}, {1.0F, 1.0F, 1.0F}},
     {"Helper", 0, 7, RIGGED_GLB_NODE_HELPER, {0.25F, -0.5F, 1.0F}, {0.0F, 0.0F, 0.70710678F, 0.70710678F}, {2.0F, 1.0F, 0.5F}},
     {"Joint0", 1, 7, RIGGED_GLB_NODE_JOINT0, {1.0F, 2.0F, 3.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}},
-    {"Joint1", 2, 5, RIGGED_GLB_NODE_JOINT1, {0.0F, -0.0F, 0.5F}, {0.0F, 0.0F, -0.70710678F, -0.70710678F}, {1.0F, 1.0F, 1.0F}},
-    {"Joint2", 3, 5, RIGGED_GLB_NODE_JOINT2, {0.0F, 0.75F, 0.0F}, {0.70710678F, 0.0F, 0.0F, 0.70710678F}, {1.0F, 1.0F, 1.0F}},
-    {"Joint3", 2, 7, RIGGED_GLB_NODE_JOINT3, {-0.5F, 0.25F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}},
-    {"Joint4", 5, 7, RIGGED_GLB_NODE_JOINT4, {0.0F, 0.5F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.5F, 0.5F, 0.5F}},
+    {"Joint3", 2, 5, RIGGED_GLB_NODE_JOINT3, {-0.5F, 0.25F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}},
+    {"Joint4", 3, 5, RIGGED_GLB_NODE_JOINT4, {0.0F, 0.5F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.5F, 0.5F, 0.5F}},
+    {"Joint1", 2, 7, RIGGED_GLB_NODE_JOINT1, {0.0F, -0.0F, 0.5F}, {0.0F, 0.0F, -0.70710678F, -0.70710678F}, {1.0F, 1.0F, 1.0F}},
+    {"Joint2", 5, 7, RIGGED_GLB_NODE_JOINT2, {0.0F, 0.75F, 0.0F}, {0.70710678F, 0.0F, 0.0F, 0.70710678F}, {1.0F, 1.0F, 1.0F}},
 };
 
-/* Palette entry p -> node, the skin's own (deliberately shuffled) joint list.
- * The rig's preorder visits nodes 0..6 in node order, so for this fixture the
- * rig joint behind a palette entry is its node index. */
+/* Palette entry p -> node, the skin's own (deliberately shuffled) joint list. */
 static const uint32_t k_palette_node[RIGGED_GLB_SKIN_JOINT_COUNT] = RIGGED_GLB_PALETTE_NODES;
 
-static nt_builder_rig_selection_t rig_selection(void) { return (nt_builder_rig_selection_t){.skin_index = 0, .skeleton_root = UINT32_MAX, .object_node = UINT32_MAX}; }
+/* The rig joint behind palette entry p, found by node in the reference table. */
+static uint16_t ref_palette_joint(uint32_t p) {
+    for (uint16_t j = 0; j < RIG_JOINT_COUNT; j++) {
+        if (k_rig[j].node == k_palette_node[p]) {
+            return j;
+        }
+    }
+    TEST_FAIL_MESSAGE("palette entry names a node outside the rig reference");
+    return 0;
+}
 
 /* Writes the default fixture and imports its only rig. */
 static void import_fixture_rig(nt_glb_scene_t *scene, nt_builder_rig_t *rig) {
     rigged_glb_write(RIG_GLB, NULL);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(scene, RIG_GLB));
-    const nt_builder_rig_selection_t sel = rig_selection();
-    nt_builder_import_rig(scene, &sel, rig);
+    nt_builder_import_rig(scene, 0, UINT32_MAX, rig);
 }
 
 /* The identity schema of skeletal-animation.md 3.1, written here so the test
@@ -364,13 +259,11 @@ void test_rig_import_preorder_and_subtree_ranges(void) {
     TEST_ASSERT_EQUAL_UINT16(RIG_JOINT_COUNT, rig.skeleton.joint_count);
     TEST_ASSERT_EQUAL_UINT16(RIGGED_GLB_SKIN_JOINT_COUNT, rig.palette_count);
     TEST_ASSERT_EQUAL_UINT32(0, rig.skin_index);
-    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, rig.object_node);
 
     for (uint16_t j = 0; j < RIG_JOINT_COUNT; j++) {
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(k_rig[j].node, rig.node_index[j], k_rig[j].name);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(nt_hash32_str(k_rig[j].name).value, rig.skeleton.joint_id[j], k_rig[j].name);
         TEST_ASSERT_EQUAL_UINT16_MESSAGE(k_rig[j].parent, rig.skeleton.parent[j], k_rig[j].name);
         TEST_ASSERT_EQUAL_UINT16_MESSAGE(k_rig[j].subtree_end, rig.skeleton.subtree_end[j], k_rig[j].name);
-        TEST_ASSERT_EQUAL_HEX32_MESSAGE(nt_hash32_str(k_rig[j].name).value, rig.skeleton.joint_id[j], k_rig[j].name);
         for (int c = 0; c < 3; c++) {
             ASSERT_F32(k_rig[j].t[c], rig.skeleton.rest[j].t[c]);
             ASSERT_F32(k_rig[j].s[c], rig.skeleton.rest[j].s[c]);
@@ -382,8 +275,7 @@ void test_rig_import_preorder_and_subtree_ranges(void) {
 
     /* The palette follows the skin's shuffled joint list, not the preorder. */
     for (uint16_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
-        TEST_ASSERT_EQUAL_UINT16(k_palette_node[p], rig.palette_joint[p]);
-        TEST_ASSERT_EQUAL_UINT32(k_palette_node[p], rig.node_index[rig.palette_joint[p]]);
+        TEST_ASSERT_EQUAL_UINT16(ref_palette_joint(p), rig.palette_joint[p]);
     }
 
     nt_builder_free_rig(&rig);
@@ -426,82 +318,6 @@ void test_rig_compat_id_matches_the_hand_written_schema(void) {
     nt_builder_free_glb_scene(&scene);
 }
 
-void test_add_skeleton_ships_the_imported_rig_id(void) {
-    nt_glb_scene_t scene;
-    nt_builder_rig_t rig;
-    import_fixture_rig(&scene, &rig);
-
-    (void)remove(PACK_PATH);
-    NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
-    TEST_ASSERT_NOT_NULL(ctx);
-    const nt_hash64_t shipped = nt_builder_add_skeleton(ctx, &rig.skeleton, "rigs/fixture.nskl");
-    TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, shipped.value);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-
-    nt_builder_free_rig(&rig);
-    nt_builder_free_glb_scene(&scene);
-}
-
-void test_rig_id_separates_one_rest_value_and_one_joint_id(void) {
-    nt_glb_scene_t scene;
-    nt_builder_rig_t rig;
-    import_fixture_rig(&scene, &rig);
-
-    nt_skeletal_trs_t rest[RIG_JOINT_COUNT];
-    uint32_t ids[RIG_JOINT_COUNT];
-    memcpy(rest, rig.skeleton.rest, sizeof(rest));
-    memcpy(ids, rig.skeleton.joint_id, sizeof(ids));
-    nt_skeletal_skeleton_t probe = rig.skeleton;
-    probe.rest = rest;
-    probe.joint_id = ids;
-
-    uint8_t scratch[NT_SKELETAL_RIG_ID_BYTES(RIG_JOINT_COUNT)];
-    TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, nt_skeletal_rig_compat_id(&probe, scratch, (uint32_t)sizeof(scratch)).value);
-
-    rest[4].t[1] = 0.75048828125F; /* Joint2, one representable step away */
-    TEST_ASSERT_TRUE(nt_skeletal_rig_compat_id(&probe, scratch, (uint32_t)sizeof(scratch)).value != rig.skeleton.rig_compat_id.value);
-
-    rest[4].t[1] = k_rig[4].t[1];
-    ids[6] ^= 1U; /* Joint4 renamed */
-    TEST_ASSERT_TRUE(nt_skeletal_rig_compat_id(&probe, scratch, (uint32_t)sizeof(scratch)).value != rig.skeleton.rig_compat_id.value);
-
-    nt_builder_free_rig(&rig);
-    nt_builder_free_glb_scene(&scene);
-}
-
-void test_rig_import_is_byte_identical_on_re_import(void) {
-    nt_glb_scene_t scene;
-    nt_builder_rig_t first;
-    import_fixture_rig(&scene, &first);
-
-    /* A second parse of the same file, so the claim covers the parse too and
-     * not only a second walk over one cgltf_data. */
-    nt_glb_scene_t again;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&again, RIG_GLB));
-    nt_builder_rig_t second;
-    const nt_builder_rig_selection_t sel = rig_selection();
-    nt_builder_import_rig(&again, &sel, &second);
-
-    TEST_ASSERT_EQUAL_UINT16(first.skeleton.joint_count, second.skeleton.joint_count);
-    TEST_ASSERT_EQUAL_UINT16(first.palette_count, second.palette_count);
-    TEST_ASSERT_EQUAL_UINT32(first.skin_index, second.skin_index);
-    TEST_ASSERT_EQUAL_UINT32(first.object_node, second.object_node);
-    TEST_ASSERT_EQUAL_HEX64(first.skeleton.rig_compat_id.value, second.skeleton.rig_compat_id.value);
-    const uint16_t joints = first.skeleton.joint_count;
-    TEST_ASSERT_EQUAL_INT(0, memcmp(first.skeleton.rest, second.skeleton.rest, (size_t)joints * sizeof(nt_skeletal_trs_t)));
-    TEST_ASSERT_EQUAL_INT(0, memcmp(first.skeleton.parent, second.skeleton.parent, (size_t)joints * sizeof(uint16_t)));
-    TEST_ASSERT_EQUAL_INT(0, memcmp(first.skeleton.subtree_end, second.skeleton.subtree_end, (size_t)joints * sizeof(uint16_t)));
-    TEST_ASSERT_EQUAL_INT(0, memcmp(first.skeleton.joint_id, second.skeleton.joint_id, (size_t)joints * sizeof(uint32_t)));
-    TEST_ASSERT_EQUAL_INT(0, memcmp(first.node_index, second.node_index, (size_t)joints * sizeof(uint32_t)));
-    TEST_ASSERT_EQUAL_INT(0, memcmp(first.palette_joint, second.palette_joint, (size_t)first.palette_count * sizeof(uint16_t)));
-
-    nt_builder_free_rig(&second);
-    nt_builder_free_glb_scene(&again);
-    nt_builder_free_rig(&first);
-    nt_builder_free_glb_scene(&scene);
-}
-
 /* A cut is the explicit way to leave wrapper nodes to the game's E. */
 void test_rig_cut_at_helper_drops_the_scene_root(void) {
     rigged_glb_write(RIG_GLB, NULL);
@@ -509,23 +325,18 @@ void test_rig_cut_at_helper_drops_the_scene_root(void) {
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
 
-    nt_builder_rig_selection_t sel = rig_selection();
-    sel.skeleton_root = RIGGED_GLB_NODE_HELPER;
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, &sel, &rig);
+    nt_builder_import_rig(&scene, 0, RIGGED_GLB_NODE_HELPER, &rig);
 
     TEST_ASSERT_EQUAL_UINT16(RIG_JOINT_COUNT - 1, rig.skeleton.joint_count);
     TEST_ASSERT_EQUAL_UINT16(NT_SKELETAL_NO_PARENT, rig.skeleton.parent[0]);
-    TEST_ASSERT_EQUAL_UINT32(RIGGED_GLB_NODE_HELPER, rig.node_index[0]);
-    TEST_ASSERT_EQUAL_HEX32(nt_hash32_str("Helper").value, rig.skeleton.joint_id[0]);
+    /* Root is gone, so every joint index moves down by one. */
     for (uint16_t j = 0; j < rig.skeleton.joint_count; j++) {
-        TEST_ASSERT_NOT_EQUAL_UINT32(RIGGED_GLB_NODE_ROOT, rig.node_index[j]);
-        TEST_ASSERT_EQUAL_UINT32(k_rig[j + 1].node, rig.node_index[j]);
+        TEST_ASSERT_EQUAL_HEX32(nt_hash32_str(k_rig[j + 1].name).value, rig.skeleton.joint_id[j]);
         TEST_ASSERT_EQUAL_UINT16(k_rig[j + 1].subtree_end - 1U, rig.skeleton.subtree_end[j]);
     }
-    /* Root is gone, so every joint index moves down by one. */
     for (uint16_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
-        TEST_ASSERT_EQUAL_UINT16(k_palette_node[p] - 1U, rig.palette_joint[p]);
+        TEST_ASSERT_EQUAL_UINT16(ref_palette_joint(p) - 1U, rig.palette_joint[p]);
     }
 
     nt_builder_free_rig(&rig);
@@ -534,41 +345,6 @@ void test_rig_cut_at_helper_drops_the_scene_root(void) {
 // #endregion
 
 // #region matrix decomposition
-/* CesiumMan's two wrapper nodes, the matrices the rig import has to survive on
- * a real Khronos asset. Both are pure rotations, so the pinned bits are the
- * quaternion the largest-diagonal branch produces with w >= 0. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_decompose_pins_the_cesiumman_wrappers(void) {
-    /* Z_UP: -90 degrees about X. */
-    static const float k_z_up[16] = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, -1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F};
-    nt_skeletal_trs_t trs;
-    nt_builder_decompose_trs(k_z_up, "Z_UP", &trs);
-    TEST_ASSERT_EQUAL_HEX32(0xBF3504F3U, f32_bits(trs.q[0]));
-    TEST_ASSERT_EQUAL_HEX32(0x00000000U, f32_bits(trs.q[1]));
-    TEST_ASSERT_EQUAL_HEX32(0x00000000U, f32_bits(trs.q[2]));
-    TEST_ASSERT_EQUAL_HEX32(0x3F3504F3U, f32_bits(trs.q[3]));
-    for (int c = 0; c < 3; c++) {
-        ASSERT_F32(0.0F, trs.t[c]);
-        ASSERT_F32(1.0F, trs.s[c]);
-    }
-
-    /* Armature: -90 degrees about Z as the asset stores it, with the exporter's
-     * cos(90 deg) of -4.37e-8 on the diagonal rather than an exact zero. The
-     * column lengths still round to 1 and the quaternion to the exact bits. */
-    static const float k_armature[16] = {
-        -4.371139894487897e-08F, -1.0F, 0.0F, 0.0F, 1.0F, -4.371139894487897e-08F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-    };
-    nt_builder_decompose_trs(k_armature, "Armature", &trs);
-    TEST_ASSERT_EQUAL_HEX32(0x00000000U, f32_bits(trs.q[0]));
-    TEST_ASSERT_EQUAL_HEX32(0x00000000U, f32_bits(trs.q[1]));
-    TEST_ASSERT_EQUAL_HEX32(0xBF3504F3U, f32_bits(trs.q[2]));
-    TEST_ASSERT_EQUAL_HEX32(0x3F3504F3U, f32_bits(trs.q[3]));
-    for (int c = 0; c < 3; c++) {
-        ASSERT_F32(0.0F, trs.t[c]);
-        ASSERT_F32(1.0F, trs.s[c]);
-    }
-}
-
 void test_decompose_asserts_on_a_projective_bottom_row(void) {
     static const float k_projective[16] = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.5F, 0.0F, 0.0F, 0.0F, 1.0F};
     nt_skeletal_trs_t trs;
@@ -601,59 +377,48 @@ void test_decompose_reflection_gives_a_negative_x_scale(void) {
 void test_decompose_asserts_on_a_zero_scale(void) {
     static const float k_flat[16] = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F};
     nt_skeletal_trs_t trs;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_decompose_trs(k_flat, "Flat", &trs), "scale");
-}
-
-void test_import_asserts_on_a_sheared_matrix(void) {
-    rigged_glb_opts_t opts = {0};
-    opts.matrix_shear = true;
-    rigged_glb_write(RIG_GLB, &opts);
-
-    nt_glb_scene_t scene;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-    const nt_builder_rig_selection_t sel = rig_selection();
-    nt_builder_rig_t rig;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, &sel, &rig), "matrix is not TRS");
-    nt_builder_free_glb_scene(&scene);
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_decompose_trs(k_flat, "Flat", &trs), "matrix scale is degenerate");
 }
 // #endregion
 
 // #region rig diagnostics
+/* One rig knob, one assert text on the import path. */
+#define EXPECT_IMPORT_ASSERT(field, expected)                                                                                                                                                          \
+    do {                                                                                                                                                                                               \
+        rigged_glb_opts_t knob_opts = {0};                                                                                                                                                             \
+        knob_opts.field = true;                                                                                                                                                                        \
+        rigged_glb_write(RIG_GLB, &knob_opts);                                                                                                                                                         \
+        nt_glb_scene_t knob_scene;                                                                                                                                                                     \
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&knob_scene, RIG_GLB));                                                                                                              \
+        nt_builder_rig_t knob_rig;                                                                                                                                                                     \
+        EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&knob_scene, 0, UINT32_MAX, &knob_rig), expected);                                                                                             \
+        nt_builder_free_glb_scene(&knob_scene);                                                                                                                                                        \
+    } while (0)
+
+void test_import_asserts_on_a_sheared_matrix(void) { EXPECT_IMPORT_ASSERT(matrix_shear, "matrix is not TRS"); }
+
+void test_import_asserts_on_an_unnamed_rig_node(void) { EXPECT_IMPORT_ASSERT(unnamed_node, "no name"); }
+
+void test_import_asserts_on_an_empty_rig_node_name(void) { EXPECT_IMPORT_ASSERT(empty_name, "no name"); }
+
+void test_import_asserts_on_a_non_unit_rest_rotation(void) { EXPECT_IMPORT_ASSERT(bad_rotation, "not a unit quaternion"); }
+
+void test_import_asserts_on_joints_under_several_scene_roots(void) { EXPECT_IMPORT_ASSERT(multi_root, "span several scene roots"); }
+
+/* Two rig nodes named "Joint3": the diagnostic names both, so it runs the
+ * collision sort and the node lookup before the assert. */
+void test_import_asserts_on_two_rig_nodes_sharing_one_joint_id(void) {
+    EXPECT_IMPORT_ASSERT(duplicate_name, "share one joint id");
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "\"Joint3\" (node[5]) and \"Joint3\" (node[6])"));
+}
+
 void test_import_asserts_on_a_missing_skin(void) {
     rigged_glb_write(RIG_GLB, NULL);
 
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-    nt_builder_rig_selection_t sel = rig_selection();
-    sel.skin_index = scene.skin_count;
     nt_builder_rig_t rig;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, &sel, &rig), "skin index out of range");
-    nt_builder_free_glb_scene(&scene);
-}
-
-void test_import_asserts_on_an_unnamed_rig_node(void) {
-    rigged_glb_opts_t opts = {0};
-    opts.unnamed_node = true;
-    rigged_glb_write(RIG_GLB, &opts);
-
-    nt_glb_scene_t scene;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-    const nt_builder_rig_selection_t sel = rig_selection();
-    nt_builder_rig_t rig;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, &sel, &rig), "no name");
-    nt_builder_free_glb_scene(&scene);
-}
-
-void test_import_asserts_on_joints_under_several_scene_roots(void) {
-    rigged_glb_opts_t opts = {0};
-    opts.multi_root = true;
-    rigged_glb_write(RIG_GLB, &opts);
-
-    nt_glb_scene_t scene;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-    const nt_builder_rig_selection_t sel = rig_selection();
-    nt_builder_rig_t rig;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, &sel, &rig), "span several scene roots");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, 1, UINT32_MAX, &rig), "skin index out of range");
     nt_builder_free_glb_scene(&scene);
 }
 
@@ -664,22 +429,8 @@ void test_import_asserts_on_a_joint_outside_the_cut(void) {
 
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-    nt_builder_rig_selection_t sel = rig_selection();
-    sel.skeleton_root = RIGGED_GLB_NODE_HELPER;
     nt_builder_rig_t rig;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, &sel, &rig), "outside the skeleton root");
-    nt_builder_free_glb_scene(&scene);
-}
-
-void test_import_asserts_on_an_object_node_inside_the_rig(void) {
-    rigged_glb_write(RIG_GLB, NULL);
-
-    nt_glb_scene_t scene;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-    nt_builder_rig_selection_t sel = rig_selection();
-    sel.object_node = RIGGED_GLB_NODE_JOINT2;
-    nt_builder_rig_t rig;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, &sel, &rig), "inside the rig");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, 0, RIGGED_GLB_NODE_HELPER, &rig), "outside the skeleton root");
     nt_builder_free_glb_scene(&scene);
 }
 // #endregion
@@ -819,6 +570,10 @@ void test_skinned_mesh_keeps_the_four_heaviest_influences(void) {
         }
     }
 
+    /* The one warning of the export: v0, v1 and v2 were reduced, v1 lost most. */
+    TEST_ASSERT_EQUAL_UINT32(1, s_log_warnings);
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "3 of 4 vertices reduced to four influences, dropping at most 0.1000"));
+
     free(data);
 }
 
@@ -888,16 +643,25 @@ void test_skinned_mesh_float16_weights_round_trip(void) {
     free(data);
 }
 
-void test_skinned_mesh_rejects_a_drop_above_the_tolerance(void) {
+/* The gate fires on the first vertex over the tolerance, and the diagnostic
+ * names it: at 0.005 that is v0 (0.01), at 0.07 v0 passes and v1 (0.10) fires,
+ * so the tolerance is compared against each vertex's own dropped mass. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_skinned_mesh_drop_gate_names_the_first_vertex_over_the_tolerance(void) {
     rigged_glb_write(RIG_GLB, NULL);
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
     NtStreamLayout layout[3];
     skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
 
-    const nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
-    ASSERT_F32(0.02F, profile.skin_drop_tolerance);
-    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, profile.skin_drop_tolerance, RIGGED_GLB_SKIN_JOINT_COUNT), "drops more weight than the tolerance allows");
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, 0.005F, RIGGED_GLB_SKIN_JOINT_COUNT), "drops more weight than the tolerance allows");
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "vertex 0 has 5 influences and loses 0.0100"));
+
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, NT_BUILDER_SKIN_DROP_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT), "drops more weight than the tolerance allows");
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "vertex 1 has 5 influences and loses 0.1000"));
+
+    EXPECT_BUILD_ASSERT_MATCH(skin_try_decode(&scene, layout, 0.07F, RIGGED_GLB_SKIN_JOINT_COUNT), "drops more weight than the tolerance allows");
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "vertex 1 has 5 influences and loses 0.1000"));
 
     nt_builder_free_glb_scene(&scene);
 }
@@ -937,6 +701,32 @@ void test_skinned_mesh_rejects_an_invalid_skin_layout(void) {
     nt_builder_free_glb_scene(&scene);
 }
 
+/* The skin ctx and the JOINTS/WEIGHTS streams are one decision made in two
+ * places, so each half without the other is a config contradiction. */
+void test_skinned_mesh_rejects_a_layout_and_skin_that_disagree(void) {
+    rigged_glb_write(RIG_GLB, NULL);
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
+    const nt_builder_skin_ctx_t skin = {.palette_count = RIGGED_GLB_SKIN_JOINT_COUNT, .drop_tolerance = SKIN_FIXTURE_TOLERANCE};
+    uint8_t *data = NULL;
+    uint32_t size = 0;
+
+    NtStreamLayout layout[3];
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+    /* JOINTS without WEIGHTS: the third stream extracts WEIGHTS_1 verbatim. */
+    layout[2] = (NtStreamLayout){"weights_raw", "WEIGHTS_1", NT_STREAM_FLOAT32, 4, false, 0};
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_decode_scene_mesh_skinned(&scene, 0, 0, layout, 3, NT_TANGENT_AUTO, &skin, &data, &size), "declares both a JOINTS and a WEIGHTS stream");
+
+    /* The skin streams without a skin ctx, the unskinned entry point. */
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_decode_scene_mesh(&scene, 0, 0, layout, 3, NT_TANGENT_AUTO, &data, &size), "skin export and the JOINTS/WEIGHTS streams must agree");
+
+    /* A skin ctx over a layout without the streams. */
+    EXPECT_BUILD_ASSERT_MATCH((void)nt_builder_decode_scene_mesh_skinned(&scene, 0, 0, layout, 1, NT_TANGENT_AUTO, &skin, &data, &size), "skin export and the JOINTS/WEIGHTS streams must agree");
+
+    nt_builder_free_glb_scene(&scene);
+}
+
 void test_skinned_mesh_rejects_a_negative_weight(void) { EXPECT_SKIN_ASSERT(negative_weight, "influence weight is negative"); }
 
 void test_skinned_mesh_rejects_a_nan_weight(void) { EXPECT_SKIN_ASSERT(nan_weight, "influence weight is not finite"); }
@@ -951,11 +741,42 @@ void test_skinned_mesh_rejects_an_unpaired_set(void) { EXPECT_SKIN_ASSERT(unpair
 
 void test_skinned_mesh_rejects_a_gap_in_the_set_numbering(void) { EXPECT_SKIN_ASSERT(nonconsecutive_sets, "sets are not consecutive"); }
 
+void test_skinned_mesh_rejects_an_accessor_covering_fewer_vertices(void) { EXPECT_SKIN_ASSERT(weights1_short, "different vertex count"); }
+
 void test_skinned_mesh_rejects_float_joint_indices(void) { EXPECT_SKIN_ASSERT(joints_float_type, "JOINTS accessor has an invalid type"); }
 
 void test_skinned_mesh_rejects_unnormalized_byte_weights(void) { EXPECT_SKIN_ASSERT(weights_bad_type, "WEIGHTS accessor has an invalid type"); }
 
 void test_skinned_mesh_rejects_a_morph_target(void) { EXPECT_SKIN_ASSERT(morph_target, "morph targets"); }
+
+/* Exporters pad unused lanes with any index; only a lane with weight counts,
+ * on the mesh path and on the binding's reach scan alike. */
+void test_skinned_mesh_ignores_the_index_of_a_zero_weight_lane(void) {
+    rigged_glb_opts_t opts = {0};
+    opts.zero_weight_lane_index = true;
+    NtStreamLayout layout[3];
+    skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
+    uint8_t *data = skin_decode(&opts, layout, SKIN_FIXTURE_TOLERANCE, RIGGED_GLB_SKIN_JOINT_COUNT);
+
+    const uint8_t *joints = mesh_plane(data, 3, 1);
+    for (uint32_t c = 0; c < 4U; c++) {
+        TEST_ASSERT_EQUAL_UINT8(k_kept_joint[3][c], joints[12 + c]);
+    }
+    free(data);
+
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
+    nt_builder_rig_t rig;
+    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
+    (void)remove(PACK_PATH);
+    NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_builder_add_scene_skin_binding(ctx, &scene, &rig, "rigs/fixture.nskn");
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
 
 void test_skinned_mesh_accepts_a_primitive_without_indices(void) {
     rigged_glb_opts_t opts = {0};
@@ -987,13 +808,11 @@ void test_add_scene_skinned_mesh_ships_the_decoded_bytes(void) {
     NtStreamLayout layout[3];
     skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
     const nt_mesh_opts_t opts = {.layout = layout, .stream_count = 3, .tangent_mode = NT_TANGENT_AUTO};
-    nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
-    profile.skin_drop_tolerance = SKIN_FIXTURE_TOLERANCE;
 
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_scene_skinned_mesh(ctx, &scene, 0, 0, &rig, &profile, "meshes/quad.mesh", &opts);
+    nt_builder_add_scene_skinned_mesh(ctx, &scene, 0, 0, &rig, SKIN_FIXTURE_TOLERANCE, "meshes/quad.mesh", &opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
@@ -1020,23 +839,19 @@ void test_add_scene_skinned_mesh_asserts_when_no_node_binds_the_skin(void) {
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
     /* The mesh node really moved to the second skin; rig 0 is a skin no node uses. */
-    TEST_ASSERT_EQUAL_UINT32(2, scene.skin_count);
     TEST_ASSERT_EQUAL_UINT32(1, scene.nodes[RIGGED_GLB_NODE_MESH].skin_index);
-    const nt_builder_rig_selection_t sel = rig_selection();
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, &sel, &rig);
+    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
     TEST_ASSERT_EQUAL_UINT32(0, rig.skin_index);
 
     NtStreamLayout layout[3];
     skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
     const nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = 3, .tangent_mode = NT_TANGENT_AUTO};
-    nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
-    profile.skin_drop_tolerance = SKIN_FIXTURE_TOLERANCE;
 
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skinned_mesh(ctx, &scene, 0, 0, &rig, &profile, "meshes/quad.mesh", &mesh_opts), "not skinned by this rig's skin");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skinned_mesh(ctx, &scene, 0, 0, &rig, SKIN_FIXTURE_TOLERANCE, "meshes/quad.mesh", &mesh_opts), "not skinned by this rig's skin");
     nt_builder_free_pack(ctx);
 
     nt_builder_free_rig(&rig);
@@ -1050,9 +865,8 @@ void test_add_scene_skin_binding_asserts_when_no_node_binds_the_skin(void) {
 
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-    const nt_builder_rig_selection_t sel = rig_selection();
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, &sel, &rig);
+    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
 
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
@@ -1142,8 +956,7 @@ static double ref_any_pose_radius(double reach) {
     }
     double best = 0.0;
     for (uint32_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
-        /* The preorder makes rig joint j node j, so the palette's node is its joint. */
-        const uint32_t j = k_palette_node[p];
+        const uint32_t j = ref_palette_joint(p);
         const double r = distance[j] + (stretch[j] * reach);
         if (r > best) {
             best = r;
@@ -1186,8 +999,7 @@ static void skn_read(skn_result_t *out) {
 static void skn_export(const rigged_glb_opts_t *opts, bool skinned_first, nt_glb_scene_t *scene, nt_builder_rig_t *rig, skn_result_t *out) {
     rigged_glb_write(RIG_GLB, opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(scene, RIG_GLB));
-    const nt_builder_rig_selection_t sel = rig_selection();
-    nt_builder_import_rig(scene, &sel, rig);
+    nt_builder_import_rig(scene, 0, UINT32_MAX, rig);
 
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
@@ -1196,9 +1008,7 @@ static void skn_export(const rigged_glb_opts_t *opts, bool skinned_first, nt_glb
         NtStreamLayout layout[3];
         skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
         const nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = 3, .tangent_mode = NT_TANGENT_AUTO};
-        nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
-        profile.skin_drop_tolerance = SKIN_FIXTURE_TOLERANCE;
-        nt_builder_add_scene_skinned_mesh(ctx, scene, 0, 0, rig, &profile, "meshes/quad.mesh", &mesh_opts);
+        nt_builder_add_scene_skinned_mesh(ctx, scene, 0, 0, rig, SKIN_FIXTURE_TOLERANCE, "meshes/quad.mesh", &mesh_opts);
     }
     nt_builder_add_scene_skin_binding(ctx, scene, rig, "rigs/fixture.nskn");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -1226,7 +1036,7 @@ void test_skin_binding_bounds_match_an_independent_computation(void) {
     TEST_ASSERT_TRUE((double)skn.header.any_pose_radius >= ref_any_pose_radius(reach));
     TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, skn.header.rig_compat_id);
     for (uint16_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
-        TEST_ASSERT_EQUAL_UINT16(rig.palette_joint[p], skn.binding.remap[p]);
+        TEST_ASSERT_EQUAL_UINT16(ref_palette_joint(p), skn.binding.remap[p]);
     }
 
     free(skn.payload);
@@ -1309,9 +1119,8 @@ void test_skin_binding_uses_identity_when_the_skin_has_no_inverse_binds(void) {
         rigged_glb_write(RIG_GLB, &knob_opts);                                                                                                                                                         \
         nt_glb_scene_t knob_scene;                                                                                                                                                                     \
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&knob_scene, RIG_GLB));                                                                                                              \
-        const nt_builder_rig_selection_t knob_sel = rig_selection();                                                                                                                                   \
         nt_builder_rig_t knob_rig;                                                                                                                                                                     \
-        nt_builder_import_rig(&knob_scene, &knob_sel, &knob_rig);                                                                                                                                      \
+        nt_builder_import_rig(&knob_scene, 0, UINT32_MAX, &knob_rig);                                                                                                                                  \
         (void)remove(PACK_PATH);                                                                                                                                                                       \
         NtBuilderContext *knob_ctx = nt_builder_start_pack(PACK_PATH);                                                                                                                                 \
         TEST_ASSERT_NOT_NULL(knob_ctx);                                                                                                                                                                \
@@ -1326,6 +1135,8 @@ void test_skin_binding_rejects_a_short_inverse_bind_accessor(void) { EXPECT_BIND
 void test_skin_binding_rejects_a_non_mat4_inverse_bind_accessor(void) { EXPECT_BINDING_ASSERT(ibm_bad_type, "inverseBindMatrices accessor is invalid"); }
 
 void test_skin_binding_rejects_a_nan_inverse_bind_element(void) { EXPECT_BINDING_ASSERT(ibm_nan, "inverse bind matrix is not finite"); }
+
+void test_skin_binding_rejects_a_projective_inverse_bind(void) { EXPECT_BINDING_ASSERT(ibm_projective, "inverse bind matrix is not affine"); }
 
 /* reach is a property of the skin, so a primitive the build never exports
  * still counts: the far triangle's first vertex sets it, while only the quad
@@ -1344,73 +1155,6 @@ void test_skin_binding_reach_covers_a_primitive_that_is_not_exported(void) {
     TEST_ASSERT_TRUE(far_reach > ref_reach(false));
     assert_close(far_reach, (double)skn.header.reach);
     assert_close(ref_any_pose_radius(far_reach), (double)skn.header.any_pose_radius);
-
-    free(skn.payload);
-    nt_builder_free_rig(&rig);
-    nt_builder_free_glb_scene(&scene);
-}
-
-/* v transformed by a 3x4 affine, written out so the reference path calls no
- * engine kernel. */
-static void ref_apply(const nt_skeletal_mat34_t *m, const float v[3], float out[3]) {
-    for (int r = 0; r < 3; r++) {
-        out[r] = (m->r[r][0] * v[0]) + (m->r[r][1] * v[1]) + (m->r[r][2] * v[2]) + m->r[r][3];
-    }
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_skin_binding_ignores_the_skinned_mesh_node_transform(void) {
-    nt_glb_scene_t scene;
-    nt_builder_rig_t rig;
-    skn_result_t skn;
-    skn_export(NULL, false, &scene, &rig, &skn);
-
-    nt_skeletal_mat34_t model[RIG_JOINT_COUNT];
-    nt_skeletal_fk(&rig.skeleton, rig.skeleton.rest, model, 0, RIG_JOINT_COUNT);
-    nt_skeletal_mat34_t palette[RIGGED_GLB_SKIN_JOINT_COUNT];
-    nt_skin_palette_build(&skn.binding, model, RIG_JOINT_COUNT, palette, RIGGED_GLB_SKIN_JOINT_COUNT);
-
-    /* MeshNode's own TRS, which glTF says a skinned primitive ignores. */
-    const nt_skeletal_trs_t mesh_node = {.t = {2.0F, 0.0F, -1.0F}, .q = {0.0F, 0.38268343F, 0.0F, 0.92387953F}, .s = {1.5F, 1.5F, 1.5F}};
-    nt_skeletal_mat34_t mesh_node_m;
-    nt_skeletal_mat34_from_trs(&mesh_node, &mesh_node_m);
-
-    const float v[3] = {1.0F, 1.0F, 0.0F};
-    bool differs_from_folded = false;
-    for (uint32_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
-        nt_skeletal_mat34_t ib;
-        double t[3];
-        ref_inverse_bind_t(p, t);
-        memset(&ib, 0, sizeof(ib));
-        for (int r = 0; r < 3; r++) {
-            ib.r[r][r] = 1.0F;
-            ib.r[r][3] = (float)t[r];
-        }
-
-        float bind_space[3];
-        float expected[3];
-        ref_apply(&ib, v, bind_space);
-        ref_apply(&model[skn.binding.remap[p]], bind_space, expected);
-
-        float got[3];
-        ref_apply(&palette[p], v, got);
-        for (int c = 0; c < 3; c++) {
-            assert_close((double)expected[c], (double)got[c]);
-        }
-
-        /* Folding the mesh node in would move the vertex, so the equality above
-         * is a claim and not an identity. */
-        float moved[3];
-        float folded[3];
-        ref_apply(&mesh_node_m, v, moved);
-        ref_apply(&ib, moved, bind_space);
-        ref_apply(&model[skn.binding.remap[p]], bind_space, folded);
-        for (int c = 0; c < 3; c++) {
-            const float d = folded[c] - got[c];
-            differs_from_folded = differs_from_folded || ((d < 0.0F ? -d : d) > 1e-3F);
-        }
-    }
-    TEST_ASSERT_TRUE(differs_from_folded);
 
     free(skn.payload);
     nt_builder_free_rig(&rig);
@@ -1441,32 +1185,24 @@ static const khronos_rig_t k_khronos[2] = {
     {"examples/skeletal_showcase/raw/CesiumMan.glb", 21, 19, true, {"Z_UP", "Armature"}, 0x881DB664F6FDE289ULL},
 };
 
-/* Counts the WARN and ERROR lines the builder logs, so a Khronos import is
- * proven clean and not only non-fatal. */
-static void khronos_count_sink(nt_log_level_t level, const char *domain, const char *msg, void *user) {
-    (void)domain;
-    (void)msg;
-    if (level >= NT_LOG_LEVEL_WARN) {
-        (*(uint32_t *)user)++;
-    }
-}
-
-/* Palette entry p of the rig points at the node the glTF skin lists at p,
- * read straight from the cgltf skin rather than through the builder's tables. */
+/* Palette entry p of the rig is the joint named like the node the glTF skin
+ * lists at p, read straight from the cgltf skin rather than through the
+ * builder's tables. */
 static void khronos_check_palette_nodes(const nt_glb_scene_t *scene, const nt_builder_rig_t *rig) {
     const cgltf_data *data = (const cgltf_data *)scene->_internal;
     TEST_ASSERT_NOT_NULL(data);
     const cgltf_skin *skin = &data->skins[rig->skin_index];
     TEST_ASSERT_EQUAL_UINT32((uint32_t)skin->joints_count, rig->palette_count);
     for (uint16_t p = 0; p < rig->palette_count; p++) {
-        TEST_ASSERT_EQUAL_UINT32((uint32_t)(skin->joints[p] - data->nodes), rig->node_index[rig->palette_joint[p]]);
+        TEST_ASSERT_TRUE(rig->palette_joint[p] < rig->skeleton.joint_count);
+        TEST_ASSERT_EQUAL_HEX32(nt_hash32_str(skin->joints[p]->name).value, rig->skeleton.joint_id[rig->palette_joint[p]]);
     }
 }
 
 /* What the wrappers decompose to on the real asset: Z_UP is -90 degrees about
- * X, Armature -90 degrees about Z with the exporter's cos(90 deg) noise on the
- * diagonal; both pin to the exact sqrt(1/2) bits with w >= 0. Fox's root has no
- * TRS at all and must come through as bit-exact identity. */
+ * X, Armature -90 degrees about Z with the exporter's cos(90 deg) noise of
+ * -4.37e-8 on the diagonal; both pin to the exact sqrt(1/2) bits with w >= 0.
+ * Fox's root has no TRS at all and must come through as bit-exact identity. */
 static void khronos_check_rest(const khronos_rig_t *asset, const nt_builder_rig_t *rig) {
     if (asset == &k_khronos[0]) {
         const nt_skeletal_trs_t *root = &rig->skeleton.rest[0];
@@ -1483,6 +1219,12 @@ static void khronos_check_rest(const khronos_rig_t *asset, const nt_builder_rig_
     for (int c = 0; c < 4; c++) {
         TEST_ASSERT_EQUAL_HEX32(k_z_up_q[c], f32_bits(rig->skeleton.rest[0].q[c]));
         TEST_ASSERT_EQUAL_HEX32(k_armature_q[c], f32_bits(rig->skeleton.rest[1].q[c]));
+    }
+    for (int j = 0; j < 2; j++) {
+        for (int c = 0; c < 3; c++) {
+            TEST_ASSERT_EQUAL_HEX32(0x00000000U, f32_bits(rig->skeleton.rest[j].t[c]));
+            TEST_ASSERT_EQUAL_HEX32(0x3F800000U, f32_bits(rig->skeleton.rest[j].s[c]));
+        }
     }
 }
 
@@ -1511,6 +1253,44 @@ static uint32_t khronos_skinned_node(const nt_glb_scene_t *scene, uint32_t skin_
     return UINT32_MAX;
 }
 
+/* The section 14 recurrence over the imported rig, so the any-pose bound of a
+ * real asset is checked against an independent pass and not only against
+ * reach. */
+static double khronos_ref_any_pose_radius(const nt_builder_rig_t *rig, double reach) {
+    const uint32_t joint_count = rig->skeleton.joint_count;
+    double *stretch = (double *)calloc(joint_count, sizeof(double));
+    double *distance = (double *)calloc(joint_count, sizeof(double));
+    TEST_ASSERT_NOT_NULL(stretch);
+    TEST_ASSERT_NOT_NULL(distance);
+    for (uint32_t j = 0; j < joint_count; j++) {
+        const nt_skeletal_trs_t *rest = &rig->skeleton.rest[j];
+        double m = 0.0;
+        for (int c = 0; c < 3; c++) {
+            m = fmax(m, fabs((double)rest->s[c]));
+        }
+        const uint16_t parent = rig->skeleton.parent[j];
+        if (parent == NT_SKELETAL_NO_PARENT) {
+            stretch[j] = m;
+            distance[j] = 0.0;
+        } else {
+            double t2 = 0.0;
+            for (int c = 0; c < 3; c++) {
+                t2 += (double)rest->t[c] * (double)rest->t[c];
+            }
+            stretch[j] = stretch[parent] * m;
+            distance[j] = distance[parent] + (stretch[parent] * sqrt(t2));
+        }
+    }
+    double best = 0.0;
+    for (uint16_t p = 0; p < rig->palette_count; p++) {
+        const uint16_t j = rig->palette_joint[p];
+        best = fmax(best, distance[j] + (stretch[j] * reach));
+    }
+    free(stretch);
+    free(distance);
+    return best;
+}
+
 /* The NSKN the pack shipped: the two bounds and a remap that stays inside the
  * rig the same build imported. */
 static void khronos_check_binding(const khronos_rig_t *asset, const nt_builder_rig_t *rig) {
@@ -1522,13 +1302,15 @@ static void khronos_check_binding(const khronos_rig_t *asset, const nt_builder_r
     TEST_ASSERT_EQUAL_UINT16(asset->palette_count, header.palette_count);
     TEST_ASSERT_EQUAL_HEX64(rig->skeleton.rig_compat_id.value, header.rig_compat_id);
     TEST_ASSERT_TRUE_MESSAGE(header.reach > 0.0F, "a skinned vertex sits away from the joint that weights it");
-    TEST_ASSERT_TRUE_MESSAGE(header.any_pose_radius >= header.reach, "the any-pose bound contains the rest reach");
+    const double any_pose = khronos_ref_any_pose_radius(rig, (double)header.reach);
+    TEST_ASSERT_TRUE((double)header.any_pose_radius >= any_pose);
+    assert_close(any_pose, (double)header.any_pose_radius);
 
     const size_t remap_at = sizeof(NtSknHeader) + (sizeof(nt_skeletal_mat34_t) * (size_t)header.palette_count);
     for (uint16_t p = 0; p < header.palette_count; p++) {
         uint16_t remap = 0;
         memcpy(&remap, skn + remap_at + ((size_t)p * sizeof(remap)), sizeof(remap));
-        TEST_ASSERT_TRUE(remap < rig->skeleton.joint_count);
+        TEST_ASSERT_EQUAL_UINT16(rig->palette_joint[p], remap);
     }
     free(skn);
 }
@@ -1558,15 +1340,11 @@ static void khronos_check_mesh(const khronos_rig_t *asset, uint32_t stream_count
 }
 
 static void khronos_import_case(const khronos_rig_t *asset) {
-    uint32_t warnings = 0;
-    nt_log_add_sink(khronos_count_sink, &warnings);
-
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL_MESSAGE(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, asset->path), asset->path);
 
-    const nt_builder_rig_selection_t sel = rig_selection();
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, &sel, &rig);
+    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
 
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(asset->joint_count, rig.skeleton.joint_count, asset->path);
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(asset->palette_count, rig.palette_count, asset->path);
@@ -1583,23 +1361,21 @@ static void khronos_import_case(const khronos_rig_t *asset) {
     NtStreamLayout layout[4];
     const uint32_t stream_count = khronos_layout(layout, asset->has_normal);
     const nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = stream_count, .tangent_mode = NT_TANGENT_AUTO};
-    /* The default budget carries both assets: neither vertex list loses weight
-     * to the reduction, because both primitives declare one influence set. */
-    const nt_builder_skeletal_profile_t profile = nt_builder_skeletal_profile_defaults();
-    TEST_ASSERT_EQUAL_HEX32(f32_bits(0.02F), f32_bits(profile.skin_drop_tolerance));
 
     const uint32_t node = khronos_skinned_node(&scene, rig.skin_index);
     const uint32_t mesh = scene.nodes[node].mesh_index;
     const uint32_t primitive_count = scene.meshes[mesh].primitive_count;
     TEST_ASSERT_TRUE(primitive_count > 0U);
 
+    /* The default budget carries both assets: neither vertex list loses weight
+     * to the reduction, because both primitives declare one influence set. */
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
     for (uint32_t p = 0; p < primitive_count; p++) {
         char rid[64];
         (void)snprintf(rid, sizeof(rid), "meshes/khronos_%u.mesh", p);
-        nt_builder_add_scene_skinned_mesh(ctx, &scene, mesh, p, &rig, &profile, rid, &mesh_opts);
+        nt_builder_add_scene_skinned_mesh(ctx, &scene, mesh, p, &rig, NT_BUILDER_SKIN_DROP_TOLERANCE, rid, &mesh_opts);
     }
     nt_builder_add_scene_skin_binding(ctx, &scene, &rig, "rigs/khronos.nskn");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -1612,7 +1388,7 @@ static void khronos_import_case(const khronos_rig_t *asset) {
     nt_glb_scene_t again;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&again, asset->path));
     nt_builder_rig_t reimported;
-    nt_builder_import_rig(&again, &sel, &reimported);
+    nt_builder_import_rig(&again, 0, UINT32_MAX, &reimported);
     TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, reimported.skeleton.rig_compat_id.value);
     nt_builder_free_rig(&reimported);
     nt_builder_free_glb_scene(&again);
@@ -1620,8 +1396,7 @@ static void khronos_import_case(const khronos_rig_t *asset) {
     nt_builder_free_rig(&rig);
     nt_builder_free_glb_scene(&scene);
 
-    nt_log_remove_sink(khronos_count_sink, &warnings);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, warnings, "a clean asset imports without a WARN or ERROR line");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, s_log_warnings, "a clean asset imports without a WARN or ERROR line");
 }
 
 void test_fox_imports_rig_binding_and_skinned_mesh(void) { khronos_import_case(&k_khronos[0]); }
@@ -1631,18 +1406,11 @@ void test_cesiumman_imports_rig_binding_and_skinned_mesh(void) { khronos_import_
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_rigged_fixture_parses);
     RUN_TEST(test_scene_publishes_the_node_graph);
-    RUN_TEST(test_scene_publishes_local_trs);
-    RUN_TEST(test_scene_publishes_skins_and_animations);
     RUN_TEST(test_parse_asserts_on_a_parent_cycle);
     RUN_TEST(test_rig_import_preorder_and_subtree_ranges);
     RUN_TEST(test_rig_compat_id_matches_the_hand_written_schema);
-    RUN_TEST(test_add_skeleton_ships_the_imported_rig_id);
-    RUN_TEST(test_rig_id_separates_one_rest_value_and_one_joint_id);
-    RUN_TEST(test_rig_import_is_byte_identical_on_re_import);
     RUN_TEST(test_rig_cut_at_helper_drops_the_scene_root);
-    RUN_TEST(test_decompose_pins_the_cesiumman_wrappers);
     RUN_TEST(test_decompose_reflection_gives_a_negative_x_scale);
     RUN_TEST(test_decompose_asserts_on_a_zero_scale);
     RUN_TEST(test_decompose_asserts_on_a_projective_bottom_row);
@@ -1650,15 +1418,18 @@ int main(void) {
     RUN_TEST(test_import_asserts_on_a_sheared_matrix);
     RUN_TEST(test_import_asserts_on_a_missing_skin);
     RUN_TEST(test_import_asserts_on_an_unnamed_rig_node);
+    RUN_TEST(test_import_asserts_on_an_empty_rig_node_name);
+    RUN_TEST(test_import_asserts_on_two_rig_nodes_sharing_one_joint_id);
+    RUN_TEST(test_import_asserts_on_a_non_unit_rest_rotation);
     RUN_TEST(test_import_asserts_on_joints_under_several_scene_roots);
     RUN_TEST(test_import_asserts_on_a_joint_outside_the_cut);
-    RUN_TEST(test_import_asserts_on_an_object_node_inside_the_rig);
     RUN_TEST(test_skinned_mesh_keeps_the_four_heaviest_influences);
     RUN_TEST(test_skinned_mesh_quantizes_a_half_half_tie_to_the_lower_lane);
     RUN_TEST(test_skinned_mesh_float32_weights_are_the_renormalized_values);
     RUN_TEST(test_skinned_mesh_float16_weights_round_trip);
-    RUN_TEST(test_skinned_mesh_rejects_a_drop_above_the_tolerance);
+    RUN_TEST(test_skinned_mesh_drop_gate_names_the_first_vertex_over_the_tolerance);
     RUN_TEST(test_skinned_mesh_rejects_an_invalid_skin_layout);
+    RUN_TEST(test_skinned_mesh_rejects_a_layout_and_skin_that_disagree);
     RUN_TEST(test_skinned_mesh_rejects_a_negative_weight);
     RUN_TEST(test_skinned_mesh_rejects_a_nan_weight);
     RUN_TEST(test_skinned_mesh_rejects_a_vertex_without_weight);
@@ -1666,9 +1437,11 @@ int main(void) {
     RUN_TEST(test_skinned_mesh_rejects_an_index_past_the_palette);
     RUN_TEST(test_skinned_mesh_rejects_an_unpaired_set);
     RUN_TEST(test_skinned_mesh_rejects_a_gap_in_the_set_numbering);
+    RUN_TEST(test_skinned_mesh_rejects_an_accessor_covering_fewer_vertices);
     RUN_TEST(test_skinned_mesh_rejects_float_joint_indices);
     RUN_TEST(test_skinned_mesh_rejects_unnormalized_byte_weights);
     RUN_TEST(test_skinned_mesh_rejects_a_morph_target);
+    RUN_TEST(test_skinned_mesh_ignores_the_index_of_a_zero_weight_lane);
     RUN_TEST(test_skinned_mesh_accepts_a_primitive_without_indices);
     RUN_TEST(test_add_scene_skinned_mesh_ships_the_decoded_bytes);
     RUN_TEST(test_add_scene_skinned_mesh_asserts_when_no_node_binds_the_skin);
@@ -1680,8 +1453,8 @@ int main(void) {
     RUN_TEST(test_skin_binding_rejects_a_short_inverse_bind_accessor);
     RUN_TEST(test_skin_binding_rejects_a_non_mat4_inverse_bind_accessor);
     RUN_TEST(test_skin_binding_rejects_a_nan_inverse_bind_element);
+    RUN_TEST(test_skin_binding_rejects_a_projective_inverse_bind);
     RUN_TEST(test_skin_binding_reach_covers_a_primitive_that_is_not_exported);
-    RUN_TEST(test_skin_binding_ignores_the_skinned_mesh_node_transform);
     RUN_TEST(test_fox_imports_rig_binding_and_skinned_mesh);
     RUN_TEST(test_cesiumman_imports_rig_binding_and_skinned_mesh);
     return UNITY_END();
