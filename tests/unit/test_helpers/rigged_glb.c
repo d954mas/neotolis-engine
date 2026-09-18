@@ -249,13 +249,18 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
 
     jb_addf(&jb, "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,");
     jb_addf(&jb, "\"scenes\":[{\"nodes\":[0%s]}],", o.multi_root ? ",8" : "");
+    const uint32_t far_node = o.deep_chain ? RIGGED_GLB_NODE_COUNT + chain_len : RIGGED_GLB_NODE_COUNT;
 
     jb_addf(&jb, "\"nodes\":[");
     jb_addf(&jb, "{\"name\":\"Root\",\"matrix\":");
     jb_floats(&jb, root_matrix, 16);
     /* cgltf rejects a scene root that has a parent, so the cycle closes below
      * Root: Helper leaves Root's children and becomes a child of Joint4. */
-    jb_addf(&jb, ",\"children\":[%s7%s]},", o.cycle ? "" : "1,", o.multi_root ? "" : ",8");
+    jb_addf(&jb, ",\"children\":[%s7%s", o.cycle ? "" : "1,", o.multi_root ? "" : ",8");
+    if (o.second_node_far) {
+        jb_addf(&jb, ",%u", far_node);
+    }
+    jb_addf(&jb, "]},");
     if (o.unnamed_node) {
         jb_addf(&jb, "{\"matrix\":");
     } else {
@@ -295,10 +300,13 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
             }
             jb_addf(&jb, "}");
         }
-        jb_addf(&jb, "],");
     } else {
-        jb_addf(&jb, "}],");
+        jb_addf(&jb, "}");
     }
+    if (o.second_node_far) {
+        jb_addf(&jb, ",{\"name\":\"FarNode\",\"mesh\":1,\"skin\":0}");
+    }
+    jb_addf(&jb, "],");
 
     const char *second_set = o.nonconsecutive_sets ? "2" : "1";
     jb_addf(&jb, "\"meshes\":[{\"name\":\"Quad\",\"primitives\":[{\"attributes\":{");
@@ -317,7 +325,11 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     if (o.second_primitive_far) {
         jb_addf(&jb, ",{\"attributes\":{\"POSITION\":7,\"JOINTS_0\":8,\"WEIGHTS_0\":9}}");
     }
-    jb_addf(&jb, "]}],");
+    jb_addf(&jb, "]}");
+    if (o.second_node_far) {
+        jb_addf(&jb, ",{\"name\":\"Far\",\"primitives\":[{\"attributes\":{\"POSITION\":7,\"JOINTS_0\":8,\"WEIGHTS_0\":9}}]}");
+    }
+    jb_addf(&jb, "],");
 
     jb_addf(&jb, "\"skins\":[{\"name\":\"RigSkin\",");
     if (!o.no_ibm) {

@@ -547,8 +547,10 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * skeleton_root is an explicit cut: that node becomes joint 0, its parent space
  * becomes skeleton space, and the game's E must carry the omitted ancestors;
  * UINT32_MAX cuts nothing. Every array lives in storage until
- * nt_builder_free_rig; the exports take the scene again. */
+ * nt_builder_free_rig. The rig keeps the scene it was built from, so the
+ * exports below cannot pair it with another; the scene outlives the rig. */
 typedef struct {
+    const nt_glb_scene_t *scene;
     nt_skeletal_skeleton_t skeleton; /* rig_compat_id filled by the import */
     const uint16_t *palette_joint;   /* skin joint p -> rig joint (the binding's remap) */
     uint32_t skin_index;
@@ -571,17 +573,19 @@ void nt_builder_free_rig(nt_builder_rig_t *rig);
  * influences per vertex, and their NtStreamLayout is the only authority on how
  * those lanes are stored. Some node must instantiate this mesh with the rig's
  * skin; joint lanes address the rig's palette, not the skeleton. */
-void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const nt_builder_rig_t *rig, float skin_drop_tolerance,
-                                       const char *resource_id, const nt_mesh_opts_t *opts);
+void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_rig_t *rig, uint32_t mesh_index, uint32_t primitive_index, float skin_drop_tolerance, const char *resource_id,
+                                       const nt_mesh_opts_t *opts);
 
 /* Exports the binding every mesh of this rig's skin shares: the skin's inverse
  * bind matrices (identity where the glTF has none), the palette remap of the
  * rig, and the two bounds of the spec: reach in joint space, any_pose_radius
  * in skeleton space. reach is measured over every vertex of every primitive
  * the skin deforms and every source influence, before the top-four reduction,
- * so it bounds the mesh the game actually draws; any_pose_radius follows from
- * it and the rig's rest hierarchy. */
-void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const nt_builder_rig_t *rig, const char *resource_id);
+ * so it bounds every mesh the game can export from the skin; a lossy POSITION
+ * or WEIGHTS layout moves a stored vertex by at most 2^-10 relative past it
+ * (skeletal spec 3.4), which the consumer allows for. any_pose_radius follows
+ * from it and the rig's rest hierarchy. */
+void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_rig_t *rig, const char *resource_id);
 
 /* Computes rig_compat_id from the joints it writes and returns it, so the
  * caller stamps clips and bindings with the identity that actually shipped;

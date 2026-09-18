@@ -814,7 +814,7 @@ void test_skinned_mesh_ignores_the_index_of_a_zero_weight_lane(void) {
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_scene_skin_binding(ctx, &scene, &rig, "rigs/fixture.nskn");
+    nt_builder_add_scene_skin_binding(ctx, &rig, "rigs/fixture.nskn");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
     nt_builder_free_rig(&rig);
@@ -855,7 +855,7 @@ void test_add_scene_skinned_mesh_ships_the_decoded_bytes(void) {
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_scene_skinned_mesh(ctx, &scene, 0, 0, &rig, SKIN_FIXTURE_TOLERANCE, "meshes/quad.mesh", &opts);
+    nt_builder_add_scene_skinned_mesh(ctx, &rig, 0, 0, SKIN_FIXTURE_TOLERANCE, "meshes/quad.mesh", &opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
@@ -894,7 +894,7 @@ void test_add_scene_skinned_mesh_asserts_when_no_node_binds_the_skin(void) {
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skinned_mesh(ctx, &scene, 0, 0, &rig, SKIN_FIXTURE_TOLERANCE, "meshes/quad.mesh", &mesh_opts), "not skinned by this rig's skin");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skinned_mesh(ctx, &rig, 0, 0, SKIN_FIXTURE_TOLERANCE, "meshes/quad.mesh", &mesh_opts), "not skinned by this rig's skin");
     nt_builder_free_pack(ctx);
 
     nt_builder_free_rig(&rig);
@@ -914,7 +914,7 @@ void test_add_scene_skin_binding_asserts_when_no_node_binds_the_skin(void) {
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skin_binding(ctx, &scene, &rig, "rigs/fixture.nskn"), "no mesh is skinned by this rig's skin");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skin_binding(ctx, &rig, "rigs/fixture.nskn"), "no mesh is skinned by this rig's skin");
     nt_builder_free_pack(ctx);
 
     nt_builder_free_rig(&rig);
@@ -1051,9 +1051,9 @@ static void skn_export(const rigged_glb_opts_t *opts, bool skinned_first, nt_glb
         NtStreamLayout layout[3];
         skin_layout(layout, NT_STREAM_UINT8, NT_STREAM_UINT8, true);
         const nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = 3, .tangent_mode = NT_TANGENT_AUTO};
-        nt_builder_add_scene_skinned_mesh(ctx, scene, 0, 0, rig, SKIN_FIXTURE_TOLERANCE, "meshes/quad.mesh", &mesh_opts);
+        nt_builder_add_scene_skinned_mesh(ctx, rig, 0, 0, SKIN_FIXTURE_TOLERANCE, "meshes/quad.mesh", &mesh_opts);
     }
-    nt_builder_add_scene_skin_binding(ctx, scene, rig, "rigs/fixture.nskn");
+    nt_builder_add_scene_skin_binding(ctx, rig, "rigs/fixture.nskn");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
@@ -1167,7 +1167,7 @@ void test_skin_binding_uses_identity_when_the_skin_has_no_inverse_binds(void) {
         (void)remove(PACK_PATH);                                                                                                                                                                       \
         NtBuilderContext *knob_ctx = nt_builder_start_pack(PACK_PATH);                                                                                                                                 \
         TEST_ASSERT_NOT_NULL(knob_ctx);                                                                                                                                                                \
-        EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skin_binding(knob_ctx, &knob_scene, &knob_rig, "rigs/fixture.nskn"), expected);                                                                 \
+        EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_skin_binding(knob_ctx, &knob_rig, "rigs/fixture.nskn"), expected);                                                                              \
         nt_builder_free_pack(knob_ctx);                                                                                                                                                                \
         nt_builder_free_rig(&knob_rig);                                                                                                                                                                \
         nt_builder_free_glb_scene(&knob_scene);                                                                                                                                                        \
@@ -1185,17 +1185,15 @@ void test_skin_binding_rejects_a_projective_inverse_bind(void) { EXPECT_BINDING_
  * mesh export having run first. */
 void test_skin_binding_rejects_an_index_past_the_palette(void) { EXPECT_BINDING_ASSERT(index_ge_palette, "outside the palette"); }
 
-/* reach is a property of the skin, so a primitive the build never exports
- * still counts: the far triangle's first vertex sets it, while only the quad
- * (primitive 0) goes into the pack. */
-void test_skin_binding_reach_covers_a_primitive_that_is_not_exported(void) {
-    rigged_glb_opts_t opts = {0};
-    opts.second_primitive_far = true;
+/* reach is a property of the skin, so geometry the build never exports still
+ * counts: the far triangle's first vertex sets it, whether it is a second
+ * primitive of the quad's mesh or a second mesh on another node with the same
+ * skin, while only the quad (mesh 0, primitive 0) goes into the pack. */
+static void check_far_reach(const rigged_glb_opts_t *opts) {
     nt_glb_scene_t scene;
     nt_builder_rig_t rig;
     skn_result_t skn;
-    skn_export(&opts, true, &scene, &rig, &skn);
-    TEST_ASSERT_EQUAL_UINT32(2, scene.meshes[0].primitive_count);
+    skn_export(opts, true, &scene, &rig, &skn);
 
     /* (10, 0, 0) through inverse bind 0 = (9, 0, -1), as rigged_glb.h states. */
     const double far_reach = sqrt(82.0);
@@ -1206,6 +1204,18 @@ void test_skin_binding_reach_covers_a_primitive_that_is_not_exported(void) {
     free(skn.payload);
     nt_builder_free_rig(&rig);
     nt_builder_free_glb_scene(&scene);
+}
+
+void test_skin_binding_reach_covers_a_primitive_that_is_not_exported(void) {
+    rigged_glb_opts_t opts = {0};
+    opts.second_primitive_far = true;
+    check_far_reach(&opts);
+}
+
+void test_skin_binding_reach_covers_a_second_node_of_the_skin(void) {
+    rigged_glb_opts_t opts = {0};
+    opts.second_node_far = true;
+    check_far_reach(&opts);
 }
 // #endregion
 
@@ -1420,9 +1430,9 @@ static void khronos_import_case(const khronos_rig_t *asset) {
     for (uint32_t p = 0; p < primitive_count; p++) {
         char rid[64];
         (void)snprintf(rid, sizeof(rid), "meshes/khronos_%u.mesh", p);
-        nt_builder_add_scene_skinned_mesh(ctx, &scene, mesh, p, &rig, NT_BUILDER_SKIN_DROP_TOLERANCE, rid, &mesh_opts);
+        nt_builder_add_scene_skinned_mesh(ctx, &rig, mesh, p, NT_BUILDER_SKIN_DROP_TOLERANCE, rid, &mesh_opts);
     }
-    nt_builder_add_scene_skin_binding(ctx, &scene, &rig, "rigs/khronos.nskn");
+    nt_builder_add_scene_skin_binding(ctx, &rig, "rigs/khronos.nskn");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
@@ -1506,6 +1516,7 @@ int main(void) {
     RUN_TEST(test_skin_binding_rejects_a_projective_inverse_bind);
     RUN_TEST(test_skin_binding_rejects_an_index_past_the_palette);
     RUN_TEST(test_skin_binding_reach_covers_a_primitive_that_is_not_exported);
+    RUN_TEST(test_skin_binding_reach_covers_a_second_node_of_the_skin);
     RUN_TEST(test_fox_imports_rig_binding_and_skinned_mesh);
     RUN_TEST(test_cesiumman_imports_rig_binding_and_skinned_mesh);
     return UNITY_END();

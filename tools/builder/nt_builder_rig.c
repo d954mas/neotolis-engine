@@ -397,6 +397,7 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
         out->skeleton.rig_compat_id = nt_skeletal_rig_compat_id(&out->skeleton, scratch, scratch_size);
         free(scratch);
     }
+    out->scene = scene;
     out->palette_joint = palette_joint;
     out->skin_index = skin_index;
     out->palette_count = (uint16_t)palette_count;
@@ -421,9 +422,10 @@ void nt_builder_free_rig(nt_builder_rig_t *rig) {
 
 // #region skinned mesh
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
-void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const nt_builder_rig_t *rig, float skin_drop_tolerance,
-                                       const char *resource_id, const nt_mesh_opts_t *opts) {
-    NT_BUILD_ASSERT(ctx && scene && rig && resource_id && opts && opts->layout && "invalid scene_skinned_mesh args");
+void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_rig_t *rig, uint32_t mesh_index, uint32_t primitive_index, float skin_drop_tolerance, const char *resource_id,
+                                       const nt_mesh_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && rig && rig->scene && resource_id && opts && opts->layout && "invalid scene_skinned_mesh args");
+    const nt_glb_scene_t *scene = rig->scene;
     NT_BUILD_ASSERT(mesh_index < scene->mesh_count && "mesh_index out of range");
     NT_BUILD_ASSERT(primitive_index < scene->meshes[mesh_index].primitive_count && "primitive_index out of range");
     NT_BUILD_ASSERT(rig->palette_count >= 1 && "rig has no palette entries");
@@ -591,8 +593,9 @@ static double rig_any_pose_radius(const nt_skeletal_skeleton_t *skel, const uint
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
-void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const nt_builder_rig_t *rig, const char *resource_id) {
-    NT_BUILD_ASSERT(ctx && scene && rig && resource_id && "invalid scene_skin_binding args");
+void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_rig_t *rig, const char *resource_id) {
+    NT_BUILD_ASSERT(ctx && rig && rig->scene && resource_id && "invalid scene_skin_binding args");
+    const nt_glb_scene_t *scene = rig->scene;
     const cgltf_data *data = (const cgltf_data *)scene->_internal;
     NT_BUILD_ASSERT(data != NULL && "add_scene_skin_binding: the scene holds no parsed glTF");
     NT_BUILD_ASSERT(rig->skin_index < (uint32_t)data->skins_count && "rig skin index out of range");
@@ -619,7 +622,9 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_glb_scene
                          (int)ibm->type);
             NT_BUILD_ASSERT(0 && "inverseBindMatrices accessor is invalid");
         }
-        const cgltf_size want = ibm->count * 16U;
+        /* Only the palette's prefix is read. A sparse accessor is unpacked whole:
+         * its second pass writes wherever its indices point. */
+        const cgltf_size want = (ibm->is_sparse ? ibm->count : (cgltf_size)palette_count) * 16U;
         float *m = (float *)calloc(want, sizeof(float));
         NT_BUILD_ASSERT(m && "add_scene_skin_binding: alloc failed (OOM)");
         const cgltf_size got = cgltf_accessor_unpack_floats(ibm, m, want);

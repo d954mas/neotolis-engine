@@ -77,7 +77,8 @@
  * With second_primitive_far, mesh 0 gains a second non-indexed triangle whose
  * first vertex sits at (10, 0, 0) bound wholly to palette entry 0: through
  * inverse bind 0 that is (9, 0, -1), a distance of sqrt(82), farther than any
- * vertex of the quad (sqrt(30) for v0 through entry 4). */
+ * vertex of the quad (sqrt(30) for v0 through entry 4). second_node_far puts
+ * the same triangle into a mesh of its own on a second node with skin 0. */
 
 #define RIGGED_GLB_NODE_ROOT 0
 #define RIGGED_GLB_NODE_HELPER 1
@@ -128,6 +129,7 @@ typedef struct {
     bool morph_target;           /* the skinned primitive gains a morph target */
     bool no_indices;             /* the primitive drops its index accessor and keeps v0..v2, one triangle */
     bool second_primitive_far;   /* mesh 0 gains the far triangle described above */
+    bool second_node_far;        /* the far triangle becomes mesh 1 on a new node "FarNode" with skin 0 */
     bool mesh_other_skin;        /* MeshNode uses a second skin; skin 0 has no mesh */
     bool no_ibm;                 /* skin 0 drops inverseBindMatrices */
     bool ibm_short;              /* the inverseBindMatrices accessor covers one joint too few */

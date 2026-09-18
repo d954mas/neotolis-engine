@@ -125,6 +125,7 @@ typedef struct {
     float angles[SKELETAL_SHOWCASE_MAX_JOINTS][3];
     uint32_t joint_ids[HUMANOID_JOINT_COUNT];
     bool fit_pending;
+    uint64_t view_rig_id; /* rig_compat_id the angles and fit were made for */
     int selected_joint;
     bool show_axes;
     bool combo_open;
@@ -260,8 +261,13 @@ static void refresh_view(void) {
     }
     if (s_skeleton_scene.view != NULL) {
         NT_ASSERT(s_skeleton_scene.view->joint_count <= SKELETAL_SHOWCASE_MAX_JOINTS && "skeletal_showcase: rig exceeds SKELETAL_SHOWCASE_MAX_JOINTS");
-        if (s_skeleton_scene.selected_joint >= (int)s_skeleton_scene.view->joint_count) {
+        /* A reload may hand back a different rig under the same handle; angles
+         * and the camera fit belong to the rig they were made for. */
+        if (s_skeleton_scene.view->rig_compat_id.value != s_skeleton_scene.view_rig_id) {
+            s_skeleton_scene.view_rig_id = s_skeleton_scene.view->rig_compat_id.value;
             s_skeleton_scene.selected_joint = 0;
+            s_skeleton_scene.fit_pending = true;
+            memset(s_skeleton_scene.angles, 0, sizeof s_skeleton_scene.angles);
         }
     }
 }
