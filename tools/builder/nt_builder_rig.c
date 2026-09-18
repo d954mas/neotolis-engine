@@ -455,13 +455,6 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_r
 // #endregion
 
 // #region skin binding
-/* A bound measured in double must still contain its vertices once stored as
- * float, so the conversion rounds towards +infinity. */
-static float rig_round_up(double x) {
-    const float f = (float)x;
-    return ((double)f < x) ? nextafterf(f, INFINITY) : f;
-}
-
 /* |inverse_bind * v| with v a mesh-space point: how far the vertex sits from
  * the joint it is bound to, which is what reach bounds. */
 static double rig_bound_distance(const nt_skeletal_mat34_t *ib, const float v[3]) {
@@ -660,8 +653,8 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_r
         .rig_compat_id = rig->skeleton.rig_compat_id,
         .remap = rig->palette_joint,
         .inverse_bind = inverse_bind,
-        .reach = rig_round_up(reach),
-        .any_pose_radius = rig_round_up(rig_any_pose_radius(&rig->skeleton, rig->palette_joint, (uint16_t)palette_count, reach)),
+        .reach = nt_builder_round_up(reach),
+        .any_pose_radius = nt_builder_round_up(rig_any_pose_radius(&rig->skeleton, rig->palette_joint, (uint16_t)palette_count, reach)),
         .palette_count = (uint16_t)palette_count,
     };
     nt_builder_add_skin_binding(ctx, &binding, resource_id);

@@ -192,6 +192,10 @@ typedef struct {
 } nt_glb_node_t;
 
 typedef struct {
+    const char *name; /* animation name from glTF (NULL if unnamed) */
+} nt_glb_animation_t;
+
+typedef struct {
     nt_glb_mesh_t *meshes;
     uint32_t mesh_count;
     nt_glb_material_t *materials;
@@ -200,6 +204,8 @@ typedef struct {
     uint32_t texture_count;
     nt_glb_node_t *nodes;
     uint32_t node_count;
+    nt_glb_animation_t *animations;
+    uint32_t animation_count;
     void *_internal; /* opaque cgltf_data pointer */
 } nt_glb_scene_t;
 
@@ -547,8 +553,9 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * skeleton_root is an explicit cut: that node becomes joint 0, its parent space
  * becomes skeleton space, and the game's E must carry the omitted ancestors;
  * UINT32_MAX cuts nothing. Every array lives in storage until
- * nt_builder_free_rig. The rig keeps the scene it was built from, so the
- * exports below cannot pair it with another; the scene outlives the rig. */
+ * nt_builder_free_rig. The rig keeps the scene it was built from for the mesh
+ * and binding exports; a clip may come from another scene whose animated nodes
+ * carry the same names and rest poses. The scene outlives the rig. */
 typedef struct {
     const nt_glb_scene_t *scene;
     nt_skeletal_skeleton_t skeleton; /* rig_compat_id filled by the import */
@@ -585,6 +592,42 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_r
  * lossy POSITION or WEIGHTS layout adds (skeletal spec, SkinBinding), which the consumer
  * pads for. any_pose_radius follows from it and the rig's rest hierarchy. */
 void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_rig_t *rig, const char *resource_id);
+
+/* What the clip export measured, so the build script decides whether the
+ * sample rate was enough: the builder never fails a build on interpolation
+ * error. Both errors compare the runtime (nt_skeletal_sample on the encoded
+ * clip, then FK) against the exact glTF curves (evaluated in double, then the
+ * same FK) over a dense set of times -- every grid time, every authored key,
+ * and three sub-samples per grid interval. cpu_error_lin is the largest
+ * Frobenius distance between the 3x3 parts of any joint's model matrix, a
+ * unitless number the developer scales by their own reach; cpu_error_t is the
+ * largest translation distance in scene units. Each maximum carries the time
+ * and joint it was found at; (0, 0) when the error is zero everywhere. */
+typedef struct {
+    uint32_t sample_count; /* grid samples the clip shipped, 1 = no sampled channel */
+    float cpu_error_lin;
+    double worst_time_lin;
+    uint16_t worst_joint_lin;
+    float cpu_error_t;
+    double worst_time_t;
+    uint16_t worst_joint_t;
+} nt_builder_clip_report_t;
+
+/* Exports one glTF animation as an absolute clip on the rig. Channels map to
+ * joints by name hash, the same path for the rig's own scene and for another
+ * scene: every animated node must be a rig joint whose local rest TRS is
+ * bit-identical to the rig's (a differing rest is a different rig). Every
+ * LINEAR and CUBICSPLINE channel is resampled onto one uniform grid of
+ * round(duration * sample_fps) + 1 samples, STEP channels keep their authored
+ * keys, a channel whose samples or keys are all identical folds to a constant,
+ * and the object curve stays absent. The three header bounds are measured
+ * over the same dense pass as the report (skeletal spec, Bounds and culling).
+ * Content errors -- a target outside the rig, a rest mismatch, an unnamed or
+ * matrix-driven target, a duplicate channel, a morph weights channel, an
+ * accessor of the wrong type or with non-increasing input -- log a diagnostic
+ * and assert. */
+void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t animation_index, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
+                               nt_builder_clip_report_t *report);
 
 /* Computes rig_compat_id from the joints it writes and returns it, so the
  * caller stamps clips and bindings with the identity that actually shipped;

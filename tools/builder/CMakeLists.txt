@@ -134,6 +134,7 @@ add_library(nt_builder STATIC
     nt_builder_atlas_vpack.c
     nt_builder_skeletal.c
     nt_builder_rig.c
+    nt_builder_clip.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # nt_meshwire_interface, not the impl: a host may combine nt_builder with the

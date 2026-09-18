@@ -139,6 +139,14 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
         cgltf_node_transform_world(cn, node->transform);
     }
 
+    /* Animations */
+    const uint32_t animation_count = (uint32_t)data->animations_count;
+    scene->animations = (nt_glb_animation_t *)calloc(animation_count > 0 ? animation_count : 1, sizeof(nt_glb_animation_t));
+    scene->animation_count = animation_count;
+    for (uint32_t a = 0; a < animation_count; a++) {
+        scene->animations[a].name = data->animations[a].name;
+    }
+
     scene->_internal = data;
 
     NT_LOG_INFO("Parsed glTF scene: %s", path);
@@ -158,6 +166,7 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene) {
     free(scene->materials);
     free(scene->textures);
     free(scene->nodes);
+    free(scene->animations);
     if (scene->_internal != NULL) {
         cgltf_free((cgltf_data *)scene->_internal);
     }

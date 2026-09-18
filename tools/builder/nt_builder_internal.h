@@ -6,6 +6,7 @@
 #include "nt_half.h"
 #include "nt_pack_format.h"
 
+#include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -531,9 +532,17 @@ nt_cache_status_t nt_builder_cache_lookup(const char *cache_dir, uint64_t decode
 bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64_t opts_hash, const uint8_t *data, uint32_t size);
 void nt_builder_ensure_cache_dir(const char *dir);
 
+/* A bound measured in double must still contain what it measured once stored
+ * as float, so the conversion rounds towards +infinity. */
+static inline float nt_builder_round_up(double x) {
+    const float f = (float)x;
+    return ((double)f < x) ? nextafterf(f, INFINITY) : f;
+}
+
 /* Skeletal encoders (nt_builder_skeletal.c): exactly the bytes the pack stores,
  * caller frees the buffer. The public entry points are the nt_builder_add_*
- * wrappers; tests call these to inspect payloads without a pack. */
+ * wrappers; tests inspect payloads through them without a pack, and the clip
+ * import measures its own output through nt_builder_encode_clip. */
 /* Rig import (nt_builder_rig.c): decomposes one glTF column-major local matrix
  * into the rest TRS. name labels diagnostics; a matrix that is not T*R*S, or one
  * with a degenerate scale, is a content error and asserts. Public only to tests,
