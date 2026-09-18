@@ -185,8 +185,10 @@ typedef struct {
 
 typedef struct {
     float transform[16]; /* world transform mat4 */
+    uint32_t parent;     /* index into scene.nodes[], UINT32_MAX if root */
     uint32_t mesh_index; /* index into scene.meshes[], UINT32_MAX if no mesh */
-    const char *name;
+    uint32_t skin_index; /* index into the glTF skins, UINT32_MAX if no skin */
+    const char *name;    /* node name from glTF (NULL if unnamed) */
 } nt_glb_node_t;
 
 typedef struct {
@@ -538,13 +540,62 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
  * diagnostic instead of returning a code (skeletal spec §16). */
 
+/* One imported rig out of one glTF skin. The joints are every node on the
+ * paths from the scene root of the joints' hierarchy to each skin joint,
+ * identity wrappers included, in preorder; a matrix node's rest pose is its
+ * decomposed local matrix, and a matrix that is not T*R*S is a content error.
+ * skeleton_root is an explicit cut: that node becomes joint 0, its parent space
+ * becomes skeleton space, and the game's E must carry the omitted ancestors;
+ * UINT32_MAX cuts nothing. Every array lives in storage until
+ * nt_builder_free_rig. The rig keeps the scene it was built from, so the
+ * exports below cannot pair it with another; the scene outlives the rig. */
+typedef struct {
+    const nt_glb_scene_t *scene;
+    nt_skeletal_skeleton_t skeleton; /* rig_compat_id filled by the import */
+    const uint16_t *palette_joint;   /* skin joint p -> rig joint (the binding's remap) */
+    uint32_t skin_index;
+    uint16_t palette_count;
+    void *storage; /* one allocation behind every array above */
+} nt_builder_rig_t;
+
+void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uint32_t skeleton_root, nt_builder_rig_t *out);
+void nt_builder_free_rig(nt_builder_rig_t *rig);
+
+/* Weight mass one vertex may lose to the top-four reduction, in [0, 1].
+ * Raising it is the supported way to accept a heavy asset; the dropped mass is
+ * logged either way. */
+#define NT_BUILDER_SKIN_DROP_TOLERANCE 0.02F
+
+/* Exports one primitive of a skinned mesh: the ordinary streams plus the two
+ * the skin adds. The layout addresses them by the gltf_name "JOINTS" and
+ * "WEIGHTS" -- not "JOINTS_0" -- because the builder reads every
+ * JOINTS_n/WEIGHTS_n set of the primitive and reduces them to the four heaviest
+ * influences per vertex, and their NtStreamLayout is the only authority on how
+ * those lanes are stored. Some node must instantiate this mesh with the rig's
+ * skin; joint lanes address the rig's palette, not the skeleton. */
+void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_rig_t *rig, uint32_t mesh_index, uint32_t primitive_index, float skin_drop_tolerance, const char *resource_id,
+                                       const nt_mesh_opts_t *opts);
+
+/* Exports the binding every mesh of this rig's skin shares: the skin's inverse
+ * bind matrices (identity where the glTF has none), the palette remap of the
+ * rig, and the two bounds of the spec: reach in joint space, any_pose_radius
+ * in skeleton space. reach is measured over every vertex of every primitive
+ * the skin deforms and every source influence, before the top-four reduction,
+ * so it bounds every mesh the game can export from the skin up to the slack a
+ * lossy POSITION or WEIGHTS layout adds (skeletal spec, SkinBinding), which the consumer
+ * pads for. any_pose_radius follows from it and the rig's rest hierarchy. */
+void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_rig_t *rig, const char *resource_id);
+
 /* Computes rig_compat_id from the joints it writes and returns it, so the
  * caller stamps clips and bindings with the identity that actually shipped;
  * skel->rig_compat_id is ignored. Joint ids must be unique. */
 nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
 
-/* Inverse binds are mesh space -> joint space at the bind pose, in glTF
- * mesh-node space. remap is not bounded against a skeleton here. */
+/* Inverse binds are mesh space -> joint space at the bind pose, where mesh space
+ * is the primitive's vertex space and the skinned mesh node's transform is
+ * ignored (the glTF rule). reach (joint space) and any_pose_radius (skeleton
+ * space) must be finite and non-negative; the activator copies them unchecked.
+ * remap is not bounded against a skeleton here. */
 void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
 
 /* One channel of a clip. Channel c of nt_builder_clip_t::channels addresses

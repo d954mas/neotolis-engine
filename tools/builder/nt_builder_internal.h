@@ -282,8 +282,59 @@ static inline void nt_builder_narrow_stream_floats(float *data, uint32_t vertex_
         }
     }
 }
+/* x - x rejects NaN and infinities without libm; requires strict IEEE math. */
+static inline bool nt_builder_finite(float v) { return (v - v) == 0.0F; }
+
+static inline bool nt_builder_finite_n(const float *v, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (!nt_builder_finite(v[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Same tolerance as nt_skeletal_mat34_from_trs: a stored pose must satisfy the
+ * kernels' unit-quaternion contract. NaN fails both comparisons. */
+static inline bool nt_builder_unit_quat(const float *q) {
+    const float n = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
+    return (n - 1.0F) < 1e-3F && (1.0F - n) < 1e-3F;
+}
+
+/* What the skinned decode path needs about the rig: how many palette entries a
+ * joint lane may address, and how much weight mass one vertex may lose to the
+ * top-four reduction. */
+typedef struct {
+    uint16_t palette_count;
+    float drop_tolerance;
+} nt_builder_skin_ctx_t;
+
+struct cgltf_primitive;
+
 nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
                                                nt_tangent_mode_t tangent_mode, uint8_t **out_data, uint32_t *out_size);
+/* Same decode with the two skin streams filled from every JOINTS_n/WEIGHTS_n set
+ * of the primitive; skin == NULL is the unskinned entry above. */
+nt_build_result_t nt_builder_decode_scene_mesh_skinned(const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
+                                                       nt_tangent_mode_t tangent_mode, const nt_builder_skin_ctx_t *skin, uint8_t **out_data, uint32_t *out_size);
+
+/* Every JOINTS_n/WEIGHTS_n pair of one primitive, unpacked to floats and
+ * validated as a set (paired, consecutive, one element per vertex, the glTF
+ * component types, no morph targets) and per vertex (finite non-negative
+ * weights, no palette entry weighted twice, a non-zero total). Both arrays hold
+ * set_count * vertex_count * 4 floats, set-major; a joint lane is an exact
+ * integer that the caller bounds against its palette. label prefixes
+ * diagnostics. Shared by the skinned mesh export and the binding's reach scan,
+ * which read the same influences with and without the top-four reduction. */
+typedef struct {
+    float *joints;
+    float *weights;
+    uint32_t set_count;
+    uint32_t vertex_count;
+} nt_builder_influences_t;
+
+void nt_builder_read_influences(const struct cgltf_primitive *prim, const char *label, uint32_t vertex_count, nt_builder_influences_t *out);
+void nt_builder_free_influences(nt_builder_influences_t *inf);
 
 /* Font decode: TTF -> final NT_ASSET_FONT binary (like mesh path).
  * target_units_per_em: 0 = natural UPM; non-zero rescales metrics/contours to that UPM. */
@@ -483,6 +534,12 @@ void nt_builder_ensure_cache_dir(const char *dir);
 /* Skeletal encoders (nt_builder_skeletal.c): exactly the bytes the pack stores,
  * caller frees the buffer. The public entry points are the nt_builder_add_*
  * wrappers; tests call these to inspect payloads without a pack. */
+/* Rig import (nt_builder_rig.c): decomposes one glTF column-major local matrix
+ * into the rest TRS. name labels diagnostics; a matrix that is not T*R*S, or one
+ * with a degenerate scale, is a content error and asserts. Public only to tests,
+ * which pin the decomposition on matrices no fixture file needs to carry. */
+void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_trs_t *out);
+
 nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
 void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size);
 void nt_builder_encode_clip(const nt_builder_clip_t *clip, uint8_t **out, uint32_t *out_size);

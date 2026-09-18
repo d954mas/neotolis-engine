@@ -200,6 +200,8 @@ uint32_t nt_skeletal_assets_activate_skin_binding(const uint8_t *data, uint32_t 
         .rig_compat_id = (nt_hash64_t){.value = header.rig_compat_id},
         .inverse_bind = (const nt_skeletal_mat34_t *)skel_at(id, sizeof(NtSknHeader)),
         .remap = (const uint16_t *)skel_at(id, sizeof(NtSknHeader) + (48ULL * header.palette_count)),
+        .reach = header.reach,
+        .any_pose_radius = header.any_pose_radius,
         .palette_count = header.palette_count,
     };
     return id;

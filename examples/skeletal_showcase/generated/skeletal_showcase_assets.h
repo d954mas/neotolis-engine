@@ -26,13 +26,19 @@
 #define ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_THUMB ((nt_hash64_t){0x04116FA511D32E10ULL}) /* skeletal_showcase_ui/thumb */
 #define ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_TRACK ((nt_hash64_t){0x40CA01B5111E8123ULL}) /* skeletal_showcase_ui/track */
 
+/* --- SKELETON --- */
+#define ASSET_SKELETON_SKELETAL_SHOWCASE_CESIUMMAN_NSKL ((nt_hash64_t){0x80C0C6469394DAC7ULL}) /* skeletal_showcase/cesiumman.nskl */
+#define ASSET_SKELETON_SKELETAL_SHOWCASE_FOX_NSKL ((nt_hash64_t){0x5ECF020813BA2FC6ULL}) /* skeletal_showcase/fox.nskl */
+
 #if NT_HASH_LABELS
 static inline void skeletal_showcase_assets_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/slug_text.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.vert");
     (void)nt_hash64_str("assets/shaders/sprite.frag");
     (void)nt_hash64_str("assets/shaders/sprite.vert");
+    (void)nt_hash64_str("skeletal_showcase/cesiumman.nskl");
     (void)nt_hash64_str("skeletal_showcase/font");
+    (void)nt_hash64_str("skeletal_showcase/fox.nskl");
     (void)nt_hash64_str("skeletal_showcase_ui");
     (void)nt_hash64_str("skeletal_showcase_ui/_white");
     (void)nt_hash64_str("skeletal_showcase_ui/fill");

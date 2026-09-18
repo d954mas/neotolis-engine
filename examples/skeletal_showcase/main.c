@@ -40,6 +40,7 @@
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "skeletal/nt_skeletal.h"
+#include "skeletal_assets/nt_skeletal_assets.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
 #include "ui/nt_ui_dropdown.h"
@@ -58,36 +59,50 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "showcase_limits.h"
+
 #ifdef NT_PLATFORM_WEB
 #include "platform/web/nt_platform_web.h"
 #endif
 // #endregion
 
 // #region constants and state
-#define JOINT_COUNT 21U
+#define HUMANOID_JOINT_COUNT 21U
 #define UI_ARENA_SIZE ((size_t)2 * 1024 * 1024)
 #define SCRATCH_ARENA_SIZE ((size_t)128 * 1024)
 #define STAGE_ID "skeletal_showcase/stage"
+/* Camera numbers are authored for the humanoid; s_fit_scale rescales them per rig. */
 #define CAMERA_MIN 3.5F
 #define CAMERA_MAX 18.0F
+#define CAMERA_NEAR 0.05F
+#define CAMERA_FAR 50.0F
 #define CAMERA_PITCH_LIMIT 1.25F
 
-static const char *const s_joint_names[JOINT_COUNT] = {
+typedef enum {
+    RIG_HUMANOID = 0,
+    RIG_FOX,
+    RIG_CESIUMMAN,
+    RIG_COUNT,
+} rig_source_t;
+
+static const char *const s_rig_names[RIG_COUNT] = {"Humanoid", "Fox", "CesiumMan"};
+
+static const char *const s_joint_names[HUMANOID_JOINT_COUNT] = {
     "pelvis",        "spine",      "chest",      "neck",      "head",      "left_clavicle", "left_upper_arm", "left_forearm", "left_hand",  "right_clavicle", "right_upper_arm",
     "right_forearm", "right_hand", "left_thigh", "left_shin", "left_foot", "left_toe",      "right_thigh",    "right_shin",   "right_foot", "right_toe",
 };
 
-static const uint16_t s_parent[JOINT_COUNT] = {
+static const uint16_t s_parent[HUMANOID_JOINT_COUNT] = {
     NT_SKELETAL_NO_PARENT, 0, 1, 2, 3, 2, 5, 6, 7, 2, 9, 10, 11, 0, 13, 14, 15, 0, 17, 18, 19,
 };
 
-static const uint16_t s_subtree_end[JOINT_COUNT] = {
-    JOINT_COUNT, 13, 13, 5, 5, 9, 9, 9, 9, 13, 13, 13, 13, 17, 17, 17, 17, 21, 21, 21, 21,
+static const uint16_t s_subtree_end[HUMANOID_JOINT_COUNT] = {
+    HUMANOID_JOINT_COUNT, 13, 13, 5, 5, 9, 9, 9, 9, 13, 13, 13, 13, 17, 17, 17, 17, 21, 21, 21, 21,
 };
 
 /* Identity rest quaternions keep this rest pose easy to inspect. Offsets use
  * q_local = q_offset * q_rest, with XYZ Euler input composed Z*Y*X. */
-static const nt_skeletal_trs_t s_rest[JOINT_COUNT] = {
+static const nt_skeletal_trs_t s_rest[HUMANOID_JOINT_COUNT] = {
     {{0.0F, 2.20F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}},   {{0.0F, 0.45F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}},
     {{0.0F, 0.45F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}},   {{0.0F, 0.35F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}},
     {{0.0F, 0.30F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}},   {{-0.22F, 0.18F, 0.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F}},
@@ -102,18 +117,25 @@ static const nt_skeletal_trs_t s_rest[JOINT_COUNT] = {
 };
 
 typedef struct {
-    nt_skeletal_skeleton_t skeleton;
-    nt_skeletal_trs_t local[JOINT_COUNT];
-    nt_skeletal_mat34_t model[JOINT_COUNT];
-    float angles[JOINT_COUNT][3];
-    uint32_t joint_ids[JOINT_COUNT];
+    nt_skeletal_skeleton_t humanoid;    /* the code-defined rig over the static arrays above */
+    const nt_skeletal_skeleton_t *view; /* active rig; NULL while an imported skeleton is not ready */
+    rig_source_t rig_source;
+    nt_skeletal_trs_t local[SKELETAL_SHOWCASE_MAX_JOINTS];
+    nt_skeletal_mat34_t model[SKELETAL_SHOWCASE_MAX_JOINTS];
+    float angles[SKELETAL_SHOWCASE_MAX_JOINTS][3];
+    uint32_t joint_ids[HUMANOID_JOINT_COUNT];
+    bool fit_pending;
+    uint64_t view_rig_id; /* rig_compat_id the angles and fit were made for */
     int selected_joint;
     bool show_axes;
     bool combo_open;
+    bool rig_combo_open;
     bool initialized;
 } skeletal_pose_scene_state_t;
 
 static skeletal_pose_scene_state_t s_skeleton_scene;
+static nt_resource_t s_rig_resource[RIG_COUNT]; /* RIG_HUMANOID stays NT_RESOURCE_INVALID */
+static float s_humanoid_extent;
 static bool s_shell_stage_drag;
 static bool s_shell_stage_pan;
 static nt_ui_bbox_t s_stage_bbox;
@@ -121,6 +143,8 @@ static float s_camera_yaw;
 static float s_camera_pitch;
 static float s_camera_distance;
 static float s_camera_target[3];
+static float s_fit_center[3];
+static float s_fit_scale = 1.0F; /* rig extent / humanoid extent: scales the camera and the stage primitives */
 static bool s_show_controls = true;
 static bool s_scene_combo_open;
 static int s_active_scene = -1;
@@ -169,18 +193,18 @@ static void skeleton_enter(void);
 static void skeleton_cancel_input(void);
 static void skeleton_draw(void);
 static void reset_scene(void);
-static void apply_pose(void);
+static void skeleton_update(void);
 static void declare_properties(void);
 
 static const skeletal_scene_desc_t s_scene_registry[] = {
     {
         .title = "Skeleton & Pose",
-        .description = "Edit a code-defined humanoid pose with forward kinematics.",
+        .description = "Pose a code-defined humanoid or an imported Khronos rig with forward kinematics.",
         .source = "Source: examples/skeletal_showcase/main.c",
         .enter = skeleton_enter,
         .leave = NULL,
         .reset = reset_scene,
-        .update = apply_pose,
+        .update = skeleton_update,
         .cancel_input = skeleton_cancel_input,
         .declare_controls = declare_properties,
         .draw = skeleton_draw,
@@ -208,17 +232,103 @@ static void make_offset_quat(const float angles[3], float out[4]) {
     glm_quat_mul(tmp, qx, out);
 }
 
+static void reset_camera(void) {
+    s_camera_yaw = 0.0F;
+    s_camera_pitch = 0.10F;
+    s_camera_distance = 6.5F * s_fit_scale;
+    memcpy(s_camera_target, s_fit_center, sizeof s_camera_target);
+    s_camera_fit_width = 0.0F;
+    s_camera_fit_height = 0.0F;
+}
+
+/* The scene reports what the stage shows; the shell keeps owning the camera. */
+static void set_camera_fit(const float center[3], float scale) {
+    memcpy(s_fit_center, center, sizeof s_fit_center);
+    s_fit_scale = scale;
+    reset_camera();
+}
+
+/* Refreshes the borrowed view: the pointer may change on reload, so it is
+ * refetched after resource_step. NULL means the imported skeleton is not ready. */
+static void refresh_view(void) {
+    const rig_source_t rig = s_skeleton_scene.rig_source;
+    if (rig == RIG_HUMANOID) {
+        s_skeleton_scene.view = &s_skeleton_scene.humanoid;
+    } else if (nt_resource_is_ready(s_rig_resource[rig])) {
+        s_skeleton_scene.view = nt_skeletal_assets_skeleton(s_rig_resource[rig]);
+    } else {
+        s_skeleton_scene.view = NULL;
+    }
+    if (s_skeleton_scene.view != NULL) {
+        NT_ASSERT(s_skeleton_scene.view->joint_count <= SKELETAL_SHOWCASE_MAX_JOINTS && "skeletal_showcase: rig exceeds SKELETAL_SHOWCASE_MAX_JOINTS");
+        /* A reload may hand back a different rig under the same handle; angles
+         * and the camera fit belong to the rig they were made for. */
+        if (s_skeleton_scene.view->rig_compat_id.value != s_skeleton_scene.view_rig_id) {
+            s_skeleton_scene.view_rig_id = s_skeleton_scene.view->rig_compat_id.value;
+            s_skeleton_scene.selected_joint = 0;
+            s_skeleton_scene.fit_pending = true;
+            memset(s_skeleton_scene.angles, 0, sizeof s_skeleton_scene.angles);
+        }
+    }
+}
+
 static void apply_pose(void) {
-    for (uint32_t j = 0; j < JOINT_COUNT; ++j) {
-        s_skeleton_scene.local[j] = s_rest[j];
+    const nt_skeletal_skeleton_t *skel = s_skeleton_scene.view;
+    for (uint32_t j = 0; j < skel->joint_count; ++j) {
+        s_skeleton_scene.local[j] = skel->rest[j];
         versor offset;
         make_offset_quat(s_skeleton_scene.angles[j], offset);
         versor rest_q;
-        memcpy(rest_q, s_rest[j].q, sizeof rest_q);
+        memcpy(rest_q, skel->rest[j].q, sizeof rest_q);
         glm_quat_mul(offset, rest_q, s_skeleton_scene.local[j].q);
         glm_quat_normalize(s_skeleton_scene.local[j].q);
     }
-    nt_skeletal_fk(&s_skeleton_scene.skeleton, s_skeleton_scene.local, s_skeleton_scene.model, 0, JOINT_COUNT);
+    nt_skeletal_fk(skel, s_skeleton_scene.local, s_skeleton_scene.model, 0, skel->joint_count);
+}
+
+/* Centroid and extent (max joint distance from the centroid) of model[]. */
+static float rig_extent(uint16_t joint_count, float center[3]) {
+    center[0] = 0.0F;
+    center[1] = 0.0F;
+    center[2] = 0.0F;
+    for (uint32_t j = 0; j < joint_count; ++j) {
+        for (int k = 0; k < 3; ++k) {
+            center[k] += s_skeleton_scene.model[j].r[k][3];
+        }
+    }
+    for (int k = 0; k < 3; ++k) {
+        center[k] /= (float)joint_count;
+    }
+    float extent = 0.0F;
+    for (uint32_t j = 0; j < joint_count; ++j) {
+        const float d[3] = {s_skeleton_scene.model[j].r[0][3] - center[0], s_skeleton_scene.model[j].r[1][3] - center[1], s_skeleton_scene.model[j].r[2][3] - center[2]};
+        const float dist = sqrtf((d[0] * d[0]) + (d[1] * d[1]) + (d[2] * d[2]));
+        extent = dist > extent ? dist : extent;
+    }
+    return extent;
+}
+
+/* Frames the active rig at rest: model[] must hold the rest pose. */
+static void fit_rig(void) {
+    float center[3];
+    const float extent = rig_extent(s_skeleton_scene.view->joint_count, center);
+    NT_ASSERT(extent > 0.0F && "skeletal_showcase: rig joints all rest at one point");
+    const float scale = extent / s_humanoid_extent;
+    s_skeleton_scene.fit_pending = false;
+    nt_log_info("skeletal_showcase: rig %s joints=%u centroid=(%.3f, %.3f, %.3f) extent=%.3f scale=%.3f", s_rig_names[s_skeleton_scene.rig_source], (unsigned)s_skeleton_scene.view->joint_count,
+                (double)center[0], (double)center[1], (double)center[2], (double)extent, (double)scale);
+    set_camera_fit(center, scale);
+}
+
+static void skeleton_update(void) {
+    refresh_view();
+    if (s_skeleton_scene.view == NULL) {
+        return;
+    }
+    apply_pose();
+    if (s_skeleton_scene.fit_pending) {
+        fit_rig();
+    }
 }
 
 static void set_rest_pose(void) {
@@ -226,33 +336,56 @@ static void set_rest_pose(void) {
     apply_pose();
 }
 
+/* out[j]: j and its whole ancestor chain rest at the origin. NSKL marks no
+ * wrappers, so this also covers a skin joint sitting there (Fox _rootJoint,
+ * b_Root_00). Preorder: parent[j] < j. */
+static void rig_at_origin(const nt_skeletal_skeleton_t *skel, bool out[SKELETAL_SHOWCASE_MAX_JOINTS]) {
+    for (uint32_t j = 0; j < skel->joint_count; ++j) {
+        const uint16_t p = skel->parent[j];
+        const float *t = skel->rest[j].t;
+        out[j] = (p == NT_SKELETAL_NO_PARENT || out[p]) && t[0] == 0.0F && t[1] == 0.0F && t[2] == 0.0F;
+    }
+}
+
 static void set_test_pose(void) {
     memset(s_skeleton_scene.angles, 0, sizeof s_skeleton_scene.angles);
-    s_skeleton_scene.angles[6][2] = -0.65F;
-    s_skeleton_scene.angles[7][2] = -0.80F;
-    s_skeleton_scene.angles[10][2] = 0.20F;
-    s_skeleton_scene.angles[3][1] = 0.28F;
-    s_skeleton_scene.angles[14][2] = -0.45F;
-    s_skeleton_scene.angles[15][2] = 0.25F;
+    if (s_skeleton_scene.rig_source == RIG_HUMANOID) {
+        s_skeleton_scene.angles[6][2] = -0.65F;
+        s_skeleton_scene.angles[7][2] = -0.80F;
+        s_skeleton_scene.angles[10][2] = 0.20F;
+        s_skeleton_scene.angles[3][1] = 0.28F;
+        s_skeleton_scene.angles[14][2] = -0.45F;
+        s_skeleton_scene.angles[15][2] = 0.25F;
+    } else {
+        /* Imported joints have no names to pick from: bend every third joint
+         * that is not origin scaffolding, so the tilt lands on limbs. */
+        const nt_skeletal_skeleton_t *skel = s_skeleton_scene.view;
+        bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS];
+        rig_at_origin(skel, at_origin);
+        for (uint32_t j = 1, n = 0; j < skel->joint_count; ++j) {
+            if (!at_origin[j] && (n++ % 3U) == 0U) {
+                s_skeleton_scene.angles[j][2] = 0.35F;
+            }
+        }
+    }
     apply_pose();
 }
 
-static void reset_camera(void) {
-    s_camera_yaw = 0.0F;
-    s_camera_pitch = 0.10F;
-    s_camera_distance = 6.5F;
-    s_camera_target[0] = 0.0F;
-    s_camera_target[1] = 2.0F;
-    s_camera_target[2] = 0.0F;
-    s_camera_fit_width = 0.0F;
-    s_camera_fit_height = 0.0F;
+/* Angles are zeroed and the fit recomputed; the camera follows through fit_rig. */
+static void select_rig(rig_source_t rig) {
+    s_skeleton_scene.rig_source = rig;
+    s_skeleton_scene.selected_joint = 0;
+    s_skeleton_scene.combo_open = false;
+    s_skeleton_scene.fit_pending = true;
+    memset(s_skeleton_scene.angles, 0, sizeof s_skeleton_scene.angles);
+    skeleton_update();
 }
 
 static void reset_scene(void) {
-    set_rest_pose();
-    s_skeleton_scene.selected_joint = 0;
     s_skeleton_scene.show_axes = false;
     s_skeleton_scene.combo_open = false;
+    s_skeleton_scene.rig_combo_open = false;
+    select_rig(s_skeleton_scene.rig_source);
 }
 
 static void make_camera_vp(mat4 vp, float aspect, float eye[3]) {
@@ -265,7 +398,7 @@ static void make_camera_vp(mat4 vp, float aspect, float eye[3]) {
     mat4 view;
     mat4 proj;
     glm_lookat((vec3){eye[0], eye[1], eye[2]}, target, up, view);
-    glm_perspective(glm_rad(45.0F), aspect, 0.05F, 50.0F, proj);
+    glm_perspective(glm_rad(45.0F), aspect, CAMERA_NEAR * s_fit_scale, CAMERA_FAR * s_fit_scale, proj);
     glm_mat4_mul(proj, view, vp);
 }
 
@@ -276,15 +409,16 @@ static bool stage_contains(float x, float y) {
 static void fit_camera_to_stage(float stage_w, float stage_h) {
     const float vertical_fov = glm_rad(45.0F);
     const float horizontal_fov = 2.0F * atanf(tanf(vertical_fov * 0.5F) * (stage_w / stage_h));
-    /* Frame the full humanoid with room for joint spheres and perspective at the lower edge. */
-    const float vertical_distance = 5.20F / (2.0F * tanf(vertical_fov * 0.5F));
-    const float horizontal_distance = 5.20F / (2.0F * tanf(horizontal_fov * 0.5F));
+    /* Frame the full rig with room for joint spheres and perspective at the lower edge. */
+    const float span = 5.20F * s_fit_scale;
+    const float vertical_distance = span / (2.0F * tanf(vertical_fov * 0.5F));
+    const float horizontal_distance = span / (2.0F * tanf(horizontal_fov * 0.5F));
     s_camera_distance = vertical_distance > horizontal_distance ? vertical_distance : horizontal_distance;
-    if (s_camera_distance < CAMERA_MIN) {
-        s_camera_distance = CAMERA_MIN;
+    if (s_camera_distance < CAMERA_MIN * s_fit_scale) {
+        s_camera_distance = CAMERA_MIN * s_fit_scale;
     }
-    if (s_camera_distance > CAMERA_MAX) {
-        s_camera_distance = CAMERA_MAX;
+    if (s_camera_distance > CAMERA_MAX * s_fit_scale) {
+        s_camera_distance = CAMERA_MAX * s_fit_scale;
     }
 }
 
@@ -328,12 +462,12 @@ static void update_stage_camera(const nt_pointer_t *pointer, const nt_ui_scale_t
         s_shell_stage_pan = true;
     }
     if (over_stage && !nt_ui_wants_pointer(s_ui)) {
-        s_camera_distance -= pointer->wheel_dy * 0.35F;
-        if (s_camera_distance < CAMERA_MIN) {
-            s_camera_distance = CAMERA_MIN;
+        s_camera_distance -= pointer->wheel_dy * 0.35F * s_fit_scale;
+        if (s_camera_distance < CAMERA_MIN * s_fit_scale) {
+            s_camera_distance = CAMERA_MIN * s_fit_scale;
         }
-        if (s_camera_distance > CAMERA_MAX) {
-            s_camera_distance = CAMERA_MAX;
+        if (s_camera_distance > CAMERA_MAX * s_fit_scale) {
+            s_camera_distance = CAMERA_MAX * s_fit_scale;
         }
     }
 }
@@ -493,65 +627,99 @@ static void declare_header(void) {
     }
 }
 
+/* Imported skeletons carry only joint_id hashes; the humanoid keeps its names. */
+static const char *joint_name(uint32_t j, char *buf, size_t size) {
+    if (s_skeleton_scene.rig_source == RIG_HUMANOID) {
+        return s_joint_names[j];
+    }
+    (void)snprintf(buf, size, "j%02u %08X", (unsigned)j, (unsigned)s_skeleton_scene.view->joint_id[j]);
+    return buf;
+}
+
+static void declare_rig_combo(void) {
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Rig", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    char rig_preview[64];
+    (void)snprintf(rig_preview, sizeof rig_preview, "%s v", s_rig_names[s_skeleton_scene.rig_source]);
+    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("skeleton/rig_combo"), rig_preview, &s_scene_combo_style, &s_skeleton_scene.rig_combo_open)) {
+        for (uint32_t rig = 0; rig < (uint32_t)RIG_COUNT; ++rig) {
+            if (nt_ui_combo_selectable(s_ui, rig, s_rig_names[rig], rig == (uint32_t)s_skeleton_scene.rig_source) && rig != (uint32_t)s_skeleton_scene.rig_source) {
+                select_rig((rig_source_t)rig);
+            }
+        }
+        nt_ui_combo_end(s_ui);
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void declare_properties(void) {
+static void declare_pose_controls(const nt_skeletal_skeleton_t *skel) {
     const bool sliders_enabled = !s_skip_scene_interaction_this_frame;
+    char name_buf[32];
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pose actions", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
+        if (text_button_fixed(nt_ui_id("skeleton/rest"), "Rest", false, 76.0F, 32.0F)) {
+            set_rest_pose();
+        }
+        if (text_button_fixed(nt_ui_id("skeleton/test"), "Test", false, 76.0F, 32.0F)) {
+            set_test_pose();
+        }
+    }
+    if (text_button(nt_ui_id("skeleton/axes"), s_skeleton_scene.show_axes ? "Axes: on" : "Axes: off", s_skeleton_scene.show_axes)) {
+        s_skeleton_scene.show_axes = !s_skeleton_scene.show_axes;
+    }
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Selected joint", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    char joint_preview[64];
+    (void)snprintf(joint_preview, sizeof joint_preview, "%s v", joint_name((uint32_t)s_skeleton_scene.selected_joint, name_buf, sizeof name_buf));
+    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("skeleton/joint_combo"), joint_preview, &s_joint_combo_style, &s_skeleton_scene.combo_open)) {
+        for (uint32_t j = 0; j < skel->joint_count; ++j) {
+            char joint_label[48];
+            int depth = 0;
+            uint16_t ancestor = skel->parent[j];
+            while (ancestor != NT_SKELETAL_NO_PARENT) {
+                ++depth;
+                ancestor = skel->parent[ancestor];
+            }
+            (void)snprintf(joint_label, sizeof joint_label, "%*s%s", depth * 2, "", joint_name(j, name_buf, sizeof name_buf));
+            if (nt_ui_combo_selectable(s_ui, j, joint_label, (int)j == s_skeleton_scene.selected_joint)) {
+                s_skeleton_scene.selected_joint = (int)j;
+            }
+        }
+        nt_ui_combo_end(s_ui);
+    }
+    const nt_skeletal_mat34_t *m = &s_skeleton_scene.model[s_skeleton_scene.selected_joint];
+    const uint16_t parent = skel->parent[s_skeleton_scene.selected_joint];
+    char buf[160];
+    (void)snprintf(buf, sizeof buf, "Joint: %s", joint_name((uint32_t)s_skeleton_scene.selected_joint, name_buf, sizeof name_buf));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(18.0F, (Clay_Color){240.0F, 246.0F, 255.0F, 255.0F}));
+    (void)snprintf(buf, sizeof buf, "Parent: %s", parent == NT_SKELETAL_NO_PARENT ? "none" : joint_name(parent, name_buf, sizeof name_buf));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(13.0F, (Clay_Color){175.0F, 185.0F, 205.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Local rotation offset (degrees)", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    static const char *const axes[3] = {"X", "Y", "Z"};
+    static const uint32_t angle_ids[3] = {0xD31A7E21U, 0x8C42B917U, 0xF0643AC5U};
+    for (int axis = 0; axis < 3; ++axis) {
+        float degrees = s_skeleton_scene.angles[s_skeleton_scene.selected_joint][axis] * 57.2957795F;
+        char label[32];
+        (void)snprintf(label, sizeof label, "%s %+03.0f deg", axes[axis], (double)degrees);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), label, label_style(12.0F, (Clay_Color){190.0F, 205.0F, 225.0F, 255.0F}));
+        (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, angle_ids[axis], NULL, &degrees, -180.0F, 180.0F, 1.0F, &s_slider_style,
+                                 &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, sliders_enabled);
+        s_skeleton_scene.angles[s_skeleton_scene.selected_joint][axis] = degrees * 0.0174532925F;
+    }
+    (void)snprintf(buf, sizeof buf, "Model position: (%.2f, %.2f, %.2f)", (double)m->r[0][3], (double)m->r[1][3], (double)m->r[2][3]);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(13.0F, (Clay_Color){220.0F, 225.0F, 235.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Model matrix (3x4)", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    for (int row = 0; row < 3; ++row) {
+        (void)snprintf(buf, sizeof buf, "[% .3f % .3f % .3f % .3f]", (double)m->r[row][0], (double)m->r[row][1], (double)m->r[row][2], (double)m->r[row][3]);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(11.0F, (Clay_Color){190.0F, 200.0F, 220.0F, 255.0F}));
+    }
+}
+
+static void declare_properties(void) {
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pose actions", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
-        CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
-            if (text_button_fixed(nt_ui_id("skeleton/rest"), "Rest", false, 76.0F, 32.0F)) {
-                set_rest_pose();
-            }
-            if (text_button_fixed(nt_ui_id("skeleton/test"), "Test", false, 76.0F, 32.0F)) {
-                set_test_pose();
-            }
-        }
-        if (text_button(nt_ui_id("skeleton/axes"), s_skeleton_scene.show_axes ? "Axes: on" : "Axes: off", s_skeleton_scene.show_axes)) {
-            s_skeleton_scene.show_axes = !s_skeleton_scene.show_axes;
-        }
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Selected joint", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
-        char joint_preview[64];
-        (void)snprintf(joint_preview, sizeof joint_preview, "%s v", s_joint_names[s_skeleton_scene.selected_joint]);
-        if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("skeleton/joint_combo"), joint_preview, &s_joint_combo_style, &s_skeleton_scene.combo_open)) {
-            for (uint32_t j = 0; j < JOINT_COUNT; ++j) {
-                char joint_label[48];
-                int depth = 0;
-                uint16_t ancestor = s_parent[j];
-                while (ancestor != NT_SKELETAL_NO_PARENT) {
-                    ++depth;
-                    ancestor = s_parent[ancestor];
-                }
-                (void)snprintf(joint_label, sizeof joint_label, "%*s%s", depth * 2, "", s_joint_names[j]);
-                if (nt_ui_combo_selectable(s_ui, j, joint_label, (int)j == s_skeleton_scene.selected_joint)) {
-                    s_skeleton_scene.selected_joint = (int)j;
-                }
-            }
-            nt_ui_combo_end(s_ui);
-        }
-        const nt_skeletal_mat34_t *m = &s_skeleton_scene.model[s_skeleton_scene.selected_joint];
-        char buf[160];
-        (void)snprintf(buf, sizeof buf, "Joint: %s", s_joint_names[s_skeleton_scene.selected_joint]);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(18.0F, (Clay_Color){240.0F, 246.0F, 255.0F, 255.0F}));
-        (void)snprintf(buf, sizeof buf, "Parent: %s", s_parent[s_skeleton_scene.selected_joint] == NT_SKELETAL_NO_PARENT ? "none" : s_joint_names[s_parent[s_skeleton_scene.selected_joint]]);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(13.0F, (Clay_Color){175.0F, 185.0F, 205.0F, 255.0F}));
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Local rotation offset (degrees)", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
-        static const char *const axes[3] = {"X", "Y", "Z"};
-        static const uint32_t angle_ids[3] = {0xD31A7E21U, 0x8C42B917U, 0xF0643AC5U};
-        for (int axis = 0; axis < 3; ++axis) {
-            float degrees = s_skeleton_scene.angles[s_skeleton_scene.selected_joint][axis] * 57.2957795F;
-            char label[32];
-            (void)snprintf(label, sizeof label, "%s %+03.0f deg", axes[axis], (double)degrees);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), label, label_style(12.0F, (Clay_Color){190.0F, 205.0F, 225.0F, 255.0F}));
-            (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, angle_ids[axis], NULL, &degrees, -180.0F, 180.0F, 1.0F, &s_slider_style,
-                                     &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, sliders_enabled);
-            s_skeleton_scene.angles[s_skeleton_scene.selected_joint][axis] = degrees * 0.0174532925F;
-        }
-        (void)snprintf(buf, sizeof buf, "Model position: (%.2f, %.2f, %.2f)", (double)m->r[0][3], (double)m->r[1][3], (double)m->r[2][3]);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(13.0F, (Clay_Color){220.0F, 225.0F, 235.0F, 255.0F}));
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Model matrix (3x4)", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
-        for (int row = 0; row < 3; ++row) {
-            (void)snprintf(buf, sizeof buf, "[% .3f % .3f % .3f % .3f]", (double)m->r[row][0], (double)m->r[row][1], (double)m->r[row][2], (double)m->r[row][3]);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(11.0F, (Clay_Color){190.0F, 200.0F, 220.0F, 255.0F}));
+        declare_rig_combo();
+        if (s_skeleton_scene.view != NULL) {
+            declare_pose_controls(s_skeleton_scene.view);
+        } else {
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "loading...", label_style(14.0F, (Clay_Color){255.0F, 200.0F, 120.0F, 255.0F}));
         }
     }
 }
@@ -594,16 +762,20 @@ static void declare_ui(const nt_ui_scale_t *scale) {
 // #endregion
 
 // #region stage rendering
-static void draw_ground(void) {
+static void draw_ground(float scale) {
     const float grid[4] = {0.16F, 0.22F, 0.30F, 1.0F};
+    nt_shape_renderer_set_line_width(0.02F * scale); /* renderer width is retained across frames */
+    const float cell = 0.6F * scale;
+    const float half_x = 3.4F * scale;
+    const float half_z = 3.0F * scale;
     for (int i = -5; i <= 5; ++i) {
-        const float p = (float)i * 0.6F;
-        nt_shape_renderer_line((float[3]){-3.4F, 0.0F, p}, (float[3]){3.4F, 0.0F, p}, grid);
-        nt_shape_renderer_line((float[3]){p, 0.0F, -3.0F}, (float[3]){p, 0.0F, 3.0F}, grid);
+        const float p = (float)i * cell;
+        nt_shape_renderer_line((float[3]){-half_x, 0.0F, p}, (float[3]){half_x, 0.0F, p}, grid);
+        nt_shape_renderer_line((float[3]){p, 0.0F, -half_z}, (float[3]){p, 0.0F, half_z}, grid);
     }
 }
 
-static bool in_selected_subtree(uint32_t j) { return j >= (uint32_t)s_skeleton_scene.selected_joint && j < (uint32_t)s_subtree_end[s_skeleton_scene.selected_joint]; }
+static bool in_selected_subtree(uint32_t j) { return j >= (uint32_t)s_skeleton_scene.selected_joint && j < (uint32_t)s_skeleton_scene.view->subtree_end[s_skeleton_scene.selected_joint]; }
 
 static void draw_stage(const nt_ui_scale_t *scale, const mat4 vp, const float eye[3]) {
     const float stage_w = s_stage_bbox.width > 1.0F ? s_stage_bbox.width : 600.0F;
@@ -623,37 +795,66 @@ static void draw_stage(const nt_ui_scale_t *scale, const mat4 vp, const float ey
     nt_shape_renderer_set_depth(true);
 }
 
+static const float s_scaffold_color[4] = {0.45F, 0.50F, 0.58F, 1.0F};
+
+/* Parent->child links whose parent is (or is not) origin scaffolding: those
+ * draw thin and grey, real bones in the subtree colours. */
+static void draw_links(const nt_skeletal_skeleton_t *skel, const bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS], bool scaffold_pass, float scale) {
+    static const float bone_colors[2][4] = {{0.35F, 0.70F, 0.95F, 1.0F}, {1.0F, 0.65F, 0.18F, 1.0F}};
+    nt_shape_renderer_set_line_width((scaffold_pass ? 0.006F : 0.02F) * scale);
+    for (uint32_t j = 0; j < skel->joint_count; ++j) {
+        const uint16_t p = skel->parent[j];
+        if (p == NT_SKELETAL_NO_PARENT || at_origin[p] != scaffold_pass) {
+            continue;
+        }
+        const float a[3] = {s_skeleton_scene.model[p].r[0][3], s_skeleton_scene.model[p].r[1][3], s_skeleton_scene.model[p].r[2][3]};
+        const float b[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
+        const float *color = scaffold_pass ? s_scaffold_color : bone_colors[in_selected_subtree(j) ? 1 : 0];
+        nt_shape_renderer_line(a, b, color);
+    }
+}
+
 static void skeleton_draw(void) {
     static const float joint_colors[3][4] = {
         {1.0F, 0.9F, 0.2F, 1.0F},
         {1.0F, 0.55F, 0.15F, 1.0F},
         {0.30F, 0.85F, 0.95F, 1.0F},
     };
-    draw_ground();
-
-    for (uint32_t j = 1; j < JOINT_COUNT; ++j) {
-        const uint16_t p = s_parent[j];
-        const float a[3] = {s_skeleton_scene.model[p].r[0][3], s_skeleton_scene.model[p].r[1][3], s_skeleton_scene.model[p].r[2][3]};
-        const float b[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
-        const float *color = in_selected_subtree(j) ? (const float[4]){1.0F, 0.65F, 0.18F, 1.0F} : (const float[4]){0.35F, 0.70F, 0.95F, 1.0F};
-        nt_shape_renderer_line(a, b, color);
+    const nt_skeletal_skeleton_t *skel = s_skeleton_scene.view;
+    if (skel == NULL) {
+        return;
     }
-    for (uint32_t j = 0; j < JOINT_COUNT; ++j) {
+    const float scale = s_fit_scale;
+    draw_ground(scale);
+
+    /* The link from origin scaffolding up to the first translated joint would
+     * read as a limb, so those joints and links draw thin and grey. */
+    bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS];
+    rig_at_origin(skel, at_origin);
+    draw_links(skel, at_origin, true, scale);
+    draw_links(skel, at_origin, false, scale);
+    for (uint32_t j = 0; j < skel->joint_count; ++j) {
         const float p[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
         const float *color;
+        float radius = 0.075F;
         if (j == (uint32_t)s_skeleton_scene.selected_joint) {
             color = joint_colors[0];
+            radius = 0.105F;
+        } else if (at_origin[j]) {
+            color = s_scaffold_color;
+            radius = 0.04F;
         } else if (in_selected_subtree(j)) {
             color = joint_colors[1];
         } else {
             color = joint_colors[2];
         }
-        nt_shape_renderer_sphere(p, j == (uint32_t)s_skeleton_scene.selected_joint ? 0.105F : 0.075F, color);
+        nt_shape_renderer_sphere(p, radius * scale, color);
         if (s_skeleton_scene.show_axes) {
             const float axis_colors[3][4] = {{1.0F, 0.2F, 0.2F, 1.0F}, {0.2F, 1.0F, 0.3F, 1.0F}, {0.2F, 0.5F, 1.0F, 1.0F}};
+            const float axis_len = 0.23F * scale;
             for (int axis = 0; axis < 3; ++axis) {
-                const float end[3] = {p[0] + (s_skeleton_scene.model[j].r[0][axis] * 0.23F), p[1] + (s_skeleton_scene.model[j].r[1][axis] * 0.23F),
-                                      p[2] + (s_skeleton_scene.model[j].r[2][axis] * 0.23F)};
+                const float end[3] = {p[0] + (s_skeleton_scene.model[j].r[0][axis] * axis_len), p[1] + (s_skeleton_scene.model[j].r[1][axis] * axis_len),
+                                      p[2] + (s_skeleton_scene.model[j].r[2][axis] * axis_len)};
                 nt_shape_renderer_line(p, end, axis_colors[axis]);
             }
         }
@@ -670,22 +871,32 @@ static void end_stage(void) {
 // #region scene registry callbacks
 static void skeleton_enter(void) {
     if (!s_skeleton_scene.initialized) {
-        s_skeleton_scene.skeleton.parent = s_parent;
-        s_skeleton_scene.skeleton.subtree_end = s_subtree_end;
-        s_skeleton_scene.skeleton.joint_id = s_skeleton_scene.joint_ids;
-        s_skeleton_scene.skeleton.rest = s_rest;
-        s_skeleton_scene.skeleton.joint_count = JOINT_COUNT;
-        uint8_t rig_scratch[NT_SKELETAL_RIG_ID_BYTES(JOINT_COUNT)];
-        for (uint32_t j = 0; j < JOINT_COUNT; ++j) {
+        nt_skeletal_skeleton_t *humanoid = &s_skeleton_scene.humanoid;
+        humanoid->parent = s_parent;
+        humanoid->subtree_end = s_subtree_end;
+        humanoid->joint_id = s_skeleton_scene.joint_ids;
+        humanoid->rest = s_rest;
+        humanoid->joint_count = HUMANOID_JOINT_COUNT;
+        uint8_t rig_scratch[NT_SKELETAL_RIG_ID_BYTES(HUMANOID_JOINT_COUNT)];
+        for (uint32_t j = 0; j < HUMANOID_JOINT_COUNT; ++j) {
             s_skeleton_scene.joint_ids[j] = nt_hash32_str(s_joint_names[j]).value;
         }
-        s_skeleton_scene.skeleton.rig_compat_id = nt_skeletal_rig_compat_id(&s_skeleton_scene.skeleton, rig_scratch, sizeof rig_scratch);
+        humanoid->rig_compat_id = nt_skeletal_rig_compat_id(humanoid, rig_scratch, sizeof rig_scratch);
+        /* The humanoid at rest is the reference every other rig is scaled against. */
+        s_skeleton_scene.rig_source = RIG_HUMANOID;
+        s_skeleton_scene.view = humanoid;
+        set_rest_pose();
+        float center[3];
+        s_humanoid_extent = rig_extent(HUMANOID_JOINT_COUNT, center);
         reset_scene();
         s_skeleton_scene.initialized = true;
     }
 }
 
-static void skeleton_cancel_input(void) { s_skeleton_scene.combo_open = false; }
+static void skeleton_cancel_input(void) {
+    s_skeleton_scene.combo_open = false;
+    s_skeleton_scene.rig_combo_open = false;
+}
 
 static void switch_scene(int next_scene) {
     if (next_scene == s_active_scene) {
@@ -731,15 +942,16 @@ static void frame(void) {
         nt_app_quit();
     }
 #endif
-    if (nt_input_key_is_pressed(NT_KEY_R)) {
-        reset_active_scene();
-    }
-    if (s_active_scene >= 0 && s_scene_registry[s_active_scene].update != NULL) {
-        s_scene_registry[s_active_scene].update();
-    }
     nt_resource_step();
     link_programs();
     try_bind_resources();
+    if (nt_input_key_is_pressed(NT_KEY_R)) {
+        reset_active_scene();
+    }
+    /* Scene views are borrowed from resources, so the scene composes after resource_step. */
+    if (s_active_scene >= 0 && s_scene_registry[s_active_scene].update != NULL) {
+        s_scene_registry[s_active_scene].update();
+    }
 
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
@@ -750,8 +962,8 @@ static void frame(void) {
     uniforms.resolution[3] = 1.0F / fb_h;
     uniforms.time[0] = 0.0F;
     uniforms.time[1] = g_nt_app.dt;
-    uniforms.near_far[0] = 0.05F;
-    uniforms.near_far[1] = 50.0F;
+    uniforms.near_far[0] = CAMERA_NEAR * s_fit_scale;
+    uniforms.near_far[1] = CAMERA_FAR * s_fit_scale;
 
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
@@ -859,6 +1071,8 @@ int main(int argc, char *argv[]) {
     nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
+    nt_skeletal_assets_init(4);
+    nt_resource_register_type(NT_ASSET_SKELETON, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_skeleton, .deactivate = nt_skeletal_assets_deactivate_skeleton});
     nt_atlas_init();
     nt_material_init(&(nt_material_desc_t){.max_materials = 2});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
@@ -887,6 +1101,8 @@ int main(int argc, char *argv[]) {
     s_atlas = nt_resource_request(ASSET_ATLAS_SKELETAL_SHOWCASE_UI, NT_ASSET_ATLAS);
     s_atlas_texture = nt_resource_request(ASSET_TEXTURE_SKELETAL_SHOWCASE_UI_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_SKELETAL_SHOWCASE_FONT, NT_ASSET_FONT);
+    s_rig_resource[RIG_FOX] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_FOX_NSKL, NT_ASSET_SKELETON);
+    s_rig_resource[RIG_CESIUMMAN] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_CESIUMMAN_NSKL, NT_ASSET_SKELETON);
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .textures = {{.name = "u_texture", .resource = s_atlas_texture}}, .texture_count = 1, .blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_sprite"});
     s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(),
@@ -945,6 +1161,7 @@ int main(int argc, char *argv[]) {
     nt_material_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();
+    nt_skeletal_assets_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();

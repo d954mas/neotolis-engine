@@ -3,7 +3,6 @@
  * fails here and not only in the round-trip suite. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
-#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +18,7 @@
 #include "nt_builder_internal.h"
 #include "nt_pack_format.h"
 #include "nt_skeletal_format.h"
+#include "test_helpers/build_assert_trap.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -34,36 +34,7 @@
 #define PACK_PATH TMP_DIR "/builder_skeletal.ntpack"
 
 void setUp(void) {}
-void tearDown(void) {}
-
-// #region build-assert trap
-/* Same shape as test_builder.c, without the context: the encoders own no
- * builder state and abort before they allocate, so nothing needs freeing. */
-static jmp_buf s_build_assert_jmp;
-static const char *s_build_assert_expr;
-
-static void test_build_assert_handler(const char *expr, const char *file, int line) {
-    s_build_assert_expr = expr;
-    (void)file;
-    (void)line;
-    longjmp(s_build_assert_jmp, 1);
-}
-
-/* Which rule fired is the claim: a death test that only sees "some assert"
- * passes on an unrelated precondition too. */
-#define EXPECT_BUILD_ASSERT_MATCH(code, expected)                                                                                                                                                      \
-    do {                                                                                                                                                                                               \
-        s_build_assert_expr = NULL;                                                                                                                                                                    \
-        nt_build_assert_handler = test_build_assert_handler;                                                                                                                                           \
-        if (setjmp(s_build_assert_jmp) == 0) {                                                                                                                                                         \
-            code;                                                                                                                                                                                      \
-            nt_build_assert_handler = NULL;                                                                                                                                                            \
-            TEST_FAIL_MESSAGE("expected NT_BUILD_ASSERT to fire: " expected);                                                                                                                          \
-        }                                                                                                                                                                                              \
-        nt_build_assert_handler = NULL;                                                                                                                                                                \
-        TEST_ASSERT_TRUE_MESSAGE(s_build_assert_expr &&strstr(s_build_assert_expr, (expected)), "a different NT_BUILD_ASSERT fired: " expected);                                                       \
-    } while (0)
-// #endregion
+void tearDown(void) { nt_build_assert_handler = NULL; }
 
 // #region little-endian readers
 static uint16_t rd_u16(const uint8_t *p) { return (uint16_t)((uint16_t)p[0] | (uint16_t)((uint16_t)p[1] << 8)); }
@@ -76,6 +47,12 @@ static uint32_t f32_bits(float v) {
     uint32_t bits = 0;
     memcpy(&bits, &v, sizeof(bits));
     return bits;
+}
+
+static float f32_from_bits(uint32_t bits) {
+    float v = 0.0F;
+    memcpy(&v, &bits, sizeof(v));
+    return v;
 }
 // #endregion
 
@@ -116,6 +93,9 @@ static uint64_t fixture_rig_id(void) {
 }
 
 #define FIXTURE_PALETTE 3
+/* Two different exact values, so a swapped pair of header floats fails here. */
+#define FIXTURE_REACH 1.25F
+#define FIXTURE_ANY_POSE_RADIUS 3.5F
 
 static const uint16_t k_remap[FIXTURE_PALETTE] = {0, 2, 1};
 
@@ -130,6 +110,8 @@ static nt_skin_binding_t fixture_binding(void) {
     binding.rig_compat_id = (nt_hash64_t){0xABCDEF0123456789ULL};
     binding.remap = k_remap;
     binding.inverse_bind = k_inverse_bind;
+    binding.reach = FIXTURE_REACH;
+    binding.any_pose_radius = FIXTURE_ANY_POSE_RADIUS;
     binding.palette_count = FIXTURE_PALETTE;
     return binding;
 }
@@ -274,15 +256,17 @@ void test_encode_skin_binding_wire_layout(void) {
     nt_builder_encode_skin_binding(&binding, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
-    TEST_ASSERT_EQUAL_UINT32(16U + (50U * FIXTURE_PALETTE), size);
+    TEST_ASSERT_EQUAL_UINT32(24U + (50U * FIXTURE_PALETTE), size);
     TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_SKN_SIZE(FIXTURE_PALETTE), size);
     TEST_ASSERT_EQUAL_HEX32(NT_SKN_MAGIC, rd_u32(payload));
     TEST_ASSERT_EQUAL_UINT16(NT_SKELETAL_FORMAT_VERSION, rd_u16(payload + 4));
     TEST_ASSERT_EQUAL_UINT16(FIXTURE_PALETTE, rd_u16(payload + 6));
     TEST_ASSERT_EQUAL_HEX64(0xABCDEF0123456789ULL, rd_u64(payload + 8));
+    TEST_ASSERT_EQUAL_HEX32(f32_bits(FIXTURE_REACH), rd_u32(payload + 16));
+    TEST_ASSERT_EQUAL_HEX32(f32_bits(FIXTURE_ANY_POSE_RADIUS), rd_u32(payload + 20));
 
     /* Matrices come first, so the u16 remap can end the payload unpadded. */
-    const uint8_t *inverse_bind = payload + 16;
+    const uint8_t *inverse_bind = payload + 24;
     const uint8_t *remap = inverse_bind + (size_t)(48 * FIXTURE_PALETTE);
     for (size_t p = 0; p < FIXTURE_PALETTE; p++) {
         TEST_ASSERT_EQUAL_UINT16(k_remap[p], rd_u16(remap + (2 * p)));
@@ -678,6 +662,24 @@ void test_encode_skin_binding_asserts_on_a_non_finite_matrix(void) {
     TEST_ASSERT_NULL(payload);
 }
 
+/* Both radii bound a culling sphere, so a NaN or a negative one would hide the
+ * character instead of drawing it. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_encode_skin_binding_asserts_on_broken_radii(void) {
+    uint8_t *payload = NULL;
+    uint32_t size = 0;
+
+    nt_skin_binding_t nan_reach = fixture_binding();
+    nan_reach.reach = f32_from_bits(0x7FC00000U);
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skin_binding(&nan_reach, &payload, &size), "reach must be finite and non-negative");
+    TEST_ASSERT_NULL(payload);
+
+    nt_skin_binding_t negative_radius = fixture_binding();
+    negative_radius.any_pose_radius = -0.5F;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_skin_binding(&negative_radius, &payload, &size), "any_pose_radius must be finite and non-negative");
+    TEST_ASSERT_NULL(payload);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_encode_clip_asserts_on_broken_channels(void) {
     nt_builder_clip_t clip;
@@ -728,6 +730,7 @@ int main(void) {
     RUN_TEST(test_encode_skeleton_asserts_on_a_broken_hierarchy);
     RUN_TEST(test_encode_skeleton_asserts_on_a_duplicate_joint_id);
     RUN_TEST(test_encode_skin_binding_asserts_on_a_non_finite_matrix);
+    RUN_TEST(test_encode_skin_binding_asserts_on_broken_radii);
     RUN_TEST(test_encode_clip_asserts_on_broken_channels);
     return UNITY_END();
 }

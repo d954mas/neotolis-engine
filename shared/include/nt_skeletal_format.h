@@ -13,7 +13,7 @@
  * headers below travel as structs; every array after a header is bytes the two
  * sides agree on. All fields are little-endian, which every target of this
  * engine is, so headers and arrays are memcpy'd rather than composed byte by
- * byte. See docs/spec/skeletal/skeletal-animation.md §16.
+ * byte. See docs/spec/skeletal/skeletal-animation.md, Builder, codec, wire formats.
  */
 
 /* FourCC read as a little-endian uint32_t, like NT_PACK_MAGIC. */
@@ -25,7 +25,7 @@
 
 /* One version for all three payloads, compared exactly: the layout is the
  * runtime layout, so any change to it is a rebuild. */
-#define NT_SKELETAL_FORMAT_VERSION 2
+#define NT_SKELETAL_FORMAT_VERSION 3
 
 // #region NSKL skeleton
 /*
@@ -54,7 +54,7 @@ typedef struct {
 
 // #region NSKN skin binding
 /*
- * NtSknHeader (16 bytes), then in palette index order (P = palette_count):
+ * NtSknHeader (24 bytes), then in palette index order (P = palette_count):
  *   float    inverse_bind[P][12]   nt_skeletal_mat34_t row order r[3][4]
  *   uint16_t remap[P]              palette entry p -> skeleton joint
  *
@@ -68,11 +68,13 @@ typedef struct {
     uint16_t version;       /* 4:  NT_SKELETAL_FORMAT_VERSION */
     uint16_t palette_count; /* 6:  >= 1 */
     uint64_t rig_compat_id; /* 8:  rig this binding is valid with */
+    float reach;            /* 16: joint space; a skeleton-space radius needs the chain stretch */
+    float any_pose_radius;  /* 20: skeleton space */
 } NtSknHeader;
 #pragma pack(pop)
 
-/* 16 header bytes + 48 + 2 per palette entry. */
-#define NT_SKN_SIZE(palette_count) (16ULL + (50ULL * (uint64_t)(palette_count)))
+/* 24 header bytes + 48 + 2 per palette entry. */
+#define NT_SKN_SIZE(palette_count) (24ULL + (50ULL * (uint64_t)(palette_count)))
 // #endregion
 
 // #region NANM clip
@@ -164,7 +166,7 @@ static inline uint64_t nt_anm_size(const NtAnmHeader *header) {
  * layout is pinned by the C build every consumer shares. */
 #ifndef __cplusplus
 _Static_assert(sizeof(NtSklHeader) == 16, "NtSklHeader must be 16 bytes");
-_Static_assert(sizeof(NtSknHeader) == 16, "NtSknHeader must be 16 bytes");
+_Static_assert(sizeof(NtSknHeader) == 24, "NtSknHeader must be 24 bytes");
 _Static_assert(sizeof(NtAnmHeader) == 56, "NtAnmHeader must be 56 bytes");
 _Static_assert(sizeof(NtAnmObject) == 64, "NtAnmObject must be 64 bytes");
 #endif

@@ -15,27 +15,6 @@
 _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the skeletal encoders write little-endian payloads by memcpy");
 #endif
 
-// #region value checks
-/* x - x rejects NaN and infinities without libm; requires strict IEEE math. */
-static bool skel_finite(float v) { return (v - v) == 0.0F; }
-
-static bool skel_finite_n(const float *v, uint32_t count) {
-    for (uint32_t i = 0; i < count; i++) {
-        if (!skel_finite(v[i])) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/* Same tolerance as nt_skeletal_mat34_from_trs: the decoded pose must satisfy
- * the kernels' unit-quaternion contract. */
-static bool skel_unit_quat(const float *q) {
-    const float n = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
-    return (n - 1.0F) < 1e-3F && (1.0F - n) < 1e-3F;
-}
-// #endregion
-
 // #region NSKL skeleton
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
 nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size) {
@@ -56,8 +35,8 @@ nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8
         }
         NT_BUILD_ASSERT((uint32_t)skel->parent[j] == top && "a joint's parent must be the innermost joint whose subtree range is still open");
         NT_BUILD_ASSERT((skel->parent[j] == NT_SKELETAL_NO_PARENT || skel->subtree_end[j] <= skel->subtree_end[skel->parent[j]]) && "child lies outside its parent's subtree range");
-        NT_BUILD_ASSERT(skel_finite_n(skel->rest[j].t, 3) && skel_finite_n(skel->rest[j].s, 3) && "rest translation or scale is not finite");
-        NT_BUILD_ASSERT(skel_unit_quat(skel->rest[j].q) && "rest rotation is not a unit quaternion");
+        NT_BUILD_ASSERT(nt_builder_finite_n(skel->rest[j].t, 3) && nt_builder_finite_n(skel->rest[j].s, 3) && "rest translation or scale is not finite");
+        NT_BUILD_ASSERT(nt_builder_unit_quat(skel->rest[j].q) && "rest rotation is not a unit quaternion");
         top = j;
     }
 
@@ -128,8 +107,12 @@ void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **
 
     const uint32_t palette_count = binding->palette_count;
     for (uint32_t p = 0; p < palette_count; p++) {
-        NT_BUILD_ASSERT(skel_finite_n(&binding->inverse_bind[p].r[0][0], 12) && "inverse bind matrix is not finite");
+        NT_BUILD_ASSERT(nt_builder_finite_n(&binding->inverse_bind[p].r[0][0], 12) && "inverse bind matrix is not finite");
     }
+    /* Both radii bound a sphere; a NaN or a negative one would cull the
+     * character away instead of drawing it. */
+    NT_BUILD_ASSERT(nt_builder_finite(binding->reach) && binding->reach >= 0.0F && "binding reach must be finite and non-negative");
+    NT_BUILD_ASSERT(nt_builder_finite(binding->any_pose_radius) && binding->any_pose_radius >= 0.0F && "binding any_pose_radius must be finite and non-negative");
 
     const uint32_t size = (uint32_t)NT_SKN_SIZE(palette_count); /* fits: palette_count is u16 */
     uint8_t *payload = (uint8_t *)malloc(size);
@@ -140,6 +123,8 @@ void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **
         .version = NT_SKELETAL_FORMAT_VERSION,
         .palette_count = (uint16_t)palette_count,
         .rig_compat_id = binding->rig_compat_id.value,
+        .reach = binding->reach,
+        .any_pose_radius = binding->any_pose_radius,
     };
     uint8_t *w = payload;
     memcpy(w, &header, sizeof(header));
@@ -192,7 +177,7 @@ static void clip_validate(const nt_builder_clip_t *clip, NtClipTally *tally) {
     NT_BUILD_ASSERT(clip->channels && "clip has no channel array");
     NT_BUILD_ASSERT(clip->joint_count >= 1 && "clip has no joints");
     NT_BUILD_ASSERT(clip->sample_count >= 1 && "clip needs at least one sample");
-    NT_BUILD_ASSERT(skel_finite(clip->duration) && clip->duration >= 0.0F && "duration must be finite and non-negative");
+    NT_BUILD_ASSERT(nt_builder_finite(clip->duration) && clip->duration >= 0.0F && "duration must be finite and non-negative");
 
     const uint32_t object_first = 3U * (uint32_t)clip->joint_count;
     const uint32_t channel_count = object_first + 3U;
@@ -205,9 +190,9 @@ static void clip_validate(const nt_builder_clip_t *clip, NtClipTally *tally) {
         case NT_SKELETAL_CHANNEL_ABSENT:
             break;
         case NT_SKELETAL_CHANNEL_CONSTANT:
-            NT_BUILD_ASSERT(skel_finite_n(ch->constant, comps) && "constant channel value is not finite");
+            NT_BUILD_ASSERT(nt_builder_finite_n(ch->constant, comps) && "constant channel value is not finite");
             if (comps == 4) {
-                NT_BUILD_ASSERT(skel_unit_quat(ch->constant) && "constant rotation is not a unit quaternion");
+                NT_BUILD_ASSERT(nt_builder_unit_quat(ch->constant) && "constant rotation is not a unit quaternion");
             }
             if (!object) {
                 tally->constant[kind]++;
@@ -218,9 +203,9 @@ static void clip_validate(const nt_builder_clip_t *clip, NtClipTally *tally) {
             NT_BUILD_ASSERT(clip->sample_count >= 2 && clip->duration > 0.0F && "a sampled channel needs at least two samples over a positive duration");
             for (uint32_t s = 0; s < clip->sample_count; s++) {
                 const float *v = &ch->samples[(size_t)s * comps];
-                NT_BUILD_ASSERT(skel_finite_n(v, comps) && "sample is not finite");
+                NT_BUILD_ASSERT(nt_builder_finite_n(v, comps) && "sample is not finite");
                 if (comps == 4) {
-                    NT_BUILD_ASSERT(skel_unit_quat(v) && "sampled rotation is not a unit quaternion");
+                    NT_BUILD_ASSERT(nt_builder_unit_quat(v) && "sampled rotation is not a unit quaternion");
                 }
             }
             if (!object) {
@@ -233,9 +218,9 @@ static void clip_validate(const nt_builder_clip_t *clip, NtClipTally *tally) {
             for (uint32_t k = 0; k < ch->step_count; k++) {
                 NT_BUILD_ASSERT((k == 0 || ch->step_times[k] > ch->step_times[k - 1]) && "step times must increase strictly");
                 const float *v = &ch->step_values[(size_t)k * 4U];
-                NT_BUILD_ASSERT(skel_finite_n(v, 4) && "step value is not finite");
+                NT_BUILD_ASSERT(nt_builder_finite_n(v, 4) && "step value is not finite");
                 if (comps == 4) {
-                    NT_BUILD_ASSERT(skel_unit_quat(v) && "step rotation is not a unit quaternion");
+                    NT_BUILD_ASSERT(nt_builder_unit_quat(v) && "step rotation is not a unit quaternion");
                 } else {
                     NT_BUILD_ASSERT(v[3] == 0.0F && "a step translation or scale must leave the fourth component at 0");
                 }

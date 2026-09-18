@@ -156,3 +156,7 @@ The module → chapter map and a task → entry-point table live in
 ## License
 
 MIT -- see [LICENSE](LICENSE) for details.
+
+The examples ship third-party assets (fonts, sample models) under their own
+licences; the attribution files live in the `raw` directories of `ui_showcase` (fonts) and `skeletal_showcase` (models)
+directory.
