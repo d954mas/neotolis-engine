@@ -12,7 +12,7 @@
 #include <string.h>
 
 // #region json buffer
-/* The JSON is ~3 KB, ~11 KB with the deep chain; a fixed buffer with an abort
+/* The JSON is ~4 KB, ~12 KB with the deep chain; a fixed buffer with an abort
  * on overflow needs no growth. */
 typedef struct {
     char data[16384];
@@ -32,6 +32,9 @@ static void jb_addf(json_buf_t *jb, const char *fmt, ...) RIGGED_PRINTF_ATTR(2, 
 static void jb_addf(json_buf_t *jb, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
+    /* The SysV va_list is an array; the analyzer loses the va_start through the
+     * forwarded pointer and reports it uninitialized on Linux only. */
+    // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
     const int needed = vsnprintf(jb->data + jb->len, sizeof(jb->data) - jb->len, fmt, args);
     va_end(args);
     if (needed < 0 || jb->len + (size_t)needed >= sizeof(jb->data)) {
@@ -61,7 +64,28 @@ static void jb_trs(json_buf_t *jb, const float *t, const float *q, const float *
 // #endregion
 
 // #region bin sections
-enum { SEC_POSITION = 0, SEC_JOINTS0, SEC_JOINTS1, SEC_WEIGHTS0, SEC_WEIGHTS1, SEC_INDICES, SEC_IBM, SEC_FAR_POSITION, SEC_FAR_JOINTS, SEC_FAR_WEIGHTS, SEC_COUNT };
+enum {
+    SEC_POSITION = 0,
+    SEC_JOINTS0,
+    SEC_JOINTS1,
+    SEC_WEIGHTS0,
+    SEC_WEIGHTS1,
+    SEC_INDICES,
+    SEC_IBM,
+    SEC_FAR_POSITION,
+    SEC_FAR_JOINTS,
+    SEC_FAR_WEIGHTS,
+    SEC_ANIM_Q_TIMES,
+    SEC_ANIM_J1_Q,
+    SEC_ANIM_CUBIC_TIMES,
+    SEC_ANIM_J2_T,
+    SEC_ANIM_ENDS,
+    SEC_ANIM_J2_Q,
+    SEC_ANIM_STEP_TIMES,
+    SEC_ANIM_J3_S,
+    SEC_ANIM_J4_T,
+    SEC_COUNT
+};
 
 typedef struct {
     const void *data;
@@ -94,6 +118,11 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     }
     /* Rotation 90 degrees about Z times scale (2, 1, 0.5), translated. */
     float helper_matrix[16] = {0.0F, 2.0F, 0.0F, 0.0F, -1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.5F, 0.0F, 0.25F, -0.5F, 1.0F, 1.0F};
+    if (o.root_translation) {
+        root_matrix[12] = 1.0F;
+        root_matrix[13] = -2.0F;
+        root_matrix[14] = 2.0F;
+    }
     if (o.matrix_shear) {
         helper_matrix[6] = 0.001F;
     }
@@ -116,6 +145,41 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     const float mesh_q[4] = {0.0F, 0.38268343F, 0.0F, 0.92387953F};
     const float mesh_s[3] = {1.5F, 1.5F, 1.5F};
     const float object_t[3] = {0.0F, 0.0F, 5.0F};
+    // #endregion
+
+    // #region animation
+    const bool anim = o.animation || o.animation_step_only || o.animation_outside_rig || o.animation_weights || o.animation_duplicate || o.animation_matrix_node || o.animation_step_past_end ||
+                      o.animation_no_channels || o.animation_bad_times || o.animation_cubic_origin || o.animation_negated_last_key;
+    const float anim_q_times[4] = {0.0F, 0.25F, 0.5F, 1.0F};
+    float anim_j1_q[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.6F, 0.6F}, {0.0F, 0.0F, -1.0F, 0.0F}};
+    if (o.animation_negated_last_key) {
+        /* Identity up to 0.5 s, then -identity held from 1.0 s: the slerp
+         * towards it stays exactly identity, so only the held tail differs. */
+        anim_j1_q[2][2] = 0.0F;
+        anim_j1_q[2][3] = 1.0F;
+        anim_j1_q[3][2] = 0.0F;
+        anim_j1_q[3][3] = -1.0F;
+    }
+    const float anim_cubic_times[2] = {0.25F, 0.75F};
+    /* Per key: in-tangent, value, out-tangent. */
+    const float anim_j2_t[2][3][3] = {{{100.0F, 100.0F, 100.0F}, {0.0F, 0.0F, 0.0F}, {8.0F, 0.0F, 0.0F}}, {{-8.0F, -8.0F, -8.0F}, {1.0F, 2.0F, 4.0F}, {100.0F, 100.0F, 100.0F}}};
+    const float anim_ends[2] = {0.0F, RIGGED_GLB_ANIM_DURATION};
+    float anim_j2_q[2][3][4] = {{{7.0F, 7.0F, 7.0F, 7.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 2.0F, 0.0F}}, {{0.0F, 0.0F, 2.0F, 0.0F}, {0.0F, 0.0F, 1.0F, 0.0F}, {7.0F, 7.0F, 7.0F, 7.0F}}};
+    if (o.animation_cubic_origin) {
+        /* Halfway between q and -q with no tangent pull the Hermite is zero. */
+        memset(anim_j2_q[0][2], 0, sizeof(anim_j2_q[0][2]));
+        memset(anim_j2_q[1][0], 0, sizeof(anim_j2_q[1][0]));
+        anim_j2_q[1][1][2] = 0.0F;
+        anim_j2_q[1][1][3] = -1.0F;
+    }
+    float anim_step_times[3] = {0.25F, 0.75F, 1.05F};
+    if (o.animation_bad_times) {
+        anim_step_times[0] = 0.75F;
+        anim_step_times[1] = 0.25F;
+    }
+    const uint32_t step_keys = o.animation_step_past_end ? 3U : 2U;
+    const float anim_j3_s[3][3] = {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}, {3.0F, 3.0F, 3.0F}};
+    const float anim_j4_t[2][3] = {{0.0F, 0.5F, 0.0F}, {0.0F, 0.5F, 0.0F}};
     // #endregion
 
     // #region vertex data
@@ -182,7 +246,7 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
 
     // #region skin data
     uint32_t joint_count = RIGGED_GLB_SKIN_JOINT_COUNT;
-    if (o.joint_outside_root || o.multi_root || o.deep_chain) {
+    if (o.multi_root || o.deep_chain) {
         joint_count = RIGGED_GLB_SKIN_JOINT_COUNT + 1;
     }
     const uint32_t chain_len = o.deep_chain ? 260U : 0U;
@@ -233,6 +297,15 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     sec[SEC_FAR_POSITION] = (rigged_sec_t){far_positions, (uint32_t)sizeof(far_positions)};
     sec[SEC_FAR_JOINTS] = (rigged_sec_t){far_joints, (uint32_t)sizeof(far_joints)};
     sec[SEC_FAR_WEIGHTS] = (rigged_sec_t){far_weights, (uint32_t)sizeof(far_weights)};
+    sec[SEC_ANIM_Q_TIMES] = (rigged_sec_t){anim_q_times, (uint32_t)sizeof(anim_q_times)};
+    sec[SEC_ANIM_J1_Q] = (rigged_sec_t){anim_j1_q, (uint32_t)sizeof(anim_j1_q)};
+    sec[SEC_ANIM_CUBIC_TIMES] = (rigged_sec_t){anim_cubic_times, (uint32_t)sizeof(anim_cubic_times)};
+    sec[SEC_ANIM_J2_T] = (rigged_sec_t){anim_j2_t, (uint32_t)sizeof(anim_j2_t)};
+    sec[SEC_ANIM_ENDS] = (rigged_sec_t){anim_ends, (uint32_t)sizeof(anim_ends)};
+    sec[SEC_ANIM_J2_Q] = (rigged_sec_t){anim_j2_q, (uint32_t)sizeof(anim_j2_q)};
+    sec[SEC_ANIM_STEP_TIMES] = (rigged_sec_t){anim_step_times, step_keys * (uint32_t)sizeof(float)};
+    sec[SEC_ANIM_J3_S] = (rigged_sec_t){anim_j3_s, step_keys * 3U * (uint32_t)sizeof(float)};
+    sec[SEC_ANIM_J4_T] = (rigged_sec_t){anim_j4_t, (uint32_t)sizeof(anim_j4_t)};
 
     uint32_t offset[SEC_COUNT];
     uint32_t bin_size = 0;
@@ -276,10 +349,10 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         jb_trs(&jb, joint_t[j], joint_q[j], joint_s[j]);
         if (j == 0) {
             jb_addf(&jb, ",\"children\":[5,3]");
-        } else if (j == 1) {
+        } else if (j == 1 && !o.reparent_joint2) {
             jb_addf(&jb, ",\"children\":[4]");
         } else if (j == 3) {
-            jb_addf(&jb, ",\"children\":[6]");
+            jb_addf(&jb, ",\"children\":[6%s]", o.reparent_joint2 ? ",4" : "");
         } else if (j == 4 && o.cycle) {
             jb_addf(&jb, ",\"children\":[1]");
         }
@@ -318,7 +391,7 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     if (!o.no_indices) {
         jb_addf(&jb, ",\"indices\":5");
     }
-    if (o.morph_target) {
+    if (o.morph_target || o.animation_weights) {
         jb_addf(&jb, ",\"targets\":[{\"POSITION\":0}]");
     }
     jb_addf(&jb, "}");
@@ -355,7 +428,61 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, "{\"bufferView\":6,\"componentType\":5126,\"count\":%u,\"type\":\"%s\"},", o.ibm_short ? joint_count - 1U : joint_count, o.ibm_bad_type ? "VEC4" : "MAT4");
     jb_addf(&jb, "{\"bufferView\":7,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\",\"min\":[0,0,0],\"max\":[10,0,0]},", (uint32_t)RIGGED_GLB_FAR_VERTEX_COUNT);
     jb_addf(&jb, "{\"bufferView\":8,\"componentType\":5121,\"count\":%u,\"type\":\"VEC4\"},", (uint32_t)RIGGED_GLB_FAR_VERTEX_COUNT);
-    jb_addf(&jb, "{\"bufferView\":9,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"}],", (uint32_t)RIGGED_GLB_FAR_VERTEX_COUNT);
+    jb_addf(&jb, "{\"bufferView\":9,\"componentType\":5126,\"count\":%u,\"type\":\"VEC4\"},", (uint32_t)RIGGED_GLB_FAR_VERTEX_COUNT);
+    /* Animation accessors 10..18, one per section, in section order. */
+    jb_addf(&jb, "{\"bufferView\":10,\"componentType\":5126,\"count\":4,\"type\":\"SCALAR\",\"min\":[0],\"max\":[1]},");
+    jb_addf(&jb, "{\"bufferView\":11,\"componentType\":5126,\"count\":4,\"type\":\"VEC4\"},");
+    jb_addf(&jb, "{\"bufferView\":12,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\",\"min\":[0.25],\"max\":[0.75]},");
+    jb_addf(&jb, "{\"bufferView\":13,\"componentType\":5126,\"count\":6,\"type\":\"VEC3\"},");
+    jb_addf(&jb, "{\"bufferView\":14,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\",\"min\":[0],\"max\":[1]},");
+    jb_addf(&jb, "{\"bufferView\":15,\"componentType\":5126,\"count\":6,\"type\":\"VEC4\"},");
+    /* min/max are the true extremes of the values, whatever order they are in. */
+    float step_min = anim_step_times[0];
+    float step_max = anim_step_times[0];
+    for (uint32_t k = 1; k < step_keys; k++) {
+        step_min = (anim_step_times[k] < step_min) ? anim_step_times[k] : step_min;
+        step_max = (anim_step_times[k] > step_max) ? anim_step_times[k] : step_max;
+    }
+    jb_addf(&jb, "{\"bufferView\":16,\"componentType\":5126,\"count\":%u,\"type\":\"SCALAR\",\"min\":[%.9g],\"max\":[%.9g]},", step_keys, (double)step_min, (double)step_max);
+    jb_addf(&jb, "{\"bufferView\":17,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\"},", step_keys);
+    jb_addf(&jb, "{\"bufferView\":18,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"}],");
+
+    if (anim) {
+        /* Samplers: 0 Joint1 q, 1 Joint2 t cubic, 2 Joint2 q cubic, 3 Joint3 s
+         * step, 4 Joint4 t, 5 the translation of the defect channels, 6 morph
+         * weights (accessor 14 is two floats: a SCALAR output over one target). */
+        jb_addf(&jb, "\"animations\":[{\"name\":\"Clip\",\"samplers\":[");
+        jb_addf(&jb, "{\"input\":10,\"output\":11,\"interpolation\":\"LINEAR\"},");
+        jb_addf(&jb, "{\"input\":12,\"output\":13,\"interpolation\":\"CUBICSPLINE\"},");
+        jb_addf(&jb, "{\"input\":14,\"output\":15,\"interpolation\":\"CUBICSPLINE\"},");
+        jb_addf(&jb, "{\"input\":16,\"output\":17,\"interpolation\":\"STEP\"},");
+        jb_addf(&jb, "{\"input\":14,\"output\":18,\"interpolation\":\"LINEAR\"},");
+        jb_addf(&jb, "{\"input\":14,\"output\":18,\"interpolation\":\"LINEAR\"},");
+        jb_addf(&jb, "{\"input\":14,\"output\":14,\"interpolation\":\"LINEAR\"}");
+        jb_addf(&jb, "],\"channels\":[");
+        if (!o.animation_step_only && !o.animation_no_channels) {
+            jb_addf(&jb, "{\"sampler\":0,\"target\":{\"node\":3,\"path\":\"rotation\"}},");
+            jb_addf(&jb, "{\"sampler\":1,\"target\":{\"node\":4,\"path\":\"translation\"}},");
+            jb_addf(&jb, "{\"sampler\":2,\"target\":{\"node\":4,\"path\":\"rotation\"}},");
+        }
+        if (!o.animation_no_channels) {
+            jb_addf(&jb, "{\"sampler\":3,\"target\":{\"node\":5,\"path\":\"scale\"}},");
+            jb_addf(&jb, "{\"sampler\":4,\"target\":{\"node\":6,\"path\":\"translation\"}}");
+        }
+        if (o.animation_outside_rig) {
+            jb_addf(&jb, ",{\"sampler\":5,\"target\":{\"node\":%u,\"path\":\"translation\"}}", (uint32_t)RIGGED_GLB_NODE_MESH);
+        }
+        if (o.animation_weights) {
+            jb_addf(&jb, ",{\"sampler\":6,\"target\":{\"node\":%u,\"path\":\"weights\"}}", (uint32_t)RIGGED_GLB_NODE_MESH);
+        }
+        if (o.animation_duplicate) {
+            jb_addf(&jb, ",{\"sampler\":0,\"target\":{\"node\":3,\"path\":\"rotation\"}}");
+        }
+        if (o.animation_matrix_node) {
+            jb_addf(&jb, ",{\"sampler\":5,\"target\":{\"node\":%u,\"path\":\"translation\"}}", (uint32_t)RIGGED_GLB_NODE_HELPER);
+        }
+        jb_addf(&jb, "]}],");
+    }
 
     jb_addf(&jb, "\"bufferViews\":[");
     for (uint32_t i = 0; i < SEC_COUNT; i++) {

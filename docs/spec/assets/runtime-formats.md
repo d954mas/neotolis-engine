@@ -22,6 +22,8 @@ Examples:
 
 Runtime must validate: magic, version, type, sizes/offsets. Required attributes (e.g. POSITION) are a builder guarantee — the runtime sees only name hashes and cannot identify them. Builder validation is primary. Runtime validation is safety net.
 
+The skeletal activators (NSKL/NSKN/NANM) pin the boundary of that safety net as a locked rule: an activator checks only the structure a view needs to address memory, of which the one float it reads is the grid shape (`sample_count`, a finite `duration ≥ 0`), and never a value inside a sound structure; the rule, its list and its rationale live in [skeletal animation](../skeletal/skeletal-animation.md), "Builder, codec, wire formats".
+
 ## Texture activation (TTEX)
 
 A RAW texture uploads the pixels that follow its header as they lie. For a BASIS

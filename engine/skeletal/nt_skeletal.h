@@ -1,6 +1,7 @@
 #ifndef NT_SKELETAL_H
 #define NT_SKELETAL_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -8,9 +9,9 @@
 #include "hash/nt_hash.h"
 
 /*
- * nt_skeletal — pose ABI, skeleton view, 3x4 affine kernels, FK, sockets, rig
- * identity, skin binding view and palette build, clip view and sampler, and
- * the track clock.
+ * nt_skeletal — pose ABI, skeleton view, 3x4 affine kernels, FK, rig identity,
+ * skin binding view and palette build, clip view and sampler, and the track
+ * clock.
  *
  * Column vectors: L = T*R*S, G[j] = G[parent[j]]*L[j], roots G = L.
  * Every kernel is void, allocates nothing and retains no pointer past the
@@ -21,9 +22,12 @@
 #error "NT_SKELETAL_CHECKS must be defined by the nt_skeletal target (0 or 1)"
 #endif
 
-/* Local joint transform, AoS in joint order. Quaternion is unit xyzw: a
- * quaternion decoded from a lossy codec is renormalized by its decoder, because
- * the unit check tolerance assumes float32 inputs. */
+/* x - x rejects NaN and infinity without libm; requires strict IEEE math. Double
+ * so one inline serves float and double callers. */
+static inline bool nt_skeletal_finite(double v) { return (v - v) == 0.0; }
+
+/* Local joint transform, AoS in joint order. Quaternion is unit xyzw; the
+ * kernels' unit check assumes float32 inputs. */
 typedef struct {
     float t[3];
     float q[4];
@@ -83,10 +87,9 @@ static inline void nt_skeletal_mat34_from_trs(const nt_skeletal_trs_t *trs, nt_s
     const float yy = y * y;
     const float zz = z * z;
 #if NT_SKELETAL_CHECKS
-    /* x - x rejects non-finite values without libm; requires strict IEEE math. */
     for (int c = 0; c < 3; ++c) {
-        NT_ASSERT((trs->t[c] - trs->t[c]) == 0.0F);
-        NT_ASSERT((trs->s[c] - trs->s[c]) == 0.0F);
+        NT_ASSERT(nt_skeletal_finite((double)trs->t[c]));
+        NT_ASSERT(nt_skeletal_finite((double)trs->s[c]));
     }
     NT_ASSERT((xx + yy + zz + (w * w) - 1.0F) < 1e-3F && (1.0F - (xx + yy + zz + (w * w))) < 1e-3F);
 #endif
@@ -154,10 +157,6 @@ void nt_skeletal_mat34_from_mat4(const float m[16], nt_skeletal_mat34_t *out);
  * parent[first] != NT_SKELETAL_NO_PARENT, model[parent[first]] is already current. */
 void nt_skeletal_fk(const nt_skeletal_skeleton_t *skel, const nt_skeletal_trs_t *restrict local, nt_skeletal_mat34_t *restrict model, uint16_t first, uint16_t count);
 
-/* out = E * G[j] * socket_local, where E (world) is a cglm column-major mat4
- * mapping skeleton space to world. out must not alias g_joint. */
-void nt_skeletal_socket(const float world[16], const nt_skeletal_mat34_t *g_joint, const nt_skeletal_trs_t *socket_local, nt_skeletal_mat34_t *out);
-
 // #region skin
 /*
  * A binding describes how one mesh's vertices attach to a skeleton: a palette of
@@ -203,119 +202,66 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_m
  * the arrays, keeps them alive and unchanged until it republishes or destroys
  * them, and the kernels neither store nor free them. The NANM payload
  * (shared/include/nt_skeletal_format.h) holds exactly these tables, so an
- * activator copies the payload and points this view into the copy.
+ * activator copies the payload and points this view into the copy through
+ * nt_skeletal_clip_view.
  *
- * Every animated channel has exactly one storage mode, so the tables below
- * never describe the same joint channel twice, and a channel in no table takes
- * the caller's default.
+ * base is the whole local pose the clip starts from: the rig's rest with every
+ * constant channel written in. Sampled rows live in sample_count frame blocks
+ * of 3*n_t + 4*n_q + 3*n_s floats each, block i at blocks + i * stride and laid
+ * out as t rows [n_t][3], then q rows [n_q][4], then s rows [n_s][3]; row k
+ * overwrites the component of joint t_joint[k] / q_joint[k] / s_joint[k]. One
+ * interpolated sample therefore reads two adjacent blocks and nothing else,
+ * instead of striding through the clip once per channel. blocks is NULL when
+ * no channel is sampled; a builder invariant, not checked at activation, is
+ * that no joint component has two rows.
  */
-
-/* Storage mode of one channel. Only the object curve carries a mode at runtime:
- * a joint channel is described by the table it appears in. */
-typedef enum {
-    NT_SKELETAL_CHANNEL_ABSENT = 0,
-    NT_SKELETAL_CHANNEL_CONSTANT = 1,
-    NT_SKELETAL_CHANNEL_SAMPLED = 2,
-    NT_SKELETAL_CHANNEL_STEP = 3,
-} nt_skeletal_channel_mode_t;
-
-/* One STEP track: keys [first, first + count) of the clip's key table, held at
- * their authored timestamps instead of on the uniform grid. */
 typedef struct {
-    uint32_t first;  /* first key index in the clip's keys */
-    uint32_t count;  /* keys, >= 1 */
-    uint16_t joint;  /* < joint_count */
-    uint8_t channel; /* 0 translation, 1 rotation, 2 scale */
-    uint8_t pad;     /* zero on the wire, so the payload hash is the clip's identity */
-} nt_skeletal_step_t;
-
-/* One STEP key: t/s use v[0..2] and leave v[3] at 0, q is unit xyzw. */
-typedef struct {
-    float time; /* seconds, strictly increasing inside a track */
-    float v[4];
-} nt_skeletal_step_key_t;
-
-#ifndef __cplusplus
-_Static_assert(sizeof(nt_skeletal_step_t) == 12, "nt_skeletal_step_t is 12 bytes");
-_Static_assert(sizeof(nt_skeletal_step_key_t) == 20, "nt_skeletal_step_key_t is 20 bytes");
-#endif
-
-/* The object curve (§7.5) is one TRS signal for the whole character, not joint
- * -1, so it carries its own modes and key ranges and is sampled without a clip
- * pointer. A curve whose three modes are all ABSENT is the same as no curve. */
-typedef struct {
-    uint8_t mode[3];                    /* nt_skeletal_channel_mode_t per channel: t, q, s */
-    nt_skeletal_trs_t constant;         /* value of the CONSTANT channels; other fields unused */
-    const nt_skeletal_trs_t *sampled;   /* sample_count grid entries; only SAMPLED fields meaningful */
-    const nt_skeletal_step_key_t *keys; /* the clip's key table */
-    uint32_t step_first[3];             /* per channel: first key in the table above */
-    uint32_t step_count[3];             /* per channel: keys, 0 unless the mode is STEP */
-    double duration;                    /* seconds, >= 0 */
-    double inv_step;                    /* (sample_count - 1) / duration, 0 when sample_count == 1 or duration == 0 */
-    uint32_t sample_count;              /* >= 1 */
-} nt_skeletal_object_curve_t;
-
-/* Sampled channels live in sample_count frame blocks of block_floats floats
- * each, block i at blocks + i * block_floats and laid out as t rows [n_t][3],
- * then q rows [n_q][4], then s rows [n_s][3]; row k belongs to joint
- * t_joint[k] / q_joint[k] / s_joint[k]. One interpolated sample therefore reads
- * two adjacent blocks and nothing else, instead of striding through the clip
- * once per channel. blocks is NULL when no joint channel is sampled. */
-typedef struct {
-    nt_hash64_t rig_compat_id;          /* rig this clip plays on */
-    nt_hash64_t additive_ref_id;        /* reference pose identity, 0 for an absolute clip */
-    double duration;                    /* seconds, >= 0 */
-    double inv_step;                    /* (sample_count - 1) / duration, 0 when sample_count == 1 or duration == 0 */
-    const float *blocks;                /* sample_count frame blocks, see above */
-    const uint16_t *t_joint;            /* joint of sampled t row k */
-    const uint16_t *q_joint;            /* joint of sampled q row k */
-    const uint16_t *s_joint;            /* joint of sampled s row k */
-    const uint16_t *ct_joint;           /* joint of constant translation i */
-    const float *ct;                    /* 3 floats per constant translation */
-    const uint16_t *cq_joint;           /* joint of constant rotation i */
-    const float *cq;                    /* 4 floats per constant rotation, unit xyzw */
-    const uint16_t *cs_joint;           /* joint of constant scale i */
-    const float *cs;                    /* 3 floats per constant scale */
-    const nt_skeletal_step_t *steps;    /* n_steps tracks */
-    const nt_skeletal_step_key_t *keys; /* shared by every track, joints and object */
-    nt_skeletal_object_curve_t object;  /* all modes ABSENT when the clip has no object curve */
-    uint32_t sample_count;              /* samples on the uniform grid over [0, duration], >= 1 */
-    uint32_t block_floats;              /* 3*n_t + 4*n_q + 3*n_s */
-    uint32_t n_steps;                   /* STEP tracks */
-    uint16_t joint_count;               /* joints the clip and its poses address */
-    uint16_t n_t, n_q, n_s;             /* sampled rows per component kind */
-    uint16_t n_ct, n_cq, n_cs;          /* constant channels per component kind */
+    nt_hash64_t rig_compat_id;     /* rig this clip plays on */
+    double duration;               /* seconds, >= 0; > 0 when any row exists */
+    const nt_skeletal_trs_t *base; /* joint_count entries */
+    const float *blocks;           /* sample_count frame blocks, see above */
+    const uint16_t *t_joint;       /* joint of sampled t row k */
+    const uint16_t *q_joint;       /* joint of sampled q row k */
+    const uint16_t *s_joint;       /* joint of sampled s row k */
+    /* The builder's three clip bounds (skeletal spec, Bounds and culling). */
+    float r_joints;
+    float r_root;
+    float s_max;
+    uint32_t sample_count;  /* samples on the uniform grid over [0, duration], >= 1; >= 2 when any row exists */
+    uint16_t joint_count;   /* joints the clip and its poses address */
+    uint16_t n_t, n_q, n_s; /* sampled rows per component kind */
 } nt_skeletal_clip_t;
 
-/* out[0, clip->joint_count) = the clip's local pose at time, absent channels
- * taking defaults[j]. time is in [0, duration] seconds; random seek and reverse
- * need no cursor because the grid index is computed, not stepped.
+/* out[0, clip->joint_count) = the clip's local pose at time: a copy of base
+ * with every sampled row interpolated on top. time is in [0, duration]
+ * seconds; random seek and reverse need no cursor because the grid index is
+ * computed, not stepped.
  *
- * Constants copy, sampled T/S lerp and sampled Q take the shortest-path
- * normalized lerp, and a grid time reproduces its stored block exactly. STEP
- * channels hold the last key at or before time. defaults and out are
- * caller-owned buffers of joint_count entries and must not overlap. */
-void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_skeletal_trs_t *restrict defaults, nt_skeletal_trs_t *restrict out);
+ * Sampled T/S lerp and sampled Q take the shortest-path normalized lerp, and a
+ * grid time reproduces its stored block exactly. out is a caller-owned buffer
+ * of joint_count entries that must not overlap base. */
+void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, nt_skeletal_trs_t *out);
 
-/* Same rules over the one-element object signal. A NULL curve or one with three
- * ABSENT channels copies defaults, so a clip without an object curve needs no
- * branch at the call site. out must not alias defaults. */
-void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double time, const nt_skeletal_trs_t *defaults, nt_skeletal_trs_t *out);
+/* Points *out at the tables of a NANM payload in place: no validation, no
+ * allocation, no copy. The payload must be 4-aligned (asserted), stay alive as
+ * long as the view and hold exactly nt_anm_size(header) bytes; the table
+ * entries are not range-checked here. The builder measures its own encoder
+ * output through the same function. */
+void nt_skeletal_clip_view(const uint8_t *payload, nt_skeletal_clip_t *out);
 // #endregion
 
 // #region tracks
 /* Playback state of one clip assignment, owned by the game in a fixed-capacity
  * array. The engine has no player object: assign, release and crossfade ramps
  * are field writes in game code, and this struct holds no clip, pose, resource
- * or GPU pointer. clip_key is an opaque game/content id; duration is fixed for
- * the assignment and is the clip's, so the clock needs no clip view. */
+ * or GPU pointer; which clip a track plays and how much it weighs are the
+ * game's own records. duration is fixed for the assignment and is the clip's,
+ * so the clock needs no clip view. */
 typedef struct {
-    double time;       /* seconds in [0, duration] */
-    double duration;   /* seconds, >= 0; 0 is a static pose */
-    uint32_t clip_key; /* opaque game/content id */
-    float speed;       /* time scale, may be negative; 0 pauses */
-    float gain;        /* g_t of §7.3, >= 0; gain 0 still advances */
-    uint32_t flags;    /* NT_SKELETAL_TRACK_* */
+    double time;     /* seconds in [0, duration] */
+    double duration; /* seconds, >= 0; 0 is a static pose */
+    float speed;     /* time scale, may be negative; 0 pauses */
+    uint32_t flags;  /* NT_SKELETAL_TRACK_* */
 } nt_skeletal_track_t;
 
 /* Slot is in use. Occupancy is not gain: a gain-0 track keeps its cycle
@@ -323,10 +269,6 @@ typedef struct {
 #define NT_SKELETAL_TRACK_OCCUPIED (1U << 0)
 /* Time wraps into [0, duration) instead of clamping to [0, duration]. */
 #define NT_SKELETAL_TRACK_LOOPING (1U << 1)
-
-#ifndef __cplusplus
-_Static_assert(sizeof(nt_skeletal_track_t) == 32, "nt_skeletal_track_t is 32 bytes");
-#endif
 
 /* Advances the clock of every occupied track by speed * dt and nothing else:
  * no callback, no event, no clip access. A finite dt >= 0 is asserted, and for

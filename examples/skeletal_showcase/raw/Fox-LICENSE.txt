@@ -28,4 +28,4 @@ attribution above preserved.
 Modifications: none. The file is the upstream binary, byte for byte.
 
 Used by tests/unit/test_builder_rig.c, which imports its rig, skin binding and
-skinned mesh.
+skinned mesh, and tests/unit/test_builder_clip.c, which imports its animations.

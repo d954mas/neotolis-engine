@@ -4,6 +4,8 @@ nt_add_module(nt_skeletal LOG_DOMAIN "skeletal"
 )
 
 target_link_libraries(nt_skeletal PUBLIC nt_core nt_hash)
+# The clip view reads the NANM wire header.
+target_link_libraries(nt_skeletal PRIVATE nt_shared)
 # The sampler's nlerp normalizes with sqrtf; on Linux/GNU ld libm is separate
 # from libc (Windows/macOS fold it in). PUBLIC so a test over hand-built clip
 # views links it too. Mirrors engine/math + engine/metrics.

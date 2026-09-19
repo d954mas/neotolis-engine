@@ -933,6 +933,14 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_builder_rig PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder_rig WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
+    # Clip import from glTF: grid, STEP and constant channels, the error report
+    # and the header bounds, over the animated fixture and the Khronos clips.
+    add_executable(test_builder_clip unit/test_builder_clip.c unit/test_helpers/rigged_glb.c)
+    target_link_libraries(test_builder_clip PRIVATE nt_builder nt_log unity nt_meshwire)
+    target_include_directories(test_builder_clip PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_compile_definitions(test_builder_clip PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_builder_clip WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # Builder -> pack -> runtime for the skeletal formats: the only place the
     # encoders and the activators meet, so a format skew is visible here first.
     add_executable(test_skeletal_assets unit/test_skeletal_assets.c unit/test_helpers/nt_assert_trap.c)

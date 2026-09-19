@@ -1,0 +1,729 @@
+/* clang-format off */
+#include "nt_builder_internal.h"
+#include "hash/nt_hash.h"
+#include "cgltf.h"
+/* clang-format on */
+
+#include <float.h>
+#include <math.h>
+
+#include "skeletal/nt_skeletal.h"
+
+/*
+ * Clip import: one glTF animation becomes one NANM clip on a rig. The source
+ * curves are evaluated exactly, in double, per the glTF animation rules, and
+ * every channel -- STEP included, since the runtime holds no keys -- is
+ * evaluated onto the clip's uniform grid; a channel that never moves lands in
+ * the base pose instead of a row. The result is then read back through the
+ * runtime's own decoder and sampler and compared against the exact curves over
+ * a dense set of times, which yields both the error report and the header
+ * bounds.
+ *
+ * Every content failure is a logged diagnostic followed by NT_BUILD_ASSERT
+ * (NT_BUILD_FAIL), per the skeletal spec's builder policy.
+ */
+
+/* Closer than this to a full quaternion dot the slerp weights lose their
+ * conditioning; a normalized lerp differs by O(theta^3), invisible in float. */
+#define CLIP_SLERP_MIN_GAP 1e-9
+/* glTF quantization leaves a rotation key at most ~8e-3 off unit; a length
+ * this small is a zero key, which no normalization can repair. */
+#define CLIP_MIN_Q_LEN2 0.5
+/* Interior sub-samples per grid interval of the dense pass. */
+#define CLIP_SUBSAMPLES 3U
+/* A source length this close to a whole number of frames is float noise from
+ * the exporter, not an authored fraction; anything beyond it is reported. */
+#define CLIP_FRAME_SNAP_TOLERANCE 1e-3
+
+/* Equal by value, or every component negated when negate is set (q and -q are
+ * one rotation); the values are finite by the time the fold compares them. */
+static bool clip_same(const float *a, const float *b, uint32_t n, bool negate) {
+    const float sign = negate ? -1.0F : 1.0F;
+    for (uint32_t i = 0; i < n; i++) {
+        if (a[i] != sign * b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void clip_normalize4(double *q) {
+    const double inv = 1.0 / sqrt((q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]));
+    for (int c = 0; c < 4; c++) {
+        q[c] *= inv;
+    }
+}
+
+// #region source tracks
+/* One source channel, mapped to a rig joint component and unpacked to double.
+ * values holds key_count * comps doubles, or three times that for CUBICSPLINE
+ * in the glTF order in-tangent, value, out-tangent per key. */
+typedef struct {
+    const cgltf_animation_channel *channel;
+    const char *label; /* the animation, for diagnostics */
+    double *times;
+    double *values;
+    uint32_t key_count;
+    uint32_t comps; /* 4 for a rotation, 3 otherwise */
+    uint16_t joint;
+    uint8_t kind; /* 0 translation, 1 rotation, 2 scale */
+    cgltf_interpolation_type interpolation;
+} clip_track_t;
+
+static const char *clip_path_name(cgltf_animation_path_type path) {
+    switch (path) {
+    case cgltf_animation_path_type_translation:
+        return "translation";
+    case cgltf_animation_path_type_rotation:
+        return "rotation";
+    case cgltf_animation_path_type_scale:
+        return "scale";
+    default:
+        return "weights";
+    }
+}
+
+/* Rig joint whose id is the hash of this node's name, or UINT32_MAX. J is
+ * small, so a linear scan beats building a lookup table per clip. */
+static uint32_t clip_find_joint(const nt_skeletal_skeleton_t *skel, const char *name) {
+    const uint32_t id = nt_hash32_str(name).value;
+    for (uint32_t j = 0; j < skel->joint_count; j++) {
+        if (skel->joint_id[j] == id) {
+            return j;
+        }
+    }
+    return UINT32_MAX;
+}
+
+/* Validates the channel's target and accessors and fills the track; the
+ * animation name labels diagnostics. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, const cgltf_animation_channel *ch, uint32_t index, clip_track_t *track) {
+    // #region target node
+    const cgltf_node *node = ch->target_node;
+    if (node == NULL) {
+        NT_BUILD_FAIL("animation channel has no target node", "%s: channel[%u] has no target node", label, index);
+    }
+    if (node->name == NULL || node->name[0] == '\0') {
+        NT_BUILD_FAIL("animation channel targets an unnamed node", "%s: channel[%u] targets an unnamed node, and a joint id is the hash of its name", label, index);
+    }
+    /* Morph weights (no targets are supported) or a path cgltf does not know. */
+    if (ch->target_path != cgltf_animation_path_type_translation && ch->target_path != cgltf_animation_path_type_rotation && ch->target_path != cgltf_animation_path_type_scale) {
+        NT_BUILD_FAIL("animation channel animates neither translation, rotation nor scale", "%s: channel[%u] animates the %s of %s, which is not a joint transform", label, index,
+                      clip_path_name(ch->target_path), node->name);
+    }
+    /* glTF forbids a matrix on an animated node: the channel would replace
+     * one of three properties the node does not have. */
+    if (node->has_matrix) {
+        NT_BUILD_FAIL("animated node carries a matrix", "%s: channel[%u] animates %s, which carries a matrix instead of translation/rotation/scale", label, index, node->name);
+    }
+    // #endregion
+
+    // #region rig joint and parent
+    const uint32_t joint = clip_find_joint(&rig->skeleton, node->name);
+    if (joint == UINT32_MAX) {
+        NT_BUILD_FAIL("animation channel targets a node outside the rig", "%s: channel[%u] animates node %s, which is not a joint of the rig", label, index, node->name);
+    }
+    /* A clip is valid for one hierarchy: the same names under another parent
+     * are a different rig, whatever glb they come from. A root joint checks
+     * nothing, since an unanimated wrapper above the rig root is not a rig
+     * difference; the node's own rest is not compared either, because the rig
+     * supplies the rest of every channel the clip does not animate. */
+    const uint16_t parent = rig->skeleton.parent[joint];
+    if (parent != NT_SKELETAL_NO_PARENT) {
+        const cgltf_node *parent_node = node->parent;
+        if (parent_node == NULL || parent_node->name == NULL || nt_hash32_str(parent_node->name).value != rig->skeleton.joint_id[parent]) {
+            NT_BUILD_FAIL("animated node has a different parent than the rig's joint", "%s: node %s hangs under %s, but the rig's joint %u has a different parent", label, node->name,
+                          (parent_node && parent_node->name) ? parent_node->name : "(none)", joint);
+        }
+    }
+    // #endregion
+
+    // #region accessors and track fields
+    const cgltf_accessor *in = ch->sampler->input;
+    const cgltf_accessor *out = ch->sampler->output;
+    const bool rotation = ch->target_path == cgltf_animation_path_type_rotation;
+    /* cgltf_validate holds only the count relation between the two accessors;
+     * a wrong type would unpack to fewer floats than the evaluator reads. */
+    if (in->type != cgltf_type_scalar || in->component_type != cgltf_component_type_r_32f || in->normalized || in->count < 1) {
+        NT_BUILD_FAIL("animation input accessor has an invalid type", "%s: channel[%u] on %s.%s: the input accessor must be SCALAR FLOAT, not normalized, with at least one key", label, index,
+                      node->name, clip_path_name(ch->target_path));
+    }
+    const bool out_float = out->component_type == cgltf_component_type_r_32f;
+    const bool out_norm_int = out->normalized != 0 && (out->component_type == cgltf_component_type_r_8 || out->component_type == cgltf_component_type_r_8u ||
+                                                       out->component_type == cgltf_component_type_r_16 || out->component_type == cgltf_component_type_r_16u);
+    if (rotation ? (out->type != cgltf_type_vec4 || (!out_float && !out_norm_int)) : (out->type != cgltf_type_vec3 || !out_float)) {
+        NT_BUILD_FAIL("animation output accessor has an invalid type", "%s: channel[%u] on %s.%s: the output accessor must be %s", label, index, node->name, clip_path_name(ch->target_path),
+                      rotation ? "VEC4 FLOAT or normalized BYTE/SHORT" : "VEC3 FLOAT");
+    }
+
+    track->channel = ch;
+    track->label = label;
+    track->key_count = (uint32_t)in->count;
+    track->comps = rotation ? 4U : 3U;
+    track->joint = (uint16_t)joint;
+    track->kind = 0U;
+    if (rotation) {
+        track->kind = 1U;
+    } else if (ch->target_path == cgltf_animation_path_type_scale) {
+        track->kind = 2U;
+    }
+    track->interpolation = ch->sampler->interpolation;
+    // #endregion
+}
+
+/* Unpacks both accessors into the track's double arrays and checks what the
+ * evaluator relies on: increasing finite times, finite values, rotation keys
+ * long enough to normalize. Rotation keys are normalized here, so a quantized
+ * source and a float one meet the kernels' unit-quaternion contract the same way. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void clip_unpack_track(clip_track_t *track, float *scratch) {
+    const cgltf_animation_channel *ch = track->channel;
+    const char *label = track->label;
+    const char *name = ch->target_node->name;
+    const char *path = clip_path_name(ch->target_path);
+    const uint32_t per_key = (track->interpolation == cgltf_interpolation_type_cubic_spline) ? 3U : 1U;
+    const cgltf_size want_in = track->key_count;
+    const cgltf_size want_out = (cgltf_size)track->key_count * per_key * track->comps;
+
+    if (cgltf_accessor_unpack_floats(ch->sampler->input, scratch, want_in) != want_in) {
+        NT_BUILD_FAIL("animation input accessor could not be unpacked", "%s: %s.%s input accessor could not be unpacked", label, name, path);
+    }
+    for (uint32_t k = 0; k < track->key_count; k++) {
+        track->times[k] = (double)scratch[k];
+        if (!nt_builder_finite(scratch[k]) || scratch[k] < 0.0F || (k > 0 && !(track->times[k] > track->times[k - 1U]))) {
+            NT_BUILD_FAIL("animation input times must be finite, non-negative and strictly increasing", "%s: %s.%s key %u time %g is negative, not finite or not after the previous key", label, name,
+                          path, k, (double)scratch[k]);
+        }
+    }
+
+    if (cgltf_accessor_unpack_floats(ch->sampler->output, scratch, want_out) != want_out) {
+        NT_BUILD_FAIL("animation output accessor could not be unpacked", "%s: %s.%s output accessor could not be unpacked", label, name, path);
+    }
+    for (cgltf_size i = 0; i < want_out; i++) {
+        if (!nt_builder_finite(scratch[i])) {
+            NT_BUILD_FAIL("animation output values must be finite", "%s: %s.%s output element %u is not finite", label, name, path, (uint32_t)i);
+        }
+        track->values[i] = (double)scratch[i];
+    }
+    if (track->kind != 1U) {
+        return;
+    }
+    for (uint32_t k = 0; k < track->key_count; k++) {
+        /* CUBICSPLINE tangents are directions, not rotations; only the value
+         * of each key is a quaternion. */
+        double *q = track->values + ((((size_t)k * per_key) + (per_key / 2U)) * 4U);
+        const double len2 = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
+        if (len2 < CLIP_MIN_Q_LEN2) {
+            NT_BUILD_FAIL("animation rotation key is too short to normalize", "%s: %s.rotation key %u (%g, %g, %g, %g) is too short to be a rotation", label, name, k, q[0], q[1], q[2], q[3]);
+        }
+        clip_normalize4(q);
+    }
+}
+// #endregion
+
+// #region source evaluation
+/* Shortest-path slerp per the glTF animation rules; b is flipped into a's
+ * hemisphere first so the near-parallel fallback never lerps q against -q. */
+static void clip_slerp(const double *a, const double *b_in, double u, double *out) {
+    double b[4] = {b_in[0], b_in[1], b_in[2], b_in[3]};
+    double dot = (a[0] * b[0]) + (a[1] * b[1]) + (a[2] * b[2]) + (a[3] * b[3]);
+    if (dot < 0.0) {
+        for (int c = 0; c < 4; c++) {
+            b[c] = -b[c];
+        }
+        dot = -dot;
+    }
+    if (dot > 1.0) {
+        dot = 1.0;
+    }
+    /* u == 0 returns key a bit for bit rather than sin(theta) / sin(theta) of
+     * it; u == 1 (reached by rounding only) returns b in a's hemisphere. */
+    if (u == 0.0 || u == 1.0) {
+        memcpy(out, (u == 0.0) ? a : b, 4U * sizeof(double));
+        return;
+    }
+    double wa = 1.0 - u;
+    double wb = u;
+    if (1.0 - dot >= CLIP_SLERP_MIN_GAP) {
+        const double theta = acos(dot);
+        const double inv_sin = 1.0 / sin(theta);
+        wa = sin((1.0 - u) * theta) * inv_sin;
+        wb = sin(u * theta) * inv_sin;
+    }
+    for (int c = 0; c < 4; c++) {
+        out[c] = (wa * a[c]) + (wb * b[c]);
+    }
+    clip_normalize4(out);
+}
+
+/* Exact value of the source curve at time, per the glTF animation sampler
+ * rules: held before the first key and after the last; LINEAR lerps
+ * translation and scale and slerps rotation; STEP holds; CUBICSPLINE is the
+ * cubic Hermite spline with the stored tangents scaled by the key interval. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void clip_eval(const clip_track_t *track, double time, double *out) {
+    const uint32_t n = track->key_count;
+    const uint32_t comps = track->comps;
+    const bool cubic = track->interpolation == cgltf_interpolation_type_cubic_spline;
+    const size_t stride = cubic ? (3U * (size_t)comps) : comps;
+    const size_t value_off = cubic ? comps : 0U;
+
+    /* Last key at or before time, by binary search; lo ends as their count. */
+    uint32_t lo = 0;
+    uint32_t hi = n;
+    while (lo < hi) {
+        const uint32_t mid = lo + ((hi - lo) / 2U);
+        if (track->times[mid] <= time) {
+            lo = mid + 1U;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo == 0U || lo >= n || track->interpolation == cgltf_interpolation_type_step) {
+        const uint32_t k = (lo == 0U) ? 0U : (lo - 1U);
+        memcpy(out, track->values + ((size_t)k * stride) + value_off, comps * sizeof(double));
+        return;
+    }
+    const uint32_t k = lo - 1U;
+    const double t0 = track->times[k];
+    const double dt = track->times[k + 1U] - t0;
+    const double u = (time - t0) / dt;
+    const double *key0 = track->values + ((size_t)k * stride);
+    const double *key1 = key0 + stride;
+    if (!cubic) {
+        if (track->kind == 1U) {
+            clip_slerp(key0, key1, u, out);
+        } else {
+            for (uint32_t c = 0; c < comps; c++) {
+                out[c] = ((1.0 - u) * key0[c]) + (u * key1[c]);
+            }
+        }
+        return;
+    }
+    const double u2 = u * u;
+    const double u3 = u2 * u;
+    const double h00 = (2.0 * u3) - (3.0 * u2) + 1.0;
+    const double h10 = u3 - (2.0 * u2) + u;
+    const double h01 = (-2.0 * u3) + (3.0 * u2);
+    const double h11 = u3 - u2;
+    const double *v0 = key0 + comps;
+    const double *m0 = key0 + ((size_t)2U * comps); /* out-tangent of key k */
+    const double *v1 = key1 + comps;
+    const double *m1 = key1; /* in-tangent of key k + 1 */
+    for (uint32_t c = 0; c < comps; c++) {
+        out[c] = (h00 * v0[c]) + (h10 * dt * m0[c]) + (h01 * v1[c]) + (h11 * dt * m1[c]);
+    }
+    if (track->kind == 1U) {
+        clip_normalize4(out);
+    }
+}
+
+/* clip_eval with the one content rule the keys cannot express: a cubic through
+ * the origin normalizes to NaN and huge tangents overflow the float the clip
+ * stores, so the value is checked where it is produced and the diagnostic
+ * names the channel. */
+static void clip_eval_checked(const clip_track_t *track, double time, double *out) {
+    clip_eval(track, time, out);
+    for (uint32_t c = 0; c < track->comps; c++) {
+        if (!(fabs(out[c]) <= (double)FLT_MAX)) {
+            NT_BUILD_FAIL("animation curve evaluates outside the float range", "%s: %s.%s evaluates outside the float range at %.9g s", track->label, track->channel->target_node->name,
+                          clip_path_name(track->channel->target_path), time);
+        }
+    }
+}
+// #endregion
+
+// #region resampling
+/* Grid time i of N samples over duration, computed the one way both the builder
+ * and a test reproduce it; i * duration is exact in double while i < 2^29 (a
+ * 24-bit mantissa times i), so the last grid time is duration itself. */
+static double clip_grid_time(uint32_t i, uint32_t n, float duration) { return ((double)i * (double)duration) / (double)(n - 1U); }
+
+/* Evaluates one track at every grid time into samples (n_grid * comps floats)
+ * and reports whether every sample equals the first one -- for a rotation, its
+ * negation counts too, since q and -q are one rotation and a held last key in
+ * the other hemisphere must not keep a still channel off the base pose. */
+static bool clip_fill_track(const clip_track_t *track, uint32_t n_grid, float duration, float *samples) {
+    const uint32_t comps = track->comps;
+    double v[4] = {0.0, 0.0, 0.0, 0.0};
+    for (uint32_t i = 0; i < n_grid; i++) {
+        clip_eval_checked(track, clip_grid_time(i, n_grid, duration), v);
+        for (uint32_t c = 0; c < comps; c++) {
+            samples[((size_t)i * comps) + c] = (float)v[c];
+        }
+    }
+    bool constant = true;
+    for (uint32_t i = 1; i < n_grid && constant; i++) {
+        const float *sample = samples + ((size_t)i * comps);
+        constant = clip_same(samples, sample, comps, false) || (track->kind == 1U && clip_same(samples, sample, comps, true));
+    }
+    return constant;
+}
+// #endregion
+
+// #region dense pass
+typedef struct {
+    const nt_skeletal_skeleton_t *skel;
+    const nt_skeletal_clip_t *view;
+    const clip_track_t *tracks;
+    uint32_t track_count;
+    nt_skeletal_trs_t *local_rt;
+    nt_skeletal_trs_t *local_ex;
+    nt_skeletal_mat34_t *g_rt;
+    nt_skeletal_mat34_t *g_ex;
+    double *stretch; /* per joint: product of max|s| along the ancestor chain */
+    double r_joints, r_root, s_max;
+    double lin_max, t_max; /* the report's maxima, compared in double so a float tie cannot move the worst pair */
+    nt_builder_clip_report_t *report;
+} clip_pass_t;
+
+static int clip_cmp_double(const void *a, const void *b) {
+    const double x = *(const double *)a;
+    const double y = *(const double *)b;
+    return (x > y) - (x < y);
+}
+
+/* One time of the dense set: the runtime pose against the exact one, joint by
+ * joint, and the three bounds off the runtime pose. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void clip_pass_time(clip_pass_t *p, double time) {
+    const uint16_t joints = p->skel->joint_count;
+    // #region runtime and exact poses
+    nt_skeletal_sample(p->view, time, p->local_rt);
+    memcpy(p->local_ex, p->skel->rest, (size_t)joints * sizeof(nt_skeletal_trs_t));
+    for (uint32_t t = 0; t < p->track_count; t++) {
+        const clip_track_t *track = &p->tracks[t];
+        double v[4] = {0.0, 0.0, 0.0, 0.0};
+        clip_eval_checked(track, time, v);
+        nt_skeletal_trs_t *dst = &p->local_ex[track->joint];
+        float *lane = dst->t;
+        if (track->kind == 1U) {
+            lane = dst->q;
+        } else if (track->kind == 2U) {
+            lane = dst->s;
+        }
+        for (uint32_t c = 0; c < track->comps; c++) {
+            lane[c] = (float)v[c];
+        }
+    }
+    nt_skeletal_fk(p->skel, p->local_rt, p->g_rt, 0, joints);
+    nt_skeletal_fk(p->skel, p->local_ex, p->g_ex, 0, joints);
+    // #endregion
+
+    // #region error and bounds
+    for (uint16_t j = 0; j < joints; j++) {
+        double lin2 = 0.0;
+        double dt2 = 0.0;
+        double origin2 = 0.0;
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                const double d = (double)p->g_rt[j].r[r][c] - (double)p->g_ex[j].r[r][c];
+                lin2 += d * d;
+            }
+            const double d = (double)p->g_rt[j].r[r][3] - (double)p->g_ex[j].r[r][3];
+            dt2 += d * d;
+            origin2 += (double)p->g_rt[j].r[r][3] * (double)p->g_rt[j].r[r][3];
+        }
+        const double lin = sqrt(lin2);
+        const double dt = sqrt(dt2);
+        if (lin > p->lin_max) {
+            p->lin_max = lin;
+            p->report->worst_time_lin = time;
+            p->report->worst_joint_lin = j;
+        }
+        if (dt > p->t_max) {
+            p->t_max = dt;
+            p->report->worst_time_t = time;
+            p->report->worst_joint_t = j;
+        }
+        const double origin = sqrt(origin2);
+        if (origin > p->r_joints) {
+            p->r_joints = origin;
+        }
+        const nt_skeletal_trs_t *l = &p->local_rt[j];
+        const uint16_t parent = p->skel->parent[j];
+        if (parent == NT_SKELETAL_NO_PARENT) {
+            const double root = sqrt(((double)l->t[0] * (double)l->t[0]) + ((double)l->t[1] * (double)l->t[1]) + ((double)l->t[2] * (double)l->t[2]));
+            if (root > p->r_root) {
+                p->r_root = root;
+            }
+        }
+        /* Products of max|s| along the chain bound the largest singular value
+         * of every model matrix's linear part (skeletal spec, Bounds and culling). */
+        const double s = fmax(fabs((double)l->s[0]), fmax(fabs((double)l->s[1]), fabs((double)l->s[2])));
+        p->stretch[j] = ((parent == NT_SKELETAL_NO_PARENT) ? 1.0 : p->stretch[parent]) * s;
+        if (p->stretch[j] > p->s_max) {
+            p->s_max = p->stretch[j];
+        }
+    }
+    // #endregion
+}
+
+/* The dense set: every grid time, every authored key time (clamped to the end)
+ * and three sub-samples per grid interval, sorted and deduplicated; a clip
+ * whose every channel folded is still measured on the n_grid grid. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void clip_dense_pass(clip_pass_t *p, uint32_t n_grid, float duration) {
+    size_t count = (size_t)n_grid + ((size_t)(n_grid - 1U) * CLIP_SUBSAMPLES);
+    for (uint32_t t = 0; t < p->track_count; t++) {
+        count += p->tracks[t].key_count;
+    }
+    double *times = (double *)malloc(count * sizeof(double));
+    NT_BUILD_ASSERT(times && "add_scene_clip: alloc failed (OOM)");
+    size_t n = 0;
+    for (uint32_t i = 0; i < n_grid; i++) {
+        times[n++] = clip_grid_time(i, n_grid, duration);
+        if (i + 1U < n_grid) {
+            for (uint32_t k = 1; k <= CLIP_SUBSAMPLES; k++) {
+                times[n++] = (((4.0 * (double)i) + (double)k) * (double)duration) / (4.0 * (double)(n_grid - 1U));
+            }
+        }
+    }
+    for (uint32_t t = 0; t < p->track_count; t++) {
+        for (uint32_t k = 0; k < p->tracks[t].key_count; k++) {
+            times[n++] = p->tracks[t].times[k];
+        }
+    }
+    qsort(times, n, sizeof(double), clip_cmp_double);
+    for (size_t i = 0; i < n; i++) {
+        if (i > 0 && times[i] == times[i - 1U]) {
+            continue;
+        }
+        double time = times[i];
+        if (time > (double)duration) {
+            time = (double)duration;
+        }
+        clip_pass_time(p, time);
+    }
+    free(times);
+}
+// #endregion
+
+// #region export
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const char *animation_name, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
+                               nt_builder_clip_report_t *report) {
+    NT_BUILD_ASSERT(ctx && scene && rig && resource_id && report && "invalid add_scene_clip args");
+    const cgltf_data *data = (const cgltf_data *)scene->_internal;
+    NT_BUILD_ASSERT(data && "add_scene_clip: scene is not parsed");
+    if (!nt_builder_finite(sample_fps) || !(sample_fps > 0.0F)) {
+        NT_BUILD_FAIL("sample_fps must be finite and positive", "add_scene_clip: sample_fps %g must be finite and positive", (double)sample_fps);
+    }
+    /* NULL and "" are one name, the unnamed animation. */
+    const char *want = animation_name ? animation_name : "";
+    const uint32_t animation_count = (uint32_t)data->animations_count;
+    uint32_t animation_index = UINT32_MAX;
+    uint32_t matches = 0;
+    for (uint32_t a = 0; a < animation_count; a++) {
+        const char *name = data->animations[a].name ? data->animations[a].name : "";
+        if (strcmp(name, want) == 0) {
+            animation_index = a;
+            matches++;
+        }
+    }
+    if (matches != 1U) {
+        for (uint32_t a = 0; a < animation_count; a++) {
+            NT_LOG_ERROR("add_scene_clip:   animation[%u] %s", a, (data->animations[a].name && data->animations[a].name[0]) ? data->animations[a].name : "(unnamed)");
+        }
+        NT_BUILD_FAIL("exactly one animation must carry the requested name", "add_scene_clip: %u of the scene's %u animations are named %s", matches, animation_count, want[0] ? want : "(unnamed)");
+    }
+    const cgltf_animation *anim = &data->animations[animation_index];
+    char label[128];
+    (void)snprintf(label, sizeof(label), "add_scene_clip: animation[%u]%s%s", animation_index, anim->name ? " " : "", anim->name ? anim->name : "");
+    if (anim->channels_count == 0) {
+        NT_BUILD_FAIL("animation has no channels", "%s has no channels", label);
+    }
+    const nt_skeletal_skeleton_t *skel = &rig->skeleton;
+    const uint32_t joints = skel->joint_count;
+    const uint32_t channel_count = 3U * joints;
+    const uint32_t track_count = (uint32_t)anim->channels_count;
+
+    // #region map and unpack
+    clip_track_t *tracks = (clip_track_t *)calloc(track_count, sizeof(clip_track_t));
+    uint32_t *track_of = (uint32_t *)malloc((size_t)channel_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(tracks && track_of && "add_scene_clip: alloc failed (OOM)");
+    memset(track_of, 0xFF, (size_t)channel_count * sizeof(uint32_t));
+    size_t doubles = 0;
+    size_t max_floats = 1; /* every track unpacks at least one key through scratch */
+    for (uint32_t t = 0; t < track_count; t++) {
+        clip_map_channel(label, rig, &anim->channels[t], t, &tracks[t]);
+        const uint32_t c = (3U * tracks[t].joint) + tracks[t].kind;
+        /* glTF forbids two channels of one animation on one node property;
+         * cgltf does not check it, and the second would silently win. */
+        if (track_of[c] != UINT32_MAX) {
+            NT_BUILD_FAIL("two channels animate one node property", "%s: channels[%u] and [%u] both animate %s.%s", label, track_of[c], t, anim->channels[t].target_node->name,
+                          clip_path_name(anim->channels[t].target_path));
+        }
+        track_of[c] = t;
+        const uint32_t per_key = (tracks[t].interpolation == cgltf_interpolation_type_cubic_spline) ? 3U : 1U;
+        const size_t values = (size_t)tracks[t].key_count * per_key * tracks[t].comps;
+        doubles += tracks[t].key_count + values;
+        if (values > max_floats) {
+            max_floats = values;
+        }
+    }
+    double *arena = (double *)malloc(doubles * sizeof(double));
+    float *scratch = (float *)malloc(max_floats * sizeof(float));
+    NT_BUILD_ASSERT(arena && scratch && "add_scene_clip: alloc failed (OOM)");
+    double *next = arena;
+    float duration = 0.0F;
+    for (uint32_t t = 0; t < track_count; t++) {
+        const uint32_t per_key = (tracks[t].interpolation == cgltf_interpolation_type_cubic_spline) ? 3U : 1U;
+        tracks[t].times = next;
+        next += tracks[t].key_count;
+        tracks[t].values = next;
+        next += (size_t)tracks[t].key_count * per_key * tracks[t].comps;
+        clip_unpack_track(&tracks[t], scratch);
+        const float last = (float)tracks[t].times[tracks[t].key_count - 1U];
+        if (last > duration) {
+            duration = last;
+        }
+    }
+    free(scratch);
+    const float source_duration = duration;
+    // #endregion
+
+    // #region resample
+    /* Frames are the nearest whole number and the duration follows, so keys
+     * authored at sample_fps land on grid samples (the Unreal import rule); a
+     * fractional source holds or loses its tail and says so, sampled or not. */
+    const double frames_exact = (double)source_duration * (double)sample_fps;
+    if (!(frames_exact < 4294967294.0)) {
+        NT_BUILD_FAIL("duration * sample_fps overflows the sample grid", "%s: %.9g s at %g fps is %g frames, more than the grid can hold", label, (double)source_duration, (double)sample_fps,
+                      frames_exact);
+    }
+    const double frames = (double)llround(frames_exact);
+    const uint32_t n_grid = (frames < 1.0) ? 2U : ((uint32_t)frames + 1U);
+    duration = (float)((double)(n_grid - 1U) / (double)sample_fps);
+    if (!nt_builder_finite(duration) || !(duration > 0.0F)) {
+        NT_BUILD_FAIL("sample_fps gives no finite grid", "%s: %u frames at %g fps is not a finite positive duration", label, n_grid - 1U, (double)sample_fps);
+    }
+    if (fabs(frames_exact - (double)(n_grid - 1U)) > CLIP_FRAME_SNAP_TOLERANCE) {
+        NT_LOG_WARN("%s: %.9g s is %.4g frames at %g fps, not a whole number; the clip ships %u frames, %.9g s", label, (double)source_duration, frames_exact, (double)sample_fps, n_grid - 1U,
+                    (double)duration);
+    }
+    /* Channel-major per track, one grid of n_grid samples each; rows are
+     * transposed into sample-major blocks once the still ones are known. */
+    float *samples = (float *)calloc((size_t)track_count * n_grid * 4U, sizeof(float));
+    bool *still = (bool *)calloc(track_count, sizeof(bool));
+    NT_BUILD_ASSERT(samples && still && "add_scene_clip: alloc failed (OOM)");
+    bool sampled = false;
+    for (uint32_t t = 0; t < track_count; t++) {
+        still[t] = clip_fill_track(&tracks[t], n_grid, duration, samples + ((size_t)t * n_grid * 4U));
+        sampled = sampled || !still[t];
+    }
+
+    /* The base pose is the rig's rest with every still channel written in;
+     * rows are assigned in joint order, so the payload does not depend on the
+     * order the file lists its channels in. */
+    nt_skeletal_trs_t *base = (nt_skeletal_trs_t *)malloc((size_t)joints * sizeof(nt_skeletal_trs_t));
+    uint16_t *tables = (uint16_t *)malloc((size_t)channel_count * sizeof(uint16_t));
+    uint32_t *row_track = (uint32_t *)malloc((size_t)channel_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(base && tables && row_track && "add_scene_clip: alloc failed (OOM)");
+    memcpy(base, skel->rest, (size_t)joints * sizeof(nt_skeletal_trs_t));
+    uint16_t *const table[3] = {tables, tables + joints, tables + ((size_t)2U * joints)};
+    uint32_t *const rows[3] = {row_track, row_track + joints, row_track + ((size_t)2U * joints)};
+    uint16_t n_rows[3] = {0, 0, 0};
+    for (uint32_t c = 0; c < 3U * joints; c++) {
+        const uint32_t t = track_of[c];
+        if (t == UINT32_MAX) {
+            continue;
+        }
+        const uint32_t kind = tracks[t].kind;
+        const uint32_t joint = tracks[t].joint;
+        if (still[t]) {
+            float *lane = base[joint].t;
+            if (kind == 1U) {
+                lane = base[joint].q;
+            } else if (kind == 2U) {
+                lane = base[joint].s;
+            }
+            memcpy(lane, samples + ((size_t)t * n_grid * 4U), tracks[t].comps * sizeof(float));
+            continue;
+        }
+        table[kind][n_rows[kind]] = (uint16_t)joint;
+        rows[kind][n_rows[kind]] = t;
+        n_rows[kind]++;
+    }
+    const size_t stride = ((size_t)3U * n_rows[0]) + ((size_t)4U * n_rows[1]) + ((size_t)3U * n_rows[2]);
+    float *blocks = (float *)malloc((stride == 0U ? 1U : ((size_t)n_grid * stride)) * sizeof(float));
+    NT_BUILD_ASSERT(blocks && "add_scene_clip: alloc failed (OOM)");
+    float *w = blocks;
+    for (uint32_t i = 0; i < n_grid; i++) {
+        for (uint32_t kind = 0; kind < 3; kind++) {
+            const uint32_t comps = (kind == 1U) ? 4U : 3U;
+            for (uint32_t k = 0; k < n_rows[kind]; k++) {
+                memcpy(w, samples + ((size_t)rows[kind][k] * n_grid * 4U) + ((size_t)i * comps), comps * sizeof(float));
+                w += comps;
+            }
+        }
+    }
+    nt_skeletal_clip_t clip = {
+        .rig_compat_id = skel->rig_compat_id,
+        .duration = (double)duration,
+        .base = base,
+        .blocks = (stride != 0U) ? blocks : NULL,
+        .t_joint = table[0],
+        .q_joint = table[1],
+        .s_joint = table[2],
+        .sample_count = sampled ? n_grid : 1U,
+        .joint_count = (uint16_t)joints,
+        .n_t = n_rows[0],
+        .n_q = n_rows[1],
+        .n_s = n_rows[2],
+    };
+    // #endregion
+
+    // #region measure
+    /* The encoded bytes are read back through the runtime's own decoder, so
+     * the report measures what the game will sample, not a builder mirror. */
+    uint8_t *payload = NULL;
+    uint32_t payload_size = 0;
+    nt_builder_encode_clip(&clip, &payload, &payload_size);
+    nt_skeletal_clip_t view;
+    nt_skeletal_clip_view(payload, &view);
+
+    memset(report, 0, sizeof(*report));
+    report->sample_count = clip.sample_count;
+    report->duration = duration;
+    clip_pass_t pass = {
+        .skel = skel,
+        .view = &view,
+        .tracks = tracks,
+        .track_count = track_count,
+        .local_rt = (nt_skeletal_trs_t *)malloc((size_t)joints * sizeof(nt_skeletal_trs_t)),
+        .local_ex = (nt_skeletal_trs_t *)malloc((size_t)joints * sizeof(nt_skeletal_trs_t)),
+        .g_rt = (nt_skeletal_mat34_t *)malloc((size_t)joints * sizeof(nt_skeletal_mat34_t)),
+        .g_ex = (nt_skeletal_mat34_t *)malloc((size_t)joints * sizeof(nt_skeletal_mat34_t)),
+        .stretch = (double *)malloc((size_t)joints * sizeof(double)),
+        .report = report,
+    };
+    NT_BUILD_ASSERT(pass.local_rt && pass.local_ex && pass.g_rt && pass.g_ex && pass.stretch && "add_scene_clip: alloc failed (OOM)");
+    clip_dense_pass(&pass, n_grid, duration);
+    report->cpu_error_lin = (float)pass.lin_max;
+    report->cpu_error_t = (float)pass.t_max;
+    free(pass.stretch);
+    free(pass.g_ex);
+    free(pass.g_rt);
+    free(pass.local_ex);
+    free(pass.local_rt);
+    free(payload);
+
+    clip.r_joints = nt_builder_round_up(pass.r_joints);
+    clip.r_root = nt_builder_round_up(pass.r_root);
+    clip.s_max = nt_builder_round_up(pass.s_max);
+    nt_builder_add_clip(ctx, &clip, resource_id);
+    // #endregion
+
+    free(blocks);
+    free(row_track);
+    free(tables);
+    free(base);
+    free(still);
+    free(samples);
+    free(arena);
+    free(track_of);
+    free(tracks);
+}
+// #endregion

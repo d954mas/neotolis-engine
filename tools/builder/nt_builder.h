@@ -33,6 +33,13 @@ extern nt_build_assert_handler_t nt_build_assert_handler;
     } while (0)
 #endif
 
+/* A logged content diagnostic followed by the fatal assert; msg is the assert text tests match on. */
+#define NT_BUILD_FAIL(msg, ...)                                                                                                                                                                        \
+    do {                                                                                                                                                                                               \
+        NT_LOG_ERROR(__VA_ARGS__);                                                                                                                                                                     \
+        NT_BUILD_ASSERT(0 && msg);                                                                                                                                                                     \
+    } while (0)
+
 /* Build limits (game can override before including this header) */
 #ifndef NT_BUILD_MAX_ASSETS
 #define NT_BUILD_MAX_ASSETS 1024
@@ -533,22 +540,24 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
 
 /* --- Skeletal API (NSKL skeleton, NSKN skin binding, NANM clip) ---
  *
- * Each add_* call turns an in-memory import result into exactly the bytes the
- * pack stores and registers the asset in one step, like add_blob.
+ * The glTF importers below are the producers of skin bindings and clips; a
+ * skeleton may also come from procedural code through nt_builder_add_skeleton,
+ * which encodes and registers in one step, like add_blob. The hand-built
+ * binding and clip entry points are builder-internal (nt_builder_internal.h).
  *
  * Every rule of the wire format is an invariant of the importer that produced
  * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
- * diagnostic instead of returning a code (skeletal spec §16). */
+ * diagnostic instead of returning a code (skeletal spec, Builder, codec, wire
+ * formats). */
 
 /* One imported rig out of one glTF skin. The joints are every node on the
  * paths from the scene root of the joints' hierarchy to each skin joint,
  * identity wrappers included, in preorder; a matrix node's rest pose is its
  * decomposed local matrix, and a matrix that is not T*R*S is a content error.
- * skeleton_root is an explicit cut: that node becomes joint 0, its parent space
- * becomes skeleton space, and the game's E must carry the omitted ancestors;
- * UINT32_MAX cuts nothing. Every array lives in storage until
- * nt_builder_free_rig. The rig keeps the scene it was built from, so the
- * exports below cannot pair it with another; the scene outlives the rig. */
+ * Every array lives in storage until nt_builder_free_rig. The rig keeps the
+ * scene it was built from for the mesh and binding exports; a clip may come
+ * from another scene whose animated nodes carry the same names and parents.
+ * The scene outlives the rig. */
 typedef struct {
     const nt_glb_scene_t *scene;
     nt_skeletal_skeleton_t skeleton; /* rig_compat_id filled by the import */
@@ -558,7 +567,7 @@ typedef struct {
     void *storage; /* one allocation behind every array above */
 } nt_builder_rig_t;
 
-void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uint32_t skeleton_root, nt_builder_rig_t *out);
+void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, nt_builder_rig_t *out);
 void nt_builder_free_rig(nt_builder_rig_t *rig);
 
 /* Weight mass one vertex may lose to the top-four reduction, in [0, 1].
@@ -586,50 +595,46 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_r
  * pads for. any_pose_radius follows from it and the rig's rest hierarchy. */
 void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_rig_t *rig, const char *resource_id);
 
-/* Computes rig_compat_id from the joints it writes and returns it, so the
- * caller stamps clips and bindings with the identity that actually shipped;
- * skel->rig_compat_id is ignored. Joint ids must be unique. */
-nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
-
-/* Inverse binds are mesh space -> joint space at the bind pose, where mesh space
- * is the primitive's vertex space and the skinned mesh node's transform is
- * ignored (the glTF rule). reach (joint space) and any_pose_radius (skeleton
- * space) must be finite and non-negative; the activator copies them unchecked.
- * remap is not bounded against a skeleton here. */
-void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
-
-/* One channel of a clip. Channel c of nt_builder_clip_t::channels addresses
- * joint c / 3 and component c % 3 (0 = translation, 1 = rotation, 2 = scale);
- * the last three channels are the object curve (§7.5). comps = 4 for a
- * rotation, 3 otherwise; only the fields the mode needs are read.
- *
- * ABSENT   nothing
- * CONSTANT constant[0..comps-1]
- * SAMPLED  samples, sample_count * comps floats on the clip's uniform grid
- * STEP     step_times and step_values (always 4 floats per key), step_count
- *          keys with strictly increasing times inside [0, duration]; the
- *          sampler holds the first key before its time */
+/* What the clip export measured, so the build script decides whether the
+ * sample rate was enough: the builder never fails a build on interpolation
+ * error. Both errors compare the runtime (nt_skeletal_sample on the encoded
+ * clip, then FK) against the exact glTF curves (evaluated in double, then the
+ * same FK) over the dense set of the clip export. cpu_error_lin is the largest
+ * Frobenius distance between the 3x3 parts of any joint's model matrix, a
+ * unitless number the developer scales by their own reach; cpu_error_t is the
+ * largest translation distance in scene units. Each maximum carries the time
+ * and joint it was found at; (0, 0) when the error is zero everywhere. */
 typedef struct {
-    const float *samples;     /* SAMPLED: sample_count * comps floats, sample-major */
-    const float *step_times;  /* STEP: step_count seconds */
-    const float *step_values; /* STEP: 4 floats per key */
-    uint32_t step_count;      /* STEP: number of keys */
-    float constant[4];        /* CONSTANT: the channel value */
-    uint8_t mode;             /* nt_skeletal_channel_mode_t */
-} nt_builder_anim_channel_t;
+    uint32_t sample_count; /* frames + 1, or 1 when no channel is sampled */
+    float duration;        /* frames / sample_fps */
+    float cpu_error_lin;
+    double worst_time_lin;
+    uint16_t worst_joint_lin;
+    float cpu_error_t;
+    double worst_time_t;
+    uint16_t worst_joint_t;
+} nt_builder_clip_report_t;
 
-/* One clip ready to encode. sample_count is the uniform grid on [0, duration]
- * every SAMPLED channel shares (1 = no sampled channel). */
-typedef struct {
-    nt_hash64_t rig_compat_id;
-    nt_hash64_t additive_ref_id; /* reference pose identity, 0 = absolute */
-    uint16_t joint_count;
-    uint32_t sample_count;
-    float duration;
-    const nt_builder_anim_channel_t *channels; /* 3 * (joint_count + 1) entries */
-} nt_builder_clip_t;
+/* Exports the glTF animation named animation_name (NULL and "" are one name,
+ * the unnamed animation) as an absolute clip on the rig; exactly one animation
+ * of the scene must carry the name. Channels map to joints by name hash, the
+ * same path for the rig's own scene and for another scene: every animated node
+ * must be a rig joint and, unless its joint is a root, hang under the node its
+ * joint's parent is named after. The grid step is 1 / sample_fps (up to the
+ * float rounding of the shipped duration): frames = round(source_duration *
+ * sample_fps), at least one, duration = frames / sample_fps and sample_count =
+ * frames + 1 when any channel is sampled, else 1. A channel whose grid samples
+ * are all still is written into the base pose instead of shipping a row, and a
+ * channel the animation does not touch keeps the rig's rest there. report
+ * receives what the export measured. Content errors log a diagnostic and
+ * assert; the builder spec (Builder validation) lists every one. */
+void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const char *animation_name, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
+                               nt_builder_clip_report_t *report);
 
-void nt_builder_add_clip(NtBuilderContext *ctx, const nt_builder_clip_t *clip, const char *resource_id);
+/* Encodes and registers a skeleton; skel->rig_compat_id is written as given,
+ * so a procedural rig fills it first (skeletal spec, Skeleton (NSKL)). Joint
+ * ids must be unique. */
+void nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
 
 /* --- Atlas API ---
  *
