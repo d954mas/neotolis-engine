@@ -46,26 +46,6 @@ void nt_skeletal_fk(const nt_skeletal_skeleton_t *skel, const nt_skeletal_trs_t 
     }
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_skeletal_socket(const float world[16], const nt_skeletal_mat34_t *g_joint, const nt_skeletal_trs_t *socket_local, nt_skeletal_mat34_t *out) {
-    NT_ASSERT(world != NULL);
-    NT_ASSERT(g_joint != NULL);
-    NT_ASSERT(socket_local != NULL);
-    NT_ASSERT(out != NULL);
-    NT_ASSERT(out != g_joint);
-
-    nt_skeletal_mat34_t e;
-    nt_skeletal_mat34_from_mat4(world, &e);
-
-    nt_skeletal_mat34_t eg;
-    nt_skeletal_mat34_mul(&e, g_joint, &eg);
-
-    nt_skeletal_mat34_t s;
-    nt_skeletal_mat34_from_trs(socket_local, &s);
-
-    nt_skeletal_mat34_mul(&eg, &s, out);
-}
-
 // #region skin
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_mat34_t *restrict model, uint16_t model_count, nt_skeletal_mat34_t *restrict out, uint16_t capacity) {
@@ -86,8 +66,8 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_m
 
 // #region clip sampling
 /* Grid interval holding time: index i and interpolant u in [0, 1]. A time that
- * lands on the grid yields u == 0, or u == 1 at the very end, which the callers
- * turn into an exact copy of a stored sample. */
+ * lands on the grid yields u == 0, or u == 1 at the very end, which the caller
+ * turns into an exact copy of a stored sample. */
 static uint32_t nt_skeletal_grid_index(double time, double inv_step, uint32_t sample_count, float *out_u) {
     NT_ASSERT(sample_count >= 2U);
     const uint32_t last = sample_count - 1U;
@@ -141,34 +121,36 @@ static void nt_skeletal_nlerp(const float *a, const float *b, float u, float *ou
     }
 }
 
-/* Value of the last key at or before time, or the first key when time precedes
- * it. Binary search, so a random seek into a long track costs log2(count)
- * instead of walking every earlier key. */
-static const float *nt_skeletal_step_value(const nt_skeletal_step_key_t *keys, uint32_t first, uint32_t count, double time) {
-    NT_ASSERT(keys != NULL);
-    NT_ASSERT(count >= 1U);
-
-    /* lo ends as the number of keys at or before time. */
-    uint32_t lo = 0;
-    uint32_t hi = count;
-    while (lo < hi) {
-        const uint32_t mid = lo + ((hi - lo) / 2U);
-        if ((double)keys[first + mid].time <= time) {
-            lo = mid + 1U;
-        } else {
-            hi = mid;
-        }
-    }
-    const uint32_t k = (lo == 0U) ? first : (first + lo - 1U);
-    return keys[k].v;
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void nt_skeletal_apply_sampled(const nt_skeletal_clip_t *clip, double time, nt_skeletal_trs_t *out) {
+void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, nt_skeletal_trs_t *out) {
+    NT_ASSERT(clip != NULL);
+    NT_ASSERT(clip->base != NULL);
+    NT_ASSERT(out != NULL);
+    NT_ASSERT(clip->joint_count >= 1U);
+    NT_ASSERT(clip->sample_count >= 1U);
+    NT_ASSERT(time >= 0.0 && time <= clip->duration);
+    /* memcpy requires disjoint buffers. */
+    NT_ASSERT((uintptr_t)(clip->base + clip->joint_count) <= (uintptr_t)out || (uintptr_t)(out + clip->joint_count) <= (uintptr_t)clip->base);
+
+    memcpy(out, clip->base, (size_t)clip->joint_count * sizeof(nt_skeletal_trs_t));
+
+    const size_t stride = ((size_t)3U * clip->n_t) + ((size_t)4U * clip->n_q) + ((size_t)3U * clip->n_s);
+    if (stride == 0U) {
+        return;
+    }
+    NT_ASSERT(clip->blocks != NULL);
+    NT_ASSERT(clip->t_joint != NULL || clip->n_t == 0U);
+    NT_ASSERT(clip->q_joint != NULL || clip->n_q == 0U);
+    NT_ASSERT(clip->s_joint != NULL || clip->n_s == 0U);
+    /* Interpolation reads two adjacent grid entries. */
+    NT_ASSERT(clip->sample_count >= 2U && clip->duration > 0.0);
+
+    /* The grid step is exact only in double. */
+    const double inv_step = (double)(clip->sample_count - 1U) / clip->duration;
     float u = 0.0F;
-    const uint32_t i = nt_skeletal_grid_index(time, clip->inv_step, clip->sample_count, &u);
-    const float *a = clip->blocks + ((size_t)i * clip->block_floats);
-    const float *b = a + clip->block_floats;
+    const uint32_t i = nt_skeletal_grid_index(time, inv_step, clip->sample_count, &u);
+    const float *a = clip->blocks + ((size_t)i * stride);
+    const float *b = a + stride;
     const size_t q_off = (size_t)3U * clip->n_t;
     const size_t s_off = q_off + ((size_t)4U * clip->n_q);
 
@@ -206,240 +188,49 @@ static void nt_skeletal_apply_sampled(const nt_skeletal_clip_t *clip, double tim
         nt_skeletal_lerp3(a + s_off + ((size_t)3U * k), b + s_off + ((size_t)3U * k), u, out[clip->s_joint[k]].s);
     }
 }
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_skeletal_trs_t *restrict defaults, nt_skeletal_trs_t *restrict out) {
-    NT_ASSERT(clip != NULL);
-    NT_ASSERT(defaults != NULL);
-    NT_ASSERT(out != NULL);
-    NT_ASSERT(clip->joint_count >= 1U);
-    NT_ASSERT(clip->sample_count >= 1U);
-    NT_ASSERT(time >= 0.0 && time <= clip->duration);
-    /* memcpy and the restrict pointers both require disjoint buffers. */
-    NT_ASSERT((uintptr_t)(defaults + clip->joint_count) <= (uintptr_t)out || (uintptr_t)(out + clip->joint_count) <= (uintptr_t)defaults);
-
-    memcpy(out, defaults, (size_t)clip->joint_count * sizeof(nt_skeletal_trs_t));
-
-    // #region constants
-    for (uint16_t k = 0; k < clip->n_ct; ++k) {
-        NT_ASSERT(clip->ct_joint[k] < clip->joint_count);
-        memcpy(out[clip->ct_joint[k]].t, clip->ct + ((size_t)3U * k), 3U * sizeof(float));
-    }
-    for (uint16_t k = 0; k < clip->n_cq; ++k) {
-        NT_ASSERT(clip->cq_joint[k] < clip->joint_count);
-        memcpy(out[clip->cq_joint[k]].q, clip->cq + ((size_t)4U * k), 4U * sizeof(float));
-    }
-    for (uint16_t k = 0; k < clip->n_cs; ++k) {
-        NT_ASSERT(clip->cs_joint[k] < clip->joint_count);
-        memcpy(out[clip->cs_joint[k]].s, clip->cs + ((size_t)3U * k), 3U * sizeof(float));
-    }
-    // #endregion
-
-    if (clip->n_t != 0U || clip->n_q != 0U || clip->n_s != 0U) {
-        NT_ASSERT(clip->blocks != NULL);
-        NT_ASSERT(clip->block_floats == (3U * (uint32_t)clip->n_t) + (4U * (uint32_t)clip->n_q) + (3U * (uint32_t)clip->n_s));
-        nt_skeletal_apply_sampled(clip, time, out);
-    }
-
-    // #region step tracks
-    /* A channel has one mode, so a STEP track never contends with a constant or
-     * a sampled row for the same joint channel. */
-    for (uint32_t s = 0; s < clip->n_steps; ++s) {
-        const nt_skeletal_step_t *track = &clip->steps[s];
-        NT_ASSERT(track->joint < clip->joint_count);
-        NT_ASSERT(track->channel <= 2U);
-        const float *v = nt_skeletal_step_value(clip->keys, track->first, track->count, time);
-        nt_skeletal_trs_t *o = &out[track->joint];
-        if (track->channel == 0U) {
-            memcpy(o->t, v, 3U * sizeof(float));
-        } else if (track->channel == 1U) {
-            memcpy(o->q, v, 4U * sizeof(float));
-        } else {
-            memcpy(o->s, v, 3U * sizeof(float));
-        }
-    }
-    // #endregion
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double time, const nt_skeletal_trs_t *defaults, nt_skeletal_trs_t *out) {
-    NT_ASSERT(defaults != NULL);
-    NT_ASSERT(out != NULL);
-    NT_ASSERT(out != defaults);
-
-    *out = *defaults;
-    if (curve == NULL) {
-        return;
-    }
-
-    const uint8_t mt = curve->mode[0];
-    const uint8_t mq = curve->mode[1];
-    const uint8_t ms = curve->mode[2];
-    NT_ASSERT(mt <= NT_SKELETAL_CHANNEL_STEP && mq <= NT_SKELETAL_CHANNEL_STEP && ms <= NT_SKELETAL_CHANNEL_STEP);
-    /* A curve with no channel is the same as no curve, so it carries no grid and
-     * no time range to hold the caller to. */
-    if (mt == NT_SKELETAL_CHANNEL_ABSENT && mq == NT_SKELETAL_CHANNEL_ABSENT && ms == NT_SKELETAL_CHANNEL_ABSENT) {
-        return;
-    }
-    NT_ASSERT(time >= 0.0 && time <= curve->duration);
-
-    // #region sampled pair
-    const nt_skeletal_trs_t *a = NULL;
-    const nt_skeletal_trs_t *b = NULL;
-    float u = 0.0F;
-    if (mt == NT_SKELETAL_CHANNEL_SAMPLED || mq == NT_SKELETAL_CHANNEL_SAMPLED || ms == NT_SKELETAL_CHANNEL_SAMPLED) {
-        NT_ASSERT(curve->sampled != NULL);
-        const uint32_t i = nt_skeletal_grid_index(time, curve->inv_step, curve->sample_count, &u);
-        a = &curve->sampled[i];
-        b = &curve->sampled[i + 1U];
-        /* Same exactness rule as the joint grid: a grid time copies its sample. */
-        if (u == 0.0F) {
-            b = a;
-        } else if (u == 1.0F) {
-            a = b;
-        }
-    }
-    // #endregion
-
-    if (mt == NT_SKELETAL_CHANNEL_CONSTANT) {
-        memcpy(out->t, curve->constant.t, sizeof(out->t));
-    } else if (mt == NT_SKELETAL_CHANNEL_SAMPLED) {
-        if (a == b) {
-            memcpy(out->t, a->t, sizeof(out->t));
-        } else {
-            nt_skeletal_lerp3(a->t, b->t, u, out->t);
-        }
-    } else if (mt == NT_SKELETAL_CHANNEL_STEP) {
-        memcpy(out->t, nt_skeletal_step_value(curve->keys, curve->step_first[0], curve->step_count[0], time), sizeof(out->t));
-    }
-
-    if (mq == NT_SKELETAL_CHANNEL_CONSTANT) {
-        memcpy(out->q, curve->constant.q, sizeof(out->q));
-    } else if (mq == NT_SKELETAL_CHANNEL_SAMPLED) {
-        if (a == b) {
-            memcpy(out->q, a->q, sizeof(out->q));
-        } else {
-            nt_skeletal_nlerp(a->q, b->q, u, out->q);
-        }
-    } else if (mq == NT_SKELETAL_CHANNEL_STEP) {
-        memcpy(out->q, nt_skeletal_step_value(curve->keys, curve->step_first[1], curve->step_count[1], time), sizeof(out->q));
-    }
-
-    if (ms == NT_SKELETAL_CHANNEL_CONSTANT) {
-        memcpy(out->s, curve->constant.s, sizeof(out->s));
-    } else if (ms == NT_SKELETAL_CHANNEL_SAMPLED) {
-        if (a == b) {
-            memcpy(out->s, a->s, sizeof(out->s));
-        } else {
-            nt_skeletal_lerp3(a->s, b->s, u, out->s);
-        }
-    } else if (ms == NT_SKELETAL_CHANNEL_STEP) {
-        memcpy(out->s, nt_skeletal_step_value(curve->keys, curve->step_first[2], curve->step_count[2], time), sizeof(out->s));
-    }
-}
 // #endregion
 
 // #region clip view
-/* The runtime reads the wire through these structs, so their sizes are pinned
- * to the strides the format declares. */
-_Static_assert(sizeof(nt_skeletal_step_t) == NT_ANM_STEP_STRIDE, "nt_skeletal_step_t must match the NANM step stride");
-_Static_assert(sizeof(nt_skeletal_step_key_t) == NT_ANM_KEY_STRIDE, "nt_skeletal_step_key_t must match the NANM key stride");
-_Static_assert(sizeof(nt_skeletal_trs_t) == 40, "the object sampled array is one nt_skeletal_trs_t per sample");
-/* nt_anm_object_sampled spells the SAMPLED mode as the byte it travels as. */
-_Static_assert(NT_SKELETAL_CHANNEL_SAMPLED == 2, "wire and runtime SAMPLED must agree");
-
 void nt_skeletal_clip_view(const uint8_t *payload, nt_skeletal_clip_t *out) {
     NT_ASSERT(payload != NULL && out != NULL);
     NT_ASSERT((((uintptr_t)payload) & 3U) == 0U && "NANM payload must be 4-aligned: the view reads its arrays in place");
 
     NtAnmHeader header;
     memcpy(&header, payload, sizeof(header));
-    const uint32_t block_floats = (3U * (uint32_t)header.n_t) + (4U * (uint32_t)header.n_q) + (3U * (uint32_t)header.n_s);
+    const size_t stride = ((size_t)3U * header.n_t) + ((size_t)4U * header.n_q) + ((size_t)3U * header.n_s);
 
     /* Walk the arrays in the one order the format defines; the encoder writes
      * them in exactly this sequence. Every product fits size_t on wasm32: the
      * activator proved size == nt_anm_size(header) in 64 bits, and the encoder
      * wrote exactly that many bytes. */
     const uint8_t *at = payload + sizeof(NtAnmHeader);
+    const nt_skeletal_trs_t *base = (const nt_skeletal_trs_t *)at;
+    at += (size_t)header.joint_count * sizeof(nt_skeletal_trs_t);
     const float *blocks = (const float *)at;
-    at += (size_t)header.sample_count * block_floats * 4U;
-    const float *ct = (const float *)at;
-    at += (size_t)header.n_ct * 12U;
-    const float *cq = (const float *)at;
-    at += (size_t)header.n_cq * 16U;
-    const float *cs = (const float *)at;
-    at += (size_t)header.n_cs * 12U;
-    const nt_skeletal_step_t *steps = (const nt_skeletal_step_t *)at;
-    at += (size_t)header.n_steps * NT_ANM_STEP_STRIDE;
-    const nt_skeletal_step_key_t *keys = (const nt_skeletal_step_key_t *)at;
-    at += (size_t)header.n_keys * NT_ANM_KEY_STRIDE;
-    NtAnmObject object = {{0}, {0}, {0}};
-    if (nt_anm_has_object(&header)) {
-        memcpy(&object, at, sizeof(object));
-        at += sizeof(NtAnmObject);
-    }
-    const nt_skeletal_trs_t *object_sampled = (const nt_skeletal_trs_t *)at;
-    if (nt_anm_object_sampled(&header)) {
-        at += (size_t)header.sample_count * sizeof(nt_skeletal_trs_t);
-    }
+    at += (size_t)header.sample_count * stride * 4U;
     const uint16_t *t_joint = (const uint16_t *)at;
     at += (size_t)header.n_t * 2U;
     const uint16_t *q_joint = (const uint16_t *)at;
     at += (size_t)header.n_q * 2U;
     const uint16_t *s_joint = (const uint16_t *)at;
-    at += (size_t)header.n_s * 2U;
-    const uint16_t *ct_joint = (const uint16_t *)at;
-    at += (size_t)header.n_ct * 2U;
-    const uint16_t *cq_joint = (const uint16_t *)at;
-    at += (size_t)header.n_cq * 2U;
-    const uint16_t *cs_joint = (const uint16_t *)at;
-
-    /* The grid step is exact only in double, and a clip with one sample or no
-     * duration has no interval to step through. */
-    const double inv_step = (header.sample_count > 1U && header.duration > 0.0F) ? ((double)(header.sample_count - 1U) / (double)header.duration) : 0.0;
 
     *out = (nt_skeletal_clip_t){
         .rig_compat_id = (nt_hash64_t){.value = header.rig_compat_id},
-        .additive_ref_id = (nt_hash64_t){.value = header.additive_ref_id},
         .duration = (double)header.duration,
-        .inv_step = inv_step,
-        .blocks = (block_floats != 0U) ? blocks : NULL,
+        .base = base,
+        .blocks = (stride != 0U) ? blocks : NULL,
         .t_joint = t_joint,
         .q_joint = q_joint,
         .s_joint = s_joint,
-        .ct_joint = ct_joint,
-        .ct = ct,
-        .cq_joint = cq_joint,
-        .cq = cq,
-        .cs_joint = cs_joint,
-        .cs = cs,
-        .steps = (header.n_steps != 0U) ? steps : NULL,
-        .keys = (header.n_keys != 0U) ? keys : NULL,
         .r_joints = header.r_joints,
         .r_root = header.r_root,
         .s_max = header.s_max,
         .sample_count = header.sample_count,
-        .block_floats = block_floats,
-        .n_steps = header.n_steps,
         .joint_count = header.joint_count,
         .n_t = header.n_t,
         .n_q = header.n_q,
         .n_s = header.n_s,
-        .n_ct = header.n_ct,
-        .n_cq = header.n_cq,
-        .n_cs = header.n_cs,
     };
-    out->object.sampled = nt_anm_object_sampled(&header) ? object_sampled : NULL;
-    out->object.keys = out->keys;
-    out->object.duration = out->duration;
-    out->object.inv_step = inv_step;
-    out->object.sample_count = header.sample_count;
-    memcpy(&out->object.constant, object.constant, sizeof(out->object.constant));
-    for (uint32_t c = 0; c < 3; ++c) {
-        out->object.mode[c] = header.object_mode[c];
-        out->object.step_first[c] = object.step_first[c];
-        out->object.step_count[c] = object.step_count[c];
-    }
 }
 // #endregion
 
@@ -470,8 +261,7 @@ static uint32_t nt_skeletal_put_u32(uint8_t *bytes, uint32_t offset, uint32_t v)
 }
 
 static uint32_t nt_skeletal_put_f32(uint8_t *bytes, uint32_t offset, float v) {
-    /* v - v rejects non-finite values without libm; requires strict IEEE math. */
-    NT_ASSERT((v - v) == 0.0F);
+    NT_ASSERT(nt_skeletal_finite((double)v));
 
     /* -0 and +0 describe the same rest pose, so only +0 is ever hashed. */
     const float canonical = (v == 0.0F) ? 0.0F : v;
@@ -547,9 +337,8 @@ nt_hash64_t nt_skeletal_rig_compat_id(const nt_skeletal_skeleton_t *skel, void *
 void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, double dt) {
     NT_ASSERT(tracks != NULL);
     NT_ASSERT(dt >= 0.0);
-    /* x - x rejects NaN and infinity without libm: a non-finite step would reach
-     * the int64 cast of the cycle count below. */
-    NT_ASSERT((dt - dt) == 0.0);
+    /* A non-finite step would reach the int64 cast of the cycle count below. */
+    NT_ASSERT(nt_skeletal_finite(dt));
 
     for (uint32_t i = 0; i < count; ++i) {
         nt_skeletal_track_t *track = &tracks[i];
@@ -557,7 +346,7 @@ void nt_skeletal_tracks_advance(nt_skeletal_track_t *tracks, uint32_t count, dou
             continue;
         }
         NT_ASSERT(track->duration >= 0.0);
-        NT_ASSERT((track->speed - track->speed) == 0.0F);
+        NT_ASSERT(nt_skeletal_finite((double)track->speed));
 
         if (track->duration == 0.0) {
             track->time = 0.0;

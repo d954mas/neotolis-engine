@@ -14,12 +14,14 @@
  * the runtime layout (spec §16), so nothing is transposed or re-indexed. The
  * pack blob is never read again, so any blob policy may drop it after
  * activation. A structurally broken payload logs one warning and returns 0,
- * which leaves the asset FAILED. Values inside a structurally sound payload
- * (finite samples, unit quaternions, key order) are the builder's contract and
- * the kernels' NT_SKELETAL_CHECKS, not re-validated here; duration is checked
- * because it sizes the grid, and the radii because a culling consumer trusts
- * them. A NANM payload must start 4-aligned, as every pack asset does: its
- * tables are read in place.
+ * which leaves the asset FAILED: a header rejection allocates nothing, a
+ * joint-table rejection takes and releases a slot. Structure is what a view
+ * needs to address memory (header, magic, version, exact size, counts, table
+ * indices, preorder, the grid's sample_count and duration); values inside a
+ * sound structure (finite samples, unit quaternions, radii) are the builder's
+ * contract, the pack CRC32 and the kernels' NT_SKELETAL_CHECKS, never checked
+ * here. Payload arrays are read in place, which the 4-aligned start of every
+ * pack asset allows.
  *
  * The module registers nothing itself. An application that links animation
  * registers the three pairs like any other type:

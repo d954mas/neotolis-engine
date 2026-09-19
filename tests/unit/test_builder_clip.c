@@ -1,5 +1,5 @@
 /* Clip import from glTF: what nt_builder_add_scene_clip ships for the animated
- * fixture of rigged_glb.c -- grid samples, STEP keys, folded constants -- and
+ * fixture of rigged_glb.c -- grid samples and base-pose constants -- and
  * what its report and bounds measure, each checked against an evaluation of
  * the fixture's curves written here from their closed forms, never through the
  * builder's own evaluator. The Khronos assets pin the importer on real data. */
@@ -212,6 +212,8 @@ static uint32_t sampled_row(const uint16_t *table, uint16_t count, uint16_t j) {
 
 static void assert_rounded_up(double expected, float actual);
 
+static size_t stride_of(const nt_skeletal_clip_t *view) { return ((size_t)3U * view->n_t) + ((size_t)4U * view->n_q) + ((size_t)3U * view->n_s); }
+
 static double grid_time(uint32_t i, uint32_t n) { return ((double)i * (double)RIGGED_GLB_ANIM_DURATION) / (double)(n - 1U); }
 // #endregion
 
@@ -412,7 +414,7 @@ void test_grid_samples_reproduce_the_source(void) {
     TEST_ASSERT_TRUE(q1_row != UINT32_MAX && t2_row != UINT32_MAX && q2_row != UINT32_MAX);
     TEST_ASSERT_EQUAL_UINT16(1, view->n_t);
     TEST_ASSERT_EQUAL_UINT16(2, view->n_q);
-    TEST_ASSERT_EQUAL_UINT16(0, view->n_s);
+    TEST_ASSERT_EQUAL_UINT16(1, view->n_s); /* the Joint3 STEP scale, on the grid */
 
     nt_skeletal_trs_t *pose = (nt_skeletal_trs_t *)calloc(skel->joint_count, sizeof(nt_skeletal_trs_t));
     TEST_ASSERT_NOT_NULL(pose);
@@ -421,8 +423,8 @@ void test_grid_samples_reproduce_the_source(void) {
     static const float k_j2_dyadic[3][3] = {{0.71875F, 0.125F, 0.625F}, {1.0F, 0.5F, 2.0F}, {1.03125F, 1.125F, 3.375F}};
     for (uint32_t i = 0; i < GRID; i++) {
         const double t = grid_time(i, GRID);
-        nt_skeletal_sample(view, t, skel->rest, pose);
-        const float *block = view->blocks + ((size_t)i * view->block_floats);
+        nt_skeletal_sample(view, t, pose);
+        const float *block = view->blocks + ((size_t)i * stride_of(view));
         const float *t2 = block + ((size_t)3U * t2_row);
         const float *q1 = block + ((size_t)3U * view->n_t) + ((size_t)4U * q1_row);
         const float *q2 = block + ((size_t)3U * view->n_t) + ((size_t)4U * q2_row);
@@ -466,65 +468,62 @@ void test_grid_samples_reproduce_the_source(void) {
     /* Grid 8, a third of the way to 90 degrees: slerp sin 15 = 0.2588, nlerp
      * 0.2527. Grid 16, a third of the way from 90 to the (0, 0, -1, 0) key:
      * the short way is 120 degrees, (sin 60, cos 60); the long way lands elsewhere. */
-    const float *q1_8 = view->blocks + ((size_t)8U * view->block_floats) + ((size_t)3U * view->n_t) + ((size_t)4U * q1_row);
+    const float *q1_8 = view->blocks + ((size_t)8U * stride_of(view)) + ((size_t)3U * view->n_t) + ((size_t)4U * q1_row);
     assert_close(0.25881905, (double)q1_8[2], 1e-6);
-    const float *q1_16 = view->blocks + ((size_t)16U * view->block_floats) + ((size_t)3U * view->n_t) + ((size_t)4U * q1_row);
+    const float *q1_16 = view->blocks + ((size_t)16U * stride_of(view)) + ((size_t)3U * view->n_t) + ((size_t)4U * q1_row);
     assert_close(0.8660254, fabs((double)q1_16[2]), 1e-6);
     assert_close(0.5, fabs((double)q1_16[3]), 1e-6);
     free(pose);
     fixture_free(&fx);
 }
 
-/* Storage modes read from the shipped view: the STEP keys are the authored
- * ones, Joint4 is the only constant, the object curve is absent. */
+/* The base pose read from the shipped view: the rig's rest, with the still
+ * Joint4 translation written in and nothing else; the Joint3 STEP scale is a
+ * row on the grid, held between its grid samples. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_step_keys_constants_and_absent_channels(void) {
+void test_still_channels_land_in_the_base_and_steps_on_the_grid(void) {
     const rigged_glb_opts_t opts = {.animation = true};
     fixture_export_t fx;
     fixture_export(&fx, &opts, &opts, UINT32_MAX);
     const nt_skeletal_clip_t *view = &fx.view;
     const nt_skeletal_skeleton_t *skel = &fx.rig.skeleton;
+    const uint16_t j3 = joint_named(skel, "Joint3");
+    const uint16_t j4 = joint_named(skel, "Joint4");
 
-    TEST_ASSERT_EQUAL_UINT32(1, view->n_steps);
-    TEST_ASSERT_EQUAL_UINT16(joint_named(skel, "Joint3"), view->steps[0].joint);
-    TEST_ASSERT_EQUAL_UINT8(2, view->steps[0].channel);
-    TEST_ASSERT_EQUAL_UINT32(0, view->steps[0].first);
-    TEST_ASSERT_EQUAL_UINT32(2, view->steps[0].count);
-    ASSERT_F32(0.25F, view->keys[0].time);
-    ASSERT_F32(0.75F, view->keys[1].time);
-    for (int c = 0; c < 3; c++) {
-        ASSERT_F32(1.0F, view->keys[0].v[c]);
-        ASSERT_F32(2.0F, view->keys[1].v[c]);
+    for (uint16_t j = 0; j < skel->joint_count; j++) {
+        if (j == j4) {
+            ASSERT_F32(0.0F, view->base[j].t[0]);
+            ASSERT_F32(0.5F, view->base[j].t[1]);
+            ASSERT_F32(0.0F, view->base[j].t[2]);
+            TEST_ASSERT_EQUAL_MEMORY(skel->rest[j].q, view->base[j].q, sizeof(view->base[j].q));
+            TEST_ASSERT_EQUAL_MEMORY(skel->rest[j].s, view->base[j].s, sizeof(view->base[j].s));
+            continue;
+        }
+        TEST_ASSERT_EQUAL_MEMORY(&skel->rest[j], &view->base[j], sizeof(view->base[j]));
     }
-    ASSERT_F32(0.0F, view->keys[0].v[3]);
-    ASSERT_F32(0.0F, view->keys[1].v[3]);
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, sampled_row(view->t_joint, view->n_t, j4));
+    const uint32_t s3_row = sampled_row(view->s_joint, view->n_s, j3);
+    TEST_ASSERT_TRUE(s3_row != UINT32_MAX);
 
-    TEST_ASSERT_EQUAL_UINT16(1, view->n_ct);
-    TEST_ASSERT_EQUAL_UINT16(0, view->n_cq);
-    TEST_ASSERT_EQUAL_UINT16(0, view->n_cs);
-    TEST_ASSERT_EQUAL_UINT16(joint_named(skel, "Joint4"), view->ct_joint[0]);
-    ASSERT_F32(0.0F, view->ct[0]);
-    ASSERT_F32(0.5F, view->ct[1]);
-    ASSERT_F32(0.0F, view->ct[2]);
+    /* Grid times 12, 18 and 24 of the 24 fps grid: before the 0.75 key, on it,
+     * and at the end; a sub-sample inside the interval before the key lerps. */
+    nt_skeletal_trs_t pose[RIGGED_GLB_NODE_COUNT];
+    TEST_ASSERT_TRUE(skel->joint_count <= RIGGED_GLB_NODE_COUNT);
+    nt_skeletal_sample(view, 0.5, pose);
     for (int c = 0; c < 3; c++) {
-        TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_ABSENT, view->object.mode[c]);
+        ASSERT_F32(1.0F, pose[j3].s[c]);
+        ASSERT_F32(skel->rest[joint_named(skel, "Joint0")].t[c], pose[joint_named(skel, "Joint0")].t[c]);
     }
-
-    /* Sampling at a held time leaves every unanimated channel at the default
-     * the caller passed, and the STEP scale holds its last key. */
-    nt_skeletal_trs_t *pose = (nt_skeletal_trs_t *)calloc(skel->joint_count, sizeof(nt_skeletal_trs_t));
-    TEST_ASSERT_NOT_NULL(pose);
-    nt_skeletal_sample(view, 0.8, skel->rest, pose);
-    const uint16_t j0 = joint_named(skel, "Joint0");
+    nt_skeletal_sample(view, 0.75, pose);
     for (int c = 0; c < 3; c++) {
-        ASSERT_F32(skel->rest[j0].t[c], pose[j0].t[c]);
-        ASSERT_F32(2.0F, pose[joint_named(skel, "Joint3")].s[c]);
+        ASSERT_F32(2.0F, pose[j3].s[c]);
     }
-    nt_skeletal_sample(view, 0.7, skel->rest, pose);
+    nt_skeletal_sample(view, 1.0, pose);
     for (int c = 0; c < 3; c++) {
-        ASSERT_F32(1.0F, pose[joint_named(skel, "Joint3")].s[c]);
+        ASSERT_F32(2.0F, pose[j3].s[c]);
     }
-    free(pose);
+    nt_skeletal_sample(view, grid_time(17, GRID) + (0.5 / 24.0), pose);
+    TEST_ASSERT_TRUE(pose[j3].s[0] > 1.0F && pose[j3].s[0] < 2.0F);
     fixture_free(&fx);
 }
 // #endregion
@@ -555,7 +554,7 @@ static void ref_measure(const fixture_export_t *fx, bool step_only, uint32_t gri
     const uint32_t n = ref_dense_times(step_only, grid, times);
     for (uint32_t i = 0; i < n; i++) {
         const double time = times[i];
-        nt_skeletal_sample(&fx->view, time, skel->rest, local_rt);
+        nt_skeletal_sample(&fx->view, time, local_rt);
         ref_local_pose(skel, time, step_only, local_ex);
         nt_skeletal_fk(skel, local_rt, g_rt, 0, joints);
         nt_skeletal_fk(skel, local_ex, g_ex, 0, joints);
@@ -648,29 +647,35 @@ void test_report_matches_an_independent_measurement(void) {
     check_report(FPS_COARSE, GRID_COARSE);
 }
 
-/* Nothing sampled: one sample, no frame block, no error anywhere. */
-void test_step_only_clip_ships_no_grid(void) {
+/* A STEP source is evaluated onto the grid like every other one, so the hold
+ * between its last grid sample before a key and the key shows in the report:
+ * the worst error sits at the last sub-sample of that interval. */
+void test_a_step_source_samples_on_the_grid(void) {
     const rigged_glb_opts_t opts = {.animation_step_only = true};
     fixture_export_t fx;
     fixture_export(&fx, &opts, &opts, UINT32_MAX);
-    TEST_ASSERT_EQUAL_UINT32(1, fx.view.sample_count);
-    TEST_ASSERT_NULL(fx.view.blocks);
-    TEST_ASSERT_EQUAL_UINT32(0, fx.view.block_floats);
+    TEST_ASSERT_EQUAL_UINT32(GRID, fx.view.sample_count);
+    TEST_ASSERT_NOT_NULL(fx.view.blocks);
+    TEST_ASSERT_TRUE(fx.view.n_t == 0 && fx.view.n_q == 0 && fx.view.n_s == 1);
     TEST_ASSERT_TRUE(fx.view.duration == (double)RIGGED_GLB_ANIM_DURATION);
-    TEST_ASSERT_EQUAL_UINT32(1, fx.view.n_steps);
-    TEST_ASSERT_EQUAL_UINT16(1, fx.view.n_ct);
-    TEST_ASSERT_EQUAL_UINT32(1, fx.report.sample_count);
+    TEST_ASSERT_EQUAL_UINT32(GRID, fx.report.sample_count);
     ASSERT_F32(RIGGED_GLB_ANIM_DURATION, fx.report.duration);
-    ASSERT_F32(0.0F, fx.report.cpu_error_lin);
-    ASSERT_F32(0.0F, fx.report.cpu_error_t);
-    TEST_ASSERT_TRUE(fx.report.worst_time_lin == 0.0 && fx.report.worst_time_t == 0.0);
-    TEST_ASSERT_EQUAL_UINT16(0, fx.report.worst_joint_lin);
-    TEST_ASSERT_EQUAL_UINT16(0, fx.report.worst_joint_t);
+    TEST_ASSERT_EQUAL_UINT32(0, s_log_warnings);
+
+    ref_measure_t m;
+    ref_measure(&fx, true, GRID, &m);
+    TEST_ASSERT_TRUE(m.lin > 1e-4 && m.t > 1e-4);
+    assert_close(m.lin, (double)fx.report.cpu_error_lin, 1e-6 * m.lin);
+    assert_close(m.t, (double)fx.report.cpu_error_t, 1e-6 * m.t);
+    TEST_ASSERT_TRUE(m.lin_time == fx.report.worst_time_lin);
+    TEST_ASSERT_TRUE(m.t_time == fx.report.worst_time_t);
+    /* The 0.75 key is grid sample 18; the runtime lerps 1 -> 2 across the
+     * interval before it, so the worst sub-sample is (4 * 17 + 3) / 96 s. */
+    TEST_ASSERT_TRUE(fx.report.worst_time_lin == ((4.0 * 17.0) + 3.0) * (double)RIGGED_GLB_ANIM_DURATION / (4.0 * (double)(GRID - 1U)));
+    TEST_ASSERT_EQUAL_UINT16(m.lin_joint, fx.report.worst_joint_lin);
     /* Helper's scale 2 times the STEP scale 2 from 0.75 on. */
     ASSERT_F32(4.0F, fx.view.s_max);
     ASSERT_F32(0.0F, fx.view.r_root);
-    ref_measure_t m;
-    ref_measure(&fx, true, GRID, &m);
     assert_rounded_up(m.r_joints, fx.view.r_joints);
     assert_rounded_up(m.s_max, fx.view.s_max);
     fixture_free(&fx);
@@ -735,35 +740,25 @@ void test_matrix_node_channel_is_rejected(void) {
     EXPECT_CLIP_REJECTED(opts, "animated node carries a matrix", "Helper");
 }
 
-void test_step_key_past_the_snapped_end_is_dropped(void) {
+/* 1.05 s is 25.2 frames: the clip ships 25 over 1.0417 s, and the key at
+ * 1.05 s lies past every grid time, so the scale never reaches it. Only the
+ * fraction is logged. */
+void test_a_step_key_past_the_snapped_end_is_not_on_the_grid(void) {
     const rigged_glb_opts_t opts = {.animation_step_past_end = true};
     fixture_export_t fx;
     fixture_export(&fx, &opts, &opts, UINT32_MAX);
-    /* 1.05 s is 25.2 frames: the clip ships 25, and the key at 1.05 is past
-     * its 1.0417 s end. Both the fraction and the dropped key are logged. */
     TEST_ASSERT_EQUAL_UINT32(26, fx.view.sample_count);
     ASSERT_F32((float)(25.0 / 24.0), fx.report.duration);
-    TEST_ASSERT_EQUAL_UINT32(1, fx.view.n_steps);
-    TEST_ASSERT_EQUAL_UINT32(2, fx.view.steps[0].count);
-    ASSERT_F32(0.75F, fx.view.keys[1].time);
-    TEST_ASSERT_EQUAL_UINT32(2, s_log_warnings);
-    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "Joint3.scale drops 1 STEP key"));
-    fixture_free(&fx);
-}
-
-/* Keys within 1e-3 frame past the end are exporter noise: they land on the
- * end as one key holding the last value, and nothing is dropped or warned. */
-void test_step_keys_inside_the_tolerance_land_on_the_end(void) {
-    const rigged_glb_opts_t opts = {.animation_step_tail_pair = true};
-    fixture_export_t fx;
-    fixture_export(&fx, &opts, &opts, UINT32_MAX);
-    TEST_ASSERT_EQUAL_UINT32(GRID, fx.view.sample_count);
-    ASSERT_F32(RIGGED_GLB_ANIM_DURATION, fx.report.duration);
-    TEST_ASSERT_EQUAL_UINT32(1, fx.view.n_steps);
-    TEST_ASSERT_EQUAL_UINT32(3, fx.view.steps[0].count);
-    ASSERT_F32(RIGGED_GLB_ANIM_DURATION, fx.view.keys[2].time);
-    ASSERT_F32(4.0F, fx.view.keys[2].v[0]);
-    TEST_ASSERT_EQUAL_UINT32(0, s_log_warnings);
+    TEST_ASSERT_EQUAL_UINT16(1, fx.view.n_s);
+    nt_skeletal_trs_t *pose = (nt_skeletal_trs_t *)calloc(fx.rig.skeleton.joint_count, sizeof(nt_skeletal_trs_t));
+    TEST_ASSERT_NOT_NULL(pose);
+    nt_skeletal_sample(&fx.view, fx.view.duration, pose);
+    for (int c = 0; c < 3; c++) {
+        ASSERT_F32(2.0F, pose[joint_named(&fx.rig.skeleton, "Joint3")].s[c]);
+    }
+    free(pose);
+    TEST_ASSERT_EQUAL_UINT32(1, s_log_warnings);
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "not a whole number"));
     fixture_free(&fx);
 }
 
@@ -823,7 +818,7 @@ void test_clip_from_another_glb_maps_by_name_and_rest(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_log_warnings);
     TEST_ASSERT_EQUAL_HEX64(fx.rig.skeleton.rig_compat_id.value, fx.view.rig_compat_id.value);
     TEST_ASSERT_EQUAL_UINT32(GRID, fx.view.sample_count);
-    TEST_ASSERT_EQUAL_UINT16(joint_named(&fx.rig.skeleton, "Joint3"), fx.view.steps[0].joint);
+    TEST_ASSERT_TRUE(sampled_row(fx.view.s_joint, fx.view.n_s, joint_named(&fx.rig.skeleton, "Joint3")) != UINT32_MAX);
     fixture_free(&fx);
 
     const rigged_glb_opts_t mismatch = {.animation = true, .rest_mismatch = true};
@@ -893,11 +888,8 @@ void test_khronos_clips_export_at_24_fps(void) {
         TEST_ASSERT_TRUE(report.cpu_error_t > asset->min_t && report.cpu_error_t <= asset->max_t);
         TEST_ASSERT_TRUE(view.r_joints > 0.0F && view.s_max >= 1.0F);
         TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, view.rig_compat_id.value);
-        /* Every source channel is LINEAR with a moving value, and both skins
-         * leave some joints unanimated; nothing folds and nothing steps. */
-        TEST_ASSERT_EQUAL_UINT32(0, view.n_steps);
-        TEST_ASSERT_TRUE(view.n_ct == 0 && view.n_cq == 0 && view.n_cs == 0);
-        TEST_ASSERT_TRUE(view.n_q < view.joint_count);
+        /* Both skins leave some joints unanimated, and every rotation moves. */
+        TEST_ASSERT_TRUE(view.n_q > 0 && view.n_q < view.joint_count);
         free(payload);
         nt_builder_free_rig(&rig);
         nt_builder_free_glb_scene(&scene);
@@ -908,16 +900,15 @@ void test_khronos_clips_export_at_24_fps(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_grid_samples_reproduce_the_source);
-    RUN_TEST(test_step_keys_constants_and_absent_channels);
-    RUN_TEST(test_step_only_clip_ships_no_grid);
+    RUN_TEST(test_still_channels_land_in_the_base_and_steps_on_the_grid);
+    RUN_TEST(test_a_step_source_samples_on_the_grid);
     RUN_TEST(test_report_matches_an_independent_measurement);
     RUN_TEST(test_bounds_match_the_measurement_under_two_cuts);
     RUN_TEST(test_channel_outside_the_rig_is_rejected);
     RUN_TEST(test_morph_weights_channel_is_rejected);
     RUN_TEST(test_duplicate_channel_is_rejected);
     RUN_TEST(test_matrix_node_channel_is_rejected);
-    RUN_TEST(test_step_key_past_the_snapped_end_is_dropped);
-    RUN_TEST(test_step_keys_inside_the_tolerance_land_on_the_end);
+    RUN_TEST(test_a_step_key_past_the_snapped_end_is_not_on_the_grid);
     RUN_TEST(test_reparented_joint_is_rejected);
     RUN_TEST(test_backwards_key_times_are_rejected);
     RUN_TEST(test_cubic_through_the_origin_is_rejected);

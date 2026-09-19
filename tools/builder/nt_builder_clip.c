@@ -11,11 +11,13 @@
 
 /*
  * Clip import: one glTF animation becomes one NANM clip on a rig. The source
- * curves are evaluated exactly, in double, per the glTF animation rules; the
- * LINEAR and CUBICSPLINE ones are resampled onto the clip's uniform grid, STEP
- * ones keep their keys. The result is then read back through the runtime's own
- * decoder and sampler and compared against the exact curves over a dense set
- * of times, which yields both the error report and the header bounds.
+ * curves are evaluated exactly, in double, per the glTF animation rules, and
+ * every channel -- STEP included, since the runtime holds no keys -- is
+ * evaluated onto the clip's uniform grid; a channel that never moves lands in
+ * the base pose instead of a row. The result is then read back through the
+ * runtime's own decoder and sampler and compared against the exact curves over
+ * a dense set of times, which yields both the error report and the header
+ * bounds.
  *
  * Every content failure is a logged diagnostic followed by NT_BUILD_ASSERT,
  * per the skeletal spec's builder policy.
@@ -365,78 +367,26 @@ static void clip_eval_checked(const clip_track_t *track, double time, double *ou
  * 24-bit mantissa times i), so the last grid time is duration itself. */
 static double clip_grid_time(uint32_t i, uint32_t n, float duration) { return ((double)i * (double)duration) / (double)(n - 1U); }
 
-/* Fills one STEP channel from its keys at or before duration (a key past the
- * clip's snapped end is never reached), or one value when nothing changes.
- * scratch holds key_count * 5 floats. */
-static void clip_fill_step_channel(const clip_track_t *track, float duration, double end_slack, float *scratch, nt_builder_anim_channel_t *ch) {
+/* Evaluates one track at every grid time into samples (n_grid * comps floats)
+ * and reports whether every sample equals the first one bit for bit -- for a
+ * rotation, its exact negation counts too, since q and -q are one rotation and
+ * a held last key in the other hemisphere must not keep a still channel off
+ * the base pose. */
+static bool clip_fill_track(const clip_track_t *track, uint32_t n_grid, float duration, float *samples) {
     const uint32_t comps = track->comps;
-    float *times = scratch;
-    float *values = scratch + track->key_count;
-    uint32_t kept = 0;
-    uint32_t read = 0;
-    for (; read < track->key_count; read++) {
-        const uint32_t k = read;
-        /* The first key holds before its time, so it stays even past the end; a
-         * key within the frame tolerance past the end is exporter noise and
-         * lands on the end. */
-        if (k > 0 && track->times[k] > (double)duration + end_slack) {
-            break;
-        }
-        const float time = (float)fmin(track->times[k], (double)duration);
-        /* Two keys landing on the end are one key holding the later value. */
-        const uint32_t slot = (kept > 0 && time == times[kept - 1U]) ? (kept - 1U) : kept;
-        times[slot] = time;
-        for (uint32_t c = 0; c < 4U; c++) {
-            values[((size_t)slot * 4U) + c] = (c < comps) ? (float)track->values[((size_t)k * comps) + c] : 0.0F;
-        }
-        kept = slot + 1U;
-    }
-    if (read < track->key_count) {
-        NT_LOG_WARN("%s: %s.%s drops %u STEP key(s) from %.9g s on, past the clip's %.9g s", track->label, track->channel->target_node->name, clip_path_name(track->channel->target_path),
-                    track->key_count - read, track->times[read], (double)duration);
-    }
-    bool constant = true;
-    for (uint32_t k = 1; k < kept && constant; k++) {
-        constant = clip_bits_equal(values, values + ((size_t)k * 4U), 4U);
-    }
-    memset(ch, 0, sizeof(*ch));
-    if (constant) {
-        ch->mode = NT_SKELETAL_CHANNEL_CONSTANT;
-        memcpy(ch->constant, values, sizeof(ch->constant));
-    } else {
-        ch->mode = NT_SKELETAL_CHANNEL_STEP;
-        ch->step_times = times;
-        ch->step_values = values;
-        ch->step_count = kept;
-    }
-}
-
-/* Fills one LINEAR or CUBICSPLINE channel: samples on the grid, or one value
- * when every sample is the same. scratch holds n_grid * 4 floats. */
-static void clip_fill_sampled_channel(const clip_track_t *track, uint32_t n_grid, float duration, float *scratch, nt_builder_anim_channel_t *ch) {
-    const uint32_t comps = track->comps;
-    memset(ch, 0, sizeof(*ch));
     double v[4] = {0.0, 0.0, 0.0, 0.0};
     for (uint32_t i = 0; i < n_grid; i++) {
         clip_eval_checked(track, clip_grid_time(i, n_grid, duration), v);
         for (uint32_t c = 0; c < comps; c++) {
-            scratch[((size_t)i * comps) + c] = (float)v[c];
+            samples[((size_t)i * comps) + c] = (float)v[c];
         }
     }
-    /* q and -q are one rotation: a held last key in the other hemisphere must
-     * not keep a constant rotation on the grid. */
     bool constant = true;
     for (uint32_t i = 1; i < n_grid && constant; i++) {
-        const float *sample = scratch + ((size_t)i * comps);
-        constant = clip_bits_equal(scratch, sample, comps) || (track->kind == 1U && clip_bits_negated(scratch, sample));
+        const float *sample = samples + ((size_t)i * comps);
+        constant = clip_bits_equal(samples, sample, comps) || (track->kind == 1U && clip_bits_negated(samples, sample));
     }
-    if (constant) {
-        ch->mode = NT_SKELETAL_CHANNEL_CONSTANT;
-        memcpy(ch->constant, scratch, comps * sizeof(float));
-    } else {
-        ch->mode = NT_SKELETAL_CHANNEL_SAMPLED;
-        ch->samples = scratch;
-    }
+    return constant;
 }
 // #endregion
 
@@ -467,7 +417,7 @@ static int clip_cmp_double(const void *a, const void *b) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void clip_pass_time(clip_pass_t *p, double time) {
     const uint16_t joints = p->skel->joint_count;
-    nt_skeletal_sample(p->view, time, p->skel->rest, p->local_rt);
+    nt_skeletal_sample(p->view, time, p->local_rt);
     memcpy(p->local_ex, p->skel->rest, (size_t)joints * sizeof(nt_skeletal_trs_t));
     for (uint32_t t = 0; t < p->track_count; t++) {
         const clip_track_t *track = &p->tracks[t];
@@ -535,8 +485,8 @@ static void clip_pass_time(clip_pass_t *p, double time) {
 }
 
 /* The dense set: every grid time, every authored key time (clamped to the end)
- * and three sub-samples per grid interval, sorted and deduplicated; a
- * STEP-only clip is still measured between its keys on the n_grid grid. */
+ * and three sub-samples per grid interval, sorted and deduplicated; a clip
+ * whose every channel folded is still measured on the n_grid grid. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void clip_dense_pass(clip_pass_t *p, uint32_t n_grid, float duration) {
     size_t count = (size_t)n_grid + ((size_t)(n_grid - 1U) * CLIP_SUBSAMPLES);
@@ -598,7 +548,7 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     }
     const nt_skeletal_skeleton_t *skel = &rig->skeleton;
     const uint32_t joints = skel->joint_count;
-    const uint32_t channel_count = 3U * (joints + 1U);
+    const uint32_t channel_count = 3U * joints;
     const uint32_t track_count = (uint32_t)anim->channels_count;
 
     // #region map and unpack
@@ -662,23 +612,15 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
         NT_LOG_ERROR("%s: %u frames at %g fps is not a finite positive duration", label, n_grid - 1U, (double)sample_fps);
         NT_BUILD_ASSERT(0 && "sample_fps gives no finite grid");
     }
-    size_t out_floats = 0;
-    for (uint32_t t = 0; t < track_count; t++) {
-        out_floats += (tracks[t].interpolation == cgltf_interpolation_type_step) ? ((size_t)tracks[t].key_count * 5U) : ((size_t)n_grid * 4U);
-    }
-    float *out_arena = (float *)calloc(out_floats, sizeof(float));
-    nt_builder_anim_channel_t *channels = (nt_builder_anim_channel_t *)calloc(channel_count, sizeof(nt_builder_anim_channel_t));
-    NT_BUILD_ASSERT(out_arena && channels && "add_scene_clip: alloc failed (OOM)");
-    float *out_next = out_arena;
+    /* Channel-major per track, one grid of n_grid samples each; rows are
+     * transposed into sample-major blocks once the still ones are known. */
+    float *samples = (float *)calloc((size_t)track_count * n_grid * 4U, sizeof(float));
+    bool *still = (bool *)calloc(track_count, sizeof(bool));
+    NT_BUILD_ASSERT(samples && still && "add_scene_clip: alloc failed (OOM)");
     bool sampled = false;
     for (uint32_t t = 0; t < track_count; t++) {
-        if (tracks[t].interpolation == cgltf_interpolation_type_step) {
-            continue;
-        }
-        const uint32_t c = (3U * tracks[t].joint) + tracks[t].kind;
-        clip_fill_sampled_channel(&tracks[t], n_grid, grid_duration, out_next, &channels[c]);
-        out_next += (size_t)n_grid * 4U;
-        sampled = sampled || channels[c].mode == NT_SKELETAL_CHANNEL_SAMPLED;
+        still[t] = clip_fill_track(&tracks[t], n_grid, grid_duration, samples + ((size_t)t * n_grid * 4U));
+        sampled = sampled || !still[t];
     }
     /* Without a grid there is nothing to align, so the clip keeps its exact
      * source length; a curve that folded over the grid is still measured over
@@ -688,21 +630,65 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
         NT_LOG_WARN("%s: %.9g s is %.4g frames at %g fps, not a whole number; the clip ships %u frames, %.9g s", label, (double)source_duration, frames_exact, (double)sample_fps, n_grid - 1U,
                     (double)duration);
     }
-    for (uint32_t t = 0; t < track_count; t++) {
-        if (tracks[t].interpolation != cgltf_interpolation_type_step) {
+
+    /* The base pose is the rig's rest with every still channel written in;
+     * rows are assigned in joint order, so the payload does not depend on the
+     * order the file lists its channels in. */
+    nt_skeletal_trs_t *base = (nt_skeletal_trs_t *)malloc((size_t)joints * sizeof(nt_skeletal_trs_t));
+    uint16_t *tables = (uint16_t *)malloc((size_t)channel_count * sizeof(uint16_t));
+    uint32_t *row_track = (uint32_t *)malloc((size_t)channel_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(base && tables && row_track && "add_scene_clip: alloc failed (OOM)");
+    memcpy(base, skel->rest, (size_t)joints * sizeof(nt_skeletal_trs_t));
+    uint16_t *const table[3] = {tables, tables + joints, tables + ((size_t)2U * joints)};
+    uint32_t *const rows[3] = {row_track, row_track + joints, row_track + ((size_t)2U * joints)};
+    uint16_t n_rows[3] = {0, 0, 0};
+    for (uint32_t c = 0; c < 3U * joints; c++) {
+        const uint32_t t = track_of[c];
+        if (t == UINT32_MAX) {
             continue;
         }
-        const uint32_t c = (3U * tracks[t].joint) + tracks[t].kind;
-        clip_fill_step_channel(&tracks[t], duration, sampled ? (CLIP_FRAME_SNAP_TOLERANCE / (double)sample_fps) : 0.0, out_next, &channels[c]);
-        out_next += (size_t)tracks[t].key_count * 5U;
+        const uint32_t kind = tracks[t].kind;
+        const uint32_t joint = tracks[t].joint;
+        if (still[t]) {
+            float *lane = base[joint].t;
+            if (kind == 1U) {
+                lane = base[joint].q;
+            } else if (kind == 2U) {
+                lane = base[joint].s;
+            }
+            memcpy(lane, samples + ((size_t)t * n_grid * 4U), tracks[t].comps * sizeof(float));
+            continue;
+        }
+        table[kind][n_rows[kind]] = (uint16_t)joint;
+        rows[kind][n_rows[kind]] = t;
+        n_rows[kind]++;
     }
-    nt_builder_clip_t clip = {
+    const size_t stride = ((size_t)3U * n_rows[0]) + ((size_t)4U * n_rows[1]) + ((size_t)3U * n_rows[2]);
+    float *blocks = (float *)malloc((stride == 0U ? 1U : ((size_t)n_grid * stride)) * sizeof(float));
+    NT_BUILD_ASSERT(blocks && "add_scene_clip: alloc failed (OOM)");
+    float *w = blocks;
+    for (uint32_t i = 0; i < n_grid; i++) {
+        for (uint32_t kind = 0; kind < 3; kind++) {
+            const uint32_t comps = (kind == 1U) ? 4U : 3U;
+            for (uint32_t k = 0; k < n_rows[kind]; k++) {
+                memcpy(w, samples + ((size_t)rows[kind][k] * n_grid * 4U) + ((size_t)i * comps), comps * sizeof(float));
+                w += comps;
+            }
+        }
+    }
+    nt_skeletal_clip_t clip = {
         .rig_compat_id = skel->rig_compat_id,
-        .additive_ref_id = (nt_hash64_t){.value = 0},
-        .joint_count = (uint16_t)joints,
+        .duration = (double)duration,
+        .base = base,
+        .blocks = (stride != 0U) ? blocks : NULL,
+        .t_joint = table[0],
+        .q_joint = table[1],
+        .s_joint = table[2],
         .sample_count = sampled ? n_grid : 1U,
-        .duration = duration,
-        .channels = channels,
+        .joint_count = (uint16_t)joints,
+        .n_t = n_rows[0],
+        .n_q = n_rows[1],
+        .n_s = n_rows[2],
     };
     // #endregion
 
@@ -747,8 +733,12 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     nt_builder_add_clip(ctx, &clip, resource_id);
     // #endregion
 
-    free(channels);
-    free(out_arena);
+    free(blocks);
+    free(row_track);
+    free(tables);
+    free(base);
+    free(still);
+    free(samples);
     free(arena);
     free(track_of);
     free(tracks);

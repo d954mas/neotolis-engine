@@ -539,8 +539,10 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
 
 /* --- Skeletal API (NSKL skeleton, NSKN skin binding, NANM clip) ---
  *
- * Each add_* call turns an in-memory import result into exactly the bytes the
- * pack stores and registers the asset in one step, like add_blob.
+ * The glTF importers below are the producers of skin bindings and clips; a
+ * skeleton may also come from procedural code through nt_builder_add_skeleton,
+ * which encodes and registers in one step, like add_blob. The hand-built
+ * binding and clip entry points are builder-internal (nt_builder_internal.h).
  *
  * Every rule of the wire format is an invariant of the importer that produced
  * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
@@ -621,13 +623,13 @@ typedef struct {
  * scene: every animated node must be a rig joint whose local rest TRS is
  * bit-identical to the rig's and that hangs under the node its joint's parent
  * is named after (a differing rest or hierarchy is a different rig). Every
- * LINEAR and CUBICSPLINE channel is resampled onto one uniform grid with a
- * step of 1 / sample_fps (up to the float rounding of the shipped duration),
+ * channel, STEP included, is evaluated onto one uniform grid with a step of
+ * 1 / sample_fps (up to the float rounding of the shipped duration),
  * round(source_duration * sample_fps) + 1 samples, at least 2, over a
- * duration snapped to that whole number of frames; STEP channels keep their
- * authored keys up to that end, later ones are dropped and logged; a channel
- * whose samples or keys are all identical (a rotation's may also all be the
- * negation of the first) folds to a constant; the object curve stays absent.
+ * duration snapped to that whole number of frames; a channel whose grid
+ * samples are all identical (a rotation's may also all be the negation of the
+ * first) is written into the clip's base pose instead of shipping a row, and
+ * every channel the animation does not touch keeps the rig's rest there.
  * The three header bounds are measured over the same dense pass as the
  * report (skeletal spec, Bounds and culling). Content errors log a
  * diagnostic and assert; the skeletal spec (Builder, codec, wire formats)
@@ -643,50 +645,6 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
  * caller stamps clips and bindings with the identity that actually shipped;
  * skel->rig_compat_id is ignored. Joint ids must be unique. */
 nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
-
-/* Inverse binds are mesh space -> joint space at the bind pose, where mesh space
- * is the primitive's vertex space and the skinned mesh node's transform is
- * ignored (the glTF rule). reach (joint space) and any_pose_radius (skeleton
- * space) must be finite and non-negative; the activator rejects the rest.
- * remap is not bounded against a skeleton here. */
-void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
-
-/* One channel of a clip. Channel c of nt_builder_clip_t::channels addresses
- * joint c / 3 and component c % 3 (0 = translation, 1 = rotation, 2 = scale);
- * the last three channels are the object curve (§7.5). comps = 4 for a
- * rotation, 3 otherwise; only the fields the mode needs are read.
- *
- * ABSENT   nothing
- * CONSTANT constant[0..comps-1]
- * SAMPLED  samples, sample_count * comps floats on the clip's uniform grid
- * STEP     step_times and step_values (always 4 floats per key), step_count
- *          keys with strictly increasing times inside [0, duration]; the
- *          sampler holds the first key before its time */
-typedef struct {
-    const float *samples;     /* SAMPLED: sample_count * comps floats, sample-major */
-    const float *step_times;  /* STEP: step_count seconds */
-    const float *step_values; /* STEP: 4 floats per key */
-    uint32_t step_count;      /* STEP: number of keys */
-    float constant[4];        /* CONSTANT: the channel value */
-    uint8_t mode;             /* nt_skeletal_channel_mode_t */
-} nt_builder_anim_channel_t;
-
-/* One clip ready to encode. sample_count is the uniform grid on [0, duration]
- * every SAMPLED channel shares (1 = no sampled channel). The three bounds are
- * written as given (finite, >= 0); a hand-built clip may leave them 0. */
-typedef struct {
-    nt_hash64_t rig_compat_id;
-    nt_hash64_t additive_ref_id; /* reference pose identity, 0 = absolute */
-    uint16_t joint_count;
-    uint32_t sample_count;
-    float duration;
-    float r_joints;                            /* max joint-origin distance from the skeleton origin */
-    float r_root;                              /* max root translation length */
-    float s_max;                               /* max product of max|s| along an ancestor chain */
-    const nt_builder_anim_channel_t *channels; /* 3 * (joint_count + 1) entries */
-} nt_builder_clip_t;
-
-void nt_builder_add_clip(NtBuilderContext *ctx, const nt_builder_clip_t *clip, const char *resource_id);
 
 /* --- Atlas API ---
  *

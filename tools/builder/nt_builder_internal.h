@@ -539,19 +539,28 @@ static inline float nt_builder_round_up(double x) {
     return ((double)f < x) ? nextafterf(f, INFINITY) : f;
 }
 
-/* Skeletal encoders (nt_builder_skeletal.c): exactly the bytes the pack stores,
- * caller frees the buffer. The public entry points are the nt_builder_add_*
- * wrappers; tests inspect payloads through them without a pack, and the clip
- * import measures its own output through nt_builder_encode_clip. */
 /* Rig import (nt_builder_rig.c): decomposes one glTF column-major local matrix
  * into the rest TRS. name labels diagnostics; a matrix that is not T*R*S, or one
  * with a degenerate scale, is a content error and asserts. Public only to tests,
  * which pin the decomposition on matrices no fixture file needs to carry. */
 void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_trs_t *out);
 
+/* Hand-built skeletal assets (nt_builder_skeletal.c). The glTF importers are
+ * the producers of bindings and clips; these entry points take the runtime
+ * views directly, for the importers themselves and for tests. Each add_* call
+ * encodes and registers in one step, like add_blob; the encoders return
+ * exactly the bytes the pack stores, caller frees the buffer, and the clip
+ * import measures its own output through nt_builder_encode_clip.
+ *
+ * The encoders assert structure (non-NULL arrays, counts, preorder, bounds
+ * finite and >= 0, a float-representable duration); values (finite samples,
+ * unit quaternions, unique joint ids) are checked once, by the importer that
+ * produced them, with the node names its diagnostics can show. */
+void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
+void nt_builder_add_clip(NtBuilderContext *ctx, const nt_skeletal_clip_t *clip, const char *resource_id);
 nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
 void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size);
-void nt_builder_encode_clip(const nt_builder_clip_t *clip, uint8_t **out, uint32_t *out_size);
+void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint32_t *out_size);
 
 /* Atlas geometry primitives now live in nt_builder_atlas_geometry.h and are
  * called directly by tests. Vpack-internal test access is in nt_builder_atlas_vpack.c. */

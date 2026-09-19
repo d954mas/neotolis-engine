@@ -118,15 +118,14 @@ static nt_skin_binding_t fixture_binding(void) {
 }
 
 /*
- * Asymmetric clip: a different mode per joint and component, two sampled rows of
- * the same kind and two constant translations, so a row index or a per-kind
- * table offset that is ignored cannot pass.
+ * Asymmetric clip: a different mix per joint and component, two sampled rows of
+ * the same kind and two base-pose constants of one kind, so a row index or a
+ * per-kind table offset that is ignored cannot pass.
  *
- *   joint 0: t constant, q sampled (q row 0), s constant
- *   joint 1: t sampled (t row 0), q constant, s absent
+ *   joint 0: t base constant, q sampled (q row 0), s base constant
+ *   joint 1: t sampled (t row 0), q base constant, s rest
  *   joint 2: t sampled (t row 1), q sampled (q row 1), s sampled (s row 0)
- *   joint 3: t constant, q absent, s step
- *   object : t sampled, q step, s absent
+ *   joint 3: t base constant, q rest, s rest
  *
  * duration 1 over 5 samples, so every grid time is binary exact. The rotation
  * rows turn about one axis in equal steps: the nlerp midpoint of two of them is
@@ -135,8 +134,7 @@ static nt_skin_binding_t fixture_binding(void) {
  */
 #define CLIP_JOINTS 4
 #define CLIP_SAMPLES 5
-#define CLIP_CHANNELS (3 * (CLIP_JOINTS + 1))
-#define CLIP_BLOCK_FLOATS 17
+#define CLIP_STRIDE 17
 
 /* joint 0: 0, 22.5, 45, 67.5 and 90 degrees about z. */
 static const float k_q_row0[CLIP_SAMPLES * 4] = {
@@ -149,77 +147,63 @@ static const float k_q_row1[CLIP_SAMPLES * 4] = {
 static const float k_t_row0[CLIP_SAMPLES * 3] = {0.0F, 0.0F, 0.0F, 1.0F, 0.5F, -0.25F, 2.0F, 1.0F, -0.5F, 3.0F, 1.5F, -0.75F, 4.0F, 2.0F, -1.0F};
 static const float k_t_row1[CLIP_SAMPLES * 3] = {10.0F, -1.0F, 0.5F, 10.5F, -2.0F, 1.5F, 11.0F, -3.0F, 2.5F, 11.5F, -4.0F, 3.5F, 12.0F, -5.0F, 4.5F};
 static const float k_s_row0[CLIP_SAMPLES * 3] = {1.0F, 1.0F, 1.0F, 1.1F, 1.0F, 0.9F, 1.2F, 1.0F, 0.8F, 1.3F, 1.0F, 0.7F, 1.4F, 1.0F, 0.6F};
-static const float k_object_t[CLIP_SAMPLES * 3] = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.25F, 0.0F, 0.0F, 0.5F, 0.0F, 0.0F, 0.75F, 0.0F, 0.0F, 1.0F};
 
 /* nlerp midpoints of samples 1 and 2: 33.75 degrees about z, 56.25 about x. */
 static const float k_q_row0_mid[4] = {0.0F, 0.0F, 0.29028483F, 0.95694034F};
 static const float k_q_row1_mid[4] = {0.47139674F, 0.0F, 0.0F, 0.88192126F};
 
-static const float k_const_t0[4] = {1.5F, -2.25F, 0.75F, 0.0F};
-static const float k_const_s0[4] = {2.0F, 3.0F, 4.0F, 0.0F};
+static const float k_const_t0[3] = {1.5F, -2.25F, 0.75F};
+static const float k_const_s0[3] = {2.0F, 3.0F, 4.0F};
 static const float k_const_q1[4] = {0.0F, 0.0F, 0.70710678F, 0.70710678F};
-static const float k_const_t3[4] = {-5.5F, 6.25F, -7.125F, 0.0F};
+static const float k_const_t3[3] = {-5.5F, 6.25F, -7.125F};
 
-/* joint 3 scale: three keys inside the duration, the first one authored after
- * the clip start so the builder keeps it and the sampler holds it until then. */
-static const float k_step_times[3] = {0.2F, 0.4F, 0.8F};
-static const float k_step_values[3 * 4] = {1.0F, 1.0F, 1.0F, 0.0F, 2.0F, 0.5F, 3.0F, 0.0F, 0.25F, 4.0F, 0.5F, 0.0F};
+/* The rest pose with the constants written in; the channels the rows drive
+ * hold rest values the rows never produce, so a row that missed its joint
+ * would show. */
+static const nt_skeletal_trs_t k_base[CLIP_JOINTS] = {
+    {{1.5F, -2.25F, 0.75F}, {0.0F, 0.0F, 0.0F, 1.0F}, {2.0F, 3.0F, 4.0F}},
+    {{0.0F, 0.5F, -0.25F}, {0.0F, 0.0F, 0.70710678F, 0.70710678F}, {2.0F, 1.0F, 0.5F}},
+    {{-1.5F, 0.0F, 0.125F}, {0.70710678F, 0.0F, 0.0F, 0.70710678F}, {1.0F, 1.0F, 1.0F}},
+    {{-5.5F, 6.25F, -7.125F}, {0.0F, 1.0F, 0.0F, 0.0F}, {0.25F, 0.25F, 0.25F}},
+};
 
-/* object rotation: an eighth turn about x, then a quarter turn about z. */
-static const float k_object_step_times[2] = {0.0F, 0.5F};
-static const float k_object_step_values[2 * 4] = {0.38268343F, 0.0F, 0.0F, 0.92387953F, 0.0F, 0.0F, 0.70710678F, 0.70710678F};
+static const uint16_t k_t_joint[2] = {1, 2};
+static const uint16_t k_q_joint[2] = {0, 2};
+static const uint16_t k_s_joint[1] = {2};
+static float g_blocks[CLIP_SAMPLES * CLIP_STRIDE];
 
-static void fixture_clip(nt_builder_clip_t *clip, nt_builder_anim_channel_t channels[CLIP_CHANNELS]) {
-    memset(channels, 0, sizeof(nt_builder_anim_channel_t) * (size_t)CLIP_CHANNELS);
-
-    channels[0].mode = NT_SKELETAL_CHANNEL_CONSTANT;
-    memcpy(channels[0].constant, k_const_t0, sizeof(k_const_t0));
-    channels[1].mode = NT_SKELETAL_CHANNEL_SAMPLED;
-    channels[1].samples = k_q_row0;
-    channels[2].mode = NT_SKELETAL_CHANNEL_CONSTANT;
-    memcpy(channels[2].constant, k_const_s0, sizeof(k_const_s0));
-
-    channels[3].mode = NT_SKELETAL_CHANNEL_SAMPLED;
-    channels[3].samples = k_t_row0;
-    channels[4].mode = NT_SKELETAL_CHANNEL_CONSTANT;
-    memcpy(channels[4].constant, k_const_q1, sizeof(k_const_q1));
-
-    channels[6].mode = NT_SKELETAL_CHANNEL_SAMPLED;
-    channels[6].samples = k_t_row1;
-    channels[7].mode = NT_SKELETAL_CHANNEL_SAMPLED;
-    channels[7].samples = k_q_row1;
-    channels[8].mode = NT_SKELETAL_CHANNEL_SAMPLED;
-    channels[8].samples = k_s_row0;
-
-    channels[9].mode = NT_SKELETAL_CHANNEL_CONSTANT;
-    memcpy(channels[9].constant, k_const_t3, sizeof(k_const_t3));
-    channels[11].mode = NT_SKELETAL_CHANNEL_STEP;
-    channels[11].step_times = k_step_times;
-    channels[11].step_values = k_step_values;
-    channels[11].step_count = 3;
-
-    channels[12].mode = NT_SKELETAL_CHANNEL_SAMPLED;
-    channels[12].samples = k_object_t;
-    channels[13].mode = NT_SKELETAL_CHANNEL_STEP;
-    channels[13].step_times = k_object_step_times;
-    channels[13].step_values = k_object_step_values;
-    channels[13].step_count = 2;
-
-    memset(clip, 0, sizeof(*clip));
-    clip->rig_compat_id = (nt_hash64_t){.value = fixture_rig_id()};
-    clip->joint_count = CLIP_JOINTS;
-    clip->sample_count = CLIP_SAMPLES;
-    clip->duration = 1.0F;
-    clip->r_joints = 1.5F;
-    clip->r_root = 0.25F;
-    clip->s_max = 2.0F;
-    clip->channels = channels;
+static void fixture_clip(nt_skeletal_clip_t *clip) {
+    /* Sample-major: both t rows, both q rows, then the s row per block. */
+    for (uint32_t i = 0; i < CLIP_SAMPLES; ++i) {
+        float *block = g_blocks + ((size_t)i * CLIP_STRIDE);
+        memcpy(block, &k_t_row0[(size_t)i * 3U], 3U * sizeof(float));
+        memcpy(block + 3, &k_t_row1[(size_t)i * 3U], 3U * sizeof(float));
+        memcpy(block + 6, &k_q_row0[(size_t)i * 4U], 4U * sizeof(float));
+        memcpy(block + 10, &k_q_row1[(size_t)i * 4U], 4U * sizeof(float));
+        memcpy(block + 14, &k_s_row0[(size_t)i * 3U], 3U * sizeof(float));
+    }
+    *clip = (nt_skeletal_clip_t){
+        .rig_compat_id = (nt_hash64_t){.value = fixture_rig_id()},
+        .duration = 1.0,
+        .base = k_base,
+        .blocks = g_blocks,
+        .t_joint = k_t_joint,
+        .q_joint = k_q_joint,
+        .s_joint = k_s_joint,
+        .r_joints = 1.5F,
+        .r_root = 0.25F,
+        .s_max = 2.0F,
+        .sample_count = CLIP_SAMPLES,
+        .joint_count = CLIP_JOINTS,
+        .n_t = 2,
+        .n_q = 2,
+        .n_s = 1,
+    };
 }
 
 static uint8_t *encode_fixture_clip(uint32_t *out_size) {
-    nt_builder_clip_t clip;
-    nt_builder_anim_channel_t channels[CLIP_CHANNELS];
-    fixture_clip(&clip, channels);
+    nt_skeletal_clip_t clip;
+    fixture_clip(&clip);
     uint8_t *payload = NULL;
     nt_builder_encode_clip(&clip, &payload, out_size);
     TEST_ASSERT_NOT_NULL(payload);
@@ -229,23 +213,12 @@ static uint8_t *encode_fixture_clip(uint32_t *out_size) {
 /* Offsets of the fixture clip's payload, in the order §16 lists them; the
  * rejection tests patch bytes through these. */
 enum {
-    ANM_OFF_BLOCKS = 68,
-    ANM_OFF_CT = ANM_OFF_BLOCKS + (CLIP_SAMPLES * CLIP_BLOCK_FLOATS * 4),
-    ANM_OFF_CQ = ANM_OFF_CT + 24,
-    ANM_OFF_CS = ANM_OFF_CQ + 16,
-    ANM_OFF_STEPS = ANM_OFF_CS + 12,
-    ANM_OFF_KEYS = ANM_OFF_STEPS + 12,
-    ANM_OFF_OBJECT_REC = ANM_OFF_KEYS + (5 * 20),
-    ANM_REC_STEP_FIRST = ANM_OFF_OBJECT_REC + 40,
-    ANM_REC_STEP_COUNT = ANM_OFF_OBJECT_REC + 52,
-    ANM_OFF_OBJECT = ANM_OFF_OBJECT_REC + 64,
-    ANM_OFF_T_JOINT = ANM_OFF_OBJECT + (CLIP_SAMPLES * 40),
+    ANM_OFF_BASE = 44,
+    ANM_OFF_BLOCKS = ANM_OFF_BASE + (CLIP_JOINTS * 40),
+    ANM_OFF_T_JOINT = ANM_OFF_BLOCKS + (CLIP_SAMPLES * CLIP_STRIDE * 4),
     ANM_OFF_Q_JOINT = ANM_OFF_T_JOINT + 4,
     ANM_OFF_S_JOINT = ANM_OFF_Q_JOINT + 4,
-    ANM_OFF_CT_JOINT = ANM_OFF_S_JOINT + 2,
-    ANM_OFF_CQ_JOINT = ANM_OFF_CT_JOINT + 4,
-    ANM_OFF_CS_JOINT = ANM_OFF_CQ_JOINT + 2,
-    ANM_SIZE = ANM_OFF_CS_JOINT + 2,
+    ANM_SIZE = ANM_OFF_S_JOINT + 2,
 };
 
 /* Header field offsets, from NtAnmHeader. */
@@ -253,32 +226,11 @@ enum {
     ANM_HDR_JOINT_COUNT = 6,
     ANM_HDR_SAMPLE_COUNT = 8,
     ANM_HDR_DURATION = 12,
-    ANM_HDR_OBJECT_MODE = 52,
-    ANM_HDR_R_JOINTS = 56,
-    ANM_HDR_R_ROOT = 60,
-    ANM_HDR_S_MAX = 64,
+    ANM_HDR_R_JOINTS = 24,
+    ANM_HDR_R_ROOT = 28,
+    ANM_HDR_S_MAX = 32,
+    ANM_HDR_N_T = 36,
 };
-
-/* Distinct non-identity unit rotations, so "absent channel keeps the default"
- * cannot pass on an identity the clip would have produced anyway. */
-static const float k_default_q[CLIP_JOINTS][4] = {
-    {0.5F, 0.5F, 0.5F, 0.5F},
-    {0.70710678F, 0.0F, 0.0F, 0.70710678F},
-    {0.0F, 0.70710678F, 0.0F, 0.70710678F},
-    {0.0F, 0.0F, 0.6F, 0.8F},
-};
-
-static void build_defaults(nt_skeletal_trs_t *out, uint16_t count) {
-    for (uint16_t j = 0; j < count; ++j) {
-        out[j].t[0] = 100.0F + (float)j;
-        out[j].t[1] = 200.0F + (float)j;
-        out[j].t[2] = 300.0F + (float)j;
-        memcpy(out[j].q, k_default_q[j], sizeof(out[j].q));
-        out[j].s[0] = 1.0F + (float)j;
-        out[j].s[1] = 2.0F + (float)j;
-        out[j].s[2] = 3.0F + (float)j;
-    }
-}
 
 /* Expected value of a T/S channel halfway between two grid samples: the kernel
  * lerps as a*(1-u) + b*u, which at u = 0.5 is the plain average. */
@@ -385,12 +337,9 @@ void test_clip_round_trip_tables(void) {
 
     const nt_skeletal_clip_t *clip = nt_skeletal_assets_clip(publish_handle("clips/a.nanm", NT_ASSET_CLIP, handle));
     TEST_ASSERT_EQUAL_HEX64(fixture_rig_id(), clip->rig_compat_id.value);
-    TEST_ASSERT_EQUAL_HEX64(0, clip->additive_ref_id.value);
     TEST_ASSERT_EQUAL_UINT16(CLIP_JOINTS, clip->joint_count);
     TEST_ASSERT_EQUAL_UINT32(CLIP_SAMPLES, clip->sample_count);
     TEST_ASSERT_TRUE(clip->duration == 1.0);
-    TEST_ASSERT_TRUE(clip->inv_step == 4.0);
-    TEST_ASSERT_EQUAL_UINT32(CLIP_BLOCK_FLOATS, clip->block_floats);
     TEST_ASSERT_TRUE(clip->r_joints == 1.5F && clip->r_root == 0.25F && clip->s_max == 2.0F);
 
     TEST_ASSERT_EQUAL_UINT16(2, clip->n_t);
@@ -402,54 +351,16 @@ void test_clip_round_trip_tables(void) {
     TEST_ASSERT_EQUAL_UINT16(2, clip->q_joint[1]);
     TEST_ASSERT_EQUAL_UINT16(2, clip->s_joint[0]);
 
-    TEST_ASSERT_EQUAL_UINT16(2, clip->n_ct);
-    TEST_ASSERT_EQUAL_UINT16(1, clip->n_cq);
-    TEST_ASSERT_EQUAL_UINT16(1, clip->n_cs);
-    TEST_ASSERT_EQUAL_UINT16(0, clip->ct_joint[0]);
-    TEST_ASSERT_EQUAL_UINT16(3, clip->ct_joint[1]);
-    TEST_ASSERT_EQUAL_UINT16(1, clip->cq_joint[0]);
-    TEST_ASSERT_EQUAL_UINT16(0, clip->cs_joint[0]);
-    ASSERT_BITS_EQUAL(k_const_t0, clip->ct, 3);
-    ASSERT_BITS_EQUAL(k_const_t3, clip->ct + 3, 3);
-    ASSERT_BITS_EQUAL(k_const_q1, clip->cq, 4);
-    ASSERT_BITS_EQUAL(k_const_s0, clip->cs, 3);
+    TEST_ASSERT_EQUAL_MEMORY(k_base, clip->base, sizeof(k_base));
 
-    /* Frame blocks hold both t rows, both q rows, then the s row. The object
-     * curve is not a joint row and stays out. */
+    /* Frame blocks hold both t rows, both q rows, then the s row. */
     for (uint32_t i = 0; i < CLIP_SAMPLES; ++i) {
-        const float *block = clip->blocks + ((size_t)i * clip->block_floats);
+        const float *block = clip->blocks + ((size_t)i * CLIP_STRIDE);
         ASSERT_BITS_EQUAL(&k_t_row0[(size_t)i * 3U], block, 3);
         ASSERT_BITS_EQUAL(&k_t_row1[(size_t)i * 3U], block + 3, 3);
         ASSERT_BITS_EQUAL(&k_q_row0[(size_t)i * 4U], block + 6, 4);
         ASSERT_BITS_EQUAL(&k_q_row1[(size_t)i * 4U], block + 10, 4);
         ASSERT_BITS_EQUAL(&k_s_row0[(size_t)i * 3U], block + 14, 3);
-    }
-
-    TEST_ASSERT_EQUAL_UINT32(1, clip->n_steps);
-    TEST_ASSERT_EQUAL_UINT16(3, clip->steps[0].joint);
-    TEST_ASSERT_EQUAL_UINT8(2, clip->steps[0].channel);
-    TEST_ASSERT_EQUAL_UINT32(0, clip->steps[0].first);
-    TEST_ASSERT_EQUAL_UINT32(3, clip->steps[0].count);
-    for (uint32_t k = 0; k < 3; ++k) {
-        ASSERT_BITS_EQUAL(&k_step_times[k], &clip->keys[k].time, 1);
-        ASSERT_BITS_EQUAL(&k_step_values[(size_t)k * 4U], clip->keys[k].v, 4);
-    }
-
-    /* The object curve keeps the clip's grid but its own modes and ranges. */
-    TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_SAMPLED, clip->object.mode[0]);
-    TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_STEP, clip->object.mode[1]);
-    TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_CHANNEL_ABSENT, clip->object.mode[2]);
-    TEST_ASSERT_EQUAL_UINT32(CLIP_SAMPLES, clip->object.sample_count);
-    TEST_ASSERT_TRUE(clip->object.inv_step == 4.0);
-    TEST_ASSERT_EQUAL_UINT32(3, clip->object.step_first[1]);
-    TEST_ASSERT_EQUAL_UINT32(2, clip->object.step_count[1]);
-    TEST_ASSERT_EQUAL_UINT32(0, clip->object.step_count[0]);
-    for (uint32_t i = 0; i < CLIP_SAMPLES; ++i) {
-        ASSERT_BITS_EQUAL(&k_object_t[(size_t)i * 3U], clip->object.sampled[i].t, 3);
-    }
-    for (uint32_t k = 0; k < 2; ++k) {
-        ASSERT_BITS_EQUAL(&k_object_step_times[k], &clip->object.keys[3 + k].time, 1);
-        ASSERT_BITS_EQUAL(&k_object_step_values[(size_t)k * 4U], clip->object.keys[3 + k].v, 4);
     }
 
     nt_skeletal_assets_deactivate_clip(handle);
@@ -470,41 +381,22 @@ void test_clip_view_matches_activator(void) {
     const uint32_t handle = nt_skeletal_assets_activate_clip(payload, size);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     const nt_skeletal_clip_t *clip = nt_skeletal_assets_clip(publish_handle("clips/view.nanm", NT_ASSET_CLIP, handle));
-    /* The activated copy starts where its first table starts, one header back. */
-    const uint8_t *base = (const uint8_t *)clip->t_joint - ((const uint8_t *)direct.t_joint - payload);
+    /* The activated copy starts where its base starts, one header back. */
+    const uint8_t *base = (const uint8_t *)clip->base - ((const uint8_t *)direct.base - payload);
     TEST_ASSERT_EQUAL_MEMORY(payload, base, size);
 
+    ASSERT_SAME_OFFSET(base);
     ASSERT_SAME_OFFSET(blocks);
     ASSERT_SAME_OFFSET(t_joint);
     ASSERT_SAME_OFFSET(q_joint);
     ASSERT_SAME_OFFSET(s_joint);
-    ASSERT_SAME_OFFSET(ct_joint);
-    ASSERT_SAME_OFFSET(ct);
-    ASSERT_SAME_OFFSET(cq_joint);
-    ASSERT_SAME_OFFSET(cq);
-    ASSERT_SAME_OFFSET(cs_joint);
-    ASSERT_SAME_OFFSET(cs);
-    ASSERT_SAME_OFFSET(steps);
-    ASSERT_SAME_OFFSET(keys);
-    ASSERT_SAME_OFFSET(object.sampled);
-    ASSERT_SAME_OFFSET(object.keys);
 
     TEST_ASSERT_EQUAL_HEX64(direct.rig_compat_id.value, clip->rig_compat_id.value);
-    TEST_ASSERT_EQUAL_HEX64(direct.additive_ref_id.value, clip->additive_ref_id.value);
-    TEST_ASSERT_TRUE(direct.duration == clip->duration && direct.inv_step == clip->inv_step);
+    TEST_ASSERT_TRUE(direct.duration == clip->duration);
     TEST_ASSERT_TRUE(direct.r_joints == clip->r_joints && direct.r_root == clip->r_root && direct.s_max == clip->s_max);
     TEST_ASSERT_EQUAL_UINT32(direct.sample_count, clip->sample_count);
-    TEST_ASSERT_EQUAL_UINT32(direct.block_floats, clip->block_floats);
-    TEST_ASSERT_EQUAL_UINT32(direct.n_steps, clip->n_steps);
     TEST_ASSERT_EQUAL_UINT16(direct.joint_count, clip->joint_count);
     TEST_ASSERT_TRUE(direct.n_t == clip->n_t && direct.n_q == clip->n_q && direct.n_s == clip->n_s);
-    TEST_ASSERT_TRUE(direct.n_ct == clip->n_ct && direct.n_cq == clip->n_cq && direct.n_cs == clip->n_cs);
-    TEST_ASSERT_EQUAL_MEMORY(direct.object.mode, clip->object.mode, sizeof(direct.object.mode));
-    TEST_ASSERT_EQUAL_MEMORY(&direct.object.constant, &clip->object.constant, sizeof(direct.object.constant));
-    TEST_ASSERT_EQUAL_MEMORY(direct.object.step_first, clip->object.step_first, sizeof(direct.object.step_first));
-    TEST_ASSERT_EQUAL_MEMORY(direct.object.step_count, clip->object.step_count, sizeof(direct.object.step_count));
-    TEST_ASSERT_TRUE(direct.object.duration == clip->object.duration && direct.object.inv_step == clip->object.inv_step);
-    TEST_ASSERT_EQUAL_UINT32(direct.object.sample_count, clip->object.sample_count);
 
     nt_skeletal_assets_deactivate_clip(handle);
     free(payload);
@@ -512,8 +404,8 @@ void test_clip_view_matches_activator(void) {
 // #endregion
 
 // #region sampling
-/* Every grid time reproduces the source samples bit for bit, absent channels
- * take the defaults and the step track holds its last key. */
+/* Every grid time reproduces the source samples bit for bit and every channel
+ * without a row keeps the base. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_clip_samples_grid_times_exactly(void) {
     uint32_t size = 0;
@@ -522,13 +414,10 @@ void test_clip_samples_grid_times_exactly(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     const nt_skeletal_clip_t *clip = nt_skeletal_assets_clip(publish_handle("clips/b.nanm", NT_ASSET_CLIP, handle));
 
-    nt_skeletal_trs_t defaults[CLIP_JOINTS];
     nt_skeletal_trs_t pose[CLIP_JOINTS];
-    build_defaults(defaults, CLIP_JOINTS);
-
     for (uint32_t i = 0; i < CLIP_SAMPLES; ++i) {
         const double time = (double)i * 0.25;
-        nt_skeletal_sample(clip, time, defaults, pose);
+        nt_skeletal_sample(clip, time, pose);
 
         ASSERT_BITS_EQUAL(k_const_t0, pose[0].t, 3);
         ASSERT_BITS_EQUAL(&k_q_row0[(size_t)i * 4U], pose[0].q, 4);
@@ -536,43 +425,31 @@ void test_clip_samples_grid_times_exactly(void) {
 
         ASSERT_BITS_EQUAL(&k_t_row0[(size_t)i * 3U], pose[1].t, 3);
         ASSERT_BITS_EQUAL(k_const_q1, pose[1].q, 4);
-        ASSERT_BITS_EQUAL(defaults[1].s, pose[1].s, 3); /* absent */
+        ASSERT_BITS_EQUAL(k_rest[1].s, pose[1].s, 3); /* no row */
 
         ASSERT_BITS_EQUAL(&k_t_row1[(size_t)i * 3U], pose[2].t, 3);
         ASSERT_BITS_EQUAL(&k_q_row1[(size_t)i * 4U], pose[2].q, 4);
         ASSERT_BITS_EQUAL(&k_s_row0[(size_t)i * 3U], pose[2].s, 3);
 
-        /* keys at 0.2, 0.4 and 0.8 over a grid of 0.25; times before 0.2 hold the first key. */
-        uint32_t key = 0U;
-        if (i >= 4U) {
-            key = 2U;
-        } else if (i >= 2U) {
-            key = 1U;
-        }
         ASSERT_BITS_EQUAL(k_const_t3, pose[3].t, 3);
-        ASSERT_BITS_EQUAL(defaults[3].q, pose[3].q, 4); /* absent */
-        ASSERT_BITS_EQUAL(&k_step_values[(size_t)key * 4U], pose[3].s, 3);
+        ASSERT_BITS_EQUAL(k_rest[3].q, pose[3].q, 4); /* no row */
+        ASSERT_BITS_EQUAL(k_rest[3].s, pose[3].s, 3); /* no row */
     }
 
     nt_skeletal_assets_deactivate_clip(handle);
     free(payload);
 }
 
-/* Between grid points the decoded blocks interpolate; the step track is exact
- * at its own timestamp and still holds the previous key just before it. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Between grid points the decoded blocks interpolate. */
 void test_clip_interpolates_between_samples(void) {
     uint32_t size = 0;
     uint8_t *payload = encode_fixture_clip(&size);
     const uint32_t handle = nt_skeletal_assets_activate_clip(payload, size);
     const nt_skeletal_clip_t *clip = nt_skeletal_assets_clip(publish_handle("clips/c.nanm", NT_ASSET_CLIP, handle));
 
-    nt_skeletal_trs_t defaults[CLIP_JOINTS];
     nt_skeletal_trs_t pose[CLIP_JOINTS];
-    build_defaults(defaults, CLIP_JOINTS);
-
     /* 0.375 = block 1 plus half an interval, so u is exactly 0.5. */
-    nt_skeletal_sample(clip, 0.375, defaults, pose);
+    nt_skeletal_sample(clip, 0.375, pose);
 
     for (uint32_t c = 0; c < 3; ++c) {
         ASSERT_FLOAT_NEAR(mid(&k_t_row0[3], c), pose[1].t[c], 1e-6F);
@@ -583,43 +460,8 @@ void test_clip_interpolates_between_samples(void) {
         ASSERT_FLOAT_NEAR(k_q_row0_mid[c], pose[0].q[c], 1e-6F);
         ASSERT_FLOAT_NEAR(k_q_row1_mid[c], pose[2].q[c], 1e-6F);
     }
-
-    /* STEP holds the first key before its time, then the previous key up to
-     * but excluding the next timestamp. */
-    nt_skeletal_sample(clip, 0.1, defaults, pose);
-    ASSERT_BITS_EQUAL(&k_step_values[0], pose[3].s, 3);
-    nt_skeletal_sample(clip, (double)k_step_times[1] - 1e-6, defaults, pose);
-    ASSERT_BITS_EQUAL(&k_step_values[0], pose[3].s, 3);
-    nt_skeletal_sample(clip, (double)k_step_times[1], defaults, pose);
-    ASSERT_BITS_EQUAL(&k_step_values[4], pose[3].s, 3);
-
-    nt_skeletal_assets_deactivate_clip(handle);
-    free(payload);
-}
-
-void test_object_curve_samples(void) {
-    uint32_t size = 0;
-    uint8_t *payload = encode_fixture_clip(&size);
-    const uint32_t handle = nt_skeletal_assets_activate_clip(payload, size);
-    const nt_skeletal_clip_t *clip = nt_skeletal_assets_clip(publish_handle("clips/d.nanm", NT_ASSET_CLIP, handle));
-
-    nt_skeletal_trs_t defaults[1];
-    nt_skeletal_trs_t out;
-    build_defaults(defaults, 1);
-
-    for (uint32_t i = 0; i < CLIP_SAMPLES; ++i) {
-        nt_skeletal_sample_object(&clip->object, (double)i * 0.25, defaults, &out);
-        ASSERT_BITS_EQUAL(&k_object_t[(size_t)i * 3U], out.t, 3);
-        const uint32_t key = (i < 2) ? 0U : 1U; /* the object key sits at 0.5 */
-        ASSERT_BITS_EQUAL(&k_object_step_values[(size_t)key * 4U], out.q, 4);
-        ASSERT_BITS_EQUAL(defaults[0].s, out.s, 3); /* absent */
-    }
-
-    /* Mid-grid the sampled translation interpolates. */
-    nt_skeletal_sample_object(&clip->object, 0.375, defaults, &out);
-    for (uint32_t c = 0; c < 3; ++c) {
-        ASSERT_FLOAT_NEAR(mid(&k_object_t[3], c), out.t[c], 1e-6F);
-    }
+    ASSERT_BITS_EQUAL(k_const_t0, pose[0].t, 3);
+    ASSERT_BITS_EQUAL(k_base[3].s, pose[3].s, 3);
 
     nt_skeletal_assets_deactivate_clip(handle);
     free(payload);
@@ -628,9 +470,9 @@ void test_object_curve_samples(void) {
 
 // #region rejections
 /* Only structure is checked at activation: a payload whose size, magic,
- * version, write indices or key partition do not hold could make the sampler
- * read or write outside the allocation. Values inside a sound structure belong
- * to the builder and to NT_SKELETAL_CHECKS.
+ * version, grid or write indices do not hold could make the sampler read or
+ * write outside the allocation. Values inside a sound structure belong to the
+ * builder and to NT_SKELETAL_CHECKS.
  *
  * Every rejection runs against a pool of one asset: after N refusals a valid
  * payload must still activate, which proves nothing was published or held. */
@@ -737,26 +579,13 @@ void test_skin_binding_rejections(void) {
     wr_u16(buf + 6, 0U);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "palette_count 0");
 
-    memcpy(buf, valid, size);
-    wr_f32(buf + 16, -1.0F);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "negative reach");
-
+    /* A radius is a value, not structure: a NaN one activates and is the
+     * builder's bug to have caught. */
     memcpy(buf, valid, size);
     wr_u32(buf + 20, 0x7FC00000U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "NaN any_pose_radius");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf + 16, 0x7F800000U);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "infinite reach");
-
-    memcpy(buf, valid, size);
-    wr_f32(buf + 20, -2.0F);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "negative any_pose_radius");
-
-    /* The pre-bounds payload of the same palette is exactly the header short of
-     * this one, and a pack built before the bounds must not activate. */
-    memcpy(buf, valid, size);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, 16U + (50U * SKIN_PALETTE)), "the payload size NSKN had before reach and any_pose_radius");
+    const uint32_t nan_handle = nt_skeletal_assets_activate_skin_binding(buf, size);
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, nan_handle, "a NaN any_pose_radius is not the activator's business");
+    nt_skeletal_assets_deactivate_skin_binding(nan_handle);
 
     memcpy(buf, valid, size);
     const uint32_t handle = nt_skeletal_assets_activate_skin_binding(buf, size);
@@ -780,7 +609,7 @@ void test_clip_header_rejections(void) {
     memcpy(buf, valid, size);
     EXPECT_CLIP_REJECTED(buf, size - 1U, "one byte short");
     EXPECT_CLIP_REJECTED(buf, size + 1U, "one byte long");
-    EXPECT_CLIP_REJECTED(buf, 67U, "shorter than the header");
+    EXPECT_CLIP_REJECTED(buf, 43U, "shorter than the header");
 
     memcpy(buf, valid, size);
     wr_u32(buf, 0xDEADBEEFU);
@@ -810,46 +639,20 @@ void test_clip_header_rejections(void) {
     wr_f32(buf + ANM_HDR_DURATION, 0.0F);
     EXPECT_CLIP_REJECTED(buf, size, "a grid with no interval to step through");
 
-    memcpy(buf, valid, size);
-    buf[ANM_HDR_OBJECT_MODE + 2U] = 4U;
-    EXPECT_CLIP_REJECTED(buf, size, "unknown object channel mode");
-
-    memcpy(buf, valid, size);
-    wr_f32(buf + ANM_HDR_R_ROOT, -1.0F);
-    EXPECT_CLIP_REJECTED(buf, size, "negative bound");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf + ANM_HDR_R_JOINTS, 0x7FC00000U);
-    EXPECT_CLIP_REJECTED(buf, size, "NaN r_joints");
-
-    memcpy(buf, valid, size);
-    wr_f32(buf + ANM_HDR_S_MAX, -0.5F);
-    EXPECT_CLIP_REJECTED(buf, size, "negative s_max");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf + ANM_HDR_R_ROOT, 0x7FC00000U);
-    EXPECT_CLIP_REJECTED(buf, size, "NaN r_root");
-
-    memcpy(buf, valid, size);
-    wr_f32(buf + ANM_HDR_R_JOINTS, -1.0F);
-    EXPECT_CLIP_REJECTED(buf, size, "negative r_joints");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf + ANM_HDR_S_MAX, 0x7F800000U);
-    EXPECT_CLIP_REJECTED(buf, size, "infinite s_max");
-
-    /* The tables are read in place, so a payload that does not start 4-aligned
-     * is refused before any typed read. */
-    uint8_t *shifted = (uint8_t *)calloc(size + 4U, 1);
-    TEST_ASSERT_NOT_NULL(shifted);
-    memcpy(shifted + 1, valid, size);
-    EXPECT_CLIP_REJECTED(shifted + 1, size, "a payload one byte off alignment");
-    free(shifted);
-
     /* A count that no longer matches the arrays changes the payload size. */
     memcpy(buf, valid, size);
-    wr_u16(buf + 32, 3U);
+    wr_u16(buf + ANM_HDR_N_T, 3U);
     EXPECT_CLIP_REJECTED(buf, size, "one sampled t row too many");
+
+    /* Bounds are values: a broken one activates and is the builder's bug to
+     * have caught, not the activator's. */
+    memcpy(buf, valid, size);
+    wr_f32(buf + ANM_HDR_R_ROOT, -1.0F);
+    wr_u32(buf + ANM_HDR_R_JOINTS, 0x7FC00000U);
+    wr_u32(buf + ANM_HDR_S_MAX, 0x7F800000U);
+    const uint32_t bounds_handle = nt_skeletal_assets_activate_clip(buf, size);
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, bounds_handle, "broken bounds are not the activator's business");
+    nt_skeletal_assets_deactivate_clip(bounds_handle);
 
     memcpy(buf, valid, size);
     const uint32_t handle = nt_skeletal_assets_activate_clip(buf, size);
@@ -860,8 +663,9 @@ void test_clip_header_rejections(void) {
     free(valid);
 }
 
-/* Every table entry the sampler turns into a write index into the caller's pose. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Every table entry the sampler turns into a write index into the caller's
+ * pose. A table rejection happens after the slot copy, against a pool of one:
+ * the slot must come back for the valid payload. */
 void test_clip_write_index_rejections(void) {
     reinit_assets(1);
 
@@ -870,72 +674,12 @@ void test_clip_write_index_rejections(void) {
     uint8_t *buf = (uint8_t *)malloc(size);
     TEST_ASSERT_NOT_NULL(buf);
 
-    const uint32_t tables[6] = {ANM_OFF_T_JOINT, ANM_OFF_Q_JOINT, ANM_OFF_S_JOINT, ANM_OFF_CT_JOINT, ANM_OFF_CQ_JOINT, ANM_OFF_CS_JOINT};
-    for (uint32_t t = 0; t < 6; ++t) {
+    const uint32_t tables[3] = {ANM_OFF_T_JOINT, ANM_OFF_Q_JOINT, ANM_OFF_S_JOINT};
+    for (uint32_t t = 0; t < 3; ++t) {
         memcpy(buf, valid, size);
         wr_u16(buf + tables[t], CLIP_JOINTS);
         EXPECT_CLIP_REJECTED(buf, size, "a joint table entry at joint_count");
     }
-
-    memcpy(buf, valid, size);
-    wr_u16(buf + ANM_OFF_STEPS + 8, CLIP_JOINTS);
-    EXPECT_CLIP_REJECTED(buf, size, "a step track on a joint past the end");
-
-    memcpy(buf, valid, size);
-    buf[ANM_OFF_STEPS + 10] = 3U;
-    EXPECT_CLIP_REJECTED(buf, size, "a step track on component 3");
-
-    memcpy(buf, valid, size);
-    const uint32_t handle = nt_skeletal_assets_activate_clip(buf, size);
-    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, handle, "a valid clip still activates");
-    nt_skeletal_assets_deactivate_clip(handle);
-
-    free(buf);
-    free(valid);
-}
-
-/* The STEP tracks must partition the key table exactly, joints first and then
- * the object channels, or a track would read keys that belong to another. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_clip_key_partition_rejections(void) {
-    reinit_assets(1);
-
-    uint32_t size = 0;
-    uint8_t *valid = encode_fixture_clip(&size);
-    uint8_t *buf = (uint8_t *)malloc(size);
-    TEST_ASSERT_NOT_NULL(buf);
-
-    memcpy(buf, valid, size);
-    wr_u32(buf + ANM_OFF_STEPS + 4, 0U);
-    EXPECT_CLIP_REJECTED(buf, size, "a step track with no keys");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf + ANM_OFF_STEPS, 1U);
-    EXPECT_CLIP_REJECTED(buf, size, "a joint track that does not start at key 0");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf + ANM_REC_STEP_FIRST + 4U, 4U);
-    EXPECT_CLIP_REJECTED(buf, size, "a gap between the joint and object tracks");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf + ANM_REC_STEP_FIRST + 4U, 2U);
-    EXPECT_CLIP_REJECTED(buf, size, "an object track sharing a joint track's key");
-
-    memcpy(buf, valid, size);
-    wr_u32(buf + ANM_REC_STEP_COUNT + 4U, 0U);
-    EXPECT_CLIP_REJECTED(buf, size, "an object step channel with no keys");
-
-    /* A second object STEP channel whose record range runs past the key table. */
-    memcpy(buf, valid, size);
-    buf[ANM_HDR_OBJECT_MODE + 2U] = NT_SKELETAL_CHANNEL_STEP;
-    wr_u32(buf + ANM_REC_STEP_FIRST + 8U, 5U);
-    wr_u32(buf + ANM_REC_STEP_COUNT + 8U, 1U);
-    EXPECT_CLIP_REJECTED(buf, size, "an object step range past the key table");
-
-    /* Dropping the object channel to ABSENT leaves two keys no track owns. */
-    memcpy(buf, valid, size);
-    buf[ANM_HDR_OBJECT_MODE + 1U] = NT_SKELETAL_CHANNEL_ABSENT;
-    EXPECT_CLIP_REJECTED(buf, size, "keys no track references");
 
     memcpy(buf, valid, size);
     const uint32_t handle = nt_skeletal_assets_activate_clip(buf, size);
@@ -962,8 +706,9 @@ static uint32_t build_one_row_clip(uint8_t **out, uint32_t sample_count, float d
     uint8_t *buf = (uint8_t *)calloc(size, 1);
     TEST_ASSERT_NOT_NULL(buf);
     memcpy(buf, &header, sizeof(header));
+    memcpy(buf + sizeof(header), &k_rest[0], sizeof(k_rest[0]));
     for (uint32_t i = 0; i < sample_count; ++i) {
-        wr_f32(buf + sizeof(header) + ((size_t)i * 12U), (float)i);
+        wr_f32(buf + sizeof(header) + sizeof(k_rest[0]) + ((size_t)i * 12U), (float)i);
     }
     *out = buf;
     return size;
@@ -1029,9 +774,8 @@ static void build_pack_a(const char *path) {
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_skeletal_skeleton_t skel = fixture_skeleton();
-    nt_builder_clip_t clip;
-    nt_builder_anim_channel_t channels[CLIP_CHANNELS];
-    fixture_clip(&clip, channels);
+    nt_skeletal_clip_t clip;
+    fixture_clip(&clip);
     nt_builder_add_skeleton(ctx, &skel, "rigs/hero.nskl");
     nt_builder_add_clip(ctx, &clip, "clips/run.nanm");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -1041,10 +785,9 @@ static void build_pack_a(const char *path) {
 static void build_pack_b(const char *path) {
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_clip_t clip;
-    nt_builder_anim_channel_t channels[CLIP_CHANNELS];
-    fixture_clip(&clip, channels);
-    clip.duration = 2.0F; /* tells the two clip views apart */
+    nt_skeletal_clip_t clip;
+    fixture_clip(&clip);
+    clip.duration = 2.0; /* tells the two clip views apart */
     nt_builder_add_clip(ctx, &clip, "clips/walk.nanm");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -1104,22 +847,15 @@ void test_two_packs_share_one_skeleton(void) {
     TEST_ASSERT_EQUAL_HEX64(skeleton->rig_compat_id.value, clip_walk->rig_compat_id.value);
     TEST_ASSERT_TRUE(clip_run->duration != clip_walk->duration);
 
-    nt_skeletal_trs_t defaults[CLIP_JOINTS];
     nt_skeletal_trs_t before[CLIP_JOINTS];
     nt_skeletal_trs_t after[CLIP_JOINTS];
-    nt_skeletal_trs_t object_before;
-    nt_skeletal_trs_t object_after;
-    build_defaults(defaults, CLIP_JOINTS);
-    nt_skeletal_sample(clip_run, 0.375, defaults, before);
-    nt_skeletal_sample_object(&clip_run->object, 0.375, defaults, &object_before);
+    nt_skeletal_sample(clip_run, 0.375, before);
 
     /* Copy-out: both blobs may be dropped or overwritten after activation. */
     wipe_asset_payloads(pack_a);
     wipe_asset_payloads(pack_b);
-    nt_skeletal_sample(clip_run, 0.375, defaults, after);
+    nt_skeletal_sample(clip_run, 0.375, after);
     TEST_ASSERT_EQUAL_MEMORY_MESSAGE(before, after, sizeof(before), "the clip view must not read the pack blob");
-    nt_skeletal_sample_object(&clip_run->object, 0.375, defaults, &object_after);
-    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&object_before, &object_after, sizeof(object_after), "the object curve must not read the pack blob either");
 
     /* The skeleton tables are copies too, so they still read back in full. */
     for (uint16_t j = 0; j < SKEL_JOINTS; ++j) {
@@ -1139,7 +875,7 @@ void test_two_packs_share_one_skeleton(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_resource_is_ready(rig), "the skeleton survives");
 
     const nt_skeletal_clip_t *clip_run_again = nt_skeletal_assets_clip(run);
-    nt_skeletal_sample(clip_run_again, 0.375, defaults, after);
+    nt_skeletal_sample(clip_run_again, 0.375, after);
     TEST_ASSERT_EQUAL_MEMORY_MESSAGE(before, after, sizeof(before), "the surviving clip samples identically");
     TEST_ASSERT_EQUAL_UINT16(SKEL_JOINTS, nt_skeletal_assets_skeleton(rig)->joint_count);
 
@@ -1163,12 +899,10 @@ int main(void) {
     RUN_TEST(test_clip_view_matches_activator);
     RUN_TEST(test_clip_samples_grid_times_exactly);
     RUN_TEST(test_clip_interpolates_between_samples);
-    RUN_TEST(test_object_curve_samples);
     RUN_TEST(test_skeleton_rejections);
     RUN_TEST(test_skin_binding_rejections);
     RUN_TEST(test_clip_header_rejections);
     RUN_TEST(test_clip_write_index_rejections);
-    RUN_TEST(test_clip_key_partition_rejections);
     RUN_TEST(test_clip_sampled_rows_need_a_grid);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_pool_overflow_asserts);

@@ -257,52 +257,7 @@ void test_fk_traps_on_overlap(void) {
     NT_TEST_EXPECT_ASSERT(nt_skeletal_fk(&g_rig.skel, shared.local, shared.model, 0, SKELETAL_RIG_JOINT_COUNT));
 }
 
-/* The socket output must not overwrite the model-space joint pose. */
-void test_socket_traps_on_output_aliasing_the_joint(void) {
-    nt_skeletal_trs_t local[SKELETAL_RIG_JOINT_COUNT];
-    memcpy(local, g_rig.bind, sizeof(local));
-    nt_skeletal_mat34_t model[SKELETAL_RIG_JOINT_COUNT];
-    nt_skeletal_fk(&g_rig.skel, local, model, 0, SKELETAL_RIG_JOINT_COUNT);
-
-    nt_skeletal_trs_t world_trs = make_trs(1.0F, 2.0F, -3.0F, 0.0F, 1.0F, 0.0F, 25.0F, 1.0F, 1.0F, 1.0F);
-    mat4 world;
-    skeletal_rig_ref_mat4_from_trs(&world_trs, world);
-    nt_skeletal_trs_t socket_local = make_trs(0.05F, 0.0F, 0.1F, 0.0F, 1.0F, 0.0F, 10.0F, 1.0F, 1.0F, 1.0F);
-
-    NT_TEST_EXPECT_ASSERT(nt_skeletal_socket((const float *)world, &model[JOINT_HAND], &socket_local, &model[JOINT_HAND]));
-}
 #endif
-
-/* ---- Sockets ---- */
-
-void test_socket_matches_cglm_composition(void) {
-    nt_skeletal_trs_t local[SKELETAL_RIG_JOINT_COUNT];
-    memcpy(local, g_rig.bind, sizeof(local));
-
-    nt_skeletal_mat34_t model[SKELETAL_RIG_JOINT_COUNT];
-    nt_skeletal_fk(&g_rig.skel, local, model, 0, SKELETAL_RIG_JOINT_COUNT);
-
-    mat4 ref[SKELETAL_RIG_JOINT_COUNT];
-    skeletal_rig_ref_fk(local, ref);
-
-    nt_skeletal_trs_t world_trs = make_trs(1.0F, 2.0F, -3.0F, 0.0F, 1.0F, 0.0F, 25.0F, 1.5F, 1.5F, 1.5F);
-    mat4 world;
-    skeletal_rig_ref_mat4_from_trs(&world_trs, world);
-
-    nt_skeletal_trs_t socket_local = make_trs(0.05F, 0.0F, 0.1F, 0.0F, 1.0F, 0.0F, 10.0F, 1.0F, 1.0F, 1.0F);
-    mat4 socket4;
-    skeletal_rig_ref_mat4_from_trs(&socket_local, socket4);
-
-    mat4 eg;
-    glm_mat4_mul(world, ref[JOINT_HAND], eg);
-    mat4 expected;
-    glm_mat4_mul(eg, socket4, expected);
-
-    nt_skeletal_mat34_t out;
-    nt_skeletal_socket((const float *)world, &model[JOINT_HAND], &socket_local, &out);
-
-    skeletal_rig_assert_mat34_equals_mat4(&out, expected, 1e-5F);
-}
 
 /* ---- Rig identity ---- */
 
@@ -611,22 +566,6 @@ void test_fk_traps_on_non_unit_quaternion(void) {
     NT_TEST_EXPECT_ASSERT(nt_skeletal_fk(&g_rig.skel, local, model, 0, SKELETAL_RIG_JOINT_COUNT));
 }
 
-void test_socket_traps_on_non_unit_quaternion(void) {
-    nt_skeletal_trs_t local[SKELETAL_RIG_JOINT_COUNT];
-    memcpy(local, g_rig.bind, sizeof(local));
-    nt_skeletal_mat34_t model[SKELETAL_RIG_JOINT_COUNT];
-    nt_skeletal_fk(&g_rig.skel, local, model, 0, SKELETAL_RIG_JOINT_COUNT);
-
-    nt_skeletal_trs_t world_trs = make_trs(1.0F, 2.0F, -3.0F, 0.0F, 1.0F, 0.0F, 25.0F, 1.0F, 1.0F, 1.0F);
-    mat4 world;
-    skeletal_rig_ref_mat4_from_trs(&world_trs, world);
-
-    nt_skeletal_trs_t socket_local = make_trs(0.05F, 0.0F, 0.1F, 0.0F, 1.0F, 0.0F, 10.0F, 1.0F, 1.0F, 1.0F);
-    socket_local.q[3] = 2.0F;
-
-    nt_skeletal_mat34_t out;
-    NT_TEST_EXPECT_ASSERT(nt_skeletal_socket((const float *)world, &model[JOINT_HAND], &socket_local, &out));
-}
 #endif
 
 int main(void) {
@@ -643,7 +582,6 @@ int main(void) {
     RUN_TEST(test_fk_single_root_range_equals_full_pass);
     RUN_TEST(test_fk_leaf_range_equals_full_pass);
     RUN_TEST(test_fk_root_range_ending_mid_subtree_equals_full_pass);
-    RUN_TEST(test_socket_matches_cglm_composition);
     RUN_TEST(test_rig_id_bytes);
     RUN_TEST(test_rig_compat_id_published_vector);
     RUN_TEST(test_rig_compat_id_ignores_quaternion_sign);
@@ -655,7 +593,6 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_fk_traps_on_invalid_ranges);
     RUN_TEST(test_fk_traps_on_overlap);
-    RUN_TEST(test_socket_traps_on_output_aliasing_the_joint);
     RUN_TEST(test_rig_compat_id_traps_on_small_scratch);
     RUN_TEST(test_rig_compat_id_traps_on_non_finite_rest);
     RUN_TEST(test_mat34_mul_traps_on_alias);
@@ -670,7 +607,6 @@ int main(void) {
     RUN_TEST(test_fk_traps_on_infinite_scale);
     RUN_TEST(test_fk_traps_on_zero_quaternion);
     RUN_TEST(test_fk_traps_on_non_unit_quaternion);
-    RUN_TEST(test_socket_traps_on_non_unit_quaternion);
 #endif
     return UNITY_END();
 }

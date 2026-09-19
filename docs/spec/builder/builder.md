@@ -63,13 +63,12 @@ nt_builder_add_scene_mesh   /* one primitive out of a parsed GLB scene */
 nt_builder_add_blob         /* opaque bytes under a resource id */
 nt_builder_add_asset_root   /* convention-based tree import */
 
-/* Skeletal assets from in-memory import results (wire formats: skeletal §16);
- * each call encodes and registers in one step, like add_blob. add_skeleton
- * returns the rig_compat_id it computed and wrote, which clips and bindings of
- * that rig must carry. The raw encoders are internal (nt_builder_internal.h). */
+/* Skeletal assets (wire formats: skeletal §16). add_skeleton encodes a
+ * procedural rig and registers it in one step, like add_blob, and returns the
+ * rig_compat_id it computed and wrote, which clips and bindings of that rig
+ * must carry. The hand-built binding/clip entry points over the runtime views
+ * and the raw encoders are internal (nt_builder_internal.h). */
 nt_builder_add_skeleton      /* NSKL, from nt_skeletal_skeleton_t */
-nt_builder_add_skin_binding  /* NSKN, from nt_skin_binding_t */
-nt_builder_add_clip          /* NANM, from nt_builder_clip_t */
 
 /* glTF rig import: the scene API side of the same header. */
 nt_builder_import_rig / nt_builder_free_rig   /* canonical rig out of one glTF skin */

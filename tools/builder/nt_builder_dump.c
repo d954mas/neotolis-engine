@@ -329,11 +329,8 @@ static void print_clip_details(const uint8_t *asset_data, uint32_t asset_size) {
     if (header.magic != NT_ANM_MAGIC) {
         return;
     }
-    NT_LOG_INFO("    NANM v%u joints:%u rig:0x%016llX ref:0x%016llX bytes:%u (expect %u)", header.version, header.joint_count, (unsigned long long)header.rig_compat_id,
-                (unsigned long long)header.additive_ref_id, asset_size, (unsigned)nt_anm_size(&header));
-    NT_LOG_INFO("    duration:%.3fs samples:%u sampled t:%u q:%u s:%u  constant t:%u q:%u s:%u", (double)header.duration, header.sample_count, header.n_t, header.n_q, header.n_s, header.n_ct,
-                header.n_cq, header.n_cs);
-    NT_LOG_INFO("    steps:%u keys:%u object modes t:%u q:%u s:%u", header.n_steps, header.n_keys, header.object_mode[0], header.object_mode[1], header.object_mode[2]);
+    NT_LOG_INFO("    NANM v%u joints:%u rig:0x%016llX bytes:%u (expect %u)", header.version, header.joint_count, (unsigned long long)header.rig_compat_id, asset_size, (unsigned)nt_anm_size(&header));
+    NT_LOG_INFO("    duration:%.3fs samples:%u sampled rows t:%u q:%u s:%u", (double)header.duration, header.sample_count, header.n_t, header.n_q, header.n_s);
     NT_LOG_INFO("    bounds r_joints:%g r_root:%g s_max:%g", (double)header.r_joints, (double)header.r_root, (double)header.s_max);
 }
 
