@@ -20,6 +20,7 @@
 #include "nt_builder.h"
 #include "nt_builder_internal.h"
 #include "nt_pack_format.h"
+#include "nt_skeletal_format.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "skeletal/nt_skeletal.h"
@@ -132,6 +133,9 @@ static uint8_t *read_pack_clip(const char *pack_path, const char *resource_id, u
         TEST_ASSERT_NOT_NULL(payload);
         memcpy(payload, file + entry.offset, entry.size);
         free(file);
+        NtAnmHeader h;
+        memcpy(&h, payload, sizeof(h));
+        TEST_ASSERT_EQUAL_UINT64(entry.size, nt_anm_size(&h));
         *out_size = entry.size;
         return payload;
     }
@@ -267,7 +271,7 @@ static void ref_j2_t(double t, double *out) {
     static const double p0[3] = {0.0, 0.0, 0.0};
     static const double p1[3] = {1.0, 2.0, 4.0};
     static const double out_tangent[3] = {8.0, 0.0, 0.0};
-    static const double in_tangent[3] = {0.0, 8.0, 0.0};
+    static const double in_tangent[3] = {-8.0, -8.0, -8.0};
     if (t <= 0.25) {
         memcpy(out, p0, sizeof(p0));
         return;
@@ -416,7 +420,7 @@ void test_grid_samples_reproduce_the_source(void) {
     TEST_ASSERT_NOT_NULL(pose);
     /* The dyadic Hermite points of the Joint2 translation, from the basis
      * values at u = 1/4, 1/2, 3/4 times the fixture's tangents and endpoints. */
-    static const float k_j2_dyadic[3][3] = {{0.71875F, 0.125F, 0.625F}, {1.0F, 0.5F, 2.0F}, {1.03125F, 1.125F, 3.375F}};
+    static const float k_j2_dyadic[3][3] = {{0.90625F, 0.5F, 0.8125F}, {1.5F, 1.5F, 2.5F}, {1.59375F, 2.25F, 3.9375F}};
     for (uint32_t i = 0; i < GRID; i++) {
         const double t = grid_time(i, GRID);
         nt_skeletal_sample(view, t, pose);
@@ -522,6 +526,25 @@ void test_still_channels_land_in_the_base_and_steps_on_the_grid(void) {
     TEST_ASSERT_TRUE(pose[j3].s[0] > 1.0F && pose[j3].s[0] < 2.0F);
     fixture_free(&fx);
 }
+
+/* q and -q are one rotation: a channel whose grid samples are identity up to
+ * the held tail of -identity is still, so it folds into the base as its first
+ * sample instead of shipping a row. */
+void test_a_rotation_held_as_its_own_negation_folds_into_the_base(void) {
+    const rigged_glb_opts_t opts = {.animation_negated_last_key = true};
+    fixture_export_t fx;
+    fixture_export(&fx, &opts, &opts);
+    const nt_skeletal_skeleton_t *skel = &fx.rig.skeleton;
+    const uint16_t j1 = joint_named(skel, "Joint1");
+    TEST_ASSERT_EQUAL_UINT32(0, s_log_warnings);
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, sampled_row(fx.view.q_joint, fx.view.n_q, j1));
+    TEST_ASSERT_EQUAL_UINT16(1, fx.view.n_q); /* the Joint2 cubic rotation still moves */
+    ASSERT_F32(0.0F, fx.view.base[j1].q[0]);
+    ASSERT_F32(0.0F, fx.view.base[j1].q[1]);
+    ASSERT_F32(0.0F, fx.view.base[j1].q[2]);
+    ASSERT_F32(1.0F, fx.view.base[j1].q[3]);
+    fixture_free(&fx);
+}
 // #endregion
 
 // #region report and bounds
@@ -604,15 +627,36 @@ static void ref_measure(const fixture_export_t *fx, bool step_only, uint32_t gri
     free(times);
 }
 
-/* A double bound stored as float rounds towards +infinity; the direction is
- * pinned on a value that a plain cast would round down. */
+/* A double bound stored as float rounds towards +infinity. */
 static void assert_rounded_up(double expected, float actual) {
     float f = (float)expected;
     if ((double)f < expected) {
         f = nextafterf(f, INFINITY);
     }
     ASSERT_F32(f, actual);
-    ASSERT_F32(nextafterf(1.0F, 2.0F), nt_builder_round_up(1.0 + 1e-9));
+}
+
+/* The largest joint-origin distance over the authored key times alone: the
+ * curves' extremes between keys are what the dense set must add to it. */
+static double ref_r_joints_at_keys(const fixture_export_t *fx) {
+    static const double k_key_times[5] = {0.0, 0.25, 0.5, 0.75, 1.0};
+    const nt_skeletal_skeleton_t *skel = &fx->rig.skeleton;
+    nt_skeletal_trs_t local[RIGGED_GLB_NODE_COUNT];
+    nt_skeletal_mat34_t global[RIGGED_GLB_NODE_COUNT];
+    TEST_ASSERT_TRUE(skel->joint_count <= RIGGED_GLB_NODE_COUNT);
+    double r = 0.0;
+    for (uint32_t k = 0; k < 5; k++) {
+        ref_local_pose(skel, k_key_times[k], false, local);
+        nt_skeletal_fk(skel, local, global, 0, skel->joint_count);
+        for (uint16_t j = 0; j < skel->joint_count; j++) {
+            double origin2 = 0.0;
+            for (int row = 0; row < 3; row++) {
+                origin2 += (double)global[j].r[row][3] * (double)global[j].r[row][3];
+            }
+            r = fmax(r, sqrt(origin2));
+        }
+    }
+    return r;
 }
 
 static void check_report(float fps, uint32_t grid) {
@@ -636,8 +680,8 @@ static void check_report(float fps, uint32_t grid) {
     fixture_free(&fx);
 }
 
-/* At 10 fps the 0.25 / 0.75 keys fall between grid samples (still quarter
- * points; only the Khronos Run floors pin the authored-key insertion). */
+/* At 10 fps the 0.25 / 0.75 keys fall between grid samples, but still on
+ * quarter points; the Khronos Run worst times pin the authored-key insertion. */
 void test_report_matches_an_independent_measurement(void) {
     check_report(FPS, GRID);
     check_report(FPS_COARSE, GRID_COARSE);
@@ -679,7 +723,8 @@ void test_a_step_source_samples_on_the_grid(void) {
 
 /* Bounds of the whole rig: Root and Helper are joints, so Helper's scale 2
  * doubles the STEP scale, and Root's (1, -2, 2) translation is the one root
- * translation, 3 from the origin at every time. */
+ * translation, 3 from the origin at every time. The Joint2 cubic overshoots
+ * its end value between the keys, so r_joints exceeds the key-time maximum. */
 void test_bounds_match_the_measurement(void) {
     const rigged_glb_opts_t opts = {.animation = true, .root_translation = true};
     fixture_export_t fx;
@@ -687,12 +732,16 @@ void test_bounds_match_the_measurement(void) {
 
     fixture_export(&fx, &opts, &opts);
     ref_measure(&fx, false, GRID, &m);
+    /* The rounding direction, pinned once on a value a plain cast rounds down. */
+    ASSERT_F32(nextafterf(1.0F, 2.0F), nt_builder_round_up(1.0 + 1e-9));
     assert_rounded_up(m.r_joints, fx.view.r_joints);
     assert_rounded_up(m.r_root, fx.view.r_root);
     assert_rounded_up(m.s_max, fx.view.s_max);
     ASSERT_F32(4.0F, fx.view.s_max);
     ASSERT_F32(3.0F, fx.view.r_root);
     TEST_ASSERT_TRUE(fx.view.r_joints > 3.0F);
+    TEST_ASSERT_TRUE(m.lin > 1e-4 && m.t > 1e-4);
+    TEST_ASSERT_TRUE((double)fx.view.r_joints > ref_r_joints_at_keys(&fx)); /* 9.29 against 8.05 */
     fixture_free(&fx);
 }
 // #endregion
@@ -854,7 +903,7 @@ typedef struct {
     uint32_t sample_count; /* round(last key * 24) + 1, from the input accessors */
     bool snapped;          /* the source is not a whole number of frames at 24 fps */
     float max_lin, max_t;  /* ceilings above the measured errors */
-    float min_lin, min_t;  /* floors below them: Run's keys sit off every sub-sample, so only the authored-key times reach its peaks */
+    float min_lin, min_t;  /* floors below them, non-zero where the grid visibly misses the source */
 } khronos_clip_t;
 
 /* Frame counts from the input accessors; the ceilings sit above the measured
@@ -863,7 +912,9 @@ static const khronos_clip_t k_khronos[4] = {
     {"examples/skeletal_showcase/raw/Fox.glb", "Survey", 83, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* 82 frames, 2e-6 / 4.5e-5 cm */
     {"examples/skeletal_showcase/raw/Fox.glb", "Walk", 18, false, 0.02F, 0.5F, 0.0F, 0.0F},   /* 17 frames, 0.0064 (0.26 deg) / 0.061 cm */
     /* Run: 27.8 frames, snaps to 28 with a warning; keys 20.8..27.8 sit 0.2 frames
-     * from the nearest grid sample, off every sub-sample: 0.117 (4.7 deg) / 1.78 cm. */
+     * from the nearest grid sample, off every sub-sample: 0.117 (4.7 deg) / 1.78 cm.
+     * Both worst times land on a key (frame n + 0.8), which only the authored
+     * key times of the dense set reach: the quarter sub-samples would stop at n + 0.75. */
     {"examples/skeletal_showcase/raw/Fox.glb", "Run", 29, true, 0.2F, 2.5F, 0.1F, 1.5F},
     {"examples/skeletal_showcase/raw/CesiumMan.glb", NULL, 49, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* unnamed, 48 frames, first key at 1/24 s (holds before it) */
 };
@@ -904,6 +955,10 @@ void test_khronos_clips_export_at_24_fps(void) {
         TEST_ASSERT_TRUE(view.duration == (double)report.duration);
         TEST_ASSERT_TRUE(report.cpu_error_lin > asset->min_lin && report.cpu_error_lin <= asset->max_lin);
         TEST_ASSERT_TRUE(report.cpu_error_t > asset->min_t && report.cpu_error_t <= asset->max_t);
+        if (asset->snapped) {
+            TEST_ASSERT_TRUE(fabs(fmod(report.worst_time_lin * 24.0, 1.0) - 0.8) < 1e-3);
+            TEST_ASSERT_TRUE(fabs(fmod(report.worst_time_t * 24.0, 1.0) - 0.8) < 1e-3);
+        }
         TEST_ASSERT_TRUE(view.r_joints > 0.0F && view.s_max >= 1.0F);
         TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, view.rig_compat_id.value);
         /* Both skins leave some joints unanimated, and every rotation moves. */
@@ -919,6 +974,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_grid_samples_reproduce_the_source);
     RUN_TEST(test_still_channels_land_in_the_base_and_steps_on_the_grid);
+    RUN_TEST(test_a_rotation_held_as_its_own_negation_folds_into_the_base);
     RUN_TEST(test_a_step_source_samples_on_the_grid);
     RUN_TEST(test_report_matches_an_independent_measurement);
     RUN_TEST(test_bounds_match_the_measurement);

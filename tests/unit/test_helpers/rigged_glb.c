@@ -149,12 +149,20 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
 
     // #region animation
     const bool anim = o.animation || o.animation_step_only || o.animation_outside_rig || o.animation_weights || o.animation_duplicate || o.animation_matrix_node || o.animation_step_past_end ||
-                      o.animation_no_channels || o.animation_bad_times || o.animation_cubic_origin;
+                      o.animation_no_channels || o.animation_bad_times || o.animation_cubic_origin || o.animation_negated_last_key;
     const float anim_q_times[4] = {0.0F, 0.25F, 0.5F, 1.0F};
-    const float anim_j1_q[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.6F, 0.6F}, {0.0F, 0.0F, -1.0F, 0.0F}};
+    float anim_j1_q[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.6F, 0.6F}, {0.0F, 0.0F, -1.0F, 0.0F}};
+    if (o.animation_negated_last_key) {
+        /* Identity up to 0.5 s, then -identity held from 1.0 s: the slerp
+         * towards it stays exactly identity, so only the held tail differs. */
+        anim_j1_q[2][2] = 0.0F;
+        anim_j1_q[2][3] = 1.0F;
+        anim_j1_q[3][2] = 0.0F;
+        anim_j1_q[3][3] = -1.0F;
+    }
     const float anim_cubic_times[2] = {0.25F, 0.75F};
     /* Per key: in-tangent, value, out-tangent. */
-    const float anim_j2_t[2][3][3] = {{{100.0F, 100.0F, 100.0F}, {0.0F, 0.0F, 0.0F}, {8.0F, 0.0F, 0.0F}}, {{0.0F, 8.0F, 0.0F}, {1.0F, 2.0F, 4.0F}, {100.0F, 100.0F, 100.0F}}};
+    const float anim_j2_t[2][3][3] = {{{100.0F, 100.0F, 100.0F}, {0.0F, 0.0F, 0.0F}, {8.0F, 0.0F, 0.0F}}, {{-8.0F, -8.0F, -8.0F}, {1.0F, 2.0F, 4.0F}, {100.0F, 100.0F, 100.0F}}};
     const float anim_ends[2] = {0.0F, RIGGED_GLB_ANIM_DURATION};
     float anim_j2_q[2][3][4] = {{{7.0F, 7.0F, 7.0F, 7.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 2.0F, 0.0F}}, {{0.0F, 0.0F, 2.0F, 0.0F}, {0.0F, 0.0F, 1.0F, 0.0F}, {7.0F, 7.0F, 7.0F, 7.0F}}};
     if (o.animation_cubic_origin) {
@@ -428,7 +436,14 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, "{\"bufferView\":13,\"componentType\":5126,\"count\":6,\"type\":\"VEC3\"},");
     jb_addf(&jb, "{\"bufferView\":14,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\",\"min\":[0],\"max\":[1]},");
     jb_addf(&jb, "{\"bufferView\":15,\"componentType\":5126,\"count\":6,\"type\":\"VEC4\"},");
-    jb_addf(&jb, "{\"bufferView\":16,\"componentType\":5126,\"count\":%u,\"type\":\"SCALAR\",\"min\":[0.25],\"max\":[%.9g]},", step_keys, (double)anim_step_times[step_keys - 1U]);
+    /* min/max are the true extremes of the values, whatever order they are in. */
+    float step_min = anim_step_times[0];
+    float step_max = anim_step_times[0];
+    for (uint32_t k = 1; k < step_keys; k++) {
+        step_min = (anim_step_times[k] < step_min) ? anim_step_times[k] : step_min;
+        step_max = (anim_step_times[k] > step_max) ? anim_step_times[k] : step_max;
+    }
+    jb_addf(&jb, "{\"bufferView\":16,\"componentType\":5126,\"count\":%u,\"type\":\"SCALAR\",\"min\":[%.9g],\"max\":[%.9g]},", step_keys, (double)step_min, (double)step_max);
     jb_addf(&jb, "{\"bufferView\":17,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\"},", step_keys);
     jb_addf(&jb, "{\"bufferView\":18,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"}],");
 
