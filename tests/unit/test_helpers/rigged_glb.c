@@ -12,7 +12,7 @@
 #include <string.h>
 
 // #region json buffer
-/* The JSON is ~3 KB, ~11 KB with the deep chain; a fixed buffer with an abort
+/* The JSON is ~4 KB, ~12 KB with the deep chain; a fixed buffer with an abort
  * on overflow needs no growth. */
 typedef struct {
     char data[16384];
@@ -143,16 +143,22 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     // #endregion
 
     // #region animation
-    const bool anim = o.animation || o.animation_step_only || o.animation_outside_rig || o.animation_weights || o.animation_duplicate || o.animation_matrix_node;
+    const bool anim = o.animation || o.animation_step_only || o.animation_outside_rig || o.animation_weights || o.animation_duplicate || o.animation_matrix_node || o.animation_step_past_end ||
+                      o.animation_no_channels || o.animation_bad_times;
     const float anim_q_times[4] = {0.0F, 0.25F, 0.5F, 1.0F};
-    const float anim_j1_q[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.70710678F, 0.70710678F}, {0.0F, 0.0F, 1.0F, 0.0F}};
+    const float anim_j1_q[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.6F, 0.6F}, {0.0F, 0.0F, -1.0F, 0.0F}};
     const float anim_cubic_times[2] = {0.25F, 0.75F};
     /* Per key: in-tangent, value, out-tangent. */
     const float anim_j2_t[2][3][3] = {{{100.0F, 100.0F, 100.0F}, {0.0F, 0.0F, 0.0F}, {8.0F, 0.0F, 0.0F}}, {{0.0F, 8.0F, 0.0F}, {1.0F, 2.0F, 4.0F}, {100.0F, 100.0F, 100.0F}}};
     const float anim_ends[2] = {0.0F, RIGGED_GLB_ANIM_DURATION};
     const float anim_j2_q[2][3][4] = {{{7.0F, 7.0F, 7.0F, 7.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 2.0F, 0.0F}}, {{0.0F, 0.0F, 2.0F, 0.0F}, {0.0F, 0.0F, 1.0F, 0.0F}, {7.0F, 7.0F, 7.0F, 7.0F}}};
-    const float anim_step_times[2] = {0.25F, 0.75F};
-    const float anim_j3_s[2][3] = {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}};
+    float anim_step_times[3] = {0.25F, 0.75F, 1.05F};
+    if (o.animation_bad_times) {
+        anim_step_times[0] = 0.75F;
+        anim_step_times[1] = 0.25F;
+    }
+    const uint32_t step_keys = o.animation_step_past_end ? 3U : 2U;
+    const float anim_j3_s[3][3] = {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}, {3.0F, 3.0F, 3.0F}};
     const float anim_j4_t[2][3] = {{0.0F, 0.5F, 0.0F}, {0.0F, 0.5F, 0.0F}};
     // #endregion
 
@@ -277,8 +283,8 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     sec[SEC_ANIM_J2_T] = (rigged_sec_t){anim_j2_t, (uint32_t)sizeof(anim_j2_t)};
     sec[SEC_ANIM_ENDS] = (rigged_sec_t){anim_ends, (uint32_t)sizeof(anim_ends)};
     sec[SEC_ANIM_J2_Q] = (rigged_sec_t){anim_j2_q, (uint32_t)sizeof(anim_j2_q)};
-    sec[SEC_ANIM_STEP_TIMES] = (rigged_sec_t){anim_step_times, (uint32_t)sizeof(anim_step_times)};
-    sec[SEC_ANIM_J3_S] = (rigged_sec_t){anim_j3_s, (uint32_t)sizeof(anim_j3_s)};
+    sec[SEC_ANIM_STEP_TIMES] = (rigged_sec_t){anim_step_times, step_keys * (uint32_t)sizeof(float)};
+    sec[SEC_ANIM_J3_S] = (rigged_sec_t){anim_j3_s, step_keys * 3U * (uint32_t)sizeof(float)};
     sec[SEC_ANIM_J4_T] = (rigged_sec_t){anim_j4_t, (uint32_t)sizeof(anim_j4_t)};
 
     uint32_t offset[SEC_COUNT];
@@ -323,10 +329,10 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         jb_trs(&jb, joint_t[j], joint_q[j], joint_s[j]);
         if (j == 0) {
             jb_addf(&jb, ",\"children\":[5,3]");
-        } else if (j == 1) {
+        } else if (j == 1 && !o.reparent_joint2) {
             jb_addf(&jb, ",\"children\":[4]");
         } else if (j == 3) {
-            jb_addf(&jb, ",\"children\":[6]");
+            jb_addf(&jb, ",\"children\":[6%s]", o.reparent_joint2 ? ",4" : "");
         } else if (j == 4 && o.cycle) {
             jb_addf(&jb, ",\"children\":[1]");
         }
@@ -410,8 +416,8 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, "{\"bufferView\":13,\"componentType\":5126,\"count\":6,\"type\":\"VEC3\"},");
     jb_addf(&jb, "{\"bufferView\":14,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\",\"min\":[0],\"max\":[1]},");
     jb_addf(&jb, "{\"bufferView\":15,\"componentType\":5126,\"count\":6,\"type\":\"VEC4\"},");
-    jb_addf(&jb, "{\"bufferView\":16,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\",\"min\":[0.25],\"max\":[0.75]},");
-    jb_addf(&jb, "{\"bufferView\":17,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"},");
+    jb_addf(&jb, "{\"bufferView\":16,\"componentType\":5126,\"count\":%u,\"type\":\"SCALAR\",\"min\":[0.25],\"max\":[%s]},", step_keys, o.animation_step_past_end ? "1.05" : "0.75");
+    jb_addf(&jb, "{\"bufferView\":17,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\"},", step_keys);
     jb_addf(&jb, "{\"bufferView\":18,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"}],");
 
     if (anim) {
@@ -427,13 +433,15 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         jb_addf(&jb, "{\"input\":14,\"output\":18,\"interpolation\":\"LINEAR\"},");
         jb_addf(&jb, "{\"input\":14,\"output\":14,\"interpolation\":\"LINEAR\"}");
         jb_addf(&jb, "],\"channels\":[");
-        if (!o.animation_step_only) {
+        if (!o.animation_step_only && !o.animation_no_channels) {
             jb_addf(&jb, "{\"sampler\":0,\"target\":{\"node\":3,\"path\":\"rotation\"}},");
             jb_addf(&jb, "{\"sampler\":1,\"target\":{\"node\":4,\"path\":\"translation\"}},");
             jb_addf(&jb, "{\"sampler\":2,\"target\":{\"node\":4,\"path\":\"rotation\"}},");
         }
-        jb_addf(&jb, "{\"sampler\":3,\"target\":{\"node\":5,\"path\":\"scale\"}},");
-        jb_addf(&jb, "{\"sampler\":4,\"target\":{\"node\":6,\"path\":\"translation\"}}");
+        if (!o.animation_no_channels) {
+            jb_addf(&jb, "{\"sampler\":3,\"target\":{\"node\":5,\"path\":\"scale\"}},");
+            jb_addf(&jb, "{\"sampler\":4,\"target\":{\"node\":6,\"path\":\"translation\"}}");
+        }
         if (o.animation_outside_rig) {
             jb_addf(&jb, ",{\"sampler\":5,\"target\":{\"node\":%u,\"path\":\"translation\"}}", (uint32_t)RIGGED_GLB_NODE_MESH);
         }

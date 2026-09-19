@@ -18,6 +18,7 @@
 
 /* clang-format off */
 #include "nt_builder.h"
+#include "nt_builder_internal.h"
 #include "nt_pack_format.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -42,6 +43,8 @@
 #define CLIP_ID "clips/fixture"
 #define FPS 24.0F
 #define GRID 25U /* round(1.0 * 24) + 1 */
+#define FPS_COARSE 10.0F
+#define GRID_COARSE 11U /* the 0.25 / 0.75 keys fall between samples */
 #define SUBSAMPLES 3U
 #define QUARTER_PI 0.78539816339744830962 /* pi / 4: the half-angle of one 90 degree key step */
 
@@ -150,7 +153,7 @@ typedef struct {
     nt_skeletal_clip_t view;
 } fixture_export_t;
 
-static void fixture_export(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts, uint32_t skeleton_root) {
+static void fixture_export_at(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts, uint32_t skeleton_root, float fps) {
     memset(fx, 0, sizeof(*fx));
     rigged_glb_write(RIG_GLB, rig_opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&fx->scene, RIG_GLB));
@@ -167,12 +170,16 @@ static void fixture_export(fixture_export_t *fx, const rigged_glb_opts_t *rig_op
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_scene_clip(ctx, clip_scene, 0, &fx->rig, FPS, CLIP_ID, &fx->report);
+    nt_builder_add_scene_clip(ctx, clip_scene, 0, &fx->rig, fps, CLIP_ID, &fx->report);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
     fx->payload = read_pack_clip(PACK_PATH, CLIP_ID, &fx->payload_size);
     nt_skeletal_clip_view(fx->payload, &fx->view);
+}
+
+static void fixture_export(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts, uint32_t skeleton_root) {
+    fixture_export_at(fx, rig_opts, clip_opts, skeleton_root, FPS);
 }
 
 static void fixture_free(fixture_export_t *fx) {
@@ -203,15 +210,16 @@ static uint32_t sampled_row(const uint16_t *table, uint16_t count, uint16_t j) {
     return UINT32_MAX;
 }
 
-static double grid_time(uint32_t i) { return ((double)i * (double)RIGGED_GLB_ANIM_DURATION) / (double)(GRID - 1U); }
+static void assert_rounded_up(double expected, float actual);
+
+static double grid_time(uint32_t i, uint32_t n) { return ((double)i * (double)RIGGED_GLB_ANIM_DURATION) / (double)(n - 1U); }
 // #endregion
 
 // #region reference curves
 /* The fixture's curves from their closed forms (rigged_glb.h). Rotations about
  * Z by an angle a are (0, 0, sin(a/2), cos(a/2)); the Joint1 keys at 0.5 and
- * 1.0 are 90 and 180 degrees, and the authored 0.70710678 is not the exact
- * sqrt(1/2), so the key values themselves go through the same double
- * normalization the importer applies. */
+ * 1.0 are 90 and 180 degrees, authored as (0, 0, 0.6, 0.6) and (0, 0, -1, 0),
+ * so a key-aligned sample is the authored key normalized in double. */
 static void ref_normalize_key(const float *key, float *out) {
     double q[4];
     double len2 = 0.0;
@@ -224,7 +232,20 @@ static void ref_normalize_key(const float *key, float *out) {
     }
 }
 
-static const float k_j1_keys[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.70710678F, 0.70710678F}, {0.0F, 0.0F, 1.0F, 0.0F}};
+static const float k_j1_keys[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.6F, 0.6F}, {0.0F, 0.0F, -1.0F, 0.0F}};
+
+/* q and -q are one rotation: the importer keeps whichever hemisphere the
+ * shortest path or the held key lands in, so rotations compare up to sign. */
+static void assert_rotation_close(const double *ref, const float *actual, double tolerance) {
+    double dot = 0.0;
+    for (int c = 0; c < 4; c++) {
+        dot += ref[c] * (double)actual[c];
+    }
+    const double sign = (dot < 0.0) ? -1.0 : 1.0;
+    for (int c = 0; c < 4; c++) {
+        assert_close(sign * ref[c], (double)actual[c], tolerance);
+    }
+}
 
 /* Joint1 rotation: a spherical interpolation of rotations about one axis is a
  * linear interpolation of the angle, so the reference is the angle itself. */
@@ -329,14 +350,14 @@ static void ref_local_pose(const nt_skeletal_skeleton_t *skel, double t, bool st
 /* The dense set the importer measures over, built from the formula the spec
  * pins: grid times, three interior sub-samples per interval at (4i + k) / 4
  * of the grid, and every authored key time. Sorted, unique; returns the count. */
-static uint32_t ref_dense_times(bool step_only, double *out) {
+static uint32_t ref_dense_times(bool step_only, uint32_t grid, double *out) {
     static const double k_keys[] = {0.0, 0.25, 0.5, 1.0, 0.25, 0.75, 0.0, 1.0, 0.25, 0.75, 0.0, 1.0};
     uint32_t n = 0;
-    for (uint32_t i = 0; i < GRID; i++) {
-        out[n++] = grid_time(i);
-        if (i + 1U < GRID) {
+    for (uint32_t i = 0; i < grid; i++) {
+        out[n++] = grid_time(i, grid);
+        if (i + 1U < grid) {
             for (uint32_t k = 1; k <= SUBSAMPLES; k++) {
-                out[n++] = ((double)((4U * i) + k) * (double)RIGGED_GLB_ANIM_DURATION) / (double)(4U * (GRID - 1U));
+                out[n++] = (((4.0 * (double)i) + (double)k) * (double)RIGGED_GLB_ANIM_DURATION) / (4.0 * (double)(grid - 1U));
             }
         }
     }
@@ -398,7 +419,7 @@ void test_grid_samples_reproduce_the_source(void) {
      * values at u = 1/4, 1/2, 3/4 times the fixture's tangents and endpoints. */
     static const float k_j2_dyadic[3][3] = {{0.71875F, 0.125F, 0.625F}, {1.0F, 0.5F, 2.0F}, {1.03125F, 1.125F, 3.375F}};
     for (uint32_t i = 0; i < GRID; i++) {
-        const double t = grid_time(i);
+        const double t = grid_time(i, GRID);
         nt_skeletal_sample(view, t, skel->rest, pose);
         const float *block = view->blocks + ((size_t)i * view->block_floats);
         const float *t2 = block + ((size_t)3U * t2_row);
@@ -430,9 +451,7 @@ void test_grid_samples_reproduce_the_source(void) {
         }
 
         ref_j1_q(t, ref);
-        for (int c = 0; c < 4; c++) {
-            assert_close(ref[c], (double)q1[c], 1e-6);
-        }
+        assert_rotation_close(ref, q1, 1e-6);
         if (i == 0U || i == 6U || i == 12U || i == 24U) {
             float key[4];
             ref_normalize_key(k_j1_keys[(i == 24U) ? 3 : (i / 6U)], key);
@@ -441,15 +460,20 @@ void test_grid_samples_reproduce_the_source(void) {
             }
         }
         ref_j2_q(t, ref);
-        for (int c = 0; c < 4; c++) {
-            assert_close(ref[c], (double)q2[c], 1e-6);
-        }
+        assert_rotation_close(ref, q2, 1e-6);
     }
     /* Grid 8 is a third of the way from identity to 90 degrees: the slerp
      * value sin(15 deg) = 0.2588 is 6e-3 away from the nlerp 0.2527 a source
-     * evaluator that lerped would have stored. */
+     * evaluator that lerped would have stored. Grid 16 is a third of the way
+     * from 90 to the 180 degree key authored as (0, 0, -1, 0): the short way
+     * round is 120 degrees, (0, 0, sin 60, cos 60); the long way an evaluator
+     * without the hemisphere flip takes passes through 0 and lands
+     * elsewhere. */
     const float *q1_8 = view->blocks + ((size_t)8U * view->block_floats) + ((size_t)3U * view->n_t) + ((size_t)4U * q1_row);
     assert_close(0.25881905, (double)q1_8[2], 1e-6);
+    const float *q1_16 = view->blocks + ((size_t)16U * view->block_floats) + ((size_t)3U * view->n_t) + ((size_t)4U * q1_row);
+    assert_close(0.8660254, fabs((double)q1_16[2]), 1e-6);
+    assert_close(0.5, fabs((double)q1_16[3]), 1e-6);
     free(pose);
     fixture_free(&fx);
 }
@@ -508,29 +532,6 @@ void test_step_keys_constants_and_absent_channels(void) {
     fixture_free(&fx);
 }
 
-/* Nothing sampled: one sample, no frame block, no error anywhere. */
-void test_step_only_clip_ships_no_grid(void) {
-    const rigged_glb_opts_t opts = {.animation_step_only = true};
-    fixture_export_t fx;
-    fixture_export(&fx, &opts, &opts, UINT32_MAX);
-    TEST_ASSERT_EQUAL_UINT32(1, fx.view.sample_count);
-    TEST_ASSERT_NULL(fx.view.blocks);
-    TEST_ASSERT_EQUAL_UINT32(0, fx.view.block_floats);
-    TEST_ASSERT_TRUE(fx.view.duration == (double)RIGGED_GLB_ANIM_DURATION);
-    TEST_ASSERT_EQUAL_UINT32(1, fx.view.n_steps);
-    TEST_ASSERT_EQUAL_UINT16(1, fx.view.n_ct);
-    TEST_ASSERT_EQUAL_UINT32(1, fx.report.sample_count);
-    ASSERT_F32(RIGGED_GLB_ANIM_DURATION, fx.report.duration);
-    ASSERT_F32(0.0F, fx.report.cpu_error_lin);
-    ASSERT_F32(0.0F, fx.report.cpu_error_t);
-    TEST_ASSERT_TRUE(fx.report.worst_time_lin == 0.0 && fx.report.worst_time_t == 0.0);
-    TEST_ASSERT_EQUAL_UINT16(0, fx.report.worst_joint_lin);
-    TEST_ASSERT_EQUAL_UINT16(0, fx.report.worst_joint_t);
-    /* Helper's scale 2 times the STEP scale 2 from 0.75 on. */
-    ASSERT_F32(4.0F, fx.view.s_max);
-    ASSERT_F32(0.0F, fx.view.r_root);
-    fixture_free(&fx);
-}
 // #endregion
 
 // #region report and bounds
@@ -545,18 +546,18 @@ typedef struct {
 } ref_measure_t;
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void ref_measure(const fixture_export_t *fx, bool step_only, ref_measure_t *m) {
+static void ref_measure(const fixture_export_t *fx, bool step_only, uint32_t grid, ref_measure_t *m) {
     const nt_skeletal_skeleton_t *skel = &fx->rig.skeleton;
     const uint16_t joints = skel->joint_count;
     memset(m, 0, sizeof(*m));
-    double *times = (double *)malloc(((size_t)GRID * 4U + 16U) * sizeof(double));
+    double *times = (double *)malloc((((size_t)grid * 4U) + 16U) * sizeof(double));
     nt_skeletal_trs_t *local_rt = (nt_skeletal_trs_t *)calloc(joints, sizeof(nt_skeletal_trs_t));
     nt_skeletal_trs_t *local_ex = (nt_skeletal_trs_t *)calloc(joints, sizeof(nt_skeletal_trs_t));
     nt_skeletal_mat34_t *g_rt = (nt_skeletal_mat34_t *)calloc(joints, sizeof(nt_skeletal_mat34_t));
     nt_skeletal_mat34_t *g_ex = (nt_skeletal_mat34_t *)calloc(joints, sizeof(nt_skeletal_mat34_t));
     double *stretch = (double *)calloc(joints, sizeof(double));
     TEST_ASSERT_TRUE(times && local_rt && local_ex && g_rt && g_ex && stretch);
-    const uint32_t n = ref_dense_times(step_only, times);
+    const uint32_t n = ref_dense_times(step_only, grid, times);
     for (uint32_t i = 0; i < n; i++) {
         const double time = times[i];
         nt_skeletal_sample(&fx->view, time, skel->rest, local_rt);
@@ -613,23 +614,25 @@ static void ref_measure(const fixture_export_t *fx, bool step_only, ref_measure_
     free(times);
 }
 
-/* A double bound stored as float rounds towards +infinity. */
+/* A double bound stored as float rounds towards +infinity; the direction is
+ * pinned on a value that a plain cast would round down. */
 static void assert_rounded_up(double expected, float actual) {
     float f = (float)expected;
     if ((double)f < expected) {
         f = nextafterf(f, INFINITY);
     }
     ASSERT_F32(f, actual);
+    ASSERT_F32(nextafterf(1.0F, 2.0F), nt_builder_round_up(1.0 + 1e-9));
 }
 
-void test_report_matches_an_independent_measurement(void) {
+static void check_report(float fps, uint32_t grid) {
     const rigged_glb_opts_t opts = {.animation = true};
     fixture_export_t fx;
-    fixture_export(&fx, &opts, &opts, UINT32_MAX);
+    fixture_export_at(&fx, &opts, &opts, UINT32_MAX, fps);
     ref_measure_t m;
-    ref_measure(&fx, false, &m);
+    ref_measure(&fx, false, grid, &m);
 
-    TEST_ASSERT_EQUAL_UINT32(GRID, fx.report.sample_count);
+    TEST_ASSERT_EQUAL_UINT32(grid, fx.report.sample_count);
     ASSERT_F32(RIGGED_GLB_ANIM_DURATION, fx.report.duration);
     /* The grid misses the Hermite bulge and the slerp arc between samples, so
      * both errors are real numbers, not zeros that any report would match. */
@@ -643,6 +646,42 @@ void test_report_matches_an_independent_measurement(void) {
     fixture_free(&fx);
 }
 
+/* At 24 fps every authored key is a grid time; at 10 fps the 0.25 / 0.75
+ * keys fall between samples, so the dense set's key times carry weight of
+ * their own and the STEP jump is measured where it happens. */
+void test_report_matches_an_independent_measurement(void) {
+    check_report(FPS, GRID);
+    check_report(FPS_COARSE, GRID_COARSE);
+}
+
+/* Nothing sampled: one sample, no frame block, no error anywhere. */
+void test_step_only_clip_ships_no_grid(void) {
+    const rigged_glb_opts_t opts = {.animation_step_only = true};
+    fixture_export_t fx;
+    fixture_export(&fx, &opts, &opts, UINT32_MAX);
+    TEST_ASSERT_EQUAL_UINT32(1, fx.view.sample_count);
+    TEST_ASSERT_NULL(fx.view.blocks);
+    TEST_ASSERT_EQUAL_UINT32(0, fx.view.block_floats);
+    TEST_ASSERT_TRUE(fx.view.duration == (double)RIGGED_GLB_ANIM_DURATION);
+    TEST_ASSERT_EQUAL_UINT32(1, fx.view.n_steps);
+    TEST_ASSERT_EQUAL_UINT16(1, fx.view.n_ct);
+    TEST_ASSERT_EQUAL_UINT32(1, fx.report.sample_count);
+    ASSERT_F32(RIGGED_GLB_ANIM_DURATION, fx.report.duration);
+    ASSERT_F32(0.0F, fx.report.cpu_error_lin);
+    ASSERT_F32(0.0F, fx.report.cpu_error_t);
+    TEST_ASSERT_TRUE(fx.report.worst_time_lin == 0.0 && fx.report.worst_time_t == 0.0);
+    TEST_ASSERT_EQUAL_UINT16(0, fx.report.worst_joint_lin);
+    TEST_ASSERT_EQUAL_UINT16(0, fx.report.worst_joint_t);
+    /* Helper's scale 2 times the STEP scale 2 from 0.75 on. */
+    ASSERT_F32(4.0F, fx.view.s_max);
+    ASSERT_F32(0.0F, fx.view.r_root);
+    ref_measure_t m;
+    ref_measure(&fx, true, GRID, &m);
+    assert_rounded_up(m.r_joints, fx.view.r_joints);
+    assert_rounded_up(m.s_max, fx.view.s_max);
+    fixture_free(&fx);
+}
+
 /* Bounds under the default cut (Root and Helper are joints: Helper's scale 2
  * doubles the STEP scale) and under a cut at Joint0 (its rest translation is
  * the only root translation; the Joint4 chain is 2 * 0.5). */
@@ -652,7 +691,7 @@ void test_bounds_match_the_recurrence_under_two_cuts(void) {
     ref_measure_t m;
 
     fixture_export(&fx, &opts, &opts, UINT32_MAX);
-    ref_measure(&fx, false, &m);
+    ref_measure(&fx, false, GRID, &m);
     assert_rounded_up(m.r_joints, fx.view.r_joints);
     assert_rounded_up(m.r_root, fx.view.r_root);
     assert_rounded_up(m.s_max, fx.view.s_max);
@@ -662,7 +701,7 @@ void test_bounds_match_the_recurrence_under_two_cuts(void) {
     fixture_free(&fx);
 
     fixture_export(&fx, &opts, &opts, RIGGED_GLB_NODE_JOINT0);
-    ref_measure(&fx, false, &m);
+    ref_measure(&fx, false, GRID, &m);
     assert_rounded_up(m.r_joints, fx.view.r_joints);
     assert_rounded_up(m.r_root, fx.view.r_root);
     assert_rounded_up(m.s_max, fx.view.s_max);
@@ -702,6 +741,42 @@ void test_matrix_node_channel_is_rejected(void) {
     EXPECT_CLIP_REJECTED(opts, "animated node carries a matrix", "Helper");
 }
 
+void test_step_key_past_the_snapped_end_is_dropped(void) {
+    const rigged_glb_opts_t opts = {.animation_step_past_end = true};
+    fixture_export_t fx;
+    fixture_export(&fx, &opts, &opts, UINT32_MAX);
+    /* 1.05 s is 25.2 frames: the clip ships 25, and the key at 1.05 is past
+     * its 1.0417 s end. Both the fraction and the dropped key are logged. */
+    TEST_ASSERT_EQUAL_UINT32(26, fx.view.sample_count);
+    ASSERT_F32((float)(25.0 / 24.0), fx.report.duration);
+    TEST_ASSERT_EQUAL_UINT32(1, fx.view.n_steps);
+    TEST_ASSERT_EQUAL_UINT32(2, fx.view.steps[0].count);
+    ASSERT_F32(0.75F, fx.view.keys[1].time);
+    TEST_ASSERT_EQUAL_UINT32(2, s_log_warnings);
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "Joint3.scale drops 1 STEP key"));
+    fixture_free(&fx);
+}
+
+void test_reparented_joint_is_rejected(void) {
+    const rigged_glb_opts_t rig_opts = {0};
+    const rigged_glb_opts_t clip_opts = {.animation = true, .reparent_joint2 = true};
+    fixture_export_t fx;
+    EXPECT_BUILD_ASSERT_MATCH(fixture_export(&fx, &rig_opts, &clip_opts, UINT32_MAX), "different parent than the rig");
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "Joint2"));
+}
+
+void test_backwards_key_times_are_rejected(void) {
+    const rigged_glb_opts_t opts = {.animation_bad_times = true};
+    EXPECT_CLIP_REJECTED(opts, "strictly increasing", "Joint3");
+}
+
+void test_animation_without_channels_is_rejected(void) {
+    const rigged_glb_opts_t opts = {.animation_no_channels = true};
+    fixture_export_t fx;
+    EXPECT_BUILD_ASSERT_MATCH(fixture_export(&fx, &opts, &opts, UINT32_MAX), "animation has no channels");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_bad_arguments_are_rejected(void) {
     const rigged_glb_opts_t opts = {.animation = true};
     rigged_glb_write(RIG_GLB, &opts);
@@ -714,6 +789,8 @@ void test_bad_arguments_are_rejected(void) {
     nt_builder_clip_report_t report;
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 1, &rig, FPS, CLIP_ID, &report), "animation index out of range");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, 0.0F, CLIP_ID, &report), "sample_fps must be finite and positive");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, NAN, CLIP_ID, &report), "sample_fps must be finite and positive");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, 1e30F, CLIP_ID, &report), "overflows the sample grid");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, FPS, CLIP_ID, NULL), "invalid add_scene_clip args");
     nt_builder_free_pack(ctx);
     nt_builder_free_rig(&rig);
@@ -826,6 +903,10 @@ int main(void) {
     RUN_TEST(test_morph_weights_channel_is_rejected);
     RUN_TEST(test_duplicate_channel_is_rejected);
     RUN_TEST(test_matrix_node_channel_is_rejected);
+    RUN_TEST(test_step_key_past_the_snapped_end_is_dropped);
+    RUN_TEST(test_reparented_joint_is_rejected);
+    RUN_TEST(test_backwards_key_times_are_rejected);
+    RUN_TEST(test_animation_without_channels_is_rejected);
     RUN_TEST(test_bad_arguments_are_rejected);
     RUN_TEST(test_clip_from_another_glb_maps_by_name_and_rest);
     RUN_TEST(test_khronos_clips_export_at_24_fps);

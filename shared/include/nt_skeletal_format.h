@@ -79,8 +79,8 @@ typedef struct {
 
 // #region NANM clip
 /* Strides of the two struct arrays; the runtime structs they hold are
- * nt_skeletal_step_t and nt_skeletal_step_key_t, pinned against these in
- * engine/skeletal_assets. */
+ * nt_skeletal_step_t and nt_skeletal_step_key_t, pinned against these next to
+ * nt_skeletal_clip_view in engine/skeletal. */
 #define NT_ANM_STEP_STRIDE 12
 #define NT_ANM_KEY_STRIDE 20
 
@@ -105,8 +105,9 @@ typedef struct {
  * The three bounds are measured by the builder over the clip's own evaluated
  * poses (skeleton-animation spec, Bounds): r_joints = max joint-origin distance
  * from the skeleton origin, r_root = max root translation length, s_max = max
- * over joints of the product of max|s| along the ancestor chain. Hand-built
- * clips may carry zeros; a consumer treats them as "no bound".
+ * over joints of the product of max|s| along the ancestor chain, each the
+ * maximum over the importer's dense sample set rounded up, not a proof over
+ * the interpolated interior. The encoder writes what it is given.
  */
 #pragma pack(push, 1)
 typedef struct {
@@ -126,7 +127,7 @@ typedef struct {
     uint32_t n_steps;         /* 44:  joint STEP tracks */
     uint32_t n_keys;          /* 48:  keys of every STEP track, joints and object */
     uint8_t object_mode[3];   /* 52:  nt_skeletal_channel_mode_t per channel: t, q, s */
-    uint8_t _pad;             /* 55:  zero, keeps the arrays after the header 4-aligned */
+    uint8_t _pad;             /* 55:  zero, keeps the bounds and the arrays 4-aligned */
     float r_joints;           /* 56:  skeleton space, finite and >= 0 */
     float r_root;             /* 60:  skeleton space, finite and >= 0 */
     float s_max;              /* 64:  unitless, finite and >= 0 */

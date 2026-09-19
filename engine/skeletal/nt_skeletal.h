@@ -280,9 +280,9 @@ typedef struct {
     const nt_skeletal_step_t *steps;    /* n_steps tracks */
     const nt_skeletal_step_key_t *keys; /* shared by every track, joints and object */
     nt_skeletal_object_curve_t object;  /* all modes ABSENT when the clip has no object curve */
-    float r_joints;                     /* max joint-origin distance from the skeleton origin, 0 = unknown */
-    float r_root;                       /* max root translation length, 0 = unknown */
-    float s_max;                        /* max product of max|s| along an ancestor chain, 0 = unknown */
+    float r_joints;                     /* max joint-origin distance from the skeleton origin over the clip (skeletal spec, Bounds and culling) */
+    float r_root;                       /* max root translation length */
+    float s_max;                        /* max product of max|s| along an ancestor chain */
     uint32_t sample_count;              /* samples on the uniform grid over [0, duration], >= 1 */
     uint32_t block_floats;              /* 3*n_t + 4*n_q + 3*n_s */
     uint32_t n_steps;                   /* STEP tracks */

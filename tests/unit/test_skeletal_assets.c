@@ -254,7 +254,9 @@ enum {
     ANM_HDR_SAMPLE_COUNT = 8,
     ANM_HDR_DURATION = 12,
     ANM_HDR_OBJECT_MODE = 52,
+    ANM_HDR_R_JOINTS = 56,
     ANM_HDR_R_ROOT = 60,
+    ANM_HDR_S_MAX = 64,
 };
 
 /* Distinct non-identity unit rotations, so "absent channel keeps the default"
@@ -735,6 +737,14 @@ void test_skin_binding_rejections(void) {
     wr_u16(buf + 6, 0U);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "palette_count 0");
 
+    memcpy(buf, valid, size);
+    wr_f32(buf + 16, -1.0F);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "negative reach");
+
+    memcpy(buf, valid, size);
+    wr_u32(buf + 20, 0x7FC00000U);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "NaN any_pose_radius");
+
     /* The pre-bounds payload of the same palette is exactly the header short of
      * this one, and a pack built before the bounds must not activate. */
     memcpy(buf, valid, size);
@@ -799,6 +809,14 @@ void test_clip_header_rejections(void) {
     memcpy(buf, valid, size);
     wr_f32(buf + ANM_HDR_R_ROOT, -1.0F);
     EXPECT_CLIP_REJECTED(buf, size, "negative bound");
+
+    memcpy(buf, valid, size);
+    wr_u32(buf + ANM_HDR_R_JOINTS, 0x7FC00000U);
+    EXPECT_CLIP_REJECTED(buf, size, "NaN r_joints");
+
+    memcpy(buf, valid, size);
+    wr_f32(buf + ANM_HDR_S_MAX, -0.5F);
+    EXPECT_CLIP_REJECTED(buf, size, "negative s_max");
 
     /* A count that no longer matches the arrays changes the payload size. */
     memcpy(buf, valid, size);

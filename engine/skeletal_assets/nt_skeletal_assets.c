@@ -161,6 +161,10 @@ static bool skn_validate(const uint8_t *data, uint32_t size, NtSknHeader *out) {
         NT_LOG_WARN("activate_skin_binding: NSKN version %u is not %u -- rebuild packs", (unsigned)out->version, (unsigned)NT_SKELETAL_FORMAT_VERSION);
         return false;
     }
+    if (!skel_finite(out->reach) || out->reach < 0.0F || !skel_finite(out->any_pose_radius) || out->any_pose_radius < 0.0F) {
+        NT_LOG_WARN("activate_skin_binding: a radius is negative or not finite");
+        return false;
+    }
     if (out->palette_count == 0) {
         NT_LOG_WARN("activate_skin_binding: palette_count 0");
         return false;
@@ -309,15 +313,16 @@ uint32_t nt_skeletal_assets_activate_clip(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    /* The table checks read through the view, so the copy comes first; a
-     * rejected payload gives its slot back. */
-    const uint32_t id = skel_take_slot(data, size);
-    nt_skeletal_clip_t *view = &s_assets.slots[nt_pool_slot_index(id)].view.clip;
-    nt_skeletal_clip_view((const uint8_t *)s_assets.slots[nt_pool_slot_index(id)].mem, view);
-    if (!anm_validate_joint_tables(view) || !anm_validate_steps(view, header.n_keys)) {
-        skel_release_slot(id);
+    /* The table checks read through a view over the caller's bytes, so a
+     * rejected payload never takes a slot; the slot's own view is built over
+     * its copy afterwards. */
+    nt_skeletal_clip_t probe;
+    nt_skeletal_clip_view(data, &probe);
+    if (!anm_validate_joint_tables(&probe) || !anm_validate_steps(&probe, header.n_keys)) {
         return 0;
     }
+    const uint32_t id = skel_take_slot(data, size);
+    nt_skeletal_clip_view((const uint8_t *)s_assets.slots[nt_pool_slot_index(id)].mem, &s_assets.slots[nt_pool_slot_index(id)].view.clip);
     return id;
 }
 

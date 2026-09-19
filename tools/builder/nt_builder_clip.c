@@ -53,6 +53,7 @@ static bool clip_bits_equal(const float *a, const float *b, uint32_t count) {
  * in the glTF order in-tangent, value, out-tangent per key. */
 typedef struct {
     const cgltf_animation_channel *channel;
+    const char *label; /* the animation, for diagnostics */
     double *times;
     double *values;
     uint32_t key_count;
@@ -119,8 +120,17 @@ static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, con
         NT_LOG_ERROR("%s: channel[%u] animates node %s, which is not a joint of the rig", label, index, node->name);
         NT_BUILD_ASSERT(0 && "animation channel targets a node outside the rig");
     }
-    /* A clip is valid for one rest pose: the same names over a different rest
-     * are a different rig, whatever glb they come from. */
+    /* A clip is valid for one hierarchy and one rest pose: the same names
+     * under another parent or over a different rest are a different rig,
+     * whatever glb they come from. The cut root's parent is not a joint. */
+    const uint16_t parent = rig->skeleton.parent[joint];
+    if (parent != NT_SKELETAL_NO_PARENT) {
+        const cgltf_node *parent_node = node->parent;
+        if (parent_node == NULL || parent_node->name == NULL || nt_hash32_str(parent_node->name).value != rig->skeleton.joint_id[parent]) {
+            NT_LOG_ERROR("%s: node %s hangs under %s, but the rig's joint %u has a different parent", label, node->name, (parent_node && parent_node->name) ? parent_node->name : "(none)", joint);
+            NT_BUILD_ASSERT(0 && "animated node has a different parent than the rig's joint");
+        }
+    }
     const nt_skeletal_trs_t *rest = &rig->skeleton.rest[joint];
     if (!clip_bits_equal(rest->t, node->translation, 3) || !clip_bits_equal(rest->q, node->rotation, 4) || !clip_bits_equal(rest->s, node->scale, 3)) {
         NT_LOG_ERROR("%s: node %s has a different rest pose than the rig's joint %u (t %g %g %g q %g %g %g %g s %g %g %g vs t %g %g %g q %g %g %g %g s %g %g %g)", label, node->name, joint,
@@ -149,6 +159,7 @@ static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, con
     }
 
     track->channel = ch;
+    track->label = label;
     track->key_count = (uint32_t)in->count;
     track->comps = rotation ? 4U : 3U;
     track->joint = (uint16_t)joint;
@@ -239,6 +250,12 @@ static void clip_slerp(const double *a, const double *b_in, double u, double *ou
     if (dot > 1.0) {
         dot = 1.0;
     }
+    /* A key-aligned time reproduces its key bit for bit rather than
+     * sin(theta) / sin(theta) of it. */
+    if (u == 0.0 || u == 1.0) {
+        memcpy(out, (u == 0.0) ? a : b, 4U * sizeof(double));
+        return;
+    }
     double wa = 1.0 - u;
     double wb = u;
     if (1.0 - dot >= CLIP_SLERP_MIN_GAP) {
@@ -314,6 +331,19 @@ static void clip_eval(const clip_track_t *track, double time, double *out) {
         clip_normalize4(out);
     }
 }
+
+/* clip_eval with the one content rule the keys cannot express: a cubic through
+ * the origin normalizes to NaN and huge tangents overflow, so the value is
+ * checked where it is produced and the diagnostic names the channel. */
+static void clip_eval_checked(const clip_track_t *track, double time, double *out) {
+    clip_eval(track, time, out);
+    for (uint32_t c = 0; c < track->comps; c++) {
+        if (!isfinite(out[c])) {
+            NT_LOG_ERROR("%s: %s.%s evaluates to a non-finite value at %.9g s", track->label, track->channel->target_node->name, clip_path_name(track->channel->target_path), time);
+            NT_BUILD_ASSERT(0 && "animation curve evaluates to a non-finite value");
+        }
+    }
+}
 // #endregion
 
 // #region resampling
@@ -341,6 +371,10 @@ static void clip_fill_step_channel(const clip_track_t *track, float duration, fl
         }
         kept++;
     }
+    if (kept < track->key_count) {
+        NT_LOG_WARN("%s: %s.%s drops %u STEP key(s) from %.9g s on, past the clip's %.9g s", track->label, track->channel->target_node->name, clip_path_name(track->channel->target_path),
+                    track->key_count - kept, track->times[kept], (double)duration);
+    }
     bool constant = true;
     for (uint32_t k = 1; k < kept && constant; k++) {
         constant = clip_bits_equal(values, values + ((size_t)k * 4U), 4U);
@@ -364,7 +398,7 @@ static void clip_fill_sampled_channel(const clip_track_t *track, uint32_t n_grid
     memset(ch, 0, sizeof(*ch));
     double v[4] = {0.0, 0.0, 0.0, 0.0};
     for (uint32_t i = 0; i < n_grid; i++) {
-        clip_eval(track, clip_grid_time(i, n_grid, duration), v);
+        clip_eval_checked(track, clip_grid_time(i, n_grid, duration), v);
         for (uint32_t c = 0; c < comps; c++) {
             scratch[((size_t)i * comps) + c] = (float)v[c];
         }
@@ -414,7 +448,7 @@ static void clip_pass_time(clip_pass_t *p, double time) {
     for (uint32_t t = 0; t < p->track_count; t++) {
         const clip_track_t *track = &p->tracks[t];
         double v[4] = {0.0, 0.0, 0.0, 0.0};
-        clip_eval(track, time, v);
+        clip_eval_checked(track, time, v);
         nt_skeletal_trs_t *dst = &p->local_ex[track->joint];
         float *lane = dst->t;
         if (track->kind == 1U) {
@@ -493,7 +527,7 @@ static void clip_dense_pass(clip_pass_t *p, uint32_t n_grid, float duration) {
         times[n++] = clip_grid_time(i, n_grid, duration);
         if (i + 1U < n_grid) {
             for (uint32_t k = 1; k <= CLIP_SUBSAMPLES; k++) {
-                times[n++] = ((double)((4U * i) + k) * (double)duration) / (double)(4U * (n_grid - 1U));
+                times[n++] = (((4.0 * (double)i) + (double)k) * (double)duration) / (4.0 * (double)(n_grid - 1U));
             }
         }
     }
@@ -595,10 +629,18 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
      * nearest whole number and the clip's duration follows it, the way Unreal
      * imports a sequence. A clip that is not a whole number of frames at this
      * rate holds its last pose for the fraction, or loses it, and says so. */
-    const double frames = (double)llround((double)source_duration * (double)sample_fps);
-    NT_BUILD_ASSERT(frames < 4294967294.0 && "add_scene_clip: duration * sample_fps overflows the sample grid");
+    const double frames_exact = (double)source_duration * (double)sample_fps;
+    if (!(frames_exact < 4294967294.0)) {
+        NT_LOG_ERROR("%s: %.9g s at %g fps is %g frames, more than the grid can hold", label, (double)source_duration, (double)sample_fps, frames_exact);
+        NT_BUILD_ASSERT(0 && "duration * sample_fps overflows the sample grid");
+    }
+    const double frames = (double)llround(frames_exact);
     const uint32_t n_grid = (frames < 1.0) ? 2U : ((uint32_t)frames + 1U);
     const float grid_duration = (float)((double)(n_grid - 1U) / (double)sample_fps);
+    if (!nt_builder_finite(grid_duration) || !(grid_duration > 0.0F)) {
+        NT_LOG_ERROR("%s: %u frames at %g fps is not a finite positive duration", label, n_grid - 1U, (double)sample_fps);
+        NT_BUILD_ASSERT(0 && "sample_fps gives no finite grid");
+    }
     size_t out_floats = 0;
     for (uint32_t t = 0; t < track_count; t++) {
         out_floats += (tracks[t].interpolation == cgltf_interpolation_type_step) ? ((size_t)tracks[t].key_count * 5U) : ((size_t)n_grid * 4U);
@@ -608,21 +650,24 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     NT_BUILD_ASSERT(out_arena && channels && "add_scene_clip: alloc failed (OOM)");
     float *out_next = out_arena;
     bool sampled = false;
+    bool evaluated = false;
     for (uint32_t t = 0; t < track_count; t++) {
         if (tracks[t].interpolation == cgltf_interpolation_type_step) {
             continue;
         }
+        evaluated = true;
         const uint32_t c = (3U * tracks[t].joint) + tracks[t].kind;
         clip_fill_sampled_channel(&tracks[t], n_grid, grid_duration, out_next, &channels[c]);
         out_next += (size_t)n_grid * 4U;
         sampled = sampled || channels[c].mode == NT_SKELETAL_CHANNEL_SAMPLED;
     }
     /* Without a grid there is nothing to align, so the clip keeps its exact
-     * source length. */
+     * source length. The fraction is reported whenever a curve was put on the
+     * grid, folded or not: a fold decided over the grid saw nothing past it. */
     duration = sampled ? grid_duration : source_duration;
-    if (sampled && fabs(((double)source_duration * (double)sample_fps) - frames) > CLIP_FRAME_SNAP_TOLERANCE) {
-        NT_LOG_WARN("%s: %.9g s is %.4g frames at %g fps, not a whole number; the clip ships %u frames, %.9g s", label, (double)source_duration, (double)source_duration * (double)sample_fps,
-                    (double)sample_fps, n_grid - 1U, (double)duration);
+    if (evaluated && (fabs(frames_exact - (double)(n_grid - 1U)) > CLIP_FRAME_SNAP_TOLERANCE)) {
+        NT_LOG_WARN("%s: %.9g s is %.4g frames at %g fps, not a whole number; the clip ships %u frames, %.9g s", label, (double)source_duration, frames_exact, (double)sample_fps, n_grid - 1U,
+                    (double)duration);
     }
     for (uint32_t t = 0; t < track_count; t++) {
         if (tracks[t].interpolation != cgltf_interpolation_type_step) {

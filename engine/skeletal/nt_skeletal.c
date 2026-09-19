@@ -357,7 +357,8 @@ void nt_skeletal_clip_view(const uint8_t *payload, nt_skeletal_clip_t *out) {
     const uint32_t block_floats = (3U * (uint32_t)header.n_t) + (4U * (uint32_t)header.n_q) + (3U * (uint32_t)header.n_s);
 
     /* Walk the arrays in the one order the format defines; the encoder writes
-     * them in exactly this sequence. */
+     * them in exactly this sequence. Every product fits size_t on wasm32
+     * because the caller proved size == nt_anm_size(header) in 64 bits. */
     const uint8_t *at = payload + sizeof(NtAnmHeader);
     const float *blocks = (const float *)at;
     at += (size_t)header.sample_count * block_floats * 4U;
