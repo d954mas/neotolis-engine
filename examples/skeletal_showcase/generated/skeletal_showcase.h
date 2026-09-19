@@ -40,9 +40,6 @@
 #define ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_CESIUMMAN_NSKN ((nt_hash64_t){0x5B791ADC7059049CULL}) /* skeletal_showcase/cesiumman.nskn */
 #define ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_FOX_NSKN ((nt_hash64_t){0xC0CD48D1A0A26281ULL}) /* skeletal_showcase/fox.nskn */
 
-/* --- CLIP --- */
-#define ASSET_CLIP_SKELETAL_SHOWCASE_CESIUMMAN_NANM ((nt_hash64_t){0x1FF45D523F1BE5C3ULL}) /* skeletal_showcase/cesiumman.nanm */
-
 #if NT_HASH_LABELS
 static inline void skeletal_showcase_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/slug_text.frag");
@@ -50,7 +47,6 @@ static inline void skeletal_showcase_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/sprite.frag");
     (void)nt_hash64_str("assets/shaders/sprite.vert");
     (void)nt_hash64_str("skeletal_showcase/cesiumman.mesh");
-    (void)nt_hash64_str("skeletal_showcase/cesiumman.nanm");
     (void)nt_hash64_str("skeletal_showcase/cesiumman.nskl");
     (void)nt_hash64_str("skeletal_showcase/cesiumman.nskn");
     (void)nt_hash64_str("skeletal_showcase/font");

@@ -6,9 +6,10 @@ the slider sprites `bar_track.png`, `bar_fill_smooth.png` and `bar_thumb.png`
 and the checkbox art `box_off.png` and `checkmark.png` from
 `examples/ui_showcase/raw`, the permitted Roboto Regular font from the same
 directory under Apache License 2.0, the skeleton (NSKL), skin binding (NSKN)
-and skinned mesh (MESH) of both rigs, and the CesiumMan clip. The clips pack
-(`skeletal_showcase_clips.ntpack`) holds only the three Fox clips (Survey, Walk,
-Run), so the showcase plays clips from one pack on a skeleton of another. Every
+and skinned mesh (MESH) of both rigs. The clips pack
+(`skeletal_showcase_clips.ntpack`) holds the three Fox clips (Survey, Walk, Run)
+and the CesiumMan clip, so the showcase plays clips from one pack on a skeleton
+of another. Every
 clip is sampled at 24 fps: Fox Survey, Walk and CesiumMan are whole frames at
 that rate; Fox Run is authored at 27.8 frames, so the builder warns about the
 fractional frame and the report shows the larger interpolation error the

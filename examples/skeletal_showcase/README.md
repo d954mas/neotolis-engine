@@ -38,11 +38,11 @@ do not move the camera.
 
 `build_packs.c` builds two packs. The rig pack, `skeletal_showcase.ntpack`,
 holds the sprite and text shaders, the UI atlas, the font, and for each of the
-two Khronos rigs its NSKL skeleton, NSKN skin binding and skinned MESH, plus the
-CesiumMan clip. The clips pack, `skeletal_showcase_clips.ntpack`, holds only the
-three Fox clips (`Survey`, `Walk`, `Run`). Both packs mount at init, and the
-Playback scene plays the Fox clips of the second pack on the Fox skeleton of
-the first, which is how the showcase exercises "a clip from another pack on an
+two Khronos rigs its NSKL skeleton, NSKN skin binding and skinned MESH. The
+clips pack, `skeletal_showcase_clips.ntpack`, holds the four clips (Fox
+`Survey`, `Walk`, `Run` and the CesiumMan walk). Both packs mount at init, and
+the Playback scene plays the clips of the second pack on the skeletons of the
+first, which is how the showcase exercises "a clip from another pack on an
 already-loaded skeleton". `raw/README.md` lists the raw inputs and their
 attribution.
 
@@ -116,8 +116,8 @@ The scene owns one `nt_skeletal_track_t` and nothing else moves time: every
 frame it refetches the selected skeleton and clip views after `resource_step`,
 writes `track.speed` and `track.flags` from the controls, calls
 `nt_skeletal_tracks_advance` with the frame `dt`, samples the clip at
-`track.time` with `nt_skeletal_sample` (or copies the rest pose when no clip
-is selected) and runs `nt_skeletal_fk`. The stage draws the pose with the same
+`track.time` with `nt_skeletal_sample` and runs `nt_skeletal_fk` (over the
+rest pose when no clip is selected). The stage draws the pose with the same
 bone primitives and framing as `Skeleton & Pose`, without a selected subtree.
 
 Controls, top to bottom:
@@ -130,17 +130,16 @@ Controls, top to bottom:
   does nothing, so for CesiumMan the three Fox entries are visible but inert
   and the Fox skeleton takes `Fox Survey`, `Fox Walk` and `Fox Run` in any
   order without being reloaded. Selecting a clip resets the track to time 0 and
-  logs its name, duration and sample count once. A clip whose resource goes
-  away, or whose reloaded view no longer matches the skeleton, is deselected.
+  logs its name, duration and sample count once.
 - `Play`/`Pause`: pause is `speed = 0` on the track, no special case.
-- `Step`: pauses, snaps the time onto the sample grid and moves it one sample
-  (backwards with `Reverse`) through the track's own wrap or clamp, so a step
-  at the end of a looping clip wraps and a step at the end of a clamped clip
-  stays.
-- `Time`: a slider over `[0, duration]` on the sample grid; a grid time
-  reproduces the stored sample. The clock is written while the slider is
-  dragged. With `Loop` on the slider ends one sample before `duration`, the
-  wrap point. Disabled without a clip.
+- `Step`: pauses, snaps the time onto the nearest reachable sample and moves
+  it one sample (backwards with `Reverse`) through the track's own wrap or
+  clamp, so a step at the last sample of a looping clip wraps to 0 and a step
+  at the end of a clamped clip stays.
+- `Time`: a slider over the sample indices; the clock is written as
+  `frame * step` while the slider is dragged, so a seek lands exactly on the
+  stored sample. With `Loop` on the last index is the sample before `duration`,
+  the wrap point. Disabled without a clip.
 - `Speed x0.00..2.00`: the speed magnitude, step 0.05.
 - `Loop`: sets `NT_SKELETAL_TRACK_LOOPING`; off, the track clamps to
   `[0, duration]` and holds.
@@ -157,16 +156,16 @@ forward. The `Step` and `Time` grid comes from the clip itself,
 
 The Controls panel header contains the common `Reset` button; `Reset` and `R`
 reset the active scene and shared camera, re-applying the fit of the active
-rig. Entering a scene for the first time initializes it, switching scenes
-resets the camera, and the Controls visibility setting is preserved.
+rig. Both scenes are initialized at startup; switching scenes resets the
+camera and refits the incoming rig, and the Controls visibility setting is
+preserved.
 
 To add a scene, define one typed state block and its callbacks in the scene
 region of `main.c`, then append one descriptor to `s_scene_registry` with its
-title, description, source, and enter/leave/reset/update/cancel_input/
-declare_controls/draw callbacks. The
+title and reset/update/cancel_input/declare_controls/draw callbacks. The
 shell calls callbacks only for the active scene, preserves state while a scene
-is inactive, calls `leave` before `enter`, closes scene input on transitions,
-and owns the stage camera and panel visibility. Keep scene widget IDs under a
+is inactive, closes scene input on transitions, and owns the stage camera,
+the pending camera fit and panel visibility. Keep scene widget IDs under a
 scene-specific prefix and keep all state fixed-size and example-local.
 
 Source: [examples/skeletal_showcase/main.c](main.c).

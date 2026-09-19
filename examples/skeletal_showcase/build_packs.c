@@ -1,8 +1,8 @@
-/* Build the Skeletal showcase packs: the rig pack carries the UI atlas, font,
- * both Khronos rigs (skeleton, skin binding, skinned mesh) and the CesiumMan
- * clip; the clips pack carries the three Fox clips, so the showcase plays clips
- * from one pack on a skeleton mounted from another. The font is reused from
- * ui_showcase and is distributed under Apache 2.0. */
+/* Build the Skeletal showcase packs: the rig pack carries the UI atlas, font
+ * and both Khronos rigs (skeleton, skin binding, skinned mesh); the clips pack
+ * carries every clip, so the showcase plays clips from one pack on a skeleton
+ * mounted from another. The font is reused from ui_showcase and is distributed
+ * under Apache 2.0. */
 
 /* clang-format off */
 #include "nt_builder.h"
@@ -51,7 +51,7 @@ typedef struct {
 } character_desc_t;
 
 /* Both palettes fit in a byte, so the joint lanes are UINT8. No TEXCOORD:
- * nothing draws the mesh textured in this showcase. */
+ * nothing draws the mesh yet; the skinned renderer is a later issue. */
 static uint32_t skinned_layout(NtStreamLayout out[4], bool has_normal) {
     uint32_t n = 0;
     out[n++] = (NtStreamLayout){"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0};
@@ -83,12 +83,10 @@ static void print_clip_report(const char *resource_id, const nt_builder_clip_rep
 /* The rig of skin 0 up to the scene root is imported once and feeds every
  * export of the character: skeleton, binding and primitive 0 of the skinned
  * mesh into rig_ctx, the clips into clip_ctx. */
-static bool add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx, const character_desc_t *desc) {
+static void add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx, const character_desc_t *desc) {
     nt_glb_scene_t scene;
-    if (nt_builder_parse_glb_scene(&scene, desc->glb_path) != NT_BUILD_OK) {
-        (void)fprintf(stderr, "Failed to parse %s\n", desc->glb_path);
-        return false;
-    }
+    const nt_build_result_t parsed = nt_builder_parse_glb_scene(&scene, desc->glb_path);
+    NT_BUILD_ASSERT(parsed == NT_BUILD_OK && "skeletal_showcase: glb parse failed");
     nt_builder_rig_t rig;
     nt_builder_import_rig(&scene, 0, &rig);
     NT_BUILD_ASSERT(rig.skeleton.joint_count <= SKELETAL_SHOWCASE_MAX_JOINTS && "skeletal_showcase: rig exceeds the pose buffers of main.c");
@@ -109,7 +107,6 @@ static bool add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx,
 
     nt_builder_free_rig(&rig);
     nt_builder_free_glb_scene(&scene);
-    return true;
 }
 
 static const clip_desc_t k_fox_clips[] = {
@@ -227,11 +224,8 @@ int main(int argc, char *argv[]) {
 
     nt_builder_add_font(rig_ctx, FONT_PATH, &(nt_font_opts_t){.charset = NT_CHARSET_ASCII, .resource_name = "skeletal_showcase/font"});
 
-    if (!add_character(rig_ctx, clip_ctx, &k_fox) || !add_character(rig_ctx, rig_ctx, &k_cesiumman)) {
-        nt_builder_free_pack(clip_ctx);
-        nt_builder_free_pack(rig_ctx);
-        return 1;
-    }
+    add_character(rig_ctx, clip_ctx, &k_fox);
+    add_character(rig_ctx, clip_ctx, &k_cesiumman);
 
     if (!finish(rig_ctx, "skeletal_showcase.ntpack")) {
         nt_builder_free_pack(clip_ctx);

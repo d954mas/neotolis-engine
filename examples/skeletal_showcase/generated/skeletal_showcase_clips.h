@@ -6,12 +6,14 @@
 #include "hash/nt_hash.h"
 
 /* --- CLIP --- */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_CESIUMMAN_NANM ((nt_hash64_t){0x1FF45D523F1BE5C3ULL}) /* skeletal_showcase/cesiumman.nanm */
 #define ASSET_CLIP_SKELETAL_SHOWCASE_FOX_RUN_NANM ((nt_hash64_t){0x6B32754A517465D0ULL}) /* skeletal_showcase/fox/run.nanm */
 #define ASSET_CLIP_SKELETAL_SHOWCASE_FOX_SURVEY_NANM ((nt_hash64_t){0x49712E760C0B1C57ULL}) /* skeletal_showcase/fox/survey.nanm */
 #define ASSET_CLIP_SKELETAL_SHOWCASE_FOX_WALK_NANM ((nt_hash64_t){0x662B2E245C8FCAC7ULL}) /* skeletal_showcase/fox/walk.nanm */
 
 #if NT_HASH_LABELS
 static inline void skeletal_showcase_clips_register_labels(void) {
+    (void)nt_hash64_str("skeletal_showcase/cesiumman.nanm");
     (void)nt_hash64_str("skeletal_showcase/fox/run.nanm");
     (void)nt_hash64_str("skeletal_showcase/fox/survey.nanm");
     (void)nt_hash64_str("skeletal_showcase/fox/walk.nanm");
