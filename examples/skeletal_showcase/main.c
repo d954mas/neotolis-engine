@@ -1141,14 +1141,7 @@ static void skeleton_cancel_input(void) {
     s_skeleton_scene.rig_combo_open = false;
 }
 
-static void playback_enter(void) {
-    /* The humanoid is never offered here, so it marks the first entry. */
-    if (s_playback_scene.rig == RIG_HUMANOID) {
-        s_playback_scene.rig = RIG_FOX;
-        playback_reset();
-    }
-    s_playback_scene.fit_pending = true;
-}
+static void playback_enter(void) { s_playback_scene.fit_pending = true; }
 
 static void playback_cancel_input(void) {
     s_playback_scene.rig_combo_open = false;
@@ -1412,6 +1405,8 @@ int main(int argc, char *argv[]) {
 
     init_ui_styles();
     init_humanoid();
+    s_playback_scene.rig = RIG_FOX;
+    playback_reset();
     switch_scene(0);
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
