@@ -555,7 +555,7 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  * UINT32_MAX cuts nothing. Every array lives in storage until
  * nt_builder_free_rig. The rig keeps the scene it was built from for the mesh
  * and binding exports; a clip may come from another scene whose animated nodes
- * carry the same names and rest poses. The scene outlives the rig. */
+ * carry the same names, parents and rest poses. The scene outlives the rig. */
 typedef struct {
     const nt_glb_scene_t *scene;
     nt_skeletal_skeleton_t skeleton; /* rig_compat_id filled by the import */
@@ -599,8 +599,8 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_r
  * sample_fps (at least one) when anything is sampled; a source that was not
  * one is snapped to the nearest frame and logged. Both errors compare the runtime (nt_skeletal_sample on the encoded
  * clip, then FK) against the exact glTF curves (evaluated in double, then the
- * same FK) over a dense set of times -- every grid time, every authored key,
- * and three sub-samples per grid interval. cpu_error_lin is the largest
+ * same FK) over a dense set of times -- every grid time, every authored key
+ * (clamped to the end), and three sub-samples per grid interval. cpu_error_lin is the largest
  * Frobenius distance between the 3x3 parts of any joint's model matrix, a
  * unitless number the developer scales by their own reach; cpu_error_t is the
  * largest translation distance in scene units. Each maximum carries the time
@@ -622,17 +622,20 @@ typedef struct {
  * bit-identical to the rig's and that hangs under the node its joint's parent
  * is named after (a differing rest or hierarchy is a different rig). Every
  * LINEAR and CUBICSPLINE channel is resampled onto one uniform grid with a
- * step of exactly 1 / sample_fps, round(duration * sample_fps) + 1 samples
- * over a duration snapped to that whole number of frames, STEP channels keep
- * their authored keys, a channel whose samples or keys are all identical folds to a constant,
- * and the object curve stays absent. The three header bounds are measured
- * over the same dense pass as the report (skeletal spec, Bounds and culling).
- * Content errors -- an animation without channels, a target outside the rig,
+ * step of 1 / sample_fps (up to the float rounding of the shipped duration),
+ * round(source_duration * sample_fps) + 1 samples, at least 2, over a
+ * duration snapped to that whole number of frames; STEP channels keep their
+ * authored keys up to that end, later ones are dropped and logged; a channel
+ * whose samples or keys are all identical (a rotation's may also all be the
+ * negation of the first) folds to a constant; the object curve stays absent.
+ * The three header bounds are measured over the same dense pass as the
+ * report (skeletal spec, Bounds and culling). Content errors log a
+ * diagnostic and assert; the skeletal spec (Builder, codec, wire formats)
+ * lists every one: an animation without channels, a target outside the rig,
  * a parent or rest mismatch, an unnamed or matrix-driven target, a duplicate
- * channel, a morph weights channel, an accessor of the wrong type or with
- * non-increasing input, a curve that evaluates outside the float range, a
- * rate whose grid overflows or has no finite step -- log a diagnostic and
- * assert. */
+ * channel, a morph weights channel, an accessor of the wrong type, non-finite
+ * or non-increasing input times, a curve outside the float range, a rate
+ * whose grid overflows or has no finite step, and the rest. */
 void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t animation_index, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
                                nt_builder_clip_report_t *report);
 

@@ -103,7 +103,7 @@ typedef struct {
  * table order, followed by the object STEP channels in t, q, s order.
  *
  * The three bounds are measured by the builder over the clip's own evaluated
- * poses (skeleton-animation spec, Bounds): r_joints = max joint-origin distance
+ * poses (skeletal spec, Bounds and culling): r_joints = max joint-origin distance
  * from the skeleton origin, r_root = max root translation length, s_max = max
  * over joints of the product of max|s| along the ancestor chain, each the
  * maximum over the importer's dense sample set rounded up, not a proof over

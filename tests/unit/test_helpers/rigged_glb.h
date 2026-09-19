@@ -104,7 +104,8 @@
  *   Joint4 translation LINEAR keys 0, 1.0: (0, 0.5, 0) twice -- constant.
  *
  * animation_step_only keeps only the Joint3 and Joint4 channels, so nothing
- * is sampled. The other animation knobs add one defective channel each. */
+ * is sampled. Each other knob breaks one thing -- an extra channel, a key, a
+ * key order, or a rig node -- as its line below says. */
 
 #define RIGGED_GLB_NODE_ROOT 0
 #define RIGGED_GLB_NODE_HELPER 1
@@ -128,53 +129,54 @@
 
 /* One defect per knob; all false writes the valid fixture. */
 typedef struct {
-    bool matrix_shear;            /* Helper's matrix gets a 1e-3 shear, so it is not TRS */
-    bool root_small_scale;        /* Root's matrix becomes a uniform 0.01 scale, the usual cm-to-m wrapper */
-    bool root_small_shear;        /* the 0.01-scale Root gets a 1e-3 rad shear (element 1e-5): not TRS at any scale */
-    bool unnamed_node;            /* Helper loses its name */
-    bool empty_name;              /* Helper is named "" */
-    bool duplicate_name;          /* Joint4 is named "Joint3", so two rig nodes share one joint id */
-    bool bad_rotation;            /* Joint2's rotation is (0, 0, 0, 2), not a unit quaternion */
-    bool cycle;                   /* Helper moves under Joint4, closing a parent cycle */
-    bool matrix_and_trs;          /* Helper carries a translation next to its matrix */
-    bool duplicate_skin_joint;    /* skin 0 lists Joint1 twice */
-    bool deep_chain;              /* a 260-node chain under Object whose last node joins the skin */
-    bool joint_outside_root;      /* Object joins the skin, outside a cut at Helper */
-    bool multi_root;              /* Object becomes a second scene root and a skin joint */
-    bool negative_weight;         /* v3 weight 1 turns negative */
-    bool nan_weight;              /* v3 weight 1 turns NaN */
-    bool index_ge_palette;        /* v3 joint 1 addresses palette entry 5 */
-    bool zero_weight_lane_index;  /* v3 joint 2, whose weight is 0, addresses palette entry 200 */
-    bool unpaired_sets;           /* JOINTS_1 without WEIGHTS_1 */
-    bool nonconsecutive_sets;     /* the second pair is named JOINTS_2/WEIGHTS_2 */
-    bool weights1_short;          /* the WEIGHTS_1 accessor covers one vertex too few */
-    bool duplicate_joint;         /* v3 weights joint 0 twice with non-zero weight */
-    bool zero_weights;            /* v3 weights sum to zero */
-    bool weights_half;            /* v3 weights become 0.5/0.5, a quantization tie */
-    bool joints_float_type;       /* JOINTS accessors become FLOAT */
-    bool weights_bad_type;        /* WEIGHTS_0 becomes UNSIGNED_BYTE without normalized */
-    bool morph_target;            /* the skinned primitive gains a morph target */
-    bool no_indices;              /* the primitive drops its index accessor and keeps v0..v2, one triangle */
-    bool second_primitive_far;    /* mesh 0 gains the far triangle described above */
-    bool second_node_far;         /* the far triangle becomes mesh 1 on a new node "FarNode" with skin 0 */
-    bool mesh_other_skin;         /* MeshNode uses a second skin; skin 0 has no mesh */
-    bool no_ibm;                  /* skin 0 drops inverseBindMatrices */
-    bool ibm_short;               /* the inverseBindMatrices accessor covers one joint too few */
-    bool ibm_bad_type;            /* the inverseBindMatrices accessor is VEC4 FLOAT */
-    bool ibm_nan;                 /* inverse bind matrix 0 holds one NaN element */
-    bool ibm_projective;          /* inverse bind matrix 0 has a bottom row other than (0, 0, 0, 1) */
-    bool animation;               /* the animation "Clip" described above; every knob below implies it */
-    bool animation_step_only;     /* "Clip" keeps only its STEP and constant channels */
-    bool animation_outside_rig;   /* "Clip" also translates MeshNode, which is not a joint */
-    bool animation_weights;       /* "Clip" also animates the morph weights of MeshNode (implies morph_target) */
-    bool animation_duplicate;     /* "Clip" lists the Joint1 rotation channel twice */
-    bool animation_matrix_node;   /* "Clip" also translates Helper, a matrix node */
-    bool animation_step_past_end; /* the Joint3 STEP track gains a key at 1.05 s, past the snapped end */
-    bool animation_no_channels;   /* "Clip" has samplers but no channels */
-    bool animation_bad_times;     /* the Joint3 STEP input runs backwards: 0.75 then 0.25 */
-    bool animation_cubic_origin;  /* the Joint2 CUBICSPLINE rotation runs identity -> (0, 0, 0, -1) with zero tangents: through the origin */
-    bool reparent_joint2;         /* Joint2 hangs under Joint3 instead of Joint1 (same name, same rest) */
-    bool rest_mismatch;           /* the rest translation y of Joint2 is one ulp above 0.75 */
+    bool matrix_shear;             /* Helper's matrix gets a 1e-3 shear, so it is not TRS */
+    bool root_small_scale;         /* Root's matrix becomes a uniform 0.01 scale, the usual cm-to-m wrapper */
+    bool root_small_shear;         /* the 0.01-scale Root gets a 1e-3 rad shear (element 1e-5): not TRS at any scale */
+    bool unnamed_node;             /* Helper loses its name */
+    bool empty_name;               /* Helper is named "" */
+    bool duplicate_name;           /* Joint4 is named "Joint3", so two rig nodes share one joint id */
+    bool bad_rotation;             /* Joint2's rotation is (0, 0, 0, 2), not a unit quaternion */
+    bool cycle;                    /* Helper moves under Joint4, closing a parent cycle */
+    bool matrix_and_trs;           /* Helper carries a translation next to its matrix */
+    bool duplicate_skin_joint;     /* skin 0 lists Joint1 twice */
+    bool deep_chain;               /* a 260-node chain under Object whose last node joins the skin */
+    bool joint_outside_root;       /* Object joins the skin, outside a cut at Helper */
+    bool multi_root;               /* Object becomes a second scene root and a skin joint */
+    bool negative_weight;          /* v3 weight 1 turns negative */
+    bool nan_weight;               /* v3 weight 1 turns NaN */
+    bool index_ge_palette;         /* v3 joint 1 addresses palette entry 5 */
+    bool zero_weight_lane_index;   /* v3 joint 2, whose weight is 0, addresses palette entry 200 */
+    bool unpaired_sets;            /* JOINTS_1 without WEIGHTS_1 */
+    bool nonconsecutive_sets;      /* the second pair is named JOINTS_2/WEIGHTS_2 */
+    bool weights1_short;           /* the WEIGHTS_1 accessor covers one vertex too few */
+    bool duplicate_joint;          /* v3 weights joint 0 twice with non-zero weight */
+    bool zero_weights;             /* v3 weights sum to zero */
+    bool weights_half;             /* v3 weights become 0.5/0.5, a quantization tie */
+    bool joints_float_type;        /* JOINTS accessors become FLOAT */
+    bool weights_bad_type;         /* WEIGHTS_0 becomes UNSIGNED_BYTE without normalized */
+    bool morph_target;             /* the skinned primitive gains a morph target */
+    bool no_indices;               /* the primitive drops its index accessor and keeps v0..v2, one triangle */
+    bool second_primitive_far;     /* mesh 0 gains the far triangle described above */
+    bool second_node_far;          /* the far triangle becomes mesh 1 on a new node "FarNode" with skin 0 */
+    bool mesh_other_skin;          /* MeshNode uses a second skin; skin 0 has no mesh */
+    bool no_ibm;                   /* skin 0 drops inverseBindMatrices */
+    bool ibm_short;                /* the inverseBindMatrices accessor covers one joint too few */
+    bool ibm_bad_type;             /* the inverseBindMatrices accessor is VEC4 FLOAT */
+    bool ibm_nan;                  /* inverse bind matrix 0 holds one NaN element */
+    bool ibm_projective;           /* inverse bind matrix 0 has a bottom row other than (0, 0, 0, 1) */
+    bool animation;                /* the animation "Clip" described above; every animation_* knob below implies it */
+    bool animation_step_only;      /* "Clip" keeps only its STEP and constant channels */
+    bool animation_outside_rig;    /* "Clip" also translates MeshNode, which is not a joint */
+    bool animation_weights;        /* "Clip" also animates the morph weights of MeshNode (implies morph_target) */
+    bool animation_duplicate;      /* "Clip" lists the Joint1 rotation channel twice */
+    bool animation_matrix_node;    /* "Clip" also translates Helper, a matrix node */
+    bool animation_step_past_end;  /* the Joint3 STEP track gains a key at 1.05 s, past the snapped end */
+    bool animation_step_tail_pair; /* the Joint3 STEP track gains two keys 1e-5 s past 1.0, inside the frame tolerance */
+    bool animation_no_channels;    /* "Clip" has samplers but no channels */
+    bool animation_bad_times;      /* the Joint3 STEP input runs backwards: 0.75 then 0.25 */
+    bool animation_cubic_origin;   /* the Joint2 CUBICSPLINE rotation runs identity -> (0, 0, 0, -1) with zero tangents: through the origin */
+    bool reparent_joint2;          /* Joint2 hangs under Joint3 instead of Joint1 (same name, same rest) */
+    bool rest_mismatch;            /* the rest translation y of Joint2 is one ulp above 0.75 */
 } rigged_glb_opts_t;
 
 /* opts may be NULL, which means every knob off. */

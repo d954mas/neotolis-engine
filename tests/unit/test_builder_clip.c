@@ -365,7 +365,7 @@ static uint32_t ref_dense_times(bool step_only, uint32_t grid, double *out) {
     for (uint32_t k = 0; k < key_count; k++) {
         out[n++] = step_only ? k_keys[8 + k] : k_keys[k];
     }
-    /* Insertion sort and dedupe; the set is a few hundred entries. */
+    /* Insertion sort and dedupe; the set is about a hundred entries. */
     for (uint32_t i = 1; i < n; i++) {
         const double v = out[i];
         uint32_t j = i;
@@ -389,7 +389,8 @@ static uint32_t ref_dense_times(bool step_only, uint32_t grid, double *out) {
 /* Every grid time reproduces its stored block bit for bit through the runtime
  * sampler, and the stored blocks are the reference curves: exact where the
  * closed form is exact (key-aligned and held times, the dyadic Hermite
- * points), one ulp elsewhere for T/S and 1e-6 for the normalized rotations. */
+ * points), one ulp elsewhere for the translation, 1e-6 for the normalized
+ * rotations (Joint1 bit-exact at its keys). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_grid_samples_reproduce_the_source(void) {
     const rigged_glb_opts_t opts = {.animation = true};
@@ -462,13 +463,9 @@ void test_grid_samples_reproduce_the_source(void) {
         ref_j2_q(t, ref);
         assert_rotation_close(ref, q2, 1e-6);
     }
-    /* Grid 8 is a third of the way from identity to 90 degrees: the slerp
-     * value sin(15 deg) = 0.2588 is 6e-3 away from the nlerp 0.2527 a source
-     * evaluator that lerped would have stored. Grid 16 is a third of the way
-     * from 90 to the 180 degree key authored as (0, 0, -1, 0): the short way
-     * round is 120 degrees, (0, 0, sin 60, cos 60); the long way an evaluator
-     * without the hemisphere flip takes passes through 0 and lands
-     * elsewhere. */
+    /* Grid 8, a third of the way to 90 degrees: slerp sin 15 = 0.2588, nlerp
+     * 0.2527. Grid 16, a third of the way from 90 to the (0, 0, -1, 0) key:
+     * the short way is 120 degrees, (sin 60, cos 60); the long way lands elsewhere. */
     const float *q1_8 = view->blocks + ((size_t)8U * view->block_floats) + ((size_t)3U * view->n_t) + ((size_t)4U * q1_row);
     assert_close(0.25881905, (double)q1_8[2], 1e-6);
     const float *q1_16 = view->blocks + ((size_t)16U * view->block_floats) + ((size_t)3U * view->n_t) + ((size_t)4U * q1_row);
@@ -479,8 +476,7 @@ void test_grid_samples_reproduce_the_source(void) {
 }
 
 /* Storage modes read from the shipped view: the STEP keys are the authored
- * ones, Joint4 folded to one constant, the object curve and every other
- * channel stay absent. */
+ * ones, Joint4 is the only constant, the object curve is absent. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_step_keys_constants_and_absent_channels(void) {
     const rigged_glb_opts_t opts = {.animation = true};
@@ -531,7 +527,6 @@ void test_step_keys_constants_and_absent_channels(void) {
     free(pose);
     fixture_free(&fx);
 }
-
 // #endregion
 
 // #region report and bounds
@@ -646,11 +641,8 @@ static void check_report(float fps, uint32_t grid) {
     fixture_free(&fx);
 }
 
-/* At 24 fps every authored key is a grid time; at 10 fps the 0.25 / 0.75
- * keys fall between grid samples, so the STEP jump and the Hermite hold
- * points are measured off the grid. (They are still quarter points of the
- * 10 fps grid; only the Khronos Run keys sit off every sub-sample, and the
- * floors in that test are what pins the authored-key insertion.) */
+/* At 10 fps the 0.25 / 0.75 keys fall between grid samples (still quarter
+ * points; only the Khronos Run floors pin the authored-key insertion). */
 void test_report_matches_an_independent_measurement(void) {
     check_report(FPS, GRID);
     check_report(FPS_COARSE, GRID_COARSE);
@@ -759,6 +751,22 @@ void test_step_key_past_the_snapped_end_is_dropped(void) {
     fixture_free(&fx);
 }
 
+/* Keys within 1e-3 frame past the end are exporter noise: they land on the
+ * end as one key holding the last value, and nothing is dropped or warned. */
+void test_step_keys_inside_the_tolerance_land_on_the_end(void) {
+    const rigged_glb_opts_t opts = {.animation_step_tail_pair = true};
+    fixture_export_t fx;
+    fixture_export(&fx, &opts, &opts, UINT32_MAX);
+    TEST_ASSERT_EQUAL_UINT32(GRID, fx.view.sample_count);
+    ASSERT_F32(RIGGED_GLB_ANIM_DURATION, fx.report.duration);
+    TEST_ASSERT_EQUAL_UINT32(1, fx.view.n_steps);
+    TEST_ASSERT_EQUAL_UINT32(3, fx.view.steps[0].count);
+    ASSERT_F32(RIGGED_GLB_ANIM_DURATION, fx.view.keys[2].time);
+    ASSERT_F32(4.0F, fx.view.keys[2].v[0]);
+    TEST_ASSERT_EQUAL_UINT32(0, s_log_warnings);
+    fixture_free(&fx);
+}
+
 void test_reparented_joint_is_rejected(void) {
     const rigged_glb_opts_t rig_opts = {0};
     const rigged_glb_opts_t clip_opts = {.animation = true, .reparent_joint2 = true};
@@ -835,19 +843,15 @@ typedef struct {
     float min_lin, min_t;  /* floors below them: Run's keys sit off every sub-sample, so only the authored-key times reach its peaks */
 } khronos_clip_t;
 
-/* Fox's three clips end at 3.4167, 0.7083 and 1.1583 s -- 82, 17 and 27.8
- * frames; Run's keys are not uniform (frames 0..16, then 20.8..27.8), so it
- * snaps to 28 frames with a warning, and its late keys sit 0.8 frames off
- * the grid, which the report shows as 4.7 degrees and 1.8 cm -- the number a
- * developer reads before raising the rate. CesiumMan's unnamed clip ends at
- * 2.0 s and starts at 1/24 s, so it holds before its first key. The other
- * ceilings sit above Walk's 0.29 degrees (a Frobenius distance of
- * 2 sqrt(2) sin(theta / 2) = 0.0072) and 0.06 cm. */
+/* Frame counts from the input accessors; the ceilings sit above the measured
+ * errors (Frobenius distance 2 sqrt(2) sin(theta / 2)). */
 static const khronos_clip_t k_khronos[4] = {
-    {"examples/skeletal_showcase/raw/Fox.glb", 0, 83, false, 0.02F, 0.5F, 0.0F, 0.0F},
-    {"examples/skeletal_showcase/raw/Fox.glb", 1, 18, false, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/Fox.glb", 0, 83, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* Survey: 82 frames, 2e-6 / 4.5e-5 cm */
+    {"examples/skeletal_showcase/raw/Fox.glb", 1, 18, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* Walk: 17 frames, 0.0064 (0.26 deg) / 0.061 cm */
+    /* Run: 27.8 frames, snaps to 28 with a warning; keys 20.8..27.8 sit 0.2 frames
+     * from the nearest grid sample, off every sub-sample: 0.117 (4.7 deg) / 1.78 cm. */
     {"examples/skeletal_showcase/raw/Fox.glb", 2, 29, true, 0.2F, 2.5F, 0.1F, 1.5F},
-    {"examples/skeletal_showcase/raw/CesiumMan.glb", 0, 49, false, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/CesiumMan.glb", 0, 49, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* unnamed, 48 frames, first key at 1/24 s (holds before it) */
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -881,8 +885,8 @@ void test_khronos_clips_export_at_24_fps(void) {
 
         TEST_ASSERT_EQUAL_UINT32(asset->sample_count, report.sample_count);
         TEST_ASSERT_EQUAL_UINT32(asset->sample_count, view.sample_count);
-        /* The grid step is exactly one frame: the shipped duration is the frame
-         * count over 24, whatever the source length was. */
+        /* The grid step is one frame up to float rounding: the shipped duration
+         * is the frame count over 24, whatever the source length was. */
         ASSERT_F32((float)((double)(asset->sample_count - 1U) / 24.0), report.duration);
         TEST_ASSERT_TRUE(view.duration == (double)report.duration);
         TEST_ASSERT_TRUE(report.cpu_error_lin > asset->min_lin && report.cpu_error_lin <= asset->max_lin);
@@ -913,6 +917,7 @@ int main(void) {
     RUN_TEST(test_duplicate_channel_is_rejected);
     RUN_TEST(test_matrix_node_channel_is_rejected);
     RUN_TEST(test_step_key_past_the_snapped_end_is_dropped);
+    RUN_TEST(test_step_keys_inside_the_tolerance_land_on_the_end);
     RUN_TEST(test_reparented_joint_is_rejected);
     RUN_TEST(test_backwards_key_times_are_rejected);
     RUN_TEST(test_cubic_through_the_origin_is_rejected);

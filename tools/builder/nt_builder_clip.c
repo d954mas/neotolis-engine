@@ -262,8 +262,8 @@ static void clip_slerp(const double *a, const double *b_in, double u, double *ou
     if (dot > 1.0) {
         dot = 1.0;
     }
-    /* A key-aligned time reproduces its key bit for bit rather than
-     * sin(theta) / sin(theta) of it. */
+    /* u == 0 returns key a bit for bit rather than sin(theta) / sin(theta) of
+     * it; u == 1 (reached by rounding only) returns b in a's hemisphere. */
     if (u == 0.0 || u == 1.0) {
         memcpy(out, (u == 0.0) ? a : b, 4U * sizeof(double));
         return;
@@ -361,8 +361,8 @@ static void clip_eval_checked(const clip_track_t *track, double time, double *ou
 
 // #region resampling
 /* Grid time i of N samples over duration, computed the one way both the builder
- * and a test reproduce it; i * duration is exact in double for a float
- * duration, so the last grid time is duration itself. */
+ * and a test reproduce it; i * duration is exact in double while i < 2^29 (a
+ * 24-bit mantissa times i), so the last grid time is duration itself. */
 static double clip_grid_time(uint32_t i, uint32_t n, float duration) { return ((double)i * (double)duration) / (double)(n - 1U); }
 
 /* Fills one STEP channel from its keys at or before duration (a key past the
@@ -373,22 +373,27 @@ static void clip_fill_step_channel(const clip_track_t *track, float duration, do
     float *times = scratch;
     float *values = scratch + track->key_count;
     uint32_t kept = 0;
-    for (uint32_t k = 0; k < track->key_count; k++) {
+    uint32_t read = 0;
+    for (; read < track->key_count; read++) {
+        const uint32_t k = read;
         /* The first key holds before its time, so it stays even past the end; a
          * key within the frame tolerance past the end is exporter noise and
          * lands on the end. */
         if (k > 0 && track->times[k] > (double)duration + end_slack) {
             break;
         }
-        times[kept] = (float)fmin(track->times[k], (double)duration);
+        const float time = (float)fmin(track->times[k], (double)duration);
+        /* Two keys landing on the end are one key holding the later value. */
+        const uint32_t slot = (kept > 0 && time == times[kept - 1U]) ? (kept - 1U) : kept;
+        times[slot] = time;
         for (uint32_t c = 0; c < 4U; c++) {
-            values[((size_t)kept * 4U) + c] = (c < comps) ? (float)track->values[((size_t)k * comps) + c] : 0.0F;
+            values[((size_t)slot * 4U) + c] = (c < comps) ? (float)track->values[((size_t)k * comps) + c] : 0.0F;
         }
-        kept++;
+        kept = slot + 1U;
     }
-    if (kept < track->key_count) {
+    if (read < track->key_count) {
         NT_LOG_WARN("%s: %s.%s drops %u STEP key(s) from %.9g s on, past the clip's %.9g s", track->label, track->channel->target_node->name, clip_path_name(track->channel->target_path),
-                    track->key_count - kept, track->times[kept], (double)duration);
+                    track->key_count - read, track->times[read], (double)duration);
     }
     bool constant = true;
     for (uint32_t k = 1; k < kept && constant; k++) {
@@ -529,10 +534,9 @@ static void clip_pass_time(clip_pass_t *p, double time) {
     }
 }
 
-/* The dense set: every grid time, every authored key time and three interior
- * sub-samples per grid interval, sorted and deduplicated. The grid is the
- * n_grid one even when no channel is sampled, so a STEP-only clip is still
- * measured between its keys. */
+/* The dense set: every grid time, every authored key time (clamped to the end)
+ * and three sub-samples per grid interval, sorted and deduplicated; a
+ * STEP-only clip is still measured between its keys on the n_grid grid. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void clip_dense_pass(clip_pass_t *p, uint32_t n_grid, float duration) {
     size_t count = (size_t)n_grid + ((size_t)(n_grid - 1U) * CLIP_SUBSAMPLES);
@@ -643,11 +647,9 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     // #endregion
 
     // #region resample
-    /* The grid step is exactly 1 / sample_fps, so the source keys of a clip
-     * authored at that rate land on grid samples: the frame count is the
-     * nearest whole number and the clip's duration follows it, the way Unreal
-     * imports a sequence. A clip that is not a whole number of frames at this
-     * rate holds its last pose for the fraction, or loses it, and says so. */
+    /* Frames are the nearest whole number and the duration follows, so keys
+     * authored at sample_fps land on grid samples (the Unreal import rule); a
+     * fractional source holds or loses its tail and says so. */
     const double frames_exact = (double)source_duration * (double)sample_fps;
     if (!(frames_exact < 4294967294.0)) {
         NT_LOG_ERROR("%s: %.9g s at %g fps is %g frames, more than the grid can hold", label, (double)source_duration, (double)sample_fps, frames_exact);

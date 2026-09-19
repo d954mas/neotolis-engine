@@ -147,7 +147,7 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
 
     // #region animation
     const bool anim = o.animation || o.animation_step_only || o.animation_outside_rig || o.animation_weights || o.animation_duplicate || o.animation_matrix_node || o.animation_step_past_end ||
-                      o.animation_no_channels || o.animation_bad_times || o.animation_cubic_origin;
+                      o.animation_no_channels || o.animation_bad_times || o.animation_cubic_origin || o.animation_step_tail_pair;
     const float anim_q_times[4] = {0.0F, 0.25F, 0.5F, 1.0F};
     const float anim_j1_q[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.6F, 0.6F}, {0.0F, 0.0F, -1.0F, 0.0F}};
     const float anim_cubic_times[2] = {0.25F, 0.75F};
@@ -162,13 +162,22 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         anim_j2_q[1][1][2] = 0.0F;
         anim_j2_q[1][1][3] = -1.0F;
     }
-    float anim_step_times[3] = {0.25F, 0.75F, 1.05F};
+    float anim_step_times[4] = {0.25F, 0.75F, 1.05F, 1.06F};
+    if (o.animation_step_tail_pair) {
+        anim_step_times[2] = 1.00001F;
+        anim_step_times[3] = 1.00002F;
+    }
     if (o.animation_bad_times) {
         anim_step_times[0] = 0.75F;
         anim_step_times[1] = 0.25F;
     }
-    const uint32_t step_keys = o.animation_step_past_end ? 3U : 2U;
-    const float anim_j3_s[3][3] = {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}, {3.0F, 3.0F, 3.0F}};
+    uint32_t step_keys = 2U;
+    if (o.animation_step_tail_pair) {
+        step_keys = 4U;
+    } else if (o.animation_step_past_end) {
+        step_keys = 3U;
+    }
+    const float anim_j3_s[4][3] = {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}, {3.0F, 3.0F, 3.0F}, {4.0F, 4.0F, 4.0F}};
     const float anim_j4_t[2][3] = {{0.0F, 0.5F, 0.0F}, {0.0F, 0.5F, 0.0F}};
     // #endregion
 
@@ -426,7 +435,7 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     jb_addf(&jb, "{\"bufferView\":13,\"componentType\":5126,\"count\":6,\"type\":\"VEC3\"},");
     jb_addf(&jb, "{\"bufferView\":14,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\",\"min\":[0],\"max\":[1]},");
     jb_addf(&jb, "{\"bufferView\":15,\"componentType\":5126,\"count\":6,\"type\":\"VEC4\"},");
-    jb_addf(&jb, "{\"bufferView\":16,\"componentType\":5126,\"count\":%u,\"type\":\"SCALAR\",\"min\":[0.25],\"max\":[%s]},", step_keys, o.animation_step_past_end ? "1.05" : "0.75");
+    jb_addf(&jb, "{\"bufferView\":16,\"componentType\":5126,\"count\":%u,\"type\":\"SCALAR\",\"min\":[0.25],\"max\":[%.9g]},", step_keys, (double)anim_step_times[step_keys - 1U]);
     jb_addf(&jb, "{\"bufferView\":17,\"componentType\":5126,\"count\":%u,\"type\":\"VEC3\"},", step_keys);
     jb_addf(&jb, "{\"bufferView\":18,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"}],");
 
