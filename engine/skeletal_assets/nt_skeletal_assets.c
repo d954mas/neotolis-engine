@@ -29,8 +29,9 @@ static struct {
 // #endregion
 
 // #region payload readers
-/* Payload bytes are little-endian and may sit at any offset inside a pack blob,
- * so every read goes through memcpy. */
+/* Payload bytes are little-endian; the NSKL/NSKN readers go through memcpy,
+ * the NANM tables are read in place through the clip view, which needs the
+ * 4-aligned start every pack asset has. */
 static uint16_t rd_u16(const uint8_t *p) {
     uint16_t v = 0;
     memcpy(&v, p, sizeof(v));
@@ -303,6 +304,12 @@ uint32_t nt_skeletal_assets_activate_clip(const uint8_t *data, uint32_t size) {
 
     NtAnmHeader header = {0};
     if (!anm_validate_header(data, size, &header)) {
+        return 0;
+    }
+    /* The view reads the tables in place; a pack asset is 4-aligned, anything
+     * else is rejected here rather than read misaligned. */
+    if ((((uintptr_t)data) & 3U) != 0U) {
+        NT_LOG_WARN("activate_clip: payload is not 4-aligned");
         return 0;
     }
     /* Interpolation reads two adjacent grid entries, so anything on the grid

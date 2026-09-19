@@ -596,8 +596,8 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_r
 /* What the clip export measured, so the build script decides whether the
  * sample rate was enough: the builder never fails a build on interpolation
  * error. duration is the length the clip ships, a whole number of frames at
- * sample_fps when anything is sampled; a source that was not one is snapped
- * to the nearest frame and logged. Both errors compare the runtime (nt_skeletal_sample on the encoded
+ * sample_fps (at least one) when anything is sampled; a source that was not
+ * one is snapped to the nearest frame and logged. Both errors compare the runtime (nt_skeletal_sample on the encoded
  * clip, then FK) against the exact glTF curves (evaluated in double, then the
  * same FK) over a dense set of times -- every grid time, every authored key,
  * and three sub-samples per grid interval. cpu_error_lin is the largest
@@ -619,17 +619,20 @@ typedef struct {
 /* Exports one glTF animation as an absolute clip on the rig. Channels map to
  * joints by name hash, the same path for the rig's own scene and for another
  * scene: every animated node must be a rig joint whose local rest TRS is
- * bit-identical to the rig's (a differing rest is a different rig). Every
+ * bit-identical to the rig's and that hangs under the node its joint's parent
+ * is named after (a differing rest or hierarchy is a different rig). Every
  * LINEAR and CUBICSPLINE channel is resampled onto one uniform grid with a
  * step of exactly 1 / sample_fps, round(duration * sample_fps) + 1 samples
  * over a duration snapped to that whole number of frames, STEP channels keep
  * their authored keys, a channel whose samples or keys are all identical folds to a constant,
  * and the object curve stays absent. The three header bounds are measured
  * over the same dense pass as the report (skeletal spec, Bounds and culling).
- * Content errors -- a target outside the rig, a rest mismatch, an unnamed or
- * matrix-driven target, a duplicate channel, a morph weights channel, an
- * accessor of the wrong type or with non-increasing input -- log a diagnostic
- * and assert. */
+ * Content errors -- an animation without channels, a target outside the rig,
+ * a parent or rest mismatch, an unnamed or matrix-driven target, a duplicate
+ * channel, a morph weights channel, an accessor of the wrong type or with
+ * non-increasing input, a curve that evaluates outside the float range, a
+ * rate whose grid overflows or has no finite step -- log a diagnostic and
+ * assert. */
 void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t animation_index, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
                                nt_builder_clip_report_t *report);
 
@@ -641,7 +644,7 @@ nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_ske
 /* Inverse binds are mesh space -> joint space at the bind pose, where mesh space
  * is the primitive's vertex space and the skinned mesh node's transform is
  * ignored (the glTF rule). reach (joint space) and any_pose_radius (skeleton
- * space) must be finite and non-negative; the activator copies them unchecked.
+ * space) must be finite and non-negative; the activator rejects the rest.
  * remap is not bounded against a skeleton here. */
 void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
 

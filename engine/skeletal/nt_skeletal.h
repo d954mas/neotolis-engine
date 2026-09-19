@@ -307,10 +307,11 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, const nt_sk
 void nt_skeletal_sample_object(const nt_skeletal_object_curve_t *curve, double time, const nt_skeletal_trs_t *defaults, nt_skeletal_trs_t *out);
 
 /* Points *out at the tables of a NANM payload in place: no validation, no
- * allocation, no copy. payload must be 4-aligned and stay alive as long as the
- * view; a structurally validated payload (the activator's job) is the
- * precondition for using the view, and the builder measures its own encoder
- * output through the same function. */
+ * allocation, no copy. Preconditions: payload is 4-aligned, stays alive as long
+ * as the view, and holds exactly nt_anm_size(header) bytes (the activator
+ * proves that before it looks at the tables; the table entries themselves are
+ * not range-checked here). The builder measures its own encoder output through
+ * the same function. */
 void nt_skeletal_clip_view(const uint8_t *payload, nt_skeletal_clip_t *out);
 // #endregion
 

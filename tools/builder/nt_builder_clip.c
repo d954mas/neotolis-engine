@@ -4,6 +4,7 @@
 #include "cgltf.h"
 /* clang-format on */
 
+#include <float.h>
 #include <math.h>
 
 #include "skeletal/nt_skeletal.h"
@@ -41,6 +42,17 @@ static bool clip_bits_equal(const float *a, const float *b, uint32_t count) {
         memcpy(&x, &a[i], sizeof(x));
         memcpy(&y, &b[i], sizeof(y));
         if (x != y) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The same rotation with every sign flipped, bit for bit. */
+static bool clip_bits_negated(const float *a, const float *b) {
+    for (uint32_t i = 0; i < 4U; i++) {
+        const float neg = -b[i];
+        if (!clip_bits_equal(&a[i], &neg, 1U)) {
             return false;
         }
     }
@@ -333,12 +345,13 @@ static void clip_eval(const clip_track_t *track, double time, double *out) {
 }
 
 /* clip_eval with the one content rule the keys cannot express: a cubic through
- * the origin normalizes to NaN and huge tangents overflow, so the value is
- * checked where it is produced and the diagnostic names the channel. */
+ * the origin normalizes to NaN and huge tangents overflow the float the clip
+ * stores, so the value is checked where it is produced and the diagnostic
+ * names the channel. */
 static void clip_eval_checked(const clip_track_t *track, double time, double *out) {
     clip_eval(track, time, out);
     for (uint32_t c = 0; c < track->comps; c++) {
-        if (!isfinite(out[c])) {
+        if (!(fabs(out[c]) <= (double)FLT_MAX)) {
             NT_LOG_ERROR("%s: %s.%s evaluates to a non-finite value at %.9g s", track->label, track->channel->target_node->name, clip_path_name(track->channel->target_path), time);
             NT_BUILD_ASSERT(0 && "animation curve evaluates to a non-finite value");
         }
@@ -355,17 +368,19 @@ static double clip_grid_time(uint32_t i, uint32_t n, float duration) { return ((
 /* Fills one STEP channel from its keys at or before duration (a key past the
  * clip's snapped end is never reached), or one value when nothing changes.
  * scratch holds key_count * 5 floats. */
-static void clip_fill_step_channel(const clip_track_t *track, float duration, float *scratch, nt_builder_anim_channel_t *ch) {
+static void clip_fill_step_channel(const clip_track_t *track, float duration, double end_slack, float *scratch, nt_builder_anim_channel_t *ch) {
     const uint32_t comps = track->comps;
     float *times = scratch;
     float *values = scratch + track->key_count;
     uint32_t kept = 0;
     for (uint32_t k = 0; k < track->key_count; k++) {
-        /* The first key holds before its time, so it stays even past the end. */
-        if (k > 0 && track->times[k] > (double)duration) {
+        /* The first key holds before its time, so it stays even past the end; a
+         * key within the frame tolerance past the end is exporter noise and
+         * lands on the end. */
+        if (k > 0 && track->times[k] > (double)duration + end_slack) {
             break;
         }
-        times[kept] = (float)track->times[k];
+        times[kept] = (float)fmin(track->times[k], (double)duration);
         for (uint32_t c = 0; c < 4U; c++) {
             values[((size_t)kept * 4U) + c] = (c < comps) ? (float)track->values[((size_t)k * comps) + c] : 0.0F;
         }
@@ -403,9 +418,12 @@ static void clip_fill_sampled_channel(const clip_track_t *track, uint32_t n_grid
             scratch[((size_t)i * comps) + c] = (float)v[c];
         }
     }
+    /* q and -q are one rotation: a held last key in the other hemisphere must
+     * not keep a constant rotation on the grid. */
     bool constant = true;
     for (uint32_t i = 1; i < n_grid && constant; i++) {
-        constant = clip_bits_equal(scratch, scratch + ((size_t)i * comps), comps);
+        const float *sample = scratch + ((size_t)i * comps);
+        constant = clip_bits_equal(scratch, sample, comps) || (track->kind == 1U && clip_bits_negated(scratch, sample));
     }
     if (constant) {
         ch->mode = NT_SKELETAL_CHANNEL_CONSTANT;
@@ -429,6 +447,7 @@ typedef struct {
     nt_skeletal_mat34_t *g_ex;
     double *stretch; /* per joint: product of max|s| along the ancestor chain */
     double r_joints, r_root, s_max;
+    double lin_max, t_max; /* the report's maxima, compared in double so a float tie cannot move the worst pair */
     nt_builder_clip_report_t *report;
 } clip_pass_t;
 
@@ -478,13 +497,13 @@ static void clip_pass_time(clip_pass_t *p, double time) {
         }
         const double lin = sqrt(lin2);
         const double dt = sqrt(dt2);
-        if (lin > (double)p->report->cpu_error_lin) {
-            p->report->cpu_error_lin = (float)lin;
+        if (lin > p->lin_max) {
+            p->lin_max = lin;
             p->report->worst_time_lin = time;
             p->report->worst_joint_lin = j;
         }
-        if (dt > (double)p->report->cpu_error_t) {
-            p->report->cpu_error_t = (float)dt;
+        if (dt > p->t_max) {
+            p->t_max = dt;
             p->report->worst_time_t = time;
             p->report->worst_joint_t = j;
         }
@@ -650,22 +669,20 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     NT_BUILD_ASSERT(out_arena && channels && "add_scene_clip: alloc failed (OOM)");
     float *out_next = out_arena;
     bool sampled = false;
-    bool evaluated = false;
     for (uint32_t t = 0; t < track_count; t++) {
         if (tracks[t].interpolation == cgltf_interpolation_type_step) {
             continue;
         }
-        evaluated = true;
         const uint32_t c = (3U * tracks[t].joint) + tracks[t].kind;
         clip_fill_sampled_channel(&tracks[t], n_grid, grid_duration, out_next, &channels[c]);
         out_next += (size_t)n_grid * 4U;
         sampled = sampled || channels[c].mode == NT_SKELETAL_CHANNEL_SAMPLED;
     }
     /* Without a grid there is nothing to align, so the clip keeps its exact
-     * source length. The fraction is reported whenever a curve was put on the
-     * grid, folded or not: a fold decided over the grid saw nothing past it. */
+     * source length; a curve that folded over the grid is still measured over
+     * that length, so anything past the grid shows in the report. */
     duration = sampled ? grid_duration : source_duration;
-    if (evaluated && (fabs(frames_exact - (double)(n_grid - 1U)) > CLIP_FRAME_SNAP_TOLERANCE)) {
+    if (sampled && (fabs(frames_exact - (double)(n_grid - 1U)) > CLIP_FRAME_SNAP_TOLERANCE)) {
         NT_LOG_WARN("%s: %.9g s is %.4g frames at %g fps, not a whole number; the clip ships %u frames, %.9g s", label, (double)source_duration, frames_exact, (double)sample_fps, n_grid - 1U,
                     (double)duration);
     }
@@ -674,7 +691,7 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
             continue;
         }
         const uint32_t c = (3U * tracks[t].joint) + tracks[t].kind;
-        clip_fill_step_channel(&tracks[t], duration, out_next, &channels[c]);
+        clip_fill_step_channel(&tracks[t], duration, sampled ? (CLIP_FRAME_SNAP_TOLERANCE / (double)sample_fps) : 0.0, out_next, &channels[c]);
         out_next += (size_t)tracks[t].key_count * 5U;
     }
     nt_builder_clip_t clip = {
@@ -713,6 +730,8 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     };
     NT_BUILD_ASSERT(pass.local_rt && pass.local_ex && pass.g_rt && pass.g_ex && pass.stretch && "add_scene_clip: alloc failed (OOM)");
     clip_dense_pass(&pass, n_grid, duration);
+    report->cpu_error_lin = (float)pass.lin_max;
+    report->cpu_error_t = (float)pass.t_max;
     free(pass.stretch);
     free(pass.g_ex);
     free(pass.g_rt);

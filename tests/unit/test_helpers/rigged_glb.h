@@ -172,6 +172,7 @@ typedef struct {
     bool animation_step_past_end; /* the Joint3 STEP track gains a key at 1.05 s, past the snapped end */
     bool animation_no_channels;   /* "Clip" has samplers but no channels */
     bool animation_bad_times;     /* the Joint3 STEP input runs backwards: 0.75 then 0.25 */
+    bool animation_cubic_origin;  /* the Joint2 CUBICSPLINE rotation runs identity -> (0, 0, 0, -1) with zero tangents: through the origin */
     bool reparent_joint2;         /* Joint2 hangs under Joint3 instead of Joint1 (same name, same rest) */
     bool rest_mismatch;           /* the rest translation y of Joint2 is one ulp above 0.75 */
 } rigged_glb_opts_t;

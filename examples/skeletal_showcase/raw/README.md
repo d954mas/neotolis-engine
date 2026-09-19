@@ -11,8 +11,9 @@ primitive without normals. Its mesh is CC0 (PixelMannen) while its rigging,
 animation and glTF conversion are CC-BY 4.0 (tomkranis, @AsoboStudio and
 @scurest), so the file is redistributed under CC-BY 4.0; `Fox-LICENSE.txt`
 holds the full attribution. `tests/unit/test_builder_rig.c` imports its rig,
-skin binding and skinned mesh, which is what keeps the importer honest against
-an asset nobody here authored.
+skin binding and skinned mesh and `tests/unit/test_builder_clip.c` its
+animations, which is what keeps the importers honest against an asset nobody
+here authored.
 
 `CesiumMan.glb` is the "Cesium Man" model of the same repository: a 19-joint
 humanoid under two `matrix` wrapper nodes, one animation and one skinned

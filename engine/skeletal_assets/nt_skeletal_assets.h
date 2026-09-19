@@ -17,7 +17,9 @@
  * which leaves the asset FAILED. Values inside a structurally sound payload
  * (finite samples, unit quaternions, key order) are the builder's contract and
  * the kernels' NT_SKELETAL_CHECKS, not re-validated here; duration is checked
- * because it sizes the grid.
+ * because it sizes the grid, and the radii because a culling consumer trusts
+ * them. A NANM payload must start 4-aligned, as every pack asset does: its
+ * tables are read in place.
  *
  * The module registers nothing itself. An application that links animation
  * registers the three pairs like any other type:

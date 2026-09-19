@@ -44,7 +44,7 @@
 #define FPS 24.0F
 #define GRID 25U /* round(1.0 * 24) + 1 */
 #define FPS_COARSE 10.0F
-#define GRID_COARSE 11U /* the 0.25 / 0.75 keys fall between samples */
+#define GRID_COARSE 11U /* the 0.25 / 0.75 keys fall between grid samples (they are still quarter points) */
 #define SUBSAMPLES 3U
 #define QUARTER_PI 0.78539816339744830962 /* pi / 4: the half-angle of one 90 degree key step */
 
@@ -647,8 +647,10 @@ static void check_report(float fps, uint32_t grid) {
 }
 
 /* At 24 fps every authored key is a grid time; at 10 fps the 0.25 / 0.75
- * keys fall between samples, so the dense set's key times carry weight of
- * their own and the STEP jump is measured where it happens. */
+ * keys fall between grid samples, so the STEP jump and the Hermite hold
+ * points are measured off the grid. (They are still quarter points of the
+ * 10 fps grid; only the Khronos Run keys sit off every sub-sample, and the
+ * floors in that test are what pins the authored-key insertion.) */
 void test_report_matches_an_independent_measurement(void) {
     check_report(FPS, GRID);
     check_report(FPS_COARSE, GRID_COARSE);
@@ -685,7 +687,7 @@ void test_step_only_clip_ships_no_grid(void) {
 /* Bounds under the default cut (Root and Helper are joints: Helper's scale 2
  * doubles the STEP scale) and under a cut at Joint0 (its rest translation is
  * the only root translation; the Joint4 chain is 2 * 0.5). */
-void test_bounds_match_the_recurrence_under_two_cuts(void) {
+void test_bounds_match_the_measurement_under_two_cuts(void) {
     const rigged_glb_opts_t opts = {.animation = true};
     fixture_export_t fx;
     ref_measure_t m;
@@ -770,6 +772,11 @@ void test_backwards_key_times_are_rejected(void) {
     EXPECT_CLIP_REJECTED(opts, "strictly increasing", "Joint3");
 }
 
+void test_cubic_through_the_origin_is_rejected(void) {
+    const rigged_glb_opts_t opts = {.animation_cubic_origin = true};
+    EXPECT_CLIP_REJECTED(opts, "evaluates to a non-finite value", "Joint2");
+}
+
 void test_animation_without_channels_is_rejected(void) {
     const rigged_glb_opts_t opts = {.animation_no_channels = true};
     fixture_export_t fx;
@@ -791,6 +798,7 @@ void test_bad_arguments_are_rejected(void) {
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, 0.0F, CLIP_ID, &report), "sample_fps must be finite and positive");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, NAN, CLIP_ID, &report), "sample_fps must be finite and positive");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, 1e30F, CLIP_ID, &report), "overflows the sample grid");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, 1e-40F, CLIP_ID, &report), "sample_fps gives no finite grid");
     EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, FPS, CLIP_ID, NULL), "invalid add_scene_clip args");
     nt_builder_free_pack(ctx);
     nt_builder_free_rig(&rig);
@@ -824,6 +832,7 @@ typedef struct {
     uint32_t sample_count; /* round(last key * 24) + 1, from the input accessors */
     bool snapped;          /* the source is not a whole number of frames at 24 fps */
     float max_lin, max_t;  /* ceilings above the measured errors */
+    float min_lin, min_t;  /* floors below them: Run's keys sit off every sub-sample, so only the authored-key times reach its peaks */
 } khronos_clip_t;
 
 /* Fox's three clips end at 3.4167, 0.7083 and 1.1583 s -- 82, 17 and 27.8
@@ -835,10 +844,10 @@ typedef struct {
  * ceilings sit above Walk's 0.29 degrees (a Frobenius distance of
  * 2 sqrt(2) sin(theta / 2) = 0.0072) and 0.06 cm. */
 static const khronos_clip_t k_khronos[4] = {
-    {"examples/skeletal_showcase/raw/Fox.glb", 0, 83, false, 0.02F, 0.5F},
-    {"examples/skeletal_showcase/raw/Fox.glb", 1, 18, false, 0.02F, 0.5F},
-    {"examples/skeletal_showcase/raw/Fox.glb", 2, 29, true, 0.2F, 2.5F},
-    {"examples/skeletal_showcase/raw/CesiumMan.glb", 0, 49, false, 0.02F, 0.5F},
+    {"examples/skeletal_showcase/raw/Fox.glb", 0, 83, false, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/Fox.glb", 1, 18, false, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/Fox.glb", 2, 29, true, 0.2F, 2.5F, 0.1F, 1.5F},
+    {"examples/skeletal_showcase/raw/CesiumMan.glb", 0, 49, false, 0.02F, 0.5F, 0.0F, 0.0F},
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -876,8 +885,8 @@ void test_khronos_clips_export_at_24_fps(void) {
          * count over 24, whatever the source length was. */
         ASSERT_F32((float)((double)(asset->sample_count - 1U) / 24.0), report.duration);
         TEST_ASSERT_TRUE(view.duration == (double)report.duration);
-        TEST_ASSERT_TRUE(report.cpu_error_lin > 0.0F && report.cpu_error_lin <= asset->max_lin);
-        TEST_ASSERT_TRUE(report.cpu_error_t > 0.0F && report.cpu_error_t <= asset->max_t);
+        TEST_ASSERT_TRUE(report.cpu_error_lin > asset->min_lin && report.cpu_error_lin <= asset->max_lin);
+        TEST_ASSERT_TRUE(report.cpu_error_t > asset->min_t && report.cpu_error_t <= asset->max_t);
         TEST_ASSERT_TRUE(view.r_joints > 0.0F && view.s_max >= 1.0F);
         TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, view.rig_compat_id.value);
         /* Every source channel is LINEAR with a moving value, and both skins
@@ -898,7 +907,7 @@ int main(void) {
     RUN_TEST(test_step_keys_constants_and_absent_channels);
     RUN_TEST(test_step_only_clip_ships_no_grid);
     RUN_TEST(test_report_matches_an_independent_measurement);
-    RUN_TEST(test_bounds_match_the_recurrence_under_two_cuts);
+    RUN_TEST(test_bounds_match_the_measurement_under_two_cuts);
     RUN_TEST(test_channel_outside_the_rig_is_rejected);
     RUN_TEST(test_morph_weights_channel_is_rejected);
     RUN_TEST(test_duplicate_channel_is_rejected);
@@ -906,6 +915,7 @@ int main(void) {
     RUN_TEST(test_step_key_past_the_snapped_end_is_dropped);
     RUN_TEST(test_reparented_joint_is_rejected);
     RUN_TEST(test_backwards_key_times_are_rejected);
+    RUN_TEST(test_cubic_through_the_origin_is_rejected);
     RUN_TEST(test_animation_without_channels_is_rejected);
     RUN_TEST(test_bad_arguments_are_rejected);
     RUN_TEST(test_clip_from_another_glb_maps_by_name_and_rest);

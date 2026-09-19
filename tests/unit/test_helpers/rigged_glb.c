@@ -147,14 +147,21 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
 
     // #region animation
     const bool anim = o.animation || o.animation_step_only || o.animation_outside_rig || o.animation_weights || o.animation_duplicate || o.animation_matrix_node || o.animation_step_past_end ||
-                      o.animation_no_channels || o.animation_bad_times;
+                      o.animation_no_channels || o.animation_bad_times || o.animation_cubic_origin;
     const float anim_q_times[4] = {0.0F, 0.25F, 0.5F, 1.0F};
     const float anim_j1_q[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.6F, 0.6F}, {0.0F, 0.0F, -1.0F, 0.0F}};
     const float anim_cubic_times[2] = {0.25F, 0.75F};
     /* Per key: in-tangent, value, out-tangent. */
     const float anim_j2_t[2][3][3] = {{{100.0F, 100.0F, 100.0F}, {0.0F, 0.0F, 0.0F}, {8.0F, 0.0F, 0.0F}}, {{0.0F, 8.0F, 0.0F}, {1.0F, 2.0F, 4.0F}, {100.0F, 100.0F, 100.0F}}};
     const float anim_ends[2] = {0.0F, RIGGED_GLB_ANIM_DURATION};
-    const float anim_j2_q[2][3][4] = {{{7.0F, 7.0F, 7.0F, 7.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 2.0F, 0.0F}}, {{0.0F, 0.0F, 2.0F, 0.0F}, {0.0F, 0.0F, 1.0F, 0.0F}, {7.0F, 7.0F, 7.0F, 7.0F}}};
+    float anim_j2_q[2][3][4] = {{{7.0F, 7.0F, 7.0F, 7.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 2.0F, 0.0F}}, {{0.0F, 0.0F, 2.0F, 0.0F}, {0.0F, 0.0F, 1.0F, 0.0F}, {7.0F, 7.0F, 7.0F, 7.0F}}};
+    if (o.animation_cubic_origin) {
+        /* Halfway between q and -q with no tangent pull the Hermite is zero. */
+        memset(anim_j2_q[0][2], 0, sizeof(anim_j2_q[0][2]));
+        memset(anim_j2_q[1][0], 0, sizeof(anim_j2_q[1][0]));
+        anim_j2_q[1][1][2] = 0.0F;
+        anim_j2_q[1][1][3] = -1.0F;
+    }
     float anim_step_times[3] = {0.25F, 0.75F, 1.05F};
     if (o.animation_bad_times) {
         anim_step_times[0] = 0.75F;

@@ -745,6 +745,14 @@ void test_skin_binding_rejections(void) {
     wr_u32(buf + 20, 0x7FC00000U);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "NaN any_pose_radius");
 
+    memcpy(buf, valid, size);
+    wr_u32(buf + 16, 0x7F800000U);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "infinite reach");
+
+    memcpy(buf, valid, size);
+    wr_f32(buf + 20, -2.0F);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, nt_skeletal_assets_activate_skin_binding(buf, size), "negative any_pose_radius");
+
     /* The pre-bounds payload of the same palette is exactly the header short of
      * this one, and a pack built before the bounds must not activate. */
     memcpy(buf, valid, size);
@@ -817,6 +825,26 @@ void test_clip_header_rejections(void) {
     memcpy(buf, valid, size);
     wr_f32(buf + ANM_HDR_S_MAX, -0.5F);
     EXPECT_CLIP_REJECTED(buf, size, "negative s_max");
+
+    memcpy(buf, valid, size);
+    wr_u32(buf + ANM_HDR_R_ROOT, 0x7FC00000U);
+    EXPECT_CLIP_REJECTED(buf, size, "NaN r_root");
+
+    memcpy(buf, valid, size);
+    wr_f32(buf + ANM_HDR_R_JOINTS, -1.0F);
+    EXPECT_CLIP_REJECTED(buf, size, "negative r_joints");
+
+    memcpy(buf, valid, size);
+    wr_u32(buf + ANM_HDR_S_MAX, 0x7F800000U);
+    EXPECT_CLIP_REJECTED(buf, size, "infinite s_max");
+
+    /* The tables are read in place, so a payload that does not start 4-aligned
+     * is refused before any typed read. */
+    uint8_t *shifted = (uint8_t *)calloc(size + 4U, 1);
+    TEST_ASSERT_NOT_NULL(shifted);
+    memcpy(shifted + 1, valid, size);
+    EXPECT_CLIP_REJECTED(shifted + 1, size, "a payload one byte off alignment");
+    free(shifted);
 
     /* A count that no longer matches the arrays changes the payload size. */
     memcpy(buf, valid, size);
