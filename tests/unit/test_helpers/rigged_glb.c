@@ -32,6 +32,9 @@ static void jb_addf(json_buf_t *jb, const char *fmt, ...) RIGGED_PRINTF_ATTR(2, 
 static void jb_addf(json_buf_t *jb, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
+    /* The SysV va_list is an array; the analyzer loses the va_start through the
+     * forwarded pointer and reports it uninitialized on Linux only. */
+    // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
     const int needed = vsnprintf(jb->data + jb->len, sizeof(jb->data) - jb->len, fmt, args);
     va_end(args);
     if (needed < 0 || jb->len + (size_t)needed >= sizeof(jb->data)) {
