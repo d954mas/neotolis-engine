@@ -1,4 +1,5 @@
-/* Skeleton & Pose: a compact, code-defined humanoid exercising nt_skeletal_fk. */
+/* Skeleton & Pose: a code-defined humanoid and imported rigs through nt_skeletal_fk.
+ * Playback: imported clips on a caller-owned track through the sampler. */
 
 // #region includes
 #include "app/nt_app.h"
@@ -43,6 +44,7 @@
 #include "skeletal_assets/nt_skeletal_assets.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
+#include "ui/nt_ui_checkbox.h"
 #include "ui/nt_ui_dropdown.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
@@ -86,6 +88,17 @@ typedef enum {
 } rig_source_t;
 
 static const char *const s_rig_names[RIG_COUNT] = {"Humanoid", "Fox", "CesiumMan"};
+/* The rig a clip plays on comes from its view's rig_compat_id, not from the label. */
+static const struct {
+    const char *name;
+    nt_hash64_t id;
+} s_clips[] = {
+    {"Fox Survey", ASSET_CLIP_SKELETAL_SHOWCASE_FOX_SURVEY_NANM},
+    {"Fox Walk", ASSET_CLIP_SKELETAL_SHOWCASE_FOX_WALK_NANM},
+    {"Fox Run", ASSET_CLIP_SKELETAL_SHOWCASE_FOX_RUN_NANM},
+    {"CesiumMan", ASSET_CLIP_SKELETAL_SHOWCASE_CESIUMMAN_NANM},
+};
+#define CLIP_COUNT ((int)(sizeof s_clips / sizeof s_clips[0]))
 
 static const char *const s_joint_names[HUMANOID_JOINT_COUNT] = {
     "pelvis",        "spine",      "chest",      "neck",      "head",      "left_clavicle", "left_upper_arm", "left_forearm", "left_hand",  "right_clavicle", "right_upper_arm",
@@ -117,24 +130,39 @@ static const nt_skeletal_trs_t s_rest[HUMANOID_JOINT_COUNT] = {
 };
 
 typedef struct {
-    nt_skeletal_skeleton_t humanoid;    /* the code-defined rig over the static arrays above */
     const nt_skeletal_skeleton_t *view; /* active rig; NULL while an imported skeleton is not ready */
     rig_source_t rig_source;
     nt_skeletal_trs_t local[SKELETAL_SHOWCASE_MAX_JOINTS];
     nt_skeletal_mat34_t model[SKELETAL_SHOWCASE_MAX_JOINTS];
     float angles[SKELETAL_SHOWCASE_MAX_JOINTS][3];
-    uint32_t joint_ids[HUMANOID_JOINT_COUNT];
-    bool fit_pending;
-    uint64_t view_rig_id; /* rig_compat_id the angles and fit were made for */
     int selected_joint;
     bool show_axes;
     bool combo_open;
     bool rig_combo_open;
-    bool initialized;
 } skeletal_pose_scene_state_t;
 
+typedef struct {
+    rig_source_t rig;                   /* RIG_FOX or RIG_CESIUMMAN: the humanoid has no clips */
+    const nt_skeletal_skeleton_t *skel; /* NULL while the imported skeleton is not ready */
+    int clip;                           /* index into s_clip_resource, -1 = none */
+    const nt_skeletal_clip_t *clip_view;
+    nt_skeletal_track_t track; /* OCCUPIED while a clip is selected */
+    float speed_mag;
+    bool reverse;
+    bool paused;
+    bool loop;
+    nt_skeletal_trs_t local[SKELETAL_SHOWCASE_MAX_JOINTS];
+    nt_skeletal_mat34_t model[SKELETAL_SHOWCASE_MAX_JOINTS];
+    bool rig_combo_open;
+    bool clip_combo_open;
+} playback_scene_state_t;
+
 static skeletal_pose_scene_state_t s_skeleton_scene;
+static playback_scene_state_t s_playback_scene;
+static nt_skeletal_skeleton_t s_humanoid; /* the code-defined rig over the static arrays above */
+static uint32_t s_humanoid_joint_ids[HUMANOID_JOINT_COUNT];
 static nt_resource_t s_rig_resource[RIG_COUNT]; /* RIG_HUMANOID stays NT_RESOURCE_INVALID */
+static nt_resource_t s_clip_resource[CLIP_COUNT];
 static float s_humanoid_extent;
 static bool s_shell_stage_drag;
 static bool s_shell_stage_pan;
@@ -145,6 +173,7 @@ static float s_camera_distance;
 static float s_camera_target[3];
 static float s_fit_center[3];
 static float s_fit_scale = 1.0F; /* rig extent / humanoid extent: scales the camera and the stage primitives */
+static bool s_fit_pending;       /* the active scene refits the camera to its rig on its next update */
 static bool s_show_controls = true;
 static bool s_scene_combo_open;
 static int s_active_scene = -1;
@@ -153,7 +182,6 @@ static bool s_skip_scene_interaction_this_frame;
 static nt_ui_context_t *s_ui;
 NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 static nt_buffer_t s_frame_ubo;
-static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas;
 static nt_resource_t s_atlas_texture;
 static nt_resource_t s_font_resource;
@@ -167,6 +195,7 @@ static bool s_font_bound;
 static uint32_t s_white_region;
 static nt_ui_button_style_t s_button_style;
 static nt_ui_slider_style_t s_slider_style;
+static nt_ui_checkbox_style_t s_checkbox_style;
 static nt_ui_scroll_style_t s_joint_scroll_style;
 static nt_ui_dropdown_style_t s_joint_combo_style;
 static nt_ui_dropdown_style_t s_scene_combo_style;
@@ -178,8 +207,6 @@ typedef struct {
     const char *title;
     const char *description;
     const char *source;
-    void (*enter)(void);
-    void (*leave)(void);
     void (*reset)(void);
     void (*update)(void);
     void (*cancel_input)(void);
@@ -189,25 +216,37 @@ typedef struct {
 
 static void cancel_scene_input(void);
 static void cancel_active_scene_input(void);
-static void skeleton_enter(void);
 static void skeleton_cancel_input(void);
 static void skeleton_draw(void);
 static void reset_scene(void);
 static void skeleton_update(void);
 static void declare_properties(void);
+static void playback_reset(void);
+static void playback_update(void);
+static void playback_cancel_input(void);
+static void playback_declare_controls(void);
+static void playback_draw(void);
 
 static const skeletal_scene_desc_t s_scene_registry[] = {
     {
         .title = "Skeleton & Pose",
         .description = "Pose a code-defined humanoid or an imported Khronos rig with forward kinematics.",
         .source = "Source: examples/skeletal_showcase/main.c",
-        .enter = skeleton_enter,
-        .leave = NULL,
         .reset = reset_scene,
         .update = skeleton_update,
         .cancel_input = skeleton_cancel_input,
         .declare_controls = declare_properties,
         .draw = skeleton_draw,
+    },
+    {
+        .title = "Playback",
+        .description = "Play imported glTF clips on a Khronos rig through one caller-owned track.",
+        .source = "Source: examples/skeletal_showcase/main.c",
+        .reset = playback_reset,
+        .update = playback_update,
+        .cancel_input = playback_cancel_input,
+        .declare_controls = playback_declare_controls,
+        .draw = playback_draw,
     },
 };
 #define SKELETAL_SCENE_COUNT ((int)(sizeof s_scene_registry / sizeof s_scene_registry[0]))
@@ -248,28 +287,19 @@ static void set_camera_fit(const float center[3], float scale) {
     reset_camera();
 }
 
-/* Refreshes the borrowed view: the pointer may change on reload, so it is
- * refetched after resource_step. NULL means the imported skeleton is not ready. */
-static void refresh_view(void) {
-    const rig_source_t rig = s_skeleton_scene.rig_source;
+/* Borrowed view of a rig: the pointer may change on reload, so scenes refetch
+ * it after resource_step. NULL means the imported skeleton is not ready. */
+static const nt_skeletal_skeleton_t *rig_view(rig_source_t rig) {
+    const nt_skeletal_skeleton_t *view = NULL;
     if (rig == RIG_HUMANOID) {
-        s_skeleton_scene.view = &s_skeleton_scene.humanoid;
+        view = &s_humanoid;
     } else if (nt_resource_is_ready(s_rig_resource[rig])) {
-        s_skeleton_scene.view = nt_skeletal_assets_skeleton(s_rig_resource[rig]);
-    } else {
-        s_skeleton_scene.view = NULL;
+        view = nt_skeletal_assets_skeleton(s_rig_resource[rig]);
     }
-    if (s_skeleton_scene.view != NULL) {
-        NT_ASSERT(s_skeleton_scene.view->joint_count <= SKELETAL_SHOWCASE_MAX_JOINTS && "skeletal_showcase: rig exceeds SKELETAL_SHOWCASE_MAX_JOINTS");
-        /* A reload may hand back a different rig under the same handle; angles
-         * and the camera fit belong to the rig they were made for. */
-        if (s_skeleton_scene.view->rig_compat_id.value != s_skeleton_scene.view_rig_id) {
-            s_skeleton_scene.view_rig_id = s_skeleton_scene.view->rig_compat_id.value;
-            s_skeleton_scene.selected_joint = 0;
-            s_skeleton_scene.fit_pending = true;
-            memset(s_skeleton_scene.angles, 0, sizeof s_skeleton_scene.angles);
-        }
+    if (view != NULL) {
+        NT_ASSERT(view->joint_count <= SKELETAL_SHOWCASE_MAX_JOINTS && "skeletal_showcase: rig exceeds SKELETAL_SHOWCASE_MAX_JOINTS");
     }
+    return view;
 }
 
 static void apply_pose(void) {
@@ -287,13 +317,13 @@ static void apply_pose(void) {
 }
 
 /* Centroid and extent (max joint distance from the centroid) of model[]. */
-static float rig_extent(uint16_t joint_count, float center[3]) {
+static float rig_extent(const nt_skeletal_mat34_t *model, uint16_t joint_count, float center[3]) {
     center[0] = 0.0F;
     center[1] = 0.0F;
     center[2] = 0.0F;
     for (uint32_t j = 0; j < joint_count; ++j) {
         for (int k = 0; k < 3; ++k) {
-            center[k] += s_skeleton_scene.model[j].r[k][3];
+            center[k] += model[j].r[k][3];
         }
     }
     for (int k = 0; k < 3; ++k) {
@@ -301,33 +331,53 @@ static float rig_extent(uint16_t joint_count, float center[3]) {
     }
     float extent = 0.0F;
     for (uint32_t j = 0; j < joint_count; ++j) {
-        const float d[3] = {s_skeleton_scene.model[j].r[0][3] - center[0], s_skeleton_scene.model[j].r[1][3] - center[1], s_skeleton_scene.model[j].r[2][3] - center[2]};
+        const float d[3] = {model[j].r[0][3] - center[0], model[j].r[1][3] - center[1], model[j].r[2][3] - center[2]};
         const float dist = sqrtf((d[0] * d[0]) + (d[1] * d[1]) + (d[2] * d[2]));
         extent = dist > extent ? dist : extent;
     }
     return extent;
 }
 
-/* Frames the active rig at rest: model[] must hold the rest pose. */
-static void fit_rig(void) {
+/* Frames a rig from its rest pose, scaled against the humanoid reference. */
+static void fit_rig(const char *name, const nt_skeletal_skeleton_t *skel) {
+    nt_skeletal_mat34_t model[SKELETAL_SHOWCASE_MAX_JOINTS];
+    nt_skeletal_fk(skel, skel->rest, model, 0, skel->joint_count);
     float center[3];
-    const float extent = rig_extent(s_skeleton_scene.view->joint_count, center);
+    const float extent = rig_extent(model, skel->joint_count, center);
     NT_ASSERT(extent > 0.0F && "skeletal_showcase: rig joints all rest at one point");
     const float scale = extent / s_humanoid_extent;
-    s_skeleton_scene.fit_pending = false;
-    nt_log_info("skeletal_showcase: rig %s joints=%u centroid=(%.3f, %.3f, %.3f) extent=%.3f scale=%.3f", s_rig_names[s_skeleton_scene.rig_source], (unsigned)s_skeleton_scene.view->joint_count,
-                (double)center[0], (double)center[1], (double)center[2], (double)extent, (double)scale);
+    nt_log_info("skeletal_showcase: rig %s joints=%u centroid=(%.3f, %.3f, %.3f) extent=%.3f scale=%.3f", name, (unsigned)skel->joint_count, (double)center[0], (double)center[1], (double)center[2],
+                (double)extent, (double)scale);
     set_camera_fit(center, scale);
 }
 
+static void init_humanoid(void) {
+    s_humanoid.parent = s_parent;
+    s_humanoid.subtree_end = s_subtree_end;
+    s_humanoid.joint_id = s_humanoid_joint_ids;
+    s_humanoid.rest = s_rest;
+    s_humanoid.joint_count = HUMANOID_JOINT_COUNT;
+    uint8_t rig_scratch[NT_SKELETAL_RIG_ID_BYTES(HUMANOID_JOINT_COUNT)];
+    for (uint32_t j = 0; j < HUMANOID_JOINT_COUNT; ++j) {
+        s_humanoid_joint_ids[j] = nt_hash32_str(s_joint_names[j]).value;
+    }
+    s_humanoid.rig_compat_id = nt_skeletal_rig_compat_id(&s_humanoid, rig_scratch, sizeof rig_scratch);
+    /* The humanoid at rest is the reference every other rig is scaled against. */
+    nt_skeletal_mat34_t model[HUMANOID_JOINT_COUNT];
+    nt_skeletal_fk(&s_humanoid, s_rest, model, 0, HUMANOID_JOINT_COUNT);
+    float center[3];
+    s_humanoid_extent = rig_extent(model, HUMANOID_JOINT_COUNT, center);
+}
+
 static void skeleton_update(void) {
-    refresh_view();
+    s_skeleton_scene.view = rig_view(s_skeleton_scene.rig_source);
     if (s_skeleton_scene.view == NULL) {
         return;
     }
     apply_pose();
-    if (s_skeleton_scene.fit_pending) {
-        fit_rig();
+    if (s_fit_pending) {
+        s_fit_pending = false;
+        fit_rig(s_rig_names[s_skeleton_scene.rig_source], s_skeleton_scene.view);
     }
 }
 
@@ -376,7 +426,7 @@ static void select_rig(rig_source_t rig) {
     s_skeleton_scene.rig_source = rig;
     s_skeleton_scene.selected_joint = 0;
     s_skeleton_scene.combo_open = false;
-    s_skeleton_scene.fit_pending = true;
+    s_fit_pending = true;
     memset(s_skeleton_scene.angles, 0, sizeof s_skeleton_scene.angles);
     skeleton_update();
 }
@@ -473,6 +523,92 @@ static void update_stage_camera(const nt_pointer_t *pointer, const nt_ui_scale_t
 }
 // #endregion
 
+// #region playback
+static void playback_deselect_clip(void) {
+    s_playback_scene.clip = -1;
+    s_playback_scene.clip_view = NULL;
+    memset(&s_playback_scene.track, 0, sizeof s_playback_scene.track);
+}
+
+static void playback_select_clip(int clip, const nt_skeletal_clip_t *view) {
+    NT_ASSERT(view->rig_compat_id.value == s_playback_scene.skel->rig_compat_id.value && "skeletal_showcase: clip pairs with the selected rig");
+    s_playback_scene.clip = clip;
+    s_playback_scene.clip_view = view;
+    s_playback_scene.track = (nt_skeletal_track_t){.time = 0.0, .duration = view->duration, .speed = 0.0F, .flags = NT_SKELETAL_TRACK_OCCUPIED};
+    nt_log_info("skeletal_showcase: clip %s duration=%.3f samples=%u", s_clips[clip].name, view->duration, (unsigned)view->sample_count);
+}
+
+static void playback_select_rig(rig_source_t rig) {
+    s_playback_scene.rig = rig;
+    s_fit_pending = true;
+    playback_deselect_clip();
+}
+
+/* The clip's own sample grid: Step and the time slider move on it. */
+static double clip_step(const nt_skeletal_clip_t *c) { return c->sample_count > 1 ? c->duration / (double)(c->sample_count - 1) : c->duration; }
+
+/* Looping, the last reachable sample is the one before the wrap point. */
+static int clip_last_frame(const playback_scene_state_t *p) { return (int)p->clip_view->sample_count - 1 - (p->loop && p->clip_view->sample_count > 1 ? 1 : 0); }
+
+static void playback_seek_frame(playback_scene_state_t *p, int frame) { p->track.time = (double)frame * clip_step(p->clip_view); }
+
+/* The nearest reachable sample; the clock sits between two while playing. */
+static int playback_frame(const playback_scene_state_t *p) { return (int)fmin(round(p->track.time / clip_step(p->clip_view)), (double)clip_last_frame(p)); }
+
+/* A seek to the adjacent sample in frame arithmetic: a step through advance
+ * lands one ulp short of the wrap point for many clip lengths. */
+static void playback_step(void) {
+    playback_scene_state_t *p = &s_playback_scene;
+    p->paused = true;
+    if (p->clip_view == NULL) {
+        return;
+    }
+    const int n = clip_last_frame(p) + 1;
+    const int next = playback_frame(p) + (p->reverse ? -1 : 1);
+    playback_seek_frame(p, p->loop ? (next + n) % n : (int)fmin(fmax(next, 0), n - 1));
+}
+
+static void playback_reset(void) {
+    playback_scene_state_t *p = &s_playback_scene;
+    playback_deselect_clip();
+    p->speed_mag = 1.0F;
+    p->reverse = false;
+    p->paused = false;
+    p->loop = true;
+    p->rig_combo_open = false;
+    p->clip_combo_open = false;
+    s_fit_pending = true;
+}
+
+static void playback_update(void) {
+    playback_scene_state_t *p = &s_playback_scene;
+    p->skel = rig_view(p->rig);
+    if (p->skel == NULL) {
+        playback_deselect_clip();
+        return;
+    }
+    if (p->clip >= 0) {
+        /* Views are borrowed: refetched every frame after resource_step. */
+        p->clip_view = nt_resource_is_ready(s_clip_resource[p->clip]) ? nt_skeletal_assets_clip(s_clip_resource[p->clip]) : NULL;
+        if (p->clip_view == NULL) {
+            playback_deselect_clip();
+        }
+    }
+    if (p->clip_view != NULL) {
+        const float speed = p->reverse ? -p->speed_mag : p->speed_mag;
+        p->track.speed = p->paused ? 0.0F : speed;
+        p->track.flags = NT_SKELETAL_TRACK_OCCUPIED | (p->loop ? NT_SKELETAL_TRACK_LOOPING : 0U);
+        nt_skeletal_tracks_advance(&p->track, 1, (double)g_nt_app.dt);
+        nt_skeletal_sample(p->clip_view, p->track.time, p->local);
+    }
+    nt_skeletal_fk(p->skel, p->clip_view != NULL ? p->local : p->skel->rest, p->model, 0, p->skel->joint_count);
+    if (s_fit_pending) {
+        s_fit_pending = false;
+        fit_rig(s_rig_names[p->rig], p->skel);
+    }
+}
+// #endregion
+
 // #region resources
 static void link_programs(void) {
     if (nt_program_ref_update(&s_sprite_program)) {
@@ -554,6 +690,21 @@ static void init_ui_styles(void) {
     s_slider_style.orientation = NT_UI_SLIDER_HORIZONTAL;
     s_slider_style.state_speed = 10.0F;
     s_slider_style.value_speed = 0.0F;
+
+    s_checkbox_style = nt_ui_checkbox_style_defaults();
+    s_checkbox_style.box_w = 22.0F;
+    s_checkbox_style.box_h = 22.0F;
+    s_checkbox_style.overlay_w = 18.0F;
+    s_checkbox_style.overlay_h = 18.0F;
+    s_checkbox_style.text_base = (nt_ui_label_style_t){.font_id = 0U, .font_size = 14.0F, .color = {215.0F, 220.0F, 230.0F, 255.0F}};
+    const nt_atlas_region_ref_t box = nt_atlas_ref(s_atlas, ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_BOX_OFF.value);
+    const nt_atlas_region_ref_t check = nt_atlas_ref(s_atlas, ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_CHECKMARK.value);
+    s_checkbox_style.unchecked[NT_UI_CB_IDLE].box = box;
+    s_checkbox_style.checked[NT_UI_CB_IDLE].box = box;
+    s_checkbox_style.checked[NT_UI_CB_IDLE].check = check;
+    s_checkbox_style.checked[NT_UI_CB_IDLE].check_tint = 0xFF7CE08CU;
+    s_checkbox_style.unchecked[NT_UI_CB_DISABLED].opacity = 0.45F;
+    s_checkbox_style.checked[NT_UI_CB_DISABLED].opacity = 0.45F;
 }
 // #endregion
 
@@ -594,7 +745,7 @@ static void cancel_scene_input(void) {
 }
 
 static void cancel_active_scene_input(void) {
-    if (s_active_scene >= 0 && s_scene_registry[s_active_scene].cancel_input != NULL) {
+    if (s_active_scene >= 0) {
         s_scene_registry[s_active_scene].cancel_input();
     }
 }
@@ -724,6 +875,88 @@ static void declare_properties(void) {
     }
 }
 
+static void declare_playback_rig_combo(playback_scene_state_t *p) {
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Character", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    char rig_preview[64];
+    (void)snprintf(rig_preview, sizeof rig_preview, "%s v", s_rig_names[p->rig]);
+    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("playback/rig_combo"), rig_preview, &s_scene_combo_style, &p->rig_combo_open)) {
+        for (uint32_t rig = RIG_FOX; rig < (uint32_t)RIG_COUNT; ++rig) {
+            if (nt_ui_combo_selectable(s_ui, rig, s_rig_names[rig], rig == (uint32_t)p->rig) && rig != (uint32_t)p->rig) {
+                playback_select_rig((rig_source_t)rig);
+            }
+        }
+        nt_ui_combo_end(s_ui);
+    }
+}
+
+/* Lists every loaded clip; one made for another rig is shown, not selectable. */
+static void declare_playback_clip_combo(playback_scene_state_t *p) {
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Clip", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    char clip_preview[64];
+    (void)snprintf(clip_preview, sizeof clip_preview, "%s v", p->clip >= 0 ? s_clips[p->clip].name : "none");
+    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("playback/clip_combo"), clip_preview, &s_joint_combo_style, &p->clip_combo_open)) {
+        for (int i = 0; i < CLIP_COUNT; ++i) {
+            if (!nt_resource_is_ready(s_clip_resource[i])) {
+                continue;
+            }
+            const nt_skeletal_clip_t *view = nt_skeletal_assets_clip(s_clip_resource[i]);
+            const bool compatible = view->rig_compat_id.value == p->skel->rig_compat_id.value;
+            char row[64];
+            (void)snprintf(row, sizeof row, "%s%s", s_clips[i].name, compatible ? "" : " (other rig)");
+            if (nt_ui_combo_selectable(s_ui, (uint32_t)i, row, i == p->clip) && compatible && i != p->clip) {
+                playback_select_clip(i, view);
+            }
+        }
+        nt_ui_combo_end(s_ui);
+    }
+}
+
+static void declare_playback_transport(playback_scene_state_t *p) {
+    const bool enabled = !s_skip_scene_interaction_this_frame;
+    char buf[96];
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Transport", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
+        if (text_button_fixed(nt_ui_id("playback/play"), p->paused ? "Play" : "Pause", !p->paused, 76.0F, 32.0F)) {
+            p->paused = !p->paused;
+        }
+        if (text_button_fixed(nt_ui_id("playback/step"), "Step", false, 76.0F, 32.0F)) {
+            playback_step();
+        }
+    }
+    (void)snprintf(buf, sizeof buf, "%s  %.3f / %.3f s", p->clip >= 0 ? s_clips[p->clip].name : "no clip", p->track.time, p->track.duration);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(14.0F, (Clay_Color){240.0F, 246.0F, 255.0F, 255.0F}));
+    /* The slider scrubs sample indices; a drag pauses so the clock and the drag do not fight. */
+    const int last_frame = p->clip_view != NULL ? clip_last_frame(p) : 0;
+    int frame = p->clip_view != NULL ? playback_frame(p) : 0;
+    if (nt_ui_slider_int(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/time"), NULL, &frame, 0, last_frame > 0 ? last_frame : 1, 1, &s_slider_style,
+                         &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled && last_frame > 0)) {
+        p->paused = true;
+        playback_seek_frame(p, frame);
+    }
+    (void)snprintf(buf, sizeof buf, "Speed x%.2f", (double)p->speed_mag);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(12.0F, (Clay_Color){190.0F, 205.0F, 225.0F, 255.0F}));
+    (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/speed"), NULL, &p->speed_mag, 0.0F, 2.0F, 0.05F, &s_slider_style,
+                             &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
+    const Clay_ElementDeclaration check_row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}}) {
+        (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/loop"), "Loop", &p->loop, &s_checkbox_style, &check_row, enabled);
+        (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/reverse"), "Reverse", &p->reverse, &s_checkbox_style, &check_row, enabled);
+    }
+}
+
+static void playback_declare_controls(void) {
+    playback_scene_state_t *p = &s_playback_scene;
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
+        declare_playback_rig_combo(p);
+        if (p->skel != NULL) {
+            declare_playback_clip_combo(p);
+            declare_playback_transport(p);
+        } else {
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "loading...", label_style(14.0F, (Clay_Color){255.0F, 200.0F, 120.0F, 255.0F}));
+        }
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_ui(const nt_ui_scale_t *scale) {
     nt_ui_begin(s_ui, scale->logical_w, scale->logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
@@ -775,7 +1008,7 @@ static void draw_ground(float scale) {
     }
 }
 
-static bool in_selected_subtree(uint32_t j) { return j >= (uint32_t)s_skeleton_scene.selected_joint && j < (uint32_t)s_skeleton_scene.view->subtree_end[s_skeleton_scene.selected_joint]; }
+static bool in_selected_subtree(const nt_skeletal_skeleton_t *skel, int selected, uint32_t j) { return selected >= 0 && j >= (uint32_t)selected && j < (uint32_t)skel->subtree_end[selected]; }
 
 static void draw_stage(const nt_ui_scale_t *scale, const mat4 vp, const float eye[3]) {
     const float stage_w = s_stage_bbox.width > 1.0F ? s_stage_bbox.width : 600.0F;
@@ -799,7 +1032,7 @@ static const float s_scaffold_color[4] = {0.45F, 0.50F, 0.58F, 1.0F};
 
 /* Parent->child links whose parent is (or is not) origin scaffolding: those
  * draw thin and grey, real bones in the subtree colours. */
-static void draw_links(const nt_skeletal_skeleton_t *skel, const bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS], bool scaffold_pass, float scale) {
+static void draw_links(const nt_skeletal_skeleton_t *skel, const nt_skeletal_mat34_t *model, const bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS], int selected_joint, bool scaffold_pass, float scale) {
     static const float bone_colors[2][4] = {{0.35F, 0.70F, 0.95F, 1.0F}, {1.0F, 0.65F, 0.18F, 1.0F}};
     nt_shape_renderer_set_line_width((scaffold_pass ? 0.006F : 0.02F) * scale);
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
@@ -807,58 +1040,69 @@ static void draw_links(const nt_skeletal_skeleton_t *skel, const bool at_origin[
         if (p == NT_SKELETAL_NO_PARENT || at_origin[p] != scaffold_pass) {
             continue;
         }
-        const float a[3] = {s_skeleton_scene.model[p].r[0][3], s_skeleton_scene.model[p].r[1][3], s_skeleton_scene.model[p].r[2][3]};
-        const float b[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
-        const float *color = scaffold_pass ? s_scaffold_color : bone_colors[in_selected_subtree(j) ? 1 : 0];
+        const float a[3] = {model[p].r[0][3], model[p].r[1][3], model[p].r[2][3]};
+        const float b[3] = {model[j].r[0][3], model[j].r[1][3], model[j].r[2][3]};
+        const float *color = scaffold_pass ? s_scaffold_color : bone_colors[in_selected_subtree(skel, selected_joint, j) ? 1 : 0];
         nt_shape_renderer_line(a, b, color);
     }
 }
 
-static void skeleton_draw(void) {
+/* Bones and joint spheres of model[]; selected_joint < 0 highlights nothing. */
+static void draw_skeleton(const nt_skeletal_skeleton_t *skel, const nt_skeletal_mat34_t *model, int selected_joint, bool show_axes, float scale) {
     static const float joint_colors[3][4] = {
         {1.0F, 0.9F, 0.2F, 1.0F},
         {1.0F, 0.55F, 0.15F, 1.0F},
         {0.30F, 0.85F, 0.95F, 1.0F},
     };
-    const nt_skeletal_skeleton_t *skel = s_skeleton_scene.view;
-    if (skel == NULL) {
-        return;
-    }
-    const float scale = s_fit_scale;
-    draw_ground(scale);
-
     /* The link from origin scaffolding up to the first translated joint would
      * read as a limb, so those joints and links draw thin and grey. */
     bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS];
     rig_at_origin(skel, at_origin);
-    draw_links(skel, at_origin, true, scale);
-    draw_links(skel, at_origin, false, scale);
+    draw_links(skel, model, at_origin, selected_joint, true, scale);
+    draw_links(skel, model, at_origin, selected_joint, false, scale);
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
-        const float p[3] = {s_skeleton_scene.model[j].r[0][3], s_skeleton_scene.model[j].r[1][3], s_skeleton_scene.model[j].r[2][3]};
+        const float p[3] = {model[j].r[0][3], model[j].r[1][3], model[j].r[2][3]};
         const float *color;
         float radius = 0.075F;
-        if (j == (uint32_t)s_skeleton_scene.selected_joint) {
+        if ((int)j == selected_joint) {
             color = joint_colors[0];
             radius = 0.105F;
         } else if (at_origin[j]) {
             color = s_scaffold_color;
             radius = 0.04F;
-        } else if (in_selected_subtree(j)) {
+        } else if (in_selected_subtree(skel, selected_joint, j)) {
             color = joint_colors[1];
         } else {
             color = joint_colors[2];
         }
         nt_shape_renderer_sphere(p, radius * scale, color);
-        if (s_skeleton_scene.show_axes) {
+        if (show_axes) {
             const float axis_colors[3][4] = {{1.0F, 0.2F, 0.2F, 1.0F}, {0.2F, 1.0F, 0.3F, 1.0F}, {0.2F, 0.5F, 1.0F, 1.0F}};
             const float axis_len = 0.23F * scale;
             for (int axis = 0; axis < 3; ++axis) {
-                const float end[3] = {p[0] + (s_skeleton_scene.model[j].r[0][axis] * axis_len), p[1] + (s_skeleton_scene.model[j].r[1][axis] * axis_len),
-                                      p[2] + (s_skeleton_scene.model[j].r[2][axis] * axis_len)};
+                const float end[3] = {p[0] + (model[j].r[0][axis] * axis_len), p[1] + (model[j].r[1][axis] * axis_len), p[2] + (model[j].r[2][axis] * axis_len)};
                 nt_shape_renderer_line(p, end, axis_colors[axis]);
             }
         }
     }
+}
+
+static void skeleton_draw(void) {
+    const nt_skeletal_skeleton_t *skel = s_skeleton_scene.view;
+    if (skel == NULL) {
+        return;
+    }
+    draw_ground(s_fit_scale);
+    draw_skeleton(skel, s_skeleton_scene.model, s_skeleton_scene.selected_joint, s_skeleton_scene.show_axes, s_fit_scale);
+}
+
+static void playback_draw(void) {
+    const playback_scene_state_t *p = &s_playback_scene;
+    if (p->skel == NULL) {
+        return;
+    }
+    draw_ground(s_fit_scale);
+    draw_skeleton(p->skel, p->model, -1, false, s_fit_scale);
 }
 
 static void end_stage(void) {
@@ -869,33 +1113,14 @@ static void end_stage(void) {
 // #endregion
 
 // #region scene registry callbacks
-static void skeleton_enter(void) {
-    if (!s_skeleton_scene.initialized) {
-        nt_skeletal_skeleton_t *humanoid = &s_skeleton_scene.humanoid;
-        humanoid->parent = s_parent;
-        humanoid->subtree_end = s_subtree_end;
-        humanoid->joint_id = s_skeleton_scene.joint_ids;
-        humanoid->rest = s_rest;
-        humanoid->joint_count = HUMANOID_JOINT_COUNT;
-        uint8_t rig_scratch[NT_SKELETAL_RIG_ID_BYTES(HUMANOID_JOINT_COUNT)];
-        for (uint32_t j = 0; j < HUMANOID_JOINT_COUNT; ++j) {
-            s_skeleton_scene.joint_ids[j] = nt_hash32_str(s_joint_names[j]).value;
-        }
-        humanoid->rig_compat_id = nt_skeletal_rig_compat_id(humanoid, rig_scratch, sizeof rig_scratch);
-        /* The humanoid at rest is the reference every other rig is scaled against. */
-        s_skeleton_scene.rig_source = RIG_HUMANOID;
-        s_skeleton_scene.view = humanoid;
-        set_rest_pose();
-        float center[3];
-        s_humanoid_extent = rig_extent(HUMANOID_JOINT_COUNT, center);
-        reset_scene();
-        s_skeleton_scene.initialized = true;
-    }
-}
-
 static void skeleton_cancel_input(void) {
     s_skeleton_scene.combo_open = false;
     s_skeleton_scene.rig_combo_open = false;
+}
+
+static void playback_cancel_input(void) {
+    s_playback_scene.rig_combo_open = false;
+    s_playback_scene.clip_combo_open = false;
 }
 
 static void switch_scene(int next_scene) {
@@ -904,22 +1129,17 @@ static void switch_scene(int next_scene) {
     }
     NT_ASSERT(next_scene >= 0 && next_scene < SKELETAL_SCENE_COUNT && "switch_scene: invalid scene index");
     cancel_active_scene_input();
-    if (s_active_scene >= 0 && s_scene_registry[s_active_scene].leave != NULL) {
-        s_scene_registry[s_active_scene].leave();
-    }
     cancel_scene_input();
     reset_camera();
     s_active_scene = next_scene;
-    if (s_scene_registry[s_active_scene].enter != NULL) {
-        s_scene_registry[s_active_scene].enter();
-    }
+    s_fit_pending = true;
+    /* The switch happens inside the UI pass, after this frame's update: views and fit must be fresh before controls and draw. */
+    s_scene_registry[s_active_scene].update();
     s_skip_scene_interaction_this_frame = true;
 }
 
 static void reset_active_scene(void) {
-    if (s_active_scene >= 0 && s_scene_registry[s_active_scene].reset != NULL) {
-        s_scene_registry[s_active_scene].reset();
-    }
+    s_scene_registry[s_active_scene].reset();
     reset_camera();
     cancel_scene_input();
     cancel_active_scene_input();
@@ -928,6 +1148,20 @@ static void reset_active_scene(void) {
 // #endregion
 
 // #region frame and init
+/* Both packs come from the same CDN folder or the local assets dir. */
+static void mount_pack(const char *name) {
+    char path[128];
+#ifdef NT_CDN_URL
+    const int len = snprintf(path, sizeof path, NT_CDN_URL "/skeletal_showcase/%s.ntpack", name);
+#else
+    const int len = snprintf(path, sizeof path, "assets/%s.ntpack", name);
+#endif
+    NT_ASSERT(len > 0 && len < (int)sizeof path && "skeletal_showcase: pack path truncated");
+    const nt_hash32_t pack_id = nt_hash32_str(name);
+    (void)nt_resource_mount(pack_id, 100);
+    (void)nt_resource_load_auto(pack_id, path);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
@@ -949,9 +1183,7 @@ static void frame(void) {
         reset_active_scene();
     }
     /* Scene views are borrowed from resources, so the scene composes after resource_step. */
-    if (s_active_scene >= 0 && s_scene_registry[s_active_scene].update != NULL) {
-        s_scene_registry[s_active_scene].update();
-    }
+    s_scene_registry[s_active_scene].update();
 
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
@@ -969,6 +1201,7 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
+        nt_resource_invalidate(NT_ASSET_MESH);
         nt_gfx_destroy_buffer(s_frame_ubo);
         s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof uniforms, .label = "skeletal_frame_uniforms"});
         nt_shape_renderer_restore_gpu();
@@ -1070,9 +1303,13 @@ int main(int argc, char *argv[]) {
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_mesh, .deactivate = nt_gfx_deactivate_mesh});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
-    nt_skeletal_assets_init(4);
+    /* Capacity counts every skeletal asset of the mounted packs: an NSKL and an NSKN per imported rig plus the clips. */
+    nt_skeletal_assets_init((uint32_t)((2 * (RIG_COUNT - 1)) + CLIP_COUNT));
     nt_resource_register_type(NT_ASSET_SKELETON, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_skeleton, .deactivate = nt_skeletal_assets_deactivate_skeleton});
+    nt_resource_register_type(NT_ASSET_SKIN_BINDING, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_skin_binding, .deactivate = nt_skeletal_assets_deactivate_skin_binding});
+    nt_resource_register_type(NT_ASSET_CLIP, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_clip, .deactivate = nt_skeletal_assets_deactivate_clip});
     nt_atlas_init();
     nt_material_init(&(nt_material_desc_t){.max_materials = 2});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
@@ -1087,13 +1324,8 @@ int main(int argc, char *argv[]) {
     NT_ASSERT(s_ui != NULL);
     s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof(nt_frame_uniforms_t), .label = "skeletal_frame_uniforms"});
 
-    s_pack_id = nt_hash32_str("skeletal_showcase");
-    (void)nt_resource_mount(s_pack_id, 100);
-#ifdef NT_CDN_URL
-    (void)nt_resource_load_auto(s_pack_id, NT_CDN_URL "/skeletal_showcase/skeletal_showcase.ntpack");
-#else
-    (void)nt_resource_load_auto(s_pack_id, "assets/skeletal_showcase.ntpack");
-#endif
+    mount_pack("skeletal_showcase");
+    mount_pack("skeletal_showcase_clips");
     s_sprite_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
     s_sprite_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG, NT_ASSET_SHADER_CODE);
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
@@ -1103,6 +1335,9 @@ int main(int argc, char *argv[]) {
     s_font_resource = nt_resource_request(ASSET_FONT_SKELETAL_SHOWCASE_FONT, NT_ASSET_FONT);
     s_rig_resource[RIG_FOX] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_FOX_NSKL, NT_ASSET_SKELETON);
     s_rig_resource[RIG_CESIUMMAN] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_CESIUMMAN_NSKL, NT_ASSET_SKELETON);
+    for (int i = 0; i < CLIP_COUNT; ++i) {
+        s_clip_resource[i] = nt_resource_request(s_clips[i].id, NT_ASSET_CLIP);
+    }
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .textures = {{.name = "u_texture", .resource = s_atlas_texture}}, .texture_count = 1, .blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_sprite"});
     s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(),
@@ -1138,6 +1373,9 @@ int main(int argc, char *argv[]) {
 #endif
 
     init_ui_styles();
+    init_humanoid();
+    s_playback_scene.rig = RIG_FOX;
+    playback_reset();
     switch_scene(0);
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
