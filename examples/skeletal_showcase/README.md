@@ -133,12 +133,14 @@ Controls, top to bottom:
   logs its name, duration and sample count once. A clip whose resource goes
   away, or whose reloaded view no longer matches the skeleton, is deselected.
 - `Play`/`Pause`: pause is `speed = 0` on the track, no special case.
-- `Step`: pauses and advances the track by one 1/24 s frame (backwards with
-  `Reverse`) through the track's own wrap or clamp, so a step at the end of a
-  looping clip wraps and a step at the end of a clamped clip stays.
-- `Time`: a slider over `[0, duration]` on the 1/24 s grid; a grid time
-  reproduces the stored sample. The clock is written only when the slider
-  moves. Disabled without a clip.
+- `Step`: pauses, snaps the time onto the sample grid and moves it one sample
+  (backwards with `Reverse`) through the track's own wrap or clamp, so a step
+  at the end of a looping clip wraps and a step at the end of a clamped clip
+  stays.
+- `Time`: a slider over `[0, duration]` on the sample grid; a grid time
+  reproduces the stored sample. The clock is written while the slider is
+  dragged. With `Loop` on the slider ends one sample before `duration`, the
+  wrap point. Disabled without a clip.
 - `Speed x0.00..2.00`: the speed magnitude, step 0.05.
 - `Loop`: sets `NT_SKELETAL_TRACK_LOOPING`; off, the track clamps to
   `[0, duration]` and holds.
@@ -148,8 +150,8 @@ Controls, top to bottom:
   clip` while none is selected.
 
 `Reset` and `R` deselect the clip and restore speed x1, looping, playing and
-forward. Every clip is sampled at 24 fps, so the `Step` and `Time` grid is the
-clip's own.
+forward. The `Step` and `Time` grid comes from the clip itself,
+`duration / (sample_count - 1)`, not from a constant.
 
 ## Shell
 
@@ -185,7 +187,7 @@ status time wraps at the duration; select `Fox Run` and confirm the skeleton
 is not reloaded (the framing does not jump) and the log shows the new clip
 line. Uncheck `Loop` and confirm the time clamps at the duration and the pose
 holds; check `Reverse` and confirm it runs back to 0 and holds. Pause, press
-`Step` a few times and confirm the time moves by 1/24 s per press; drag `Time`
+`Step` a few times and confirm the time moves by one sample per press; drag `Time`
 and confirm the pose follows. Switch `Character` to `CesiumMan`: the three Fox
 entries read ` (other rig)` and selecting one does nothing; select `CesiumMan`
 and confirm the walk plays upright.

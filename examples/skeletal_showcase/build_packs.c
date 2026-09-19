@@ -129,7 +129,7 @@ static const character_desc_t k_fox = {
     .mesh_id = "skeletal_showcase/fox.mesh",
     .has_normal = false,
     .clips = k_fox_clips,
-    .clip_count = 3,
+    .clip_count = (uint32_t)(sizeof k_fox_clips / sizeof k_fox_clips[0]),
 };
 
 static const character_desc_t k_cesiumman = {
@@ -139,7 +139,7 @@ static const character_desc_t k_cesiumman = {
     .mesh_id = "skeletal_showcase/cesiumman.mesh",
     .has_normal = true,
     .clips = k_cesiumman_clips,
-    .clip_count = 1,
+    .clip_count = (uint32_t)(sizeof k_cesiumman_clips / sizeof k_cesiumman_clips[0]),
 };
 
 static bool finish(NtBuilderContext *ctx, const char *name) {

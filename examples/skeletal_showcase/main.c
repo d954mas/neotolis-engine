@@ -80,7 +80,6 @@
 #define CAMERA_FAR 50.0F
 #define CAMERA_PITCH_LIMIT 1.25F
 #define CLIP_COUNT 4
-#define CLIP_FPS 24.0F /* every clip is sampled at 24 fps; Step and the time slider move on that grid */
 
 typedef enum {
     RIG_HUMANOID = 0,
@@ -144,7 +143,6 @@ typedef struct {
     const nt_skeletal_clip_t *clip_view;
     nt_skeletal_track_t track; /* OCCUPIED while a clip is selected */
     float speed_mag;
-    float time_slider; /* grid-aligned float mirror of track.time for the slider */
     bool reverse;
     bool paused;
     bool loop;
@@ -360,8 +358,10 @@ static float rig_extent(const nt_skeletal_mat34_t *model, uint16_t joint_count, 
     return extent;
 }
 
-/* Frames a rig from the pose in model[], scaled against the humanoid reference. */
-static void fit_rig(const char *name, const nt_skeletal_skeleton_t *skel, const nt_skeletal_mat34_t *model) {
+/* Frames a rig from its rest pose, scaled against the humanoid reference. */
+static void fit_rig(const char *name, const nt_skeletal_skeleton_t *skel) {
+    nt_skeletal_mat34_t model[SKELETAL_SHOWCASE_MAX_JOINTS];
+    nt_skeletal_fk(skel, skel->rest, model, 0, skel->joint_count);
     float center[3];
     const float extent = rig_extent(model, skel->joint_count, center);
     NT_ASSERT(extent > 0.0F && "skeletal_showcase: rig joints all rest at one point");
@@ -397,7 +397,7 @@ static void skeleton_update(void) {
     apply_pose();
     if (s_skeleton_scene.fit_pending) {
         s_skeleton_scene.fit_pending = false;
-        fit_rig(s_rig_names[s_skeleton_scene.rig_source], s_skeleton_scene.view, s_skeleton_scene.model);
+        fit_rig(s_rig_names[s_skeleton_scene.rig_source], s_skeleton_scene.view);
     }
 }
 
@@ -564,12 +564,21 @@ static void playback_select_rig(rig_source_t rig) {
     playback_deselect_clip();
 }
 
-/* One grid frame through the track's own wrap/clamp; update reassigns speed
- * next frame. Without a clip the track is unoccupied and nothing moves. */
+/* The clip's own sample grid: Step and the time slider move on it. */
+static double clip_step(const nt_skeletal_clip_t *c) { return c->sample_count > 1 ? c->duration / (double)(c->sample_count - 1) : c->duration; }
+
+/* Snaps onto the grid, then one grid sample through the track's own wrap/clamp;
+ * update reassigns speed next frame. Without a clip nothing moves. */
 static void playback_step(void) {
-    s_playback_scene.paused = true;
-    s_playback_scene.track.speed = s_playback_scene.reverse ? -1.0F : 1.0F;
-    nt_skeletal_tracks_advance(&s_playback_scene.track, 1, 1.0 / (double)CLIP_FPS);
+    playback_scene_state_t *p = &s_playback_scene;
+    p->paused = true;
+    if (p->clip_view == NULL) {
+        return;
+    }
+    const double step = clip_step(p->clip_view);
+    p->track.time = fmin(fmax(round(p->track.time / step) * step, 0.0), p->track.duration);
+    p->track.speed = p->reverse ? -1.0F : 1.0F;
+    nt_skeletal_tracks_advance(&p->track, 1, step);
 }
 
 static void playback_reset(void) {
@@ -599,9 +608,9 @@ static void playback_update(void) {
     }
     if (p->clip >= 0) {
         /* Views are borrowed: refetched every frame, dropped when the clip is
-         * gone or a reload handed back one for another rig. */
+         * gone or a reload handed back one for another rig or of another length. */
         p->clip_view = nt_resource_is_ready(s_clip_resource[p->clip]) ? nt_skeletal_assets_clip(s_clip_resource[p->clip]) : NULL;
-        if (p->clip_view == NULL || p->clip_view->rig_compat_id.value != skel->rig_compat_id.value) {
+        if (p->clip_view == NULL || p->clip_view->rig_compat_id.value != skel->rig_compat_id.value || p->clip_view->duration != p->track.duration) {
             playback_deselect_clip();
         }
     }
@@ -620,7 +629,7 @@ static void playback_update(void) {
     nt_skeletal_fk(skel, p->local, p->model, 0, skel->joint_count);
     if (p->fit_pending) {
         p->fit_pending = false;
-        fit_rig(s_rig_names[p->rig], skel, p->model);
+        fit_rig(s_rig_names[p->rig], skel);
     }
 }
 // #endregion
@@ -919,7 +928,7 @@ static void declare_playback_clip_combo(playback_scene_state_t *p) {
             const bool compatible = view->rig_compat_id.value == p->skel->rig_compat_id.value;
             char row[64];
             (void)snprintf(row, sizeof row, "%s%s", s_clip_names[i], compatible ? "" : " (other rig)");
-            if (nt_ui_combo_selectable(s_ui, (uint32_t)i, row, i == p->clip) && compatible) {
+            if (nt_ui_combo_selectable(s_ui, (uint32_t)i, row, i == p->clip) && compatible && i != p->clip) {
                 playback_select_clip(i, view);
             }
         }
@@ -942,12 +951,20 @@ static void declare_playback_transport(playback_scene_state_t *p) {
     }
     (void)snprintf(buf, sizeof buf, "%s  %.3f / %.3f s", p->clip >= 0 ? s_clip_names[p->clip] : "no clip", p->track.time, p->track.duration);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(14.0F, (Clay_Color){240.0F, 246.0F, 255.0F, 255.0F}));
-    /* The slider snaps its float onto the step grid every frame, so it sees a
-     * grid-aligned mirror and the clock is written only when a drag moves it. */
-    p->time_slider = fminf(roundf((float)p->track.time * CLIP_FPS) / CLIP_FPS, (float)p->track.duration);
-    if (nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/time"), NULL, &p->time_slider, 0.0F, has_clip ? (float)p->track.duration : 1.0F, 1.0F / CLIP_FPS, &s_slider_style,
+    /* The slider sees a grid-aligned float mirror of the clock, rebuilt every
+     * frame, and the clock is written only while a drag moves it. Looping, the
+     * last reachable time is one sample before the wrap point. */
+    double step = 1.0;
+    double time_max = 1.0;
+    float time_slider = 0.0F;
+    if (has_clip) {
+        step = clip_step(p->clip_view);
+        time_max = p->loop && p->track.duration - step > 0.0 ? p->track.duration - step : p->track.duration;
+        time_slider = (float)fmin(round(p->track.time / step) * step, time_max);
+    }
+    if (nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/time"), NULL, &time_slider, 0.0F, (float)time_max, (float)step, &s_slider_style,
                            &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled && has_clip)) {
-        p->track.time = fmin((double)p->time_slider, p->track.duration);
+        p->track.time = fmin((double)time_slider, time_max);
     }
     (void)snprintf(buf, sizeof buf, "Speed x%.2f", (double)p->speed_mag);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(12.0F, (Clay_Color){190.0F, 205.0F, 225.0F, 255.0F}));
@@ -1134,6 +1151,8 @@ static void skeleton_enter(void) {
         reset_scene();
         s_skeleton_scene.initialized = true;
     }
+    /* The fit globals are shell state that Playback moves. */
+    s_skeleton_scene.fit_pending = true;
 }
 
 static void skeleton_cancel_input(void) {
@@ -1162,6 +1181,10 @@ static void switch_scene(int next_scene) {
     s_active_scene = next_scene;
     if (s_scene_registry[s_active_scene].enter != NULL) {
         s_scene_registry[s_active_scene].enter();
+    }
+    /* The switch happens inside the UI pass, after this frame's update: views and fit must be fresh before controls and draw. */
+    if (s_scene_registry[s_active_scene].update != NULL) {
+        s_scene_registry[s_active_scene].update();
     }
     s_skip_scene_interaction_this_frame = true;
 }
