@@ -816,7 +816,7 @@ void test_backwards_key_times_are_rejected(void) {
 
 void test_cubic_through_the_origin_is_rejected(void) {
     const rigged_glb_opts_t opts = {.animation_cubic_origin = true};
-    EXPECT_CLIP_REJECTED(opts, "evaluates to a non-finite value", "Joint2");
+    EXPECT_CLIP_REJECTED(opts, "evaluates outside the float range", "Joint2");
 }
 
 void test_animation_without_channels_is_rejected(void) {

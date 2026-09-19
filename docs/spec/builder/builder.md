@@ -64,11 +64,10 @@ nt_builder_add_blob         /* opaque bytes under a resource id */
 nt_builder_add_asset_root   /* convention-based tree import */
 
 /* Skeletal assets (wire formats: skeletal §16). add_skeleton encodes a
- * procedural rig and registers it in one step, like add_blob; it writes the
- * skeleton's rig_compat_id as given (nt_skeletal_rig_compat_id fills it), and
- * clips and bindings of that rig carry the same value. The hand-built
- * binding/clip entry points over the runtime views and the raw encoders are
- * internal (nt_builder_internal.h). */
+ * procedural rig and registers it in one step, like add_blob; rig_compat_id is
+ * written as given (skeletal §3.1). The hand-built binding/clip entry points
+ * over the runtime views and the raw encoders are internal
+ * (nt_builder_internal.h). */
 nt_builder_add_skeleton      /* NSKL, from nt_skeletal_skeleton_t */
 
 /* glTF rig import: the scene API side of the same header. */

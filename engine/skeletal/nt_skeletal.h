@@ -26,9 +26,8 @@
  * so one inline serves float and double callers. */
 static inline bool nt_skeletal_finite(double v) { return (v - v) == 0.0; }
 
-/* Local joint transform, AoS in joint order. Quaternion is unit xyzw: a
- * quaternion decoded from a lossy codec is renormalized by its decoder, because
- * the unit check tolerance assumes float32 inputs. */
+/* Local joint transform, AoS in joint order. Quaternion is unit xyzw; the
+ * kernels' unit check assumes float32 inputs. */
 typedef struct {
     float t[3];
     float q[4];
@@ -224,12 +223,13 @@ typedef struct {
     const uint16_t *t_joint;       /* joint of sampled t row k */
     const uint16_t *q_joint;       /* joint of sampled q row k */
     const uint16_t *s_joint;       /* joint of sampled s row k */
-    float r_joints;                /* max joint-origin distance from the skeleton origin over the clip (skeletal spec, Bounds and culling) */
-    float r_root;                  /* max root translation length */
-    float s_max;                   /* max product of max|s| along an ancestor chain */
-    uint32_t sample_count;         /* samples on the uniform grid over [0, duration], >= 1; >= 2 when any row exists */
-    uint16_t joint_count;          /* joints the clip and its poses address */
-    uint16_t n_t, n_q, n_s;        /* sampled rows per component kind */
+    /* The builder's three clip bounds (skeletal spec, Bounds and culling). */
+    float r_joints;
+    float r_root;
+    float s_max;
+    uint32_t sample_count;  /* samples on the uniform grid over [0, duration], >= 1; >= 2 when any row exists */
+    uint16_t joint_count;   /* joints the clip and its poses address */
+    uint16_t n_t, n_q, n_s; /* sampled rows per component kind */
 } nt_skeletal_clip_t;
 
 /* out[0, clip->joint_count) = the clip's local pose at time: a copy of base

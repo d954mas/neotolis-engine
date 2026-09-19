@@ -29,7 +29,7 @@
  *
  * Only Root and Helper carry a glTF "matrix"; every other node carries TRS.
  * Rest values of Joint0 and Joint1 are the published test vector of
- * skeletal-animation.md 3.1:
+ * the skeletal spec, Skeleton (NSKL):
  *
  *   Joint0  t (1, 2, 3)    q (0, 0, 0, 1)                       s (1, 1, 1)
  *   Joint1  t (0, -0, 0.5) q (0, 0, -0.70710678, -0.70710678)   s (1, 1, 1)

@@ -62,7 +62,7 @@ The chapters below define engine behavior.
 | [io/input.md](io/input.md) | Polling input model, pointer state, capture |
 | [io/audio.md](io/audio.md) | Platform-agnostic audio module, clips, voices, JS bridge |
 | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) | Logging, asserts, errors, debug overlay, and the dev-only devapi |
-| [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) | Skeletal animation: NSKL/NANM/NSKN assets, pose ABI, tracks, mix/override/additive, FK, runtime banks, `skeletal_gpu`, `skinned_mesh_renderer`, bounds |
+| [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) | Skeletal animation (partly planned): NSKL/NANM/NSKN assets, pose ABI, tracks, mix/override/additive, FK, runtime banks, `skeletal_gpu`, `skinned_mesh_renderer`, bounds |
 | [ui/nt-ui.md](ui/nt-ui.md) | `nt_ui`: Clay dependency contract, transforms, interaction, widgets, scroll, popups, menus |
 | [ui/radial-widgets.md](ui/radial-widgets.md) | Radial widgets and the custom-attr image path rationale |
 | [ui/rich-text.md](ui/rich-text.md) | Rich text: run-list, solver, decoration, effects, z-layers |

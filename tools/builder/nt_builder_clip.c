@@ -99,6 +99,7 @@ static uint32_t clip_find_joint(const nt_skeletal_skeleton_t *skel, const char *
  * animation name labels diagnostics. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, const cgltf_animation_channel *ch, uint32_t index, clip_track_t *track) {
+    // #region target node
     const cgltf_node *node = ch->target_node;
     if (node == NULL) {
         NT_BUILD_FAIL("animation channel has no target node", "%s: channel[%u] has no target node", label, index);
@@ -116,6 +117,9 @@ static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, con
     if (node->has_matrix) {
         NT_BUILD_FAIL("animated node carries a matrix", "%s: channel[%u] animates %s, which carries a matrix instead of translation/rotation/scale", label, index, node->name);
     }
+    // #endregion
+
+    // #region rig joint and parent
     const uint32_t joint = clip_find_joint(&rig->skeleton, node->name);
     if (joint == UINT32_MAX) {
         NT_BUILD_FAIL("animation channel targets a node outside the rig", "%s: channel[%u] animates node %s, which is not a joint of the rig", label, index, node->name);
@@ -133,15 +137,17 @@ static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, con
                           (parent_node && parent_node->name) ? parent_node->name : "(none)", joint);
         }
     }
+    // #endregion
 
+    // #region accessors and track fields
     const cgltf_accessor *in = ch->sampler->input;
     const cgltf_accessor *out = ch->sampler->output;
     const bool rotation = ch->target_path == cgltf_animation_path_type_rotation;
     /* cgltf_validate holds only the count relation between the two accessors;
      * a wrong type would unpack to fewer floats than the evaluator reads. */
     if (in->type != cgltf_type_scalar || in->component_type != cgltf_component_type_r_32f || in->normalized || in->count < 1) {
-        NT_BUILD_FAIL("animation input accessor has an invalid type", "%s: channel[%u] on %s.%s: the input accessor must be SCALAR FLOAT with at least one key", label, index, node->name,
-                      clip_path_name(ch->target_path));
+        NT_BUILD_FAIL("animation input accessor has an invalid type", "%s: channel[%u] on %s.%s: the input accessor must be SCALAR FLOAT, not normalized, with at least one key", label, index,
+                      node->name, clip_path_name(ch->target_path));
     }
     const bool out_float = out->component_type == cgltf_component_type_r_32f;
     const bool out_norm_int = out->normalized != 0 && (out->component_type == cgltf_component_type_r_8 || out->component_type == cgltf_component_type_r_8u ||
@@ -163,12 +169,13 @@ static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, con
         track->kind = 2U;
     }
     track->interpolation = ch->sampler->interpolation;
+    // #endregion
 }
 
 /* Unpacks both accessors into the track's double arrays and checks what the
  * evaluator relies on: increasing finite times, finite values, rotation keys
  * long enough to normalize. Rotation keys are normalized here, so a quantized
- * source and a float one meet the encoder's unit rule the same way. */
+ * source and a float one meet the kernels' unit-quaternion contract the same way. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void clip_unpack_track(clip_track_t *track, float *scratch) {
     const cgltf_animation_channel *ch = track->channel;
@@ -208,7 +215,7 @@ static void clip_unpack_track(clip_track_t *track, float *scratch) {
         double *q = track->values + ((((size_t)k * per_key) + (per_key / 2U)) * 4U);
         const double len2 = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
         if (len2 < CLIP_MIN_Q_LEN2) {
-            NT_BUILD_FAIL("animation rotation key is not a unit quaternion", "%s: %s.rotation key %u (%g, %g, %g, %g) is too short to be a rotation", label, name, k, q[0], q[1], q[2], q[3]);
+            NT_BUILD_FAIL("animation rotation key is too short to normalize", "%s: %s.rotation key %u (%g, %g, %g, %g) is too short to be a rotation", label, name, k, q[0], q[1], q[2], q[3]);
         }
         clip_normalize4(q);
     }
@@ -320,7 +327,7 @@ static void clip_eval_checked(const clip_track_t *track, double time, double *ou
     clip_eval(track, time, out);
     for (uint32_t c = 0; c < track->comps; c++) {
         if (!(fabs(out[c]) <= (double)FLT_MAX)) {
-            NT_BUILD_FAIL("animation curve evaluates to a non-finite value", "%s: %s.%s evaluates to a non-finite value at %.9g s", track->label, track->channel->target_node->name,
+            NT_BUILD_FAIL("animation curve evaluates outside the float range", "%s: %s.%s evaluates outside the float range at %.9g s", track->label, track->channel->target_node->name,
                           clip_path_name(track->channel->target_path), time);
         }
     }
@@ -382,6 +389,7 @@ static int clip_cmp_double(const void *a, const void *b) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void clip_pass_time(clip_pass_t *p, double time) {
     const uint16_t joints = p->skel->joint_count;
+    // #region runtime and exact poses
     nt_skeletal_sample(p->view, time, p->local_rt);
     memcpy(p->local_ex, p->skel->rest, (size_t)joints * sizeof(nt_skeletal_trs_t));
     for (uint32_t t = 0; t < p->track_count; t++) {
@@ -401,7 +409,9 @@ static void clip_pass_time(clip_pass_t *p, double time) {
     }
     nt_skeletal_fk(p->skel, p->local_rt, p->g_rt, 0, joints);
     nt_skeletal_fk(p->skel, p->local_ex, p->g_ex, 0, joints);
+    // #endregion
 
+    // #region error and bounds
     for (uint16_t j = 0; j < joints; j++) {
         double lin2 = 0.0;
         double dt2 = 0.0;
@@ -447,6 +457,7 @@ static void clip_pass_time(clip_pass_t *p, double time) {
             p->s_max = p->stretch[j];
         }
     }
+    // #endregion
 }
 
 /* The dense set: every grid time, every authored key time (clamped to the end)

@@ -35,8 +35,9 @@
  *   uint32_t joint_id[J]     stable id, nt_hash32_str(node name)
  *   float    rest[J][10]     local rest pose AoS: t[3] q[4] s[3], q unit xyzw
  *
- * Payload size is exactly NT_SKL_SIZE(joint_count). rig_compat_id is content
- * identity computed by nt_skeletal_rig_compat_id in the encoder.
+ * Payload size is exactly NT_SKL_SIZE(joint_count). rig_compat_id is
+ * nt_skeletal_rig_compat_id of this rig, filled by the producer; the encoder
+ * writes it as given.
  */
 #pragma pack(push, 1)
 typedef struct {
@@ -93,12 +94,8 @@ typedef struct {
  * authored keys, so a stepped source is evaluated onto the grid by the builder.
  * A clip with no row ships sample_count 1 and may still carry a duration.
  *
- * The three bounds are measured by the builder over the clip's own evaluated
- * poses (skeletal spec, Bounds and culling): r_joints = max joint-origin distance
- * from the skeleton origin, r_root = max root translation length, s_max = max
- * over joints of the product of max|s| along the ancestor chain, each the
- * maximum over the importer's dense sample set rounded up, not a proof over
- * the interpolated interior. The encoder writes what it is given.
+ * The three bounds are the builder's measurements over the clip's own poses
+ * (skeletal spec, Bounds and culling); the encoder writes what it is given.
  */
 #pragma pack(push, 1)
 typedef struct {

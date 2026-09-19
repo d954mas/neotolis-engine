@@ -29,8 +29,8 @@ static struct {
 
 // #region slots
 /* Copies the payload into a fresh slot; the caller points the slot's view into
- * the copy. Payload arrays are read in place through typed pointers, which the
- * 4-aligned start of every pack asset (and of malloc) allows. */
+ * the copy. Payload arrays are read in place through typed pointers over the
+ * copy; malloc's alignment carries them. */
 static uint32_t skel_take_slot(const uint8_t *data, uint32_t size) {
     const uint32_t id = nt_pool_alloc(&s_assets.pool);
     NT_ASSERT(id != 0 && "skeletal asset pool exhausted -- raise nt_skeletal_assets_init(max_assets)");

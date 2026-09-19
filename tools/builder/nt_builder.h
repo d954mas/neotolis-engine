@@ -547,7 +547,8 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
  *
  * Every rule of the wire format is an invariant of the importer that produced
  * the data, so a violation aborts through NT_BUILD_ASSERT after a logged
- * diagnostic instead of returning a code (skeletal spec §16). */
+ * diagnostic instead of returning a code (skeletal spec, Builder, codec, wire
+ * formats). */
 
 /* One imported rig out of one glTF skin. The joints are every node on the
  * paths from the scene root of the joints' hierarchy to each skin joint,
@@ -596,13 +597,9 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_r
 
 /* What the clip export measured, so the build script decides whether the
  * sample rate was enough: the builder never fails a build on interpolation
- * error. duration = frames / sample_fps, frames the nearest whole number of
- * frames of the source length (at least one); a source that was not a whole
- * number is logged. sample_count = frames + 1 when any channel is sampled,
- * else 1. Both errors compare the runtime (nt_skeletal_sample on the encoded
+ * error. Both errors compare the runtime (nt_skeletal_sample on the encoded
  * clip, then FK) against the exact glTF curves (evaluated in double, then the
- * same FK) over a dense set of times -- every grid time, every authored key
- * (clamped to the end), and three sub-samples per grid interval. cpu_error_lin is the largest
+ * same FK) over the dense set of the clip export. cpu_error_lin is the largest
  * Frobenius distance between the 3x3 parts of any joint's model matrix, a
  * unitless number the developer scales by their own reach; cpu_error_t is the
  * largest translation distance in scene units. Each maximum carries the time
@@ -620,32 +617,23 @@ typedef struct {
 
 /* Exports the glTF animation named animation_name (NULL and "" are one name,
  * the unnamed animation) as an absolute clip on the rig; exactly one animation
- * of the scene must carry the name, else the diagnostic lists them all.
- * Channels map to joints by name hash, the same path for the rig's own scene
- * and for another scene: every animated node must be a rig joint and, unless
- * its joint is a root, hang under the node its joint's parent is named after
- * (the same names under another hierarchy are a different rig). A channel the
- * animation does not touch takes the rig's rest in the base pose, whatever
- * the clip file's node says: the clip carries motion, the rig carries the
- * pose. Every channel, STEP included, is evaluated onto one uniform grid with
- * a step of 1 / sample_fps (up to the float rounding of the shipped
- * duration) over round(source_duration * sample_fps) frames, at least one; a
- * channel whose grid samples are all equal (a rotation's may also all be the
- * negation of the first) is written into the clip's base pose instead of
- * shipping a row. The three header bounds are measured over the same dense
- * pass as the report (skeletal spec, Bounds and culling). Content errors log a
- * diagnostic and assert; the builder spec (Validation) lists every one: a name
- * matching no animation or several, an animation without channels, a target
- * outside the rig, a parent mismatch, an unnamed or matrix-driven target, a
- * duplicate channel, a morph weights channel, an accessor of the wrong type,
- * non-finite or non-increasing input times, a curve outside the float range,
- * a rate whose grid overflows or has no finite step, and the rest. */
+ * of the scene must carry the name. Channels map to joints by name hash, the
+ * same path for the rig's own scene and for another scene: every animated node
+ * must be a rig joint and, unless its joint is a root, hang under the node its
+ * joint's parent is named after. The grid step is 1 / sample_fps (up to the
+ * float rounding of the shipped duration): frames = round(source_duration *
+ * sample_fps), at least one, duration = frames / sample_fps and sample_count =
+ * frames + 1 when any channel is sampled, else 1. A channel whose grid samples
+ * are all still is written into the base pose instead of shipping a row, and a
+ * channel the animation does not touch keeps the rig's rest there. report
+ * receives what the export measured. Content errors log a diagnostic and
+ * assert; the builder spec (Builder validation) lists every one. */
 void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const char *animation_name, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
                                nt_builder_clip_report_t *report);
 
 /* Encodes and registers a skeleton; skel->rig_compat_id is written as given,
- * so a procedural rig fills it with nt_skeletal_rig_compat_id first (the glTF
- * importer already has). Joint ids must be unique. */
+ * so a procedural rig fills it first (skeletal spec, Skeleton (NSKL)). Joint
+ * ids must be unique. */
 void nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id);
 
 /* --- Atlas API ---

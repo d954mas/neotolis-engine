@@ -563,7 +563,7 @@ void nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **ou
 void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size);
 void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint32_t *out_size);
 
-/* Atlas geometry primitives now live in nt_builder_atlas_geometry.h and are
+/* Atlas geometry primitives live in nt_builder_atlas_geometry.h and are
  * called directly by tests. Vpack-internal test access is in nt_builder_atlas_vpack.c. */
 
 #endif /* NT_BUILDER_INTERNAL_H */

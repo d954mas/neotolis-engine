@@ -80,6 +80,7 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
     NT_BUILD_ASSERT(m && out && "invalid decompose_trs args");
     const char *label = (name != NULL) ? name : "(unnamed)";
 
+    // #region input checks
     for (int i = 0; i < 16; i++) {
         if (!nt_builder_finite(m[i])) {
             NT_BUILD_FAIL("matrix is not finite", "node %s: matrix element %d is not a finite number", label, i);
@@ -89,7 +90,9 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
     if (m[3] != 0.0F || m[7] != 0.0F || m[11] != 0.0F || m[15] != 1.0F) {
         NT_BUILD_FAIL("matrix is not affine", "node %s: matrix bottom row is (%g, %g, %g, %g), an affine matrix ends in (0, 0, 0, 1)", label, (double)m[3], (double)m[7], (double)m[11], (double)m[15]);
     }
+    // #endregion
 
+    // #region scale and rotation
     /* Column lengths in double: a float32 length of a float32 column loses the
      * precision the recompose check below spends its whole budget on. */
     double scale[3];
@@ -122,7 +125,9 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
 
     double q[4];
     rig_quat_from_rotation(rot, q);
+    // #endregion
 
+    // #region store and recompose check
     for (int c = 0; c < 3; c++) {
         out->t[c] = m[12 + c];
         out->s[c] = (float)scale[c];
@@ -146,6 +151,7 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
         }
         NT_BUILD_ASSERT(re.r[row][3] == m[12 + row] && "matrix translation survives decomposition exactly");
     }
+    // #endregion
 }
 // #endregion
 
@@ -318,7 +324,7 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, nt_
             memcpy(rest[j].q, cn->rotation, sizeof(rest[j].q));
             memcpy(rest[j].s, cn->scale, sizeof(rest[j].s));
         }
-        /* The encoder asserts the same two rules; here they name the node. */
+        /* The encoder asserts structure only; values are checked here, where the node has a name. */
         if (!nt_builder_finite_n(rest[j].t, 3) || !nt_builder_finite_n(rest[j].s, 3)) {
             NT_BUILD_FAIL("rest translation or scale is not finite", "import_rig: node %s has a non-finite rest translation or scale", cn->name);
         }
@@ -453,6 +459,7 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
             char label[64];
             (void)snprintf(label, sizeof(label), "mesh[%u] prim[%u]", mesh_index, (uint32_t)pi);
 
+            // #region positions
             const cgltf_accessor *pos = cgltf_find_accessor(prim, cgltf_attribute_type_position, 0);
             if (pos == NULL || pos->count == 0) {
                 NT_BUILD_FAIL("skinned primitive has no positions", "%s: skinned primitive has no POSITION accessor, so its reach cannot be measured", label);
@@ -468,7 +475,9 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
             if (got != want) {
                 NT_BUILD_FAIL("POSITION accessor could not be unpacked as VEC3", "%s: POSITION unpacked %u of %u floats", label, (uint32_t)got, (uint32_t)want);
             }
+            // #endregion
 
+            // #region influence scan
             nt_builder_influences_t inf;
             nt_builder_read_influences(prim, label, vertex_count, &inf);
             const size_t set_floats = (size_t)vertex_count * 4U;
@@ -496,6 +505,7 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
             nt_builder_free_influences(&inf);
             free(xyz);
             scanned = true;
+            // #endregion
         }
     }
     if (!scanned) {

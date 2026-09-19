@@ -11,17 +11,15 @@
  *
  * Each activator validates the structure of the whole pack payload, copies it
  * into one allocation and points a runtime view at the copy: the wire layout is
- * the runtime layout (spec §16), so nothing is transposed or re-indexed. The
- * pack blob is never read again, so any blob policy may drop it after
- * activation. A structurally broken payload logs one warning and returns 0,
- * which leaves the asset FAILED: a header rejection allocates nothing, a
- * joint-table rejection takes and releases a slot. Structure is what a view
- * needs to address memory (header, magic, version, exact size, counts, table
- * indices, preorder, the grid's sample_count and duration); values inside a
- * sound structure (finite samples, unit quaternions, radii) are the builder's
- * contract, the pack CRC32 and the kernels' NT_SKELETAL_CHECKS, never checked
- * here. Payload arrays are read in place, which the 4-aligned start of every
- * pack asset allows.
+ * the runtime layout (skeletal spec, Builder, codec, wire formats), so nothing
+ * is transposed or re-indexed. The pack blob is never read again, so any blob
+ * policy may drop it after activation. A structurally broken payload logs one
+ * warning and returns 0, which leaves the asset FAILED: a header rejection
+ * allocates nothing; the clip's joint-table rejection takes and releases a
+ * slot. Structure is what a view needs to address memory, and the one float
+ * read is the grid shape (sample_count, a finite duration >= 0); no value is
+ * checked here (the locked rule of the same spec section). Payload arrays are
+ * read in place from the malloc copy, whose alignment carries them.
  *
  * The module registers nothing itself. An application that links animation
  * registers the three pairs like any other type:
@@ -31,7 +29,8 @@
  *                                 .deactivate = nt_skeletal_assets_deactivate_skeleton});
  *
  * Views are borrowed and live until their asset is deactivated (unmount,
- * reload, shutdown), so the game refetches them after nt_resource_step (§15).
+ * reload, shutdown), so the game refetches them after nt_resource_step
+ * (skeletal spec, Resources and lifetimes).
  * rig_compat_id is not cross-checked here — no second asset exists at
  * activation; the game asserts equal rig_compat_id once, when it pairs a
  * skeleton, a binding and a clip.

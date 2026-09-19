@@ -145,7 +145,7 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, nt_skeletal
     /* Interpolation reads two adjacent grid entries. */
     NT_ASSERT(clip->sample_count >= 2U && clip->duration > 0.0);
 
-    /* The grid step is exact only in double. */
+    /* The step stays in double: a float quotient drifts grid times off their samples. */
     const double inv_step = (double)(clip->sample_count - 1U) / clip->duration;
     float u = 0.0F;
     const uint32_t i = nt_skeletal_grid_index(time, inv_step, clip->sample_count, &u);

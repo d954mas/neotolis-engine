@@ -128,6 +128,7 @@ void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
 void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint32_t *out_size) {
     NT_BUILD_ASSERT(clip && out && out_size && "invalid encode_clip args");
+    // #region structure asserts
     NT_BUILD_ASSERT(clip->base && "clip has no base pose");
     NT_BUILD_ASSERT(clip->joint_count >= 1 && "clip has no joints");
     NT_BUILD_ASSERT(clip->sample_count >= 1 && "clip needs at least one sample");
@@ -142,7 +143,9 @@ void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint3
     const uint32_t joint_count = clip->joint_count;
     const size_t stride = ((size_t)3U * clip->n_t) + ((size_t)4U * clip->n_q) + ((size_t)3U * clip->n_s);
     NT_BUILD_ASSERT((stride == 0 || (clip->blocks && clip->sample_count >= 2 && clip->duration > 0.0)) && "sampled rows need frame blocks, at least two samples and a positive duration");
+    // #endregion
 
+    // #region header and payload
     const NtAnmHeader header = {
         .magic = NT_ANM_MAGIC,
         .version = NT_SKELETAL_FORMAT_VERSION,
@@ -187,6 +190,7 @@ void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint3
         w += (size_t)clip->n_s * sizeof(uint16_t);
     }
     NT_BUILD_ASSERT((uint32_t)(w - payload) == size && "encode_clip wrote a different number of bytes than its header declares");
+    // #endregion
 
     *out = payload;
     *out_size = size;
