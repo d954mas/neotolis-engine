@@ -211,7 +211,7 @@ static uint16_t ref_palette_joint(uint32_t p) {
 static void import_fixture_rig(nt_glb_scene_t *scene, nt_builder_rig_t *rig) {
     rigged_glb_write(RIG_GLB, NULL);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(scene, RIG_GLB));
-    nt_builder_import_rig(scene, 0, UINT32_MAX, rig);
+    nt_builder_import_rig(scene, 0, rig);
 }
 
 /* The identity schema of skeletal-animation.md 3.1, written here so the test
@@ -329,33 +329,6 @@ void test_rig_compat_id_matches_the_hand_written_schema(void) {
     nt_builder_free_glb_scene(&scene);
 }
 
-/* A cut is the explicit way to leave wrapper nodes to the game's E. */
-void test_rig_cut_at_helper_drops_the_scene_root(void) {
-    rigged_glb_write(RIG_GLB, NULL);
-
-    nt_glb_scene_t scene;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-
-    nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, 0, RIGGED_GLB_NODE_HELPER, &rig);
-
-    TEST_ASSERT_EQUAL_UINT16(RIG_JOINT_COUNT - 1, rig.skeleton.joint_count);
-    TEST_ASSERT_EQUAL_UINT16(NT_SKELETAL_NO_PARENT, rig.skeleton.parent[0]);
-    /* Root is gone, so every joint index moves down by one. */
-    for (uint16_t j = 0; j < rig.skeleton.joint_count; j++) {
-        TEST_ASSERT_EQUAL_HEX32(nt_hash32_str(k_rig[j + 1].name).value, rig.skeleton.joint_id[j]);
-        TEST_ASSERT_EQUAL_UINT16(k_rig[j + 1].subtree_end - 1U, rig.skeleton.subtree_end[j]);
-        if (j > 0) {
-            TEST_ASSERT_EQUAL_UINT16(k_rig[j + 1].parent - 1U, rig.skeleton.parent[j]);
-        }
-    }
-    for (uint16_t p = 0; p < RIGGED_GLB_SKIN_JOINT_COUNT; p++) {
-        TEST_ASSERT_EQUAL_UINT16(ref_palette_joint(p) - 1U, rig.palette_joint[p]);
-    }
-
-    nt_builder_free_rig(&rig);
-    nt_builder_free_glb_scene(&scene);
-}
 // #endregion
 
 // #region matrix decomposition
@@ -405,7 +378,7 @@ void test_decompose_asserts_on_a_zero_scale(void) {
         nt_glb_scene_t knob_scene;                                                                                                                                                                     \
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&knob_scene, RIG_GLB));                                                                                                              \
         nt_builder_rig_t knob_rig;                                                                                                                                                                     \
-        EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&knob_scene, 0, UINT32_MAX, &knob_rig), expected);                                                                                             \
+        EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&knob_scene, 0, &knob_rig), expected);                                                                                                         \
         nt_builder_free_glb_scene(&knob_scene);                                                                                                                                                        \
     } while (0)
 
@@ -425,7 +398,7 @@ void test_import_decomposes_a_small_scale_wrapper(void) {
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
+    nt_builder_import_rig(&scene, 0, &rig);
     for (int c = 0; c < 3; c++) {
         ASSERT_F32(0.01F, rig.skeleton.rest[0].s[c]);
         ASSERT_F32(0.0F, rig.skeleton.rest[0].t[c]);
@@ -463,19 +436,7 @@ void test_import_asserts_on_a_missing_skin(void) {
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
     nt_builder_rig_t rig;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, 1, UINT32_MAX, &rig), "skin index out of range");
-    nt_builder_free_glb_scene(&scene);
-}
-
-void test_import_asserts_on_a_joint_outside_the_cut(void) {
-    rigged_glb_opts_t opts = {0};
-    opts.joint_outside_root = true;
-    rigged_glb_write(RIG_GLB, &opts);
-
-    nt_glb_scene_t scene;
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
-    nt_builder_rig_t rig;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, 0, RIGGED_GLB_NODE_HELPER, &rig), "outside the skeleton root");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_import_rig(&scene, 1, &rig), "skin index out of range");
     nt_builder_free_glb_scene(&scene);
 }
 // #endregion
@@ -811,7 +772,7 @@ void test_skinned_mesh_ignores_the_index_of_a_zero_weight_lane(void) {
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
+    nt_builder_import_rig(&scene, 0, &rig);
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
@@ -885,7 +846,7 @@ void test_add_scene_skinned_mesh_asserts_when_no_node_binds_the_skin(void) {
     /* The mesh node really moved to the second skin; rig 0 is a skin no node uses. */
     TEST_ASSERT_EQUAL_UINT32(1, scene.nodes[RIGGED_GLB_NODE_MESH].skin_index);
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
+    nt_builder_import_rig(&scene, 0, &rig);
     TEST_ASSERT_EQUAL_UINT32(0, rig.skin_index);
 
     NtStreamLayout layout[3];
@@ -910,7 +871,7 @@ void test_add_scene_skin_binding_asserts_when_no_node_binds_the_skin(void) {
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
+    nt_builder_import_rig(&scene, 0, &rig);
 
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
@@ -1043,7 +1004,7 @@ static void skn_read(skn_result_t *out) {
 static void skn_export(const rigged_glb_opts_t *opts, bool skinned_first, nt_glb_scene_t *scene, nt_builder_rig_t *rig, skn_result_t *out) {
     rigged_glb_write(RIG_GLB, opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(scene, RIG_GLB));
-    nt_builder_import_rig(scene, 0, UINT32_MAX, rig);
+    nt_builder_import_rig(scene, 0, rig);
 
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
@@ -1164,7 +1125,7 @@ void test_skin_binding_uses_identity_when_the_skin_has_no_inverse_binds(void) {
         nt_glb_scene_t knob_scene;                                                                                                                                                                     \
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&knob_scene, RIG_GLB));                                                                                                              \
         nt_builder_rig_t knob_rig;                                                                                                                                                                     \
-        nt_builder_import_rig(&knob_scene, 0, UINT32_MAX, &knob_rig);                                                                                                                                  \
+        nt_builder_import_rig(&knob_scene, 0, &knob_rig);                                                                                                                                              \
         (void)remove(PACK_PATH);                                                                                                                                                                       \
         NtBuilderContext *knob_ctx = nt_builder_start_pack(PACK_PATH);                                                                                                                                 \
         TEST_ASSERT_NOT_NULL(knob_ctx);                                                                                                                                                                \
@@ -1400,7 +1361,7 @@ static void khronos_import_case(const khronos_rig_t *asset) {
     TEST_ASSERT_EQUAL_MESSAGE(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, asset->path), asset->path);
 
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
+    nt_builder_import_rig(&scene, 0, &rig);
 
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(asset->joint_count, rig.skeleton.joint_count, asset->path);
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(asset->palette_count, rig.palette_count, asset->path);
@@ -1444,7 +1405,7 @@ static void khronos_import_case(const khronos_rig_t *asset) {
     nt_glb_scene_t again;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&again, asset->path));
     nt_builder_rig_t reimported;
-    nt_builder_import_rig(&again, 0, UINT32_MAX, &reimported);
+    nt_builder_import_rig(&again, 0, &reimported);
     TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, reimported.skeleton.rig_compat_id.value);
     nt_builder_free_rig(&reimported);
     nt_builder_free_glb_scene(&again);
@@ -1467,7 +1428,6 @@ int main(void) {
     RUN_TEST(test_parse_asserts_on_an_accessor_covering_fewer_vertices);
     RUN_TEST(test_rig_import_preorder_and_subtree_ranges);
     RUN_TEST(test_rig_compat_id_matches_the_hand_written_schema);
-    RUN_TEST(test_rig_cut_at_helper_drops_the_scene_root);
     RUN_TEST(test_decompose_reflection_gives_a_negative_x_scale);
     RUN_TEST(test_decompose_asserts_on_a_zero_scale);
     RUN_TEST(test_decompose_asserts_on_a_projective_bottom_row);
@@ -1484,7 +1444,6 @@ int main(void) {
     RUN_TEST(test_import_asserts_on_a_skin_listing_one_joint_twice);
     RUN_TEST(test_import_asserts_on_a_joint_chain_deeper_than_the_cap);
     RUN_TEST(test_import_asserts_on_joints_under_several_scene_roots);
-    RUN_TEST(test_import_asserts_on_a_joint_outside_the_cut);
     RUN_TEST(test_skinned_mesh_keeps_the_four_heaviest_influences);
     RUN_TEST(test_skinned_mesh_quantizes_a_half_half_tie_to_the_lower_lane);
     RUN_TEST(test_skinned_mesh_float32_weights_are_the_renormalized_values);

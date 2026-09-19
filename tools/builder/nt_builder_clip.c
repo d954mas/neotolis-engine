@@ -19,8 +19,8 @@
  * a dense set of times, which yields both the error report and the header
  * bounds.
  *
- * Every content failure is a logged diagnostic followed by NT_BUILD_ASSERT,
- * per the skeletal spec's builder policy.
+ * Every content failure is a logged diagnostic followed by NT_BUILD_ASSERT
+ * (NT_BUILD_FAIL), per the skeletal spec's builder policy.
  */
 
 /* Closer than this to a full quaternion dot the slerp weights lose their
@@ -35,30 +35,23 @@
  * the exporter, not an authored fraction; anything beyond it is reported. */
 #define CLIP_FRAME_SNAP_TOLERANCE 1e-3
 
-/* Bit-identical floats: the fold and the rest check compare representations,
- * not values, so -0 and 0 or two NaNs stay distinct. */
-static bool clip_bits_equal(const float *a, const float *b, uint32_t count) {
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t x = 0;
-        uint32_t y = 0;
-        memcpy(&x, &a[i], sizeof(x));
-        memcpy(&y, &b[i], sizeof(y));
-        if (x != y) {
+/* Equal by value, or every component negated when negate is set (q and -q are
+ * one rotation); the values are finite by the time the fold compares them. */
+static bool clip_same(const float *a, const float *b, uint32_t n, bool negate) {
+    const float sign = negate ? -1.0F : 1.0F;
+    for (uint32_t i = 0; i < n; i++) {
+        if (a[i] != sign * b[i]) {
             return false;
         }
     }
     return true;
 }
 
-/* The same rotation with every sign flipped, bit for bit. */
-static bool clip_bits_negated(const float *a, const float *b) {
-    for (uint32_t i = 0; i < 4U; i++) {
-        const float neg = -b[i];
-        if (!clip_bits_equal(&a[i], &neg, 1U)) {
-            return false;
-        }
+static void clip_normalize4(double *q) {
+    const double inv = 1.0 / sqrt((q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]));
+    for (int c = 0; c < 4; c++) {
+        q[c] *= inv;
     }
-    return true;
 }
 
 // #region source tracks
@@ -108,50 +101,37 @@ static uint32_t clip_find_joint(const nt_skeletal_skeleton_t *skel, const char *
 static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, const cgltf_animation_channel *ch, uint32_t index, clip_track_t *track) {
     const cgltf_node *node = ch->target_node;
     if (node == NULL) {
-        NT_LOG_ERROR("%s: channel[%u] has no target node", label, index);
-        NT_BUILD_ASSERT(0 && "animation channel has no target node");
+        NT_BUILD_FAIL("animation channel has no target node", "%s: channel[%u] has no target node", label, index);
     }
     if (node->name == NULL || node->name[0] == '\0') {
-        NT_LOG_ERROR("%s: channel[%u] targets an unnamed node, and a joint id is the hash of its name", label, index);
-        NT_BUILD_ASSERT(0 && "animation channel targets an unnamed node");
+        NT_BUILD_FAIL("animation channel targets an unnamed node", "%s: channel[%u] targets an unnamed node, and a joint id is the hash of its name", label, index);
     }
-    if (ch->target_path == cgltf_animation_path_type_weights) {
-        NT_LOG_ERROR("%s: channel[%u] animates the morph weights of %s; morph targets are not supported", label, index, node->name);
-        NT_BUILD_ASSERT(0 && "animation channel animates morph weights");
-    }
+    /* Morph weights (no targets are supported) or a path cgltf does not know. */
     if (ch->target_path != cgltf_animation_path_type_translation && ch->target_path != cgltf_animation_path_type_rotation && ch->target_path != cgltf_animation_path_type_scale) {
-        NT_LOG_ERROR("%s: channel[%u] on %s has an unknown target path %d", label, index, node->name, (int)ch->target_path);
-        NT_BUILD_ASSERT(0 && "animation channel has an unknown target path");
+        NT_BUILD_FAIL("animation channel animates neither translation, rotation nor scale", "%s: channel[%u] animates the %s of %s, which is not a joint transform", label, index,
+                      clip_path_name(ch->target_path), node->name);
     }
     /* glTF forbids a matrix on an animated node: the channel would replace
      * one of three properties the node does not have. */
     if (node->has_matrix) {
-        NT_LOG_ERROR("%s: channel[%u] animates %s, which carries a matrix instead of translation/rotation/scale", label, index, node->name);
-        NT_BUILD_ASSERT(0 && "animated node carries a matrix");
+        NT_BUILD_FAIL("animated node carries a matrix", "%s: channel[%u] animates %s, which carries a matrix instead of translation/rotation/scale", label, index, node->name);
     }
     const uint32_t joint = clip_find_joint(&rig->skeleton, node->name);
     if (joint == UINT32_MAX) {
-        NT_LOG_ERROR("%s: channel[%u] animates node %s, which is not a joint of the rig", label, index, node->name);
-        NT_BUILD_ASSERT(0 && "animation channel targets a node outside the rig");
+        NT_BUILD_FAIL("animation channel targets a node outside the rig", "%s: channel[%u] animates node %s, which is not a joint of the rig", label, index, node->name);
     }
-    /* A clip is valid for one hierarchy and one rest pose: the same names
-     * under another parent or over a different rest are a different rig,
-     * whatever glb they come from. The cut root's parent is not a joint. */
+    /* A clip is valid for one hierarchy: the same names under another parent
+     * are a different rig, whatever glb they come from. A root joint checks
+     * nothing, since an unanimated wrapper above the rig root is not a rig
+     * difference; the node's own rest is not compared either, because the rig
+     * supplies the rest of every channel the clip does not animate. */
     const uint16_t parent = rig->skeleton.parent[joint];
     if (parent != NT_SKELETAL_NO_PARENT) {
         const cgltf_node *parent_node = node->parent;
         if (parent_node == NULL || parent_node->name == NULL || nt_hash32_str(parent_node->name).value != rig->skeleton.joint_id[parent]) {
-            NT_LOG_ERROR("%s: node %s hangs under %s, but the rig's joint %u has a different parent", label, node->name, (parent_node && parent_node->name) ? parent_node->name : "(none)", joint);
-            NT_BUILD_ASSERT(0 && "animated node has a different parent than the rig's joint");
+            NT_BUILD_FAIL("animated node has a different parent than the rig's joint", "%s: node %s hangs under %s, but the rig's joint %u has a different parent", label, node->name,
+                          (parent_node && parent_node->name) ? parent_node->name : "(none)", joint);
         }
-    }
-    const nt_skeletal_trs_t *rest = &rig->skeleton.rest[joint];
-    if (!clip_bits_equal(rest->t, node->translation, 3) || !clip_bits_equal(rest->q, node->rotation, 4) || !clip_bits_equal(rest->s, node->scale, 3)) {
-        NT_LOG_ERROR("%s: node %s has a different rest pose than the rig's joint %u (t %g %g %g q %g %g %g %g s %g %g %g vs t %g %g %g q %g %g %g %g s %g %g %g)", label, node->name, joint,
-                     (double)node->translation[0], (double)node->translation[1], (double)node->translation[2], (double)node->rotation[0], (double)node->rotation[1], (double)node->rotation[2],
-                     (double)node->rotation[3], (double)node->scale[0], (double)node->scale[1], (double)node->scale[2], (double)rest->t[0], (double)rest->t[1], (double)rest->t[2], (double)rest->q[0],
-                     (double)rest->q[1], (double)rest->q[2], (double)rest->q[3], (double)rest->s[0], (double)rest->s[1], (double)rest->s[2]);
-        NT_BUILD_ASSERT(0 && "animated node's rest pose differs from the rig's");
     }
 
     const cgltf_accessor *in = ch->sampler->input;
@@ -160,16 +140,15 @@ static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, con
     /* cgltf_validate holds only the count relation between the two accessors;
      * a wrong type would unpack to fewer floats than the evaluator reads. */
     if (in->type != cgltf_type_scalar || in->component_type != cgltf_component_type_r_32f || in->normalized || in->count < 1) {
-        NT_LOG_ERROR("%s: channel[%u] on %s.%s: the input accessor must be SCALAR FLOAT with at least one key", label, index, node->name, clip_path_name(ch->target_path));
-        NT_BUILD_ASSERT(0 && "animation input accessor has an invalid type");
+        NT_BUILD_FAIL("animation input accessor has an invalid type", "%s: channel[%u] on %s.%s: the input accessor must be SCALAR FLOAT with at least one key", label, index, node->name,
+                      clip_path_name(ch->target_path));
     }
     const bool out_float = out->component_type == cgltf_component_type_r_32f;
     const bool out_norm_int = out->normalized != 0 && (out->component_type == cgltf_component_type_r_8 || out->component_type == cgltf_component_type_r_8u ||
                                                        out->component_type == cgltf_component_type_r_16 || out->component_type == cgltf_component_type_r_16u);
     if (rotation ? (out->type != cgltf_type_vec4 || (!out_float && !out_norm_int)) : (out->type != cgltf_type_vec3 || !out_float)) {
-        NT_LOG_ERROR("%s: channel[%u] on %s.%s: the output accessor must be %s", label, index, node->name, clip_path_name(ch->target_path),
-                     rotation ? "VEC4 FLOAT or normalized BYTE/SHORT" : "VEC3 FLOAT");
-        NT_BUILD_ASSERT(0 && "animation output accessor has an invalid type");
+        NT_BUILD_FAIL("animation output accessor has an invalid type", "%s: channel[%u] on %s.%s: the output accessor must be %s", label, index, node->name, clip_path_name(ch->target_path),
+                      rotation ? "VEC4 FLOAT or normalized BYTE/SHORT" : "VEC3 FLOAT");
     }
 
     track->channel = ch;
@@ -191,8 +170,9 @@ static void clip_map_channel(const char *label, const nt_builder_rig_t *rig, con
  * long enough to normalize. Rotation keys are normalized here, so a quantized
  * source and a float one meet the encoder's unit rule the same way. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void clip_unpack_track(const char *label, clip_track_t *track, float *scratch) {
+static void clip_unpack_track(clip_track_t *track, float *scratch) {
     const cgltf_animation_channel *ch = track->channel;
+    const char *label = track->label;
     const char *name = ch->target_node->name;
     const char *path = clip_path_name(ch->target_path);
     const uint32_t per_key = (track->interpolation == cgltf_interpolation_type_cubic_spline) ? 3U : 1U;
@@ -200,25 +180,22 @@ static void clip_unpack_track(const char *label, clip_track_t *track, float *scr
     const cgltf_size want_out = (cgltf_size)track->key_count * per_key * track->comps;
 
     if (cgltf_accessor_unpack_floats(ch->sampler->input, scratch, want_in) != want_in) {
-        NT_LOG_ERROR("%s: %s.%s input accessor could not be unpacked", label, name, path);
-        NT_BUILD_ASSERT(0 && "animation input accessor could not be unpacked");
+        NT_BUILD_FAIL("animation input accessor could not be unpacked", "%s: %s.%s input accessor could not be unpacked", label, name, path);
     }
     for (uint32_t k = 0; k < track->key_count; k++) {
         track->times[k] = (double)scratch[k];
         if (!nt_builder_finite(scratch[k]) || scratch[k] < 0.0F || (k > 0 && !(track->times[k] > track->times[k - 1U]))) {
-            NT_LOG_ERROR("%s: %s.%s key %u time %g is negative, not finite or not after the previous key", label, name, path, k, (double)scratch[k]);
-            NT_BUILD_ASSERT(0 && "animation input times must be finite, non-negative and strictly increasing");
+            NT_BUILD_FAIL("animation input times must be finite, non-negative and strictly increasing", "%s: %s.%s key %u time %g is negative, not finite or not after the previous key", label, name,
+                          path, k, (double)scratch[k]);
         }
     }
 
     if (cgltf_accessor_unpack_floats(ch->sampler->output, scratch, want_out) != want_out) {
-        NT_LOG_ERROR("%s: %s.%s output accessor could not be unpacked", label, name, path);
-        NT_BUILD_ASSERT(0 && "animation output accessor could not be unpacked");
+        NT_BUILD_FAIL("animation output accessor could not be unpacked", "%s: %s.%s output accessor could not be unpacked", label, name, path);
     }
     for (cgltf_size i = 0; i < want_out; i++) {
         if (!nt_builder_finite(scratch[i])) {
-            NT_LOG_ERROR("%s: %s.%s output element %u is not finite", label, name, path, (uint32_t)i);
-            NT_BUILD_ASSERT(0 && "animation output values must be finite");
+            NT_BUILD_FAIL("animation output values must be finite", "%s: %s.%s output element %u is not finite", label, name, path, (uint32_t)i);
         }
         track->values[i] = (double)scratch[i];
     }
@@ -231,25 +208,14 @@ static void clip_unpack_track(const char *label, clip_track_t *track, float *scr
         double *q = track->values + ((((size_t)k * per_key) + (per_key / 2U)) * 4U);
         const double len2 = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
         if (len2 < CLIP_MIN_Q_LEN2) {
-            NT_LOG_ERROR("%s: %s.rotation key %u (%g, %g, %g, %g) is too short to be a rotation", label, name, k, q[0], q[1], q[2], q[3]);
-            NT_BUILD_ASSERT(0 && "animation rotation key is not a unit quaternion");
+            NT_BUILD_FAIL("animation rotation key is not a unit quaternion", "%s: %s.rotation key %u (%g, %g, %g, %g) is too short to be a rotation", label, name, k, q[0], q[1], q[2], q[3]);
         }
-        const double inv = 1.0 / sqrt(len2);
-        for (int c = 0; c < 4; c++) {
-            q[c] *= inv;
-        }
+        clip_normalize4(q);
     }
 }
 // #endregion
 
 // #region source evaluation
-static void clip_normalize4(double *q) {
-    const double inv = 1.0 / sqrt((q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]));
-    for (int c = 0; c < 4; c++) {
-        q[c] *= inv;
-    }
-}
-
 /* Shortest-path slerp per the glTF animation rules; b is flipped into a's
  * hemisphere first so the near-parallel fallback never lerps q against -q. */
 static void clip_slerp(const double *a, const double *b_in, double u, double *out) {
@@ -354,8 +320,8 @@ static void clip_eval_checked(const clip_track_t *track, double time, double *ou
     clip_eval(track, time, out);
     for (uint32_t c = 0; c < track->comps; c++) {
         if (!(fabs(out[c]) <= (double)FLT_MAX)) {
-            NT_LOG_ERROR("%s: %s.%s evaluates to a non-finite value at %.9g s", track->label, track->channel->target_node->name, clip_path_name(track->channel->target_path), time);
-            NT_BUILD_ASSERT(0 && "animation curve evaluates to a non-finite value");
+            NT_BUILD_FAIL("animation curve evaluates to a non-finite value", "%s: %s.%s evaluates to a non-finite value at %.9g s", track->label, track->channel->target_node->name,
+                          clip_path_name(track->channel->target_path), time);
         }
     }
 }
@@ -368,10 +334,9 @@ static void clip_eval_checked(const clip_track_t *track, double time, double *ou
 static double clip_grid_time(uint32_t i, uint32_t n, float duration) { return ((double)i * (double)duration) / (double)(n - 1U); }
 
 /* Evaluates one track at every grid time into samples (n_grid * comps floats)
- * and reports whether every sample equals the first one bit for bit -- for a
- * rotation, its exact negation counts too, since q and -q are one rotation and
- * a held last key in the other hemisphere must not keep a still channel off
- * the base pose. */
+ * and reports whether every sample equals the first one -- for a rotation, its
+ * negation counts too, since q and -q are one rotation and a held last key in
+ * the other hemisphere must not keep a still channel off the base pose. */
 static bool clip_fill_track(const clip_track_t *track, uint32_t n_grid, float duration, float *samples) {
     const uint32_t comps = track->comps;
     double v[4] = {0.0, 0.0, 0.0, 0.0};
@@ -384,7 +349,7 @@ static bool clip_fill_track(const clip_track_t *track, uint32_t n_grid, float du
     bool constant = true;
     for (uint32_t i = 1; i < n_grid && constant; i++) {
         const float *sample = samples + ((size_t)i * comps);
-        constant = clip_bits_equal(samples, sample, comps) || (track->kind == 1U && clip_bits_negated(samples, sample));
+        constant = clip_same(samples, sample, comps, false) || (track->kind == 1U && clip_same(samples, sample, comps, true));
     }
     return constant;
 }
@@ -526,25 +491,37 @@ static void clip_dense_pass(clip_pass_t *p, uint32_t n_grid, float duration) {
 
 // #region export
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t animation_index, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
+void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const char *animation_name, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
                                nt_builder_clip_report_t *report) {
     NT_BUILD_ASSERT(ctx && scene && rig && resource_id && report && "invalid add_scene_clip args");
     const cgltf_data *data = (const cgltf_data *)scene->_internal;
     NT_BUILD_ASSERT(data && "add_scene_clip: scene is not parsed");
-    if (animation_index >= scene->animation_count) {
-        NT_LOG_ERROR("add_scene_clip: animation index %u, the scene has %u animations", animation_index, scene->animation_count);
-        NT_BUILD_ASSERT(0 && "animation index out of range");
-    }
     if (!nt_builder_finite(sample_fps) || !(sample_fps > 0.0F)) {
-        NT_LOG_ERROR("add_scene_clip: sample_fps %g must be finite and positive", (double)sample_fps);
-        NT_BUILD_ASSERT(0 && "sample_fps must be finite and positive");
+        NT_BUILD_FAIL("sample_fps must be finite and positive", "add_scene_clip: sample_fps %g must be finite and positive", (double)sample_fps);
+    }
+    /* NULL and "" are one name, the unnamed animation. */
+    const char *want = animation_name ? animation_name : "";
+    const uint32_t animation_count = (uint32_t)data->animations_count;
+    uint32_t animation_index = UINT32_MAX;
+    uint32_t matches = 0;
+    for (uint32_t a = 0; a < animation_count; a++) {
+        const char *name = data->animations[a].name ? data->animations[a].name : "";
+        if (strcmp(name, want) == 0) {
+            animation_index = a;
+            matches++;
+        }
+    }
+    if (matches != 1U) {
+        for (uint32_t a = 0; a < animation_count; a++) {
+            NT_LOG_ERROR("add_scene_clip:   animation[%u] %s", a, (data->animations[a].name && data->animations[a].name[0]) ? data->animations[a].name : "(unnamed)");
+        }
+        NT_BUILD_FAIL("exactly one animation must carry the requested name", "add_scene_clip: %u of the scene's %u animations are named %s", matches, animation_count, want[0] ? want : "(unnamed)");
     }
     const cgltf_animation *anim = &data->animations[animation_index];
     char label[128];
     (void)snprintf(label, sizeof(label), "add_scene_clip: animation[%u]%s%s", animation_index, anim->name ? " " : "", anim->name ? anim->name : "");
     if (anim->channels_count == 0) {
-        NT_LOG_ERROR("%s has no channels", label);
-        NT_BUILD_ASSERT(0 && "animation has no channels");
+        NT_BUILD_FAIL("animation has no channels", "%s has no channels", label);
     }
     const nt_skeletal_skeleton_t *skel = &rig->skeleton;
     const uint32_t joints = skel->joint_count;
@@ -564,8 +541,8 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
         /* glTF forbids two channels of one animation on one node property;
          * cgltf does not check it, and the second would silently win. */
         if (track_of[c] != UINT32_MAX) {
-            NT_LOG_ERROR("%s: channels[%u] and [%u] both animate %s.%s", label, track_of[c], t, anim->channels[t].target_node->name, clip_path_name(anim->channels[t].target_path));
-            NT_BUILD_ASSERT(0 && "two channels animate one node property");
+            NT_BUILD_FAIL("two channels animate one node property", "%s: channels[%u] and [%u] both animate %s.%s", label, track_of[c], t, anim->channels[t].target_node->name,
+                          clip_path_name(anim->channels[t].target_path));
         }
         track_of[c] = t;
         const uint32_t per_key = (tracks[t].interpolation == cgltf_interpolation_type_cubic_spline) ? 3U : 1U;
@@ -586,7 +563,7 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
         next += tracks[t].key_count;
         tracks[t].values = next;
         next += (size_t)tracks[t].key_count * per_key * tracks[t].comps;
-        clip_unpack_track(label, &tracks[t], scratch);
+        clip_unpack_track(&tracks[t], scratch);
         const float last = (float)tracks[t].times[tracks[t].key_count - 1U];
         if (last > duration) {
             duration = last;
@@ -599,18 +576,21 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     // #region resample
     /* Frames are the nearest whole number and the duration follows, so keys
      * authored at sample_fps land on grid samples (the Unreal import rule); a
-     * fractional source holds or loses its tail and says so. */
+     * fractional source holds or loses its tail and says so, sampled or not. */
     const double frames_exact = (double)source_duration * (double)sample_fps;
     if (!(frames_exact < 4294967294.0)) {
-        NT_LOG_ERROR("%s: %.9g s at %g fps is %g frames, more than the grid can hold", label, (double)source_duration, (double)sample_fps, frames_exact);
-        NT_BUILD_ASSERT(0 && "duration * sample_fps overflows the sample grid");
+        NT_BUILD_FAIL("duration * sample_fps overflows the sample grid", "%s: %.9g s at %g fps is %g frames, more than the grid can hold", label, (double)source_duration, (double)sample_fps,
+                      frames_exact);
     }
     const double frames = (double)llround(frames_exact);
     const uint32_t n_grid = (frames < 1.0) ? 2U : ((uint32_t)frames + 1U);
-    const float grid_duration = (float)((double)(n_grid - 1U) / (double)sample_fps);
-    if (!nt_builder_finite(grid_duration) || !(grid_duration > 0.0F)) {
-        NT_LOG_ERROR("%s: %u frames at %g fps is not a finite positive duration", label, n_grid - 1U, (double)sample_fps);
-        NT_BUILD_ASSERT(0 && "sample_fps gives no finite grid");
+    duration = (float)((double)(n_grid - 1U) / (double)sample_fps);
+    if (!nt_builder_finite(duration) || !(duration > 0.0F)) {
+        NT_BUILD_FAIL("sample_fps gives no finite grid", "%s: %u frames at %g fps is not a finite positive duration", label, n_grid - 1U, (double)sample_fps);
+    }
+    if (fabs(frames_exact - (double)(n_grid - 1U)) > CLIP_FRAME_SNAP_TOLERANCE) {
+        NT_LOG_WARN("%s: %.9g s is %.4g frames at %g fps, not a whole number; the clip ships %u frames, %.9g s", label, (double)source_duration, frames_exact, (double)sample_fps, n_grid - 1U,
+                    (double)duration);
     }
     /* Channel-major per track, one grid of n_grid samples each; rows are
      * transposed into sample-major blocks once the still ones are known. */
@@ -619,16 +599,8 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     NT_BUILD_ASSERT(samples && still && "add_scene_clip: alloc failed (OOM)");
     bool sampled = false;
     for (uint32_t t = 0; t < track_count; t++) {
-        still[t] = clip_fill_track(&tracks[t], n_grid, grid_duration, samples + ((size_t)t * n_grid * 4U));
+        still[t] = clip_fill_track(&tracks[t], n_grid, duration, samples + ((size_t)t * n_grid * 4U));
         sampled = sampled || !still[t];
-    }
-    /* Without a grid there is nothing to align, so the clip keeps its exact
-     * source length; a curve that folded over the grid is still measured over
-     * that length, so anything past the grid shows in the report. */
-    duration = sampled ? grid_duration : source_duration;
-    if (sampled && (fabs(frames_exact - (double)(n_grid - 1U)) > CLIP_FRAME_SNAP_TOLERANCE)) {
-        NT_LOG_WARN("%s: %.9g s is %.4g frames at %g fps, not a whole number; the clip ships %u frames, %.9g s", label, (double)source_duration, frames_exact, (double)sample_fps, n_grid - 1U,
-                    (double)duration);
     }
 
     /* The base pose is the rig's rest with every still channel written in;

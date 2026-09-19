@@ -141,8 +141,8 @@ static uint8_t *read_pack_clip(const char *pack_path, const char *resource_id, u
 }
 
 /* One fixture export: writes the glb with opts (rig and clip from the same
- * file unless clip_opts differs), imports the rig at skeleton_root, exports
- * the clip and reads it back. The scene and rig stay alive for the caller. */
+ * file unless clip_opts differs), imports the rig, exports the clip "Clip" and
+ * reads it back. The scene and rig stay alive for the caller. */
 typedef struct {
     nt_glb_scene_t scene;
     nt_glb_scene_t clip_scene;
@@ -153,24 +153,22 @@ typedef struct {
     nt_skeletal_clip_t view;
 } fixture_export_t;
 
-static void fixture_export_at(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts, uint32_t skeleton_root, float fps) {
+static void fixture_export_at(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts, float fps) {
     memset(fx, 0, sizeof(*fx));
     rigged_glb_write(RIG_GLB, rig_opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&fx->scene, RIG_GLB));
-    nt_builder_import_rig(&fx->scene, 0, skeleton_root, &fx->rig);
+    nt_builder_import_rig(&fx->scene, 0, &fx->rig);
     const nt_glb_scene_t *clip_scene = &fx->scene;
     if (clip_opts != rig_opts) {
         rigged_glb_write(OTHER_GLB, clip_opts);
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&fx->clip_scene, OTHER_GLB));
         clip_scene = &fx->clip_scene;
     }
-    TEST_ASSERT_EQUAL_UINT32(1, clip_scene->animation_count);
-    TEST_ASSERT_EQUAL_STRING("Clip", clip_scene->animations[0].name);
 
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_scene_clip(ctx, clip_scene, 0, &fx->rig, fps, CLIP_ID, &fx->report);
+    nt_builder_add_scene_clip(ctx, clip_scene, "Clip", &fx->rig, fps, CLIP_ID, &fx->report);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
@@ -178,9 +176,7 @@ static void fixture_export_at(fixture_export_t *fx, const rigged_glb_opts_t *rig
     nt_skeletal_clip_view(fx->payload, &fx->view);
 }
 
-static void fixture_export(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts, uint32_t skeleton_root) {
-    fixture_export_at(fx, rig_opts, clip_opts, skeleton_root, FPS);
-}
+static void fixture_export(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts) { fixture_export_at(fx, rig_opts, clip_opts, FPS); }
 
 static void fixture_free(fixture_export_t *fx) {
     free(fx->payload);
@@ -397,7 +393,7 @@ static uint32_t ref_dense_times(bool step_only, uint32_t grid, double *out) {
 void test_grid_samples_reproduce_the_source(void) {
     const rigged_glb_opts_t opts = {.animation = true};
     fixture_export_t fx;
-    fixture_export(&fx, &opts, &opts, UINT32_MAX);
+    fixture_export(&fx, &opts, &opts);
     const nt_skeletal_clip_t *view = &fx.view;
     const nt_skeletal_skeleton_t *skel = &fx.rig.skeleton;
     TEST_ASSERT_EQUAL_UINT32(0, s_log_warnings);
@@ -484,7 +480,7 @@ void test_grid_samples_reproduce_the_source(void) {
 void test_still_channels_land_in_the_base_and_steps_on_the_grid(void) {
     const rigged_glb_opts_t opts = {.animation = true};
     fixture_export_t fx;
-    fixture_export(&fx, &opts, &opts, UINT32_MAX);
+    fixture_export(&fx, &opts, &opts);
     const nt_skeletal_clip_t *view = &fx.view;
     const nt_skeletal_skeleton_t *skel = &fx.rig.skeleton;
     const uint16_t j3 = joint_named(skel, "Joint3");
@@ -622,7 +618,7 @@ static void assert_rounded_up(double expected, float actual) {
 static void check_report(float fps, uint32_t grid) {
     const rigged_glb_opts_t opts = {.animation = true};
     fixture_export_t fx;
-    fixture_export_at(&fx, &opts, &opts, UINT32_MAX, fps);
+    fixture_export_at(&fx, &opts, &opts, fps);
     ref_measure_t m;
     ref_measure(&fx, false, grid, &m);
 
@@ -653,7 +649,7 @@ void test_report_matches_an_independent_measurement(void) {
 void test_a_step_source_samples_on_the_grid(void) {
     const rigged_glb_opts_t opts = {.animation_step_only = true};
     fixture_export_t fx;
-    fixture_export(&fx, &opts, &opts, UINT32_MAX);
+    fixture_export(&fx, &opts, &opts);
     TEST_ASSERT_EQUAL_UINT32(GRID, fx.view.sample_count);
     TEST_ASSERT_NOT_NULL(fx.view.blocks);
     TEST_ASSERT_TRUE(fx.view.n_t == 0 && fx.view.n_q == 0 && fx.view.n_s == 1);
@@ -681,31 +677,22 @@ void test_a_step_source_samples_on_the_grid(void) {
     fixture_free(&fx);
 }
 
-/* Bounds under the default cut (Root and Helper are joints: Helper's scale 2
- * doubles the STEP scale) and under a cut at Joint0 (its rest translation is
- * the only root translation; the Joint4 chain is 2 * 0.5). */
-void test_bounds_match_the_measurement_under_two_cuts(void) {
-    const rigged_glb_opts_t opts = {.animation = true};
+/* Bounds of the whole rig: Root and Helper are joints, so Helper's scale 2
+ * doubles the STEP scale, and Root's (1, -2, 2) translation is the one root
+ * translation, 3 from the origin at every time. */
+void test_bounds_match_the_measurement(void) {
+    const rigged_glb_opts_t opts = {.animation = true, .root_translation = true};
     fixture_export_t fx;
     ref_measure_t m;
 
-    fixture_export(&fx, &opts, &opts, UINT32_MAX);
+    fixture_export(&fx, &opts, &opts);
     ref_measure(&fx, false, GRID, &m);
     assert_rounded_up(m.r_joints, fx.view.r_joints);
     assert_rounded_up(m.r_root, fx.view.r_root);
     assert_rounded_up(m.s_max, fx.view.s_max);
     ASSERT_F32(4.0F, fx.view.s_max);
-    ASSERT_F32(0.0F, fx.view.r_root);
-    TEST_ASSERT_TRUE(fx.view.r_joints > 0.0F);
-    fixture_free(&fx);
-
-    fixture_export(&fx, &opts, &opts, RIGGED_GLB_NODE_JOINT0);
-    ref_measure(&fx, false, GRID, &m);
-    assert_rounded_up(m.r_joints, fx.view.r_joints);
-    assert_rounded_up(m.r_root, fx.view.r_root);
-    assert_rounded_up(m.s_max, fx.view.s_max);
-    ASSERT_F32(2.0F, fx.view.s_max);
-    assert_rounded_up(sqrt(14.0), fx.view.r_root);
+    ASSERT_F32(3.0F, fx.view.r_root);
+    TEST_ASSERT_TRUE(fx.view.r_joints > 3.0F);
     fixture_free(&fx);
 }
 // #endregion
@@ -715,7 +702,7 @@ void test_bounds_match_the_measurement_under_two_cuts(void) {
 #define EXPECT_CLIP_REJECTED(knob_opts, expected, node)                                                                                                                                                \
     do {                                                                                                                                                                                               \
         fixture_export_t fx;                                                                                                                                                                           \
-        EXPECT_BUILD_ASSERT_MATCH(fixture_export(&fx, &(knob_opts), &(knob_opts), UINT32_MAX), expected);                                                                                              \
+        EXPECT_BUILD_ASSERT_MATCH(fixture_export(&fx, &(knob_opts), &(knob_opts)), expected);                                                                                                          \
         TEST_ASSERT_TRUE_MESSAGE(s_log_warnings > 0, "no diagnostic before the assert");                                                                                                               \
         TEST_ASSERT_NOT_NULL_MESSAGE(strstr(s_log_last, node), "the diagnostic does not name the node");                                                                                               \
     } while (0)
@@ -727,7 +714,7 @@ void test_channel_outside_the_rig_is_rejected(void) {
 
 void test_morph_weights_channel_is_rejected(void) {
     const rigged_glb_opts_t opts = {.animation_weights = true};
-    EXPECT_CLIP_REJECTED(opts, "animates morph weights", "MeshNode");
+    EXPECT_CLIP_REJECTED(opts, "neither translation, rotation nor scale", "MeshNode");
 }
 
 void test_duplicate_channel_is_rejected(void) {
@@ -746,9 +733,10 @@ void test_matrix_node_channel_is_rejected(void) {
 void test_a_step_key_past_the_snapped_end_is_not_on_the_grid(void) {
     const rigged_glb_opts_t opts = {.animation_step_past_end = true};
     fixture_export_t fx;
-    fixture_export(&fx, &opts, &opts, UINT32_MAX);
+    fixture_export(&fx, &opts, &opts);
     TEST_ASSERT_EQUAL_UINT32(26, fx.view.sample_count);
     ASSERT_F32((float)(25.0 / 24.0), fx.report.duration);
+    TEST_ASSERT_TRUE(fx.view.duration == (double)fx.report.duration);
     TEST_ASSERT_EQUAL_UINT16(1, fx.view.n_s);
     nt_skeletal_trs_t *pose = (nt_skeletal_trs_t *)calloc(fx.rig.skeleton.joint_count, sizeof(nt_skeletal_trs_t));
     TEST_ASSERT_NOT_NULL(pose);
@@ -762,11 +750,13 @@ void test_a_step_key_past_the_snapped_end_is_not_on_the_grid(void) {
     fixture_free(&fx);
 }
 
+/* The same names under another parent are a different rig, whatever file
+ * they come from; a node's own rest is not compared (the rig supplies it). */
 void test_reparented_joint_is_rejected(void) {
     const rigged_glb_opts_t rig_opts = {0};
     const rigged_glb_opts_t clip_opts = {.animation = true, .reparent_joint2 = true};
     fixture_export_t fx;
-    EXPECT_BUILD_ASSERT_MATCH(fixture_export(&fx, &rig_opts, &clip_opts, UINT32_MAX), "different parent than the rig");
+    EXPECT_BUILD_ASSERT_MATCH(fixture_export(&fx, &rig_opts, &clip_opts), "different parent than the rig");
     TEST_ASSERT_NOT_NULL(strstr(s_log_last, "Joint2"));
 }
 
@@ -783,7 +773,7 @@ void test_cubic_through_the_origin_is_rejected(void) {
 void test_animation_without_channels_is_rejected(void) {
     const rigged_glb_opts_t opts = {.animation_no_channels = true};
     fixture_export_t fx;
-    EXPECT_BUILD_ASSERT_MATCH(fixture_export(&fx, &opts, &opts, UINT32_MAX), "animation has no channels");
+    EXPECT_BUILD_ASSERT_MATCH(fixture_export(&fx, &opts, &opts), "animation has no channels");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -793,45 +783,74 @@ void test_bad_arguments_are_rejected(void) {
     nt_glb_scene_t scene;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
     nt_builder_rig_t rig;
-    nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
+    nt_builder_import_rig(&scene, 0, &rig);
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     nt_builder_clip_report_t report;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 1, &rig, FPS, CLIP_ID, &report), "animation index out of range");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, 0.0F, CLIP_ID, &report), "sample_fps must be finite and positive");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, NAN, CLIP_ID, &report), "sample_fps must be finite and positive");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, 1e30F, CLIP_ID, &report), "overflows the sample grid");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, 1e-40F, CLIP_ID, &report), "sample_fps gives no finite grid");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, 0, &rig, FPS, CLIP_ID, NULL), "invalid add_scene_clip args");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, 0.0F, CLIP_ID, &report), "sample_fps must be finite and positive");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, NAN, CLIP_ID, &report), "sample_fps must be finite and positive");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, 1e30F, CLIP_ID, &report), "overflows the sample grid");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, 1e-40F, CLIP_ID, &report), "sample_fps gives no finite grid");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, FPS, CLIP_ID, NULL), "invalid add_scene_clip args");
     nt_builder_free_pack(ctx);
     nt_builder_free_rig(&rig);
     nt_builder_free_glb_scene(&scene);
 }
 
-/* A clip from a second file with the same names and rest maps onto the rig
- * and carries its identity; one rest component one ulp off is a different rig. */
-void test_clip_from_another_glb_maps_by_name_and_rest(void) {
+/* A name no animation carries, and the unnamed animation of a file whose
+ * animations all have names: the diagnostic lists the file's animations and
+ * ends on the count. */
+void test_an_unmatched_name_is_rejected(void) {
+    const rigged_glb_opts_t opts = {.animation = true};
+    rigged_glb_write(RIG_GLB, &opts);
+    nt_glb_scene_t scene;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, RIG_GLB));
+    nt_builder_rig_t rig;
+    nt_builder_import_rig(&scene, 0, &rig);
+    (void)remove(PACK_PATH);
+    NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
+    nt_builder_clip_report_t report;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Nope", &rig, FPS, CLIP_ID, &report), "exactly one animation must carry the requested name");
+    TEST_ASSERT_EQUAL_UINT32(2, s_log_warnings); /* the one animation, then the verdict */
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "0 of the scene's 1 animations are named Nope"));
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+
+    s_log_warnings = 0;
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, "examples/skeletal_showcase/raw/Fox.glb"));
+    nt_builder_import_rig(&scene, 0, &rig);
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, NULL, &rig, FPS, CLIP_ID, &report), "exactly one animation must carry the requested name");
+    TEST_ASSERT_EQUAL_UINT32(4, s_log_warnings); /* Survey, Walk, Run, then the verdict */
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "0 of the scene's 3 animations are named (unnamed)"));
+    nt_builder_free_pack(ctx);
+    nt_builder_free_rig(&rig);
+    nt_builder_free_glb_scene(&scene);
+}
+
+/* A clip from a second file with the same names and parents maps onto the
+ * rig and carries its identity; the second file's rest is never read, so the
+ * base pose is the rig's rest even where the clip file's Root differs. */
+void test_clip_from_another_glb_maps_by_name_and_parent(void) {
     const rigged_glb_opts_t rig_opts = {0};
-    const rigged_glb_opts_t clip_opts = {.animation = true};
+    const rigged_glb_opts_t clip_opts = {.animation = true, .root_translation = true};
     fixture_export_t fx;
-    fixture_export(&fx, &rig_opts, &clip_opts, UINT32_MAX);
+    fixture_export(&fx, &rig_opts, &clip_opts);
     TEST_ASSERT_EQUAL_UINT32(0, s_log_warnings);
     TEST_ASSERT_EQUAL_HEX64(fx.rig.skeleton.rig_compat_id.value, fx.view.rig_compat_id.value);
     TEST_ASSERT_EQUAL_UINT32(GRID, fx.view.sample_count);
     TEST_ASSERT_TRUE(sampled_row(fx.view.s_joint, fx.view.n_s, joint_named(&fx.rig.skeleton, "Joint3")) != UINT32_MAX);
+    const uint16_t root = joint_named(&fx.rig.skeleton, "Root");
+    TEST_ASSERT_EQUAL_MEMORY(fx.rig.skeleton.rest[root].t, fx.view.base[root].t, sizeof(fx.view.base[root].t));
+    ASSERT_F32(0.0F, fx.view.base[root].t[0]);
+    ASSERT_F32(0.0F, fx.view.r_root);
     fixture_free(&fx);
-
-    const rigged_glb_opts_t mismatch = {.animation = true, .rest_mismatch = true};
-    fixture_export_t bad;
-    EXPECT_BUILD_ASSERT_MATCH(fixture_export(&bad, &rig_opts, &mismatch, UINT32_MAX), "rest pose differs from the rig");
-    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "Joint2"));
 }
 // #endregion
 
 // #region khronos assets
 typedef struct {
     const char *path;
-    uint32_t animation;
+    const char *name;      /* the animation, NULL for the unnamed one */
     uint32_t sample_count; /* round(last key * 24) + 1, from the input accessors */
     bool snapped;          /* the source is not a whole number of frames at 24 fps */
     float max_lin, max_t;  /* ceilings above the measured errors */
@@ -841,12 +860,12 @@ typedef struct {
 /* Frame counts from the input accessors; the ceilings sit above the measured
  * errors (Frobenius distance 2 sqrt(2) sin(theta / 2)). */
 static const khronos_clip_t k_khronos[4] = {
-    {"examples/skeletal_showcase/raw/Fox.glb", 0, 83, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* Survey: 82 frames, 2e-6 / 4.5e-5 cm */
-    {"examples/skeletal_showcase/raw/Fox.glb", 1, 18, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* Walk: 17 frames, 0.0064 (0.26 deg) / 0.061 cm */
+    {"examples/skeletal_showcase/raw/Fox.glb", "Survey", 83, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* 82 frames, 2e-6 / 4.5e-5 cm */
+    {"examples/skeletal_showcase/raw/Fox.glb", "Walk", 18, false, 0.02F, 0.5F, 0.0F, 0.0F},   /* 17 frames, 0.0064 (0.26 deg) / 0.061 cm */
     /* Run: 27.8 frames, snaps to 28 with a warning; keys 20.8..27.8 sit 0.2 frames
      * from the nearest grid sample, off every sub-sample: 0.117 (4.7 deg) / 1.78 cm. */
-    {"examples/skeletal_showcase/raw/Fox.glb", 2, 29, true, 0.2F, 2.5F, 0.1F, 1.5F},
-    {"examples/skeletal_showcase/raw/CesiumMan.glb", 0, 49, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* unnamed, 48 frames, first key at 1/24 s (holds before it) */
+    {"examples/skeletal_showcase/raw/Fox.glb", "Run", 29, true, 0.2F, 2.5F, 0.1F, 1.5F},
+    {"examples/skeletal_showcase/raw/CesiumMan.glb", NULL, 49, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* unnamed, 48 frames, first key at 1/24 s (holds before it) */
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -856,11 +875,11 @@ void test_khronos_clips_export_at_24_fps(void) {
         nt_glb_scene_t scene;
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, asset->path));
         nt_builder_rig_t rig;
-        nt_builder_import_rig(&scene, 0, UINT32_MAX, &rig);
+        nt_builder_import_rig(&scene, 0, &rig);
         (void)remove(PACK_PATH);
         NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
         nt_builder_clip_report_t report;
-        nt_builder_add_scene_clip(ctx, &scene, asset->animation, &rig, FPS, CLIP_ID, &report);
+        nt_builder_add_scene_clip(ctx, &scene, asset->name, &rig, FPS, CLIP_ID, &report);
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
         nt_builder_free_pack(ctx);
         TEST_ASSERT_EQUAL_UINT32(asset->snapped ? 1U : 0U, s_log_warnings);
@@ -873,10 +892,9 @@ void test_khronos_clips_export_at_24_fps(void) {
         uint8_t *payload = read_pack_clip(PACK_PATH, CLIP_ID, &size);
         nt_skeletal_clip_t view;
         nt_skeletal_clip_view(payload, &view);
-        (void)printf("%s animation[%u] %s: samples %u, cpu_error_lin %.3g at t=%.4f joint %u, cpu_error_t %.3g at t=%.4f joint %u, r_joints %.4g r_root %.4g s_max %.4g\n", asset->path,
-                     asset->animation, scene.animations[asset->animation].name ? scene.animations[asset->animation].name : "(unnamed)", report.sample_count, (double)report.cpu_error_lin,
-                     report.worst_time_lin, report.worst_joint_lin, (double)report.cpu_error_t, report.worst_time_t, report.worst_joint_t, (double)view.r_joints, (double)view.r_root,
-                     (double)view.s_max);
+        (void)printf("%s %s: samples %u, cpu_error_lin %.3g at t=%.4f joint %u, cpu_error_t %.3g at t=%.4f joint %u, r_joints %.4g r_root %.4g s_max %.4g\n", asset->path,
+                     asset->name ? asset->name : "(unnamed)", report.sample_count, (double)report.cpu_error_lin, report.worst_time_lin, report.worst_joint_lin, (double)report.cpu_error_t,
+                     report.worst_time_t, report.worst_joint_t, (double)view.r_joints, (double)view.r_root, (double)view.s_max);
 
         TEST_ASSERT_EQUAL_UINT32(asset->sample_count, report.sample_count);
         TEST_ASSERT_EQUAL_UINT32(asset->sample_count, view.sample_count);
@@ -903,7 +921,7 @@ int main(void) {
     RUN_TEST(test_still_channels_land_in_the_base_and_steps_on_the_grid);
     RUN_TEST(test_a_step_source_samples_on_the_grid);
     RUN_TEST(test_report_matches_an_independent_measurement);
-    RUN_TEST(test_bounds_match_the_measurement_under_two_cuts);
+    RUN_TEST(test_bounds_match_the_measurement);
     RUN_TEST(test_channel_outside_the_rig_is_rejected);
     RUN_TEST(test_morph_weights_channel_is_rejected);
     RUN_TEST(test_duplicate_channel_is_rejected);
@@ -914,7 +932,8 @@ int main(void) {
     RUN_TEST(test_cubic_through_the_origin_is_rejected);
     RUN_TEST(test_animation_without_channels_is_rejected);
     RUN_TEST(test_bad_arguments_are_rejected);
-    RUN_TEST(test_clip_from_another_glb_maps_by_name_and_rest);
+    RUN_TEST(test_an_unmatched_name_is_rejected);
+    RUN_TEST(test_clip_from_another_glb_maps_by_name_and_parent);
     RUN_TEST(test_khronos_clips_export_at_24_fps);
     return UNITY_END();
 }

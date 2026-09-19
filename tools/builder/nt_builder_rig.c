@@ -11,11 +11,10 @@
  * Rig import: which glTF nodes become joints, in which order, and what their
  * rest pose is. Skeleton space is glTF scene space -- the joints are every node
  * on the paths from the scene root of the joints' hierarchy to each skin joint,
- * identity wrappers included -- unless the caller cuts the hierarchy explicitly
- * with skeleton_root, whose parent space then becomes skeleton space.
+ * identity wrappers included.
  *
- * Every content failure is a logged diagnostic followed by NT_BUILD_ASSERT,
- * per the skeletal spec's builder policy.
+ * Every content failure is a logged diagnostic followed by NT_BUILD_ASSERT
+ * (NT_BUILD_FAIL), per the skeletal spec's builder policy.
  */
 
 // #region matrix decomposition
@@ -83,14 +82,12 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
 
     for (int i = 0; i < 16; i++) {
         if (!nt_builder_finite(m[i])) {
-            NT_LOG_ERROR("node %s: matrix element %d is not a finite number", label, i);
-            NT_BUILD_ASSERT(0 && "matrix is not finite");
+            NT_BUILD_FAIL("matrix is not finite", "node %s: matrix element %d is not a finite number", label, i);
         }
     }
     /* A projective bottom row has no TRS; column-major puts it at 3, 7, 11, 15. */
     if (m[3] != 0.0F || m[7] != 0.0F || m[11] != 0.0F || m[15] != 1.0F) {
-        NT_LOG_ERROR("node %s: matrix bottom row is (%g, %g, %g, %g), an affine matrix ends in (0, 0, 0, 1)", label, (double)m[3], (double)m[7], (double)m[11], (double)m[15]);
-        NT_BUILD_ASSERT(0 && "matrix is not affine");
+        NT_BUILD_FAIL("matrix is not affine", "node %s: matrix bottom row is (%g, %g, %g, %g), an affine matrix ends in (0, 0, 0, 1)", label, (double)m[3], (double)m[7], (double)m[11], (double)m[15]);
     }
 
     /* Column lengths in double: a float32 length of a float32 column loses the
@@ -105,8 +102,7 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
         }
         scale[col] = sqrt(len2);
         if (!(scale[col] >= RIG_MIN_SCALE)) {
-            NT_LOG_ERROR("node %s: matrix column %d has length %g, too small to decompose", label, col, scale[col]);
-            NT_BUILD_ASSERT(0 && "matrix scale is degenerate");
+            NT_BUILD_FAIL("matrix scale is degenerate", "node %s: matrix column %d has length %g, too small to decompose", label, col, scale[col]);
         }
         for (int row = 0; row < 3; row++) {
             rot[row][col] = rig_m(m, row, col) / scale[col];
@@ -145,8 +141,7 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
             const float tolerance = 64.0F * FLT_EPSILON * (float)fabs(scale[col]);
             const float d = re.r[row][col] - m[(col * 4) + row];
             if (((d < 0.0F) ? -d : d) > tolerance) {
-                NT_LOG_ERROR("node %s: recomposed element (%d,%d) is %g, the matrix holds %g", label, row, col, (double)re.r[row][col], (double)m[(col * 4) + row]);
-                NT_BUILD_ASSERT(0 && "matrix is not TRS");
+                NT_BUILD_FAIL("matrix is not TRS", "node %s: recomposed element (%d,%d) is %g, the matrix holds %g", label, row, col, (double)re.r[row][col], (double)m[(col * 4) + row]);
             }
         }
         NT_BUILD_ASSERT(re.r[row][3] == m[12 + row] && "matrix translation survives decomposition exactly");
@@ -174,8 +169,7 @@ typedef struct {
 // NOLINTNEXTLINE(misc-no-recursion) -- the walk follows the node hierarchy, which cgltf_validate proved acyclic
 static void rig_visit(rig_walk_t *w, uint32_t node, uint16_t parent_joint, uint32_t depth) {
     if (depth > RIG_MAX_DEPTH) {
-        NT_LOG_ERROR("import_rig: node[%u] sits %u joints below the rig root, the importer walks at most %u", node, depth, RIG_MAX_DEPTH);
-        NT_BUILD_ASSERT(0 && "rig hierarchy is too deep");
+        NT_BUILD_FAIL("rig hierarchy is too deep", "import_rig: node[%u] sits %u joints below the rig root, the importer walks at most %u", node, depth, RIG_MAX_DEPTH);
     }
     const uint16_t j = w->next++;
     w->joint_of[node] = j;
@@ -192,21 +186,14 @@ static void rig_visit(rig_walk_t *w, uint32_t node, uint16_t parent_joint, uint3
     w->subtree_end[j] = w->next;
 }
 
-/* Marks the node and every ancestor up to the cut or to the scene root, and
- * returns the root the walk ended on. */
-static uint32_t rig_mark_path(const nt_glb_scene_t *scene, uint8_t *mark, uint32_t node, uint32_t cut) {
+/* Marks the node and every ancestor up to the scene root, and returns that
+ * root. */
+static uint32_t rig_mark_path(const nt_glb_scene_t *scene, uint8_t *mark, uint32_t node) {
     uint32_t cur = node;
     for (;;) {
         mark[cur] = 1U;
-        if (cur == cut) {
-            return cur;
-        }
         const uint32_t parent = scene->nodes[cur].parent;
         if (parent == UINT32_MAX) {
-            if (cut != UINT32_MAX) {
-                NT_LOG_ERROR("import_rig: skin joint node[%u] is outside the subtree of skeleton_root node[%u]", node, cut);
-                NT_BUILD_ASSERT(0 && "rig joint lies outside the skeleton root");
-            }
             return cur;
         }
         cur = parent;
@@ -231,27 +218,23 @@ static int rig_id_slot_cmp(const void *a, const void *b) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
-void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uint32_t skeleton_root, nt_builder_rig_t *out) {
+void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, nt_builder_rig_t *out) {
     NT_BUILD_ASSERT(scene && out && "invalid import_rig args");
     const cgltf_data *data = (const cgltf_data *)scene->_internal;
     NT_BUILD_ASSERT(data != NULL && "import_rig: the scene holds no parsed glTF");
 
     if (skin_index >= (uint32_t)data->skins_count) {
-        NT_LOG_ERROR("import_rig: skin index %u, the scene has %u skins", skin_index, (uint32_t)data->skins_count);
-        NT_BUILD_ASSERT(0 && "rig skin index out of range");
+        NT_BUILD_FAIL("rig skin index out of range", "import_rig: skin index %u, the scene has %u skins", skin_index, (uint32_t)data->skins_count);
     }
     const cgltf_skin *skin = &data->skins[skin_index];
     if (skin->joints_count == 0) {
-        NT_LOG_ERROR("import_rig: skin[%u] has no joints", skin_index);
-        NT_BUILD_ASSERT(0 && "skin has no joints");
+        NT_BUILD_FAIL("skin has no joints", "import_rig: skin[%u] has no joints", skin_index);
     }
     const uint32_t palette_count = (uint32_t)skin->joints_count;
     if (palette_count > UINT16_MAX) {
-        NT_LOG_ERROR("import_rig: skin[%u] lists %u joints, the palette index is a u16", skin_index, palette_count);
-        NT_BUILD_ASSERT(0 && "skin palette exceeds the u16 palette index");
+        NT_BUILD_FAIL("skin palette exceeds the u16 palette index", "import_rig: skin[%u] lists %u joints, the palette index is a u16", skin_index, palette_count);
     }
     const uint32_t node_count = scene->node_count;
-    NT_BUILD_ASSERT((skeleton_root == UINT32_MAX || skeleton_root < node_count) && "skeleton_root out of range");
 
     // #region select
     uint8_t *mark = (uint8_t *)calloc(node_count, 1);
@@ -261,34 +244,27 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
 
     uint32_t root = UINT32_MAX;
     for (uint32_t p = 0; p < palette_count; p++) {
-        NT_BUILD_ASSERT(skin->joints[p] != NULL && "skin joint is null");
         const uint32_t node = (uint32_t)(skin->joints[p] - data->nodes);
-        NT_BUILD_ASSERT(node < node_count && "skin joint is not a node of this scene");
         /* glTF lists each joint once; twice would give one joint two palette
          * entries, each free to carry its own inverse bind. */
         if (in_palette[node] != 0U) {
-            NT_LOG_ERROR("import_rig: skin[%u] lists node[%u] twice in its joints", skin_index, node);
-            NT_BUILD_ASSERT(0 && "skin lists one joint twice");
+            NT_BUILD_FAIL("skin lists one joint twice", "import_rig: skin[%u] lists node[%u] twice in its joints", skin_index, node);
         }
         in_palette[node] = 1U;
-        const uint32_t reached = rig_mark_path(scene, mark, node, skeleton_root);
+        const uint32_t reached = rig_mark_path(scene, mark, node);
         if (root == UINT32_MAX) {
             root = reached;
         } else if (root != reached) {
-            NT_LOG_ERROR("import_rig: skin joints reach scene roots node[%u] and node[%u]; one rig has one root", root, reached);
-            NT_BUILD_ASSERT(0 && "rig joints span several scene roots");
+            NT_BUILD_FAIL("rig joints span several scene roots", "import_rig: skin joints reach scene roots node[%u] and node[%u]; one rig has one root", root, reached);
         }
     }
-    NT_BUILD_ASSERT(root != UINT32_MAX && "rig has no root");
 
     uint32_t joint_count = 0;
     for (uint32_t n = 0; n < node_count; n++) {
         joint_count += mark[n];
     }
-    NT_BUILD_ASSERT(joint_count >= 1 && "rig has no joints");
     if (joint_count > UINT16_MAX) {
-        NT_LOG_ERROR("import_rig: %u joints, the skeleton format addresses at most %u", joint_count, (uint32_t)UINT16_MAX);
-        NT_BUILD_ASSERT(0 && "rig joint count exceeds the u16 joint index");
+        NT_BUILD_FAIL("rig joint count exceeds the u16 joint index", "import_rig: %u joints, the skeleton format addresses at most %u", joint_count, (uint32_t)UINT16_MAX);
     }
     // #endregion
 
@@ -327,15 +303,13 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
         const uint32_t node = node_index[j];
         const cgltf_node *cn = &data->nodes[node];
         if (cn->name == NULL || cn->name[0] == '\0') {
-            NT_LOG_ERROR("import_rig: rig node[%u] has no name, and a joint id is the hash of its name", node);
-            NT_BUILD_ASSERT(0 && "rig node has no name");
+            NT_BUILD_FAIL("rig node has no name", "import_rig: rig node[%u] has no name, and a joint id is the hash of its name", node);
         }
         joint_id[j] = nt_hash32_str(cn->name).value;
         /* glTF allows one form of transform per node; a matrix next to TRS
          * would have the TRS silently lose. */
         if (cn->has_matrix && (cn->has_translation || cn->has_rotation || cn->has_scale)) {
-            NT_LOG_ERROR("import_rig: node %s carries both a matrix and translation/rotation/scale", cn->name);
-            NT_BUILD_ASSERT(0 && "rig node has both a matrix and TRS");
+            NT_BUILD_FAIL("rig node has both a matrix and TRS", "import_rig: node %s carries both a matrix and translation/rotation/scale", cn->name);
         }
         if (cn->has_matrix) {
             nt_builder_decompose_trs(cn->matrix, cn->name, &rest[j]);
@@ -346,13 +320,11 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
         }
         /* The encoder asserts the same two rules; here they name the node. */
         if (!nt_builder_finite_n(rest[j].t, 3) || !nt_builder_finite_n(rest[j].s, 3)) {
-            NT_LOG_ERROR("import_rig: node %s has a non-finite rest translation or scale", cn->name);
-            NT_BUILD_ASSERT(0 && "rest translation or scale is not finite");
+            NT_BUILD_FAIL("rest translation or scale is not finite", "import_rig: node %s has a non-finite rest translation or scale", cn->name);
         }
         if (!nt_builder_unit_quat(rest[j].q)) {
-            NT_LOG_ERROR("import_rig: node %s rest rotation (%g, %g, %g, %g) is not a unit quaternion", cn->name, (double)rest[j].q[0], (double)rest[j].q[1], (double)rest[j].q[2],
-                         (double)rest[j].q[3]);
-            NT_BUILD_ASSERT(0 && "rest rotation is not a unit quaternion");
+            NT_BUILD_FAIL("rest rotation is not a unit quaternion", "import_rig: node %s rest rotation (%g, %g, %g, %g) is not a unit quaternion", cn->name, (double)rest[j].q[0], (double)rest[j].q[1],
+                          (double)rest[j].q[2], (double)rest[j].q[3]);
         }
     }
 
@@ -369,9 +341,8 @@ void nt_builder_import_rig(const nt_glb_scene_t *scene, uint32_t skin_index, uin
             if (slots[i].id == slots[i - 1U].id) {
                 const uint32_t a = slots[i - 1U].joint;
                 const uint32_t b = slots[i].joint;
-                NT_LOG_ERROR("import_rig: rig nodes \"%s\" (node[%u]) and \"%s\" (node[%u]) share joint id 0x%08X", data->nodes[node_index[a]].name, node_index[a], data->nodes[node_index[b]].name,
-                             node_index[b], slots[i].id);
-                NT_BUILD_ASSERT(0 && "two rig nodes share one joint id");
+                NT_BUILD_FAIL("two rig nodes share one joint id", "import_rig: rig nodes \"%s\" (node[%u]) and \"%s\" (node[%u]) share joint id 0x%08X", data->nodes[node_index[a]].name, node_index[a],
+                              data->nodes[node_index[b]].name, node_index[b], slots[i].id);
             }
         }
         free(slots);
@@ -429,7 +400,6 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_r
     const nt_glb_scene_t *scene = rig->scene;
     NT_BUILD_ASSERT(mesh_index < scene->mesh_count && "mesh_index out of range");
     NT_BUILD_ASSERT(primitive_index < scene->meshes[mesh_index].primitive_count && "primitive_index out of range");
-    NT_BUILD_ASSERT(rig->palette_count >= 1 && "rig has no palette entries");
     NT_BUILD_ASSERT(skin_drop_tolerance >= 0.0F && skin_drop_tolerance <= 1.0F && "skin_drop_tolerance must lie in [0, 1]");
 
     /* The joint lanes address this rig's palette, so a mesh no node instantiates
@@ -439,8 +409,7 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_r
         skinned_here = scene->nodes[n].mesh_index == mesh_index && scene->nodes[n].skin_index == rig->skin_index;
     }
     if (!skinned_here) {
-        NT_LOG_ERROR("add_scene_skinned_mesh: no node instantiates mesh[%u] with skin[%u], the skin of this rig", mesh_index, rig->skin_index);
-        NT_BUILD_ASSERT(0 && "mesh is not skinned by this rig's skin");
+        NT_BUILD_FAIL("mesh is not skinned by this rig's skin", "add_scene_skinned_mesh: no node instantiates mesh[%u] with skin[%u], the skin of this rig", mesh_index, rig->skin_index);
     }
 
     const nt_builder_skin_ctx_t skin = {.palette_count = rig->palette_count, .drop_tolerance = skin_drop_tolerance};
@@ -486,12 +455,10 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
 
             const cgltf_accessor *pos = cgltf_find_accessor(prim, cgltf_attribute_type_position, 0);
             if (pos == NULL || pos->count == 0) {
-                NT_LOG_ERROR("%s: skinned primitive has no POSITION accessor, so its reach cannot be measured", label);
-                NT_BUILD_ASSERT(0 && "skinned primitive has no positions");
+                NT_BUILD_FAIL("skinned primitive has no positions", "%s: skinned primitive has no POSITION accessor, so its reach cannot be measured", label);
             }
             if (pos->type != cgltf_type_vec3) {
-                NT_LOG_ERROR("%s: POSITION accessor has type %d, a position is a VEC3", label, (int)pos->type);
-                NT_BUILD_ASSERT(0 && "POSITION accessor is not VEC3");
+                NT_BUILD_FAIL("POSITION accessor is not VEC3", "%s: POSITION accessor has type %d, a position is a VEC3", label, (int)pos->type);
             }
             const uint32_t vertex_count = (uint32_t)pos->count;
             const cgltf_size want = (cgltf_size)vertex_count * 3U;
@@ -499,8 +466,7 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
             NT_BUILD_ASSERT(xyz && "skin reach: alloc failed (OOM)");
             const cgltf_size got = cgltf_accessor_unpack_floats(pos, xyz, want);
             if (got != want) {
-                NT_LOG_ERROR("%s: POSITION unpacked %u of %u floats", label, (uint32_t)got, (uint32_t)want);
-                NT_BUILD_ASSERT(0 && "POSITION accessor could not be unpacked as VEC3");
+                NT_BUILD_FAIL("POSITION accessor could not be unpacked as VEC3", "%s: POSITION unpacked %u of %u floats", label, (uint32_t)got, (uint32_t)want);
             }
 
             nt_builder_influences_t inf;
@@ -515,13 +481,11 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
                         }
                         const uint32_t p = (uint32_t)inf.joints[at];
                         if (p >= (uint32_t)rig->palette_count) {
-                            NT_LOG_ERROR("%s: vertex %u addresses palette entry %u, the skin has %u", label, v, p, (uint32_t)rig->palette_count);
-                            NT_BUILD_ASSERT(0 && "joint index lies outside the palette");
+                            NT_BUILD_FAIL("joint index lies outside the palette", "%s: vertex %u addresses palette entry %u, the skin has %u", label, v, p, (uint32_t)rig->palette_count);
                         }
                         const double d = rig_bound_distance(&inverse_bind[p], &xyz[(size_t)v * 3U]);
                         if (!isfinite(d)) {
-                            NT_LOG_ERROR("%s: vertex %u bound to palette entry %u sits at a non-finite distance from its joint", label, v, p);
-                            NT_BUILD_ASSERT(0 && "skinned position is not finite");
+                            NT_BUILD_FAIL("skinned position is not finite", "%s: vertex %u bound to palette entry %u sits at a non-finite distance from its joint", label, v, p);
                         }
                         if (d > reach) {
                             reach = d;
@@ -535,8 +499,7 @@ static double rig_skin_reach(const nt_glb_scene_t *scene, const cgltf_data *data
         }
     }
     if (!scanned) {
-        NT_LOG_ERROR("add_scene_skin_binding: no node instantiates a mesh with skin[%u], so the binding would carry a zero reach", rig->skin_index);
-        NT_BUILD_ASSERT(0 && "no mesh is skinned by this rig's skin");
+        NT_BUILD_FAIL("no mesh is skinned by this rig's skin", "add_scene_skin_binding: no node instantiates a mesh with skin[%u], so the binding would carry a zero reach", rig->skin_index);
     }
     return reach;
 }
@@ -593,11 +556,8 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_r
     const nt_glb_scene_t *scene = rig->scene;
     const cgltf_data *data = (const cgltf_data *)scene->_internal;
     NT_BUILD_ASSERT(data != NULL && "add_scene_skin_binding: the scene holds no parsed glTF");
-    NT_BUILD_ASSERT(rig->skin_index < (uint32_t)data->skins_count && "rig skin index out of range");
     const uint32_t palette_count = rig->palette_count;
-    NT_BUILD_ASSERT(palette_count >= 1 && "rig has no palette entries");
     const cgltf_skin *skin = &data->skins[rig->skin_index];
-    NT_BUILD_ASSERT((uint32_t)skin->joints_count == palette_count && "the rig's palette does not match its skin");
 
     nt_skeletal_mat34_t *inverse_bind = (nt_skeletal_mat34_t *)calloc(palette_count, sizeof(nt_skeletal_mat34_t));
     NT_BUILD_ASSERT(inverse_bind && "add_scene_skin_binding: alloc failed (OOM)");
@@ -613,9 +573,8 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_r
         }
     } else {
         if (ibm->type != cgltf_type_mat4 || ibm->component_type != cgltf_component_type_r_32f || (uint32_t)ibm->count < palette_count) {
-            NT_LOG_ERROR("add_scene_skin_binding: inverseBindMatrices must be MAT4 FLOAT over at least %u joints, the skin declares %u elements of type %d", palette_count, (uint32_t)ibm->count,
-                         (int)ibm->type);
-            NT_BUILD_ASSERT(0 && "inverseBindMatrices accessor is invalid");
+            NT_BUILD_FAIL("inverseBindMatrices accessor is invalid", "add_scene_skin_binding: inverseBindMatrices must be MAT4 FLOAT over at least %u joints, the skin declares %u elements of type %d",
+                          palette_count, (uint32_t)ibm->count, (int)ibm->type);
         }
         /* Only the palette's prefix is read. A sparse accessor is unpacked whole:
          * its second pass writes wherever its indices point. */
@@ -624,23 +583,20 @@ void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_r
         NT_BUILD_ASSERT(m && "add_scene_skin_binding: alloc failed (OOM)");
         const cgltf_size got = cgltf_accessor_unpack_floats(ibm, m, want);
         if (got != want) {
-            NT_LOG_ERROR("add_scene_skin_binding: inverseBindMatrices unpacked %u of %u floats", (uint32_t)got, (uint32_t)want);
-            NT_BUILD_ASSERT(0 && "inverseBindMatrices could not be unpacked");
+            NT_BUILD_FAIL("inverseBindMatrices could not be unpacked", "add_scene_skin_binding: inverseBindMatrices unpacked %u of %u floats", (uint32_t)got, (uint32_t)want);
         }
         for (uint32_t p = 0; p < palette_count; p++) {
             const float *src = &m[(size_t)p * 16U];
             for (int i = 0; i < 16; i++) {
                 if (!nt_builder_finite(src[i])) {
-                    NT_LOG_ERROR("add_scene_skin_binding: inverse bind matrix %u element %d is not a finite number", p, i);
-                    NT_BUILD_ASSERT(0 && "inverse bind matrix is not finite");
+                    NT_BUILD_FAIL("inverse bind matrix is not finite", "add_scene_skin_binding: inverse bind matrix %u element %d is not a finite number", p, i);
                 }
             }
             /* The 3x4 view drops the bottom row, so a projective one would
              * vanish silently; column-major puts it at 3, 7, 11, 15. */
             if (src[3] != 0.0F || src[7] != 0.0F || src[11] != 0.0F || src[15] != 1.0F) {
-                NT_LOG_ERROR("add_scene_skin_binding: inverse bind matrix %u bottom row is (%g, %g, %g, %g), an affine matrix ends in (0, 0, 0, 1)", p, (double)src[3], (double)src[7], (double)src[11],
-                             (double)src[15]);
-                NT_BUILD_ASSERT(0 && "inverse bind matrix is not affine");
+                NT_BUILD_FAIL("inverse bind matrix is not affine", "add_scene_skin_binding: inverse bind matrix %u bottom row is (%g, %g, %g, %g), an affine matrix ends in (0, 0, 0, 1)", p,
+                              (double)src[3], (double)src[7], (double)src[11], (double)src[15]);
             }
             nt_skeletal_mat34_from_mat4(src, &inverse_bind[p]);
         }

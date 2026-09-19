@@ -18,7 +18,7 @@ _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the skeletal encoders
 
 // #region NSKL skeleton
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
-nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size) {
+void nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size) {
     NT_BUILD_ASSERT(skel && out && out_size && "invalid encode_skeleton args");
     NT_BUILD_ASSERT(skel->parent && skel->subtree_end && skel->joint_id && skel->rest && "skeleton view has a NULL array");
     NT_BUILD_ASSERT(skel->joint_count >= 1 && "skeleton has no joints");
@@ -39,17 +39,6 @@ nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8
         top = j;
     }
 
-    /* The identity is computed here and returned, so what ships and what the
-     * caller stamps on clips and bindings are the same number by construction. */
-    nt_hash64_t rig_compat_id = {0};
-    {
-        const uint32_t scratch_size = NT_SKELETAL_RIG_ID_BYTES(joint_count);
-        void *scratch = malloc(scratch_size);
-        NT_BUILD_ASSERT(scratch && "encode_skeleton: alloc failed (OOM)");
-        rig_compat_id = nt_skeletal_rig_compat_id(skel, scratch, scratch_size);
-        free(scratch);
-    }
-
     const uint32_t size = (uint32_t)NT_SKL_SIZE(joint_count); /* fits: joint_count is u16 */
     uint8_t *payload = (uint8_t *)malloc(size);
     NT_BUILD_ASSERT(payload && "encode_skeleton: alloc failed (OOM)");
@@ -58,7 +47,7 @@ nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8
         .magic = NT_SKL_MAGIC,
         .version = NT_SKELETAL_FORMAT_VERSION,
         .joint_count = (uint16_t)joint_count,
-        .rig_compat_id = rig_compat_id.value,
+        .rig_compat_id = skel->rig_compat_id.value,
     };
     uint8_t *w = payload;
     memcpy(w, &header, sizeof(header));
@@ -75,17 +64,15 @@ nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8
 
     *out = payload;
     *out_size = size;
-    return rig_compat_id;
 }
 
-nt_hash64_t nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id) {
+void nt_builder_add_skeleton(NtBuilderContext *ctx, const nt_skeletal_skeleton_t *skel, const char *resource_id) {
     NT_BUILD_ASSERT(ctx && resource_id && "invalid add_skeleton args");
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    const nt_hash64_t rig_compat_id = nt_builder_encode_skeleton(skel, &payload, &size);
+    nt_builder_encode_skeleton(skel, &payload, &size);
     uint64_t hash = nt_hash64(payload, size).value;
     nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_SKELETON, NULL, payload, size, hash);
-    return rig_compat_id;
 }
 // #endregion
 

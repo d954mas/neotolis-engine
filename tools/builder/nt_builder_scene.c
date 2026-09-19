@@ -139,14 +139,6 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
         cgltf_node_transform_world(cn, node->transform);
     }
 
-    /* Animations */
-    const uint32_t animation_count = (uint32_t)data->animations_count;
-    scene->animations = (nt_glb_animation_t *)calloc(animation_count > 0 ? animation_count : 1, sizeof(nt_glb_animation_t));
-    scene->animation_count = animation_count;
-    for (uint32_t a = 0; a < animation_count; a++) {
-        scene->animations[a].name = data->animations[a].name;
-    }
-
     scene->_internal = data;
 
     NT_LOG_INFO("Parsed glTF scene: %s", path);
@@ -166,7 +158,6 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene) {
     free(scene->materials);
     free(scene->textures);
     free(scene->nodes);
-    free(scene->animations);
     if (scene->_internal != NULL) {
         cgltf_free((cgltf_data *)scene->_internal);
     }
@@ -205,12 +196,10 @@ static void nt_scene_validate_vertex_influences(const nt_builder_influences_t *i
         const size_t at = ((size_t)s * set_floats) + ((size_t)v * 4U) + c;
         const float w = inf->weights[at];
         if (!nt_builder_finite(w)) {
-            NT_LOG_ERROR("%s: vertex %u weight %u of set %u is not a finite number", label, v, c, s);
-            NT_BUILD_ASSERT(0 && "influence weight is not finite");
+            NT_BUILD_FAIL("influence weight is not finite", "%s: vertex %u weight %u of set %u is not a finite number", label, v, c, s);
         }
         if (w < 0.0F) {
-            NT_LOG_ERROR("%s: vertex %u weight %u of set %u is %g; a weight is a non-negative fraction", label, v, c, s, (double)w);
-            NT_BUILD_ASSERT(0 && "influence weight is negative");
+            NT_BUILD_FAIL("influence weight is negative", "%s: vertex %u weight %u of set %u is %g; a weight is a non-negative fraction", label, v, c, s, (double)w);
         }
         if (w == 0.0F) {
             continue;
@@ -220,14 +209,12 @@ static void nt_scene_validate_vertex_influences(const nt_builder_influences_t *i
         for (uint32_t earlier = 0; earlier < lane; earlier++) {
             const size_t e_at = ((size_t)(earlier / 4U) * set_floats) + ((size_t)v * 4U) + (earlier % 4U);
             if (inf->weights[e_at] != 0.0F && inf->joints[e_at] == joint) {
-                NT_LOG_ERROR("%s: vertex %u weights palette entry %u twice", label, v, (uint32_t)joint);
-                NT_BUILD_ASSERT(0 && "vertex weights one joint twice");
+                NT_BUILD_FAIL("vertex weights one joint twice", "%s: vertex %u weights palette entry %u twice", label, v, (uint32_t)joint);
             }
         }
     }
     if (!(total > 0.0)) {
-        NT_LOG_ERROR("%s: vertex %u has no influence with a non-zero weight", label, v);
-        NT_BUILD_ASSERT(0 && "vertex influence weights sum to zero");
+        NT_BUILD_FAIL("vertex influence weights sum to zero", "%s: vertex %u has no influence with a non-zero weight", label, v);
     }
 }
 
@@ -238,8 +225,7 @@ void nt_builder_read_influences(const struct cgltf_primitive *prim, const char *
     /* A morph target moves the bound vertices, so the binding's reach would no
      * longer hold; morphs are deferred rather than silently unbounded. */
     if (prim->targets_count != 0) {
-        NT_LOG_ERROR("%s: skinned primitive carries %u morph targets, which the skeletal importer does not support", label, (uint32_t)prim->targets_count);
-        NT_BUILD_ASSERT(0 && "skinned primitive has morph targets");
+        NT_BUILD_FAIL("skinned primitive has morph targets", "%s: skinned primitive carries %u morph targets, which the skeletal importer does not support", label, (uint32_t)prim->targets_count);
     }
 
     uint32_t joint_sets = 0;
@@ -249,8 +235,7 @@ void nt_builder_read_influences(const struct cgltf_primitive *prim, const char *
         weight_sets += (prim->attributes[a].type == cgltf_attribute_type_weights) ? 1U : 0U;
     }
     if (joint_sets == 0 || joint_sets != weight_sets) {
-        NT_LOG_ERROR("%s: %u JOINTS_n and %u WEIGHTS_n attributes; a skinned primitive pairs every set", label, joint_sets, weight_sets);
-        NT_BUILD_ASSERT(0 && "unpaired JOINTS_n/WEIGHTS_n set");
+        NT_BUILD_FAIL("unpaired JOINTS_n/WEIGHTS_n set", "%s: %u JOINTS_n and %u WEIGHTS_n attributes; a skinned primitive pairs every set", label, joint_sets, weight_sets);
     }
 
     const size_t set_floats = (size_t)vertex_count * 4U;
@@ -266,34 +251,29 @@ void nt_builder_read_influences(const struct cgltf_primitive *prim, const char *
         const cgltf_accessor *ja = cgltf_find_accessor(prim, cgltf_attribute_type_joints, (cgltf_int)n);
         const cgltf_accessor *wa = cgltf_find_accessor(prim, cgltf_attribute_type_weights, (cgltf_int)n);
         if (ja == NULL || wa == NULL) {
-            NT_LOG_ERROR("%s: influence set %u is absent although the primitive carries %u sets; sets run from 0 without gaps", label, n, joint_sets);
-            NT_BUILD_ASSERT(0 && "JOINTS_n/WEIGHTS_n sets are not consecutive");
+            NT_BUILD_FAIL("JOINTS_n/WEIGHTS_n sets are not consecutive", "%s: influence set %u is absent although the primitive carries %u sets; sets run from 0 without gaps", label, n, joint_sets);
         }
         /* cgltf_validate already holds every attribute to the primitive's count. */
         NT_BUILD_ASSERT(ja->count == (cgltf_size)vertex_count && wa->count == (cgltf_size)vertex_count && "influence accessor covers a different vertex count");
         /* A FLOAT or normalized joint lane would unpack to a fraction, not a
          * palette index, so the type is checked before the read. */
         if (ja->type != cgltf_type_vec4 || (ja->component_type != cgltf_component_type_r_8u && ja->component_type != cgltf_component_type_r_16u) || ja->normalized) {
-            NT_LOG_ERROR("%s: JOINTS_%u must be VEC4 UNSIGNED_BYTE or UNSIGNED_SHORT and not normalized", label, n);
-            NT_BUILD_ASSERT(0 && "JOINTS accessor has an invalid type");
+            NT_BUILD_FAIL("JOINTS accessor has an invalid type", "%s: JOINTS_%u must be VEC4 UNSIGNED_BYTE or UNSIGNED_SHORT and not normalized", label, n);
         }
         const bool w_float = wa->component_type == cgltf_component_type_r_32f;
         const bool w_norm_int = (wa->component_type == cgltf_component_type_r_8u || wa->component_type == cgltf_component_type_r_16u) && wa->normalized != 0;
         if (wa->type != cgltf_type_vec4 || (!w_float && !w_norm_int)) {
-            NT_LOG_ERROR("%s: WEIGHTS_%u must be VEC4 FLOAT or normalized UNSIGNED_BYTE/UNSIGNED_SHORT", label, n);
-            NT_BUILD_ASSERT(0 && "WEIGHTS accessor has an invalid type");
+            NT_BUILD_FAIL("WEIGHTS accessor has an invalid type", "%s: WEIGHTS_%u must be VEC4 FLOAT or normalized UNSIGNED_BYTE/UNSIGNED_SHORT", label, n);
         }
         /* unpack_floats is sparse-capable and exact for u8/u16 integers. */
         const cgltf_size want = (cgltf_size)set_floats;
         const cgltf_size got_joints = cgltf_accessor_unpack_floats(ja, joints + ((size_t)n * set_floats), want);
         if (got_joints != want) {
-            NT_LOG_ERROR("%s: JOINTS_%u unpacked %u of %u floats", label, n, (uint32_t)got_joints, (uint32_t)want);
-            NT_BUILD_ASSERT(0 && "JOINTS accessor could not be unpacked");
+            NT_BUILD_FAIL("JOINTS accessor could not be unpacked", "%s: JOINTS_%u unpacked %u of %u floats", label, n, (uint32_t)got_joints, (uint32_t)want);
         }
         const cgltf_size got_weights = cgltf_accessor_unpack_floats(wa, weights + ((size_t)n * set_floats), want);
         if (got_weights != want) {
-            NT_LOG_ERROR("%s: WEIGHTS_%u unpacked %u of %u floats", label, n, (uint32_t)got_weights, (uint32_t)want);
-            NT_BUILD_ASSERT(0 && "WEIGHTS accessor could not be unpacked");
+            NT_BUILD_FAIL("WEIGHTS accessor could not be unpacked", "%s: WEIGHTS_%u unpacked %u of %u floats", label, n, (uint32_t)got_weights, (uint32_t)want);
         }
     }
 
@@ -381,8 +361,7 @@ static void nt_scene_extract_skin(const cgltf_primitive *prim, uint32_t mesh_ind
                 }
                 const uint32_t joint = (uint32_t)inf.joints[at];
                 if (joint >= (uint32_t)skin->palette_count) {
-                    NT_LOG_ERROR("%s: vertex %u addresses palette entry %u, the skin has %u", label, v, joint, (uint32_t)skin->palette_count);
-                    NT_BUILD_ASSERT(0 && "joint index lies outside the palette");
+                    NT_BUILD_FAIL("joint index lies outside the palette", "%s: vertex %u addresses palette entry %u, the skin has %u", label, v, joint, (uint32_t)skin->palette_count);
                 }
                 cand[n_cand].joint = joint;
                 cand[n_cand].weight = w;
@@ -416,8 +395,8 @@ static void nt_scene_extract_skin(const cgltf_primitive *prim, uint32_t mesh_ind
          * float noise, not mass. */
         const double dropped = (n_cand <= 4U) ? 0.0 : (total - kept) / total;
         if (dropped > (double)skin->drop_tolerance) {
-            NT_LOG_ERROR("%s: vertex %u has %u influences and loses %.4f of its weight to the four heaviest, tolerance %.4f", label, v, n_cand, dropped, (double)skin->drop_tolerance);
-            NT_BUILD_ASSERT(0 && "skinned vertex drops more weight than the tolerance allows");
+            NT_BUILD_FAIL("skinned vertex drops more weight than the tolerance allows", "%s: vertex %u has %u influences and loses %.4f of its weight to the four heaviest, tolerance %.4f", label, v,
+                          n_cand, dropped, (double)skin->drop_tolerance);
         }
         if (n_cand > 4U) {
             reduced_count++;
@@ -537,21 +516,19 @@ nt_build_result_t nt_builder_decode_scene_mesh_skinned(const nt_glb_scene_t *sce
         const NtStreamLayout *jl = &layout[joints_stream_idx];
         const NtStreamLayout *wl = &layout[weights_stream_idx];
         if (jl->count != 4 || (jl->source_components != 0 && jl->source_components != 4) || wl->count != 4 || (wl->source_components != 0 && wl->source_components != 4)) {
-            NT_LOG_ERROR("mesh[%u] prim[%u]: the reduction writes four lanes, the layout declares JOINTS %u and WEIGHTS %u", mesh_index, primitive_index, (uint32_t)jl->count, (uint32_t)wl->count);
-            NT_BUILD_ASSERT(0 && "JOINTS and WEIGHTS streams must declare 4 components");
+            NT_BUILD_FAIL("JOINTS and WEIGHTS streams must declare 4 components", "mesh[%u] prim[%u]: the reduction writes four lanes, the layout declares JOINTS %u and WEIGHTS %u", mesh_index,
+                          primitive_index, (uint32_t)jl->count, (uint32_t)wl->count);
         }
         if ((jl->type != NT_STREAM_UINT8 && jl->type != NT_STREAM_UINT16) || jl->normalized) {
-            NT_LOG_ERROR("mesh[%u] prim[%u]: the JOINTS stream is an index, so it must be UINT8 or UINT16 and not normalized", mesh_index, primitive_index);
-            NT_BUILD_ASSERT(0 && "JOINTS stream has an invalid type");
+            NT_BUILD_FAIL("JOINTS stream has an invalid type", "mesh[%u] prim[%u]: the JOINTS stream is an index, so it must be UINT8 or UINT16 and not normalized", mesh_index, primitive_index);
         }
         if (jl->type == NT_STREAM_UINT8 && (uint32_t)skin->palette_count > 256U) {
-            NT_LOG_ERROR("mesh[%u] prim[%u]: UINT8 joint lanes address 256 palette entries, the skin has %u", mesh_index, primitive_index, (uint32_t)skin->palette_count);
-            NT_BUILD_ASSERT(0 && "UINT8 JOINTS stream cannot address this palette");
+            NT_BUILD_FAIL("UINT8 JOINTS stream cannot address this palette", "mesh[%u] prim[%u]: UINT8 joint lanes address 256 palette entries, the skin has %u", mesh_index, primitive_index,
+                          (uint32_t)skin->palette_count);
         }
         weights_uint8 = wl->type == NT_STREAM_UINT8;
         if (!((weights_uint8 && wl->normalized) || wl->type == NT_STREAM_FLOAT16 || wl->type == NT_STREAM_FLOAT32)) {
-            NT_LOG_ERROR("mesh[%u] prim[%u]: the WEIGHTS stream must be normalized UINT8, FLOAT16 or FLOAT32", mesh_index, primitive_index);
-            NT_BUILD_ASSERT(0 && "WEIGHTS stream has an invalid type");
+            NT_BUILD_FAIL("WEIGHTS stream has an invalid type", "mesh[%u] prim[%u]: the WEIGHTS stream must be normalized UINT8, FLOAT16 or FLOAT32", mesh_index, primitive_index);
         }
     }
 

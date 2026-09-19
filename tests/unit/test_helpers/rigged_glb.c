@@ -118,16 +118,18 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     }
     /* Rotation 90 degrees about Z times scale (2, 1, 0.5), translated. */
     float helper_matrix[16] = {0.0F, 2.0F, 0.0F, 0.0F, -1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.5F, 0.0F, 0.25F, -0.5F, 1.0F, 1.0F};
+    if (o.root_translation) {
+        root_matrix[12] = 1.0F;
+        root_matrix[13] = -2.0F;
+        root_matrix[14] = 2.0F;
+    }
     if (o.matrix_shear) {
         helper_matrix[6] = 0.001F;
     }
 
-    float joint_t[RIGGED_GLB_SKIN_JOINT_COUNT][3] = {
+    const float joint_t[RIGGED_GLB_SKIN_JOINT_COUNT][3] = {
         {1.0F, 2.0F, 3.0F}, {0.0F, -0.0F, 0.5F}, {0.0F, 0.75F, 0.0F}, {-0.5F, 0.25F, 0.0F}, {0.0F, 0.5F, 0.0F},
     };
-    if (o.rest_mismatch) {
-        joint_t[2][1] = nextafterf(0.75F, 1.0F);
-    }
     float joint_q[RIGGED_GLB_SKIN_JOINT_COUNT][4] = {
         {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, -0.70710678F, -0.70710678F}, {0.70710678F, 0.0F, 0.0F, 0.70710678F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F},
     };
@@ -147,7 +149,7 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
 
     // #region animation
     const bool anim = o.animation || o.animation_step_only || o.animation_outside_rig || o.animation_weights || o.animation_duplicate || o.animation_matrix_node || o.animation_step_past_end ||
-                      o.animation_no_channels || o.animation_bad_times || o.animation_cubic_origin || o.animation_step_tail_pair;
+                      o.animation_no_channels || o.animation_bad_times || o.animation_cubic_origin;
     const float anim_q_times[4] = {0.0F, 0.25F, 0.5F, 1.0F};
     const float anim_j1_q[4][4] = {{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.6F, 0.6F}, {0.0F, 0.0F, -1.0F, 0.0F}};
     const float anim_cubic_times[2] = {0.25F, 0.75F};
@@ -162,22 +164,13 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
         anim_j2_q[1][1][2] = 0.0F;
         anim_j2_q[1][1][3] = -1.0F;
     }
-    float anim_step_times[4] = {0.25F, 0.75F, 1.05F, 1.06F};
-    if (o.animation_step_tail_pair) {
-        anim_step_times[2] = 1.00001F;
-        anim_step_times[3] = 1.00002F;
-    }
+    float anim_step_times[3] = {0.25F, 0.75F, 1.05F};
     if (o.animation_bad_times) {
         anim_step_times[0] = 0.75F;
         anim_step_times[1] = 0.25F;
     }
-    uint32_t step_keys = 2U;
-    if (o.animation_step_tail_pair) {
-        step_keys = 4U;
-    } else if (o.animation_step_past_end) {
-        step_keys = 3U;
-    }
-    const float anim_j3_s[4][3] = {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}, {3.0F, 3.0F, 3.0F}, {4.0F, 4.0F, 4.0F}};
+    const uint32_t step_keys = o.animation_step_past_end ? 3U : 2U;
+    const float anim_j3_s[3][3] = {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}, {3.0F, 3.0F, 3.0F}};
     const float anim_j4_t[2][3] = {{0.0F, 0.5F, 0.0F}, {0.0F, 0.5F, 0.0F}};
     // #endregion
 
@@ -245,7 +238,7 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
 
     // #region skin data
     uint32_t joint_count = RIGGED_GLB_SKIN_JOINT_COUNT;
-    if (o.joint_outside_root || o.multi_root || o.deep_chain) {
+    if (o.multi_root || o.deep_chain) {
         joint_count = RIGGED_GLB_SKIN_JOINT_COUNT + 1;
     }
     const uint32_t chain_len = o.deep_chain ? 260U : 0U;

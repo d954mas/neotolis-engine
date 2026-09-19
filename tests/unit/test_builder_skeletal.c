@@ -73,23 +73,20 @@ static const nt_skeletal_trs_t k_rest[FIXTURE_JOINTS] = {
     {{4.0F, -4.0F, 0.0F}, {0.0F, 1.0F, 0.0F, 0.0F}, {0.25F, 0.25F, 0.25F}},
 };
 
-/* rig_compat_id is an output of the encoder, so the fixture leaves the field at
- * a value that is deliberately not the rig's own identity. */
+/* rig_compat_id is the producer's: the encoder writes the field as given, so
+ * the fixture carries a value that is deliberately not the rig's own identity
+ * and the tests check that this value, not a recomputed one, ships. */
+#define FIXTURE_RIG_ID 0xDEADBEEFDEADBEEFULL
+
 static nt_skeletal_skeleton_t fixture_skeleton(void) {
     nt_skeletal_skeleton_t skel = {0};
-    skel.rig_compat_id = (nt_hash64_t){0xDEADBEEFDEADBEEFULL};
+    skel.rig_compat_id = (nt_hash64_t){FIXTURE_RIG_ID};
     skel.parent = k_parent;
     skel.subtree_end = k_subtree_end;
     skel.joint_id = k_joint_id;
     skel.rest = k_rest;
     skel.joint_count = FIXTURE_JOINTS;
     return skel;
-}
-
-static uint64_t fixture_rig_id(void) {
-    nt_skeletal_skeleton_t skel = fixture_skeleton();
-    uint8_t scratch[NT_SKELETAL_RIG_ID_BYTES(FIXTURE_JOINTS)];
-    return nt_skeletal_rig_compat_id(&skel, scratch, (uint32_t)sizeof(scratch)).value;
 }
 
 #define FIXTURE_PALETTE 3
@@ -191,12 +188,11 @@ void test_encode_skeleton_wire_layout(void) {
     nt_skeletal_skeleton_t skel = fixture_skeleton();
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    const nt_hash64_t rig = nt_builder_encode_skeleton(&skel, &payload, &size);
+    nt_builder_encode_skeleton(&skel, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
-    /* The encoder computes the identity and ignores the field it was handed. */
-    TEST_ASSERT_EQUAL_HEX64(fixture_rig_id(), rig.value);
-    TEST_ASSERT_EQUAL_HEX64(rig.value, rd_u64(payload + 8));
+    /* The encoder writes the identity it was handed, whatever the joints hash to. */
+    TEST_ASSERT_EQUAL_HEX64(FIXTURE_RIG_ID, rd_u64(payload + 8));
 
     TEST_ASSERT_EQUAL_UINT32(16U + (48U * FIXTURE_JOINTS), size);
     TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_SKL_SIZE(FIXTURE_JOINTS), size);
@@ -414,8 +410,7 @@ void test_add_skeletal_assets_writes_typed_entries(void) {
     nt_skeletal_clip_t clip;
     fixture_clip(&clip);
 
-    const nt_hash64_t rig = nt_builder_add_skeleton(ctx, &skel, "rigs/hero.nskl");
-    TEST_ASSERT_EQUAL_HEX64(fixture_rig_id(), rig.value);
+    nt_builder_add_skeleton(ctx, &skel, "rigs/hero.nskl");
     nt_builder_add_skin_binding(ctx, &binding, "rigs/hero.nskn");
     nt_builder_add_clip(ctx, &clip, "clips/hero_run.nanm");
 

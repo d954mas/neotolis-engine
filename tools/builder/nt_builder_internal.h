@@ -532,8 +532,9 @@ nt_cache_status_t nt_builder_cache_lookup(const char *cache_dir, uint64_t decode
 bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64_t opts_hash, const uint8_t *data, uint32_t size);
 void nt_builder_ensure_cache_dir(const char *dir);
 
-/* A bound measured in double must still contain what it measured once stored
- * as float, so the conversion rounds towards +infinity. */
+/* Skeletal importers (nt_builder_rig.c, nt_builder_clip.c): a bound measured
+ * in double must still contain what it measured once stored as float, so the
+ * conversion rounds towards +infinity. */
 static inline float nt_builder_round_up(double x) {
     const float f = (float)x;
     return ((double)f < x) ? nextafterf(f, INFINITY) : f;
@@ -548,17 +549,17 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
 /* Hand-built skeletal assets (nt_builder_skeletal.c). The glTF importers are
  * the producers of bindings and clips; these entry points take the runtime
  * views directly, for the importers themselves and for tests. Each add_* call
- * encodes and registers in one step, like add_blob; the encoders return
+ * encodes and registers in one step, like add_blob; the encoders write
  * exactly the bytes the pack stores, caller frees the buffer, and the clip
  * import measures its own output through nt_builder_encode_clip.
  *
  * The encoders assert structure (non-NULL arrays, counts, preorder, bounds
  * finite and >= 0, a float-representable duration); values (finite samples,
- * unit quaternions, unique joint ids) are checked once, by the importer that
- * produced them, with the node names its diagnostics can show. */
+ * unit quaternions, unique joint ids, rig_compat_id) are the producer's: the
+ * importer checks them once, with the node names its diagnostics can show. */
 void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
 void nt_builder_add_clip(NtBuilderContext *ctx, const nt_skeletal_clip_t *clip, const char *resource_id);
-nt_hash64_t nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
+void nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
 void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size);
 void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint32_t *out_size);
 

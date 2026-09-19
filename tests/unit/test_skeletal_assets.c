@@ -75,22 +75,29 @@ static const nt_skeletal_trs_t k_rest[SKEL_JOINTS] = {
     {{4.0F, -4.0F, 0.0F}, {0.0F, 1.0F, 0.0F, 0.0F}, {0.25F, 0.25F, 0.25F}},
 };
 
-static nt_skeletal_skeleton_t fixture_skeleton(void) {
-    return (nt_skeletal_skeleton_t){
+/* The producer stamps the rig identity, so the fixture asks the one
+ * implementation of the schema instead of inventing a number. */
+static uint64_t fixture_rig_id(void) {
+    const nt_skeletal_skeleton_t skel = {
         .parent = k_parent,
         .subtree_end = k_subtree_end,
         .joint_id = k_joint_id,
         .rest = k_rest,
         .joint_count = SKEL_JOINTS,
     };
-}
-
-/* The encoder computes the rig identity, so the fixture asks the one
- * implementation of the schema instead of inventing a number. */
-static uint64_t fixture_rig_id(void) {
-    nt_skeletal_skeleton_t skel = fixture_skeleton();
     uint8_t scratch[NT_SKELETAL_RIG_ID_BYTES(SKEL_JOINTS)];
     return nt_skeletal_rig_compat_id(&skel, scratch, (uint32_t)sizeof(scratch)).value;
+}
+
+static nt_skeletal_skeleton_t fixture_skeleton(void) {
+    return (nt_skeletal_skeleton_t){
+        .rig_compat_id = (nt_hash64_t){.value = fixture_rig_id()},
+        .parent = k_parent,
+        .subtree_end = k_subtree_end,
+        .joint_id = k_joint_id,
+        .rest = k_rest,
+        .joint_count = SKEL_JOINTS,
+    };
 }
 
 #define SKIN_PALETTE 3
