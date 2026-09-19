@@ -125,21 +125,23 @@ Controls, top to bottom:
 - `Character`: `Fox` or `CesiumMan` (the humanoid has no clips and is not
   offered). Switching deselects the clip and refits the camera. While the
   skeleton is not ready the panel shows `loading...`.
-- `Clip`: every clip whose resource is loaded, from both packs. A clip made for
+- `Clip`: every clip whose resource is loaded. A clip made for
   another skeleton is listed with the suffix ` (other rig)` and selecting it
   does nothing, so for CesiumMan the three Fox entries are visible but inert
   and the Fox skeleton takes `Fox Survey`, `Fox Walk` and `Fox Run` in any
   order without being reloaded. Selecting a clip resets the track to time 0 and
   logs its name, duration and sample count once.
 - `Play`/`Pause`: pause is `speed = 0` on the track, no special case.
-- `Step`: pauses, snaps the time onto the nearest reachable sample and moves
-  it one sample (backwards with `Reverse`) through the track's own wrap or
-  clamp, so a step at the last sample of a looping clip wraps to 0 and a step
-  at the end of a clamped clip stays.
-- `Time`: a slider over the sample indices; the clock is written as
-  `frame * step` while the slider is dragged, so a seek lands exactly on the
-  stored sample. With `Loop` on the last index is the sample before `duration`,
-  the wrap point. Disabled without a clip.
+- `Step`: pauses and seeks to the adjacent sample (backwards with `Reverse`)
+  in frame arithmetic: with `Loop` on the index wraps, so a step at the last
+  reachable sample lands on 0; with `Loop` off it clamps at the ends. The seek
+  is a `time` write, not an `advance`: advancing by one grid interval lands one
+  ulp short of the wrap point for many clip lengths.
+- `Time`: a slider over the sample indices; a drag pauses and writes the clock
+  as `frame * step`, so a seek lands exactly on the stored sample. With `Loop`
+  on the last index is the sample before `duration`, the wrap point. Disabled
+  without a scrubbable range (no clip, or a clip with a single reachable
+  sample).
 - `Speed x0.00..2.00`: the speed magnitude, step 0.05.
 - `Loop`: sets `NT_SKELETAL_TRACK_LOOPING`; off, the track clamps to
   `[0, duration]` and holds.
@@ -156,9 +158,8 @@ forward. The `Step` and `Time` grid comes from the clip itself,
 
 The Controls panel header contains the common `Reset` button; `Reset` and `R`
 reset the active scene and shared camera, re-applying the fit of the active
-rig. Both scenes are initialized at startup; switching scenes resets the
-camera and refits the incoming rig, and the Controls visibility setting is
-preserved.
+rig. Switching scenes resets the camera and refits the incoming rig, and the
+Controls visibility setting is preserved.
 
 To add a scene, define one typed state block and its callbacks in the scene
 region of `main.c`, then append one descriptor to `s_scene_registry` with its

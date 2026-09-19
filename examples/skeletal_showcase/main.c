@@ -552,18 +552,20 @@ static int clip_last_frame(const playback_scene_state_t *p) { return (int)p->cli
 
 static void playback_seek_frame(playback_scene_state_t *p, int frame) { p->track.time = (double)frame * clip_step(p->clip_view); }
 
-/* Snaps onto the grid, then one grid sample through the track's own wrap/clamp;
- * update reassigns speed next frame. Without a clip nothing moves. */
+/* The nearest reachable sample; the clock sits between two while playing. */
+static int playback_frame(const playback_scene_state_t *p) { return (int)fmin(round(p->track.time / clip_step(p->clip_view)), (double)clip_last_frame(p)); }
+
+/* A seek to the adjacent sample in frame arithmetic: a step through advance
+ * lands one ulp short of the wrap point for many clip lengths. */
 static void playback_step(void) {
     playback_scene_state_t *p = &s_playback_scene;
     p->paused = true;
     if (p->clip_view == NULL) {
         return;
     }
-    const double step = clip_step(p->clip_view);
-    playback_seek_frame(p, (int)fmin(round(p->track.time / step), (double)clip_last_frame(p)));
-    p->track.speed = p->reverse ? -1.0F : 1.0F;
-    nt_skeletal_tracks_advance(&p->track, 1, step);
+    const int n = clip_last_frame(p) + 1;
+    const int next = playback_frame(p) + (p->reverse ? -1 : 1);
+    playback_seek_frame(p, p->loop ? (next + n) % n : (int)fmin(fmax(next, 0), n - 1));
 }
 
 static void playback_reset(void) {
@@ -588,7 +590,7 @@ static void playback_update(void) {
     if (p->clip >= 0) {
         /* Views are borrowed: refetched every frame after resource_step. */
         p->clip_view = nt_resource_is_ready(s_clip_resource[p->clip]) ? nt_skeletal_assets_clip(s_clip_resource[p->clip]) : NULL;
-        if (p->clip_view == NULL || p->clip_view->rig_compat_id.value != p->skel->rig_compat_id.value) {
+        if (p->clip_view == NULL) {
             playback_deselect_clip();
         }
     }
@@ -923,11 +925,12 @@ static void declare_playback_transport(playback_scene_state_t *p) {
     }
     (void)snprintf(buf, sizeof buf, "%s  %.3f / %.3f s", p->clip >= 0 ? s_clips[p->clip].name : "no clip", p->track.time, p->track.duration);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(14.0F, (Clay_Color){240.0F, 246.0F, 255.0F, 255.0F}));
-    /* The slider scrubs sample indices: the clock is written only while a drag moves it. */
+    /* The slider scrubs sample indices; a drag pauses so the clock and the drag do not fight. */
     const int last_frame = p->clip_view != NULL ? clip_last_frame(p) : 0;
-    int frame = p->clip_view != NULL ? (int)fmin(round(p->track.time / clip_step(p->clip_view)), (double)last_frame) : 0;
+    int frame = p->clip_view != NULL ? playback_frame(p) : 0;
     if (nt_ui_slider_int(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/time"), NULL, &frame, 0, last_frame > 0 ? last_frame : 1, 1, &s_slider_style,
                          &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled && last_frame > 0)) {
+        p->paused = true;
         playback_seek_frame(p, frame);
     }
     (void)snprintf(buf, sizeof buf, "Speed x%.2f", (double)p->speed_mag);
@@ -1149,10 +1152,11 @@ static void reset_active_scene(void) {
 static void mount_pack(const char *name) {
     char path[128];
 #ifdef NT_CDN_URL
-    (void)snprintf(path, sizeof path, NT_CDN_URL "/skeletal_showcase/%s.ntpack", name);
+    const int len = snprintf(path, sizeof path, NT_CDN_URL "/skeletal_showcase/%s.ntpack", name);
 #else
-    (void)snprintf(path, sizeof path, "assets/%s.ntpack", name);
+    const int len = snprintf(path, sizeof path, "assets/%s.ntpack", name);
 #endif
+    NT_ASSERT(len > 0 && len < (int)sizeof path && "skeletal_showcase: pack path truncated");
     const nt_hash32_t pack_id = nt_hash32_str(name);
     (void)nt_resource_mount(pack_id, 100);
     (void)nt_resource_load_auto(pack_id, path);
@@ -1370,7 +1374,6 @@ int main(int argc, char *argv[]) {
 
     init_ui_styles();
     init_humanoid();
-    reset_scene();
     s_playback_scene.rig = RIG_FOX;
     playback_reset();
     switch_scene(0);
