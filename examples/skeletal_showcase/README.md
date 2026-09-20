@@ -125,12 +125,11 @@ Controls, top to bottom:
 - `Character`: `Fox` or `CesiumMan` (the humanoid has no clips and is not
   offered). Switching deselects the clip and refits the camera. While the
   skeleton is not ready the panel shows `loading...`.
-- `Clip`: every clip whose resource is loaded. A clip made for
-  another skeleton is listed with the suffix ` (other rig)` and selecting it
-  does nothing, so for CesiumMan the three Fox entries are visible but inert
-  and the Fox skeleton takes `Fox Survey`, `Fox Walk` and `Fox Run` in any
-  order without being reloaded. Selecting a clip resets the track to time 0 and
-  logs its name, duration and sample count once.
+- `Clip`: every loaded clip whose `rig_compat_id` matches the selected
+  skeleton, so CesiumMan lists its one clip and the Fox skeleton takes
+  `Fox Survey`, `Fox Walk` and `Fox Run` in any order without being reloaded.
+  Selecting a clip resets the track to time 0 and logs its name, duration and
+  sample count once.
 - `Play`/`Pause`: pause is `speed = 0` on the track, no special case.
 - `Step`: pauses and seeks to the adjacent sample (backwards with `Reverse`)
   in frame arithmetic: with `Loop` on the index wraps, so a step at the last
@@ -181,13 +180,12 @@ each one, and check that the framing, joint size and grid match the
 humanoid's.
 
 Playback: switch the scene to `Playback`; Fox stands at rest and the status
-line reads `no clip`. Open `Clip`: all four entries are listed and `CesiumMan`
-carries ` (other rig)`. Select `Fox Walk` and confirm the legs cycle and the
+line reads `no clip`. Open `Clip`: the three Fox entries are listed and
+`CesiumMan` is not. Select `Fox Walk` and confirm the legs cycle and the
 status time wraps at the duration; select `Fox Run` and confirm the skeleton
 is not reloaded (the framing does not jump) and the log shows the new clip
 line. Uncheck `Loop` and confirm the time clamps at the duration and the pose
 holds; check `Reverse` and confirm it runs back to 0 and holds. Pause, press
 `Step` a few times and confirm the time moves by one sample per press; drag `Time`
-and confirm the pose follows. Switch `Character` to `CesiumMan`: the three Fox
-entries read ` (other rig)` and selecting one does nothing; select `CesiumMan`
-and confirm the walk plays upright.
+and confirm the pose follows. Switch `Character` to `CesiumMan`: `Clip` lists
+only `CesiumMan`; select it and confirm the walk plays upright.

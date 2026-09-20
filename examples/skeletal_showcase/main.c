@@ -556,15 +556,17 @@ static void playback_seek_frame(playback_scene_state_t *p, int frame) { p->track
 static int playback_frame(const playback_scene_state_t *p) { return (int)fmin(round(p->track.time / clip_step(p->clip_view)), (double)clip_last_frame(p)); }
 
 /* A seek to the adjacent sample in frame arithmetic: a step through advance
- * lands one ulp short of the wrap point for many clip lengths. */
+ * lands one ulp short of the wrap point for many clip lengths. Paused between
+ * two samples, the step goes to the next one in its direction, never past it. */
 static void playback_step(void) {
     playback_scene_state_t *p = &s_playback_scene;
-    p->paused = true;
     if (p->clip_view == NULL) {
         return;
     }
+    p->paused = true;
     const int n = clip_last_frame(p) + 1;
-    const int next = playback_frame(p) + (p->reverse ? -1 : 1);
+    const double f = p->track.time / clip_step(p->clip_view); /* the epsilon absorbs the rounding of a grid-exact seek */
+    const int next = p->reverse ? (int)ceil(f - 1e-6) - 1 : (int)floor(f + 1e-6) + 1;
     playback_seek_frame(p, p->loop ? (next + n) % n : (int)fmin(fmax(next, 0), n - 1));
 }
 
@@ -584,16 +586,10 @@ static void playback_update(void) {
     playback_scene_state_t *p = &s_playback_scene;
     p->skel = rig_view(p->rig);
     if (p->skel == NULL) {
-        playback_deselect_clip();
         return;
     }
-    if (p->clip >= 0) {
-        /* Views are borrowed: refetched every frame after resource_step. */
-        p->clip_view = nt_resource_is_ready(s_clip_resource[p->clip]) ? nt_skeletal_assets_clip(s_clip_resource[p->clip]) : NULL;
-        if (p->clip_view == NULL) {
-            playback_deselect_clip();
-        }
-    }
+    /* Views are borrowed: refetched every frame after resource_step. Nothing unmounts, so a selected clip stays ready. */
+    p->clip_view = p->clip >= 0 ? nt_skeletal_assets_clip(s_clip_resource[p->clip]) : NULL;
     if (p->clip_view != NULL) {
         const float speed = p->reverse ? -p->speed_mag : p->speed_mag;
         p->track.speed = p->paused ? 0.0F : speed;
@@ -889,7 +885,7 @@ static void declare_playback_rig_combo(playback_scene_state_t *p) {
     }
 }
 
-/* Lists every loaded clip; one made for another rig is shown, not selectable. */
+/* Lists the loaded clips made for the selected rig. */
 static void declare_playback_clip_combo(playback_scene_state_t *p) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Clip", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
     char clip_preview[64];
@@ -900,10 +896,10 @@ static void declare_playback_clip_combo(playback_scene_state_t *p) {
                 continue;
             }
             const nt_skeletal_clip_t *view = nt_skeletal_assets_clip(s_clip_resource[i]);
-            const bool compatible = view->rig_compat_id.value == p->skel->rig_compat_id.value;
-            char row[64];
-            (void)snprintf(row, sizeof row, "%s%s", s_clips[i].name, compatible ? "" : " (other rig)");
-            if (nt_ui_combo_selectable(s_ui, (uint32_t)i, row, i == p->clip) && compatible && i != p->clip) {
+            if (view->rig_compat_id.value != p->skel->rig_compat_id.value) {
+                continue;
+            }
+            if (nt_ui_combo_selectable(s_ui, (uint32_t)i, s_clips[i].name, i == p->clip) && i != p->clip) {
                 playback_select_clip(i, view);
             }
         }
@@ -937,7 +933,7 @@ static void declare_playback_transport(playback_scene_state_t *p) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(12.0F, (Clay_Color){190.0F, 205.0F, 225.0F, 255.0F}));
     (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/speed"), NULL, &p->speed_mag, 0.0F, 2.0F, 0.05F, &s_slider_style,
                              &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
-    const Clay_ElementDeclaration check_row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    const Clay_ElementDeclaration check_row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}}};
     CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}}) {
         (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/loop"), "Loop", &p->loop, &s_checkbox_style, &check_row, enabled);
         (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("playback/reverse"), "Reverse", &p->reverse, &s_checkbox_style, &check_row, enabled);
@@ -1150,9 +1146,9 @@ static void reset_active_scene(void) {
 // #region frame and init
 /* Both packs come from the same CDN folder or the local assets dir. */
 static void mount_pack(const char *name) {
-    char path[128];
+    char path[256];
 #ifdef NT_CDN_URL
-    const int len = snprintf(path, sizeof path, NT_CDN_URL "/skeletal_showcase/%s.ntpack", name);
+    const int len = snprintf(path, sizeof path, "%s/skeletal_showcase/%s.ntpack", NT_CDN_URL, name);
 #else
     const int len = snprintf(path, sizeof path, "assets/%s.ntpack", name);
 #endif
