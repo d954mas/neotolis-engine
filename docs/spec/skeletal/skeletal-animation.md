@@ -232,7 +232,7 @@ typedef struct {
 
 A binding is valid until the context's next `begin_frame` or graphics invalidation; the game's frame order (§15: prepare before list build) is what keeps a binding current, and no epoch counter mirrors that order — `skeletal_gpu` keeps no `in_frame`/`flushed` flags either. Textures and assets stay alive through all consuming passes. Capacities are init parameters; overflow asserts. Identical pose+binding may share one prepared binding explicitly; no global dedup cache. Coordinates are separate x/y integers (a linear offset may exceed 2²⁴ in float).
 
-**`skin_comp`** (`engine/skin_comp`, implemented) stores one by-value `nt_deformation_binding_t` per entity in the `mesh_comp` pattern (`init/shutdown/add/has/remove`, `nt_skin_comp_handle(entity)` asserts presence). `add` starts from the zero binding; drawing it is the renderer's assert (§13). Swap-and-pop moves the 16 B value; `remove` frees nothing — the texture is borrowed.
+**`skin_comp`** (`engine/skin_comp`, implemented) stores one by-value `nt_deformation_binding_t` per entity in the `mesh_comp` pattern (`init/shutdown/add/has/remove`, `nt_skin_comp_handle(entity)` asserts presence). `add` starts from the zero binding; drawing it is the renderer's assert (§13). Swap-and-pop moves the 16 B value; `remove` frees nothing — the texture is borrowed. Under `NT_INTROSPECT_ENABLED` the component describes its texture handle, origins and alpha like the other render components, so a devapi bot can spot an entity left on the zero binding.
 
 ## 13. Renderer (planned, #488)
 

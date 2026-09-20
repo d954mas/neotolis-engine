@@ -14,6 +14,7 @@
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
+#include "skin_comp/nt_skin_comp.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "log/nt_log_ring.h"
@@ -48,6 +49,8 @@ void setUp(void) {
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_material_init(&matdesc));
     nt_material_comp_desc_t mcdesc = nt_material_comp_desc_defaults();
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_material_comp_init(&mcdesc));
+    nt_skin_comp_desc_t sdesc = nt_skin_comp_desc_defaults();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_skin_comp_init(&sdesc));
 
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     nt_devapi_register_obs();
@@ -56,6 +59,7 @@ void setUp(void) {
 
 void tearDown(void) {
     nt_devapi_shutdown();
+    nt_skin_comp_shutdown();
     nt_material_comp_shutdown();
     nt_material_shutdown();
     nt_resource_shutdown();
@@ -464,6 +468,29 @@ static void test_entity_list_material_label(void) {
     cJSON_Delete(root);
 }
 
+/* The skin group shows the by-value binding, so a bot can tell a never-reserved entity (texture 0). */
+static void test_entity_list_skin_binding(void) {
+    nt_entity_t e = nt_entity_create();
+    TEST_ASSERT_TRUE(nt_skin_comp_add(e));
+    *nt_skin_comp_handle(e) = (nt_deformation_binding_t){.texture = {.id = 7}, .x0 = 6, .y0 = 1, .x1 = 9, .y1 = 2, .alpha = 0.5F};
+
+    cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\",\"params\":{\"component\":\"skin\"}}"));
+    cJSON *r = result_of(root);
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(r, "total")->valueint);
+    cJSON *ent = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(r, "entities"), 0);
+    cJSON *skin = cJSON_GetObjectItemCaseSensitive(ent, "skin");
+    TEST_ASSERT_TRUE(cJSON_IsObject(skin));
+    cJSON *texture = cJSON_GetObjectItemCaseSensitive(skin, "texture");
+    TEST_ASSERT_TRUE(cJSON_IsObject(texture));
+    TEST_ASSERT_EQUAL_STRING("handle", cJSON_GetObjectItemCaseSensitive(texture, "ref")->valuestring);
+    TEST_ASSERT_EQUAL_INT(6, cJSON_GetObjectItemCaseSensitive(skin, "x0")->valueint);
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(skin, "y0")->valueint);
+    TEST_ASSERT_EQUAL_INT(9, cJSON_GetObjectItemCaseSensitive(skin, "x1")->valueint);
+    TEST_ASSERT_EQUAL_INT(2, cJSON_GetObjectItemCaseSensitive(skin, "y1")->valueint);
+    TEST_ASSERT_TRUE(cJSON_GetObjectItemCaseSensitive(skin, "alpha")->valuedouble == 0.5);
+    cJSON_Delete(root);
+}
+
 /* entity.list `limit` is DoS-capped at NT_DEVAPI_OBS_LIMIT_MAX: a request for limit > cap clamps to
    the cap (at most cap entries emitted) while `total` stays the honest count. Needs > cap live
    entities, so this re-inits the entity system (and its dependent comp storages, in dep order) with a
@@ -754,6 +781,7 @@ int main(void) {
     RUN_TEST(test_entity_list_component_filter);
     RUN_TEST(test_entity_query_all_any_none);
     RUN_TEST(test_entity_list_material_label);
+    RUN_TEST(test_entity_list_skin_binding);
     RUN_TEST(test_entity_list_limit_clamps_to_cap);
     RUN_TEST(test_entity_list_pagination_and_bad_params);
     RUN_TEST(test_resource_list_packs);
