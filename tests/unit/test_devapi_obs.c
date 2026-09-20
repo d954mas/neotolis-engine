@@ -483,6 +483,7 @@ static void test_entity_list_skin_binding(void) {
     cJSON *texture = cJSON_GetObjectItemCaseSensitive(skin, "texture");
     TEST_ASSERT_TRUE(cJSON_IsObject(texture));
     TEST_ASSERT_EQUAL_STRING("handle", cJSON_GetObjectItemCaseSensitive(texture, "ref")->valuestring);
+    TEST_ASSERT_EQUAL_STRING("0x7", cJSON_GetObjectItemCaseSensitive(texture, "id")->valuestring);
     TEST_ASSERT_EQUAL_INT(6, cJSON_GetObjectItemCaseSensitive(skin, "x0")->valueint);
     TEST_ASSERT_EQUAL_INT(1, cJSON_GetObjectItemCaseSensitive(skin, "y0")->valueint);
     TEST_ASSERT_EQUAL_INT(9, cJSON_GetObjectItemCaseSensitive(skin, "x1")->valueint);

@@ -23,8 +23,9 @@
  */
 
 /* Borrowed texture + two frame origins; CPU palettes have x1 == x0, y1 == y0,
- * alpha 0; bank lookups fill both origins. Coordinates stay separate
- * integers: a linear offset may exceed 2^24 in float. */
+ * alpha 0; bank lookups fill both origins. Origins are x/y pairs, not a linear
+ * index: the shader fetches with an ivec2 and the vertex attribute types have
+ * no 32-bit integer. */
 typedef struct {
     nt_texture_t texture;
     uint16_t x0, y0, x1, y1;
@@ -35,13 +36,15 @@ typedef struct {
 _Static_assert(sizeof(nt_deformation_binding_t) == 16, "nt_deformation_binding_t is 16 bytes");
 #endif
 
+/* width = 3 * max palette count makes every frame one row: no row tail is
+ * wasted in the texture or in the flush upload. */
 typedef struct {
     uint16_t width;  /* texels per row; 0 = min(2048, gpu_caps.max_texture_size) */
     uint16_t height; /* rows; capacity = width * height texels, overflow asserts */
 } nt_skeletal_gpu_desc_t;
 
-/* 2048 x 16 texels = 512 KB: 96 frames of 100 joints. */
-static inline nt_skeletal_gpu_desc_t nt_skeletal_gpu_desc_defaults(void) { return (nt_skeletal_gpu_desc_t){.width = 0, .height = 16}; }
+/* 2048 x 4 texels = 128 KB staging + 128 KB texture: 24 frames of 100 joints; raise height for crowds. */
+static inline nt_skeletal_gpu_desc_t nt_skeletal_gpu_desc_defaults(void) { return (nt_skeletal_gpu_desc_t){.width = 0, .height = 4}; }
 
 /* Requires nt_gfx_init. Allocates the staging buffer and creates the texture;
  * no other allocation afterwards. */
@@ -61,10 +64,10 @@ void nt_skeletal_gpu_begin_frame(void);
  * The pointer is valid until the next begin_frame. */
 nt_skeletal_mat34_t *nt_skeletal_gpu_reserve(uint16_t count, nt_deformation_binding_t *out_binding);
 
-/* Uploads every texel reserved since begin_frame: the complete rows as one
- * rectangle plus the partial last row as one h = 1 fragment. Call once per
- * frame after the last palette write and before the first pass; a second call
- * re-uploads the same bytes. */
+/* Uploads every row touched since begin_frame as one rectangle (0, 0, width,
+ * rows); the unreserved tail of the last row rides along, nothing reads it.
+ * Call once per frame after the last palette write and before the first pass;
+ * a second call re-uploads the same bytes. */
 void nt_skeletal_gpu_flush(void);
 
 #endif /* NT_SKELETAL_GPU_H */

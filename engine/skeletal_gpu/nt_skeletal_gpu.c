@@ -9,6 +9,9 @@
 #define NT_SKELETAL_GPU_DEFAULT_WIDTH 2048U
 #define NT_SKELETAL_GPU_TEXEL_FLOATS 4U
 
+/* reserve hands out 3 texels per palette entry; the pose ABI must not pad the matrix. */
+_Static_assert(sizeof(nt_skeletal_mat34_t) == (size_t)3 * NT_SKELETAL_GPU_TEXEL_FLOATS * sizeof(float), "one palette entry is three RGBA32F texels");
+
 static struct {
     float *staging; /* width * height texels, 4 floats each */
     nt_texture_t texture;
@@ -55,8 +58,6 @@ nt_result_t nt_skeletal_gpu_init(const nt_skeletal_gpu_desc_t *desc) {
     if (width == 0) {
         width = max_size < NT_SKELETAL_GPU_DEFAULT_WIDTH ? max_size : NT_SKELETAL_GPU_DEFAULT_WIDTH;
     }
-    NT_ASSERT(width <= max_size && "nt_skeletal_gpu_init: width exceeds max_texture_size");
-    NT_ASSERT(desc->height <= max_size && "nt_skeletal_gpu_init: height exceeds max_texture_size");
     s_skeletal_gpu.width = (uint16_t)width;
     s_skeletal_gpu.height = desc->height;
 
@@ -127,18 +128,9 @@ nt_skeletal_mat34_t *nt_skeletal_gpu_reserve(uint16_t count, nt_deformation_bind
 
 void nt_skeletal_gpu_flush(void) {
     NT_ASSERT(s_skeletal_gpu.initialized);
-    uint16_t rows = s_skeletal_gpu.cursor_y;
-    uint16_t fragment = s_skeletal_gpu.cursor_x;
-    if (fragment == s_skeletal_gpu.width) {
-        rows++;
-        fragment = 0;
-    }
+    uint16_t rows = (uint16_t)(s_skeletal_gpu.cursor_y + (s_skeletal_gpu.cursor_x > 0 ? 1 : 0));
     if (rows > 0) {
         nt_gfx_update_texture(s_skeletal_gpu.texture, 0, 0, s_skeletal_gpu.width, rows, s_skeletal_gpu.staging);
-    }
-    if (fragment > 0) {
-        size_t texel = (size_t)rows * s_skeletal_gpu.width;
-        nt_gfx_update_texture(s_skeletal_gpu.texture, 0, rows, fragment, 1, s_skeletal_gpu.staging + (texel * NT_SKELETAL_GPU_TEXEL_FLOATS));
     }
 }
 // #endregion

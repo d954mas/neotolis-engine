@@ -93,10 +93,12 @@ static void test_init_width_zero_is_min_2048_max_texture_size(void) {
     TEST_ASSERT_EQUAL_UINT16(2048, nt_gfx_fake_last_texture_desc().width);
 }
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
 static void test_init_rejects_zero_height(void) {
     nt_test_assert_install();
     NT_TEST_EXPECT_ASSERT(nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 12, .height = 0}));
 }
+#endif
 // #endregion
 
 // #region reserve
@@ -189,55 +191,47 @@ static void test_palette_build_writes_into_the_reserved_frame(void) {
 // #endregion
 
 // #region flush
-static void test_flush_uploads_full_rows_plus_one_fragment(void) {
+static void assert_one_full_width_rect(uint16_t width, uint16_t rows) {
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_update_texture_count());
+    nt_gfx_fake_update_texture_rect_t r = nt_gfx_fake_update_texture_rect_at(0);
+    TEST_ASSERT_EQUAL_UINT16(0, r.x);
+    TEST_ASSERT_EQUAL_UINT16(0, r.y);
+    TEST_ASSERT_EQUAL_UINT16(width, r.w);
+    TEST_ASSERT_EQUAL_UINT16(rows, r.h);
+}
+
+static void test_flush_uploads_touched_rows_as_one_rectangle(void) {
     gpu_init(12, 3);
     nt_skeletal_gpu_begin_frame();
     nt_deformation_binding_t b;
     (void)nt_skeletal_gpu_reserve(4, &b); /* row 0 exactly */
     (void)nt_skeletal_gpu_reserve(1, &b); /* row 1, 3 texels */
     nt_skeletal_gpu_flush();
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_update_texture_count());
-    nt_gfx_fake_update_texture_rect_t rows = nt_gfx_fake_update_texture_rect_at(0);
-    nt_gfx_fake_update_texture_rect_t frag = nt_gfx_fake_update_texture_rect_at(1);
-    TEST_ASSERT_EQUAL_UINT16(0, rows.x);
-    TEST_ASSERT_EQUAL_UINT16(0, rows.y);
-    TEST_ASSERT_EQUAL_UINT16(12, rows.w);
-    TEST_ASSERT_EQUAL_UINT16(1, rows.h);
-    TEST_ASSERT_EQUAL_UINT16(0, frag.x);
-    TEST_ASSERT_EQUAL_UINT16(1, frag.y);
-    TEST_ASSERT_EQUAL_UINT16(3, frag.w);
-    TEST_ASSERT_EQUAL_UINT16(1, frag.h);
-    /* The fragment uploads from its own row, not from the staging base. */
-    TEST_ASSERT_EQUAL_PTR((const float *)rows.data + ((size_t)12 * TEXEL_FLOATS), frag.data);
+    assert_one_full_width_rect(12, 2);
 }
 
-static void test_flush_exactly_filled_rows_is_one_rectangle(void) {
-    gpu_init(6, 2);
+static void test_flush_exactly_filled_rows_adds_no_row(void) {
+    gpu_init(6, 3);
     nt_skeletal_gpu_begin_frame();
     nt_deformation_binding_t b;
     (void)nt_skeletal_gpu_reserve(2, &b);
     (void)nt_skeletal_gpu_reserve(2, &b);
     nt_skeletal_gpu_flush();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_update_texture_count());
-    nt_gfx_fake_update_texture_rect_t r = nt_gfx_fake_update_texture_rect_at(0);
-    TEST_ASSERT_EQUAL_UINT16(6, r.w);
-    TEST_ASSERT_EQUAL_UINT16(2, r.h);
+    assert_one_full_width_rect(6, 2);
 }
 
-static void test_flush_partial_first_row_is_one_fragment(void) {
+static void test_flush_twice_re_uploads_the_same_rectangle(void) {
     gpu_init(12, 2);
     nt_skeletal_gpu_begin_frame();
     nt_deformation_binding_t b;
     (void)nt_skeletal_gpu_reserve(1, &b);
     nt_skeletal_gpu_flush();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_update_texture_count());
-    nt_gfx_fake_update_texture_rect_t r = nt_gfx_fake_update_texture_rect_at(0);
-    TEST_ASSERT_EQUAL_UINT16(0, r.y);
-    TEST_ASSERT_EQUAL_UINT16(3, r.w);
-    TEST_ASSERT_EQUAL_UINT16(1, r.h);
-    /* A second flush re-uploads the same bytes. */
+    assert_one_full_width_rect(12, 1);
     nt_skeletal_gpu_flush();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_update_texture_count());
+    nt_gfx_fake_update_texture_rect_t first = nt_gfx_fake_update_texture_rect_at(0);
+    nt_gfx_fake_update_texture_rect_t second = nt_gfx_fake_update_texture_rect_at(1);
+    TEST_ASSERT_EQUAL_MEMORY(&first, &second, sizeof(first));
 }
 
 static void test_flush_of_an_empty_frame_uploads_nothing(void) {
@@ -271,6 +265,34 @@ static void test_restore_recreates_the_texture_and_new_bindings_use_it(void) {
 }
 
 static void test_restore_when_inactive_is_ok(void) { TEST_ASSERT_EQUAL(NT_OK, nt_skeletal_gpu_restore_gpu()); }
+
+static void test_failed_restore_is_retried_before_the_next_reserve(void) {
+    gpu_init(12, 2);
+    nt_gfx_fake_fail_texture_creates(1);
+    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_skeletal_gpu_restore_gpu());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
+    nt_deformation_binding_t b;
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    nt_skeletal_gpu_begin_frame();
+    nt_test_assert_install();
+    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_gpu_reserve(1, &b));
+#endif
+    /* The retry creates a fresh texture without destroying the husk twice. */
+    TEST_ASSERT_EQUAL(NT_OK, nt_skeletal_gpu_restore_gpu());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
+    nt_skeletal_gpu_begin_frame();
+    (void)nt_skeletal_gpu_reserve(1, &b);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, b.texture.id);
+}
+
+static void test_failed_init_leaves_the_module_down(void) {
+    nt_gfx_fake_fail_texture_creates(1);
+    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 12, .height = 2}));
+    nt_skeletal_gpu_shutdown(); /* no-op on an inactive module */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_destroy_count());
+    gpu_init(12, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_create_count());
+}
 // #endregion
 
 // #region skin_comp
@@ -317,11 +339,14 @@ static void test_skin_comp_swap_and_pop_keeps_every_remaining_value(void) {
     TEST_ASSERT_EQUAL_MEMORY(&zero, nt_skin_comp_handle(e3), sizeof(zero));
 }
 
-static void test_skin_comp_entity_destroy_removes_the_component(void) {
-    nt_entity_t e = nt_entity_create();
-    nt_skin_comp_add(e);
-    nt_entity_destroy(e);
-    TEST_ASSERT_FALSE(nt_skin_comp_has(e));
+static void test_skin_comp_entity_destroy_frees_the_slot(void) {
+    /* Capacity 4: a slot leaked by a missing on_destroy would fail the fifth add. */
+    for (int i = 0; i < 5; i++) {
+        nt_entity_t e = nt_entity_create();
+        TEST_ASSERT_TRUE(nt_skin_comp_add(e));
+        nt_entity_destroy(e);
+        TEST_ASSERT_FALSE(nt_skin_comp_has(e));
+    }
 }
 
 static void test_skin_comp_holds_a_reserved_binding_by_value(void) {
@@ -339,6 +364,7 @@ static void test_skin_comp_holds_a_reserved_binding_by_value(void) {
 // #endregion
 
 // #region asserts
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
 static void test_reserve_rejects_zero_count(void) {
     gpu_init(12, 1);
     nt_skeletal_gpu_begin_frame();
@@ -363,29 +389,36 @@ static void test_reserve_asserts_when_the_texture_is_full(void) {
     nt_test_assert_install();
     NT_TEST_EXPECT_ASSERT((void)nt_skeletal_gpu_reserve(1, &b));
 }
+#endif
 // #endregion
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_creates_one_nearest_rgba32f_texture);
     RUN_TEST(test_init_width_zero_is_min_2048_max_texture_size);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_init_rejects_zero_height);
+#endif
     RUN_TEST(test_reserve_packs_frames_row_major_without_spanning);
     RUN_TEST(test_reserve_wraps_a_frame_that_does_not_fit_the_row);
     RUN_TEST(test_begin_frame_resets_the_cursor);
     RUN_TEST(test_palette_build_writes_into_the_reserved_frame);
-    RUN_TEST(test_flush_uploads_full_rows_plus_one_fragment);
-    RUN_TEST(test_flush_exactly_filled_rows_is_one_rectangle);
-    RUN_TEST(test_flush_partial_first_row_is_one_fragment);
+    RUN_TEST(test_flush_uploads_touched_rows_as_one_rectangle);
+    RUN_TEST(test_flush_exactly_filled_rows_adds_no_row);
+    RUN_TEST(test_flush_twice_re_uploads_the_same_rectangle);
     RUN_TEST(test_flush_of_an_empty_frame_uploads_nothing);
     RUN_TEST(test_restore_recreates_the_texture_and_new_bindings_use_it);
     RUN_TEST(test_restore_when_inactive_is_ok);
+    RUN_TEST(test_failed_restore_is_retried_before_the_next_reserve);
+    RUN_TEST(test_failed_init_leaves_the_module_down);
     RUN_TEST(test_skin_comp_add_starts_from_the_zero_binding);
     RUN_TEST(test_skin_comp_swap_and_pop_keeps_every_remaining_value);
-    RUN_TEST(test_skin_comp_entity_destroy_removes_the_component);
+    RUN_TEST(test_skin_comp_entity_destroy_frees_the_slot);
     RUN_TEST(test_skin_comp_holds_a_reserved_binding_by_value);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_reserve_rejects_zero_count);
     RUN_TEST(test_reserve_rejects_a_frame_wider_than_the_texture);
     RUN_TEST(test_reserve_asserts_when_the_texture_is_full);
+#endif
     return UNITY_END();
 }
