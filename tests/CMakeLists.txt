@@ -26,7 +26,7 @@ if(NOT EMSCRIPTEN)
         nt_atlas nt_ui nt_ui_rich nt_gfx nt_gfx_fake nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
-        nt_builder
+        nt_builder nt_skeletal_gpu
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
         if(TARGET ${_lib})
@@ -76,6 +76,12 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_skin PRIVATE nt_skeletal nt_hash nt_core nt_log_stub nt_math unity)
     target_include_directories(test_skin PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_skin)
+
+    # Frame staging + upload of CPU palettes and the by-value skin component, on the gfx fake.
+    add_executable(test_skeletal_gpu unit/test_skeletal_gpu.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skeletal_gpu PRIVATE nt_skeletal_gpu nt_skin_comp nt_entity nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_log_stub unity)
+    target_include_directories(test_skeletal_gpu PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_skeletal_gpu)
 
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
