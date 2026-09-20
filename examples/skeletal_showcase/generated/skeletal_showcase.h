@@ -5,6 +5,10 @@
 
 #include "hash/nt_hash.h"
 
+/* --- MESH --- */
+#define ASSET_MESH_SKELETAL_SHOWCASE_CESIUMMAN_MESH ((nt_hash64_t){0xE60E33DC3DD3965FULL}) /* skeletal_showcase/cesiumman.mesh */
+#define ASSET_MESH_SKELETAL_SHOWCASE_FOX_MESH ((nt_hash64_t){0xAF72CC79187B59D2ULL}) /* skeletal_showcase/fox.mesh */
+
 /* --- TEXTURE --- */
 #define ASSET_TEXTURE_SKELETAL_SHOWCASE_UI_TEX0 ((nt_hash64_t){0x7CA2C6FD03D37F1AULL}) /* skeletal_showcase_ui/tex0 */
 
@@ -22,6 +26,8 @@
 
 /* --- ATLAS_REGION --- */
 #define ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI__WHITE ((nt_hash64_t){0x27424DEE40744BBBULL}) /* skeletal_showcase_ui/_white */
+#define ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_BOX_OFF ((nt_hash64_t){0x97CC840C10B18698ULL}) /* skeletal_showcase_ui/box_off */
+#define ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_CHECKMARK ((nt_hash64_t){0x24D04B5060D94AAAULL}) /* skeletal_showcase_ui/checkmark */
 #define ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_FILL ((nt_hash64_t){0x5F9D2E390982D1FBULL}) /* skeletal_showcase_ui/fill */
 #define ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_THUMB ((nt_hash64_t){0x04116FA511D32E10ULL}) /* skeletal_showcase_ui/thumb */
 #define ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_TRACK ((nt_hash64_t){0x40CA01B5111E8123ULL}) /* skeletal_showcase_ui/track */
@@ -30,17 +36,27 @@
 #define ASSET_SKELETON_SKELETAL_SHOWCASE_CESIUMMAN_NSKL ((nt_hash64_t){0x80C0C6469394DAC7ULL}) /* skeletal_showcase/cesiumman.nskl */
 #define ASSET_SKELETON_SKELETAL_SHOWCASE_FOX_NSKL ((nt_hash64_t){0x5ECF020813BA2FC6ULL}) /* skeletal_showcase/fox.nskl */
 
+/* --- SKIN_BINDING --- */
+#define ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_CESIUMMAN_NSKN ((nt_hash64_t){0x5B791ADC7059049CULL}) /* skeletal_showcase/cesiumman.nskn */
+#define ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_FOX_NSKN ((nt_hash64_t){0xC0CD48D1A0A26281ULL}) /* skeletal_showcase/fox.nskn */
+
 #if NT_HASH_LABELS
 static inline void skeletal_showcase_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/slug_text.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.vert");
     (void)nt_hash64_str("assets/shaders/sprite.frag");
     (void)nt_hash64_str("assets/shaders/sprite.vert");
+    (void)nt_hash64_str("skeletal_showcase/cesiumman.mesh");
     (void)nt_hash64_str("skeletal_showcase/cesiumman.nskl");
+    (void)nt_hash64_str("skeletal_showcase/cesiumman.nskn");
     (void)nt_hash64_str("skeletal_showcase/font");
+    (void)nt_hash64_str("skeletal_showcase/fox.mesh");
     (void)nt_hash64_str("skeletal_showcase/fox.nskl");
+    (void)nt_hash64_str("skeletal_showcase/fox.nskn");
     (void)nt_hash64_str("skeletal_showcase_ui");
     (void)nt_hash64_str("skeletal_showcase_ui/_white");
+    (void)nt_hash64_str("skeletal_showcase_ui/box_off");
+    (void)nt_hash64_str("skeletal_showcase_ui/checkmark");
     (void)nt_hash64_str("skeletal_showcase_ui/fill");
     (void)nt_hash64_str("skeletal_showcase_ui/tex0");
     (void)nt_hash64_str("skeletal_showcase_ui/thumb");

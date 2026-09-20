@@ -25,12 +25,12 @@ target_include_directories(skeletal_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 if(EMSCRIPTEN)
     target_link_libraries(skeletal_showcase PRIVATE
         nt_platform_web nt_platform nt_gfx nt_http nt_clipboard_stub
-        nt_basisu_transcoder_stub nt_meshwire_stub
+        nt_basisu_transcoder_stub nt_meshwire
     )
 else()
     target_link_libraries(skeletal_showcase PRIVATE
         nt_gfx nt_http_stub nt_fs nt_clipboard_stub nt_platform
-        nt_basisu_transcoder_stub nt_meshwire_stub
+        nt_basisu_transcoder_stub nt_meshwire
     )
 endif()
 
@@ -58,7 +58,7 @@ nt_example_packs(
     BUILDER build_skeletal_showcase_packs
     PACK_DIR "${SKELETAL_SHOWCASE_PACK_DIR}"
     ASSETS_DIR "${SKELETAL_SHOWCASE_ASSETS_DIR}"
-    PACKS skeletal_showcase.ntpack
+    PACKS skeletal_showcase.ntpack skeletal_showcase_clips.ntpack
     INPUT_DIRS raw
         "${NT_ENGINE_ROOT}/assets/shaders"
         "${NT_ENGINE_ROOT}/examples/ui_showcase/raw"
@@ -68,4 +68,4 @@ if(NT_CDN_URL)
     target_compile_definitions(skeletal_showcase PRIVATE NT_CDN_URL="${NT_CDN_URL}")
 endif()
 
-nt_configure_shell(skeletal_showcase TITLE "Skeleton & Pose - Neotolis Engine")
+nt_configure_shell(skeletal_showcase TITLE "Skeletal showcase - Neotolis Engine")
