@@ -579,7 +579,7 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
 
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
     if (s_fake_update_texture_count < NT_GFX_FAKE_HISTORY_CAPACITY) {
-        s_fake_update_texture_rects[s_fake_update_texture_count] = (nt_gfx_fake_update_texture_rect_t){.x = x, .y = y, .w = w, .h = h};
+        s_fake_update_texture_rects[s_fake_update_texture_count] = (nt_gfx_fake_update_texture_rect_t){.x = x, .y = y, .w = w, .h = h, .data = data};
     }
     s_fake_update_texture_count++;
     (void)backend_handle;

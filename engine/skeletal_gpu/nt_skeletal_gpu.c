@@ -34,6 +34,14 @@ static nt_result_t create_texture(void) {
     return s_skeletal_gpu.texture.id != 0 ? NT_OK : NT_ERR_INIT_FAILED;
 }
 
+/* Handle 0 after a failed restore: gfx logs an error for it, unlike buffers. */
+static void destroy_texture(void) {
+    if (s_skeletal_gpu.texture.id != 0) {
+        nt_gfx_destroy_texture(s_skeletal_gpu.texture);
+    }
+    s_skeletal_gpu.texture = (nt_texture_t){0};
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 nt_result_t nt_skeletal_gpu_init(const nt_skeletal_gpu_desc_t *desc) {
     NT_ASSERT(!s_skeletal_gpu.initialized);
@@ -72,7 +80,7 @@ void nt_skeletal_gpu_shutdown(void) {
     if (!s_skeletal_gpu.initialized) {
         return;
     }
-    nt_gfx_destroy_texture(s_skeletal_gpu.texture);
+    destroy_texture();
     free(s_skeletal_gpu.staging);
     memset(&s_skeletal_gpu, 0, sizeof(s_skeletal_gpu));
 }
@@ -81,8 +89,7 @@ nt_result_t nt_skeletal_gpu_restore_gpu(void) {
     if (!s_skeletal_gpu.initialized) {
         return NT_OK;
     }
-    nt_gfx_destroy_texture(s_skeletal_gpu.texture);
-    s_skeletal_gpu.texture = (nt_texture_t){0};
+    destroy_texture();
     return create_texture();
 }
 // #endregion
@@ -134,10 +141,4 @@ void nt_skeletal_gpu_flush(void) {
         nt_gfx_update_texture(s_skeletal_gpu.texture, 0, rows, fragment, 1, s_skeletal_gpu.staging + (texel * NT_SKELETAL_GPU_TEXEL_FLOATS));
     }
 }
-// #endregion
-
-// #region test_access
-#ifdef NT_TEST_ACCESS
-const float *nt_skeletal_gpu_test_staging(void) { return s_skeletal_gpu.staging; }
-#endif
 // #endregion

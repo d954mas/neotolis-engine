@@ -23,7 +23,7 @@
  */
 
 /* Borrowed texture + two frame origins; CPU palettes have x1 == x0, y1 == y0,
- * alpha 0. Bank lookups (planned) fill both origins. Coordinates stay separate
+ * alpha 0; bank lookups fill both origins. Coordinates stay separate
  * integers: a linear offset may exceed 2^24 in float. */
 typedef struct {
     nt_texture_t texture;
@@ -66,12 +66,5 @@ nt_skeletal_mat34_t *nt_skeletal_gpu_reserve(uint16_t count, nt_deformation_bind
  * frame after the last palette write and before the first pass; a second call
  * re-uploads the same bytes. */
 void nt_skeletal_gpu_flush(void);
-
-// #region test_access
-#ifdef NT_TEST_ACCESS
-/* Staging texels: 4 floats each, row-major, width texels per row. */
-const float *nt_skeletal_gpu_test_staging(void);
-#endif
-// #endregion
 
 #endif /* NT_SKELETAL_GPU_H */

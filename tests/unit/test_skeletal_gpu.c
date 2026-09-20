@@ -49,9 +49,18 @@ static void fill_frame(nt_skeletal_mat34_t *frame, uint16_t count, float base) {
     }
 }
 
-static const float *staging_texel(uint16_t width, uint16_t x, uint16_t y) { return nt_skeletal_gpu_test_staging() + ((((size_t)y * width) + x) * TEXEL_FLOATS); }
+/* The first flush rectangle always starts at texel (0, 0): its data pointer is the staging base. */
+static const float *staging_base(void) {
+    TEST_ASSERT_TRUE(nt_gfx_fake_update_texture_count() > 0);
+    nt_gfx_fake_update_texture_rect_t first = nt_gfx_fake_update_texture_rect_at(0);
+    TEST_ASSERT_EQUAL_UINT16(0, first.x);
+    TEST_ASSERT_EQUAL_UINT16(0, first.y);
+    return (const float *)first.data;
+}
 
-/* Texel (x0 + 3p + r, y0) == row r of B[p]. */
+static const float *staging_texel(uint16_t width, uint16_t x, uint16_t y) { return staging_base() + ((((size_t)y * width) + x) * TEXEL_FLOATS); }
+
+/* After flush: texel (x0 + 3p + r, y0) == row r of B[p]. */
 static void assert_frame_at(uint16_t width, const nt_deformation_binding_t *b, const nt_skeletal_mat34_t *expected, uint16_t count) {
     for (uint16_t p = 0; p < count; p++) {
         for (int r = 0; r < 3; r++) {
@@ -110,10 +119,10 @@ static void test_reserve_packs_frames_row_major_without_spanning(void) {
     TEST_ASSERT_EQUAL_UINT16(1, c.y0);
 
     /* CPU binding: one frame twice, alpha 0, the module's texture. */
-    TEST_ASSERT_EQUAL_UINT16(a.x0, a.x1);
-    TEST_ASSERT_EQUAL_UINT16(a.y0, a.y1);
-    TEST_ASSERT_EQUAL_UINT16(c.x0, c.x1);
-    TEST_ASSERT_EQUAL_UINT16(c.y0, c.y1);
+    TEST_ASSERT_EQUAL_UINT16(6, b.x1);
+    TEST_ASSERT_EQUAL_UINT16(0, b.y1);
+    TEST_ASSERT_EQUAL_UINT16(0, c.x1);
+    TEST_ASSERT_EQUAL_UINT16(1, c.y1);
     TEST_ASSERT_TRUE(a.alpha == 0.0F);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, a.texture.id);
     TEST_ASSERT_EQUAL_UINT32(a.texture.id, b.texture.id);
@@ -129,6 +138,7 @@ static void test_reserve_packs_frames_row_major_without_spanning(void) {
     memcpy(fa, ea, sizeof(ea));
     memcpy(fb, eb, sizeof(eb));
     memcpy(fc, ec, sizeof(ec));
+    nt_skeletal_gpu_flush();
     assert_frame_at(12, &a, ea, 2);
     assert_frame_at(12, &b, eb, 2);
     assert_frame_at(12, &c, ec, 1);
@@ -173,6 +183,7 @@ static void test_palette_build_writes_into_the_reserved_frame(void) {
     nt_deformation_binding_t b;
     nt_skeletal_mat34_t *frame = nt_skeletal_gpu_reserve(2, &b);
     nt_skin_palette_build(&binding, model, 2, frame, 2);
+    nt_skeletal_gpu_flush();
     assert_frame_at(12, &b, inverse_bind, 2);
 }
 // #endregion
@@ -196,6 +207,8 @@ static void test_flush_uploads_full_rows_plus_one_fragment(void) {
     TEST_ASSERT_EQUAL_UINT16(1, frag.y);
     TEST_ASSERT_EQUAL_UINT16(3, frag.w);
     TEST_ASSERT_EQUAL_UINT16(1, frag.h);
+    /* The fragment uploads from its own row, not from the staging base. */
+    TEST_ASSERT_EQUAL_PTR((const float *)rows.data + ((size_t)12 * TEXEL_FLOATS), frag.data);
 }
 
 static void test_flush_exactly_filled_rows_is_one_rectangle(void) {
@@ -270,23 +283,31 @@ static void test_skin_comp_add_starts_from_the_zero_binding(void) {
 }
 
 static void test_skin_comp_swap_and_pop_keeps_every_remaining_value(void) {
+    gpu_init(12, 1);
     nt_entity_t e0 = nt_entity_create();
     nt_entity_t e1 = nt_entity_create();
     nt_entity_t e2 = nt_entity_create();
     nt_skin_comp_add(e0);
     nt_skin_comp_add(e1);
     nt_skin_comp_add(e2);
-    nt_deformation_binding_t b0 = {.texture = {.id = 10}, .x0 = 1, .y0 = 2, .x1 = 3, .y1 = 4, .alpha = 0.25F};
-    nt_deformation_binding_t b1 = {.texture = {.id = 11}, .x0 = 5, .y0 = 6, .x1 = 7, .y1 = 8, .alpha = 0.5F};
-    nt_deformation_binding_t b2 = {.texture = {.id = 12}, .x0 = 9, .y0 = 10, .x1 = 11, .y1 = 12, .alpha = 0.75F};
-    *nt_skin_comp_handle(e0) = b0;
-    *nt_skin_comp_handle(e1) = b1;
-    *nt_skin_comp_handle(e2) = b2;
+    /* Live bindings from the module, so a destroy in remove would reach the fake. */
+    nt_skeletal_gpu_begin_frame();
+    (void)nt_skeletal_gpu_reserve(1, nt_skin_comp_handle(e0));
+    (void)nt_skeletal_gpu_reserve(1, nt_skin_comp_handle(e1));
+    (void)nt_skeletal_gpu_reserve(1, nt_skin_comp_handle(e2));
+    nt_skin_comp_handle(e1)->alpha = 0.5F;
+    nt_skin_comp_handle(e2)->alpha = 0.75F;
+    nt_deformation_binding_t b1 = *nt_skin_comp_handle(e1);
+    nt_deformation_binding_t b2 = *nt_skin_comp_handle(e2);
+    TEST_ASSERT_EQUAL_UINT16(6, b2.x0);
 
     nt_skin_comp_remove(e0); /* the last slot moves into slot 0 */
     TEST_ASSERT_FALSE(nt_skin_comp_has(e0));
     TEST_ASSERT_EQUAL_MEMORY(&b1, nt_skin_comp_handle(e1), sizeof(b1));
     TEST_ASSERT_EQUAL_MEMORY(&b2, nt_skin_comp_handle(e2), sizeof(b2));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_destroy_count());
+    nt_skin_comp_remove(e2);
+    nt_skin_comp_remove(e1);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_destroy_count());
 
     /* Slot reuse starts from the zero binding again. */
@@ -317,7 +338,7 @@ static void test_skin_comp_holds_a_reserved_binding_by_value(void) {
 }
 // #endregion
 
-// #region asserts (last: a longjmp out of reserve leaves the cursor mid-frame)
+// #region asserts
 static void test_reserve_rejects_zero_count(void) {
     gpu_init(12, 1);
     nt_skeletal_gpu_begin_frame();

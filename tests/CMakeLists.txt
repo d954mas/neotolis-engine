@@ -26,7 +26,7 @@ if(NOT EMSCRIPTEN)
         nt_atlas nt_ui nt_ui_rich nt_gfx nt_gfx_fake nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
-        nt_builder nt_skeletal_gpu
+        nt_builder
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
         if(TARGET ${_lib})
