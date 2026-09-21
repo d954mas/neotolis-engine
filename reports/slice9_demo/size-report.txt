@@ -1,5 +1,5 @@
 # Size Report: slice9_demo (wasm-analysis-paired)
-# Commit: 95a76b9
+# Commit: e6ada0e
 
 ## WASM Section Sizes
 
@@ -105,6 +105,8 @@ libnt_resource.a          215122 B
 libnt_shape_renderer.a   1144652 B
 libnt_skeletal.a            5484 B
 libnt_skeletal_assets.a     7796 B
+libnt_skeletal_gpu.a        2852 B
+libnt_skin_comp.a           2044 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8864 B
 libnt_sprite_renderer.a    49806 B
@@ -119,7 +121,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4217118 B
+TOTAL (archives)         4222014 B
 
 ## Data Segments Summary
 
