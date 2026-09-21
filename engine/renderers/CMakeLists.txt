@@ -14,6 +14,16 @@ target_link_libraries(nt_mesh_renderer PUBLIC
 )
 # Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 
+nt_add_module(nt_skinned_mesh_renderer LOG_DOMAIN "skinned_mesh_renderer"
+    nt_skinned_mesh_renderer.c
+    nt_skinned_mesh_renderer.h
+)
+target_link_libraries(nt_skinned_mesh_renderer PUBLIC
+    nt_core nt_render nt_entity nt_transform_comp nt_mesh_comp nt_material_comp
+    nt_drawable_comp nt_material nt_resource nt_skin_comp
+)
+# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
+
 nt_add_module(nt_text_renderer LOG_DOMAIN "text_renderer"
     nt_text_renderer.c
     nt_text_renderer.h

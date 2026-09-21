@@ -25,6 +25,7 @@ if(NOT EMSCRIPTEN)
     set(NT_TEST_ACCESS_LIBS
         nt_atlas nt_ui nt_ui_rich nt_gfx nt_gfx_fake nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
+        nt_skinned_mesh_renderer
         nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
         nt_builder
     )
@@ -1223,6 +1224,17 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_mesh_renderer COMMAND test_mesh_renderer)
+
+    # --- Skinned mesh renderer tests ---
+    add_executable(test_skinned_mesh_renderer unit/test_skinned_mesh_renderer.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skinned_mesh_renderer PRIVATE
+        nt_skinned_mesh_renderer nt_mesh_renderer nt_render nt_gfx_fake nt_basisu_transcoder_stub
+        nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_skin_comp
+        nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log unity nt_meshwire_stub
+    )
+    target_compile_definitions(test_skinned_mesh_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_include_directories(test_skinned_mesh_renderer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_skinned_mesh_renderer)
 
     # --- Sprite renderer tests ---
     add_executable(test_sprite_renderer unit/test_sprite_renderer.c unit/test_helpers/nt_assert_trap.c)

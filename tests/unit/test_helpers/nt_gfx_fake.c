@@ -120,6 +120,8 @@ static bool s_fake_fail_next_backend_restore;
 static bool s_fake_fail_next_render_target_create;
 static bool s_fake_fail_next_render_target_resize;
 static uint32_t s_fake_last_update_buffer_offset;
+static const void *s_fake_last_update_buffer_data;
+static uint32_t s_fake_last_update_buffer_size;
 static uint32_t s_fake_last_instance_offset;
 static uint32_t s_fake_last_instance_vertex_input; /* recorder: last VI handle bind_instance_buffer named */
 static nt_blend_state_t s_fake_last_pipeline_blend;
@@ -168,6 +170,8 @@ nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t in
     return valid ? s_fake_update_texture_rects[index] : (nt_gfx_fake_update_texture_rect_t){0};
 }
 uint32_t nt_gfx_fake_update_buffer_count(void) { return s_fake_update_buffer_count; }
+const void *nt_gfx_fake_last_update_buffer_data(void) { return s_fake_last_update_buffer_data; }
+uint32_t nt_gfx_fake_last_update_buffer_size(void) { return s_fake_last_update_buffer_size; }
 uint32_t nt_gfx_fake_last_vertex_buffer_hash(void) { return s_fake_last_vertex_buffer_hash; }
 uint32_t nt_gfx_fake_last_index_buffer_hash(void) { return s_fake_last_index_buffer_hash; }
 uint32_t nt_gfx_fake_backend_restore_count(void) { return s_fake_backend_restore_count; }
@@ -235,6 +239,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_texture_desc = (nt_texture_desc_t){0};
     s_fake_last_depth_texture_backend = 0;
     s_fake_last_update_buffer_offset = 0;
+    s_fake_last_update_buffer_data = NULL;
+    s_fake_last_update_buffer_size = 0;
     s_fake_last_instance_offset = 0;
     s_fake_last_instance_vertex_input = 0;
     s_fake_last_pipeline_blend = (nt_blend_state_t){0};
@@ -531,9 +537,9 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
 
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size) {
     (void)backend_handle;
-    (void)data;
-    (void)size;
     s_fake_last_update_buffer_offset = offset;
+    s_fake_last_update_buffer_data = data;
+    s_fake_last_update_buffer_size = size;
     s_fake_update_buffer_count++;
 }
 
