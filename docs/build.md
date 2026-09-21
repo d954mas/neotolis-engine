@@ -92,6 +92,7 @@ is no longer a valid configuration.
 | `NT_GFX_NATIVE_GL_DEBUG` | OFF | Requests a native GL debug context and installs the KHR_debug callback when available. `native-debug` selects ON; native Release presets select OFF. Can be enabled explicitly in Release. |
 | `NT_GFX_WEB_GL_DEBUG` | OFF | Opt-in Emscripten GL parameter checks and per-call logging. |
 | `NT_HTTP_CURL` | OFF | Native presets select ON. Plain CMake and subproject builds require explicit ON for the libcurl backend; OFF uses the HTTP stub. |
+| `NT_HTTP_WEBSOCKETS` | OFF | Effective only when `NT_HTTP_CURL=ON` and Neotolis configures the vendored `CURL::libcurl`; otherwise configuration reports that it is ignored. ON keeps only HTTP(S) and WS(S), then publishes the global `NT_HTTP_WEBSOCKETS` property for consumers after `add_subdirectory(<engine>)`. A pre-provided curl target remains consumer-owned. |
 | `NT_HYBRID_HPG` | ON | Windows hybrid-GPU preference hint; per-app Windows graphics preferences override it. |
 | `NT_FONT_EMBOLDEN_ENABLED` | OFF | Explicit opt-in, including Debug. |
 | `NT_UI_CLAY_DEBUG_VIEW` | OFF | Explicit opt-in, independent of the Neotolis inspector. |
