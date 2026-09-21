@@ -199,8 +199,9 @@ the common case, not a corner case. No renderer cache key may fold handles or en
 or hash the whole canonical identity with `nt_hash64` where the identity is
 content rather than a handful of small fields.
 
-**State transitions.** The run-based renderers (mesh, sprite) drive one shared
-state machine, `nt_renderer_bound_t` in `engine/renderers/nt_renderer_shared.h`.
+**State transitions.** The run-based renderers (mesh, skinned mesh, sprite)
+drive one shared state machine, `nt_renderer_bound_t` in
+`engine/renderers/nt_renderer_shared.h`.
 It separates four transitions, each with its own identity: pipeline (handle),
 vertex input (handle), material uniforms — every vec4 param, keyed by material
 id — and the per-run instance range plus draw. A run that changes only the mesh
@@ -215,7 +216,11 @@ Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a materia
 without an override selects the texture's asset default. At every material
 transition the renderer resolves the material's declared `nt_resource_t` texture
 handles, and every sprite command submits the complete semantic set once. The
-sprite batch key packs the material pool slot and the currently published GPU
+skinned renderer replaces the declared `u_skin_matrices` resource and sampler
+with the current deformation texture and its default sampler, resolves the other
+declarations, and submits the same complete set. The skin declaration still
+counts toward the material's four slots; there is no renderer-only fifth
+binding. The sprite batch key packs the material pool slot and the currently published GPU
 texture pool slot, resolved from the stable page resource index. Both bindings
 remain live and unchanged from list construction through draw completion; a new
 list resolves the current publication again. The
@@ -225,7 +230,7 @@ backend only after the whole set resolves. The backend GL cache drops repeated
 physical binds. The text renderer draws once per flush and other renderers draw
 in between, so it also submits its complete set unconditionally.
 
-The material-driven mesh, sprite, and text renderer caches build the
+The material-driven mesh, skinned mesh, sprite, and text renderer caches build the
 `nt_pipeline_desc_t` from the material's render state and key on its
 `nt_gfx_pipeline_key_t`. Layouts and `color_mode` live on vertex-input
 objects, so materials differing only in layout or color mode share one
@@ -233,21 +238,24 @@ pipeline. The sprite renderer resolves the pipeline once per material change
 inside a `draw_list` call, not once per run: runs also split per atlas page,
 and nothing can replace a material's program inside the call.
 
-Vertex-input caches use exact identity for *derived* layouts too. The mesh
-renderer keeps a per-mesh versions table
-(`[nt_gfx_max_meshes()][nt_mesh_renderer_desc_t.max_mesh_layouts]`). Each row
-stores its mesh's full generation-checked handle. A different generation
-clears the entire row, including bufferless vertex inputs that have no
-destroy-cascade hook. Within the row the mesh's stream types, counts, offsets
-and stride are fixed, so entry identity packs only what varies: per stream a
-presence bit and the mapped location (mesh streams × material attr_map —
-attr_map entries matching no stream do not split; a material mapping none of
-the streams derives an empty layout and takes the attribute-less gl_VertexID
-path) plus the color mode that selects the instance layout. The sprite
-renderer packs the attr_map count and every location the same way. Handles are
-revalidated on lookup because buffer destruction can invalidate cached versions.
-Exhausting a mesh's version row asserts, naming the knob — silent eviction would hide VAO re-creation
-thrash as an invisible perf regression.
+Vertex-input caches use exact identity for *derived* layouts too. The mesh and
+skinned mesh renderers each instantiate the shared internal per-mesh versions
+cache from `nt_renderer_shared.h`; the tables are independent because their
+instance layouts differ. Each row stores its mesh's full generation-checked
+handle. A different generation clears the entire row, including bufferless
+vertex inputs that have no destroy-cascade hook. Within the row the mesh's
+stream types, counts, offsets and stride are fixed, so entry identity packs only
+what varies: per stream a presence bit and the mapped location (mesh streams ×
+material attr_map — attr_map entries matching no stream do not split; a
+material mapping none of the streams derives an empty layout and takes the
+attribute-less gl_VertexID path) plus the color mode that selects the instance
+layout. The sprite renderer packs the attr_map count and every location the same
+way. Handles are revalidated on lookup because buffer destruction can invalidate
+cached versions. Exhausting a mesh's version row asserts, naming the knob —
+silent eviction would hide VAO re-creation thrash as an invisible perf
+regression. The default `max_vertex_inputs` budgets one mesh cache; a game using
+both mesh renderers adds
+`max_meshes * skinned.max_mesh_layouts` to that base budget explicitly.
 
 The sprite renderer owns its vertex/index buffers and clears its entire
 vertex-input cache on shutdown or GPU restore before replacing those buffers.
@@ -373,7 +381,13 @@ or a shadow-map system.
 
 Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
 
-**Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`, `nt_mesh_renderer`). Single pipeline, fixed pattern, one or more instanced draws per batch_key run — split at max_instances chunk boundaries (see items-sorting-batching.md). Use for 3D meshes, custom geometry, anything where the game owns batching strategy. Stay minimal. The mesh renderer does state-delta tracking through the shared `static inline` helper, which costs it no cmd queue and no snapshot machinery.
+**Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`,
+`nt_mesh_renderer`, optional `nt_skinned_mesh_renderer`). Single pipeline, fixed
+pattern, one or more instanced draws per compatible run — split at
+`max_instances` chunk boundaries (see items-sorting-batching.md). Use for 3D
+meshes, custom geometry, anything where the game owns batching strategy. Stay
+minimal. The mesh renderers do state-delta tracking through the shared
+`static inline` helper, which costs them no cmd queue and no snapshot machinery.
 
 **Batched dynamic** — high-throughput accumulation renderers (`nt_sprite_renderer`; future particles). Cmd queue, state-delta tracking, overflow recovery via snapshot/replay, multi-page atlas resolution, SIMD path. Optimized for many small draws per frame (1k–60k items). Complex by necessity — the 580 LOC of `nt_sprite_renderer.c` are paid for by measured throughput on bunnymark. Don't simplify away the cmd queue or snapshot recovery without a measured replacement plan.
 

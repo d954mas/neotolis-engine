@@ -62,7 +62,7 @@ The chapters below define engine behavior.
 | [io/input.md](io/input.md) | Polling input model, pointer state, capture |
 | [io/audio.md](io/audio.md) | Platform-agnostic audio module, clips, voices, JS bridge |
 | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) | Logging, asserts, errors, debug overlay, and the dev-only devapi |
-| [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) | Skeletal animation (partly planned): NSKL/NANM/NSKN assets, pose ABI, tracks, mix/override/additive, FK, runtime banks, `skeletal_gpu`, `skinned_mesh_renderer`, bounds |
+| [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) | Skeletal animation: NSKL/NANM/NSKN assets, pose ABI, tracks, FK, GPU staging, `skinned_mesh_renderer`, bounds; composition and runtime banks partly planned |
 | [ui/nt-ui.md](ui/nt-ui.md) | `nt_ui`: Clay dependency contract, transforms, interaction, widgets, scroll, popups, menus |
 | [ui/radial-widgets.md](ui/radial-widgets.md) | Radial widgets and the custom-attr image path rationale |
 | [ui/rich-text.md](ui/rich-text.md) | Rich text: run-list, solver, decoration, effects, z-layers |
@@ -84,7 +84,7 @@ lifetime, and naming vocabulary.
 | `engine/comp_storage` | [data/component-storage.md](data/component-storage.md) |
 | `engine/transform_comp` | [data/transform.md](data/transform.md) |
 | `engine/drawable_comp`, `engine/mesh_comp`, `engine/material_comp`, `engine/sprite_comp` | [render/render-components.md](render/render-components.md) |
-| `engine/render`, `engine/renderers` | [render/architecture.md](render/architecture.md), [render/items-sorting-batching.md](render/items-sorting-batching.md) |
+| `engine/render`, `engine/renderers` | [render/architecture.md](render/architecture.md), [render/items-sorting-batching.md](render/items-sorting-batching.md); `nt_skinned_mesh_renderer`: [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (§13) |
 | `engine/graphics` | [render/architecture.md](render/architecture.md), [core/module-layout.md](core/module-layout.md) |
 | `engine/sort` | [render/items-sorting-batching.md](render/items-sorting-batching.md) |
 | `engine/material` | [render/material.md](render/material.md), [render/shader.md](render/shader.md) |
@@ -98,7 +98,7 @@ lifetime, and naming vocabulary.
 | `engine/skeletal` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (`nt_skeletal.h` pose ABI/FK/rig identity, skin binding + palette, clip sampling, `nt_skeletal_clip_view`) |
 | `engine/skeletal_assets` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (§15 NSKL/NSKN/NANM activators and views), [assets/resource.md](assets/resource.md) (activator contract) |
 | `engine/skeletal_gpu`, `engine/skin_comp` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (§12 frame staging/upload, `nt_deformation_binding_t`, skin component) |
-| *(`engine/skeletal_bank`, skinned renderer in `engine/renderers` — planned, epic #472)* | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) |
+| *(`engine/skeletal_bank` — planned, epic #472)* | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) |
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |
 | `engine/time` | [runtime/frame-lifecycle.md](runtime/frame-lifecycle.md) |
 | `engine/window`, `engine/platform` | [runtime/platform.md](runtime/platform.md) |

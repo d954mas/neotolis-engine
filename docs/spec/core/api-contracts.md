@@ -199,30 +199,34 @@ a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` 
 assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks
 context loss before asserting readiness.
 
-Texture slots differ by renderer. A sprite material that samples the atlas
-declares its page sampler at slot 0; that slot's resource is never sampled,
-because the renderer substitutes the page texture there per command. A material
-declaring no textures never receives the page and is for shaders that compute
-coverage analytically. Every declared slot the program samples must resolve to a
-texture, in every material-driven renderer. The renderer submits one complete
-name-keyed set per material transition, resolved from the material's declared
-`nt_resource_t` handles at that transition; gfx resolves backend units, validates
-coverage, and publishes only the full valid set. A rejected set discards the
-logical binding state, so a draw cannot reuse the previous material's textures.
-Register a placeholder with `nt_resource_set_placeholder_texture` to survive
-async load races; a sampler override does not exempt a slot, since the override
-only picks filtering for a texture that still has to exist. A text
-material declares no textures at all — the font's curve and band textures are
-the text renderer's own binds, on the units its program gave `u_curve_texture`
-and `u_band_texture`. `nt_text_renderer_flush` asserts that the material declares
-nothing and submits its font set unconditionally; gfx's coverage check confirms
-every sampler the program actually links, so a text program that samples only
-one of the two draws with that one.
+Every material declares a slot for every sampler its program uses. A specialized
+renderer may document that it supplies the runtime resource and sampler for a
+named slot. The declaration still counts toward `NT_MATERIAL_MAX_TEXTURES`, and
+the renderer submits one complete name-keyed set rather than appending a hidden
+binding. `nt_skinned_mesh_renderer` implements this rule for
+`u_skin_matrices`: it ignores that slot's descriptor resource and sampler,
+substitutes the entity's deformation texture with its default sampler, and
+resolves the other declared resources normally. The supplied slot may therefore
+carry an invalid placeholder resource. A declared name the program does not
+sample is ignored before its descriptor handle is inspected.
 
-Every other material declares a slot for every sampler its program uses. A
-renderer applies the complete name-keyed set at every material transition and at
-every command in the sprite renderer. A declared name the program does not
-sample is ignored.
+Every other active declared slot must resolve to a texture. Register a
+placeholder with `nt_resource_set_placeholder_texture` to survive async load
+races; a sampler override does not exempt a normally resolved slot, since the
+override only picks filtering for a texture that still has to exist. At each
+material transition the renderer applies the complete combined set; gfx resolves
+backend units, validates coverage, and publishes only the full valid set. A
+rejected set discards the logical binding state, so a draw cannot reuse the
+previous material's textures.
+
+Sprite and text retain legacy exceptions until #528. A sprite material that
+samples the atlas declares its page sampler at slot 0, but the renderer
+substitutes the page resource per command; a material declaring no textures
+never receives the page and is for analytical coverage. A text material declares
+no textures at all — the font's curve and band textures are the text renderer's
+own binds. `nt_text_renderer_flush` asserts that the material declares nothing
+and submits its font set unconditionally; gfx's coverage check confirms every
+sampler the program actually links.
 
 Pipeline cache keys include the program handle, so replacement selects a
 different entry. Destroying the old program frees its pipelines immediately;

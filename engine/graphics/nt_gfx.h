@@ -331,7 +331,9 @@ typedef struct {
     uint16_t max_meshes;    /* default: 128 */
     /* default: 560 = max_meshes(128) x mesh renderer max_mesh_layouts(4)
      * worst case + 48 for renderer-owned vertex inputs (shape ~14, text,
-     * blur, ~32 sprite custom layouts). Scale it together with max_meshes;
+     * blur, ~32 sprite custom layouts). This budgets one per-mesh renderer
+     * cache. Simultaneous static + skinned rendering adds
+     * max_meshes * skinned.max_mesh_layouts. Scale it with max_meshes and
      * raise it near the sprite custom-layout hardcap (64). */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */

@@ -32,7 +32,7 @@ nt_result_t nt_skinned_mesh_renderer_restore_gpu(void);
 /* The caller owns visibility, sorting and every referenced lifetime. Materials
  * declare u_skin_matrices; this renderer supplies that declared texture and its
  * default sampler from skin_comp. The fast normal path requires positive
- * uniform joint scale. Items may be NULL only when count is zero. */
+ * uniform joint and world scale. Items may be NULL only when count is zero. */
 void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access
