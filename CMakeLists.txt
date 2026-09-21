@@ -222,6 +222,10 @@ if(NOT EMSCRIPTEN)
     # requiring OpenSSL headers for consumers that only need nt_http_stub.
     # A pre-provided CURL::libcurl skips the vendored configure when enabled.
     option(NT_HTTP_CURL "Build the libcurl-backed native nt_http backend" OFF)
+    # libcurl's WebSocket API (ws:// and wss://, RFC 6455 framing over the
+    # same TLS as nt_http) for a consumer that links CURL::libcurl itself;
+    # nt_http exposes none of it, so the default keeps the lib HTTP-only.
+    option(NT_HTTP_WEBSOCKETS "Keep libcurl's WebSocket API in the native build" OFF)
     if(NT_HTTP_CURL AND NOT TARGET CURL::libcurl)
         # block(): BUILD_* and CMAKE_DISABLE_* are generic names a consumer
         # superproject may own, and later add_subdirectory() calls in THIS file
@@ -244,9 +248,22 @@ if(NOT EMSCRIPTEN)
         set(Perl_FOUND FALSE)
         set(PERL_FOUND FALSE)
         set(PERL_EXECUTABLE "")
-        set(HTTP_ONLY ON)
-        # HTTP_ONLY drops non-HTTP protocols only; nt_http exposes none of these
-        # features either — compile them out of the native exe.
+        # curl's HTTP_ONLY drops every non-HTTP protocol and WebSockets with
+        # them; WebSockets ride HTTP, so when they are wanted the list is
+        # spelled out here without them.
+        if(NT_HTTP_WEBSOCKETS)
+            # A superproject's own HTTP_ONLY would be inherited here and
+            # switch WebSockets off again.
+            set(HTTP_ONLY OFF)
+            foreach(_curl_protocol DICT FILE FTP GOPHER IMAP IPFS LDAP LDAPS MQTT POP3 RTSP SMTP TELNET TFTP)
+                set(CURL_DISABLE_${_curl_protocol} ON)
+            endforeach()
+            set(CURL_DISABLE_WEBSOCKETS OFF)
+        else()
+            set(HTTP_ONLY ON)
+        endif()
+        # nt_http exposes none of these features either — compile them out
+        # of the native exe.
         set(CURL_DISABLE_ALTSVC ON)
         set(CURL_DISABLE_HSTS ON)
         set(CURL_DISABLE_DOH ON)
@@ -281,7 +298,19 @@ if(NOT EMSCRIPTEN)
                 nt_set_static_crt(${_curl_target})
             endif()
         endforeach()
+        if(NT_HTTP_WEBSOCKETS)
+            # The property states what curl was configured with, read after
+            # add_subdirectory(<engine>) by a consumer picking its WebSocket
+            # transport; a consumer providing its own CURL::libcurl owns that.
+            get_directory_property(_curl_protocols DIRECTORY deps/curl DEFINITION CURL_SUPPORTED_PROTOCOLS_LIST)
+            if(NOT _curl_protocols STREQUAL "HTTP;HTTPS;WS;WSS")
+                message(FATAL_ERROR "libcurl protocols with NT_HTTP_WEBSOCKETS: ${_curl_protocols}; expected HTTP;HTTPS;WS;WSS")
+            endif()
+            set_property(GLOBAL PROPERTY NT_HTTP_WEBSOCKETS ON)
+        endif()
         endblock()
+    elseif(NT_HTTP_WEBSOCKETS)
+        message(STATUS "NT_HTTP_WEBSOCKETS ignored: the vendored libcurl is not configured here")
     endif()
 
     add_subdirectory(deps/glad EXCLUDE_FROM_ALL)
