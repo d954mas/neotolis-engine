@@ -61,6 +61,12 @@ nt_render_target_depth_t nt_gfx_fake_last_render_target_depth(void);
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
 uint32_t nt_gfx_fake_last_depth_texture_backend(void);
 uint32_t nt_gfx_fake_update_texture_count(void);
+typedef struct {
+    uint16_t x, y, w, h;
+    const void *data; /* the caller's pointer, still readable while its owner keeps the staging alive */
+} nt_gfx_fake_update_texture_rect_t;
+/* Update i since the last reset (history capacity 16; zero past it). */
+nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t index);
 uint32_t nt_gfx_fake_update_buffer_count(void);
 /* nt_hash32 of the bytes the last created VERTEX / INDEX buffer uploaded -- pins that mesh wire
  * decode ran before the upload. Scope is per buffer creation, not per mesh: a mesh that creates no

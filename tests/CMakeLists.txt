@@ -77,6 +77,12 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_skin PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_skin)
 
+    # Frame staging + upload of CPU palettes and the by-value skin component, on the gfx fake.
+    add_executable(test_skeletal_gpu unit/test_skeletal_gpu.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skeletal_gpu PRIVATE nt_skeletal_gpu nt_skin_comp nt_entity nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_log_stub unity)
+    target_include_directories(test_skeletal_gpu PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_skeletal_gpu)
+
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
 
@@ -845,7 +851,7 @@ if(NOT EMSCRIPTEN)
             target_link_libraries(test_devapi_obs PRIVATE
                 nt_devapi_obs nt_devapi_discovery nt_devapi cjson nt_window_stub nt_app_stub
                 nt_log_ring nt_metrics
-                nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_mesh_comp nt_material_comp nt_comp_storage
+                nt_introspect nt_entity nt_transform_comp nt_drawable_comp nt_mesh_comp nt_material_comp nt_skin_comp nt_comp_storage
                 nt_material nt_pool nt_resource nt_math nt_shared
                 nt_gfx_fake nt_basisu_transcoder_stub nt_input_stub nt_http_stub nt_fs_stub
                 nt_core nt_log nt_hash unity

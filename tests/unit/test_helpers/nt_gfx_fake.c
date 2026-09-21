@@ -94,6 +94,7 @@ static float s_fake_uniform_vec4_values[NT_GFX_FAKE_UNIFORM_NAMES][4];
 static uint32_t s_fake_uniform_vec4_count;
 static uint32_t s_fake_bind_pipeline_count;
 static uint32_t s_fake_update_texture_count;
+static nt_gfx_fake_update_texture_rect_t s_fake_update_texture_rects[NT_GFX_FAKE_HISTORY_CAPACITY];
 static uint32_t s_fake_update_buffer_count;
 static uint32_t s_fake_last_vertex_buffer_hash;
 static uint32_t s_fake_last_index_buffer_hash;
@@ -162,6 +163,10 @@ void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]) {
     }
 }
 uint32_t nt_gfx_fake_update_texture_count(void) { return s_fake_update_texture_count; }
+nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t index) {
+    bool valid = index < s_fake_update_texture_count && index < NT_GFX_FAKE_HISTORY_CAPACITY;
+    return valid ? s_fake_update_texture_rects[index] : (nt_gfx_fake_update_texture_rect_t){0};
+}
 uint32_t nt_gfx_fake_update_buffer_count(void) { return s_fake_update_buffer_count; }
 uint32_t nt_gfx_fake_last_vertex_buffer_hash(void) { return s_fake_last_vertex_buffer_hash; }
 uint32_t nt_gfx_fake_last_index_buffer_hash(void) { return s_fake_last_index_buffer_hash; }
@@ -573,12 +578,11 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
 }
 
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
+    if (s_fake_update_texture_count < NT_GFX_FAKE_HISTORY_CAPACITY) {
+        s_fake_update_texture_rects[s_fake_update_texture_count] = (nt_gfx_fake_update_texture_rect_t){.x = x, .y = y, .w = w, .h = h, .data = data};
+    }
     s_fake_update_texture_count++;
     (void)backend_handle;
-    (void)x;
-    (void)y;
-    (void)w;
-    (void)h;
     (void)format;
     (void)data;
 }
