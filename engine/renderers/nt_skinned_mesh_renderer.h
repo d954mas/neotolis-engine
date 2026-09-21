@@ -22,6 +22,7 @@ static inline nt_skinned_mesh_renderer_desc_t nt_skinned_mesh_renderer_desc_defa
     };
 }
 
+/* desc is required, non-NULL and borrowed for the duration of the call. */
 nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t *desc);
 void nt_skinned_mesh_renderer_shutdown(void);
 

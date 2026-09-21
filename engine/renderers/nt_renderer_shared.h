@@ -187,6 +187,21 @@ static inline nt_vertex_layout_t nt_renderer_build_mesh_vertex_layout(const nt_m
     return layout;
 }
 
+/* Generic attribute defaults disappear from the active NONE layout, but their
+ * locations remain renderer-owned across every color-mode variant. */
+static inline bool nt_renderer_mesh_layout_avoids_instance_variants(const nt_vertex_layout_t *layout, const nt_vertex_layout_t *instance_layouts) {
+    for (uint8_t vi = 0; vi < layout->attr_count; vi++) {
+        for (uint32_t mode = NT_COLOR_MODE_NONE; mode <= NT_COLOR_MODE_FLOAT4; mode++) {
+            for (uint8_t ii = 0; ii < instance_layouts[mode].attr_count; ii++) {
+                if (layout->attrs[vi].location == instance_layouts[mode].attrs[ii].location) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_renderer_mesh_vi_cache_t *cache, nt_material_t mat, nt_mesh_t mesh, const nt_material_info_t *mat_info,
                                                                          const nt_gfx_mesh_info_t *mesh_info, const nt_vertex_layout_t *instance_layouts, const char *label) {
@@ -210,6 +225,7 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
 
     uint64_t key = 0;
     const nt_vertex_layout_t layout = nt_renderer_build_mesh_vertex_layout(mat_info, mesh_info, &key);
+    NT_ASSERT(nt_renderer_mesh_layout_avoids_instance_variants(&layout, instance_layouts) && "mesh attribute uses a renderer-owned instance location");
     nt_renderer_mesh_vi_version_t *reusable = NULL;
     for (uint16_t i = 0; i < cache->max_layouts; i++) {
         nt_renderer_mesh_vi_version_t *entry = &row[i];

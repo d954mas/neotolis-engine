@@ -33,9 +33,11 @@ static struct {
      * built, i.e. when something became drawable again. */
     bool warned_program_not_ready;
 
+#ifdef NT_TEST_ACCESS
     /* Per-frame tracking for test accessors */
     uint32_t frame_draw_calls;
     uint32_t frame_instance_total;
+#endif
 
     bool initialized;
 } s_mesh_renderer;
@@ -181,8 +183,10 @@ static void destroy_gpu_resources(void) {
     s_mesh_renderer.count = 0;
     nt_renderer_mesh_vi_cache_reset(&s_mesh_renderer.vi_cache);
     s_mesh_renderer.ring_cursor = 0;
+#ifdef NT_TEST_ACCESS
     s_mesh_renderer.frame_draw_calls = 0;
     s_mesh_renderer.frame_instance_total = 0;
+#endif
     s_mesh_renderer.warned_program_not_ready = false;
 }
 
@@ -272,9 +276,11 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(items != NULL);
     NT_ASSERT(s_mesh_renderer.instance_buf.id != 0 && "retry failed GPU restore before drawing");
 
+#ifdef NT_TEST_ACCESS
     /* Reset per-frame tracking */
     s_mesh_renderer.frame_draw_calls = 0;
     s_mesh_renderer.frame_instance_total = 0;
+#endif
 
     /* Restore generic attribute 7 to white once per draw_list call.
      * NONE mode shaders read this as identity color. Protects against
@@ -413,8 +419,10 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 nt_gfx_draw_instanced(0, mesh_info->vertex_count, instance_count);
             }
 
+#ifdef NT_TEST_ACCESS
             s_mesh_renderer.frame_draw_calls++;
             s_mesh_renderer.frame_instance_total += instance_count;
+#endif
 
             draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
             run_start = run_end;
@@ -424,7 +432,8 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     }
 }
 
-/* ---- Test accessors (always compiled; header guard controls visibility) ---- */
+#ifdef NT_TEST_ACCESS
+/* ---- Test accessors ---- */
 
 uint32_t nt_mesh_renderer_test_pipeline_cache_count(void) { return s_mesh_renderer.count; }
 
@@ -437,3 +446,4 @@ uint32_t nt_mesh_renderer_test_instance_total(void) { return s_mesh_renderer.fra
 uint32_t nt_mesh_renderer_test_ring_cursor(void) { return s_mesh_renderer.ring_cursor; }
 
 bool nt_mesh_renderer_test_initialized(void) { return s_mesh_renderer.initialized; }
+#endif

@@ -31,8 +31,10 @@ static struct {
     uint32_t ring_cursor;
     uint32_t skin_sampler_hash;
     bool warned_program_not_ready;
+#ifdef NT_TEST_ACCESS
     uint32_t frame_draw_calls;
     uint32_t frame_instance_total;
+#endif
     bool initialized;
 } s_skinned;
 
@@ -194,8 +196,10 @@ static void destroy_gpu_resources(void) {
     s_skinned.pipeline_count = 0;
     nt_renderer_mesh_vi_cache_reset(&s_skinned.vi_cache);
     s_skinned.ring_cursor = 0;
+#ifdef NT_TEST_ACCESS
     s_skinned.frame_draw_calls = 0;
     s_skinned.frame_instance_total = 0;
+#endif
     s_skinned.warned_program_not_ready = false;
 }
 
@@ -268,8 +272,10 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
     }
     NT_ASSERT(items != NULL);
     NT_ASSERT(s_skinned.instance_buf.id != 0 && "retry failed GPU restore before drawing");
+#ifdef NT_TEST_ACCESS
     s_skinned.frame_draw_calls = 0;
     s_skinned.frame_instance_total = 0;
+#endif
     nt_gfx_set_vertex_attrib_default(13, 1.0F, 1.0F, 1.0F, 1.0F);
 
     uint32_t chunk_start = 0;
@@ -386,8 +392,10 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             } else {
                 nt_gfx_draw_instanced(0, mesh->vertex_count, instance_count);
             }
+#ifdef NT_TEST_ACCESS
             s_skinned.frame_draw_calls++;
             s_skinned.frame_instance_total += instance_count;
+#endif
             draw_offset += instance_count * stride;
             run_start = run_end;
         }
@@ -395,9 +403,11 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
     }
 }
 
+#ifdef NT_TEST_ACCESS
 uint32_t nt_skinned_mesh_renderer_test_pipeline_cache_count(void) { return s_skinned.pipeline_count; }
 uint32_t nt_skinned_mesh_renderer_test_vertex_input_count(void) { return nt_renderer_mesh_vi_cache_live_count(&s_skinned.vi_cache); }
 uint32_t nt_skinned_mesh_renderer_test_draw_call_count(void) { return s_skinned.frame_draw_calls; }
 uint32_t nt_skinned_mesh_renderer_test_instance_total(void) { return s_skinned.frame_instance_total; }
 uint32_t nt_skinned_mesh_renderer_test_ring_cursor(void) { return s_skinned.ring_cursor; }
 bool nt_skinned_mesh_renderer_test_initialized(void) { return s_skinned.initialized; }
+#endif

@@ -33,6 +33,7 @@ typedef struct {
 
 static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_instances = 4096, .max_pipelines = 64, .max_mesh_layouts = 4}; }
 
+/* desc is required, non-NULL and borrowed for the duration of the call. */
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
 /* Retains CPU storage and initialization; drops GPU caches and recreates buffers.
