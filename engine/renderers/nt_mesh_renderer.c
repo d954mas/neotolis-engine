@@ -16,22 +16,12 @@
 
 /* ---- Module state ---- */
 
-typedef struct {
-    uint64_t key;
-    nt_vertex_input_t vi;
-    uint32_t last_mat; /* most recently resolved material for this VI version */
-} nt_mesh_vi_version_t;
-
 static struct {
     nt_renderer_pipeline_entry_t *entries; /* [max_pipelines] */
     uint16_t max_pipelines;
     uint16_t count;
 
-    nt_mesh_vi_version_t *vi_versions; /* [nt_gfx_max_meshes()][max_mesh_layouts] */
-    /* Row ownership includes the mesh generation. */
-    nt_mesh_t *vi_meshes;
-    uint16_t max_mesh_layouts;
-    uint16_t vi_mesh_capacity; /* nt_gfx_max_meshes() at init time */
+    nt_renderer_mesh_vi_cache_t vi_cache;
 
     nt_buffer_t instance_buf; /* dynamic vertex buffer for instance data */
 
@@ -136,25 +126,7 @@ static void pack_rgba8(uint8_t *dst, const float color[4]) {
 /* Pack stream types and gfx vertex types are distinct enums on purpose: the
  * pack's on-disk format must not leak into the gfx API. Total mapping --
  * count and normalized pass through the attribute unchanged. */
-nt_vertex_type_t nt_stream_to_vertex_type(uint8_t type) {
-    switch (type) {
-    case NT_STREAM_UINT8:
-        return NT_VERTEX_UINT8;
-    case NT_STREAM_INT8:
-        return NT_VERTEX_INT8;
-    case NT_STREAM_UINT16:
-        return NT_VERTEX_UINT16;
-    case NT_STREAM_INT16:
-        return NT_VERTEX_INT16;
-    case NT_STREAM_FLOAT16:
-        return NT_VERTEX_HALF;
-    case NT_STREAM_FLOAT32:
-        return NT_VERTEX_FLOAT;
-    default:
-        NT_LOG_ERROR("unmapped stream type in vertex layout");
-        return NT_VERTEX_FLOAT;
-    }
-}
+nt_vertex_type_t nt_stream_to_vertex_type(uint8_t type) { return nt_renderer_stream_to_vertex_type(type); }
 
 /* ---- Pipeline cache lookup/create ---- */
 
@@ -183,118 +155,6 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     return nt_renderer_pipeline_cache_insert(s_mesh_renderer.entries, &s_mesh_renderer.count, s_mesh_renderer.max_pipelines, &key, &desc, &s_mesh_renderer.warned_program_not_ready);
 }
 
-/* ---- Vertex-input versions (Godot-style, one row per mesh pool slot) ---- */
-
-/* Derived layout = mesh streams x material attr_map: only mapped streams
- * become attributes, so materials whose extra attr_map entries match none of
- * this mesh's streams share a vertex input. */
-/* Row-exact key: the mesh fixes stream types/offsets/stride, so only presence +
- * location per stream (5 bits) and color_mode (2 bits) vary. */
-#define NT_MESH_VI_KEY_STREAM_BITS 5
-_Static_assert(NT_GFX_MAX_VERTEX_ATTRS <= 16, "mesh VI key packs a location in 4 bits");
-_Static_assert(NT_MESH_MAX_STREAMS *NT_MESH_VI_KEY_STREAM_BITS + 2 <= 64, "mesh VI key overflows uint64");
-_Static_assert(NT_COLOR_MODE_FLOAT4 < 4, "mesh VI key packs color_mode in 2 bits");
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-static nt_vertex_layout_t build_mesh_vertex_layout(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info, uint64_t *out_key) {
-    nt_vertex_layout_t layout;
-    memset(&layout, 0, sizeof(layout));
-    layout.stride = mesh_info->stride;
-    uint64_t key = (uint64_t)mat_info->color_mode << (NT_MESH_MAX_STREAMS * NT_MESH_VI_KEY_STREAM_BITS);
-
-    uint16_t offset = 0;
-    for (uint8_t si = 0; si < mesh_info->stream_count; si++) {
-        const NtStreamDesc *stream = &mesh_info->streams[si];
-
-        /* Find location in material attr_map */
-        uint8_t location = 0;
-        bool found = false;
-        for (uint8_t ai = 0; ai < mat_info->attr_map_count; ai++) {
-            if (mat_info->attr_map_hashes[ai] == stream->name_hash) {
-                location = mat_info->attr_map_locations[ai];
-                found = true;
-                break;
-            }
-        }
-
-        if (found) {
-            NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS);
-            key |= (1ULL | (uint64_t)location << 1) << (si * NT_MESH_VI_KEY_STREAM_BITS);
-            layout.attrs[layout.attr_count].location = location;
-            layout.attrs[layout.attr_count].type = nt_stream_to_vertex_type(stream->type);
-            layout.attrs[layout.attr_count].count = stream->count;
-            layout.attrs[layout.attr_count].normalized = stream->normalized != 0;
-            layout.attrs[layout.attr_count].offset = offset;
-            layout.attr_count++;
-        }
-
-        offset += (uint16_t)(nt_stream_type_size(stream->type) * stream->count);
-    }
-    *out_key = key;
-    return layout;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-static nt_vertex_input_t find_or_create_vertex_input(nt_material_t mat, nt_mesh_t mesh, const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
-    const uint32_t slot = nt_pool_slot_index(mesh.id);
-    NT_ASSERT(slot != 0 && slot <= s_mesh_renderer.vi_mesh_capacity);
-    nt_mesh_vi_version_t *row = &s_mesh_renderer.vi_versions[(size_t)(slot - 1) * s_mesh_renderer.max_mesh_layouts];
-    if (s_mesh_renderer.vi_meshes[slot - 1].id != mesh.id) {
-        /* Bufferless vertex inputs have no buffer-destroy cascade hook. */
-        for (uint16_t i = 0; i < s_mesh_renderer.max_mesh_layouts; i++) {
-            nt_gfx_destroy_vertex_input(row[i].vi);
-            row[i] = (nt_mesh_vi_version_t){0};
-        }
-        s_mesh_renderer.vi_meshes[slot - 1] = mesh;
-    }
-    /* Memo fast path: the generational mat.id pins attr_map + color_mode, so a
-     * hit needs no layout rebuild or hash. Misses (first sight, entry stolen by
-     * a same-key sharing material, cascade-killed vi) fall through. */
-    for (uint16_t i = 0; i < s_mesh_renderer.max_mesh_layouts; i++) {
-        if (row[i].last_mat == mat.id && nt_gfx_vertex_input_valid(row[i].vi)) {
-            return row[i].vi;
-        }
-    }
-
-    uint64_t key = 0;
-    const nt_vertex_layout_t layout = build_mesh_vertex_layout(mat_info, mesh_info, &key);
-
-    nt_mesh_vi_version_t *reusable = NULL;
-    for (uint16_t i = 0; i < s_mesh_renderer.max_mesh_layouts; i++) {
-        nt_mesh_vi_version_t *e = &row[i];
-        const bool live = nt_gfx_vertex_input_valid(e->vi);
-        if (e->key == key && live) {
-            e->last_mat = mat.id;
-            return e->vi;
-        }
-        if (reusable == NULL && !live) {
-            reusable = e;
-        }
-    }
-    /* Crash early instead of hiding VAO churn behind version eviction. */
-    NT_ASSERT(reusable != NULL && "mesh vertex-input versions exhausted -- raise nt_mesh_renderer_desc_t.max_mesh_layouts");
-    if (reusable == NULL) {
-        return NT_VERTEX_INPUT_INVALID;
-    }
-
-    const nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
-        .layout = layout,
-        .instance_layout = s_instance_layouts[mat_info->color_mode],
-        /* A material mapping none of this mesh's streams derives an empty
-         * layout -- the attribute-less gl_VertexID path takes no buffer. */
-        .vertex_buffer = (layout.attr_count > 0) ? mesh_info->vbo : (nt_buffer_t){0},
-        .index_buffer = mesh_info->ibo,
-        .label = "mesh_vi",
-    });
-    if (vi.id == 0) {
-        return vi; /* lost context / backend failure: caller skips the run */
-    }
-    reusable->key = key;
-    reusable->vi = vi;
-    reusable->last_mat = mat.id;
-    return vi;
-}
-
 /* ---- Lifecycle ---- */
 
 static nt_result_t create_gpu_resources(void) {
@@ -319,11 +179,7 @@ static void destroy_gpu_resources(void) {
         nt_gfx_destroy_pipeline(s_mesh_renderer.entries[i].pipeline);
     }
     s_mesh_renderer.count = 0;
-    for (size_t i = 0; i < (size_t)s_mesh_renderer.vi_mesh_capacity * s_mesh_renderer.max_mesh_layouts; i++) {
-        nt_gfx_destroy_vertex_input(s_mesh_renderer.vi_versions[i].vi);
-        s_mesh_renderer.vi_versions[i] = (nt_mesh_vi_version_t){0};
-    }
-    memset(s_mesh_renderer.vi_meshes, 0, (size_t)s_mesh_renderer.vi_mesh_capacity * sizeof(nt_mesh_t));
+    nt_renderer_mesh_vi_cache_reset(&s_mesh_renderer.vi_cache);
     s_mesh_renderer.ring_cursor = 0;
     s_mesh_renderer.frame_draw_calls = 0;
     s_mesh_renderer.frame_instance_total = 0;
@@ -342,12 +198,6 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
 
     s_mesh_renderer.max_instances = desc->max_instances;
     s_mesh_renderer.max_pipelines = desc->max_pipelines;
-    s_mesh_renderer.max_mesh_layouts = desc->max_mesh_layouts;
-    /* The capacity lives only in nt_gfx_desc_t; hardcoding it here would write
-     * out of bounds on bigger gfx configs. */
-    s_mesh_renderer.vi_mesh_capacity = nt_gfx_max_meshes();
-    NT_ASSERT(s_mesh_renderer.vi_mesh_capacity > 0 && "nt_mesh_renderer_init: nt_gfx_init must run first");
-
     /* Allocate pipeline cache */
     s_mesh_renderer.entries = (nt_renderer_pipeline_entry_t *)calloc(desc->max_pipelines, sizeof(nt_renderer_pipeline_entry_t));
     if (!s_mesh_renderer.entries) {
@@ -355,27 +205,16 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
-    /* Vertex-input versions table: one row per mesh pool slot */
-    s_mesh_renderer.vi_versions = (nt_mesh_vi_version_t *)calloc((size_t)s_mesh_renderer.vi_mesh_capacity * desc->max_mesh_layouts, sizeof(nt_mesh_vi_version_t));
-    s_mesh_renderer.vi_meshes = (nt_mesh_t *)calloc(s_mesh_renderer.vi_mesh_capacity, sizeof(nt_mesh_t));
-    if (!s_mesh_renderer.vi_versions || !s_mesh_renderer.vi_meshes) {
-        free(s_mesh_renderer.vi_meshes);
-        s_mesh_renderer.vi_meshes = NULL;
-        free(s_mesh_renderer.vi_versions);
-        s_mesh_renderer.vi_versions = NULL;
+    if (nt_renderer_mesh_vi_cache_init(&s_mesh_renderer.vi_cache, desc->max_mesh_layouts) != NT_OK) {
         free(s_mesh_renderer.entries);
         s_mesh_renderer.entries = NULL;
-        NT_LOG_ERROR("failed to allocate vertex-input versions");
         return NT_ERR_INIT_FAILED;
     }
 
     /* Allocate CPU staging byte buffer (worst-case stride) */
     s_mesh_renderer.instance_data = (uint8_t *)calloc(desc->max_instances, NT_INSTANCE_STRIDE_MAX);
     if (!s_mesh_renderer.instance_data) {
-        free(s_mesh_renderer.vi_meshes);
-        s_mesh_renderer.vi_meshes = NULL;
-        free(s_mesh_renderer.vi_versions);
-        s_mesh_renderer.vi_versions = NULL;
+        nt_renderer_mesh_vi_cache_shutdown(&s_mesh_renderer.vi_cache);
         free(s_mesh_renderer.entries);
         s_mesh_renderer.entries = NULL;
         NT_LOG_ERROR("failed to allocate instance data");
@@ -385,10 +224,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     if (create_gpu_resources() != NT_OK) {
         free(s_mesh_renderer.instance_data);
         s_mesh_renderer.instance_data = NULL;
-        free(s_mesh_renderer.vi_meshes);
-        s_mesh_renderer.vi_meshes = NULL;
-        free(s_mesh_renderer.vi_versions);
-        s_mesh_renderer.vi_versions = NULL;
+        nt_renderer_mesh_vi_cache_shutdown(&s_mesh_renderer.vi_cache);
         free(s_mesh_renderer.entries);
         s_mesh_renderer.entries = NULL;
         NT_LOG_ERROR("failed to create instance buffer");
@@ -405,8 +241,7 @@ void nt_mesh_renderer_shutdown(void) {
     }
 
     destroy_gpu_resources();
-    free(s_mesh_renderer.vi_versions);
-    free(s_mesh_renderer.vi_meshes);
+    nt_renderer_mesh_vi_cache_shutdown(&s_mesh_renderer.vi_cache);
 
     /* Free pipeline cache */
     free(s_mesh_renderer.entries);
@@ -548,7 +383,8 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             }
             /* VI identity is (mesh row, material-derived layout), so a mesh change re-resolves too. */
             if (mat_changed || mesh_changed) {
-                vi = (pip.id != 0) ? find_or_create_vertex_input(run_mat, run_mesh, mat_info, mesh_info) : NT_VERTEX_INPUT_INVALID;
+                vi = (pip.id != 0) ? nt_renderer_mesh_vi_cache_find_or_create(&s_mesh_renderer.vi_cache, run_mat, run_mesh, mat_info, mesh_info, s_instance_layouts, "mesh_vi")
+                                   : NT_VERTEX_INPUT_INVALID;
             }
             if (pip.id == 0 || vi.id == 0) {
                 draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
@@ -592,15 +428,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
 
 uint32_t nt_mesh_renderer_test_pipeline_cache_count(void) { return s_mesh_renderer.count; }
 
-uint32_t nt_mesh_renderer_test_vertex_input_count(void) {
-    uint32_t live = 0;
-    for (size_t i = 0; i < (size_t)s_mesh_renderer.vi_mesh_capacity * s_mesh_renderer.max_mesh_layouts; i++) {
-        if (nt_gfx_vertex_input_valid(s_mesh_renderer.vi_versions[i].vi)) {
-            live++;
-        }
-    }
-    return live;
-}
+uint32_t nt_mesh_renderer_test_vertex_input_count(void) { return nt_renderer_mesh_vi_cache_live_count(&s_mesh_renderer.vi_cache); }
 
 uint32_t nt_mesh_renderer_test_draw_call_count(void) { return s_mesh_renderer.frame_draw_calls; }
 
