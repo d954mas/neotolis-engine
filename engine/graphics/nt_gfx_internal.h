@@ -35,9 +35,22 @@ static inline void nt_gfx_observe_count(uint32_t *counter) {
 }
 #define NT_GFX_COUNT(field) nt_gfx_observe_count(&g_nt_gfx_observation.working.field)
 #define NT_GFX_GEOMETRY_COUNT(value) ((uint64_t)(value))
+static inline void nt_gfx_observe_upload(bool texture, const void *data, uint64_t size) {
+    if (!g_nt_gfx_observation.stats_enabled || data == NULL) {
+        return;
+    }
+    nt_gfx_upload_totals_t *totals = &g_nt_gfx_observation.uploads;
+    uint64_t *calls = texture ? &totals->texture_calls : &totals->buffer_calls;
+    uint64_t *bytes = texture ? &totals->texture_bytes : &totals->buffer_bytes;
+    NT_ASSERT(*calls != UINT64_MAX && size <= UINT64_MAX - *bytes);
+    (*calls)++;
+    *bytes += size;
+}
+#define NT_GFX_COUNT_UPLOAD(texture, data, size) nt_gfx_observe_upload(texture, data, size)
 #else
 #define NT_GFX_COUNT(field) ((void)0)
 #define NT_GFX_GEOMETRY_COUNT(value) (value)
+#define NT_GFX_COUNT_UPLOAD(texture, data, size) ((void)0)
 #endif
 // #endregion
 

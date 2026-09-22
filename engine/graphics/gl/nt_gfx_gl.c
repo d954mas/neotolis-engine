@@ -299,6 +299,7 @@ static void gl_bind_vao(GLuint vao) {
     s_test_vao_binds++;
 #endif
     glBindVertexArray(vao);
+    NT_GFX_COUNT(vao_calls);
 }
 
 /* The service VAO prevents EBO data operations from rewriting a draw VAO.
@@ -324,6 +325,7 @@ static void gl_set_viewport(int x, int y, int w, int h) {
 static void nt_gfx_gl_cache_ground_state(void) {
     gl_bind_vao(0);
     glUseProgram(0);
+    NT_GFX_COUNT(program_calls);
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LESS);
@@ -338,6 +340,7 @@ static void nt_gfx_gl_cache_ground_state(void) {
     glActiveTexture(GL_TEXTURE0);
     for (uint32_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
         glBindSampler(unit, 0);
+        NT_GFX_COUNT(sampler_calls);
     }
     /* A zero-size viewport is legal GL and never equals a real pass, so the first
      * pass after grounding always re-issues. */
@@ -908,6 +911,7 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     GLuint program = s_programs[pip->program_slot].program;
     if (s_gl_cache.program != program) {
         glUseProgram(program);
+        NT_GFX_COUNT(program_calls);
         s_gl_cache.program = program;
     }
 
@@ -989,6 +993,7 @@ void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_has
     int index = program_get_uniform_index(program_backend, name_hash);
     if (index >= 0) {
         glUniformMatrix4fv(s_programs[program_backend].uniforms[index].location, 1, GL_FALSE, matrix);
+        NT_GFX_COUNT(uniform_calls);
     }
 }
 
@@ -1003,6 +1008,7 @@ void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_has
         return;
     }
     glUniform4fv(prog->uniforms[index].location, 1, vec);
+    NT_GFX_COUNT(uniform_calls);
     // Preserve uncached GL handling for other uniform types.
     if ((prog->vec4_mask & bit) != 0) {
         memcpy(prog->vec4_values[index], vec, sizeof(prog->vec4_values[index]));
@@ -1014,6 +1020,7 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
     int index = program_get_uniform_index(program_backend, name_hash);
     if (index >= 0) {
         glUniform1f(s_programs[program_backend].uniforms[index].location, val);
+        NT_GFX_COUNT(uniform_calls);
     }
 }
 
@@ -1024,6 +1031,7 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
     NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
     if (index >= 0) {
         glUniform1i(s_programs[program_backend].uniforms[index].location, val);
+        NT_GFX_COUNT(uniform_calls);
     }
 }
 
@@ -1300,10 +1308,13 @@ static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) 
     }
     const GLuint saved = s_gl_cache.program;
     glUseProgram(program);
+    NT_GFX_COUNT(program_calls);
     for (uint8_t i = 0; i < rec->sampler_count; i++) {
         glUniform1i(rec->sampler_units[i].location, (GLint)i);
+        NT_GFX_COUNT(uniform_calls);
     }
     glUseProgram(saved);
+    NT_GFX_COUNT(program_calls);
 }
 
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
@@ -1345,6 +1356,7 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
     /* GL defers deletion while a program remains current. */
     if (s_gl_cache.program == program) {
         glUseProgram(0);
+        NT_GFX_COUNT(program_calls);
         s_gl_cache.program = 0;
     }
     glDeleteProgram(program);
@@ -1411,6 +1423,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
             glEnableVertexAttribArray(attr->location);
             glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)desc->layout.stride,
                                   (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
+            NT_GFX_COUNT(static_attribute_calls);
 #ifdef NT_TEST_ACCESS
             s_test_static_attrib_pointer_calls++;
 #endif
@@ -1494,6 +1507,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     }
     glBindBuffer(target, buf);
     glBufferData(target, (GLsizeiptr)desc->size, desc->data, usage);
+    NT_GFX_COUNT_UPLOAD(false, desc->data, desc->size);
     if (unhook_vao) {
         ebo_upload_end();
     }
@@ -1541,6 +1555,7 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     }
     glBindBuffer(target, buf);
     glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, data);
+    NT_GFX_COUNT_UPLOAD(false, data, size);
     if (unhook_vao) {
         ebo_upload_end();
     }
@@ -1563,6 +1578,7 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
      * avoiding the pipeline stall that glBufferSubData can introduce when
      * rewriting a buffer that's still in flight. */
     glBufferData(target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
+    NT_GFX_COUNT_UPLOAD(false, data, size);
     if (unhook_vao) {
         ebo_upload_end();
     }
@@ -1582,6 +1598,7 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
         const nt_vertex_attr_t *attr = &vi->instance_attrs[i];
         glVertexAttribPointer(attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)vi->instance_stride,
                               (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
+        NT_GFX_COUNT(instance_attribute_calls);
 #ifdef NT_TEST_ACCESS
         s_test_instance_attrib_pointer_calls++;
 #endif
@@ -1596,6 +1613,7 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) 
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
     GLuint buf = s_buffer_gl[backend_handle];
     glBindBufferBase(GL_UNIFORM_BUFFER, slot, buf);
+    NT_GFX_COUNT(ubo_calls);
 }
 
 void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
@@ -1691,6 +1709,7 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
         s_gl_cache.active_texture_unit = NT_GFX_GL_UPLOAD_TEXTURE_UNIT;
     }
     glBindTexture(GL_TEXTURE_2D, tex);
+    NT_GFX_COUNT(texture_calls);
 }
 
 /* For upload paths that check glGetError afterwards — a stale error would be
@@ -1741,6 +1760,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
         } else {
             glTexImage2D(GL_TEXTURE_2D, (GLint)level, (GLint)gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, gl.format, gl.type, level_data);
         }
+        NT_GFX_COUNT_UPLOAD(true, level_data, level_bytes);
         if (level_data != NULL) {
             level_data += level_bytes;
         }
@@ -1810,6 +1830,7 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
     }
 
     glTexSubImage2D(GL_TEXTURE_2D, 0, (GLint)x, (GLint)y, (GLsizei)w, (GLsizei)h, gl.format, gl.type, data);
+    NT_GFX_COUNT_UPLOAD(true, data, nt_texture_level_bytes(format, w, h));
 
     if (!gl.align4) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -2085,6 +2106,7 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
         s_gl_cache.active_texture_unit = unit;
     }
     glBindTexture(GL_TEXTURE_2D, tex);
+    NT_GFX_COUNT(texture_calls);
     s_gl_cache.bound_textures[slot] = tex;
 }
 
@@ -2134,6 +2156,7 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     s_test_sampler_binds++;
 #endif
     glBindSampler(slot, sampler);
+    NT_GFX_COUNT(sampler_calls);
     s_gl_cache.bound_samplers[slot] = sampler;
 }
 

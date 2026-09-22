@@ -1766,6 +1766,8 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         if ((applied_mask & (uint8_t)(1U << unit)) == 0) {
             continue;
         }
+        NT_GFX_COUNT(texture_requests);
+        NT_GFX_COUNT(sampler_requests);
         nt_gfx_backend_bind_texture(texture_backends[unit], unit);
         nt_gfx_backend_bind_sampler(sampler_backends[unit], unit);
     }
@@ -1972,6 +1974,7 @@ void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix) {
         return;
     }
     NT_ASSERT(matrix != NULL);
+    NT_GFX_COUNT(uniform_requests);
     nt_gfx_backend_set_uniform_mat4(uniform_target_program(), name.value, matrix);
 }
 
@@ -1980,6 +1983,7 @@ void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec) {
         return;
     }
     NT_ASSERT(vec != NULL);
+    NT_GFX_COUNT(uniform_requests);
     nt_gfx_backend_set_uniform_vec4(uniform_target_program(), name.value, vec);
 }
 
@@ -1987,6 +1991,7 @@ void nt_gfx_set_uniform_float(nt_hash32_t name, float val) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_GFX_COUNT(uniform_requests);
     nt_gfx_backend_set_uniform_float(uniform_target_program(), name.value, val);
 }
 
@@ -1994,6 +1999,7 @@ void nt_gfx_set_uniform_int(nt_hash32_t name, int val) {
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_GFX_COUNT(uniform_requests);
     nt_gfx_backend_set_uniform_int(uniform_target_program(), name.value, val);
 }
 
@@ -2215,6 +2221,7 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         NT_LOG_ERROR_ONCE("bind_uniform_buffer: buffer has no live backend");
         return;
     }
+    NT_GFX_COUNT(ubo_requests);
     nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
 }
 

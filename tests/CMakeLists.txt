@@ -355,6 +355,11 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_gfx_bind_mirrors_native)
     set_tests_properties(test_nt_gfx_bind_mirrors_native PROPERTIES LABELS "native")
 
+    add_executable(test_nt_gfx_observe_native unit/test_nt_gfx_observe_native.c)
+    target_link_libraries(test_nt_gfx_observe_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    nt_setup_test_target(test_nt_gfx_observe_native)
+    set_tests_properties(test_nt_gfx_observe_native PROPERTIES LABELS "native")
+
     add_executable(test_nt_gfx_render_target_native unit/test_nt_gfx_render_target_native.c unit/test_helpers/nt_assert_trap.c)
     target_include_directories(test_nt_gfx_render_target_native PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
     target_link_libraries(test_nt_gfx_render_target_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
