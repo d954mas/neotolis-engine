@@ -6,8 +6,9 @@ Khronos rigs through `nt_skeletal_fk`, and `Playback` plays the imported glTF
 clips of those rigs on one caller-owned track through `nt_skeletal_sample`.
 The packs carry the skeleton, skin binding, skinned mesh and clips of both
 rigs, but the stage draws bone primitives only, with the existing shape
-renderer: the GPU skinning renderer is a later issue, and there is no IK,
-mixer or animation library.
+renderer. The GPU skinning renderer is implemented; its showcase integration
+is planned in [#524](https://github.com/d954mas/neotolis-engine/issues/524).
+There is no IK, mixer or animation library.
 
 Build and run the native example with:
 

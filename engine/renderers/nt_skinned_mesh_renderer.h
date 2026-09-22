@@ -30,12 +30,11 @@ void nt_skinned_mesh_renderer_shutdown(void);
  * instance buffer. Failure must be retried before drawing. */
 nt_result_t nt_skinned_mesh_renderer_restore_gpu(void);
 
-/* The caller owns visibility, sorting and every referenced lifetime. For
- * common/skin.glsl, the mesh supplies joints/weights and the material attr_map
- * maps them to its declared locations. Materials declare u_skin_matrices; this
- * renderer supplies that declared texture and its default sampler from skin_comp.
- * The fast normal path requires positive uniform joint and world scale. Items may
- * be NULL only when count is zero. */
+/* Caller controls visibility/sorting; items and referenced bindings stay live
+ * and unchanged until return. items may be NULL only when count is zero. */
+/* common/skin.glsl requires joints/weights mapped by material attr_map and
+ * positive uniform joint/world scale. Declare u_skin_matrices in the material;
+ * the renderer supplies its texture and default sampler from skin_comp. */
 void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access

@@ -50,8 +50,7 @@ typedef struct {
     uint32_t clip_count;
 } character_desc_t;
 
-/* Both palettes fit in a byte, so the joint lanes are UINT8. No TEXCOORD:
- * nothing draws the mesh yet; the skinned renderer is a later issue. */
+/* Joint indices fit UINT8; TEXCOORD is omitted because the showcase only draws bones. */
 static uint32_t skinned_layout(NtStreamLayout out[4], bool has_normal) {
     uint32_t n = 0;
     out[n++] = (NtStreamLayout){"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0};

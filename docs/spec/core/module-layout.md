@@ -139,11 +139,12 @@ layer.
 
 `engine/renderers/nt_skinned_mesh_renderer` is another fixed optional module.
 It consumes the existing render components plus `skin_comp`; it does not sample
-animation or select a graphics implementation. Its public static-link chain is
-`nt_skinned_mesh_renderer → nt_skin_comp → nt_skeletal_gpu → nt_skeletal`,
-because each layer exposes the next layer's by-value type. Static archive
-linking can still discard unused CPU kernel objects. The composition-symbol
-checks that prove the intended variants without LTO remain #488 scope.
+animation or select a graphics implementation. Its current `PUBLIC` CMake
+dependencies include the chain
+`nt_skinned_mesh_renderer → nt_skin_comp → nt_skeletal_gpu → nt_skeletal`.
+Static archive linking can still discard unused CPU kernel objects. The
+composition-symbol checks that prove the intended variants without LTO remain
+#488 scope.
 
 `nt_postfx_blur` is a gaussian blur helper, not a post-processing graph. It
 borrows ready source, temp, and destination handles for each call; their
