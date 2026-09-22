@@ -50,7 +50,7 @@ The chapters below define engine behavior.
 | [data/component-storage.md](data/component-storage.md) | Sparse/dense component storage and typed component APIs |
 | [data/transform.md](data/transform.md) | Transform component, hierarchy inheritance, dirty propagation |
 | [render/render-components.md](render/render-components.md) | Drawable, mesh, material, sprite, text, and shadow components |
-| [render/architecture.md](render/architecture.md) | Engine/game render split, backend API shape, renderer classes |
+| [render/architecture.md](render/architecture.md) | Engine/game render split, backend API shape, shape strokes, renderer classes |
 | [render/items-sorting-batching.md](render/items-sorting-batching.md) | Render tags, 16-byte render items, sorting policy, batching/instancing |
 | [render/shader.md](render/shader.md) | ShaderAsset interface and the four levels of shader data |
 | [render/material.md](render/material.md) | Material model, vec4 params, render state ownership, draw-time texture resolve |

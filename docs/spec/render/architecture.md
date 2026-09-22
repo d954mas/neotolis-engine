@@ -617,6 +617,98 @@ rectangle is UNKNOWN because the frontend mirror is not authoritative after a
 context loss. Capture
 never adds a persistent GL-state mirror or queries GL to reconstruct them.
 
+## Shape strokes
+
+`nt_shape_renderer` owns immediate-mode shape geometry and batches it until
+`flush`; the game owns the pass, view-projection matrix, camera position and
+viewport. It uses triangle geometry for thick lines on native GL and WebGL 2,
+without relying on implementation-dependent hardware line widths.
+
+### Paths and width
+
+- `line(a, b, color)` draws one independent segment with butt ends.
+- `polyline(points, count, closed, color)` draws a connected sequence of
+  world-space `float[3]` positions. It consumes points during the call and keeps
+  no caller pointers. The caller samples curves into points; this renderer does
+  not own Bezier/spline evaluation or an adaptive tessellation policy.
+- Open paths have butt ends. Closed paths connect the last point to the first;
+  the caller may repeat the first point at the end. Consecutive equal positions
+  are skipped using component-wise equality. Fewer than two remaining positions
+  emit nothing; two positions produce one segment even with `closed=true`.
+  `points` may be null only when `count=0`. Positions must be finite.
+- Joins use a miter up to four half-widths, then a bevel. The bevel has actual
+  connecting triangles. A flush in the middle of a path retains the same
+  neighbor geometry on both sides of its boundary.
+- `set_line_width(width)` selects world units, including when switching back
+  from pixels. The default is `0.02`. Width is applied after a shape's scale and
+  rotation, so it is independent of radius or height; the camera projection
+  determines its size on screen.
+- `set_line_width_pixels(width, viewport_width, viewport_height)` selects
+  framebuffer pixels. Dimensions are the active viewport's physical pixel
+  size, including for an offscreen target or sub-viewport. The game resubmits
+  them after a viewport/target/DPR change. The setter does not change the gfx
+  viewport. Both dimensions must be positive; both width setters require a
+  finite positive width and assert programmer violations.
+
+Width, width mode, viewport dimensions, VP, camera position and depth changes
+flush pending geometry before replacing state. Identical values do not flush.
+Settings survive GPU restore, including a failed restore followed by retry.
+The game must flush before changing render passes or directly changing the gfx
+viewport; the renderer does not intercept gfx state changes.
+
+World strokes use camera-facing cross-sections at each endpoint. Pixel strokes
+project adjacent points into viewport pixel coordinates before constructing
+joins. Their centerline is clipped against the homogeneous near plane before
+perspective division; clipped ends become butt ends. A fully hidden segment
+emits no visible triangles. Reversed/degenerate directions use bounded fallback
+geometry, without a division by zero. These are camera-facing strokes, not
+cylindrical tubes with volumetric thickness.
+
+### Ready-made wire shapes
+
+Rectangle and triangle outlines use connected closed paths. Circle outlines
+use one closed 16-segment XZ ring; spheres use three orthogonal rings. Cylinders
+use two closed rings and four independent struts. Capsules use two equator rings
+and two closed meridians that include the straight sides. A capsule with
+`height <= 2 * radius` uses the sphere wire template, avoiding duplicate rings
+and collapsed straight segments. Rotated variants transform the complete path
+before constructing its thickness.
+
+A branching wire graph is distinct from a path: cube edges and `mesh_wire`
+remain independent segments, and cylinder strut/ring intersections do not gain
+an arbitrary two-edge join. No global graph stitching, hidden-edge extraction,
+mesh silhouette or duplicate-edge removal is implied by these APIs.
+
+The stroke pipelines retain opaque rendering and the existing depth behavior.
+Inner bevel triangles and intersecting paths can overlap; the renderer does
+not promise composited translucent strokes. Boundary antialiasing and circle
+subdivision are separate from joining segments. Fixing joins does not change
+the 16-segment approximation of a circle.
+
+### Storage and batching
+
+No heap allocation or trigonometry occurs when submitting these strokes.
+Independent segments retain 28-byte instances and two triangles. General path
+segments store previous/start/end/next points and color in 52 bytes, using seven
+vertices and four triangles; two triangles collapse for a miter. Their queues
+are separate so independent lines do not upload unused neighbors. Their depth
+and overlay pipelines share the same program and template buffers.
+
+Circle, sphere, cylinder and capsule wires use immutable templates built at
+initialization, one 44-byte instance per shape and one draw per nonempty wire
+shape type. They share the existing filled-shape instance buffer and ring
+cursor. Mixed wire types therefore require separate draws; fewer uploaded
+bytes do not imply fewer draws or a universal GPU speedup.
+
+`NT_SHAPE_RENDERER_MAX_LINES` bounds the independent-line queue (default 8192).
+`NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` bounds the connected-segment queue
+(default 1024). Each ready-made wire type has
+`ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)` staging entries (default 512).
+A full queue flushes automatically; GPU streaming buffers use disjoint ring
+ranges until wrap. A skipped flush after failed initialization empties every
+queue, preventing overflow during context recovery. Shutdown and GPU restore
+release/recreate the templates, vertex inputs and streaming buffers together.
+
 ## Renderer complexity classes
 
 Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
