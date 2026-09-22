@@ -6740,5 +6740,59 @@
       "raw": 112642648,
       "gzip": 69303296
     }
+  },
+  {
+    "commit": "4eb112a",
+    "date": "2026-09-22T12:04:17Z",
+    "files": {
+      "index.html": {
+        "raw": 2552,
+        "gzip": 1280
+      },
+      "index_simd.wasm": {
+        "raw": 434266,
+        "gzip": 203203
+      },
+      "index.wasm": {
+        "raw": 407280,
+        "gzip": 198056
+      },
+      "index_simd.js": {
+        "raw": 19435,
+        "gzip": 7837
+      },
+      "index.js": {
+        "raw": 19435,
+        "gzip": 7832
+      },
+      "assets/sponza_core.ntpack": {
+        "raw": 19792,
+        "gzip": 3299
+      },
+      "assets/sponza_full.ntpack": {
+        "raw": 98607700,
+        "gzip": 60780588
+      },
+      "assets/sponza_geo.ntpack": {
+        "raw": 4693756,
+        "gzip": 2457600
+      },
+      "assets/sponza_tex.ntpack": {
+        "raw": 8865112,
+        "gzip": 5848997
+      }
+    },
+    "engine": {
+      "raw": 456253,
+      "gzip": 212320
+    },
+    "resources": {
+      "raw": 112186360,
+      "gzip": 69090484
+    },
+    "total": {
+      "raw": 112642613,
+      "gzip": 69302804
+    }
   }
 ]

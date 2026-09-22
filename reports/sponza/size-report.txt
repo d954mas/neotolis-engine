@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: 32f77d1
+# Commit: 4eb112a
 
 ## WASM Section Sizes
 
@@ -7,28 +7,28 @@ Section                Size
 ---------------- ----------
 Type                 243 B
 Import               612 B
-Function             171 B
+Function             169 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  76 B
-Code              193721 B
-Data              212328 B
-Custom             10780 B
+Code              193650 B
+Data              212388 B
+Custom             10724 B
 ---------------- ----------
-TOTAL             418034 B
+TOTAL             417965 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-32771 B   frame
+32507 B   frame
 31497 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27330 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17621 B   nt_gfx_activate_texture
  5762 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
- 5225 B   main
+ 5491 B   main
  5011 B   nt_gfx_activate_mesh
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
@@ -54,8 +54,8 @@ TOTAL             418034 B
   769 B   nt_input_web_on_pointer_down
   738 B   emmalloc_aligned_realloc
 
-Total functions: 169
-Total code size: 193450 B
+Total functions: 167
+Total code size: 193381 B
 
 ## Built Engine Archives
 
@@ -92,7 +92,7 @@ libnt_material.a            4460 B
 libnt_material_comp.a       2104 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2028 B
-libnt_mesh_renderer.a      11376 B
+libnt_mesh_renderer.a      10736 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
@@ -107,13 +107,14 @@ libnt_skeletal.a            5484 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2852 B
 libnt_skin_comp.a           2044 B
+libnt_skinned_mesh_renderer.a   11986 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8864 B
 libnt_sprite_renderer.a    49806 B
 libnt_text_renderer.a    1243428 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                353778 B
+libnt_ui.a                353772 B
 libnt_ui_rich.a            39964 B
 libnt_ui_rich_fx.a          2756 B
 libnt_ui_stub.a             1324 B
@@ -121,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4222014 B
+TOTAL (archives)         4233354 B
 
 ## Data Segments Summary
 
 Segments: 159
-Total data size: 211128 B
+Total data size: 211188 B
