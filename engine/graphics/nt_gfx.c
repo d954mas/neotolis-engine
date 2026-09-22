@@ -245,6 +245,99 @@ nt_gfx_capture_view_t nt_gfx_capture_read(void) {
 }
 
 #if NT_GFX_CAPTURE_ENABLED
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one record schema per owned resource kind
+static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) {
+    if (!g_nt_gfx_observation.recording || g_nt_gfx_observation.capture.overflow) {
+        return;
+    }
+    uint32_t slot = nt_pool_slot_index(id);
+    NT_GFX_RECORD(
+        NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event.object_kind = kind; event.object = id; switch (kind) {
+            case NT_GFX_OBJECT_SHADER:
+                event.data.resource.backend = s_gfx.shader_backends[slot];
+                event.reason = NT_GFX_REASON_UNKNOWN;
+                break;
+            case NT_GFX_OBJECT_PROGRAM:
+                event.data.resource.backend = s_gfx.program_backends[slot];
+                event.reason = NT_GFX_REASON_UNKNOWN;
+                break;
+            case NT_GFX_OBJECT_PIPELINE:
+                event.data.resource.backend = slot;
+                event.data.resource.related[0] = s_gfx.pipeline_programs[slot];
+                break;
+            case NT_GFX_OBJECT_VERTEX_INPUT:
+                event.data.resource.backend = slot;
+                event.data.resource.related[0] = s_gfx.vertex_input_metas[slot].vbo_id;
+                event.data.resource.related[1] = s_gfx.vertex_input_metas[slot].ibo_id;
+                event.data.resource.related[2] = s_gfx.vertex_input_metas[slot].inst_buf_id;
+                event.data.resource.type = s_gfx.vertex_input_metas[slot].index_type;
+                event.data.resource.flags = s_gfx.vertex_input_metas[slot].instance_pointed;
+                event.reason = NT_GFX_REASON_UNKNOWN;
+                break;
+            case NT_GFX_OBJECT_BUFFER:
+                event.data.resource.backend = s_gfx.buffer_backends[slot];
+                event.data.resource.size = s_gfx.buffer_metas[slot].size;
+                event.data.resource.type = s_gfx.buffer_metas[slot].type;
+                event.data.resource.usage = s_gfx.buffer_metas[slot].usage;
+                event.data.resource.format = s_gfx.buffer_metas[slot].index_type;
+                break;
+            case NT_GFX_OBJECT_TEXTURE:
+                event.data.resource.backend = s_gfx.texture_backends[slot];
+                event.data.resource.width = s_gfx.texture_metas[slot].width;
+                event.data.resource.height = s_gfx.texture_metas[slot].height;
+                event.data.resource.format = s_gfx.texture_metas[slot].format;
+                event.data.resource.levels = s_gfx.texture_metas[slot].mip_count;
+                event.data.resource.flags = s_gfx.texture_metas[slot].render_target_owned;
+                event.data.resource.related[0] = s_gfx.texture_metas[slot].default_sampler.id;
+                break;
+            case NT_GFX_OBJECT_SAMPLER:
+                event.data.resource.backend = s_gfx.sampler_cache[id - 1].backend;
+                event.data.resource.flags = s_gfx.sampler_cache[id - 1].key;
+                break;
+            case NT_GFX_OBJECT_RENDER_TARGET:
+                event.data.resource.backend = s_gfx.render_target_backends[slot];
+                event.data.resource.related[0] = s_gfx.render_target_metas[slot].color.id;
+                event.data.resource.related[1] = s_gfx.render_target_metas[slot].depth.id;
+                event.data.resource.width = s_gfx.render_target_metas[slot].desc.width;
+                event.data.resource.height = s_gfx.render_target_metas[slot].desc.height;
+                event.data.resource.format = (uint32_t)s_gfx.render_target_metas[slot].desc.color_format;
+                event.data.resource.type = (uint32_t)s_gfx.render_target_metas[slot].desc.depth_storage;
+                event.data.resource.usage = (uint32_t)s_gfx.render_target_metas[slot].desc.depth_format;
+                event.data.resource.flags = s_gfx.render_target_metas[slot].complete;
+                break;
+            case NT_GFX_OBJECT_NONE:
+                break;
+        });
+}
+#define NT_GFX_DEFINE_RESOURCE(kind, id) capture_resource_definition(kind, id)
+
+static void capture_initial_state(void) {
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event.data.state.integers[0] = s_gfx.bound_pipeline; event.data.state.integers[1] = s_gfx.bound_vertex_input;
+                  event.data.state.integers[2] = s_gfx.active_render_target; event.data.state.integers[3] = s_gfx.bound_index_type; event.data.state.integers[4] = s_gfx.texture_set_state;
+                  event.data.state.integers[5] = g_nt_gfx.context_lost;);
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR_ENABLE, event.data.state.integers[0] = s_gfx.scissor_enabled);
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, event.reason = NT_GFX_REASON_UNKNOWN);
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_UBO, event.reason = NT_GFX_REASON_UNKNOWN);
+    const nt_pool_t *pools[] = {&s_gfx.shader_pool, &s_gfx.program_pool, &s_gfx.pipeline_pool, &s_gfx.vertex_input_pool, &s_gfx.buffer_pool, &s_gfx.texture_pool, &s_gfx.render_target_pool};
+    const nt_gfx_object_kind_t kinds[] = {NT_GFX_OBJECT_SHADER, NT_GFX_OBJECT_PROGRAM, NT_GFX_OBJECT_PIPELINE,     NT_GFX_OBJECT_VERTEX_INPUT,
+                                          NT_GFX_OBJECT_BUFFER, NT_GFX_OBJECT_TEXTURE, NT_GFX_OBJECT_RENDER_TARGET};
+    for (uint32_t p = 0; p < sizeof(pools) / sizeof(pools[0]); p++) {
+        for (uint32_t i = 1; i <= pools[p]->capacity && !g_nt_gfx_observation.capture.overflow; i++) {
+            if (nt_pool_slot_alive(pools[p], i)) {
+                capture_resource_definition(kinds[p], pools[p]->slots[i].id);
+            }
+        }
+    }
+    for (uint32_t i = 1; i <= s_gfx.sampler_count && !g_nt_gfx_observation.capture.overflow; i++) {
+        capture_resource_definition(NT_GFX_OBJECT_SAMPLER, i);
+    }
+    nt_gfx_backend_capture_initial_state();
+}
+#else
+#define NT_GFX_DEFINE_RESOURCE(kind, id) ((void)0)
+#endif
+
+#if NT_GFX_CAPTURE_ENABLED
 static void capture_begin_frame(void) {
     g_nt_gfx_observation.recording = g_nt_gfx_observation.capture_requested;
     if (g_nt_gfx_observation.recording) {
@@ -254,6 +347,7 @@ static void capture_begin_frame(void) {
             .status = NT_GFX_FRAME_RECORDING,
         };
         NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_FRAME, event.reason = NT_GFX_REASON_ACCEPTED);
+        capture_initial_state();
     }
 }
 #endif

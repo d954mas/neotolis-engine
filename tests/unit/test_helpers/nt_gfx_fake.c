@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if NT_GFX_CAPTURE_ENABLED
+void nt_gfx_backend_capture_initial_state(void) {}
+#endif
+
 // #region sampler units
 typedef struct {
     bool used;

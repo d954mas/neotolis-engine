@@ -35,6 +35,7 @@ extern nt_gfx_observation_t g_nt_gfx_observation;
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
+void nt_gfx_backend_capture_initial_state(void);
 static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
     nt_gfx_observation_t *obs = &g_nt_gfx_observation;
     if (obs->capture.count == obs->capacity) {

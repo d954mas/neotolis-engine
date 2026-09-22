@@ -73,6 +73,29 @@ static void test_disabled_counters_are_unavailable(void) {
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
+static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 24});
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    nt_gfx_capture_view_t initial = nt_gfx_capture_read();
+    bool buffer_found = false;
+    bool scissor_unknown = false;
+    for (uint32_t i = 0; i < initial.count; i++) {
+        const nt_gfx_event_t *e = &initial.events[i];
+        if (e->kind == NT_GFX_EVENT_DEFINITION && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == buffer.id) {
+            TEST_ASSERT_EQUAL_UINT64(24, e->data.resource.size);
+            buffer_found = true;
+        }
+        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_SCISSOR && e->reason == NT_GFX_REASON_UNKNOWN) {
+            scissor_unknown = true;
+        }
+    }
+    TEST_ASSERT_TRUE(buffer_found);
+    TEST_ASSERT_TRUE(scissor_unknown);
+    nt_gfx_destroy_buffer(buffer);
+    (void)nt_gfx_observe_end_frame();
+}
+
 static void test_draw_trace_preserves_arguments_and_live_prefix(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
@@ -179,6 +202,7 @@ int main(void) {
     RUN_TEST(test_disabled_counters_are_unavailable);
 #endif
 #if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);
     RUN_TEST(test_capture_overflow_does_not_stop_counters);

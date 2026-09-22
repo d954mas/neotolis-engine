@@ -771,8 +771,8 @@ typedef struct {
             uint32_t buffer, offset, stride, location, type, count, normalized, divisor;
         } attribute;
         struct {
-            uint32_t integers[12];
-            float values[8];
+            uint32_t integers[14];
+            float values[6];
         } state;
     } data;
 } nt_gfx_event_t;

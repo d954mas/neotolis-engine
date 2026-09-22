@@ -155,6 +155,28 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     for (uint32_t frame = 0; frame < 2; frame++) {
         s_program_calls = s_vao_calls = s_uniform_calls = s_ubo_calls = 0;
         nt_gfx_observe_begin_frame();
+#if NT_GFX_CAPTURE_ENABLED
+        if (frame == 1) {
+            nt_gfx_capture_view_t initial = nt_gfx_capture_read();
+            bool color_known = false;
+            bool viewport_known = false;
+            for (uint32_t i = 0; i < initial.count; i++) {
+                const nt_gfx_event_t *e = &initial.events[i];
+                if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UNIFORM_VEC4 && e->data.backend.args[1] == nt_hash32_str("u_color").value) {
+                    TEST_ASSERT_EQUAL(NT_GFX_REASON_NONE, e->reason);
+                    TEST_ASSERT_EQUAL_MEMORY(color, e->data.backend.values, sizeof(color));
+                    color_known = true;
+                }
+                if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_VIEWPORT) {
+                    TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_width, e->data.state.integers[2]);
+                    TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_height, e->data.state.integers[3]);
+                    viewport_known = true;
+                }
+            }
+            TEST_ASSERT_TRUE(color_known);
+            TEST_ASSERT_TRUE(viewport_known);
+        }
+#endif
         nt_gfx_begin_frame();
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
         for (uint32_t repeat = 0; repeat < 2; repeat++) {
