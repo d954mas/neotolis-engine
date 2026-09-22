@@ -276,7 +276,10 @@ Run the scripts serially; they use separate build directories and also run in
 `check.sh --push`. The runtime matrix covers log/rich-parser consumers at every
 log floor with FULL asserts, TRAP positive paths, timing producers ON/OFF,
 metrics independence, UI key checks ON with inspector OFF and OFF with inspector ON,
-and inspector ON with UI timing OFF.
+and inspector ON with UI timing OFF. Gfx observation exercises all four independent
+counters/capture combinations, including fake/frontend and unavailable stub paths.
+`tests/browser/observation.spec.ts` independently intercepts WebGL calls, checks
+uploads before render begin and compares output pixels with recording off/on/full.
 
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,

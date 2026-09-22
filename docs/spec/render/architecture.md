@@ -412,14 +412,15 @@ by the interface target so every consumer uses the same configuration.
 
 `nt_gfx_upload_totals_read` exposes lifetime CPU payload calls/bytes, including
 work outside observation intervals. Deltas require availability and equal
-epochs. Re-enabling counters starts a new epoch. NULL-data storage and generated
+epochs within one gfx initialization lifetime. Sequence, context and epoch
+identifiers reset at initialization. Re-enabling counters starts a new epoch. NULL-data storage and generated
 mips are excluded; non-NULL orphaning counts once. Texture bytes use the actual
 GPU format for each mip/subrectangle. Failed creates retain already-issued work.
 Per-frame payload fields subtract the begin baseline from these canonical totals.
 Bind requests count accepted frontend operations; call fields count actual GL
 calls, including temporary program, service VAO and upload texture bindings.
 Requests minus calls is not a cache-skip count. Uniform calls include link-time
-sampler assignments. UBO binds are unconditional; attribute counters count pointer
+sampler assignments and uniform-block binding assignments. UBO binds are unconditional; attribute counters count pointer
 specifications for static/instance layouts respectively.
 
 Command recording starts disabled. `nt_gfx_desc_t.capture_capacity` reserves one
@@ -442,6 +443,40 @@ prove GL success or GPU completion. Metadata distinguishes recording from
 finalized, complete, truncated and aborted captures. Overflow is separately
 reported even when aborted, stops event appends, and never truncates counters.
 Runtime recording changes during observation apply next begin.
+
+The `object_kind` and `object` pair identifies a full frontend handle, including
+its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t` and
+carry raw GL names scoped to `context_sequence`. `backend.args` follows the GL
+integer argument order; pointer payload arguments are presence bits, single-name
+gen/delete arguments contain that name, and indexed offsets are byte offsets.
+Float arguments occupy `backend.values` in float argument order. Matrix and vec4
+calls use `uniform` with the location in `name`, float count in `count`, and
+copied values. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
+No event borrows upload memory, shader source or caller labels.
+
+Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
+resource kind and `backend.args[0..1]` as backend slot/raw GL name; render targets
+also supply the depth renderbuffer name at index 2. Frontend resource definitions
+carry the full handle, current backend slot and available dimensions/relationships.
+Replacement names and surviving handles receive fresh definitions on resize or
+restore. Definitions remain meaningful after resource destruction or slot reuse.
+
+Program publication and initial state include `INITIAL/SAMPLER` records with
+backend program slot, name hash, location, unit and sampler class in args 0–4.
+`INITIAL/UNIFORM_VEC4` gives program slot/name hash/location in args 0–2 and cached
+vec4 values; `UNKNOWN` means no retained value. These INITIAL records can occur
+inside CREATE when the program first becomes available. Inactive names emit
+SKIP/INACTIVE; cache skips are distinct from invalid requests.
+
+Pipeline state records use integers 0–12 for program, depth enable/write/function,
+cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha
+operation and polygon offset enable. Values 0–5 hold blend color, offset factor
+and units. Frontend definitions use full handles and frontend enums; backend
+definitions use slots and backend enums; initial state uses the current raw
+program name. Vertex-input creation copies each static/instance attribute with
+its divisor, layout, and known buffer. Inherited layouts/UBO bindings/scissor
+rectangles unavailable in existing CPU state are explicitly unknown. Capture
+never adds a persistent GL-state mirror or queries GL to reconstruct them.
 
 ## Renderer complexity classes
 

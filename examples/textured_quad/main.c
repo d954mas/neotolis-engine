@@ -167,6 +167,7 @@ static void print_status(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
+    nt_gfx_observe_begin_frame();
     nt_window_poll();
     nt_input_poll();
 
@@ -379,6 +380,7 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
+    (void)nt_gfx_observe_end_frame();
 }
 
 int main(void) {

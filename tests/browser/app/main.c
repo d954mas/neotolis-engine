@@ -432,6 +432,95 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_render_target(target);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
+static double s_observe_values[40];
+EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
+    NT_ASSERT(index >= 0 && index < 40);
+    return s_observe_values[index];
+}
+EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
+    memset(s_observe_values, 0, sizeof(s_observe_values));
+    nt_gfx_stats_set_enabled(true);
+    nt_gfx_capture_set_enabled(mode != 0);
+    nt_gfx_observe_begin_frame();
+    const uint8_t pixels[16] = {64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255};
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+    nt_gfx_update_buffer(buffer, 0, pixels, 16);
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
+    nt_texture_t spare = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_gfx_update_texture(spare, 0, 0, 2, 2, pixels);
+    nt_gfx_counters_t preparation = nt_gfx_stats_read();
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 2, .height = 2, .color_format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_shader_t vs =
+        nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}"});
+    nt_shader_t fs = nt_gfx_make_shader(
+        &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float;uniform sampler2D tex;uniform vec4 tint;out vec4 color;void main(){color=texture(tex,vec2(0.5))*tint;}"});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(vi);
+    const float tint[4] = {1, 1, 1, 1};
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("tex"), .texture = texture};
+    for (uint32_t i = 0; i < 2; i++) {
+        nt_gfx_apply_texture_bindings(&binding, 1);
+        nt_gfx_set_uniform_vec4(nt_hash32_str("tint"), tint);
+    }
+    if (mode == 2) {
+        for (uint32_t i = 0; i < 10000; i++) {
+            nt_gfx_set_scissor_enabled(false);
+        }
+    }
+    nt_gfx_draw(0, 3);
+    uint8_t pixel[4] = {0};
+    bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_destroy_vertex_input(vi);
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_texture(texture);
+    nt_gfx_destroy_texture(spare);
+    nt_gfx_destroy_buffer(buffer);
+    nt_gfx_frame_snapshot_t snapshot = *nt_gfx_observe_end_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    s_observe_values[0] = NT_GFX_COUNTERS_ENABLED;
+    s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
+    s_observe_values[2] = snapshot.status;
+    s_observe_values[3] = snapshot.counters.draw_calls;
+    s_observe_values[4] = (double)preparation.buffer_upload_bytes;
+    s_observe_values[5] = (double)preparation.texture_upload_bytes;
+    s_observe_values[6] = snapshot.counters.program_calls;
+    s_observe_values[7] = snapshot.counters.vao_calls;
+    s_observe_values[8] = snapshot.counters.texture_calls;
+    s_observe_values[9] = snapshot.counters.sampler_calls;
+    s_observe_values[10] = snapshot.counters.uniform_calls;
+    s_observe_values[11] = capture.overflow;
+    s_observe_values[12] = capture.count;
+    s_observe_values[13] = capture.status;
+    s_observe_values[14] = (double)snapshot.counters.buffer_upload_bytes;
+    s_observe_values[15] = (double)snapshot.counters.texture_upload_bytes;
+    s_observe_values[16] = (double)snapshot.counters.buffer_upload_calls;
+    s_observe_values[17] = (double)snapshot.counters.texture_upload_calls;
+    const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_USEPROGRAM, NT_GFX_GL_BINDVERTEXARRAY, NT_GFX_GL_BINDTEXTURE, NT_GFX_GL_BINDSAMPLER, NT_GFX_GL_UNIFORM4FV, NT_GFX_GL_UNIFORM1I};
+    for (uint32_t i = 0; i < capture.count; i++) {
+        if (capture.events[i].kind != NT_GFX_EVENT_BACKEND) {
+            continue;
+        }
+        for (uint32_t j = 0; j < 6; j++) {
+            if (capture.events[i].detail == (uint32_t)calls[j]) {
+                s_observe_values[20 + j]++;
+            }
+        }
+    }
+    nt_gfx_capture_set_enabled(false);
+    return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8) | ((uint32_t)pixel[2] << 16) | ((uint32_t)pixel[3] << 24)) : 0;
+}
+
 EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
     const char *names[] = {"diagnostics-a", "diagnostics-b", "diagnostics-c"};
     NT_ASSERT(segment >= 0 && segment < 3);
@@ -553,6 +642,8 @@ EM_JS(void, nt_test_install_hooks, (void), {
             return { 'preset': UTF8ToString(_nt_test_diagnostics_preset()), 'log': _nt_test_diagnostics_config(0),
                 'ui': _nt_test_diagnostics_config(1), 'gpu': _nt_test_diagnostics_config(2), 'metrics': _nt_test_diagnostics_config(3) };
         },
+        'observe_probe': function(mode) { return _nt_test_observe_probe(mode); },
+        'observe_value': function(index) { return _nt_test_observe_value(index); },
         'gpu_supported': function() { return _nt_test_gpu_supported() !== 0; },
         'float_probe': function(useTexture) { return _nt_test_float_probe(useTexture); },
         'basis_ready': function() { return _nt_test_basis_ready() !== 0; },
@@ -730,6 +821,7 @@ static bool gpu_restore_step(void) {
 }
 
 static void frame(void) {
+    nt_gfx_observe_begin_frame();
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
@@ -890,6 +982,7 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
+    (void)nt_gfx_observe_end_frame();
 }
 // #endregion
 
@@ -912,6 +1005,7 @@ int main(int argc, char *argv[]) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.capture_capacity = 16384;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 

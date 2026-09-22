@@ -104,12 +104,26 @@ static void test_stub_packs_pipeline_keys(void) {
     TEST_ASSERT_FALSE(nt_gfx_pipeline_key_equal(&ka, &kb));
 }
 
+static void test_stub_observation_is_unavailable(void) {
+    nt_gfx_stats_set_enabled(true);
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_stats_read().availability);
+    TEST_ASSERT_FALSE(nt_gfx_upload_totals_read().available);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, nt_gfx_observe_end_frame()->status);
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.available);
+    TEST_ASSERT_EQUAL_UINT32(0, capture.count);
+    TEST_ASSERT_NULL(capture.events);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_stub_has_no_graphics_resources);
     RUN_TEST(test_stub_returns_empty_queries_without_fabricating_pixels);
     RUN_TEST(test_stub_drops_draws_and_state_changes);
     RUN_TEST(test_stub_packs_pipeline_keys);
+    RUN_TEST(test_stub_observation_is_unavailable);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_stub_timer_requires_name_and_output);
     RUN_TEST(test_stub_queries_require_outputs);

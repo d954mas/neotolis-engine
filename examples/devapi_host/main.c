@@ -206,6 +206,9 @@ static void render_pattern(void) {
 #endif /* NT_DEVAPI_HOST_WEB_CAPTURE */
 
 static void frame(void) {
+#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+    nt_gfx_observe_begin_frame();
+#endif
     /* Host owns measurement; nt_metrics only stores. */
 #if NT_METRICS_ENABLED
     static double s_last_begin = 0.0;
@@ -276,6 +279,9 @@ static void frame(void) {
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
+#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+    (void)nt_gfx_observe_end_frame();
+#endif
 }
 
 int main(void) {

@@ -46,9 +46,11 @@ def main():
                 targets += ("test_devapi_obs",)
             if floor >= 2 and metrics == "ON":
                 targets = ("test_devapi_obs", "test_resource_timing", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native")
+            targets += ("test_gfx_observe", "test_nt_gfx_observe_native", "test_gfx_stub") if "test_gfx_stub" not in targets else ("test_gfx_observe", "test_nt_gfx_observe_native")
             run(["cmake", "--preset", "native-release-test", "-B", str(build),
                  f"-DNT_PRESET_NAME={name}", f"-DNT_LOG_MIN_LEVEL={floor}",
                  f"-DNT_RESOURCE_TIMING_ENABLED={resource}", f"-DNT_UI_TIMING_ENABLED={ui}", f"-DNT_GFX_GPU_TIMING_ENABLED={gpu}",
+                 f"-DNT_GFX_COUNTERS_ENABLED={ui}", f"-DNT_GFX_CAPTURE_ENABLED={gpu}",
                  f"-DNT_METRICS_ENABLED={metrics}", f"-DNT_UI_DEBUG_TOOLS={ui_debug}", f"-DNT_UI_CHECKS={ui_checks}",
                  "-DNT_LOG_RING_ENABLED=ON", "-DNT_INTROSPECT_ENABLED=ON",
                  "-DNT_INTROSPECT_WRITE_ENABLED=ON", f"-DNT_DEVAPI_ENABLED={obs}",

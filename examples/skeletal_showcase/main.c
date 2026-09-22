@@ -1160,6 +1160,7 @@ static void mount_pack(const char *name) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
+    nt_gfx_observe_begin_frame();
     nt_window_poll();
 #ifdef NT_DEVAPI_ENABLED
     nt_devapi_update();
@@ -1211,6 +1212,7 @@ static void frame(void) {
         if (nt_app_render_enabled()) {
             nt_window_swap_buffers();
         }
+        (void)nt_gfx_observe_end_frame();
         return;
     }
     nt_font_step();
@@ -1274,6 +1276,7 @@ static void frame(void) {
     if (render_enabled) {
         nt_window_swap_buffers();
     }
+    (void)nt_gfx_observe_end_frame();
 }
 
 int main(int argc, char *argv[]) {

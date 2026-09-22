@@ -2010,7 +2010,10 @@ static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     if (pending_error == 0x9242U) { /* GL_CONTEXT_LOST_WEBGL */
         nt_gfx_observe_context_loss();
     }
-    NT_ASSERT((pending_error == GL_NO_ERROR || nt_gfx_gl_ctx_is_lost()) && "pending GL error before texture upload");
+#if NT_ASSERT_MODE != NT_ASSERT_OFF
+    bool context_lost = pending_error != GL_NO_ERROR && nt_gfx_backend_is_context_lost();
+    NT_ASSERT((pending_error == GL_NO_ERROR || context_lost) && "pending GL error before texture upload");
+#endif
     if (pending_error != GL_NO_ERROR) {
         NT_LOG_ERROR("pending GL error before texture upload: 0x%04X", (unsigned)pending_error);
         return false;
