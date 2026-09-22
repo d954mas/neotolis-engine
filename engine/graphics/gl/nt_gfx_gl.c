@@ -542,6 +542,13 @@ static void nt_gfx_gl_init_context_features(void) {
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc);
     s_init_desc = *desc;
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+#ifdef NT_PLATFORM_WEB
+    g_nt_gfx_observation.backend = NT_GFX_BACKEND_WEBGL;
+#else
+    g_nt_gfx_observation.backend = NT_GFX_BACKEND_OPENGL;
+#endif
+#endif
 
     if (!nt_gfx_gl_ctx_create(&s_init_desc)) {
         return false;

@@ -8,6 +8,10 @@
 nt_declare_interface(nt_gfx)
 target_link_libraries(nt_gfx_interface INTERFACE nt_core)
 target_compile_definitions(nt_gfx_interface INTERFACE NT_GFX_GPU_TIMING_ENABLED=$<BOOL:${NT_GFX_GPU_TIMING_ENABLED}>)
+target_compile_definitions(nt_gfx_interface INTERFACE
+    NT_GFX_COUNTERS_ENABLED=$<BOOL:${NT_GFX_COUNTERS_ENABLED}>
+    NT_GFX_CAPTURE_ENABLED=$<BOOL:${NT_GFX_CAPTURE_ENABLED}>
+)
 
 if(EMSCRIPTEN)
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"

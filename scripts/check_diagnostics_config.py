@@ -28,6 +28,8 @@ DEFINES = {
     "NT_UI_CHECKS": 0,
     "NT_UI_TIMING_ENABLED": 0,
     "NT_GFX_GPU_TIMING_ENABLED": 0,
+    "NT_GFX_COUNTERS_ENABLED": 0,
+    "NT_GFX_CAPTURE_ENABLED": 0,
 }
 
 
@@ -93,6 +95,8 @@ class Checks:
             "NT_UI_CHECKS": "ui/nt_ui.h",
             "NT_UI_TIMING_ENABLED": "ui/nt_ui.h",
             "NT_GFX_GPU_TIMING_ENABLED": "graphics/nt_gfx.h",
+            "NT_GFX_COUNTERS_ENABLED": "graphics/nt_gfx.h",
+            "NT_GFX_CAPTURE_ENABLED": "graphics/nt_gfx.h",
         }
         for define, header in headers.items():
             source = f'#include "{header}"\n'

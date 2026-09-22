@@ -5,6 +5,13 @@
 #error "NT_GFX_GPU_TIMING_ENABLED must be defined by the nt_gfx_interface target"
 #endif
 
+#ifndef NT_GFX_COUNTERS_ENABLED
+#error "NT_GFX_COUNTERS_ENABLED must be defined by the nt_gfx_interface target"
+#endif
+#ifndef NT_GFX_CAPTURE_ENABLED
+#error "NT_GFX_CAPTURE_ENABLED must be defined by the nt_gfx_interface target"
+#endif
+
 #include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
@@ -491,10 +498,99 @@ typedef struct {
 typedef struct {
     uint32_t draw_calls;           /* all GPU draw calls */
     uint32_t draw_calls_instanced; /* of those, instanced */
+#if NT_GFX_COUNTERS_ENABLED
+    uint64_t vertices;
+    uint64_t indices;
+    uint64_t instances;
+#else
     uint32_t vertices;
     uint32_t indices;
     uint32_t instances; /* total objects drawn via instanced calls */
+#endif
 } nt_gfx_frame_stats_t;
+
+// #region frame observation
+typedef enum {
+    NT_GFX_BACKEND_NONE = 0,
+    NT_GFX_BACKEND_FAKE,
+    NT_GFX_BACKEND_OPENGL,
+    NT_GFX_BACKEND_WEBGL,
+} nt_gfx_backend_kind_t;
+
+typedef enum {
+    NT_GFX_FRAME_UNAVAILABLE = 0,
+    NT_GFX_FRAME_RECORDING,
+    NT_GFX_FRAME_COMPLETE,
+    NT_GFX_FRAME_TRUNCATED,
+    NT_GFX_FRAME_ABORTED,
+} nt_gfx_frame_status_t;
+
+enum {
+    NT_GFX_COUNTERS_FRONTEND = 1,
+    NT_GFX_COUNTERS_BACKEND = 2,
+};
+
+/* Payload calls only: NULL storage, generated mips and rendering are excluded.
+ * Deltas require equal nonzero epoch and available=true at both endpoints. */
+typedef struct {
+    uint64_t epoch;
+    uint64_t buffer_calls;
+    uint64_t buffer_bytes;
+    uint64_t texture_calls;
+    uint64_t texture_bytes;
+    bool available;
+} nt_gfx_upload_totals_t;
+
+/* All fields are values. Submitted geometry is not shader/GPU work.
+ * availability is a bitset; zero means unmeasured, not measured zero. */
+typedef struct {
+    uint64_t frame_sequence;
+    uint32_t availability;
+    uint32_t draw_calls;
+    uint32_t draw_calls_instanced;
+    uint64_t vertices;
+    uint64_t indices;
+    uint64_t instances; /* instanced draws only */
+    uint32_t pipeline_requests;
+    uint32_t vertex_input_requests;
+    uint32_t texture_requests;
+    uint32_t sampler_requests;
+    uint32_t uniform_requests;
+    uint32_t ubo_requests;
+    uint32_t program_calls;
+    uint32_t vao_calls;
+    uint32_t texture_calls;
+    uint32_t sampler_calls;
+    uint32_t uniform_calls;
+    uint32_t ubo_calls;
+    uint32_t static_attribute_calls;
+    uint32_t instance_attribute_calls;
+    uint64_t buffer_upload_calls;
+    uint64_t buffer_upload_bytes;
+    uint64_t texture_upload_calls;
+    uint64_t texture_upload_bytes;
+} nt_gfx_counters_t;
+
+typedef struct {
+    nt_gfx_counters_t counters;
+    nt_gfx_frame_status_t status;
+} nt_gfx_frame_snapshot_t;
+
+/* Optional host-owned interval, at gfx IDLE, enclosing 0..1 gfx frames.
+ * Call before resource preparation and end even when rendering is disabled.
+ * These boundaries never advance rendering or poll the graphics context. */
+void nt_gfx_observe_begin_frame(void);
+/* Borrowed module snapshot, valid until the next observe_end_frame or shutdown.
+ * Always non-NULL; OFF/stub returns an unavailable snapshot. Copy by value to keep. */
+const nt_gfx_frame_snapshot_t *nt_gfx_observe_end_frame(void);
+/* Current interval by value; unavailable outside it or with counters disabled. */
+nt_gfx_counters_t nt_gfx_stats_read(void);
+/* Includes payloads outside observation intervals; frame boundaries never reset it. */
+nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void);
+/* Starts enabled when compiled in. Inside an interval takes effect next begin;
+ * outside takes effect immediately. Re-enabling starts a new upload epoch. */
+void nt_gfx_stats_set_enabled(bool enabled);
+// #endregion
 
 /* ---- GPU format capabilities ---- */
 

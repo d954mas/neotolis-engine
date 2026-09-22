@@ -5,6 +5,42 @@
 #include "hash/nt_hash.h"
 #include "pool/nt_pool.h"
 
+// #region observation storage and owning-site counters
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+typedef struct {
+    uint64_t sequence;
+    nt_gfx_backend_kind_t backend;
+    bool active;
+    bool gfx_begun;
+    bool aborted;
+    nt_gfx_frame_snapshot_t last;
+#if NT_GFX_COUNTERS_ENABLED
+    bool stats_requested;
+    bool stats_enabled;
+    nt_gfx_counters_t working;
+    nt_gfx_upload_totals_t uploads;
+    nt_gfx_upload_totals_t upload_start;
+#endif
+} nt_gfx_observation_t;
+
+extern nt_gfx_observation_t g_nt_gfx_observation;
+#endif
+
+#if NT_GFX_COUNTERS_ENABLED
+static inline void nt_gfx_observe_count(uint32_t *counter) {
+    if (g_nt_gfx_observation.active && g_nt_gfx_observation.stats_enabled) {
+        NT_ASSERT(*counter != UINT32_MAX);
+        (*counter)++;
+    }
+}
+#define NT_GFX_COUNT(field) nt_gfx_observe_count(&g_nt_gfx_observation.working.field)
+#define NT_GFX_GEOMETRY_COUNT(value) ((uint64_t)(value))
+#else
+#define NT_GFX_COUNT(field) ((void)0)
+#define NT_GFX_GEOMETRY_COUNT(value) (value)
+#endif
+// #endregion
+
 /* ---- Render state machine ---- */
 
 typedef enum {

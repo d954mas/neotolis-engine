@@ -288,7 +288,8 @@ instance-buffer re-pointing, uniform writes and draws outside a pass assert.
 Destroying a texture or a render target inside a pass asserts: pass-scoped draw
 state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
-state and the backend deduplicates them across passes. The clear forces the depth
+state. The backend deduplicates texture/sampler binds across passes;
+uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 Render-target color and sampleable depth attachments are exposed as normal
@@ -376,6 +377,38 @@ This does not add RGBA32F render-target support to the engine.
 This capability supplies low-level targets and depth textures only. It does not
 define light cameras, PCF, cascades, shadow atlases, material shadow integration,
 or a shadow-map system.
+
+## Frame observation
+
+The host may bracket one callback with `nt_gfx_observe_begin_frame` and
+`nt_gfx_observe_end_frame`, before resource preparation and after rendering.
+These are diagnostic boundaries, independent of render begin/end and simulation
+time. Each interval contains zero or one gfx frame and any number of passes.
+Calls require gfx IDLE, except that known context loss permits finalization.
+Missing/nested boundaries assert. No host wiring is added implicitly by app/gfx.
+
+`nt_gfx_stats_read` returns current counters by value; outside the interval or
+with counters disabled they are unavailable. Two reads with the same sequence
+measure an interval by field subtraction. Stage totals are subsets of the whole
+frame, not additional totals. The bitset distinguishes frontend observations
+from real backend observations; the test fake cannot claim measured GL calls.
+
+End returns a borrowed POD snapshot that stays unchanged until the next end
+or shutdown. Copy it by value for caller-owned history. A no-render callback
+still produces a new sequence and zero draws; old geometry is never reused.
+Existing `frame_stats` remains the only live draw/geometry source, reset by
+gfx begin_frame; `nt_gfx_get_frame_draw_calls` retains its uint32 live contract.
+With counters compiled in, existing geometry and instance fields are uint64,
+including multiplication before accumulation. OFF keeps their legacy widths.
+Vertices/indices are submitted counts, multiplied by instance count for
+instanced calls; instances counts only instances in instanced calls. These are
+not rasterized triangles or vertex-shader invocations.
+
+`NT_GFX_COUNTERS_ENABLED` and `NT_GFX_CAPTURE_ENABLED` are independent numeric
+interface definitions. Counters start enabled when compiled in. A stats toggle
+inside an interval takes effect at the next begin; outside it applies immediately.
+OFF/stub reads are explicitly unavailable. Counter widths/flags are published
+by the interface target so every consumer uses the same configuration.
 
 ## Renderer complexity classes
 

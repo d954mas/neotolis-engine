@@ -57,6 +57,8 @@
                 "NT_UI_TIMING_ENABLED": "ON",
                 "NT_RESOURCE_TIMING_ENABLED": "ON",
                 "NT_GFX_GPU_TIMING_ENABLED": "ON",
+                "NT_GFX_COUNTERS_ENABLED": "ON",
+                "NT_GFX_CAPTURE_ENABLED": "ON",
                 "NT_ASSERT_MODE": "2",
                 "NT_UI_CHECKS": "ON",
                 "NT_SKELETAL_CHECKS": "ON"
@@ -78,6 +80,8 @@
                 "NT_UI_TIMING_ENABLED": "OFF",
                 "NT_RESOURCE_TIMING_ENABLED": "OFF",
                 "NT_GFX_GPU_TIMING_ENABLED": "OFF",
+                "NT_GFX_COUNTERS_ENABLED": "OFF",
+                "NT_GFX_CAPTURE_ENABLED": "OFF",
                 "NT_ASSERT_MODE": "1",
                 "NT_UI_CHECKS": "OFF",
                 "NT_SKELETAL_CHECKS": "OFF"
@@ -135,6 +139,8 @@
                 "NT_UI_TIMING_ENABLED": "ON",
                 "NT_RESOURCE_TIMING_ENABLED": "ON",
                 "NT_GFX_GPU_TIMING_ENABLED": "ON",
+                "NT_GFX_COUNTERS_ENABLED": "ON",
+                "NT_GFX_CAPTURE_ENABLED": "ON",
                 "NT_ASSERT_MODE": "2",
                 "NT_UI_CHECKS": "ON",
                 "NT_SKELETAL_CHECKS": "ON",
@@ -158,6 +164,8 @@
                 "NT_UI_TIMING_ENABLED": "OFF",
                 "NT_RESOURCE_TIMING_ENABLED": "OFF",
                 "NT_GFX_GPU_TIMING_ENABLED": "OFF",
+                "NT_GFX_COUNTERS_ENABLED": "OFF",
+                "NT_GFX_CAPTURE_ENABLED": "OFF",
                 "NT_ASSERT_MODE": "1",
                 "NT_UI_CHECKS": "OFF",
                 "NT_SKELETAL_CHECKS": "OFF",
@@ -191,7 +199,9 @@
                 "NT_LOG_MIN_LEVEL": "0",
                 "NT_UI_TIMING_ENABLED": "ON",
                 "NT_RESOURCE_TIMING_ENABLED": "ON",
-                "NT_GFX_GPU_TIMING_ENABLED": "ON"
+                "NT_GFX_GPU_TIMING_ENABLED": "ON",
+                "NT_GFX_COUNTERS_ENABLED": "ON",
+                "NT_GFX_CAPTURE_ENABLED": "ON"
             }
         },
         {

@@ -28,6 +28,15 @@ void nt_gfx_begin_frame(void) {}
 
 void nt_gfx_end_frame(void) {}
 
+void nt_gfx_observe_begin_frame(void) {}
+const nt_gfx_frame_snapshot_t *nt_gfx_observe_end_frame(void) {
+    static const nt_gfx_frame_snapshot_t unavailable;
+    return &unavailable;
+}
+nt_gfx_counters_t nt_gfx_stats_read(void) { return (nt_gfx_counters_t){0}; }
+nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) { return (nt_gfx_upload_totals_t){0}; }
+void nt_gfx_stats_set_enabled(bool enabled) { (void)enabled; }
+
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 
 void nt_gfx_end_pass(void) {}

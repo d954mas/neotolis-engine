@@ -187,6 +187,109 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 /* ---- Lifecycle ---- */
 
+// #region frame observation
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+nt_gfx_observation_t g_nt_gfx_observation;
+#endif
+
+#if NT_GFX_COUNTERS_ENABLED
+static void observe_apply_stats_policy(bool enabled) {
+    if (enabled && !g_nt_gfx_observation.stats_enabled) {
+        uint64_t epoch = g_nt_gfx_observation.uploads.epoch + 1;
+        g_nt_gfx_observation.uploads = (nt_gfx_upload_totals_t){.epoch = epoch};
+    }
+    g_nt_gfx_observation.stats_enabled = enabled;
+}
+#endif
+
+void nt_gfx_stats_set_enabled(bool enabled) {
+#if NT_GFX_COUNTERS_ENABLED
+    g_nt_gfx_observation.stats_requested = enabled;
+    if (!g_nt_gfx_observation.active) {
+        observe_apply_stats_policy(enabled);
+    }
+#else
+    (void)enabled;
+#endif
+}
+
+nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) {
+#if NT_GFX_COUNTERS_ENABLED
+    nt_gfx_upload_totals_t result = g_nt_gfx_observation.uploads;
+    result.available = g_nt_gfx_observation.stats_enabled && g_nt_gfx_observation.backend >= NT_GFX_BACKEND_OPENGL;
+    return result;
+#else
+    return (nt_gfx_upload_totals_t){0};
+#endif
+}
+
+void nt_gfx_observe_begin_frame(void) {
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+    NT_ASSERT(g_nt_gfx.initialized);
+    NT_ASSERT(!g_nt_gfx_observation.active);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
+    NT_ASSERT(g_nt_gfx_observation.sequence != UINT64_MAX);
+    g_nt_gfx_observation.sequence++;
+    g_nt_gfx_observation.active = true;
+    g_nt_gfx_observation.gfx_begun = false;
+    g_nt_gfx_observation.aborted = g_nt_gfx.context_lost;
+#if NT_GFX_COUNTERS_ENABLED
+    observe_apply_stats_policy(g_nt_gfx_observation.stats_requested);
+    g_nt_gfx_observation.working = (nt_gfx_counters_t){0};
+    g_nt_gfx_observation.upload_start = g_nt_gfx_observation.uploads;
+#endif
+#endif
+}
+
+nt_gfx_counters_t nt_gfx_stats_read(void) {
+    nt_gfx_counters_t result = {0};
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+    if (!g_nt_gfx_observation.active) {
+        return result;
+    }
+    result.frame_sequence = g_nt_gfx_observation.sequence;
+#if NT_GFX_COUNTERS_ENABLED
+    if (g_nt_gfx_observation.stats_enabled) {
+        result = g_nt_gfx_observation.working;
+        result.frame_sequence = g_nt_gfx_observation.sequence;
+        result.availability = NT_GFX_COUNTERS_FRONTEND;
+        if (g_nt_gfx_observation.backend >= NT_GFX_BACKEND_OPENGL) {
+            result.availability |= NT_GFX_COUNTERS_BACKEND;
+        }
+        if (g_nt_gfx_observation.gfx_begun) {
+            result.draw_calls = g_nt_gfx.frame_stats.draw_calls;
+            result.draw_calls_instanced = g_nt_gfx.frame_stats.draw_calls_instanced;
+            result.vertices = g_nt_gfx.frame_stats.vertices;
+            result.indices = g_nt_gfx.frame_stats.indices;
+            result.instances = g_nt_gfx.frame_stats.instances;
+        }
+        result.buffer_upload_calls = g_nt_gfx_observation.uploads.buffer_calls - g_nt_gfx_observation.upload_start.buffer_calls;
+        result.buffer_upload_bytes = g_nt_gfx_observation.uploads.buffer_bytes - g_nt_gfx_observation.upload_start.buffer_bytes;
+        result.texture_upload_calls = g_nt_gfx_observation.uploads.texture_calls - g_nt_gfx_observation.upload_start.texture_calls;
+        result.texture_upload_bytes = g_nt_gfx_observation.uploads.texture_bytes - g_nt_gfx_observation.upload_start.texture_bytes;
+    }
+#endif
+#endif
+    return result;
+}
+
+const nt_gfx_frame_snapshot_t *nt_gfx_observe_end_frame(void) {
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+    NT_ASSERT(g_nt_gfx_observation.active);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
+    g_nt_gfx_observation.last = (nt_gfx_frame_snapshot_t){
+        .counters = nt_gfx_stats_read(),
+        .status = (g_nt_gfx_observation.aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
+    };
+    g_nt_gfx_observation.active = false;
+    return &g_nt_gfx_observation.last;
+#else
+    static const nt_gfx_frame_snapshot_t unavailable;
+    return &unavailable;
+#endif
+}
+// #endregion
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc);
@@ -201,6 +304,10 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+    memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
+#endif
+    nt_gfx_stats_set_enabled(true);
 
     nt_pool_init(&s_gfx.shader_pool, desc->max_shaders);
     nt_pool_init(&s_gfx.program_pool, desc->max_programs);
@@ -323,6 +430,9 @@ void nt_gfx_shutdown(void) {
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
     /* Clear global block registry */
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+    memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
+#endif
     memset(s_global_blocks, 0, sizeof(s_global_blocks));
     s_global_block_count = 0;
 }
@@ -601,6 +711,12 @@ void nt_gfx_begin_frame(void) {
     }
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+    if (g_nt_gfx_observation.active) {
+        NT_ASSERT(!g_nt_gfx_observation.gfx_begun);
+        g_nt_gfx_observation.gfx_begun = true;
+    }
+#endif
     nt_gfx_backend_begin_frame();
 }
 
@@ -1485,6 +1601,7 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
     }
     /* Loss frees pipeline slots, so a live slot always has a backend. */
     s_gfx.bound_pipeline = pip.id;
+    NT_GFX_COUNT(pipeline_requests);
     nt_gfx_backend_bind_pipeline(slot);
 }
 
@@ -1507,6 +1624,7 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) {
     uint32_t slot = nt_pool_slot_index(vi.id);
     /* Loss frees vertex-input slots, so a live slot always has a backend. */
     s_gfx.bound_vertex_input = vi.id;
+    NT_GFX_COUNT(vertex_input_requests);
     /* NT_INDEX_NONE for a non-indexed vertex input: cleared, not stale. */
     s_gfx.bound_index_type = s_gfx.vertex_input_metas[slot].index_type;
     nt_gfx_backend_bind_vertex_input(slot);
@@ -1959,7 +2077,7 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.draw_calls_instanced++;
-    g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
+    g_nt_gfx.frame_stats.vertices += NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
     nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
 }
@@ -2018,8 +2136,8 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.draw_calls_instanced++;
-    g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
-    g_nt_gfx.frame_stats.indices += num_indices * instance_count;
+    g_nt_gfx.frame_stats.vertices += NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count;
+    g_nt_gfx.frame_stats.indices += NT_GFX_GEOMETRY_COUNT(num_indices) * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
     nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
 }

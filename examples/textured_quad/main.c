@@ -25,6 +25,7 @@
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include <inttypes.h>
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
@@ -367,8 +368,9 @@ static void frame(void) {
         /* One-time log to verify batching */
         static bool s_stats_logged;
         if (!s_stats_logged) {
-            nt_log_info(">> Render stats: %u draw calls, %u instanced, %u instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
-                        g_nt_gfx.frame_stats.instances, item_count);
+            const uint64_t instances = g_nt_gfx.frame_stats.instances;
+            nt_log_info(">> Render stats: %u draw calls, %u instanced, %" PRIu64 " instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced, instances,
+                        item_count);
             s_stats_logged = true;
         }
     }
