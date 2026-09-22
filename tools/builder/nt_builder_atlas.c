@@ -1815,13 +1815,11 @@ static void geometry_canonicalize_ring(Point2D *poly, uint32_t count) {
     memcpy(poly, canonical, (size_t)count * sizeof(Point2D));
 }
 
-static void geometry_candidate_canonicalize(GeometryCandidate *candidate) { geometry_canonicalize_ring(candidate->poly, candidate->count); }
-
 static bool geometry_frontier_finalize(GeometryFrontier *frontier, GeometryCandidate *candidate) {
     if (!candidate->valid || !candidate->poly || candidate->count < 3 || candidate->count > frontier->max_vertices || candidate->count > NT_POLYGON_MAX_VERTICES) {
         return false;
     }
-    geometry_candidate_canonicalize(candidate);
+    geometry_canonicalize_ring(candidate->poly, candidate->count);
     nt_polygon_feasibility_t feasibility = nt_polygon_feasibility(candidate->poly, candidate->count, frontier->binary, frontier->width, frontier->height, frontier->max_vertices);
     if (!feasibility.valid) {
         return false;
@@ -1896,7 +1894,7 @@ static void geometry_frontier_clamp_to_trim(const GeometryFrontier *frontier, Ge
 
 static void geometry_frontier_adopt(GeometryFrontier *frontier, GeometryCandidate *source) {
     geometry_frontier_clamp_to_trim(frontier, source);
-    geometry_candidate_canonicalize(source);
+    geometry_canonicalize_ring(source->poly, source->count);
     GeometryCandidate *slot = source->count <= NT_POLYGON_MAX_VERTICES ? &frontier->slots[source->count] : NULL;
     /* Area-first reject: feasibility never changes area, so a candidate that cannot
      * beat its slot skips the O(cells*verts) coverage proof entirely. */

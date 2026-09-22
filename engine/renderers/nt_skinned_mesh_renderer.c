@@ -85,8 +85,6 @@ static void pack_skin_binding(uint8_t *dst, const nt_deformation_binding_t *bind
     memcpy(dst + sizeof(origins), &binding->alpha, sizeof(binding->alpha));
 }
 
-static uint16_t instance_stride(nt_color_mode_t color_mode) { return s_instance_layouts[color_mode].stride; }
-
 static bool run_compatible(const nt_render_item_t *items, uint32_t leader, uint32_t candidate, uint32_t texture_id) {
     if (items[candidate].batch_key != items[leader].batch_key) {
         return false;
@@ -265,7 +263,7 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             NT_ASSERT(material != NULL && "skinned render item references a destroyed material");
             const nt_color_mode_t color_mode = material->color_mode;
             NT_ASSERT(color_mode <= NT_COLOR_MODE_FLOAT4);
-            const uint16_t stride = instance_stride(color_mode);
+            const uint16_t stride = s_instance_layouts[color_mode].stride;
             for (uint32_t i = scan; i < run_end; i++) {
                 nt_entity_t entity = {.id = items[i].entity};
                 const nt_deformation_binding_t binding = *nt_skin_comp_handle(entity);
@@ -305,7 +303,7 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             const nt_material_info_t *material = nt_material_get_info(material_handle);
             const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info(mesh_handle);
             NT_ASSERT(material != NULL && mesh != NULL && "skinned draw references a destroyed material or mesh");
-            const uint16_t stride = instance_stride(material->color_mode);
+            const uint16_t stride = s_instance_layouts[material->color_mode].stride;
             if (!nt_gfx_program_ready(material->program)) {
                 nt_renderer_warn_program_not_ready(&s_skinned.warned_program_not_ready, material);
                 draw_offset += instance_count * stride;
