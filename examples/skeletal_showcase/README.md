@@ -1,14 +1,9 @@
 # Skeletal showcase
 
-`skeletal_showcase` ships two scenes over the existing `nt_skeletal` kernels:
-`Skeleton & Pose` poses an original code-defined humanoid and two imported
-Khronos rigs through `nt_skeletal_fk`, and `Playback` plays the imported glTF
-clips of those rigs on one caller-owned track through `nt_skeletal_sample`.
-The packs carry the skeleton, skin binding, skinned mesh and clips of both
-rigs, but the stage draws bone primitives only, with the existing shape
-renderer. The GPU skinning renderer is implemented; its showcase integration
-is planned in [#524](https://github.com/d954mas/neotolis-engine/issues/524).
-There is no IK, mixer or animation library.
+`Skeleton & Pose` edits joint offsets on the code-defined humanoid and imported
+Khronos rigs. `Skinned Meshes` plays their imported clips on textured meshes with
+explicit palette upload. It includes the former Playback controls and optional
+bones; there is no separate Playback scene, IK, mixer or animation library.
 
 Build and run the native example with:
 
@@ -29,7 +24,7 @@ cmake --preset wasm-debug
 cmake --build --preset wasm-debug --target skeletal_showcase
 ```
 
-The scene list contains two entries, `Skeleton & Pose` and `Playback`. The top
+The scene list contains two entries, `Skeleton & Pose` and `Skinned Meshes`. The top
 selector selects a scene; the right panel holds the scene's controls. Stage
 orbit is owned by the shell: drag with the left mouse button inside the stage,
 drag with the right mouse button to pan, and use the wheel to zoom. UI controls
@@ -42,7 +37,7 @@ holds the sprite and text shaders, the UI atlas, the font, and for each of the
 two Khronos rigs its NSKL skeleton, NSKN skin binding and skinned MESH. The
 clips pack, `skeletal_showcase_clips.ntpack`, holds the four clips (Fox
 `Survey`, `Walk`, `Run` and the CesiumMan walk). Both packs mount at init, and
-the Playback scene plays the clips of the second pack on the skeletons of the
+the Skinned Meshes scene plays the clips of the second pack on the skeletons of the
 first, which is how the showcase exercises "a clip from another pack on an
 already-loaded skeleton". `raw/README.md` lists the raw inputs and their
 attribution.
@@ -50,8 +45,9 @@ attribution.
 Each glb is parsed once; its rig is imported with the default selection (skin 0,
 no cut) and fed to both builder contexts. The skinned mesh is primitive 0 of the
 mesh of the node that instantiates skin 0, exported with `POSITION`, `JOINTS`
-and `WEIGHTS` and, for CesiumMan only, `NORMAL` (the Fox primitive has none);
-nothing draws it yet. Every clip is sampled at 24 fps, and the builder prints
+and `WEIGHTS`, float32 `TEXCOORD_0` and, for CesiumMan only, `NORMAL` (the Fox primitive has none).
+Base-color textures come from each primitive material and ship as RAW with mipmaps.
+Both CPU and GPU use the same textured unlit shading; normals are not used. Every clip is sampled at 24 fps, and the builder prints
 one report line per clip:
 
 ```
@@ -88,7 +84,7 @@ above), `Fox` and `CesiumMan`. The last two are the Khronos glTF sample
 assets in `raw/` (see `raw/README.md` and the `*-LICENSE.txt` files for their
 CC-BY 4.0 attribution); `build_packs.c` imports each one with the default rig
 selection (skin 0, no cut) into an NSKL skeleton, and this scene shows only its
-rest pose; the clips play in `Playback`. Imported joints carry
+rest pose; the clips play in `Skinned Meshes`. Imported joints carry
 `joint_id` hashes but no names, so their list reads `j00 C14E6FD1`. Every rig
 is framed the same way: after FK at rest the scene computes the joint
 centroid and extent, aims the camera at the centroid, and scales the camera
@@ -111,15 +107,15 @@ resulting model-space 3x4 matrix. Offsets are composed in the fixed order
 matrix comes from the full `nt_skeletal_fk` pass. `Axes on` draws local X/Y/Z
 axes in RGB.
 
-## Playback
+## Skinned Meshes
 
 The scene owns one `nt_skeletal_track_t` and nothing else moves time: every
 frame it refetches the selected skeleton and clip views after `resource_step`,
 writes `track.speed` and `track.flags` from the controls, calls
 `nt_skeletal_tracks_advance` with the frame `dt`, samples the clip at
 `track.time` with `nt_skeletal_sample` and runs `nt_skeletal_fk` (over the
-rest pose when no clip is selected). The stage draws the pose with the same
-bone primitives and framing as `Skeleton & Pose`, without a selected subtree.
+rest pose when no clip is selected). The stage draws the mesh with depth test
+and depth writes. `Bones & marker` enables the bone overlay.
 
 Controls, top to bottom:
 
@@ -154,6 +150,22 @@ Controls, top to bottom:
 forward. The `Step` and `Time` grid comes from the clip itself,
 `duration / (sample_count - 1)`, not from a constant.
 
+### CPU comparison
+
+`Compare CPU (pauses)` freezes the player and shows GPU skinning on the left,
+CPU reference on the right. They use the same pose, camera, texture, sampler and
+depth settings. Matching images are the expected result. `Step`, the time slider
+and clip selection update both views; disable comparison to enable Play again.
+Reset also remains paused while comparison is enabled.
+
+The example copies both exported MESH payloads once after load via
+`nt_resource_get_asset_data`, decodes SOA/index compression, and keeps its own
+source bytes through pack/GPU invalidation. Four packed weight bytes divided by
+255 feed a scalar CPU deformation. Its RAW result is rasterized by the static
+mesh renderer. Geometry is rebuilt on explicit pose changes, not each paused
+frame, and survives context loss in CPU memory. This is a verification mode of
+the example, not a general CPU renderer or a required engine animation path.
+
 ## Shell
 
 The Controls panel header contains the common `Reset` button; `Reset` and `R`
@@ -180,7 +192,7 @@ and stage orbit/pan/zoom. Then switch `Rig` to `CesiumMan` and `Fox`, orbit
 each one, and check that the framing, joint size and grid match the
 humanoid's.
 
-Playback: switch the scene to `Playback`; Fox stands at rest and the status
+Playback: switch the scene to `Skinned Meshes`; Fox stands at rest and the status
 line reads `no clip`. Open `Clip`: the three Fox entries are listed and
 `CesiumMan` is not. Select `Fox Walk` and confirm the legs cycle and the
 status time wraps at the duration; select `Fox Run` and confirm the skeleton

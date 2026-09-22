@@ -5,4 +5,7 @@
  * a rig above it, so a bigger asset fails at pack build rather than at runtime. */
 #define SKELETAL_SHOWCASE_MAX_JOINTS 32U
 
+#define SKELETAL_SHOWCASE_MAX_PALETTE 32U
+#define SKELETAL_SHOWCASE_MAX_INSTANCES 256U
+
 #endif /* SKELETAL_SHOWCASE_LIMITS_H */

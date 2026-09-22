@@ -45,18 +45,20 @@ typedef struct {
     const char *skeleton_id;
     const char *binding_id;
     const char *mesh_id;
+    const char *texture_id;
     bool has_normal; /* the scene API asserts on a layout stream the primitive lacks */
     const clip_desc_t *clips;
     uint32_t clip_count;
 } character_desc_t;
 
-/* Joint indices fit UINT8; TEXCOORD is omitted because the showcase only draws bones. */
-static uint32_t skinned_layout(NtStreamLayout out[4], bool has_normal) {
+/* Packed weights are shared by the GPU shader and the CPU reference. */
+static uint32_t skinned_layout(NtStreamLayout out[5], bool has_normal) {
     uint32_t n = 0;
     out[n++] = (NtStreamLayout){"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0};
     if (has_normal) {
         out[n++] = (NtStreamLayout){"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0};
     }
+    out[n++] = (NtStreamLayout){"uv", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0};
     out[n++] = (NtStreamLayout){"joints", "JOINTS", NT_STREAM_UINT8, 4, false, 0};
     out[n++] = (NtStreamLayout){"weights", "WEIGHTS", NT_STREAM_UINT8, 4, true, 0};
     return n;
@@ -82,6 +84,7 @@ static void print_clip_report(const char *resource_id, const nt_builder_clip_rep
 /* The rig of skin 0 up to the scene root is imported once and feeds every
  * export of the character: skeleton, binding and primitive 0 of the skinned
  * mesh into rig_ctx, the clips into clip_ctx. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx, const character_desc_t *desc) {
     nt_glb_scene_t scene;
     const nt_build_result_t parsed = nt_builder_parse_glb_scene(&scene, desc->glb_path);
@@ -90,13 +93,27 @@ static void add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx,
     nt_builder_import_rig(&scene, 0, &rig);
     NT_BUILD_ASSERT(rig.skeleton.joint_count <= SKELETAL_SHOWCASE_MAX_JOINTS && "skeletal_showcase: rig exceeds the pose buffers of main.c");
     nt_builder_add_skeleton(rig_ctx, &rig.skeleton, desc->skeleton_id);
+    NT_BUILD_ASSERT(rig.palette_count <= SKELETAL_SHOWCASE_MAX_PALETTE);
     nt_builder_add_scene_skin_binding(rig_ctx, &rig, desc->binding_id);
 
-    NtStreamLayout layout[4];
+    NtStreamLayout layout[5];
     const uint32_t stream_count = skinned_layout(layout, desc->has_normal);
     const nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = stream_count, .tangent_mode = NT_TANGENT_AUTO};
     const uint32_t mesh = scene.nodes[skinned_node(&scene, rig.skin_index)].mesh_index;
     nt_builder_add_scene_skinned_mesh(rig_ctx, &rig, mesh, 0, NT_BUILDER_SKIN_DROP_TOLERANCE, desc->mesh_id, &mesh_opts);
+
+    const uint32_t material = scene.meshes[mesh].material_index;
+    NT_BUILD_ASSERT(material < scene.material_count);
+    const nt_glb_material_t *surface = &scene.materials[material];
+    NT_BUILD_ASSERT(surface->diffuse_index < scene.texture_count);
+    for (uint32_t c = 0; c < 4; ++c) {
+        NT_BUILD_ASSERT(surface->base_color[c] == 1.0F);
+    }
+    const nt_glb_texture_t *texture = &scene.textures[surface->diffuse_index];
+    nt_tex_opts_t texture_opts = nt_tex_opts_defaults();
+    texture_opts.compress = (nt_basisu_encode_opts_t){0};
+    texture_opts.gen_mipmaps = true;
+    nt_builder_add_texture_from_memory(rig_ctx, texture->data, texture->size, desc->texture_id, &texture_opts);
 
     for (uint32_t c = 0; c < desc->clip_count; c++) {
         nt_builder_clip_report_t report;
@@ -123,6 +140,7 @@ static const character_desc_t k_fox = {
     .skeleton_id = "skeletal_showcase/fox.nskl",
     .binding_id = "skeletal_showcase/fox.nskn",
     .mesh_id = "skeletal_showcase/fox.mesh",
+    .texture_id = "skeletal_showcase/fox.texture",
     .has_normal = false,
     .clips = k_fox_clips,
     .clip_count = (uint32_t)(sizeof k_fox_clips / sizeof k_fox_clips[0]),
@@ -133,6 +151,7 @@ static const character_desc_t k_cesiumman = {
     .skeleton_id = "skeletal_showcase/cesiumman.nskl",
     .binding_id = "skeletal_showcase/cesiumman.nskn",
     .mesh_id = "skeletal_showcase/cesiumman.mesh",
+    .texture_id = "skeletal_showcase/cesiumman.texture",
     .has_normal = true,
     .clips = k_cesiumman_clips,
     .clip_count = (uint32_t)(sizeof k_cesiumman_clips / sizeof k_cesiumman_clips[0]),
@@ -185,6 +204,17 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(rig_ctx, "assets/shaders/sprite.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(rig_ctx, "assets/shaders/slug_text.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(rig_ctx, "assets/shaders/slug_text.frag", NT_BUILD_SHADER_FRAGMENT);
+
+    nt_builder_add_shader(rig_ctx, "assets/shaders/skinned.vert", NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(rig_ctx, "assets/shaders/mesh_inst.vert", NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(rig_ctx, "assets/shaders/mesh_inst.frag", NT_BUILD_SHADER_FRAGMENT);
+    nt_tex_opts_t solid_opts = nt_tex_opts_defaults();
+    solid_opts.compress = (nt_basisu_encode_opts_t){0};
+    solid_opts.gen_mipmaps = true;
+    static const uint8_t white_texture[4] = {255, 255, 255, 255};
+    static const uint8_t tint_texture[4] = {110, 185, 255, 255};
+    nt_builder_add_texture_raw(rig_ctx, white_texture, 1, 1, "skeletal_showcase/white.texture", &solid_opts);
+    nt_builder_add_texture_raw(rig_ctx, tint_texture, 1, 1, "skeletal_showcase/tint.texture", &solid_opts);
 
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
