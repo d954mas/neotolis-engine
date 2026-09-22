@@ -24,7 +24,7 @@ cmake --preset wasm-debug
 cmake --build --preset wasm-debug --target skeletal_showcase
 ```
 
-The scene list contains two entries, `Skeleton & Pose` and `Skinned Meshes`. The top
+The scene list contains `Skeleton & Pose`, `Skinned Meshes` and `Order & Instancing`. The top
 selector selects a scene; the right panel holds the scene's controls. Stage
 orbit is owned by the shell: drag with the left mouse button inside the stage,
 drag with the right mouse button to pan, and use the wheel to zoom. UI controls
@@ -109,19 +109,18 @@ axes in RGB.
 
 ## Skinned Meshes
 
-The scene owns one `nt_skeletal_track_t` and nothing else moves time: every
+The scene owns the character track and a second track for independent clothes. Every
 frame it refetches the selected skeleton and clip views after `resource_step`,
 writes `track.speed` and `track.flags` from the controls, calls
 `nt_skeletal_tracks_advance` with the frame `dt`, samples the clip at
 `track.time` with `nt_skeletal_sample` and runs `nt_skeletal_fk` (over the
 rest pose when no clip is selected). The stage draws the mesh with depth test
-and depth writes. `Bones & marker` enables the bone overlay.
+and depth writes. `Bones` enables the bone overlay; the humanoid also shows a hand marker.
 
 Controls, top to bottom:
 
-- `Character`: `Fox` or `CesiumMan` (the humanoid has no clips and is not
-  offered). Switching deselects the clip and refits the camera. While the
-  skeleton is not ready the panel shows `loading...`.
+- `Character`: `Humanoid`, `Fox` or `CesiumMan`. Switching deselects the clip
+  and refits the camera. Clip controls wait for the skeleton to load.
 - `Clip`: every loaded clip whose `rig_compat_id` matches the selected
   skeleton, so CesiumMan lists its one clip and the Fox skeleton takes
   `Fox Survey`, `Fox Walk` and `Fox Run` in any order without being reloaded.
@@ -166,6 +165,49 @@ mesh renderer. Geometry is rebuilt on explicit pose changes, not each paused
 frame, and survives context loss in CPU memory. This is a verification mode of
 the example, not a general CPU renderer or a required engine animation path.
 
+### Body and clothes
+
+`Humanoid motion` is an asymmetric, code-authored two-second clip. White body
+and blue shirt have mixed-weight vertices. The shirt vertices use a different
+mesh space: `C` scales by 1.25 and translates by (0.3, 0.25, -0.2).
+Its vertices contain `inverse(C) * authored_position` and its binding contains
+`IB_body * C`, so the two transforms cancel before deformation. Both meshes
+receive the same nonidentity entity world transform, applied once after skinning.
+
+Shared pose evaluates one track but builds two palettes because the inverse
+binds differ. `Independent clothes` evaluates the second track with a 0.45-second
+phase offset; it leaves the body's clock unchanged. These are skinned garments,
+without cloth physics. `Bones & marker` transforms a point (0.2, 0.1, 0.15) on the
+left hand through `E * G[hand]`; there is no socket object or attachment API.
+
+## Order & Instancing
+
+The instance slider selects an active prefix of 256 preallocated entities and
+tracks. Inactive tracks pause; changing the count preserves their times.
+`Shared binding` evaluates one pose and copies its deformation binding to all
+active entities. Otherwise each active track produces its own palette. Tracks
+keep advancing in either mode. One workspace is reused for sample/FK.
+
+The game submits items in the displayed order without sorting. Alternating
+meshes uses body and a shirt mesh in the body's authored space under the same
+inverse binds; alternating materials uses two actual material handles.
+
+| Mode | Pass 1 draws | Pass 2 draws |
+| --- | --- | --- |
+| Grouped | 1 | 1 |
+| Alternating meshes | N | N |
+| Alternating materials | N | 1 |
+
+`Two passes` draws the same poses/world transforms into two viewports within
+one gfx pass. Pass 2 assigns one tint material and rebuilds the batch keys.
+It does not test transitions between two `nt_gfx_begin_pass` calls. Both draws
+reuse one palette upload. Per-pass counters show measured draw calls and
+instances plus the expected count for that completed frame, excluding UI.
+
+The palette texture is 96 by 256 RGBA32F texels. Each 21-joint palette occupies
+one row: 1008 useful bytes, 1536 uploaded bytes. Shared mode builds one palette;
+independent mode builds N. Both views together draw 2N instances.
+
 ## Shell
 
 The Controls panel header contains the common `Reset` button; `Reset` and `R`
@@ -202,3 +244,71 @@ holds; check `Reverse` and confirm it runs back to 0 and holds. Pause, press
 `Step` a few times and confirm the time moves by one sample per press; drag `Time`
 and confirm the pose follows. Switch `Character` to `CesiumMan`: `Clip` lists
 only `CesiumMan`; select it and confirm the walk plays upright.
+
+
+### Capture and compare
+
+Enable the existing DevAPI groups when configuring a capture build:
+
+```bash
+cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_UI=ON
+cmake --build --preset native-debug --target skeletal_showcase
+```
+
+Run from `build/examples/skeletal_showcase/native-debug`, select Skinned Meshes,
+enable Compare CPU, disable Bones and keep Controls visible for the report. Keep the engine loop running; only the
+character player pauses. From the repository root, with Pillow and NumPy installed:
+
+```bash
+python -m tools.devapi.scenarios.skeletal_compare --output build/skeletal-compare
+```
+
+This uses `SocketTransport` and `DevApiClient.capture_frame(scale=1)`, saves the
+full PNG, both stage halves and a JSON report, and exits with an assertion
+failure if any-channel delta >2 affects more than 0.5% of the union of visible
+model pixels. Empty coverage fails. The background must stay uniform and clear;
+UI, ground and bones must be outside the compared area. Matching images are
+expected: CPU computes positions while the static renderer still rasterizes them
+on the GPU.
+
+After activating the pinned SDK, build the WebGL2 capture variant:
+
+```bash
+cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_UI=ON
+cmake --build --preset wasm-debug --target skeletal_showcase
+python -m http.server 8125 --bind 127.0.0.1 --directory build/examples/skeletal_showcase/wasm-debug
+```
+
+Open `http://127.0.0.1:8125`, select the same comparison pose, then use the
+existing browser bridge. Capture replies are deferred; wait for the actual PNG:
+
+```js
+const command = {method: "capture.frame", request_id: 1, params: {scale: 1}};
+let reply = window.__devapi.submit(JSON.stringify(command));
+const deadline = performance.now() + 5000;
+while (!reply && performance.now() < deadline) {
+    await new Promise(requestAnimationFrame);
+    reply = window.__devapi.poll();
+}
+if (!reply) throw new Error("Capture timed out");
+const response = JSON.parse(reply);
+if (!response.ok) throw new Error(JSON.stringify(response.error));
+const image = new Image();
+image.src = "data:image/png;base64," + response.result.data;
+document.body.append(image);
+```
+
+The Python comparator's `compare(client, output, backend)` also accepts a
+`DevApiClient(PlaywrightTransport(page))` for automated browser captures.
+Context-loss restoration is reviewed in code; a full loss/retry run remains
+outside this showcase's evidence.
+
+
+Verification on the implementation branch covered all four imported clips at
+zero, an internal sample, the endpoint and between samples, plus endpoint-to-loop
+normalization. Native and Chromium WebGL2 (ANGLE SwiftShader) also compared the
+procedural body/clothes with shared and independent poses under nonidentity E/C.
+All comparisons met the 0.5% coverage threshold. Both backends measured the
+ordering table for N=1, 2, 17 and 256 with Shared binding off/on. This verifies
+unlit position deformation and batching; it does not verify lighting normals,
+cloth simulation, performance budgets or the full context-loss/retry sequence.

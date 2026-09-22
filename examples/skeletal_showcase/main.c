@@ -179,6 +179,19 @@ static bool s_cpu_reference;
 static bool s_reference_dirty;
 static bool s_show_bones;
 static nt_entity_t s_mesh_entities[2];
+static nt_entity_t s_order_entities[SKELETAL_SHOWCASE_MAX_INSTANCES];
+static nt_skeletal_track_t s_order_tracks[SKELETAL_SHOWCASE_MAX_INSTANCES];
+static int s_order_count = 17;
+static int s_order_mode;
+static bool s_order_shared;
+static bool s_order_two_passes;
+static bool s_order_paused;
+static bool s_order_combo_open;
+static const char *const s_order_names[] = {"Grouped", "Alternating meshes", "Alternating materials"};
+static struct {
+    uint32_t draws[2], expected[2], instances[2];
+    uint32_t passes, palettes;
+} s_order_stats;
 static nt_resource_t s_mesh_resource[RIG_COUNT];
 static nt_resource_t s_skin_resource[RIG_COUNT];
 static nt_resource_t s_texture_resource[RIG_COUNT + 1];
@@ -279,6 +292,11 @@ static void skinned_update(void);
 static void skinned_cancel_input(void);
 static void skinned_declare_controls(void);
 static void skinned_draw(void);
+static void ordering_reset(void);
+static void ordering_update(void);
+static void ordering_cancel_input(void);
+static void ordering_declare_controls(void);
+static void ordering_draw(void);
 
 static const skeletal_scene_desc_t s_scene_registry[] = {
     {
@@ -300,6 +318,16 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
         .cancel_input = skinned_cancel_input,
         .declare_controls = skinned_declare_controls,
         .draw = skinned_draw,
+    },
+    {
+        .title = "Order & Instancing",
+        .description = "Adjacent items batch together; palettes upload once before both views.",
+        .source = "Source: examples/skeletal_showcase/main.c",
+        .reset = ordering_reset,
+        .update = ordering_update,
+        .cancel_input = ordering_cancel_input,
+        .declare_controls = ordering_declare_controls,
+        .draw = ordering_draw,
     },
 };
 #define SKELETAL_SCENE_COUNT ((int)(sizeof s_scene_registry / sizeof s_scene_registry[0]))
@@ -513,7 +541,7 @@ static void fit_camera_to_stage(float stage_w, float stage_h) {
     const float vertical_fov = glm_rad(45.0F);
     const float horizontal_fov = 2.0F * atanf(tanf(vertical_fov * 0.5F) * (stage_w / stage_h));
     /* Frame the full rig with room for joint spheres and perspective at the lower edge. */
-    const float span = (s_scene_registry[s_active_scene].draw == skinned_draw ? 7.0F : 5.20F) * s_fit_scale;
+    const float span = (s_scene_registry[s_active_scene].draw == skeleton_draw ? 5.20F : 7.0F) * s_fit_scale;
     const float vertical_distance = span / (2.0F * tanf(vertical_fov * 0.5F));
     const float horizontal_distance = span / (2.0F * tanf(horizontal_fov * 0.5F));
     s_camera_distance = vertical_distance > horizontal_distance ? vertical_distance : horizontal_distance;
@@ -576,7 +604,12 @@ static void update_stage_camera(const nt_pointer_t *pointer, const nt_ui_scale_t
 }
 // #endregion
 
-static const nt_skeletal_clip_t *player_clip_view(int clip) { return clip == CLIP_COUNT - 1 ? &s_humanoid_clip : nt_skeletal_assets_clip(s_clip_resource[clip]); }
+static const nt_skeletal_clip_t *player_clip_view(int clip) {
+    if (clip == CLIP_COUNT - 1) {
+        return &s_humanoid_clip;
+    }
+    return nt_resource_is_ready(s_clip_resource[clip]) ? nt_skeletal_assets_clip(s_clip_resource[clip]) : NULL;
+}
 
 // #region playback
 static void player_deselect_clip(character_player_t *p) {
@@ -692,6 +725,41 @@ static void skinned_update(void) {
 }
 // #endregion
 
+// #region ordering
+static void ordering_reset(void) {
+    s_order_count = 17;
+    s_order_mode = 0;
+    s_order_shared = false;
+    s_order_two_passes = false;
+    s_order_paused = false;
+    s_order_combo_open = false;
+    memset(&s_order_stats, 0, sizeof s_order_stats);
+    for (uint32_t i = 0; i < SKELETAL_SHOWCASE_MAX_INSTANCES; ++i) {
+        s_order_tracks[i] = (nt_skeletal_track_t){
+            .time = fmod((double)i * 0.27, s_humanoid_clip.duration), .duration = s_humanoid_clip.duration, .speed = 1, .flags = NT_SKELETAL_TRACK_OCCUPIED | NT_SKELETAL_TRACK_LOOPING};
+    }
+    s_fit_pending = true;
+}
+
+static void ordering_update(void) {
+    for (int i = 0; i < s_order_count; ++i) {
+        s_order_tracks[i].speed = s_order_paused ? 0 : 1;
+    }
+    nt_skeletal_tracks_advance(s_order_tracks, (uint32_t)s_order_count, (double)g_nt_app.dt);
+    if (s_fit_pending) {
+        const int columns = s_order_count < 16 ? s_order_count : 16;
+        const int rows = (s_order_count + 15) / 16;
+        const float center[3] = {(float)(columns - 1) * 2.5F, 1.8F, (float)(rows - 1) * 2.5F};
+        set_camera_fit(center, (float)(columns > rows ? columns : rows));
+        s_camera_yaw = 0.3F;
+        s_camera_pitch = 0.45F;
+        s_fit_pending = false;
+    }
+}
+
+static void ordering_cancel_input(void) { s_order_combo_open = false; }
+// #endregion
+
 // #region scene meshes
 /* The standard MESH activator already checked structure. Decode once at load;
  * keep exactly its packed attribute bytes for the independent scalar reference. */
@@ -750,11 +818,11 @@ static void finish_mesh_sources(void) {
             continue;
         }
         const uint8_t *wire = nt_resource_get_asset_data(s_mesh_resource[rig], NULL);
-        const nt_skin_binding_t *skin = nt_skeletal_assets_skin_binding(s_skin_resource[rig]);
         const nt_skeletal_skeleton_t *skel = rig_view((rig_source_t)rig);
-        if (wire == NULL || skin == NULL || skel == NULL) {
+        if (wire == NULL || !nt_resource_is_ready(s_skin_resource[rig]) || skel == NULL) {
             continue;
         }
+        const nt_skin_binding_t *skin = nt_skeletal_assets_skin_binding(s_skin_resource[rig]);
         NT_ASSERT(skin->rig_compat_id.value == skel->rig_compat_id.value);
         copy_mesh_source(source, wire);
         nt_log_info("skeletal_showcase: copied %s MESH (%u bytes)", s_rig_names[rig], source->size);
@@ -957,9 +1025,14 @@ static void init_mesh_scene(void) {
     NT_ASSERT(result == NT_OK);
     result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = SKELETAL_SHOWCASE_MAX_INSTANCES, .max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
-    for (uint32_t i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < SKELETAL_SHOWCASE_MAX_INSTANCES + 2U; ++i) {
         const nt_entity_t e = nt_entity_create();
-        s_mesh_entities[i] = e;
+        if (i < 2) {
+            s_mesh_entities[i] = e;
+        } else {
+            const uint32_t index = i - 2U;
+            s_order_entities[index] = e;
+        }
         bool added = nt_transform_comp_add(e);
         NT_ASSERT(added);
         added = nt_mesh_comp_add(e);
@@ -970,6 +1043,11 @@ static void init_mesh_scene(void) {
         NT_ASSERT(added);
         added = nt_skin_comp_add(e);
         NT_ASSERT(added);
+        if (i >= 2) {
+            const uint32_t index = i - 2U;
+            const uint32_t row = index / 16U;
+            nt_transform_comp_set_position(e, (float)(index % 16U) * 5.0F, 0, (float)row * 5.0F);
+        }
     }
     nt_transform_comp_update();
     init_humanoid_meshes();
@@ -1018,6 +1096,7 @@ static void restore_mesh_scene(void) {
     }
 }
 
+#ifndef NT_PLATFORM_WEB
 static void shutdown_mesh_scene(void) {
     nt_skinned_mesh_renderer_shutdown();
     nt_mesh_renderer_shutdown();
@@ -1045,6 +1124,7 @@ static void shutdown_mesh_scene(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
 }
+#endif
 // #endregion
 
 // #region resources
@@ -1423,6 +1503,43 @@ static void skinned_declare_controls(void) {
     }
 }
 
+static void ordering_declare_controls(void) {
+    char text[128];
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
+        (void)snprintf(text, sizeof text, "Instances: %d", s_order_count);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(14, (Clay_Color){145, 215, 255, 255}));
+        if (nt_ui_slider_int(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("ordering/count"), NULL, &s_order_count, 1, SKELETAL_SHOWCASE_MAX_INSTANCES, 1, &s_slider_style,
+                             &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, !s_skip_scene_interaction_this_frame)) {
+            s_fit_pending = true;
+        }
+        if (nt_ui_combo_begin(s_ui, NULL, 4, nt_ui_id("ordering/mode"), s_order_names[s_order_mode], &s_joint_combo_style, &s_order_combo_open)) {
+            for (uint32_t i = 0; i < 3; ++i) {
+                if (nt_ui_combo_selectable(s_ui, i, s_order_names[i], i == (uint32_t)s_order_mode)) {
+                    s_order_mode = (int)i;
+                }
+            }
+            nt_ui_combo_end(s_ui);
+        }
+        const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}}};
+        (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("ordering/shared"), "Shared binding", &s_order_shared, &s_checkbox_style, &row, true);
+        (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("ordering/passes"), "Two passes", &s_order_two_passes, &s_checkbox_style, &row, true);
+        (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("ordering/paused"), "Pause", &s_order_paused, &s_checkbox_style, &row, true);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Last completed frame", label_style(14, (Clay_Color){145, 215, 255, 255}));
+        for (uint32_t pass = 0; pass < s_order_stats.passes; ++pass) {
+            (void)snprintf(text, sizeof text, "Pass %u: draws %u / expected %u", pass + 1U, s_order_stats.draws[pass], s_order_stats.expected[pass]);
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){240, 246, 255, 255}));
+            (void)snprintf(text, sizeof text, "Instances drawn: %u", s_order_stats.instances[pass]);
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
+        }
+        (void)snprintf(text, sizeof text, "Palette builds: %u", s_order_stats.palettes);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
+        (void)snprintf(text, sizeof text, "Palette bytes: %u", s_order_stats.palettes * HUMANOID_JOINT_COUNT * 48U);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
+        (void)snprintf(text, sizeof text, "Upload bytes: %u", s_order_stats.palettes * (3U * SKELETAL_SHOWCASE_MAX_PALETTE) * 16U);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_ui(const nt_ui_scale_t *scale) {
     nt_ui_begin(s_ui, scale->logical_w, scale->logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
@@ -1442,6 +1559,14 @@ static void declare_ui(const nt_ui_scale_t *scale) {
                             nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "GPU skinning", label_style(13.0F, (Clay_Color){145, 215, 255, 255}));
                         }
                         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "CPU reference (paused)", label_style(13.0F, (Clay_Color){145, 215, 255, 255}));
+                    }
+                }
+                if (s_order_two_passes && scene->draw == ordering_draw) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_PERCENT(0.5F), CLAY_SIZING_FIT(0)}}}) {
+                            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pass 1", label_style(13, (Clay_Color){145, 215, 255, 255}));
+                        }
+                        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pass 2: one tint material", label_style(13, (Clay_Color){145, 215, 255, 255}));
                     }
                 }
                 CLAY({.id = CLAY_ID(STAGE_ID), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
@@ -1596,10 +1721,10 @@ static void mesh_viewport(uint32_t part, uint32_t count) {
 static void skinned_draw(void) {
     const character_player_t *p = &s_skinned_scene.player;
     const bool humanoid = p->rig == RIG_HUMANOID;
-    const nt_skin_binding_t *skins[2] = {humanoid ? &s_humanoid_skin[0] : nt_skeletal_assets_skin_binding(s_skin_resource[p->rig]), &s_humanoid_skin[1]};
-    if (p->skel == NULL || skins[0] == NULL || g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F) {
+    if (p->skel == NULL || (!humanoid && !nt_resource_is_ready(s_skin_resource[p->rig])) || g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F) {
         return;
     }
+    const nt_skin_binding_t *skins[2] = {humanoid ? &s_humanoid_skin[0] : nt_skeletal_assets_skin_binding(s_skin_resource[p->rig]), &s_humanoid_skin[1]};
     const uint32_t count = humanoid ? 2U : 1U;
     const nt_skeletal_mat34_t *models[2] = {p->model, s_independent_clothes ? s_clothes_model : p->model};
     cpu_mesh_t *sources[2] = {&s_cpu_mesh[p->rig], &s_cpu_mesh[CPU_CLOTHES]};
@@ -1678,6 +1803,51 @@ static void skinned_draw(void) {
             }
             nt_shape_renderer_flush();
         }
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void ordering_draw(void) {
+    if (g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F || !nt_resource_is_ready(s_texture_resource[RIG_HUMANOID]) || !nt_resource_is_ready(s_texture_resource[RIG_COUNT]) ||
+        !nt_gfx_program_ready(s_skin_program.program)) {
+        return;
+    }
+    const uint32_t count = (uint32_t)s_order_count;
+    const uint32_t passes = s_order_two_passes ? 2U : 1U;
+    s_order_stats.passes = passes;
+    s_order_stats.palettes = 0;
+    nt_skeletal_gpu_begin_frame();
+    for (uint32_t i = 0; i < count; ++i) {
+        nt_deformation_binding_t *binding = nt_skin_comp_handle(s_order_entities[i]);
+        if (s_order_shared && i > 0) {
+            *binding = *nt_skin_comp_handle(s_order_entities[0]);
+        } else {
+            nt_skeletal_trs_t local[HUMANOID_JOINT_COUNT];
+            nt_skeletal_mat34_t model[HUMANOID_JOINT_COUNT];
+            nt_skeletal_sample(&s_humanoid_clip, s_order_tracks[i].time, local);
+            nt_skeletal_fk(&s_humanoid, local, model, 0, HUMANOID_JOINT_COUNT);
+            nt_skeletal_mat34_t *palette = nt_skeletal_gpu_reserve(HUMANOID_JOINT_COUNT, binding);
+            nt_skin_palette_build(&s_humanoid_skin[0], model, HUMANOID_JOINT_COUNT, palette, HUMANOID_JOINT_COUNT);
+            ++s_order_stats.palettes;
+        }
+    }
+    nt_skeletal_gpu_flush();
+    for (uint32_t pass = 0; pass < passes; ++pass) {
+        nt_render_item_t items[SKELETAL_SHOWCASE_MAX_INSTANCES];
+        for (uint32_t i = 0; i < count; ++i) {
+            const nt_entity_t e = s_order_entities[i];
+            const nt_mesh_t mesh = s_procedural_mesh[s_order_mode == 1 && (i % 2U) != 0U ? 2 : 0];
+            const nt_material_t material = s_skin_material[pass == 1 || (s_order_mode == 2 && (i % 2U) != 0U) ? RIG_COUNT : RIG_HUMANOID];
+            *nt_mesh_comp_handle(e) = mesh;
+            *nt_material_comp_handle(e) = material;
+            items[i] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
+        }
+        mesh_viewport(pass, passes);
+        const nt_gfx_frame_stats_t before = g_nt_gfx.frame_stats;
+        nt_skinned_mesh_renderer_draw_list(items, count);
+        s_order_stats.draws[pass] = g_nt_gfx.frame_stats.draw_calls - before.draw_calls;
+        s_order_stats.instances[pass] = g_nt_gfx.frame_stats.instances - before.instances;
+        s_order_stats.expected[pass] = s_order_mode == 0 || (pass == 1 && s_order_mode == 2) ? 1U : count;
     }
 }
 
@@ -1819,7 +1989,8 @@ static void frame(void) {
     s_scene_registry[s_active_scene].update();
     if (ready) {
         s_stage_bbox = nt_ui_get_bbox(s_ui, nt_ui_id(STAGE_ID));
-        const float camera_width = s_stage_bbox.width / ((s_cpu_reference && s_scene_registry[s_active_scene].draw == skinned_draw) ? 2.0F : 1.0F);
+        const bool split = (s_cpu_reference && s_scene_registry[s_active_scene].draw == skinned_draw) || (s_order_two_passes && s_scene_registry[s_active_scene].draw == ordering_draw);
+        const float camera_width = s_stage_bbox.width / (split ? 2.0F : 1.0F);
         const bool stage_resized = fabsf(s_camera_fit_width - camera_width) > 0.5F || fabsf(s_camera_fit_height - s_stage_bbox.height) > 0.5F;
         if (stage_resized && s_stage_bbox.found && s_stage_bbox.height > 1.0F) {
             fit_camera_to_stage(camera_width, s_stage_bbox.height);
@@ -1964,6 +2135,7 @@ int main(int argc, char *argv[]) {
 
     init_humanoid();
     init_mesh_scene();
+    ordering_reset();
     init_ui_styles();
     s_skinned_scene.player.rig = RIG_FOX;
     skinned_reset();
