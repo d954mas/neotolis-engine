@@ -70,6 +70,17 @@ static inline void nt_gfx_capture_result(nt_gfx_operation_t operation, nt_gfx_ob
 #define NT_GFX_RESULT(...) ((void)0)
 #endif
 
+#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+static inline void nt_gfx_observe_context_loss(void) {
+    if (g_nt_gfx_observation.active && !g_nt_gfx_observation.aborted) {
+        g_nt_gfx_observation.aborted = true;
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_CONTEXT_LOST);
+    }
+}
+#else
+#define nt_gfx_observe_context_loss() ((void)0)
+#endif
+
 #if NT_GFX_COUNTERS_ENABLED
 static inline void nt_gfx_observe_count(uint32_t *counter) {
     if (g_nt_gfx_observation.active && g_nt_gfx_observation.stats_enabled) {

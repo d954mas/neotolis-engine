@@ -73,6 +73,36 @@ static void test_disabled_counters_are_unavailable(void) {
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
+static void test_resource_operations_keep_published_handles_after_destroy(void) {
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 24});
+    nt_gfx_destroy_buffer(buffer);
+    (void)nt_gfx_observe_end_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    bool created = false;
+    bool destroyed = false;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind == NT_GFX_EVENT_RESULT && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == buffer.id && e->reason == NT_GFX_REASON_ACCEPTED) {
+            created |= e->operation == NT_GFX_OP_CREATE;
+            destroyed |= e->operation == NT_GFX_OP_DESTROY;
+        }
+    }
+    TEST_ASSERT_TRUE(created);
+    TEST_ASSERT_TRUE(destroyed);
+}
+
+static void test_loss_detected_during_creation_aborts_observation(void) {
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    nt_gfx_fake_set_context_lost(true);
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
+    TEST_ASSERT_EQUAL_UINT32(0, buffer.id);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, nt_gfx_observe_end_frame()->status);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, nt_gfx_capture_read().status);
+}
+
 static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 24});
     nt_gfx_capture_set_enabled(true);
@@ -202,6 +232,8 @@ int main(void) {
     RUN_TEST(test_disabled_counters_are_unavailable);
 #endif
 #if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_resource_operations_keep_published_handles_after_destroy);
+    RUN_TEST(test_loss_detected_during_creation_aborts_observation);
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);

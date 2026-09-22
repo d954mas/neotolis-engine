@@ -162,6 +162,8 @@ static void discard_texture_set(void) { s_gfx.texture_set_state = NT_GFX_TEXTURE
 /* ---- Global UBO block registration ---- */
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_UNIFORM_BLOCK, event.object_kind = NT_GFX_OBJECT_NONE; event.object = 0; event.detail = 0;
+                  event.data.binding.name = name != NULL ? nt_hash32_str(name).value : 0; event.data.binding.slot = binding_slot;);
     NT_ASSERT(name != NULL);
     NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
     /* Borrowed until nt_gfx_shutdown; use a string literal or equally long-lived immutable storage. */
@@ -176,6 +178,7 @@ void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
             nt_gfx_backend_set_uniform_block(s_gfx.program_backends[i], name, binding_slot);
         }
     }
+    NT_GFX_RESULT(NT_GFX_OP_UNIFORM_BLOCK, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_ACCEPTED);
 }
 
 void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count) {
@@ -666,26 +669,31 @@ static bool render_target_depth_format_valid(const nt_render_target_desc_t *desc
 }
 
 static void destroy_texture_slot(nt_texture_t tex, bool allow_render_target_owned) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DESTROY, event.object_kind = NT_GFX_OBJECT_TEXTURE; event.object = tex.id;);
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         NT_LOG_ERROR("destroy_texture: invalid handle");
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE, tex.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     uint32_t slot = nt_pool_slot_index(tex.id);
     NT_ASSERT((!s_gfx.texture_metas[slot].render_target_owned || allow_render_target_owned) && "destroy_texture: texture is owned by a render target");
     if (s_gfx.texture_metas[slot].render_target_owned && !allow_render_target_owned) {
         NT_LOG_ERROR("destroy_texture: texture is owned by a render target");
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE, tex.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     /* Pass-scoped draw state may still sample it; lifetime changes stay outside passes. */
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS && "destroy_texture called inside a pass");
     if (s_gfx.render_state == NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("destroy_texture called inside a pass");
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE, tex.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
     s_gfx.texture_backends[slot] = 0;
     memset(&s_gfx.texture_metas[slot], 0, sizeof(nt_gfx_texture_meta_t));
     nt_pool_free(&s_gfx.texture_pool, tex.id);
+    NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE, tex.id, NT_GFX_REASON_ACCEPTED);
 }
 
 static void render_target_commit_attachment_backend(nt_texture_t tex, uint32_t backend, const nt_texture_desc_t *desc) {
@@ -1044,14 +1052,17 @@ void nt_gfx_end_pass(void) {
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_SHADER; if (desc != NULL) { event.data.resource.type = (uint32_t)desc->type; });
     nt_shader_t result = {0};
     if (!desc) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_SHADER, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
 
     uint32_t id = nt_pool_alloc(&s_gfx.shader_pool);
     if (id == 0) {
         NT_LOG_ERROR("shader pool full");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_SHADER, 0, NT_GFX_REASON_CAPACITY);
         return result;
     }
 
@@ -1059,6 +1070,7 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
     if (backend == 0) {
         NT_LOG_ERROR("backend shader creation failed");
         nt_pool_free(&s_gfx.shader_pool, id);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_SHADER, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return result;
     }
 
@@ -1066,16 +1078,21 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
     s_gfx.shader_backends[slot] = backend;
 
     result.id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SHADER, result.id);
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_SHADER; event.object = result.id; event.data.resource.backend = backend;
+                  event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_PROGRAM; event.data.resource.related[0] = vs.id; event.data.resource.related[1] = fs.id;);
     NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, vs.id) && "make_program: invalid vertex shader handle");
     NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, fs.id) && "make_program: invalid fragment shader handle");
 
     /* The browser can recover before begin_frame resets the backend tables. */
     if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM, 0, NT_GFX_REASON_CONTEXT_LOST);
         return NT_PROGRAM_INVALID;
     }
 
@@ -1085,6 +1102,7 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
      * permanently unready, so this is recoverable state and not a caller error.
      * The owner recreates the stages and links again. */
     if (vs_backend == 0 || fs_backend == 0) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return NT_PROGRAM_INVALID;
     }
 
@@ -1096,6 +1114,7 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
     uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
     if (backend == 0 && nt_gfx_backend_is_context_lost()) {
         nt_pool_free(&s_gfx.program_pool, id);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM, 0, NT_GFX_REASON_CONTEXT_LOST);
         return NT_PROGRAM_INVALID;
     }
     NT_ASSERT(backend != 0 && "program link failed");
@@ -1103,6 +1122,9 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
     s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
 
     nt_program_t result = {id};
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, result.id);
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_PROGRAM; event.object = result.id; event.data.resource.backend = backend;
+                  event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
 }
 
@@ -1173,6 +1195,7 @@ static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_PIPELINE; if (desc != NULL) { event.data.resource.related[0] = desc->program.id; });
     /* Everything a caller controls is a developer error and traps. What is left
      * -- a lost context, a failed backend allocation -- returns an invalid handle
      * the caller retries on a later frame. */
@@ -1182,6 +1205,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
      * backend, so without this every renderer would trap on the readiness assert
      * below -- and the browser can recover before begin_frame resets the tables. */
     if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PIPELINE, 0, NT_GFX_REASON_CONTEXT_LOST);
         return result;
     }
     NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
@@ -1196,6 +1220,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     if (backend == 0) {
         NT_LOG_ERROR("backend pipeline creation failed");
         nt_pool_free(&s_gfx.pipeline_pool, id);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PIPELINE, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return result;
     }
     /* Backend records are addressed directly by pool slot. */
@@ -1204,16 +1229,25 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     s_gfx.pipeline_programs[slot] = desc->program.id;
 
     result.id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PIPELINE, result.id);
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = result.id; event.data.resource.backend = backend;
+                  event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
+    NT_GFX_RECORD(
+        NT_GFX_EVENT_BEGIN, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_VERTEX_INPUT; if (desc != NULL) {
+            event.data.resource.related[0] = desc->vertex_buffer.id;
+            event.data.resource.related[1] = desc->index_buffer.id;
+        });
     /* Same contract as make_pipeline: caller errors trap, only a lost context
      * or a failed backend allocation returns an invalid handle. */
     nt_vertex_input_t result = {0};
     NT_ASSERT(desc != NULL);
     if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_VERTEX_INPUT, 0, NT_GFX_REASON_CONTEXT_LOST);
         return result;
     }
     NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
@@ -1259,6 +1293,7 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
     if (backend == 0) {
         NT_LOG_ERROR("backend vertex input creation failed");
         nt_pool_free(&s_gfx.vertex_input_pool, id);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_VERTEX_INPUT, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return result;
     }
     NT_ASSERT(backend == slot && "create_vertex_input: backend must mirror the pool slot");
@@ -1272,17 +1307,30 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
     };
 
     result.id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_VERTEX_INPUT, result.id);
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_VERTEX_INPUT; event.object = result.id; event.data.resource.backend = backend;
+                  event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
 }
 
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
+    NT_GFX_RECORD(
+        NT_GFX_EVENT_BEGIN, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_BUFFER; if (desc != NULL) {
+            event.data.resource.size = desc->size;
+            event.data.resource.type = (uint32_t)desc->type;
+            event.data.resource.usage = (uint32_t)desc->usage;
+            event.data.resource.format = desc->index_type;
+            event.data.resource.flags = desc->data != NULL;
+        });
     nt_buffer_t result = {0};
     if (!desc) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_BUFFER, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     /* Same recoverable contract as the other make_* creators -- without this
      * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
     if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_BUFFER, 0, NT_GFX_REASON_CONTEXT_LOST);
         return result;
     }
 
@@ -1294,6 +1342,7 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     if (backend == 0) {
         NT_LOG_ERROR("backend buffer creation failed");
         nt_pool_free(&s_gfx.buffer_pool, id);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_BUFFER, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return result;
     }
 
@@ -1305,6 +1354,9 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     s_gfx.buffer_metas[slot].size = desc->size;
 
     result.id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_BUFFER, result.id);
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_BUFFER; event.object = result.id; event.data.resource.backend = backend;
+                  event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
 }
 
@@ -1324,14 +1376,24 @@ static bool texture_compressed_format_supported(nt_texture_format_t format) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
+    NT_GFX_RECORD(
+        NT_GFX_EVENT_BEGIN, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_TEXTURE; if (desc != NULL) {
+            event.data.resource.width = desc->width;
+            event.data.resource.height = desc->height;
+            event.data.resource.format = (uint32_t)desc->format;
+            event.data.resource.levels = desc->level_count;
+            event.data.resource.flags = desc->gen_mipmaps;
+        });
     nt_texture_t result = {0};
     if (!desc) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     /* Under a lost context glGenTextures records GL_INVALID_OPERATION in
      * Emscripten's module-global GL.lastError, which survives context
      * recreation and would trip the next upload's pending-error assert. */
     if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, NT_GFX_REASON_CONTEXT_LOST);
         return result;
     }
     nt_texture_desc_t local_desc = *desc;
@@ -1339,16 +1401,19 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     // #region descriptor contract
     if (local_desc.width == 0 || local_desc.height == 0) {
         NT_LOG_ERROR("make_texture: zero dimension");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     if (local_desc.width > g_nt_gfx.gpu_caps.max_texture_size || local_desc.height > g_nt_gfx.gpu_caps.max_texture_size) {
         NT_LOG_ERROR("make_texture: %ux%u exceeds GPU max_texture_size %u", local_desc.width, local_desc.height, g_nt_gfx.gpu_caps.max_texture_size);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
 
     bool format_valid = nt_texture_format_valid(local_desc.format);
     NT_ASSERT(format_valid && "make_texture: format is required");
     if (!format_valid) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
 
@@ -1362,6 +1427,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         NT_ASSERT((local_desc.format != NT_TEXTURE_FORMAT_BC7_RGBA || (local_desc.width % 4 == 0 && local_desc.height % 4 == 0)) && "make_texture: BC7 base dimensions must be multiples of 4");
         if (!texture_compressed_format_supported(local_desc.format)) {
             NT_LOG_ERROR("make_texture: compressed format %u is not supported by this GPU", (unsigned)local_desc.format);
+            NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, NT_GFX_REASON_INVALID_ARGUMENT);
             return result;
         }
     }
@@ -1407,6 +1473,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     if (backend == 0) {
         NT_LOG_ERROR("backend texture creation failed");
         nt_pool_free(&s_gfx.texture_pool, id);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return result;
     }
 
@@ -1421,6 +1488,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     if (default_sampler.id == 0) {
         nt_gfx_backend_destroy_texture(backend);
         nt_pool_free(&s_gfx.texture_pool, id);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return result;
     }
 
@@ -1438,24 +1506,38 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     s_gfx.texture_metas[slot].default_sampler = default_sampler;
 
     result.id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, result.id);
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_TEXTURE; event.object = result.id; event.data.resource.backend = backend;
+                  event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc) {
+    NT_GFX_RECORD(
+        NT_GFX_EVENT_BEGIN, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_RENDER_TARGET; if (desc != NULL) {
+            event.data.resource.width = desc->width;
+            event.data.resource.height = desc->height;
+            event.data.resource.format = (uint32_t)desc->color_format;
+            event.data.resource.type = (uint32_t)desc->depth_storage;
+            event.data.resource.usage = (uint32_t)desc->depth_format;
+        });
     nt_render_target_t result = NT_RENDER_TARGET_INVALID;
     NT_ASSERT(desc != NULL);
     if (!desc) {
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
     if (s_gfx.render_state == NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("make_render_target called inside a pass");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     NT_ASSERT(desc->width > 0 && desc->height > 0 && "make_render_target: zero dimension");
     if (desc->width == 0 || desc->height == 0) {
         NT_LOG_ERROR("make_render_target: zero dimension");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     /* Deliberately not gated on gpu_caps.has_float_render_target: the backend
@@ -1464,27 +1546,32 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
     NT_ASSERT(color_format_valid && "make_render_target: unsupported color format");
     if (!color_format_valid) {
         NT_LOG_ERROR("make_render_target: unsupported color format");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     bool depth_valid = desc->depth_storage >= NT_RT_DEPTH_NONE && desc->depth_storage <= NT_RT_DEPTH_TEXTURE;
     NT_ASSERT(depth_valid && "make_render_target: invalid depth mode");
     if (!depth_valid) {
         NT_LOG_ERROR("make_render_target: invalid depth mode");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     NT_ASSERT(render_target_depth_format_valid(desc) && "make_render_target: depth format does not match depth storage");
     if (!render_target_depth_format_valid(desc)) {
         NT_LOG_ERROR("make_render_target: depth format does not match depth storage");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     NT_ASSERT(render_target_color_sampler_valid(desc) && "make_render_target: invalid color sampler");
     if (!render_target_color_sampler_valid(desc)) {
         NT_LOG_ERROR("make_render_target: invalid color sampler");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
     NT_ASSERT(render_target_depth_sampler_valid(desc) && "make_render_target: invalid depth texture sampler");
     if (!render_target_depth_sampler_valid(desc)) {
         NT_LOG_ERROR("make_render_target: invalid depth texture sampler");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_INVALID_ARGUMENT);
         return result;
     }
 
@@ -1492,6 +1579,7 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
     NT_ASSERT(id != 0 && "render target pool full; raise nt_gfx_desc_t.max_render_targets");
     if (id == 0) {
         NT_LOG_ERROR("render target pool full");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_CAPACITY);
         return result;
     }
     uint32_t slot = nt_pool_slot_index(id);
@@ -1500,6 +1588,7 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
     nt_texture_t color = render_target_make_attachment(&color_desc);
     if (color.id == 0) {
         nt_pool_free(&s_gfx.render_target_pool, id);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return result;
     }
 
@@ -1510,6 +1599,7 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
         if (depth.id == 0) {
             destroy_texture_slot(color, true);
             nt_pool_free(&s_gfx.render_target_pool, id);
+            NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_BACKEND_FAILURE);
             return result;
         }
     }
@@ -1531,34 +1621,44 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
         destroy_texture_slot(color, true);
         memset(&s_gfx.render_target_metas[slot], 0, sizeof(nt_gfx_render_target_meta_t));
         nt_pool_free(&s_gfx.render_target_pool, id);
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return result;
     }
 
     s_gfx.render_target_metas[slot].complete = true;
     result.id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, result.id);
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_RENDER_TARGET; event.object = result.id; event.data.resource.backend = s_gfx.render_target_backends[slot];
+                  event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
 }
 
 /* ---- Resource destruction ---- */
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DESTROY, event.object_kind = NT_GFX_OBJECT_SHADER; event.object = shd.id;);
     if (shd.id == 0) {
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_SHADER, shd.id, NT_GFX_REASON_INVALID_HANDLE);
         return; /* invalid-zero is a first-class value, as for programs */
     }
     if (!nt_pool_valid(&s_gfx.shader_pool, shd.id)) {
         NT_LOG_ERROR("destroy_shader: invalid handle");
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_SHADER, shd.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     uint32_t slot = nt_pool_slot_index(shd.id);
     nt_gfx_backend_destroy_shader(s_gfx.shader_backends[slot]);
     s_gfx.shader_backends[slot] = 0;
     nt_pool_free(&s_gfx.shader_pool, shd.id);
+    NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_SHADER, shd.id, NT_GFX_REASON_ACCEPTED);
 }
 
 void nt_gfx_destroy_program(nt_program_t prog) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DESTROY, event.object_kind = NT_GFX_OBJECT_PROGRAM; event.object = prog.id;);
     /* NT_PROGRAM_INVALID is a first-class value -- games clear their handles on
      * context loss and destroy them again at shutdown. Not an error. */
     if (prog.id == 0) {
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PROGRAM, prog.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     /* A stale non-zero handle means the owner lost track of which programs it
@@ -1575,11 +1675,14 @@ void nt_gfx_destroy_program(nt_program_t prog) {
     nt_gfx_backend_destroy_program(s_gfx.program_backends[slot]);
     s_gfx.program_backends[slot] = 0;
     nt_pool_free(&s_gfx.program_pool, prog.id);
+    NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PROGRAM, prog.id, NT_GFX_REASON_ACCEPTED);
 }
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DESTROY, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = pip.id;);
     /* Program destruction may already have reclaimed this cached pipeline. */
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, pip.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
@@ -1590,12 +1693,15 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     nt_gfx_backend_destroy_pipeline(slot);
     s_gfx.pipeline_programs[slot] = 0;
     nt_pool_free(&s_gfx.pipeline_pool, pip.id);
+    NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, pip.id, NT_GFX_REASON_ACCEPTED);
 }
 
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DESTROY, event.object_kind = NT_GFX_OBJECT_VERTEX_INPUT; event.object = vi.id;);
     /* The destroy_buffer cascade makes stale handles routine here, so both
      * INVALID and stale are tolerated no-ops (same contract as pipelines). */
     if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_VERTEX_INPUT, vi.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     uint32_t slot = nt_pool_slot_index(vi.id);
@@ -1606,14 +1712,18 @@ void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi) {
     nt_gfx_backend_destroy_vertex_input(slot);
     memset(&s_gfx.vertex_input_metas[slot], 0, sizeof(nt_gfx_vertex_input_meta_t));
     nt_pool_free(&s_gfx.vertex_input_pool, vi.id);
+    NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_VERTEX_INPUT, vi.id, NT_GFX_REASON_ACCEPTED);
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DESTROY, event.object_kind = NT_GFX_OBJECT_BUFFER; event.object = buf.id;);
     if (buf.id == 0) {
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id, NT_GFX_REASON_INVALID_HANDLE);
         return; /* invalid-zero is a first-class value, as for programs */
     }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         NT_LOG_ERROR("destroy_buffer: invalid handle");
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     /* Dependent vertex inputs baked this buffer into their VAO state and can
@@ -1634,20 +1744,24 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     s_gfx.buffer_backends[slot] = 0;
     memset(&s_gfx.buffer_metas[slot], 0, sizeof(nt_gfx_buffer_meta_t));
     nt_pool_free(&s_gfx.buffer_pool, buf.id);
+    NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id, NT_GFX_REASON_ACCEPTED);
 }
 
 void nt_gfx_destroy_texture(nt_texture_t tex) { destroy_texture_slot(tex, false); }
 
 void nt_gfx_destroy_render_target(nt_render_target_t rt) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DESTROY, event.object_kind = NT_GFX_OBJECT_RENDER_TARGET; event.object = rt.id;);
     bool valid = nt_pool_valid(&s_gfx.render_target_pool, rt.id);
     NT_ASSERT(valid && "destroy_render_target: invalid handle");
     if (!valid) {
         NT_LOG_ERROR("destroy_render_target: invalid handle");
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_RENDER_TARGET, rt.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
     if (s_gfx.render_state == NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("destroy_render_target called inside a pass");
+        NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_RENDER_TARGET, rt.id, NT_GFX_REASON_INVALID_HANDLE);
         return;
     }
     uint32_t slot = nt_pool_slot_index(rt.id);
@@ -1659,27 +1773,35 @@ void nt_gfx_destroy_render_target(nt_render_target_t rt) {
     destroy_texture_slot(s_gfx.render_target_metas[slot].color, true);
     memset(&s_gfx.render_target_metas[slot], 0, sizeof(nt_gfx_render_target_meta_t));
     nt_pool_free(&s_gfx.render_target_pool, rt.id);
+    NT_GFX_RESULT(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_RENDER_TARGET, rt.id, NT_GFX_REASON_ACCEPTED);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_RESIZE, event.object_kind = NT_GFX_OBJECT_RENDER_TARGET; event.object = rt.id; event.data.resource.width = width; event.data.resource.height = height;);
     bool valid = nt_pool_valid(&s_gfx.render_target_pool, rt.id);
     NT_ASSERT(valid && "resize_render_target: invalid handle");
     if (!valid) {
         NT_LOG_ERROR("resize_render_target: invalid handle");
+        NT_GFX_RESULT(NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET, rt.id, NT_GFX_REASON_INVALID_ARGUMENT);
         return false;
     }
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
     if (s_gfx.render_state == NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("resize_render_target called inside a pass");
+        NT_GFX_RESULT(NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET, rt.id, NT_GFX_REASON_INVALID_ARGUMENT);
         return false;
     }
     NT_ASSERT(width > 0 && height > 0 && "resize_render_target: zero dimension");
     if (width == 0 || height == 0) {
         NT_LOG_ERROR("resize_render_target: zero dimension");
+        NT_GFX_RESULT(NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET, rt.id, NT_GFX_REASON_INVALID_ARGUMENT);
         return false;
     }
     uint32_t slot = nt_pool_slot_index(rt.id);
-    return render_target_resize_backend(slot, width, height);
+    bool resized = render_target_resize_backend(slot, width, height);
+    NT_GFX_RESULT(NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET, rt.id, resized ? NT_GFX_REASON_ACCEPTED : NT_GFX_REASON_BACKEND_FAILURE);
+    return resized;
 }
 
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt) {
@@ -1906,14 +2028,17 @@ static bool texture_is_active_attachment(nt_texture_t texture) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- contract asserts expand into nested handler branches
 void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_TEXTURE_SET, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = s_gfx.bound_pipeline; event.detail = 0; event.data.state.integers[0] = count;);
     discard_texture_set();
     if (g_nt_gfx.context_lost) {
+        NT_GFX_RESULT(NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_CONTEXT_LOST);
         return;
     }
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "apply_texture_bindings: must be called inside a pass");
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "apply_texture_bindings: no pipeline bound");
     NT_ASSERT((bindings != NULL || count == 0) && "apply_texture_bindings: NULL bindings with nonzero count");
     if (s_gfx.render_state != NT_GFX_STATE_PASS || s_gfx.bound_pipeline == 0 || (bindings == NULL && count != 0)) {
+        NT_GFX_RESULT(NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_INVALID_ARGUMENT);
         return;
     }
     const uint32_t program = s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)];
@@ -1926,7 +2051,10 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
     uint8_t applied_mask = 0;
     for (uint8_t i = 0; i < count; i++) {
         nt_gfx_sampler_info_t info = {0};
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_TEXTURE_SET, event.object_kind = NT_GFX_OBJECT_TEXTURE; event.object = bindings[i].texture.id;
+                      event.data.binding.name = bindings[i].name.value; event.data.binding.secondary = bindings[i].sampler.id;);
         if (!nt_gfx_backend_program_sampler_info(program_backend, bindings[i].name.value, &info)) {
+            NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_TEXTURE_SET, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = bindings[i].name.value;);
             continue;
         }
         const uint8_t bit = (uint8_t)(1U << info.unit);
@@ -1941,11 +2069,13 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         if (s_gfx.texture_backends[texture_slot] == 0) {
             NT_LOG_ERROR_ONCE("apply_texture_bindings: texture has no GPU resource (restore failed)");
             s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_FAILED;
+            NT_GFX_RESULT(NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_UNREADY);
             return;
         }
         uint32_t sampler_backend = 0;
         if (!resolve_sampler_backend(texture_slot, bindings[i].sampler, info.sampler_class, &sampler_backend)) {
             s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_FAILED;
+            NT_GFX_RESULT(NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_UNREADY);
             return;
         }
         texture_backends[info.unit] = s_gfx.texture_backends[texture_slot];
@@ -1959,6 +2089,7 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
     NT_ASSERT(applied_mask == required_mask && "apply_texture_bindings: active sampler coverage is incomplete");
     if (applied_mask != required_mask) {
         s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_FAILED;
+        NT_GFX_RESULT(NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_INVALID_ARGUMENT);
         return;
     }
     for (uint8_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
@@ -1971,6 +2102,7 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
         nt_gfx_backend_bind_sampler(sampler_backends[unit], unit);
     }
     s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_APPLIED;
+    NT_GFX_RESULT(NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
 }
 
 #ifdef NT_TEST_ACCESS
@@ -2088,6 +2220,7 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     NT_ASSERT((uint32_t)desc->compare_func <= NT_COMPARE_LESS && "sampler compare_func out of range");
 
     nt_sampler_desc_t normalized = sampler_normalize(desc);
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_SAMPLER; event.data.resource.flags = sampler_pack_key(&normalized));
     uint32_t key = sampler_pack_key(&normalized);
 
     for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
@@ -2096,6 +2229,8 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
             if (s_gfx.sampler_cache[i].backend == 0 && !g_nt_gfx.context_lost) {
                 s_gfx.sampler_cache[i].backend = nt_gfx_backend_create_sampler(&s_gfx.sampler_cache[i].desc);
             }
+            NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, i + 1);
+            NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_SAMPLER, i + 1, NT_GFX_REASON_CACHE);
             return (nt_sampler_t){.id = i + 1};
         }
     }
@@ -2104,12 +2239,15 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     uint32_t backend = nt_gfx_backend_create_sampler(&normalized);
     if (backend == 0) {
         NT_LOG_ERROR("make_sampler: backend failed");
+        NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_SAMPLER, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return NT_SAMPLER_INVALID;
     }
     uint32_t slot = s_gfx.sampler_count++;
     s_gfx.sampler_cache[slot].key = key;
     s_gfx.sampler_cache[slot].backend = backend;
     s_gfx.sampler_cache[slot].desc = normalized;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, slot + 1);
+    NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_SAMPLER, slot + 1, NT_GFX_REASON_ACCEPTED);
     return (nt_sampler_t){.id = slot + 1};
 }
 

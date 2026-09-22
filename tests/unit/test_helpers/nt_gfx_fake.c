@@ -336,7 +336,13 @@ void nt_gfx_backend_shutdown(void) {
     s_fake_max_programs = 0;
 }
 
-bool nt_gfx_backend_is_context_lost(void) { return s_fake_context_lost || s_fake_backend_missing; }
+bool nt_gfx_backend_is_context_lost(void) {
+    bool lost = s_fake_context_lost || s_fake_backend_missing;
+    if (lost) {
+        nt_gfx_observe_context_loss();
+    }
+    return lost;
+}
 
 void nt_gfx_backend_begin_frame(void) {}
 
