@@ -169,8 +169,6 @@ static nt_result_t create_gpu_resources(void) {
     if (s_mesh_renderer.instance_buf.id == 0) {
         return NT_ERR_INIT_FAILED;
     }
-    /* NONE color mode reads the generic attribute instead of a buffer. */
-    nt_gfx_set_vertex_attrib_default(7, 1.0F, 1.0F, 1.0F, 1.0F);
     return NT_OK;
 }
 
@@ -281,11 +279,6 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     s_mesh_renderer.frame_draw_calls = 0;
     s_mesh_renderer.frame_instance_total = 0;
 #endif
-
-    /* Restore generic attribute 7 to white once per draw_list call.
-     * NONE mode shaders read this as identity color. Protects against
-     * other renderers or user code changing the value between frames. */
-    nt_gfx_set_vertex_attrib_default(7, 1.0F, 1.0F, 1.0F, 1.0F);
 
     /* Process items in chunks of max_instances.
      * Each chunk: pack instance data -> upload -> draw with offsets.
@@ -411,6 +404,9 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             prev_mat = run_mat;
             prev_mesh = run_mesh;
 
+            if (mat_info->color_mode == NT_COLOR_MODE_NONE) {
+                nt_gfx_set_vertex_attrib_default(7, 1.0F, 1.0F, 1.0F, 1.0F);
+            }
             nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf, draw_byte_offset);
 
             if (mesh_info->index_count > 0) {

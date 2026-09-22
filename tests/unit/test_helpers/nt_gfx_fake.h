@@ -96,6 +96,7 @@ uint32_t nt_gfx_fake_vertex_input_create_count(void);
 uint32_t nt_gfx_fake_bind_vertex_input_count(void);
 uint32_t nt_gfx_fake_last_bound_vertex_input(void);
 uint32_t nt_gfx_fake_last_uniform_program(void);
+void nt_gfx_fake_vertex_attrib_default(uint8_t location, float out[4]);
 void nt_gfx_fake_fail_next_vertex_input_create(void);
 void nt_gfx_fake_reset(void);
 

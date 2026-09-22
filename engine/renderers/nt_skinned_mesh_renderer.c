@@ -183,7 +183,6 @@ static nt_result_t create_gpu_resources(void) {
     if (s_skinned.instance_buf.id == 0) {
         return NT_ERR_INIT_FAILED;
     }
-    nt_gfx_set_vertex_attrib_default(13, 1.0F, 1.0F, 1.0F, 1.0F);
     return NT_OK;
 }
 
@@ -276,8 +275,6 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
     s_skinned.frame_draw_calls = 0;
     s_skinned.frame_instance_total = 0;
 #endif
-    nt_gfx_set_vertex_attrib_default(13, 1.0F, 1.0F, 1.0F, 1.0F);
-
     uint32_t chunk_start = 0;
     nt_material_t previous_material = {0};
     nt_mesh_t previous_mesh = {0};
@@ -386,6 +383,9 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             previous_material = material_handle;
             previous_mesh = mesh_handle;
             previous_deformation = deformation.texture;
+            if (material->color_mode == NT_COLOR_MODE_NONE) {
+                nt_gfx_set_vertex_attrib_default(13, 1.0F, 1.0F, 1.0F, 1.0F);
+            }
             nt_gfx_bind_instance_buffer(s_skinned.instance_buf, draw_offset);
             if (mesh->index_count > 0) {
                 nt_gfx_draw_indexed_instanced(0, mesh->index_count, mesh->vertex_count, instance_count);
