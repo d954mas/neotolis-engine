@@ -790,7 +790,7 @@ jobs:
       # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
       # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
       - name: Run browser smoke test
-        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts observation.spec.ts
 
       # Each admission row (NT_BASISU_ROWS) activates its own fixture pack in wasm Debug (FULL
       # asserts) and samples the transcoded texels through WebGL; a Release row would add no

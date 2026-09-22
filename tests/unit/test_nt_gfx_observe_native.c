@@ -15,6 +15,9 @@ static PFNGLBINDBUFFERBASEPROC s_bind_buffer_base;
 static PFNGLTEXIMAGE2DPROC s_tex_image;
 static PFNGLTEXSUBIMAGE2DPROC s_tex_sub_image;
 static PFNGLGETERRORPROC s_get_error;
+static PFNGLCOMPRESSEDTEXIMAGE2DPROC s_compressed_image;
+static PFNGLVERTEXATTRIBPOINTERPROC s_attribute_pointer;
+static uint32_t s_attribute_calls;
 static uint64_t s_texture_calls;
 static uint64_t s_texture_bytes;
 static GLenum s_upload_error;
@@ -89,6 +92,19 @@ static GLenum GLAD_API_PTR injected_get_error(void) {
     return s_get_error();
 }
 
+static void GLAD_API_PTR count_compressed_image(GLenum target, GLint level, GLenum format, GLsizei width, GLsizei height, GLint border, GLsizei size, const void *data) {
+    if (data != NULL) {
+        s_texture_calls++;
+        s_texture_bytes += (uint32_t)size;
+    }
+    s_compressed_image(target, level, format, width, height, border, size, data);
+}
+
+static void GLAD_API_PTR count_attribute_pointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) {
+    s_attribute_calls++;
+    s_attribute_pointer(index, size, type, normalized, stride, pointer);
+}
+
 void setUp(void) {
     TEST_ASSERT_TRUE(glfwInit());
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
@@ -115,6 +131,11 @@ void setUp(void) {
     glad_glTexImage2D = count_tex_image;
     glad_glTexSubImage2D = count_tex_sub_image;
     glad_glGetError = injected_get_error;
+    s_compressed_image = glad_glCompressedTexImage2D;
+    s_attribute_pointer = glad_glVertexAttribPointer;
+    glad_glCompressedTexImage2D = count_compressed_image;
+    glad_glVertexAttribPointer = count_attribute_pointer;
+    s_attribute_calls = 0;
     s_texture_calls = s_texture_bytes = 0;
     s_upload_error = s_pending_error = GL_NO_ERROR;
     s_buffer_calls = s_buffer_bytes = 0;
@@ -131,12 +152,14 @@ void tearDown(void) {
     glad_glTexImage2D = s_tex_image;
     glad_glTexSubImage2D = s_tex_sub_image;
     glad_glGetError = s_get_error;
+    glad_glCompressedTexImage2D = s_compressed_image;
+    glad_glVertexAttribPointer = s_attribute_pointer;
     nt_gfx_shutdown();
     nt_window_shutdown();
 }
 
-#if NT_GFX_COUNTERS_ENABLED
 #if NT_GFX_CAPTURE_ENABLED
+#if NT_GFX_COUNTERS_ENABLED
 static uint32_t captured_calls(nt_gfx_gl_call_t call) {
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_FALSE(capture.overflow);
@@ -148,6 +171,7 @@ static uint32_t captured_calls(nt_gfx_gl_call_t call) {
     }
     return count;
 }
+#endif
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- inspect the two identity layers before and after resize
 static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
@@ -171,6 +195,7 @@ static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
             old_name = event->data.backend.args[1];
         }
     }
+    TEST_ASSERT_NOT_EQUAL(0, old_name);
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 13, 7));
     nt_gfx_set_scissor_enabled(false);
     (void)nt_gfx_observe_end_frame();
@@ -252,6 +277,7 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     TEST_ASSERT_FALSE(capture.overflow);
 }
 #endif
+#if NT_GFX_COUNTERS_ENABLED
 static void test_payloads_before_render_and_without_frames(void) {
     const uint8_t data[64] = {0};
     nt_gfx_upload_totals_t baseline = nt_gfx_upload_totals_read();
@@ -394,22 +420,70 @@ static void test_runtime_policy_changes_at_next_boundary(void) {
     nt_gfx_update_buffer(buffer, 0, data, sizeof(data));
     TEST_ASSERT_EQUAL_UINT64(16, nt_gfx_observe_end_frame()->counters.buffer_upload_bytes);
 }
+
+static void test_compressed_mips_use_issued_block_sizes(void) {
+    const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
+    nt_texture_format_t format = NT_TEXTURE_FORMAT_ASTC_4x4_RGBA;
+    if (caps->has_bc7) {
+        format = NT_TEXTURE_FORMAT_BC7_RGBA;
+    } else if (caps->has_etc2) {
+        format = NT_TEXTURE_FORMAT_ETC2_RGBA8;
+    }
+    if (!caps->has_bc7 && !caps->has_etc2 && !caps->has_astc) {
+        TEST_IGNORE_MESSAGE("Compressed payload unverified: no supported block format");
+    }
+    const uint8_t blocks[80] = {0};
+    nt_gfx_observe_begin_frame();
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 8, .height = 4, .format = format, .level_count = 4, .data = blocks});
+    TEST_ASSERT_NOT_EQUAL(0, texture.id);
+    nt_gfx_counters_t counters = nt_gfx_observe_end_frame()->counters;
+    TEST_ASSERT_EQUAL_UINT64(4, counters.texture_upload_calls);
+    TEST_ASSERT_EQUAL_UINT64(80, counters.texture_upload_bytes);
+    TEST_ASSERT_EQUAL_UINT64(s_texture_calls, counters.texture_upload_calls);
+    TEST_ASSERT_EQUAL_UINT64(s_texture_bytes, counters.texture_upload_bytes);
+}
+
+static void test_static_and_instance_pointer_calls_have_distinct_owners(void) {
+    nt_gfx_observe_begin_frame();
+    nt_buffer_t vertices = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 64});
+    nt_buffer_t instances = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 64});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .vertex_buffer = vertices,
+        .layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2}}},
+        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 4}}},
+    });
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_stats_read().static_attribute_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, s_attribute_calls);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_instance_buffer(instances, 0);
+    nt_gfx_bind_instance_buffer(instances, 16);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_counters_t counters = nt_gfx_observe_end_frame()->counters;
+    TEST_ASSERT_EQUAL_UINT32(1, counters.static_attribute_calls);
+    TEST_ASSERT_EQUAL_UINT32(2, counters.instance_attribute_calls);
+    TEST_ASSERT_EQUAL_UINT32(s_attribute_calls, counters.static_attribute_calls + counters.instance_attribute_calls);
+}
 #else
 static void test_compiled_off_is_unavailable(void) { TEST_ASSERT_FALSE(nt_gfx_upload_totals_read().available); }
 #endif
 
 int main(void) {
     UNITY_BEGIN();
-#if NT_GFX_COUNTERS_ENABLED
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_capture_publishes_resize_mappings_and_skip_reasons);
     RUN_TEST(test_new_program_defines_sampler_names_and_inactive_uniforms);
 #endif
+#if NT_GFX_COUNTERS_ENABLED
     RUN_TEST(test_payloads_before_render_and_without_frames);
     RUN_TEST(test_texture_mips_storage_and_subrect_payloads);
     RUN_TEST(test_failed_upload_keeps_issued_bytes_and_observed_loss);
     RUN_TEST(test_repeated_frames_separate_requests_from_issued_calls);
     RUN_TEST(test_runtime_policy_changes_at_next_boundary);
+    RUN_TEST(test_compressed_mips_use_issued_block_sizes);
+    RUN_TEST(test_static_and_instance_pointer_calls_have_distinct_owners);
 #else
     RUN_TEST(test_compiled_off_is_unavailable);
 #endif

@@ -5,6 +5,8 @@ type ObserveHooks = {
   programs_ready(): boolean;
   observe_probe(mode: number): number;
   observe_value(index: number): number;
+  observe_record(enabled: number): void;
+  observe_status(): number;
 };
 type CallControl = { active: boolean; calls: Record<string, number> };
 
@@ -66,4 +68,25 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
     }
   }
   expect(errors).toEqual([]);
+});
+
+test('gfx observation marks context loss aborted and resumes complete frames', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/');
+  await page.waitForFunction(() => (window as unknown as { __nt?: ObserveHooks }).__nt?.programs_ready());
+  await page.evaluate(() => {
+    const hooks = (window as unknown as { __nt: ObserveHooks }).__nt;
+    const gl = document.querySelector('canvas')!.getContext('webgl2')!;
+    const loss = gl.getExtension('WEBGL_lose_context');
+    if (!loss) throw new Error('WEBGL_lose_context unavailable');
+    (window as unknown as { observationLoss: WEBGL_lose_context }).observationLoss = loss;
+    hooks.observe_record(1);
+    loss.loseContext();
+  });
+  await page.waitForFunction(() => (window as unknown as { __nt: ObserveHooks }).__nt.observe_status() === 4);
+  await page.evaluate(() => (window as unknown as { observationLoss: WEBGL_lose_context }).observationLoss.restoreContext());
+  await page.waitForFunction(() => {
+    const hooks = (window as unknown as { __nt: ObserveHooks }).__nt;
+    return hooks.observe_status() === 2 && hooks.programs_ready();
+  });
 });

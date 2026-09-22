@@ -221,6 +221,27 @@ static void test_capture_toggle_waits_until_next_begin(void) {
     (void)nt_gfx_observe_end_frame();
     TEST_ASSERT_EQUAL_UINT64(sequence, nt_gfx_capture_read().frame_sequence);
 }
+
+static void test_exact_capacity_and_one_record_short(void) {
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    (void)nt_gfx_observe_end_frame();
+    uint32_t needed = nt_gfx_capture_read().count;
+    TEST_ASSERT_GREATER_THAN_UINT32(1, needed);
+    for (uint32_t missing = 0; missing < 2; missing++) {
+        nt_gfx_shutdown();
+        nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+        desc.capture_capacity = needed - missing;
+        nt_gfx_init(&desc);
+        nt_gfx_capture_set_enabled(true);
+        nt_gfx_observe_begin_frame();
+        (void)nt_gfx_observe_end_frame();
+        nt_gfx_capture_view_t view = nt_gfx_capture_read();
+        TEST_ASSERT_EQUAL_UINT32(needed - missing, view.count);
+        TEST_ASSERT_EQUAL(missing != 0, view.overflow);
+        TEST_ASSERT_EQUAL(missing != 0 ? NT_GFX_FRAME_TRUNCATED : NT_GFX_FRAME_COMPLETE, view.status);
+    }
+}
 #endif
 
 int main(void) {
@@ -239,6 +260,7 @@ int main(void) {
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);
     RUN_TEST(test_capture_overflow_does_not_stop_counters);
     RUN_TEST(test_capture_toggle_waits_until_next_begin);
+    RUN_TEST(test_exact_capacity_and_one_record_short);
 #endif
     return UNITY_END();
 }

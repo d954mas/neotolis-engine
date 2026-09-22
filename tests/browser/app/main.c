@@ -433,6 +433,8 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
 static double s_observe_values[40];
+EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) { nt_gfx_capture_set_enabled(enabled != 0); }
+EMSCRIPTEN_KEEPALIVE int nt_test_observe_status(void) { return (int)nt_gfx_capture_read().status; }
 EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
     NT_ASSERT(index >= 0 && index < 40);
     return s_observe_values[index];
@@ -644,6 +646,8 @@ EM_JS(void, nt_test_install_hooks, (void), {
         },
         'observe_probe': function(mode) { return _nt_test_observe_probe(mode); },
         'observe_value': function(index) { return _nt_test_observe_value(index); },
+        'observe_record': function(enabled) { _nt_test_observe_record(enabled); },
+        'observe_status': function() { return _nt_test_observe_status(); },
         'gpu_supported': function() { return _nt_test_gpu_supported() !== 0; },
         'float_probe': function(useTexture) { return _nt_test_float_probe(useTexture); },
         'basis_ready': function() { return _nt_test_basis_ready() !== 0; },
