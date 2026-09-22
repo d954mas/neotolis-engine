@@ -269,10 +269,10 @@ two-slot packing. An equal key is a candidate run, and the run also requires an
 equal deformation texture. Frame origins, alpha, world and color are
 per-instance. Only adjacent compatible items merge; the game's order wins.
 
-**Instance layout** carries three world rows, optional color, four UINT16 frame
-origin coordinates and one float alpha. Its renderer-owned stride is 60 B with
-no color, 64 B with normalized RGBA8, and 76 B with FLOAT4 color; it is
-independent of the mesh renderer's 64-byte cap. `joints` arrive through float
+**Instance layout** carries three world rows, four UINT16 frame origin
+coordinates and one float alpha, followed by optional color. Its renderer-owned
+stride is 60 B with no color, 64 B with normalized RGBA8, and 76 B with FLOAT4
+color; it is independent of the mesh renderer's 64-byte cap. `joints` arrive through float
 attributes with shader integer conversion and `weights` normalized, in the
 stream layouts the builder chapter fixes (Skin streams, under Builder
 validation). FLOAT16 lane sums deviate from 1 by at most `4·2⁻¹¹`, and no

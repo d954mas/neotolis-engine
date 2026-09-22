@@ -216,7 +216,7 @@ static nt_mesh_t make_mesh(const test_vertex_t vertices[VERTEX_COUNT]) {
     return (nt_mesh_t){.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
 }
 
-static nt_material_t make_skinned_material(float probe_mode) {
+static nt_material_t make_skinned_material(float probe_mode, nt_color_mode_t color_mode) {
     return nt_material_create(&(nt_material_create_desc_t){
         .program = s_skin_program,
         .textures = {{.name = "u_skin_matrices"}},
@@ -233,15 +233,15 @@ static nt_material_t make_skinned_material(float probe_mode) {
             },
         .attr_map_count = 5,
         .cull_mode = NT_CULL_NONE,
-        .color_mode = NT_COLOR_MODE_NONE,
+        .color_mode = color_mode,
         .label = "native_skinned_probe",
     });
 }
 
-static nt_material_t make_reference_material(void) {
+static nt_material_t make_reference_material(float probe_mode) {
     return nt_material_create(&(nt_material_create_desc_t){
         .program = s_reference_program,
-        .params = {{.name = "u_probe_mode", .value = {0.0F, 0.0F, 0.0F, 0.0F}}},
+        .params = {{.name = "u_probe_mode", .value = {probe_mode, 0.0F, 0.0F, 0.0F}}},
         .param_count = 1,
         .attr_map =
             {
@@ -282,6 +282,15 @@ static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t 
     } else {
         nt_mesh_renderer_draw_list(&item, 1);
     }
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+static void render_skinned_list(const nt_render_item_t *items, uint32_t count, uint8_t out[FRAME_BYTES]) {
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
+    nt_skinned_mesh_renderer_draw_list(items, count);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -460,8 +469,8 @@ static void test_palette_frames_and_interpolation_match_cpu_reference(void) {
         {.texture = {0}, .x0 = 0, .y0 = 0, .x1 = 6, .y1 = 0, .alpha = 0.5F},
     };
     nt_mesh_t skinned_mesh = make_mesh(k_bar);
-    nt_material_t skinned_material = make_skinned_material(0.0F);
-    nt_material_t reference_material = make_reference_material();
+    nt_material_t skinned_material = make_skinned_material(0.0F, NT_COLOR_MODE_NONE);
+    nt_material_t reference_material = make_reference_material(0.0F);
     nt_deformation_binding_t initial = cases[0];
     initial.texture = s_palette;
     nt_entity_t skinned_entity = make_entity(skinned_mesh, skinned_material, &initial);
@@ -484,9 +493,9 @@ static void test_palette_frames_and_interpolation_match_cpu_reference(void) {
 static void test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic(void) {
     const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 0, .y1 = 0, .alpha = 0.0F};
     nt_mesh_t mesh = make_mesh(k_guard_bar);
-    nt_material_t position_material = make_skinned_material(0.0F);
-    nt_material_t normal_material = make_skinned_material(1.0F);
-    nt_material_t tangent_material = make_skinned_material(2.0F);
+    nt_material_t position_material = make_skinned_material(0.0F, NT_COLOR_MODE_NONE);
+    nt_material_t normal_material = make_skinned_material(1.0F, NT_COLOR_MODE_NONE);
+    nt_material_t tangent_material = make_skinned_material(2.0F, NT_COLOR_MODE_NONE);
     nt_entity_t entity = make_entity(mesh, position_material, &binding);
 
     render_entity(entity, position_material, mesh, true, s_expected);
@@ -499,9 +508,39 @@ static void test_degenerate_normal_and_tangent_guards_are_finite_and_determinist
     assert_probe_matches_mask(s_actual, 128, 128, 191); /* deterministic +Z tangent */
 }
 
+static void test_colored_then_none_restores_white_for_both_color_layouts(void) {
+    const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 6, .y1 = 0, .alpha = 0.5F};
+    test_vertex_t reference_vertices[VERTEX_COUNT];
+    deform_vertices(binding, reference_vertices);
+    nt_mesh_t reference_mesh = make_mesh(reference_vertices);
+    nt_material_t reference_material = make_reference_material(3.0F);
+    nt_entity_t reference_entity = make_entity(reference_mesh, reference_material, NULL);
+    render_entity(reference_entity, reference_material, reference_mesh, false, s_expected);
+
+    const nt_color_mode_t modes[2] = {NT_COLOR_MODE_RGBA8, NT_COLOR_MODE_FLOAT4};
+    for (uint8_t i = 0; i < 2; i++) {
+        nt_mesh_t mesh = make_mesh(k_bar);
+        nt_material_t colored = make_skinned_material(3.0F, modes[i]);
+        nt_material_t none = make_skinned_material(3.0F, NT_COLOR_MODE_NONE);
+        nt_entity_t colored_entity = make_entity(mesh, colored, &binding);
+        nt_entity_t none_entity = make_entity(mesh, none, &binding);
+        nt_drawable_comp_set_color(colored_entity, 0.1F, 0.2F, 0.3F, 1.0F);
+        render_entity(colored_entity, colored, mesh, true, s_actual);
+        assert_probe_matches_mask(s_actual, 26, 51, 77);
+        const nt_render_item_t items[2] = {
+            {.entity = colored_entity.id, .batch_key = nt_mesh_renderer_batch_key(colored, mesh)},
+            {.entity = none_entity.id, .batch_key = nt_mesh_renderer_batch_key(none, mesh)},
+        };
+
+        render_skinned_list(items, 2, s_actual);
+        assert_cpu_gpu_frames_agree();
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_palette_frames_and_interpolation_match_cpu_reference);
     RUN_TEST(test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic);
+    RUN_TEST(test_colored_then_none_restores_white_for_both_color_layouts);
     return UNITY_END();
 }

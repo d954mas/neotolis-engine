@@ -21,6 +21,34 @@ typedef struct {
     nt_pipeline_t pipeline;
 } nt_renderer_pipeline_entry_t;
 
+static inline nt_pipeline_desc_t nt_renderer_material_pipeline_desc(const nt_material_info_t *material, const char *fallback_label) {
+    return (nt_pipeline_desc_t){
+        .program = material->program,
+        .depth_test = material->depth_test,
+        .depth_write = material->depth_write,
+        .depth_func = NT_DEPTH_LESS,
+        .blend = material->blend,
+        .cull_mode = (uint8_t)material->cull_mode,
+        .label = material->label != NULL ? material->label : fallback_label,
+    };
+}
+
+/* Transpose a column-major mat4 into the three affine rows consumed by instance shaders. */
+static inline void nt_renderer_pack_world(float *dst, const float *m) {
+    dst[0] = m[0];
+    dst[1] = m[4];
+    dst[2] = m[8];
+    dst[3] = m[12];
+    dst[4] = m[1];
+    dst[5] = m[5];
+    dst[6] = m[9];
+    dst[7] = m[13];
+    dst[8] = m[2];
+    dst[9] = m[6];
+    dst[10] = m[10];
+    dst[11] = m[14];
+}
+
 /* Validate matched pipelines because program generations can wrap; dead matches return invalid.
  * Misses also return invalid. Cleanup is deferred to insertion. */
 static inline nt_pipeline_t nt_renderer_pipeline_cache_find(const nt_renderer_pipeline_entry_t *entries, uint16_t count, const nt_gfx_pipeline_key_t *key) {

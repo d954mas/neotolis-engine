@@ -1,5 +1,6 @@
 #include "renderers/nt_mesh_renderer.h"
 
+#include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "graphics/nt_gfx.h"
@@ -78,51 +79,6 @@ static const nt_vertex_layout_t s_instance_layouts[3] = {
 };
 /* clang-format on */
 
-/* ---- Pack helpers ---- */
-
-/* Pack mat4x3: extract 3 rows from column-major mat4 (cglm convention).
- * row0 = (m[0], m[4], m[8],  m[12]) -- first basis components + translation x
- * row1 = (m[1], m[5], m[9],  m[13]) -- second basis + translation y
- * row2 = (m[2], m[6], m[10], m[14]) -- third basis + translation z
- * Row 3 (0,0,0,1) is reconstructed in the vertex shader.
- * Transpose: column-major cols → row-major rows with stride-4 gather. */
-static void pack_mat4x3(float *dst, const float *m) {
-    /* row 0 */
-    dst[0] = m[0];
-    dst[1] = m[4];
-    dst[2] = m[8];
-    dst[3] = m[12];
-    /* row 1 */
-    dst[4] = m[1];
-    dst[5] = m[5];
-    dst[6] = m[9];
-    dst[7] = m[13];
-    /* row 2 */
-    dst[8] = m[2];
-    dst[9] = m[6];
-    dst[10] = m[10];
-    dst[11] = m[14];
-}
-
-/* Float-to-uint8 with clamping and rounding (same pattern as shape renderer) */
-static inline uint8_t float_to_u8(float v) {
-    if (v <= 0.0F) {
-        return 0;
-    }
-    if (v >= 1.0F) {
-        return 255;
-    }
-    return (uint8_t)((v * 255.0F) + 0.5F);
-}
-
-/* Pack float[4] color to RGBA8 (4 bytes) */
-static void pack_rgba8(uint8_t *dst, const float color[4]) {
-    dst[0] = float_to_u8(color[0]);
-    dst[1] = float_to_u8(color[1]);
-    dst[2] = float_to_u8(color[2]);
-    dst[3] = float_to_u8(color[3]);
-}
-
 /* ---- Stream type to vertex format mapping ---- */
 
 /* Pack stream types and gfx vertex types are distinct enums on purpose: the
@@ -139,15 +95,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
 
     /* Layouts and color_mode live on the vertex-input versions; the pipeline is
      * program x render state, keyed by its exact desc identity. */
-    nt_pipeline_desc_t desc;
-    memset(&desc, 0, sizeof(desc));
-    desc.program = mat_info->program;
-    desc.depth_test = mat_info->depth_test;
-    desc.depth_write = mat_info->depth_write;
-    desc.depth_func = NT_DEPTH_LESS;
-    desc.blend = mat_info->blend;
-    desc.cull_mode = (uint8_t)mat_info->cull_mode;
-    desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
+    const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mat_info, "mesh_pipeline");
     const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
 
     const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_mesh_renderer.entries, s_mesh_renderer.count, &key);
@@ -291,6 +239,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     nt_renderer_bound_t bound = {0};
     nt_pipeline_t pip = {0};
     nt_vertex_input_t vi = {0};
+    const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
 
     while (chunk_start < count) {
         uint32_t chunk_count = count - chunk_start;
@@ -322,11 +271,12 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 uint8_t *dst = s_mesh_renderer.instance_data + packed_size;
 
                 const float *world = nt_transform_comp_world_matrix(e);
-                pack_mat4x3((float *)dst, world);
+                nt_renderer_pack_world((float *)dst, world);
 
                 if (color_mode == NT_COLOR_MODE_RGBA8) {
-                    const float *color = nt_drawable_comp_color(e);
-                    pack_rgba8(dst + 48, color);
+                    const uint16_t drawable_index = drawable_view.sparse_indices[nt_entity_index(e)];
+                    NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "mesh render item: entity has no drawable component");
+                    memcpy(dst + 48, &drawable_view.colors_packed[drawable_index], sizeof(uint32_t));
                 } else if (color_mode == NT_COLOR_MODE_FLOAT4) {
                     const float *color = nt_drawable_comp_color(e);
                     memcpy(dst + 48, color, 16);
@@ -405,6 +355,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             prev_mesh = run_mesh;
 
             if (mat_info->color_mode == NT_COLOR_MODE_NONE) {
+                /* Native GL leaves a generic value unspecified after drawing with an enabled array there. */
                 nt_gfx_set_vertex_attrib_default(7, 1.0F, 1.0F, 1.0F, 1.0F);
             }
             nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf, draw_byte_offset);

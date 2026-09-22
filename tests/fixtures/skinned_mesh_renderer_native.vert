@@ -14,6 +14,7 @@ layout(location = 13) in vec4 a_color;
 out vec3 v_position_probe;
 out vec3 v_normal_probe;
 out vec3 v_tangent_probe;
+out vec4 v_color_probe;
 
 mat3 world_linear() {
     return mat3(
@@ -39,5 +40,6 @@ void main() {
     v_position_probe = position * 0.25 + 0.5;
     v_normal_probe = normal * 0.25 + 0.5;
     v_tangent_probe = tangent * 0.25 + 0.5;
+    v_color_probe = a_color;
     gl_Position = vec4(position, 1.0);
 }

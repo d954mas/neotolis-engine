@@ -506,32 +506,70 @@ void test_rgba8_and_float4_colors_keep_skin_fields_at_their_layout_offsets(void)
 
     nt_material_t rgba8 = make_material_ex(program, NT_COLOR_MODE_RGBA8, NT_RESOURCE_INVALID, NT_SAMPLER_DEFAULT);
     nt_entity_t rgba8_entity = make_entity(mesh, rgba8, binding);
-    nt_drawable_comp_set_color(rgba8_entity, 0.25F, 0.5F, 0.75F, 1.0F);
+    nt_drawable_comp_set_color(rgba8_entity, -0.25F, 0.5F, 1.25F, 1.0F);
+    nt_drawable_comp_set_alpha(rgba8_entity, 0.25F);
     nt_render_item_t item = make_item(rgba8_entity, rgba8, mesh);
     nt_skinned_mesh_renderer_draw_list(&item, 1);
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
     TEST_ASSERT_EQUAL_UINT32(64, nt_gfx_fake_last_update_buffer_size());
-    const uint8_t expected_rgba8[4] = {64, 128, 191, 255};
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_rgba8, bytes + 48, 4);
+    const uint8_t expected_rgba8[4] = {0, 128, 255, 64};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_rgba8, bytes + 60, 4);
     uint16_t origins[4];
-    memcpy(origins, bytes + 52, sizeof(origins));
+    memcpy(origins, bytes + 48, sizeof(origins));
     TEST_ASSERT_EQUAL_UINT16(2, origins[0]);
     TEST_ASSERT_EQUAL_UINT16(8, origins[3]);
+    uint32_t alpha_bits;
+    memcpy(&alpha_bits, bytes + 56, sizeof(alpha_bits));
+    TEST_ASSERT_EQUAL_HEX32(0x3F000000U, alpha_bits);
 
     nt_material_t float4 = make_material_ex(program, NT_COLOR_MODE_FLOAT4, NT_RESOURCE_INVALID, NT_SAMPLER_DEFAULT);
     nt_entity_t float4_entity = make_entity(mesh, float4, binding);
-    nt_drawable_comp_set_color(float4_entity, 0.25F, 0.5F, 0.75F, 1.0F);
+    nt_drawable_comp_set_color(float4_entity, 0.25F, 1.5F, 0.75F, 1.0F);
     item = make_item(float4_entity, float4, mesh);
     nt_skinned_mesh_renderer_draw_list(&item, 1);
     bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
     TEST_ASSERT_EQUAL_UINT32(76, nt_gfx_fake_last_update_buffer_size());
     uint32_t color_bits[4];
-    memcpy(color_bits, bytes + 48, sizeof(color_bits));
+    memcpy(color_bits, bytes + 60, sizeof(color_bits));
     TEST_ASSERT_EQUAL_HEX32(0x3E800000U, color_bits[0]);
+    TEST_ASSERT_EQUAL_HEX32(0x3FC00000U, color_bits[1]);
     TEST_ASSERT_EQUAL_HEX32(0x3F800000U, color_bits[3]);
-    memcpy(origins, bytes + 64, sizeof(origins));
+    memcpy(origins, bytes + 48, sizeof(origins));
     TEST_ASSERT_EQUAL_UINT16(2, origins[0]);
     TEST_ASSERT_EQUAL_UINT16(8, origins[3]);
+}
+
+void test_mixed_color_modes_pack_canonical_strides_and_offsets(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_texture_t texture = make_deformation_texture();
+    nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1);
+    const nt_color_mode_t modes[3] = {NT_COLOR_MODE_NONE, NT_COLOR_MODE_RGBA8, NT_COLOR_MODE_FLOAT4};
+    nt_render_item_t items[3];
+    for (uint8_t i = 0; i < 3; i++) {
+        nt_material_t material = make_material_ex(program, modes[i], NT_RESOURCE_INVALID, NT_SAMPLER_DEFAULT);
+        nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture, .x0 = (uint16_t)(11U + i), .alpha = 0.25F * (float)i});
+        nt_drawable_comp_set_color(entity, 0.25F, 0.5F, 1.5F, 0.75F);
+        items[i] = make_item(entity, material, mesh);
+    }
+
+    nt_skinned_mesh_renderer_draw_list(items, 3);
+
+    const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
+    TEST_ASSERT_EQUAL_UINT32(60U + 64U + 76U, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_skinned_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_update_buffer_offset() + 60U + 64U, nt_gfx_fake_last_instance_offset());
+    uint16_t origin;
+    memcpy(&origin, bytes + 48, sizeof(origin));
+    TEST_ASSERT_EQUAL_UINT16(11, origin);
+    memcpy(&origin, bytes + 60 + 48, sizeof(origin));
+    TEST_ASSERT_EQUAL_UINT16(12, origin);
+    memcpy(&origin, bytes + 60 + 64 + 48, sizeof(origin));
+    TEST_ASSERT_EQUAL_UINT16(13, origin);
+    const uint8_t expected_rgba8[4] = {64, 128, 255, 191};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_rgba8, bytes + 60 + 60, 4);
+    uint32_t hdr_blue;
+    memcpy(&hdr_blue, bytes + 60 + 64 + 68, sizeof(hdr_blue));
+    TEST_ASSERT_EQUAL_HEX32(0x3FC00000U, hdr_blue); /* float4 blue at color + 8 */
 }
 
 void test_active_skin_sampler_must_be_declared_by_material(void) {
@@ -791,6 +829,7 @@ int main(void) {
     RUN_TEST(test_chunk_limit_splits_one_run_without_dropping_instances);
     RUN_TEST(test_indexed_and_nonindexed_meshes_use_matching_draw_paths);
     RUN_TEST(test_rgba8_and_float4_colors_keep_skin_fields_at_their_layout_offsets);
+    RUN_TEST(test_mixed_color_modes_pack_canonical_strides_and_offsets);
     RUN_TEST(test_active_skin_sampler_must_be_declared_by_material);
     RUN_TEST(test_zero_deformation_texture_asserts);
     RUN_TEST(test_skinned_mesh_stream_cannot_overlap_active_color_location);

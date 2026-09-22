@@ -1,5 +1,6 @@
 #include "renderers/nt_skinned_mesh_renderer.h"
 
+#include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "graphics/nt_gfx.h"
@@ -58,9 +59,9 @@ static const nt_vertex_layout_t s_instance_layouts[3] = {
             {.location = 10, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
             {.location = 11, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
             {.location = 12, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-            {.location = 13, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 48},
-            {.location = 14, .type = NT_VERTEX_UINT16, .count = 4, .offset = 52},
-            {.location = 15, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 60},
+            {.location = 14, .type = NT_VERTEX_UINT16, .count = 4, .offset = 48},
+            {.location = 15, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 56},
+            {.location = 13, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 60},
         },
     },
     [NT_COLOR_MODE_FLOAT4] = {
@@ -70,49 +71,18 @@ static const nt_vertex_layout_t s_instance_layouts[3] = {
             {.location = 10, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
             {.location = 11, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
             {.location = 12, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-            {.location = 13, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 48},
-            {.location = 14, .type = NT_VERTEX_UINT16, .count = 4, .offset = 64},
-            {.location = 15, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 72},
+            {.location = 14, .type = NT_VERTEX_UINT16, .count = 4, .offset = 48},
+            {.location = 15, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 56},
+            {.location = 13, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 60},
         },
     },
 };
 /* clang-format on */
 
-static void pack_world(float *dst, const float *m) {
-    dst[0] = m[0];
-    dst[1] = m[4];
-    dst[2] = m[8];
-    dst[3] = m[12];
-    dst[4] = m[1];
-    dst[5] = m[5];
-    dst[6] = m[9];
-    dst[7] = m[13];
-    dst[8] = m[2];
-    dst[9] = m[6];
-    dst[10] = m[10];
-    dst[11] = m[14];
-}
-
-static uint8_t float_to_u8(float value) {
-    if (value <= 0.0F) {
-        return 0;
-    }
-    if (value >= 1.0F) {
-        return 255;
-    }
-    return (uint8_t)((value * 255.0F) + 0.5F);
-}
-
-static void pack_color_u8(uint8_t *dst, const float color[4]) {
-    for (uint8_t i = 0; i < 4; i++) {
-        dst[i] = float_to_u8(color[i]);
-    }
-}
-
-static void pack_skin_binding(uint8_t *dst, uint16_t skin_offset, const nt_deformation_binding_t *binding) {
+static void pack_skin_binding(uint8_t *dst, const nt_deformation_binding_t *binding) {
     uint16_t origins[4] = {binding->x0, binding->y0, binding->x1, binding->y1};
-    memcpy(dst + skin_offset, origins, sizeof(origins));
-    memcpy(dst + skin_offset + sizeof(origins), &binding->alpha, sizeof(binding->alpha));
+    memcpy(dst, origins, sizeof(origins));
+    memcpy(dst + sizeof(origins), &binding->alpha, sizeof(binding->alpha));
 }
 
 static uint16_t instance_stride(nt_color_mode_t color_mode) { return s_instance_layouts[color_mode].stride; }
@@ -135,15 +105,7 @@ static uint32_t find_run_end(const nt_render_item_t *items, uint32_t leader, uin
 
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *material) {
     NT_ASSERT(nt_gfx_program_ready(material->program));
-    nt_pipeline_desc_t desc;
-    memset(&desc, 0, sizeof(desc));
-    desc.program = material->program;
-    desc.depth_test = material->depth_test;
-    desc.depth_write = material->depth_write;
-    desc.depth_func = NT_DEPTH_LESS;
-    desc.blend = material->blend;
-    desc.cull_mode = (uint8_t)material->cull_mode;
-    desc.label = material->label != NULL ? material->label : "skinned_mesh_pipeline";
+    const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(material, "skinned_mesh_pipeline");
     const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
     nt_pipeline_t pipeline = nt_renderer_pipeline_cache_find(s_skinned.pipelines, s_skinned.pipeline_count, &key);
     if (pipeline.id != 0) {
@@ -282,6 +244,7 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
     nt_renderer_bound_t bound = {0};
     nt_pipeline_t pipeline = {0};
     nt_vertex_input_t vertex_input = {0};
+    const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
 
     while (chunk_start < count) {
         uint32_t chunk_count = count - chunk_start;
@@ -293,9 +256,10 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
         uint32_t scan = chunk_start;
         while (scan < chunk_end) {
             nt_entity_t leader = {.id = items[scan].entity};
-            const nt_deformation_binding_t leader_binding = *nt_skin_comp_handle(leader);
-            NT_ASSERT(leader_binding.texture.id != 0 && "skinned draw requires a deformation texture");
-            const uint32_t run_end = find_run_end(items, scan, chunk_end, leader_binding.texture.id);
+            uint32_t run_end = scan + 1;
+            while (run_end < chunk_end && items[run_end].batch_key == items[scan].batch_key) {
+                run_end++;
+            }
             nt_material_t material_handle = *nt_material_comp_handle(leader);
             const nt_material_info_t *material = nt_material_get_info(material_handle);
             const nt_color_mode_t color_mode = material != NULL ? material->color_mode : NT_COLOR_MODE_NONE;
@@ -306,15 +270,14 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
                 const nt_deformation_binding_t binding = *nt_skin_comp_handle(entity);
                 NT_ASSERT(binding.texture.id != 0 && "skinned draw requires a deformation texture");
                 uint8_t *dst = s_skinned.instance_data + packed_size;
-                pack_world((float *)dst, nt_transform_comp_world_matrix(entity));
+                nt_renderer_pack_world((float *)dst, nt_transform_comp_world_matrix(entity));
+                pack_skin_binding(dst + 48, &binding);
                 if (color_mode == NT_COLOR_MODE_RGBA8) {
-                    pack_color_u8(dst + 48, nt_drawable_comp_color(entity));
-                    pack_skin_binding(dst, 52, &binding);
+                    const uint16_t drawable_index = drawable_view.sparse_indices[nt_entity_index(entity)];
+                    NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no drawable component");
+                    memcpy(dst + 60, &drawable_view.colors_packed[drawable_index], sizeof(uint32_t));
                 } else if (color_mode == NT_COLOR_MODE_FLOAT4) {
-                    memcpy(dst + 48, nt_drawable_comp_color(entity), 16);
-                    pack_skin_binding(dst, 64, &binding);
-                } else {
-                    pack_skin_binding(dst, 48, &binding);
+                    memcpy(dst + 60, nt_drawable_comp_color(entity), 16);
                 }
                 packed_size += stride;
             }
@@ -384,6 +347,7 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             previous_mesh = mesh_handle;
             previous_deformation = deformation.texture;
             if (material->color_mode == NT_COLOR_MODE_NONE) {
+                /* Native GL leaves a generic value unspecified after drawing with an enabled array there. */
                 nt_gfx_set_vertex_attrib_default(13, 1.0F, 1.0F, 1.0F, 1.0F);
             }
             nt_gfx_bind_instance_buffer(s_skinned.instance_buf, draw_offset);
