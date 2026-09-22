@@ -222,6 +222,22 @@ static struct {
 
 // #region capture of authoritative backend mirrors
 #if NT_GFX_CAPTURE_ENABLED
+static void capture_program_definition(uint32_t i) {
+    const nt_gfx_gl_program_t *program = &s_programs[i];
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_PROGRAM; event.data.backend.args[0] = i; event.data.backend.args[1] = program->program;);
+    for (uint32_t u = 0; u < program->uniform_count; u++) {
+        NT_GFX_RECORD(
+            NT_GFX_EVENT_INITIAL, NT_GFX_OP_UNIFORM_VEC4, event.data.backend.args[0] = i; event.data.backend.args[1] = program->uniforms[u].name_hash;
+            event.data.backend.args[2] = (uint32_t)program->uniforms[u].location; if ((program->vec4_valid & (1U << u)) != 0) {
+                memcpy(event.data.backend.values, program->vec4_values[u], sizeof(event.data.backend.values));
+            } else { event.reason = NT_GFX_REASON_UNKNOWN; });
+    }
+    for (uint32_t u = 0; u < program->sampler_count; u++) {
+        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SAMPLER, event.data.backend.args[0] = i; event.data.backend.args[1] = program->sampler_units[u].name_hash;
+                      event.data.backend.args[2] = (uint32_t)program->sampler_units[u].location; event.data.backend.args[3] = u; event.data.backend.args[4] = program->sampler_units[u].sampler_class;);
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded snapshots of separate backend tables
 void nt_gfx_backend_capture_initial_state(void) {
     if (g_nt_gfx_observation.capture.overflow) {
@@ -261,19 +277,7 @@ void nt_gfx_backend_capture_initial_state(void) {
         if (program->program == 0) {
             continue;
         }
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_PROGRAM; event.data.backend.args[0] = i; event.data.backend.args[1] = program->program;);
-        for (uint32_t u = 0; u < program->uniform_count; u++) {
-            NT_GFX_RECORD(
-                NT_GFX_EVENT_INITIAL, NT_GFX_OP_UNIFORM_VEC4, event.data.backend.args[0] = i; event.data.backend.args[1] = program->uniforms[u].name_hash;
-                event.data.backend.args[2] = (uint32_t)program->uniforms[u].location; if ((program->vec4_valid & (1U << u)) != 0) {
-                    memcpy(event.data.backend.values, program->vec4_values[u], sizeof(event.data.backend.values));
-                } else { event.reason = NT_GFX_REASON_UNKNOWN; });
-        }
-        for (uint32_t u = 0; u < program->sampler_count; u++) {
-            NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SAMPLER, event.data.backend.args[0] = i; event.data.backend.args[1] = program->sampler_units[u].name_hash;
-                          event.data.backend.args[2] = (uint32_t)program->sampler_units[u].location; event.data.backend.args[3] = u;
-                          event.data.backend.args[4] = program->sampler_units[u].sampler_class;);
-        }
+        capture_program_definition(i);
     }
     for (uint32_t i = 1; i <= s_init_desc.max_buffers && !g_nt_gfx_observation.capture.overflow; i++) {
         if (s_buffer_gl[i] == 0) {
@@ -673,6 +677,7 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
 #endif
 
     if (!nt_gfx_gl_ctx_create(&s_init_desc)) {
+        NT_GFX_RESULT(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return false;
     }
 
@@ -690,6 +695,7 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     nt_gfx_gl_cache_ground_state();
 
     nt_gfx_gl_init_context_features();
+    NT_GFX_RESULT(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_ACCEPTED);
     return true;
 }
 
@@ -910,7 +916,7 @@ void nt_gfx_backend_drop_timer_segments(void) {
 
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
     if (!enabled && s_timer_user_enabled && s_timer_enabled) {
-        if (nt_gfx_gl_ctx_is_lost()) {
+        if (nt_gfx_backend_is_context_lost()) {
             nt_gfx_backend_drop_timer_segments();
         } else {
             nt_gfx_backend_end_segment();
@@ -1158,6 +1164,10 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 
 void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
     int index = program_get_uniform_index(program_backend, name_hash);
+    if (index < 0) {
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_MAT4, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = name_hash; event.data.binding.secondary = program_backend;);
+        return;
+    }
     if (index >= 0) {
         glUniformMatrix4fv(s_programs[program_backend].uniforms[index].location, 1, GL_FALSE, matrix);
         NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_UNIFORM_MAT4, event.detail = NT_GFX_GL_UNIFORMMATRIX4FV;
@@ -1192,6 +1202,10 @@ void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_has
 
 void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val) {
     int index = program_get_uniform_index(program_backend, name_hash);
+    if (index < 0) {
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_FLOAT, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = name_hash; event.data.binding.secondary = program_backend;);
+        return;
+    }
     if (index >= 0) {
         glUniform1f(s_programs[program_backend].uniforms[index].location, val);
         NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_UNIFORM_FLOAT, event.detail = NT_GFX_GL_UNIFORM1F; event.data.backend.args[0] = (uint32_t)(s_programs[program_backend].uniforms[index].location);
@@ -1205,6 +1219,10 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
     nt_gfx_sampler_info_t sampler_info = {0};
     const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
     NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
+    if (index < 0) {
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_INT, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = name_hash; event.data.binding.secondary = program_backend;);
+        return;
+    }
     if (index >= 0) {
         glUniform1i(s_programs[program_backend].uniforms[index].location, val);
         NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_UNIFORM_INT, event.detail = NT_GFX_GL_UNIFORM1I; event.data.backend.args[0] = (uint32_t)(s_programs[program_backend].uniforms[index].location);
@@ -1344,6 +1362,7 @@ static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
     for (uint32_t bi = 0; bi < block_count; bi++) {
         GLuint block_index = glGetUniformBlockIndex(program, blocks[bi].name);
         if (block_index != GL_INVALID_INDEX) {
+            NT_GFX_COUNT(uniform_calls);
             glUniformBlockBinding(program, block_index, (GLuint)blocks[bi].binding_slot);
             NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_UNIFORM_BLOCK, event.detail = NT_GFX_GL_UNIFORMBLOCKBINDING; event.data.backend.args[0] = (uint32_t)(program);
                           event.data.backend.args[1] = (uint32_t)(block_index); event.data.backend.args[2] = (uint32_t)((GLuint)blocks[bi].binding_slot););
@@ -1545,7 +1564,11 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     }
     write_sampler_units(program, &s_programs[slot]);
     s_programs[slot].program = program;
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_PROGRAM; event.data.backend.args[0] = slot; event.data.backend.args[1] = program;);
+#if NT_GFX_CAPTURE_ENABLED
+    if (g_nt_gfx_observation.recording && !g_nt_gfx_observation.capture.overflow) {
+        capture_program_definition(slot);
+    }
+#endif
     return slot;
 }
 
@@ -1887,6 +1910,7 @@ void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *bloc
     }
     GLuint block_index = glGetUniformBlockIndex(program, block_name);
     if (block_index != GL_INVALID_INDEX) {
+        NT_GFX_COUNT(uniform_calls);
         glUniformBlockBinding(program, block_index, slot);
         NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_UNIFORM_BLOCK, event.detail = NT_GFX_GL_UNIFORMBLOCKBINDING; event.data.backend.args[0] = (uint32_t)(program);
                       event.data.backend.args[1] = (uint32_t)(block_index); event.data.backend.args[2] = (uint32_t)(slot););
@@ -1983,6 +2007,9 @@ static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     GLenum pending_error = glGetError();
     /* WebGL reports a loss once through glGetError; that is a recoverable
        outcome the caller rolls back, not a programmer error. */
+    if (pending_error == 0x9242U) { /* GL_CONTEXT_LOST_WEBGL */
+        nt_gfx_observe_context_loss();
+    }
     NT_ASSERT((pending_error == GL_NO_ERROR || nt_gfx_gl_ctx_is_lost()) && "pending GL error before texture upload");
     if (pending_error != GL_NO_ERROR) {
         NT_LOG_ERROR("pending GL error before texture upload: 0x%04X", (unsigned)pending_error);
@@ -2065,6 +2092,9 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
 
     GLenum first_error = GL_NO_ERROR;
     for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) {
+        if (e == 0x9242U) { /* GL_CONTEXT_LOST_WEBGL */
+            nt_gfx_observe_context_loss();
+        }
         if (first_error == GL_NO_ERROR) {
             first_error = e;
         }
@@ -2396,6 +2426,7 @@ static void nt_gfx_gl_commit_render_target_resize(uint32_t backend_handle, uint3
     nt_gfx_gl_render_target_t old = s_render_targets[backend_handle];
     GLuint old_color = s_texture_gl[color_backend];
     s_texture_gl[color_backend] = staging->color;
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_TEXTURE; event.data.backend.args[0] = color_backend; event.data.backend.args[1] = staging->color;);
     nt_gfx_gl_forget_texture(old_color);
     glDeleteTextures(1, &old_color);
     NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_STATE, event.detail = NT_GFX_GL_DELETETEXTURES; event.data.backend.args[0] = (uint32_t)(1); event.data.backend.args[1] = (uint32_t)(*(&old_color)););
@@ -2403,12 +2434,15 @@ static void nt_gfx_gl_commit_render_target_resize(uint32_t backend_handle, uint3
     if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
         GLuint old_depth = s_texture_gl[depth_backend];
         s_texture_gl[depth_backend] = staging->depth;
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_TEXTURE; event.data.backend.args[0] = depth_backend; event.data.backend.args[1] = staging->depth;);
         nt_gfx_gl_forget_texture(old_depth);
         glDeleteTextures(1, &old_depth);
         NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_STATE, event.detail = NT_GFX_GL_DELETETEXTURES; event.data.backend.args[0] = (uint32_t)(1);
                       event.data.backend.args[1] = (uint32_t)(*(&old_depth)););
     }
     s_render_targets[backend_handle] = staging->target;
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_RENDER_TARGET; event.data.backend.args[0] = backend_handle; event.data.backend.args[1] = staging->target.fbo;
+                  event.data.backend.args[2] = staging->target.depth_rbo;);
     if (s_bound_framebuffer == old.fbo) {
         glBindFramebuffer(GL_FRAMEBUFFER, staging->target.fbo);
         NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_STATE, event.detail = NT_GFX_GL_BINDFRAMEBUFFER; event.data.backend.args[0] = (uint32_t)(GL_FRAMEBUFFER);
@@ -2570,15 +2604,16 @@ void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_in
 /* ---- Context loss recovery ---- */
 
 bool nt_gfx_backend_recreate_all_resources(void) {
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_NONE;);
     /* Destroy old context and create a fresh one. */
     nt_gfx_gl_ctx_destroy();
     if (!nt_gfx_gl_ctx_create(&s_init_desc)) {
+        NT_GFX_RESULT(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return false;
     }
 #if NT_GFX_CAPTURE_ENABLED
     NT_ASSERT(g_nt_gfx_observation.context_sequence != UINT64_MAX);
     g_nt_gfx_observation.context_sequence++;
-    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_ACCEPTED);
 #endif
 
     /* Zero out all backend-side arrays -- old GL names are invalid. */
@@ -2605,5 +2640,6 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     }
     nt_gfx_gl_cache_ground_state();
     nt_gfx_gl_init_context_features();
+    NT_GFX_RESULT(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_ACCEPTED);
     return true;
 }

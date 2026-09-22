@@ -532,7 +532,8 @@ enum {
 };
 
 /* Payload calls only: NULL storage, generated mips and rendering are excluded.
- * Deltas require equal nonzero epoch and available=true at both endpoints. */
+ * Deltas require one gfx init lifetime, equal nonzero epoch and available=true
+ * at both endpoints. Sequence/epoch identifiers reset at gfx initialization. */
 typedef struct {
     uint64_t epoch;
     uint64_t buffer_calls;

@@ -198,6 +198,7 @@ nt_gfx_observation_t g_nt_gfx_observation;
 #if NT_GFX_COUNTERS_ENABLED
 static void observe_apply_stats_policy(bool enabled) {
     if (enabled && !g_nt_gfx_observation.stats_enabled) {
+        NT_ASSERT(g_nt_gfx_observation.uploads.epoch != UINT64_MAX);
         uint64_t epoch = g_nt_gfx_observation.uploads.epoch + 1;
         g_nt_gfx_observation.uploads = (nt_gfx_upload_totals_t){.epoch = epoch};
     }
@@ -642,6 +643,7 @@ static nt_texture_t render_target_make_attachment(const nt_texture_desc_t *desc)
     nt_texture_t tex = nt_gfx_make_texture(desc);
     if (tex.id != 0) {
         s_gfx.texture_metas[nt_pool_slot_index(tex.id)].render_target_owned = true;
+        NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, tex.id);
     }
     return tex;
 }
@@ -712,6 +714,7 @@ static void render_target_commit_attachment_backend(nt_texture_t tex, uint32_t b
         .label = NULL,
     };
     s_gfx.texture_metas[slot].default_sampler = nt_gfx_make_sampler(&sampler_desc);
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, tex.id);
 }
 
 static bool render_target_recreate_attachment(nt_texture_t tex, const nt_texture_desc_t *desc) {
@@ -748,6 +751,7 @@ static bool render_target_recreate_backend(uint32_t slot) {
     uint32_t color_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->color.id)];
     s_gfx.render_target_backends[slot] = nt_gfx_backend_create_render_target(&meta->desc, color_backend, depth_backend);
     meta->complete = s_gfx.render_target_backends[slot] != 0;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, s_gfx.render_target_pool.slots[slot].id);
     return meta->complete;
 }
 
@@ -1230,6 +1234,14 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 
     result.id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PIPELINE, result.id);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_PIPELINE, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = result.id; event.data.state.integers[0] = desc->program.id;
+                  event.data.state.integers[1] = desc->depth_test; event.data.state.integers[2] = desc->depth_write; event.data.state.integers[3] = (uint32_t)desc->depth_func;
+                  event.data.state.integers[4] = desc->cull_mode; event.data.state.integers[5] = desc->blend.enabled; event.data.state.integers[6] = (uint32_t)desc->blend.src_rgb;
+                  event.data.state.integers[7] = (uint32_t)desc->blend.dst_rgb; event.data.state.integers[8] = (uint32_t)desc->blend.src_alpha;
+                  event.data.state.integers[9] = (uint32_t)desc->blend.dst_alpha; event.data.state.integers[10] = (uint32_t)desc->blend.op_rgb;
+                  event.data.state.integers[11] = (uint32_t)desc->blend.op_alpha; event.data.state.integers[12] = desc->polygon_offset;
+                  memcpy(event.data.state.values, desc->blend.constant_color, 4 * sizeof(float)); event.data.state.values[4] = desc->polygon_offset_factor;
+                  event.data.state.values[5] = desc->polygon_offset_units;);
     NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = result.id; event.data.resource.backend = backend;
                   event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
@@ -1308,6 +1320,20 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
 
     result.id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_VERTEX_INPUT, result.id);
+#if NT_GFX_CAPTURE_ENABLED
+    if (g_nt_gfx_observation.recording && !g_nt_gfx_observation.capture.overflow) {
+        const nt_vertex_layout_t *layouts[] = {&desc->layout, &desc->instance_layout};
+        for (uint32_t layout = 0; layout < 2; layout++) {
+            for (uint32_t a = 0; a < layouts[layout]->attr_count; a++) {
+                const nt_vertex_attr_t *attr = &layouts[layout]->attrs[a];
+                NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event.object_kind = NT_GFX_OBJECT_VERTEX_INPUT; event.object = result.id;
+                              event.data.attribute.buffer = layout == 0 ? desc->vertex_buffer.id : 0; event.data.attribute.offset = attr->offset; event.data.attribute.stride = layouts[layout]->stride;
+                              event.data.attribute.location = attr->location; event.data.attribute.type = (uint32_t)attr->type; event.data.attribute.count = attr->count;
+                              event.data.attribute.normalized = attr->normalized; event.data.attribute.divisor = layout;);
+            }
+        }
+    }
+#endif
     NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_VERTEX_INPUT; event.object = result.id; event.data.resource.backend = backend;
                   event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
@@ -1800,6 +1826,9 @@ bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t
     }
     uint32_t slot = nt_pool_slot_index(rt.id);
     bool resized = render_target_resize_backend(slot, width, height);
+    if (resized) {
+        NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, rt.id);
+    }
     NT_GFX_RESULT(NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET, rt.id, resized ? NT_GFX_REASON_ACCEPTED : NT_GFX_REASON_BACKEND_FAILURE);
     return resized;
 }
@@ -2013,6 +2042,7 @@ static bool resolve_sampler_backend(uint32_t texture_slot, nt_sampler_t sampler,
             NT_LOG_ERROR_ONCE("apply_texture_bindings: sampler recreation failed");
             return false;
         }
+        NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, effective.id);
     }
     *out_backend = e->backend;
     return true;
@@ -2282,7 +2312,7 @@ void nt_gfx_set_scissor_enabled(bool enabled) {
     }
     /* The mirror owns this state end to end, so the dedup lives here and the backend stays raw. */
     if (s_gfx.scissor_enabled == enabled) {
-        NT_GFX_RESULT(NT_GFX_OP_SCISSOR_ENABLE, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_INVALID_ARGUMENT);
+        NT_GFX_RESULT(NT_GFX_OP_SCISSOR_ENABLE, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_CACHE);
         return;
     }
     s_gfx.scissor_enabled = enabled;
@@ -2399,6 +2429,7 @@ static void assert_instance_attribs_pointed(void) {
  * the caller draws indexed on a non-indexed input. */
 static void assert_indexed_draw_has_index_type(void) { NT_ASSERT(s_gfx.bound_index_type != NT_INDEX_NONE && "draw_indexed: bound vertex input is non-indexed"); }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic records and capacity assertions expand at owning sites
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DRAW, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = s_gfx.bound_pipeline; event.detail = 0; event.data.draw.first = first_vertex;
                   event.data.draw.count = num_vertices; event.data.draw.vertices = num_vertices; event.data.draw.instances = 1; event.data.draw.vertex_input = s_gfx.bound_vertex_input;);
@@ -2427,12 +2458,19 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls <= UINT32_MAX - (1));
+#endif
     g_nt_gfx.frame_stats.draw_calls++;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (num_vertices));
+#endif
     g_nt_gfx.frame_stats.vertices += num_vertices;
     nt_gfx_backend_draw(first_vertex, num_vertices);
     NT_GFX_RESULT(NT_GFX_OP_DRAW, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic records and capacity assertions expand at owning sites
 void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DRAW_INSTANCED, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = s_gfx.bound_pipeline; event.detail = 0; event.data.draw.first = first_vertex;
                   event.data.draw.count = num_vertices; event.data.draw.vertices = num_vertices; event.data.draw.instances = instance_count; event.data.draw.vertex_input = s_gfx.bound_vertex_input;);
@@ -2461,14 +2499,27 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls <= UINT32_MAX - (1));
+#endif
     g_nt_gfx.frame_stats.draw_calls++;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls_instanced <= UINT32_MAX - (1));
+#endif
     g_nt_gfx.frame_stats.draw_calls_instanced++;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count));
+#endif
     g_nt_gfx.frame_stats.vertices += NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.instances <= UINT64_MAX - (instance_count));
+#endif
     g_nt_gfx.frame_stats.instances += instance_count;
     nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
     NT_GFX_RESULT(NT_GFX_OP_DRAW_INSTANCED, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic records and capacity assertions expand at owning sites
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices) {
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DRAW_INDEXED, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = s_gfx.bound_pipeline; event.detail = 0; event.data.draw.first = first_index;
                   event.data.draw.count = num_indices; event.data.draw.vertices = num_vertices; event.data.draw.instances = 1; event.data.draw.vertex_input = s_gfx.bound_vertex_input;);
@@ -2498,13 +2549,23 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();
 
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls <= UINT32_MAX - (1));
+#endif
     g_nt_gfx.frame_stats.draw_calls++;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (num_vertices));
+#endif
     g_nt_gfx.frame_stats.vertices += num_vertices;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.indices <= UINT64_MAX - (num_indices));
+#endif
     g_nt_gfx.frame_stats.indices += num_indices;
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
     NT_GFX_RESULT(NT_GFX_OP_DRAW_INDEXED, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic records and capacity assertions expand at owning sites
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count) {
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_DRAW_INDEXED_INSTANCED, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = s_gfx.bound_pipeline; event.detail = 0;
                   event.data.draw.first = first_index; event.data.draw.count = num_indices; event.data.draw.vertices = num_vertices; event.data.draw.instances = instance_count;
@@ -2535,10 +2596,25 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();
 
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls <= UINT32_MAX - (1));
+#endif
     g_nt_gfx.frame_stats.draw_calls++;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls_instanced <= UINT32_MAX - (1));
+#endif
     g_nt_gfx.frame_stats.draw_calls_instanced++;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count));
+#endif
     g_nt_gfx.frame_stats.vertices += NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.indices <= UINT64_MAX - (NT_GFX_GEOMETRY_COUNT(num_indices) * instance_count));
+#endif
     g_nt_gfx.frame_stats.indices += NT_GFX_GEOMETRY_COUNT(num_indices) * instance_count;
+#if NT_GFX_COUNTERS_ENABLED
+    NT_ASSERT(g_nt_gfx.frame_stats.instances <= UINT64_MAX - (instance_count));
+#endif
     g_nt_gfx.frame_stats.instances += instance_count;
     nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
     NT_GFX_RESULT(NT_GFX_OP_DRAW_INDEXED_INSTANCED, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
