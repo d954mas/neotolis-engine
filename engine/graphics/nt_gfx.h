@@ -341,6 +341,7 @@ typedef struct {
      * raise the extra budget near the 64-layout sprite limit. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
+    uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     bool depth;                  /* request depth buffer (default: true) */
     bool stencil;                /* request stencil buffer (default: false) */
     bool antialias;              /* MSAA (default: false) */
@@ -576,6 +577,142 @@ typedef struct {
     nt_gfx_frame_status_t status;
 } nt_gfx_frame_snapshot_t;
 
+typedef enum {
+    NT_GFX_CAPTURE_NONE = 0,
+    NT_GFX_CAPTURE_RECORDING,
+    NT_GFX_CAPTURE_FINALIZED,
+} nt_gfx_capture_phase_t;
+
+typedef enum {
+    NT_GFX_EVENT_BEGIN,
+    NT_GFX_EVENT_RESULT,
+    NT_GFX_EVENT_BACKEND,
+    NT_GFX_EVENT_SKIP,
+    NT_GFX_EVENT_INITIAL,
+    NT_GFX_EVENT_DEFINITION,
+} nt_gfx_event_kind_t;
+
+typedef enum {
+    NT_GFX_OP_FRAME,
+    NT_GFX_OP_RENDER_FRAME,
+    NT_GFX_OP_PASS,
+    NT_GFX_OP_CREATE,
+    NT_GFX_OP_DESTROY,
+    NT_GFX_OP_RESIZE,
+    NT_GFX_OP_PIPELINE,
+    NT_GFX_OP_VERTEX_INPUT,
+    NT_GFX_OP_TEXTURE_SET,
+    NT_GFX_OP_TEXTURE,
+    NT_GFX_OP_SAMPLER,
+    NT_GFX_OP_VIEWPORT,
+    NT_GFX_OP_SCISSOR,
+    NT_GFX_OP_SCISSOR_ENABLE,
+    NT_GFX_OP_UNIFORM_MAT4,
+    NT_GFX_OP_UNIFORM_VEC4,
+    NT_GFX_OP_UNIFORM_FLOAT,
+    NT_GFX_OP_UNIFORM_INT,
+    NT_GFX_OP_UNIFORM_BLOCK,
+    NT_GFX_OP_UBO,
+    NT_GFX_OP_BUFFER_UPLOAD,
+    NT_GFX_OP_BUFFER_ORPHAN,
+    NT_GFX_OP_TEXTURE_UPLOAD,
+    NT_GFX_OP_ATTRIBUTE,
+    NT_GFX_OP_ATTRIBUTE_DEFAULT,
+    NT_GFX_OP_INSTANCE_BUFFER,
+    NT_GFX_OP_DRAW,
+    NT_GFX_OP_DRAW_INSTANCED,
+    NT_GFX_OP_DRAW_INDEXED,
+    NT_GFX_OP_DRAW_INDEXED_INSTANCED,
+    NT_GFX_OP_CONTEXT,
+    NT_GFX_OP_STATE,
+} nt_gfx_operation_t;
+
+typedef enum {
+    NT_GFX_OBJECT_NONE,
+    NT_GFX_OBJECT_SHADER,
+    NT_GFX_OBJECT_PROGRAM,
+    NT_GFX_OBJECT_PIPELINE,
+    NT_GFX_OBJECT_VERTEX_INPUT,
+    NT_GFX_OBJECT_BUFFER,
+    NT_GFX_OBJECT_TEXTURE,
+    NT_GFX_OBJECT_SAMPLER,
+    NT_GFX_OBJECT_RENDER_TARGET,
+} nt_gfx_object_kind_t;
+
+typedef enum {
+    NT_GFX_REASON_NONE,
+    NT_GFX_REASON_ACCEPTED,
+    NT_GFX_REASON_CACHE,
+    NT_GFX_REASON_INACTIVE,
+    NT_GFX_REASON_CONTEXT_LOST,
+    NT_GFX_REASON_INVALID_HANDLE,
+    NT_GFX_REASON_UNREADY,
+    NT_GFX_REASON_BACKEND_FAILURE,
+    NT_GFX_REASON_CAPACITY,
+    NT_GFX_REASON_UNKNOWN,
+    NT_GFX_REASON_EMPTY,
+} nt_gfx_event_reason_t;
+
+/* Pointer-free records. BEGIN/RESULT delimit nested operations; INITIAL and
+ * DEFINITION describe inherited state and never represent issued calls.
+ * object is a full typed frontend handle; raw names live only in backend data
+ * and are scoped by context_sequence. Unknown inherited values are explicit. */
+typedef struct {
+    uint64_t context_sequence;
+    nt_gfx_event_kind_t kind;
+    nt_gfx_operation_t operation;
+    nt_gfx_object_kind_t object_kind;
+    uint32_t object;
+    uint32_t detail;
+    nt_gfx_event_reason_t reason;
+    union {
+        struct {
+            uint64_t bytes;
+            uint32_t args[12];
+            float values[4];
+        } backend;
+        struct {
+            uint64_t size;
+            uint32_t backend, related[3], type, usage, width, height, format, levels, flags;
+        } resource;
+        struct {
+            uint32_t first, count, vertices, instances;
+        } draw;
+        struct {
+            uint32_t name, count;
+            float values[16];
+        } uniform;
+        struct {
+            uint32_t secondary, name, slot, offset;
+        } binding;
+        struct {
+            uint32_t target, width, height;
+            float color[4], depth;
+        } pass;
+        struct {
+            uint32_t buffer, offset, stride, location, type, count, normalized, divisor;
+        } attribute;
+        struct {
+            uint32_t integers[12];
+            float values[8];
+        } state;
+    } data;
+} nt_gfx_event_t;
+
+_Static_assert(sizeof(nt_gfx_event_t) == 112, "capture record layout must remain explicit");
+
+typedef struct {
+    uint64_t frame_sequence;
+    nt_gfx_backend_kind_t backend;
+    bool available;
+    bool overflow;
+    nt_gfx_capture_phase_t phase;
+    nt_gfx_frame_status_t status;
+    const nt_gfx_event_t *events;
+    uint32_t count;
+    nt_gfx_frame_snapshot_t snapshot; /* matching finalized counters, even after later counter-only frames */
+} nt_gfx_capture_view_t;
+
 /* Optional host-owned interval, at gfx IDLE, enclosing 0..1 gfx frames.
  * Call before resource preparation and end even when rendering is disabled.
  * These boundaries never advance rendering or poll the graphics context. */
@@ -590,6 +727,12 @@ nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void);
 /* Starts enabled when compiled in. Inside an interval takes effect next begin;
  * outside takes effect immediately. Re-enabling starts a new upload epoch. */
 void nt_gfx_stats_set_enabled(bool enabled);
+/* Defaults to false; enabling requires nonzero init capacity. Changes during
+ * observation apply next begin. OFF/stub is inert. */
+void nt_gfx_capture_set_enabled(bool enabled);
+/* Metadata by value; immutable event prefix until next recorded begin/shutdown.
+ * Copy count records and metadata to keep. Empty views have events=NULL. */
+nt_gfx_capture_view_t nt_gfx_capture_read(void);
 // #endregion
 
 /* ---- GPU format capabilities ---- */

@@ -36,6 +36,8 @@ const nt_gfx_frame_snapshot_t *nt_gfx_observe_end_frame(void) {
 nt_gfx_counters_t nt_gfx_stats_read(void) { return (nt_gfx_counters_t){0}; }
 nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) { return (nt_gfx_upload_totals_t){0}; }
 void nt_gfx_stats_set_enabled(bool enabled) { (void)enabled; }
+void nt_gfx_capture_set_enabled(bool enabled) { (void)enabled; }
+nt_gfx_capture_view_t nt_gfx_capture_read(void) { return (nt_gfx_capture_view_t){0}; }
 
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 

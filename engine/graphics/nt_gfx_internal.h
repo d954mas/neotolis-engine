@@ -14,6 +14,14 @@ typedef struct {
     bool gfx_begun;
     bool aborted;
     nt_gfx_frame_snapshot_t last;
+#if NT_GFX_CAPTURE_ENABLED
+    uint64_t context_sequence;
+    bool capture_requested;
+    bool recording;
+    nt_gfx_event_t *events;
+    uint32_t capacity;
+    nt_gfx_capture_view_t capture;
+#endif
 #if NT_GFX_COUNTERS_ENABLED
     bool stats_requested;
     bool stats_enabled;
@@ -24,6 +32,32 @@ typedef struct {
 } nt_gfx_observation_t;
 
 extern nt_gfx_observation_t g_nt_gfx_observation;
+#endif
+
+#if NT_GFX_CAPTURE_ENABLED
+static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
+    nt_gfx_observation_t *obs = &g_nt_gfx_observation;
+    if (obs->capture.count == obs->capacity) {
+        obs->capture.overflow = true;
+        return;
+    }
+    memcpy(&obs->events[obs->capture.count++], event, sizeof(*event));
+}
+/* Arguments and record construction disappear entirely in counters-only builds. */
+#define NT_GFX_RECORD(event_kind, event_operation, ...)                                                                                                                                                \
+    do {                                                                                                                                                                                               \
+        if (g_nt_gfx_observation.recording && !g_nt_gfx_observation.capture.overflow) {                                                                                                                \
+            nt_gfx_event_t event;                                                                                                                                                                      \
+            memset(&event, 0, sizeof(event));                                                                                                                                                          \
+            event.context_sequence = g_nt_gfx_observation.context_sequence;                                                                                                                            \
+            event.kind = (event_kind);                                                                                                                                                                 \
+            event.operation = (event_operation);                                                                                                                                                       \
+            __VA_ARGS__;                                                                                                                                                                               \
+            nt_gfx_capture_append(&event);                                                                                                                                                             \
+        }                                                                                                                                                                                              \
+    } while (0)
+#else
+#define NT_GFX_RECORD(...) ((void)0)
 #endif
 
 #if NT_GFX_COUNTERS_ENABLED

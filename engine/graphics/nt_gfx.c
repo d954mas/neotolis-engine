@@ -223,6 +223,41 @@ nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) {
 #endif
 }
 
+void nt_gfx_capture_set_enabled(bool enabled) {
+#if NT_GFX_CAPTURE_ENABLED
+    NT_ASSERT(!enabled || g_nt_gfx_observation.capacity > 0);
+    g_nt_gfx_observation.capture_requested = enabled;
+#else
+    (void)enabled;
+#endif
+}
+
+nt_gfx_capture_view_t nt_gfx_capture_read(void) {
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_capture_view_t result = g_nt_gfx_observation.capture;
+    result.available = g_nt_gfx.initialized;
+    result.backend = g_nt_gfx_observation.backend;
+    result.events = result.count > 0 ? g_nt_gfx_observation.events : NULL;
+    return result;
+#else
+    return (nt_gfx_capture_view_t){0};
+#endif
+}
+
+#if NT_GFX_CAPTURE_ENABLED
+static void capture_begin_frame(void) {
+    g_nt_gfx_observation.recording = g_nt_gfx_observation.capture_requested;
+    if (g_nt_gfx_observation.recording) {
+        g_nt_gfx_observation.capture = (nt_gfx_capture_view_t){
+            .frame_sequence = g_nt_gfx_observation.sequence,
+            .phase = NT_GFX_CAPTURE_RECORDING,
+            .status = NT_GFX_FRAME_RECORDING,
+        };
+        NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_FRAME, event.reason = NT_GFX_REASON_ACCEPTED);
+    }
+}
+#endif
+
 void nt_gfx_observe_begin_frame(void) {
 #if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
     NT_ASSERT(g_nt_gfx.initialized);
@@ -237,6 +272,9 @@ void nt_gfx_observe_begin_frame(void) {
     observe_apply_stats_policy(g_nt_gfx_observation.stats_requested);
     g_nt_gfx_observation.working = (nt_gfx_counters_t){0};
     g_nt_gfx_observation.upload_start = g_nt_gfx_observation.uploads;
+#endif
+#if NT_GFX_CAPTURE_ENABLED
+    capture_begin_frame();
 #endif
 #endif
 }
@@ -273,6 +311,22 @@ nt_gfx_counters_t nt_gfx_stats_read(void) {
     return result;
 }
 
+#if NT_GFX_CAPTURE_ENABLED
+static void capture_end_frame(void) {
+    if (g_nt_gfx_observation.recording) {
+        NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_FRAME, event.reason = g_nt_gfx_observation.last.status == NT_GFX_FRAME_ABORTED ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_ACCEPTED);
+        nt_gfx_capture_view_t *capture = &g_nt_gfx_observation.capture;
+        capture->phase = NT_GFX_CAPTURE_FINALIZED;
+        capture->status = g_nt_gfx_observation.last.status;
+        if (capture->status == NT_GFX_FRAME_COMPLETE && capture->overflow) {
+            capture->status = NT_GFX_FRAME_TRUNCATED;
+        }
+        capture->snapshot = g_nt_gfx_observation.last;
+        g_nt_gfx_observation.recording = false;
+    }
+}
+#endif
+
 const nt_gfx_frame_snapshot_t *nt_gfx_observe_end_frame(void) {
 #if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
     NT_ASSERT(g_nt_gfx_observation.active);
@@ -281,6 +335,9 @@ const nt_gfx_frame_snapshot_t *nt_gfx_observe_end_frame(void) {
         .counters = nt_gfx_stats_read(),
         .status = (g_nt_gfx_observation.aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
     };
+#if NT_GFX_CAPTURE_ENABLED
+    capture_end_frame();
+#endif
     g_nt_gfx_observation.active = false;
     return &g_nt_gfx_observation.last;
 #else
@@ -308,6 +365,15 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
 #endif
     nt_gfx_stats_set_enabled(true);
+#if NT_GFX_CAPTURE_ENABLED
+    NT_ASSERT(desc->capture_capacity == 0 || sizeof(nt_gfx_event_t) <= SIZE_MAX / desc->capture_capacity);
+    g_nt_gfx_observation.capacity = desc->capture_capacity;
+    g_nt_gfx_observation.context_sequence = 1;
+    if (desc->capture_capacity > 0) {
+        g_nt_gfx_observation.events = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * sizeof(nt_gfx_event_t));
+        NT_ASSERT(g_nt_gfx_observation.events != NULL);
+    }
+#endif
 
     nt_pool_init(&s_gfx.shader_pool, desc->max_shaders);
     nt_pool_init(&s_gfx.program_pool, desc->max_programs);
@@ -351,6 +417,10 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_shutdown(void) {
+#if NT_GFX_CAPTURE_ENABLED
+    g_nt_gfx_observation.recording = false;
+    free(g_nt_gfx_observation.events);
+#endif
     /* Delete GL objects before backend teardown, which destroys the WebGL context. */
 
     /* Render targets own attachment texture handles. */

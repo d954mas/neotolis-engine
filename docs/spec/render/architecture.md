@@ -410,6 +410,39 @@ inside an interval takes effect at the next begin; outside it applies immediatel
 OFF/stub reads are explicitly unavailable. Counter widths/flags are published
 by the interface target so every consumer uses the same configuration.
 
+`nt_gfx_upload_totals_read` exposes lifetime CPU payload calls/bytes, including
+work outside observation intervals. Deltas require availability and equal
+epochs. Re-enabling counters starts a new epoch. NULL-data storage and generated
+mips are excluded; non-NULL orphaning counts once. Texture bytes use the actual
+GPU format for each mip/subrectangle. Failed creates retain already-issued work.
+Per-frame payload fields subtract the begin baseline from these canonical totals.
+Bind requests count accepted frontend operations; call fields count actual GL
+calls, including temporary program, service VAO and upload texture bindings.
+Requests minus calls is not a cache-skip count. Uniform calls include link-time
+sampler assignments. UBO binds are unconditional; attribute counters count pointer
+specifications for static/instance layouts respectively.
+
+Command recording starts disabled. `nt_gfx_desc_t.capture_capacity` reserves one
+event array at init (default zero); enabling capture without capacity asserts.
+There is no growth or allocation while recording. Each pointer-free POD event
+is 112 bytes, including padding; 16384 records reserve 1.75 MiB. Other storage
+consists of fixed control state and counter snapshots, with no second event array.
+All record bytes are initialized before publication.
+
+`nt_gfx_capture_read` returns metadata by value and an immutable event prefix.
+The prefix remains valid until the next **recorded** begin or shutdown; frames
+with recording disabled preserve it. Two counts in the same sequence delimit
+an operation interval. Keep a capture by copying the metadata and `count` records
+and redirecting the saved view's pointer to the owned array. An empty view has
+a NULL pointer. The finalized view retains its matching counter snapshot by value
+even after subsequent counters-only frames overwrite the module's last snapshot.
+
+BEGIN/RESULT records delimit nested operations. Issued backend calls do not
+prove GL success or GPU completion. Metadata distinguishes recording from
+finalized, complete, truncated and aborted captures. Overflow is separately
+reported even when aborted, stops event appends, and never truncates counters.
+Runtime recording changes during observation apply next begin.
+
 ## Renderer complexity classes
 
 Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
