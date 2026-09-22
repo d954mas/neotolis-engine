@@ -167,6 +167,13 @@ uint8_t nt_resource_get_asset_type(nt_resource_t handle);
  * publication and epoch changes follow in nt_resource_step(). */
 uint32_t nt_resource_publication_epoch(void);
 
+/* Full wire payload, including the asset header, of the published READY file asset.
+ * Borrowed immutable pack bytes: copy to retain beyond provider change/invalidation,
+ * eviction, unmount or shutdown. Does not load, pin, decode, or update residency.
+ * Returns NULL for invalid/unallocated handles, unavailable providers or absent bytes
+ * (including virtual assets). Optional out_size receives wire size on success, 0 otherwise. */
+const uint8_t *nt_resource_get_asset_data(nt_resource_t handle, uint32_t *out_size);
+
 /* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready,
  * not a blob, or the current blob is absent; out_size may be NULL. Non-NULL data
  * is the current published winner's pack-blob view, valid until this slot publishes

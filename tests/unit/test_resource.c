@@ -177,6 +177,9 @@ void test_access_rejects_unallocated_slot_indices(void) {
         TEST_ASSERT_EQUAL_UINT8(0, nt_resource_get_asset_type(invalid[i]));
         TEST_ASSERT_NULL(nt_resource_peek_user_data(invalid[i]));
         uint32_t size = 123;
+        TEST_ASSERT_NULL(nt_resource_get_asset_data(invalid[i], &size));
+        TEST_ASSERT_EQUAL_UINT32(0, size);
+        size = 123;
         TEST_ASSERT_NULL(nt_resource_get_blob(invalid[i], &size));
         TEST_ASSERT_EQUAL_UINT32(0, size);
         size = 123;
@@ -2151,6 +2154,13 @@ void test_invalidate_triggers_redownload_on_evicted_blob(void) {
     nt_time_sleep(0.005); /* 5ms, well past 1ms TTL */
     nt_resource_step();   /* should evict blob (TTL expired) */
 
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    uint32_t wire_size = 99;
+    TEST_ASSERT_NULL(nt_resource_get_asset_data(h, &wire_size));
+    TEST_ASSERT_EQUAL_UINT32(0, wire_size);
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+    TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
+
     /* Now invalidate -- since blob is evicted, should trigger re-download */
     nt_resource_invalidate(NT_ASSET_MESH);
     TEST_ASSERT_EQUAL_UINT32(1, s_deactivate_call_count);
@@ -2364,6 +2374,10 @@ void test_get_blob_returns_data(void) {
     const uint8_t *data = nt_resource_get_blob(h, &data_size);
     TEST_ASSERT_NOT_NULL(data);
     TEST_ASSERT_EQUAL_UINT32(payload_size, data_size);
+    uint32_t wire_size = 0;
+    const uint8_t *wire = nt_resource_get_asset_data(h, &wire_size);
+    TEST_ASSERT_EQUAL_PTR(data - sizeof(NtBlobAssetHeader), wire);
+    TEST_ASSERT_EQUAL_UINT32(payload_size + sizeof(NtBlobAssetHeader), wire_size);
 
     /* Verify payload content matches fill byte */
     for (uint32_t i = 0; i < payload_size; i++) {
@@ -2402,6 +2416,53 @@ void test_get_blob_null_for_invalid_handle(void) {
     const uint8_t *data = nt_resource_get_blob(NT_RESOURCE_INVALID, &data_size);
     TEST_ASSERT_NULL(data);
     TEST_ASSERT_EQUAL_UINT32(0, data_size);
+}
+
+void test_asset_data_follows_published_owner_lifetime(void) {
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = test_activate});
+    const nt_hash64_t rid = nt_hash64_str("asset_data");
+    const nt_hash32_t low = nt_hash32_str("asset_data_low");
+    const nt_hash32_t high = nt_hash32_str("asset_data_high");
+    uint32_t low_size = 0;
+    uint32_t high_size = 0;
+    uint8_t *low_blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &low_size);
+    uint8_t *high_blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &high_size);
+    TEST_ASSERT_NOT_NULL(low_blob);
+    TEST_ASSERT_NOT_NULL(high_blob);
+    const NtAssetEntry *low_entry = (const NtAssetEntry *)(low_blob + sizeof(NtPackHeader));
+    const NtAssetEntry *high_entry = (const NtAssetEntry *)(high_blob + sizeof(NtPackHeader));
+    nt_resource_t resource = nt_resource_request(rid, NT_ASSET_MESH);
+    uint32_t size = 99;
+    TEST_ASSERT_NULL(nt_resource_get_asset_data(resource, &size));
+    TEST_ASSERT_EQUAL_UINT32(0, size);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(low, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(low, low_blob, low_size));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_PTR(low_blob + low_entry->offset, nt_resource_get_asset_data(resource, &size));
+    TEST_ASSERT_EQUAL_UINT32(low_entry->size, size);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(high, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(high, high_blob, high_size));
+    TEST_ASSERT_EQUAL_PTR(low_blob + low_entry->offset, nt_resource_get_asset_data(resource, NULL));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_PTR(high_blob + high_entry->offset, nt_resource_get_asset_data(resource, NULL));
+    nt_resource_invalidate(NT_ASSET_MESH);
+    size = 99;
+    TEST_ASSERT_NULL(nt_resource_get_asset_data(resource, &size));
+    TEST_ASSERT_EQUAL_UINT32(0, size);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_PTR(high_blob + high_entry->offset, nt_resource_get_asset_data(resource, NULL));
+    nt_resource_unmount(high);
+    TEST_ASSERT_NULL(nt_resource_get_asset_data(resource, NULL));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(high, 20));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(high, rid, NT_ASSET_MESH, 42));
+    TEST_ASSERT_NULL(nt_resource_get_asset_data(resource, NULL));
+    nt_resource_step();
+    TEST_ASSERT_TRUE(nt_resource_is_ready(resource));
+    TEST_ASSERT_NULL(nt_resource_get_asset_data(resource, NULL));
+    nt_resource_unmount(high);
+    nt_resource_unmount(low);
+    free(high_blob);
+    free(low_blob);
 }
 
 /* ---- Metadata test helpers ---- */
@@ -3436,6 +3497,12 @@ void test_blob_alias_at_index_zero_keeps_per_name_metadata(void) {
     TEST_ASSERT_EQUAL_UINT32(8, payload_size);
     TEST_ASSERT_EQUAL_HEX8(0xAB, payload[0]);
     TEST_ASSERT_EQUAL_PTR(payload, nt_resource_get_blob(owner, NULL));
+    uint32_t wire_size = 0;
+    const uint8_t *wire = nt_resource_get_asset_data(alias, &wire_size);
+    TEST_ASSERT_EQUAL_PTR(payload - sizeof(NtBlobAssetHeader), wire);
+    TEST_ASSERT_EQUAL_UINT32(payload_size + sizeof(NtBlobAssetHeader), wire_size);
+    TEST_ASSERT_EQUAL_PTR(wire, nt_resource_get_asset_data(owner, NULL));
+
     uint32_t meta_size = 0;
     const uint32_t *owner_tag = (const uint32_t *)nt_resource_get_meta(owner, nt_hash64_str("alias_tag"), &meta_size);
     TEST_ASSERT_NOT_NULL(owner_tag);
@@ -3469,6 +3536,9 @@ void test_blob_and_meta_reuse_stay_unpublished_until_step(void) {
         TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
         TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
         uint32_t view_size = 99;
+        TEST_ASSERT_NULL(nt_resource_get_asset_data(resource, &view_size));
+        TEST_ASSERT_EQUAL_UINT32(0, view_size);
+        view_size = 99;
         TEST_ASSERT_NULL(nt_resource_get_blob(resource, &view_size));
         TEST_ASSERT_EQUAL_UINT32(0, view_size);
         view_size = 99;
@@ -3890,6 +3960,7 @@ int main(void) {
     /* Blob asset tests */
     RUN_TEST(test_blob_asset_ready_after_parse);
     RUN_TEST(test_get_blob_returns_data);
+    RUN_TEST(test_asset_data_follows_published_owner_lifetime);
     RUN_TEST(test_get_blob_null_for_non_blob);
     RUN_TEST(test_get_blob_null_for_invalid_handle);
 

@@ -140,6 +140,11 @@ With the pack blob resident, a validated entry's payload begins at
 `blob + entry.offset` and spans `entry.size` bytes. Runtime activators borrow
 that range. `nt_resource_get_blob` returns the bytes after `NtBlobAssetHeader`
 for a published BLOB resource; its public contract defines the view's lifetime.
+`nt_resource_get_asset_data` returns the complete payload (including its typed
+header) of a published READY file resource when its pack bytes are resident.
+Both getters borrow pack storage and leave residency unchanged; copy the view
+before its provider is changed/invalidated, evicted, unmounted or shut down.
+
 
 ## Debugging
 
