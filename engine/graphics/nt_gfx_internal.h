@@ -60,6 +60,15 @@ static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
 #define NT_GFX_RECORD(...) ((void)0)
 #endif
 
+#if NT_GFX_CAPTURE_ENABLED
+static inline void nt_gfx_capture_result(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object, nt_gfx_event_reason_t reason) {
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, operation, event.object_kind = kind; event.object = object; event.reason = reason);
+}
+#define NT_GFX_RESULT(operation, kind, object, reason) nt_gfx_capture_result(operation, kind, object, reason)
+#else
+#define NT_GFX_RESULT(...) ((void)0)
+#endif
+
 #if NT_GFX_COUNTERS_ENABLED
 static inline void nt_gfx_observe_count(uint32_t *counter) {
     if (g_nt_gfx_observation.active && g_nt_gfx_observation.stats_enabled) {

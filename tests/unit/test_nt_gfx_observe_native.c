@@ -61,6 +61,7 @@ void setUp(void) {
     g_nt_window = (nt_window_t){.max_dpr = 1.0F, .width = 16, .height = 16};
     nt_window_init();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.capture_capacity = 4096;
     nt_gfx_init(&desc);
     s_buffer_data = glad_glBufferData;
     s_buffer_sub_data = glad_glBufferSubData;
@@ -90,6 +91,19 @@ void tearDown(void) {
 }
 
 #if NT_GFX_COUNTERS_ENABLED
+#if NT_GFX_CAPTURE_ENABLED
+static uint32_t captured_calls(nt_gfx_gl_call_t call) {
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        if (capture.events[i].kind == NT_GFX_EVENT_BACKEND && capture.events[i].detail == (uint32_t)call) {
+            count++;
+        }
+    }
+    return count;
+}
+#endif
 static void test_payloads_before_render_and_without_frames(void) {
     const uint8_t data[64] = {0};
     nt_gfx_upload_totals_t baseline = nt_gfx_upload_totals_read();
@@ -137,6 +151,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 64});
     const float color[4] = {1.0F, 0.5F, 0.0F, 1.0F};
+    nt_gfx_capture_set_enabled(true);
     for (uint32_t frame = 0; frame < 2; frame++) {
         s_program_calls = s_vao_calls = s_uniform_calls = s_ubo_calls = 0;
         nt_gfx_observe_begin_frame();
@@ -164,6 +179,12 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.program_calls);
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.uniform_calls);
         TEST_ASSERT_EQUAL_UINT32(2, c.ubo_calls);
+#if NT_GFX_CAPTURE_ENABLED
+        TEST_ASSERT_EQUAL_UINT32(c.program_calls, captured_calls(NT_GFX_GL_USEPROGRAM));
+        TEST_ASSERT_EQUAL_UINT32(c.vao_calls, captured_calls(NT_GFX_GL_BINDVERTEXARRAY));
+        TEST_ASSERT_EQUAL_UINT32(c.uniform_calls, captured_calls(NT_GFX_GL_UNIFORM4FV));
+        TEST_ASSERT_EQUAL_UINT32(c.ubo_calls, captured_calls(NT_GFX_GL_BINDBUFFERBASE));
+#endif
     }
 }
 
