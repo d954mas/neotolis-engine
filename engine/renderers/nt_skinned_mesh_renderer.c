@@ -262,7 +262,8 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             }
             nt_material_t material_handle = *nt_material_comp_handle(leader);
             const nt_material_info_t *material = nt_material_get_info(material_handle);
-            const nt_color_mode_t color_mode = material != NULL ? material->color_mode : NT_COLOR_MODE_NONE;
+            NT_ASSERT(material != NULL && "skinned render item references a destroyed material");
+            const nt_color_mode_t color_mode = material->color_mode;
             NT_ASSERT(color_mode <= NT_COLOR_MODE_FLOAT4);
             const uint16_t stride = instance_stride(color_mode);
             for (uint32_t i = scan; i < run_end; i++) {
@@ -372,6 +373,5 @@ uint32_t nt_skinned_mesh_renderer_test_pipeline_cache_count(void) { return s_ski
 uint32_t nt_skinned_mesh_renderer_test_vertex_input_count(void) { return nt_renderer_mesh_vi_cache_live_count(&s_skinned.vi_cache); }
 uint32_t nt_skinned_mesh_renderer_test_draw_call_count(void) { return s_skinned.frame_draw_calls; }
 uint32_t nt_skinned_mesh_renderer_test_instance_total(void) { return s_skinned.frame_instance_total; }
-uint32_t nt_skinned_mesh_renderer_test_ring_cursor(void) { return s_skinned.ring_cursor; }
 bool nt_skinned_mesh_renderer_test_initialized(void) { return s_skinned.initialized; }
 #endif

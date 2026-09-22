@@ -30,10 +30,12 @@ void nt_skinned_mesh_renderer_shutdown(void);
  * instance buffer. Failure must be retried before drawing. */
 nt_result_t nt_skinned_mesh_renderer_restore_gpu(void);
 
-/* The caller owns visibility, sorting and every referenced lifetime. Materials
- * declare u_skin_matrices; this renderer supplies that declared texture and its
- * default sampler from skin_comp. The fast normal path requires positive
- * uniform joint and world scale. Items may be NULL only when count is zero. */
+/* The caller owns visibility, sorting and every referenced lifetime. For
+ * common/skin.glsl, the mesh supplies joints/weights and the material attr_map
+ * maps them to its declared locations. Materials declare u_skin_matrices; this
+ * renderer supplies that declared texture and its default sampler from skin_comp.
+ * The fast normal path requires positive uniform joint and world scale. Items may
+ * be NULL only when count is zero. */
 void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access
@@ -42,7 +44,6 @@ uint32_t nt_skinned_mesh_renderer_test_pipeline_cache_count(void);
 uint32_t nt_skinned_mesh_renderer_test_vertex_input_count(void);
 uint32_t nt_skinned_mesh_renderer_test_draw_call_count(void);
 uint32_t nt_skinned_mesh_renderer_test_instance_total(void);
-uint32_t nt_skinned_mesh_renderer_test_ring_cursor(void);
 bool nt_skinned_mesh_renderer_test_initialized(void);
 #endif
 // #endregion

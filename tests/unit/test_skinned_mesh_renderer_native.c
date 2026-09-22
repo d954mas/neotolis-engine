@@ -19,6 +19,7 @@
 #include "nt_pack_format.h"
 #include "unity.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,10 +42,10 @@ _Static_assert(sizeof(test_vertex_t) == 48, "native skin fixture vertex must sta
 static const uint16_t k_indices[6] = {0, 1, 2, 0, 2, 3};
 
 static const test_vertex_t k_bar[VERTEX_COUNT] = {
-    {{-0.72F, -0.16F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 0.0F, 0.0F, 1.0F}, {0, 1, 0, 0}, {255, 0, 0, 0}},
-    {{0.72F, -0.16F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 0.0F, 0.0F, 1.0F}, {0, 1, 0, 0}, {64, 191, 0, 0}},
-    {{0.72F, 0.16F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 0.0F, 0.0F, 1.0F}, {0, 1, 0, 0}, {64, 191, 0, 0}},
-    {{-0.72F, 0.16F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 0.0F, 0.0F, 1.0F}, {0, 1, 0, 0}, {255, 0, 0, 0}},
+    {{-0.72F, -0.16F, 0.0F}, {0.36F, 0.48F, 0.8F}, {0.8F, -0.6F, 0.0F, 1.0F}, {0, 1, 0, 0}, {255, 0, 0, 0}},
+    {{0.72F, -0.16F, 0.0F}, {0.36F, 0.48F, 0.8F}, {0.8F, -0.6F, 0.0F, 1.0F}, {0, 1, 0, 0}, {64, 191, 0, 0}},
+    {{0.72F, 0.16F, 0.0F}, {0.36F, 0.48F, 0.8F}, {0.8F, -0.6F, 0.0F, 1.0F}, {0, 1, 0, 0}, {64, 191, 0, 0}},
+    {{-0.72F, 0.16F, 0.0F}, {0.36F, 0.48F, 0.8F}, {0.8F, -0.6F, 0.0F, 1.0F}, {0, 1, 0, 0}, {255, 0, 0, 0}},
 };
 
 static const test_vertex_t k_guard_bar[VERTEX_COUNT] = {
@@ -55,8 +56,8 @@ static const test_vertex_t k_guard_bar[VERTEX_COUNT] = {
 };
 
 /* Two frames, two joints, three RGBA rows per joint. */
-static const float k_palette_texels[48] = {
-    /* frame A, joint 0 */
+static const float k_palette_texels[96] = {
+    /* row 0: frame A at x=0 */
     1.0F,
     0.0F,
     0.0F,
@@ -82,6 +83,44 @@ static const float k_palette_texels[48] = {
     0.0F,
     1.0F,
     0.0F,
+    /* row 0 padding */
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    /* row 1: padding, then frame B at x=3 */
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
     /* frame B, joint 0 */
     0.96592581F,
     0.25881904F,
@@ -106,7 +145,20 @@ static const float k_palette_texels[48] = {
     -0.10F,
     0.0F,
     0.0F,
-    1.0F,
+    0.9F,
+    0.0F,
+    /* row 1 padding */
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
+    0.0F,
     0.0F,
 };
 
@@ -296,12 +348,27 @@ static void render_skinned_list(const nt_render_item_t *items, uint32_t count, u
     nt_gfx_end_frame();
 }
 
-static const float *palette_row(uint16_t origin_x, uint8_t joint, uint8_t row) {
-    const size_t texel = (size_t)origin_x + ((size_t)joint * 3U) + row;
+static const float *palette_row(uint16_t origin_x, uint16_t origin_y, uint8_t joint, uint8_t row) {
+    const size_t texel = ((size_t)origin_y * 12U) + origin_x + ((size_t)joint * 3U) + row;
     return &k_palette_texels[texel * 4U];
 }
 
-static void deform_vertices(nt_deformation_binding_t binding, test_vertex_t out[VERTEX_COUNT]) {
+static float dot3(const float a[3], const float b[3]) { return (a[0] * b[0]) + (a[1] * b[1]) + (a[2] * b[2]); }
+
+static void normalize3(float v[3]) {
+    const float inverse_length = 1.0F / sqrtf(dot3(v, v));
+    for (uint8_t i = 0; i < 3; i++) {
+        v[i] *= inverse_length;
+    }
+}
+
+static void world_vector(const float in[3], float out[3]) {
+    out[0] = -0.75F * in[1];
+    out[1] = 0.75F * in[0];
+    out[2] = 0.75F * in[2];
+}
+
+static void deform_vertices(nt_deformation_binding_t binding, bool apply_world, test_vertex_t out[VERTEX_COUNT]) {
     memcpy(out, k_bar, sizeof(k_bar));
     for (uint32_t vertex = 0; vertex < VERTEX_COUNT; vertex++) {
         float matrix[3][4] = {{0}};
@@ -309,17 +376,45 @@ static void deform_vertices(nt_deformation_binding_t binding, test_vertex_t out[
             const float weight = (float)k_bar[vertex].weights[lane] / 255.0F;
             const uint8_t joint = k_bar[vertex].joints[lane];
             for (uint8_t row = 0; row < 3; row++) {
-                const float *a = palette_row(binding.x0, joint, row);
-                const float *b = palette_row(binding.x1, joint, row);
+                const float *a = palette_row(binding.x0, binding.y0, joint, row);
+                const float *b = palette_row(binding.x1, binding.y1, joint, row);
                 for (uint8_t column = 0; column < 4; column++) {
                     matrix[row][column] += weight * ((a[column] * (1.0F - binding.alpha)) + (b[column] * binding.alpha));
                 }
             }
         }
         const float *position = k_bar[vertex].position;
+        float skinned_position[3];
         for (uint8_t row = 0; row < 3; row++) {
-            out[vertex].position[row] = (matrix[row][0] * position[0]) + (matrix[row][1] * position[1]) + (matrix[row][2] * position[2]) + matrix[row][3];
+            skinned_position[row] = (matrix[row][0] * position[0]) + (matrix[row][1] * position[1]) + (matrix[row][2] * position[2]) + matrix[row][3];
         }
+        if (apply_world) {
+            world_vector(skinned_position, out[vertex].position);
+            out[vertex].position[0] += 0.08F;
+            out[vertex].position[1] -= 0.06F;
+        } else {
+            memcpy(out[vertex].position, skinned_position, sizeof(skinned_position));
+        }
+
+        float skin_normal[3];
+        float skin_tangent[3];
+        for (uint8_t row = 0; row < 3; row++) {
+            skin_normal[row] = (matrix[row][0] * k_bar[vertex].normal[0]) + (matrix[row][1] * k_bar[vertex].normal[1]) + (matrix[row][2] * k_bar[vertex].normal[2]);
+            skin_tangent[row] = (matrix[row][0] * k_bar[vertex].tangent[0]) + (matrix[row][1] * k_bar[vertex].tangent[1]) + (matrix[row][2] * k_bar[vertex].tangent[2]);
+        }
+        if (apply_world) {
+            world_vector(skin_normal, out[vertex].normal);
+            world_vector(skin_tangent, out[vertex].tangent);
+        } else {
+            memcpy(out[vertex].normal, skin_normal, sizeof(skin_normal));
+            memcpy(out[vertex].tangent, skin_tangent, sizeof(skin_tangent));
+        }
+        normalize3(out[vertex].normal);
+        const float projection = dot3(out[vertex].normal, out[vertex].tangent);
+        for (uint8_t axis = 0; axis < 3; axis++) {
+            out[vertex].tangent[axis] -= out[vertex].normal[axis] * projection;
+        }
+        normalize3(out[vertex].tangent);
     }
 }
 
@@ -366,10 +461,6 @@ void setUp(void) {
     char *skin_source = NULL;
     char *reference_source = NULL;
     char *fragment_source = NULL;
-    TEST_ASSERT_TRUE_MESSAGE(compose_skin_vertex_source(&skin_source), "failed to load and substitute assets/shaders/common/skin.glsl");
-    TEST_ASSERT_TRUE_MESSAGE(read_text("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source), "failed to load reference vertex fixture");
-    TEST_ASSERT_TRUE_MESSAGE(read_text("tests/fixtures/skinned_mesh_renderer_native.frag", &fragment_source), "failed to load fragment fixture");
-
     TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = RT_W, .height = RT_H};
@@ -393,8 +484,18 @@ void setUp(void) {
     nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 32});
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 32});
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
+    s_initialized = true;
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_instances = 8, .max_pipelines = 4, .max_mesh_layouts = 4}));
     TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 8, .max_pipelines = 4, .max_mesh_layouts = 4}));
+
+    const bool sources_ready = compose_skin_vertex_source(&skin_source) && read_text("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
+                               read_text("tests/fixtures/skinned_mesh_renderer_native.frag", &fragment_source);
+    if (!sources_ready) {
+        free(skin_source);
+        free(reference_source);
+        free(fragment_source);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(sources_ready, "failed to load native skinned-renderer shader fixtures");
 
     s_skin_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = skin_source, .label = "native_skin_vs"});
     s_reference_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = reference_source, .label = "native_skin_reference_vs"});
@@ -421,7 +522,7 @@ void setUp(void) {
     });
     s_palette = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 12,
-        .height = 1,
+        .height = 2,
         .data = k_palette_texels,
         .format = NT_TEXTURE_FORMAT_RGBA32F,
         .min_filter = NT_FILTER_NEAREST,
@@ -432,7 +533,6 @@ void setUp(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, s_target.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, s_palette.id);
-    s_initialized = true;
 }
 
 void tearDown(void) {
@@ -449,13 +549,24 @@ void tearDown(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
     nt_resource_shutdown();
-    nt_gfx_destroy_texture(s_palette);
-    nt_gfx_destroy_render_target(s_target);
+    if (s_palette.id != 0) {
+        nt_gfx_destroy_texture(s_palette);
+    }
+    if (s_target.id != 0) {
+        nt_gfx_destroy_render_target(s_target);
+    }
     nt_gfx_destroy_program(s_reference_program);
     nt_gfx_destroy_program(s_skin_program);
     nt_gfx_destroy_shader(s_fragment_shader);
     nt_gfx_destroy_shader(s_reference_vs);
     nt_gfx_destroy_shader(s_skin_vs);
+    s_palette = (nt_texture_t){0};
+    s_target = (nt_render_target_t){0};
+    s_reference_program = (nt_program_t){0};
+    s_skin_program = (nt_program_t){0};
+    s_fragment_shader = (nt_shader_t){0};
+    s_reference_vs = (nt_shader_t){0};
+    s_skin_vs = (nt_shader_t){0};
     nt_gfx_shutdown();
     nt_hash_shutdown();
     nt_window_shutdown();
@@ -465,28 +576,40 @@ void tearDown(void) {
 static void test_palette_frames_and_interpolation_match_cpu_reference(void) {
     const nt_deformation_binding_t cases[3] = {
         {.texture = {0}, .x0 = 0, .y0 = 0, .x1 = 0, .y1 = 0, .alpha = 0.0F},
-        {.texture = {0}, .x0 = 6, .y0 = 0, .x1 = 6, .y1 = 0, .alpha = 0.0F},
-        {.texture = {0}, .x0 = 0, .y0 = 0, .x1 = 6, .y1 = 0, .alpha = 0.5F},
+        {.texture = {0}, .x0 = 3, .y0 = 1, .x1 = 3, .y1 = 1, .alpha = 0.0F},
+        {.texture = {0}, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F},
     };
     nt_mesh_t skinned_mesh = make_mesh(k_bar);
-    nt_material_t skinned_material = make_skinned_material(0.0F, NT_COLOR_MODE_NONE);
-    nt_material_t reference_material = make_reference_material(0.0F);
+    nt_material_t skinned_material[3];
+    nt_material_t reference_material[3];
+    for (uint8_t mode = 0; mode < 3; mode++) {
+        skinned_material[mode] = make_skinned_material((float)mode, NT_COLOR_MODE_NONE);
+        reference_material[mode] = make_reference_material((float)mode);
+    }
     nt_deformation_binding_t initial = cases[0];
     initial.texture = s_palette;
-    nt_entity_t skinned_entity = make_entity(skinned_mesh, skinned_material, &initial);
+    nt_entity_t skinned_entity = make_entity(skinned_mesh, skinned_material[0], &initial);
+    const float rotation[4] = {0.0F, 0.0F, 0.70710678F, 0.70710678F};
+    nt_transform_comp_set_position(skinned_entity, 0.08F, -0.06F, 0.0F);
+    nt_transform_comp_set_rotation(skinned_entity, rotation);
+    nt_transform_comp_set_scale(skinned_entity, 0.75F, 0.75F, 0.75F);
+    nt_transform_comp_update();
 
     for (uint8_t i = 0; i < 3; i++) {
         nt_deformation_binding_t binding = cases[i];
         binding.texture = s_palette;
         *nt_skin_comp_handle(skinned_entity) = binding;
-        render_entity(skinned_entity, skinned_material, skinned_mesh, true, s_actual);
-
         test_vertex_t reference_vertices[VERTEX_COUNT];
-        deform_vertices(binding, reference_vertices);
+        deform_vertices(binding, true, reference_vertices);
         nt_mesh_t reference_mesh = make_mesh(reference_vertices);
-        nt_entity_t reference_entity = make_entity(reference_mesh, reference_material, NULL);
-        render_entity(reference_entity, reference_material, reference_mesh, false, s_expected);
-        assert_cpu_gpu_frames_agree();
+        nt_entity_t reference_entity = make_entity(reference_mesh, reference_material[0], NULL);
+        for (uint8_t mode = 0; mode < 3; mode++) {
+            *nt_material_comp_handle(skinned_entity) = skinned_material[mode];
+            *nt_material_comp_handle(reference_entity) = reference_material[mode];
+            render_entity(skinned_entity, skinned_material[mode], skinned_mesh, true, s_actual);
+            render_entity(reference_entity, reference_material[mode], reference_mesh, false, s_expected);
+            assert_cpu_gpu_frames_agree();
+        }
     }
 }
 
@@ -509,9 +632,9 @@ static void test_degenerate_normal_and_tangent_guards_are_finite_and_determinist
 }
 
 static void test_colored_then_none_restores_white_for_both_color_layouts(void) {
-    const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 6, .y1 = 0, .alpha = 0.5F};
+    const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
     test_vertex_t reference_vertices[VERTEX_COUNT];
-    deform_vertices(binding, reference_vertices);
+    deform_vertices(binding, false, reference_vertices);
     nt_mesh_t reference_mesh = make_mesh(reference_vertices);
     nt_material_t reference_material = make_reference_material(3.0F);
     nt_entity_t reference_entity = make_entity(reference_mesh, reference_material, NULL);

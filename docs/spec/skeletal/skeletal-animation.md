@@ -246,8 +246,11 @@ both frame origins and interpolates by alpha; CPU palettes are the case
 `frame1 == frame0`, `alpha == 0` (the second fetch hits the same texels). There
 is no program kind, per-run mode uniform, material pair or kind↔program
 validator: every material submitted here implements the documented shader ABI.
-`assets/shaders/common/skin.glsl` owns the shared fetch, blend and guarded-vector
-functions; the common shader and renderer implementation own their numeric
+`assets/shaders/common/skin.glsl` declares the skin, world and color inputs and
+owns the shared fetch, blend and guarded-vector functions. Skinned vertex
+shaders include it instead of the static renderer's `common/instance.glsl`;
+the material maps the mesh's joints and weights streams to the locations
+declared there. The common shader and renderer implementation own their numeric
 attribute locations and instance offsets, which are not specification ABI.
 `joints`/`weights` reach the program through the material `attr_map` like every
 other stream. Unmapped streams are skipped, so a skinned MESH still draws

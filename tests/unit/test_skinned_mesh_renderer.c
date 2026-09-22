@@ -392,6 +392,7 @@ void test_packed_instances_keep_each_entity_world_and_binding(void) {
     TEST_ASSERT_EQUAL_UINT32(120, nt_gfx_fake_last_update_buffer_size());
     uint32_t world_x_bits[2];
     uint16_t origins[2][4];
+    const uint16_t expected_origins[2][4] = {{11, 12, 13, 14}, {1, 2, 3, 4}};
     uint32_t alpha_bits[2];
     memcpy(&world_x_bits[0], bytes + 12, sizeof(uint32_t));
     memcpy(&origins[0], bytes + 48, sizeof(origins[0]));
@@ -400,12 +401,10 @@ void test_packed_instances_keep_each_entity_world_and_binding(void) {
     memcpy(&origins[1], bytes + 60 + 48, sizeof(origins[1]));
     memcpy(&alpha_bits[1], bytes + 60 + 56, sizeof(uint32_t));
     TEST_ASSERT_EQUAL_HEX32(0x41100000U, world_x_bits[0]); /* 9.0f */
-    TEST_ASSERT_EQUAL_UINT16(11, origins[0][0]);
-    TEST_ASSERT_EQUAL_UINT16(14, origins[0][3]);
+    TEST_ASSERT_EQUAL_UINT16_ARRAY(expected_origins[0], origins[0], 4);
     TEST_ASSERT_EQUAL_HEX32(0x3F400000U, alpha_bits[0]);   /* 0.75f */
     TEST_ASSERT_EQUAL_HEX32(0x40A00000U, world_x_bits[1]); /* 5.0f */
-    TEST_ASSERT_EQUAL_UINT16(1, origins[1][0]);
-    TEST_ASSERT_EQUAL_UINT16(4, origins[1][3]);
+    TEST_ASSERT_EQUAL_UINT16_ARRAY(expected_origins[1], origins[1], 4);
     TEST_ASSERT_EQUAL_HEX32(0x3E800000U, alpha_bits[1]); /* 0.25f */
 }
 
@@ -515,9 +514,9 @@ void test_rgba8_and_float4_colors_keep_skin_fields_at_their_layout_offsets(void)
     const uint8_t expected_rgba8[4] = {0, 128, 255, 64};
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_rgba8, bytes + 60, 4);
     uint16_t origins[4];
+    const uint16_t expected_origins[4] = {2, 4, 6, 8};
     memcpy(origins, bytes + 48, sizeof(origins));
-    TEST_ASSERT_EQUAL_UINT16(2, origins[0]);
-    TEST_ASSERT_EQUAL_UINT16(8, origins[3]);
+    TEST_ASSERT_EQUAL_UINT16_ARRAY(expected_origins, origins, 4);
     uint32_t alpha_bits;
     memcpy(&alpha_bits, bytes + 56, sizeof(alpha_bits));
     TEST_ASSERT_EQUAL_HEX32(0x3F000000U, alpha_bits);
@@ -535,8 +534,7 @@ void test_rgba8_and_float4_colors_keep_skin_fields_at_their_layout_offsets(void)
     TEST_ASSERT_EQUAL_HEX32(0x3FC00000U, color_bits[1]);
     TEST_ASSERT_EQUAL_HEX32(0x3F800000U, color_bits[3]);
     memcpy(origins, bytes + 48, sizeof(origins));
-    TEST_ASSERT_EQUAL_UINT16(2, origins[0]);
-    TEST_ASSERT_EQUAL_UINT16(8, origins[3]);
+    TEST_ASSERT_EQUAL_UINT16_ARRAY(expected_origins, origins, 4);
 }
 
 void test_mixed_color_modes_pack_canonical_strides_and_offsets(void) {

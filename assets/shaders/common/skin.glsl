@@ -5,6 +5,10 @@ precision highp int;
 
 layout(location = 8) in vec4 a_joints;
 layout(location = 9) in vec4 a_weights;
+layout(location = 10) in vec4 a_world_row0;
+layout(location = 11) in vec4 a_world_row1;
+layout(location = 12) in vec4 a_world_row2;
+layout(location = 13) in vec4 a_color;
 layout(location = 14) in vec4 a_skin_frames;
 layout(location = 15) in float a_skin_alpha;
 

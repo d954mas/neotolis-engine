@@ -79,13 +79,6 @@ static const nt_vertex_layout_t s_instance_layouts[3] = {
 };
 /* clang-format on */
 
-/* ---- Stream type to vertex format mapping ---- */
-
-/* Pack stream types and gfx vertex types are distinct enums on purpose: the
- * pack's on-disk format must not leak into the gfx API. Total mapping --
- * count and normalized pass through the attribute unchanged. */
-nt_vertex_type_t nt_stream_to_vertex_type(uint8_t type) { return nt_renderer_stream_to_vertex_type(type); }
-
 /* ---- Pipeline cache lookup/create ---- */
 
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
@@ -262,7 +255,8 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             nt_entity_t first_entity = {.id = items[scan].entity};
             nt_material_t run_mat = *nt_material_comp_handle(first_entity);
             const nt_material_info_t *mat_info = nt_material_get_info(run_mat);
-            nt_color_mode_t color_mode = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
+            NT_ASSERT(mat_info != NULL && "mesh render item references a destroyed material");
+            nt_color_mode_t color_mode = mat_info->color_mode;
             NT_ASSERT(color_mode <= NT_COLOR_MODE_FLOAT4); /* corrupted material = programmer error */
             uint16_t stride = s_instance_layouts[color_mode].stride;
 

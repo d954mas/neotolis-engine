@@ -6,10 +6,6 @@ precision highp int;
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec4 a_tangent;
-layout(location = 10) in vec4 a_world_row0;
-layout(location = 11) in vec4 a_world_row1;
-layout(location = 12) in vec4 a_world_row2;
-layout(location = 13) in vec4 a_color;
 
 out vec3 v_position_probe;
 out vec3 v_normal_probe;

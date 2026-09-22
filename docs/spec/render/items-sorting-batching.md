@@ -79,11 +79,11 @@ Renderers compare consecutive tokens to detect runs:
 while (run_end < count && items[run_end].batch_key == items[run_start].batch_key) run_end++;
 ```
 
-Equality is authoritative: it allows the renderer to reuse state resolved from
-the run leader. Equal tokens for incompatible state violate the caller
-contract and may draw with the wrong state. Store renderer-helper tokens
-unchanged. To force a boundary between otherwise compatible items, split them
-across separate `draw_list()` calls.
+Equality is authoritative for the state encoded by the token: it allows the
+renderer to reuse that state from the run leader. Equal tokens for incompatible
+encoded state violate the caller contract and may draw with the wrong state.
+Store renderer-helper tokens unchanged. To force a boundary between otherwise
+compatible items, split them across separate `draw_list()` calls.
 
 `nt_mesh_renderer_batch_key(material, mesh)` packs the two 16-bit pool slot
 indices as `material_slot << 16 | mesh_slot`. This is exact for simultaneously
@@ -93,6 +93,11 @@ material and mesh bindings of that same `item.entity`; until
 `nt_mesh_renderer_draw_list()` returns, the entity and required components stay
 alive, neither binding changes, and neither referenced live resource is
 destroyed or has its slot reused.
+
+`nt_skinned_mesh_renderer` uses the same material/mesh token, then additionally
+splits runs when the deformation texture changes. Frame origins and alpha stay
+per-instance; equal tokens do not require them to match. See
+[Skeletal animation — Renderer](../skeletal/skeletal-animation.md#13-renderer-implemented-523).
 
 `nt_sprite_renderer_batch_key(material, page_resource)` packs the material's
 16-bit pool slot and the current GPU texture's 16-bit pool slot. The page resource

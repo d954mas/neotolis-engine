@@ -1,3 +1,4 @@
+#define NT_LOG_DOMAIN "mesh_renderer_test"
 #include "test_helpers/nt_gfx_fake.h"
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -6,6 +7,7 @@
 /* clang-format off */
 /* NT_TEST_ACCESS defined via CMake target_compile_definitions */
 #include "renderers/nt_mesh_renderer.h"
+#include "renderers/nt_renderer_shared.h"
 #include "graphics/nt_gfx.h"
 #include "entity/nt_entity.h"
 #include "transform_comp/nt_transform_comp.h"
@@ -1525,12 +1527,12 @@ void test_restore_on_inactive_renderer_does_nothing(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_stream_to_vertex_type_total(void) {
-    TEST_ASSERT_EQUAL(NT_VERTEX_FLOAT, nt_stream_to_vertex_type(NT_STREAM_FLOAT32));
-    TEST_ASSERT_EQUAL(NT_VERTEX_HALF, nt_stream_to_vertex_type(NT_STREAM_FLOAT16));
-    TEST_ASSERT_EQUAL(NT_VERTEX_INT16, nt_stream_to_vertex_type(NT_STREAM_INT16));
-    TEST_ASSERT_EQUAL(NT_VERTEX_UINT16, nt_stream_to_vertex_type(NT_STREAM_UINT16));
-    TEST_ASSERT_EQUAL(NT_VERTEX_INT8, nt_stream_to_vertex_type(NT_STREAM_INT8));
-    TEST_ASSERT_EQUAL(NT_VERTEX_UINT8, nt_stream_to_vertex_type(NT_STREAM_UINT8));
+    TEST_ASSERT_EQUAL(NT_VERTEX_FLOAT, nt_renderer_stream_to_vertex_type(NT_STREAM_FLOAT32));
+    TEST_ASSERT_EQUAL(NT_VERTEX_HALF, nt_renderer_stream_to_vertex_type(NT_STREAM_FLOAT16));
+    TEST_ASSERT_EQUAL(NT_VERTEX_INT16, nt_renderer_stream_to_vertex_type(NT_STREAM_INT16));
+    TEST_ASSERT_EQUAL(NT_VERTEX_UINT16, nt_renderer_stream_to_vertex_type(NT_STREAM_UINT16));
+    TEST_ASSERT_EQUAL(NT_VERTEX_INT8, nt_renderer_stream_to_vertex_type(NT_STREAM_INT8));
+    TEST_ASSERT_EQUAL(NT_VERTEX_UINT8, nt_renderer_stream_to_vertex_type(NT_STREAM_UINT8));
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

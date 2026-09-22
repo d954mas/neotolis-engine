@@ -63,7 +63,4 @@ bool nt_mesh_renderer_test_initialized(void);
 #endif
 // #endregion
 
-/* Stream type → vertex attribute type mapping (used by pipeline builder, testable) */
-nt_vertex_type_t nt_stream_to_vertex_type(uint8_t type);
-
 #endif /* NT_MESH_RENDERER_H */
