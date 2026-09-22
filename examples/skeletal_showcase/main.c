@@ -108,6 +108,7 @@ static const struct {
     {"Fox Walk", ASSET_CLIP_SKELETAL_SHOWCASE_FOX_WALK_NANM},
     {"Fox Run", ASSET_CLIP_SKELETAL_SHOWCASE_FOX_RUN_NANM},
     {"CesiumMan", ASSET_CLIP_SKELETAL_SHOWCASE_CESIUMMAN_NANM},
+    {"Humanoid motion", {0}},
 };
 #define CLIP_COUNT ((int)(sizeof s_clips / sizeof s_clips[0]))
 
@@ -153,7 +154,7 @@ typedef struct {
 } skeletal_pose_scene_state_t;
 
 typedef struct {
-    rig_source_t rig;                   /* RIG_FOX or RIG_CESIUMMAN: the humanoid has no clips */
+    rig_source_t rig;
     const nt_skeletal_skeleton_t *skel; /* NULL while the imported skeleton is not ready */
     int clip;                           /* index into s_clip_resource, -1 = none */
     const nt_skeletal_clip_t *clip_view;
@@ -196,7 +197,20 @@ typedef struct {
     uint32_t weights;
     nt_mesh_t reference;
 } cpu_mesh_t;
-static cpu_mesh_t s_cpu_mesh[RIG_COUNT];
+#define CPU_CLOTHES RIG_COUNT
+#define CPU_ORDER_CLOTHES (RIG_COUNT + 1)
+#define CPU_SOURCE_COUNT (RIG_COUNT + 2)
+static cpu_mesh_t s_cpu_mesh[CPU_SOURCE_COUNT];
+static nt_mesh_t s_procedural_mesh[3];
+static nt_skin_binding_t s_humanoid_skin[2];
+static uint16_t s_humanoid_remap[HUMANOID_JOINT_COUNT];
+static nt_skeletal_mat34_t s_humanoid_inverse[2][HUMANOID_JOINT_COUNT];
+static nt_skeletal_clip_t s_humanoid_clip;
+static const uint16_t s_motion_joints[6] = {2, 4, 6, 10, 13, 17};
+static float s_motion_blocks[49][6][4];
+static bool s_independent_clothes;
+static nt_skeletal_track_t s_clothes_track;
+static nt_skeletal_mat34_t s_clothes_model[SKELETAL_SHOWCASE_MAX_JOINTS];
 static nt_skeletal_skeleton_t s_humanoid; /* the code-defined rig over the static arrays above */
 static uint32_t s_humanoid_joint_ids[HUMANOID_JOINT_COUNT];
 static nt_resource_t s_rig_resource[RIG_COUNT]; /* RIG_HUMANOID stays NT_RESOURCE_INVALID */
@@ -562,6 +576,8 @@ static void update_stage_camera(const nt_pointer_t *pointer, const nt_ui_scale_t
 }
 // #endregion
 
+static const nt_skeletal_clip_t *player_clip_view(int clip) { return clip == CLIP_COUNT - 1 ? &s_humanoid_clip : nt_skeletal_assets_clip(s_clip_resource[clip]); }
+
 // #region playback
 static void player_deselect_clip(character_player_t *p) {
     p->clip = -1;
@@ -624,7 +640,7 @@ static void player_update(character_player_t *p) {
         return;
     }
     /* Views are borrowed: refetched every frame after resource_step. Nothing unmounts, so a selected clip stays ready. */
-    p->clip_view = p->clip >= 0 ? nt_skeletal_assets_clip(s_clip_resource[p->clip]) : NULL;
+    p->clip_view = p->clip >= 0 ? player_clip_view(p->clip) : NULL;
     if (p->clip_view != NULL) {
         const float speed = p->reverse ? -p->speed_mag : p->speed_mag;
         p->track.speed = p->paused ? 0.0F : speed;
@@ -640,6 +656,7 @@ static void player_update(character_player_t *p) {
 }
 static void skinned_reset(void) {
     player_reset(&s_skinned_scene.player);
+    s_clothes_track = (nt_skeletal_track_t){0};
     s_reference_dirty = true;
     skinned_cancel_input();
 }
@@ -651,7 +668,24 @@ static void skinned_update(void) {
     const bool fit = s_fit_pending;
     const double old_time = s_skinned_scene.player.track.time;
     player_update(&s_skinned_scene.player);
-    s_reference_dirty |= old_time != s_skinned_scene.player.track.time;
+    s_reference_dirty |= s_cpu_reference && old_time != s_skinned_scene.player.track.time;
+    character_player_t *p = &s_skinned_scene.player;
+    if (p->rig == RIG_HUMANOID) {
+        s_clothes_track.speed = p->track.speed;
+        s_clothes_track.flags = p->track.flags;
+        s_clothes_track.duration = p->track.duration;
+        nt_skeletal_tracks_advance(&s_clothes_track, 1, (double)g_nt_app.dt);
+        if (s_independent_clothes) {
+            nt_skeletal_trs_t local[SKELETAL_SHOWCASE_MAX_JOINTS];
+            if (p->clip_view != NULL) {
+                nt_skeletal_sample(p->clip_view, s_clothes_track.time, local);
+            }
+            nt_skeletal_fk(&s_humanoid, p->clip_view != NULL ? local : s_rest, s_clothes_model, 0, HUMANOID_JOINT_COUNT);
+        }
+    }
+    if (!s_cpu_reference) {
+        s_reference_dirty = false;
+    }
     if (fit && !s_fit_pending) {
         s_camera_yaw = 0.9F;
     }
@@ -727,7 +761,7 @@ static void finish_mesh_sources(void) {
     }
 }
 
-static void deform_cpu_mesh(cpu_mesh_t *source, const nt_skin_binding_t *skin, const character_player_t *player) {
+static void deform_cpu_mesh(cpu_mesh_t *source, const nt_skin_binding_t *skin, const nt_skeletal_mat34_t *model, uint16_t joint_count) {
     if (source->output == NULL) {
         source->output = malloc(source->size);
         NT_ASSERT(source->output != NULL);
@@ -736,7 +770,7 @@ static void deform_cpu_mesh(cpu_mesh_t *source, const nt_skin_binding_t *skin, c
     const NtMeshAssetHeader *header = (const NtMeshAssetHeader *)source->data;
     const uint32_t prefix = (uint32_t)sizeof(*header) + (header->stream_count * (uint32_t)sizeof(NtStreamDesc));
     nt_skeletal_mat34_t palette[SKELETAL_SHOWCASE_MAX_PALETTE];
-    nt_skin_palette_build(skin, player->model, player->skel->joint_count, palette, SKELETAL_SHOWCASE_MAX_PALETTE);
+    nt_skin_palette_build(skin, model, joint_count, palette, SKELETAL_SHOWCASE_MAX_PALETTE);
     for (uint32_t i = 0; i < header->vertex_count; ++i) {
         const uint8_t *v = source->data + prefix + ((size_t)i * source->stride);
         const float *position = (const float *)(v + source->position);
@@ -755,6 +789,136 @@ static void deform_cpu_mesh(cpu_mesh_t *source, const nt_skin_binding_t *skin, c
     }
     source->reference = (nt_mesh_t){nt_gfx_activate_mesh(source->output, source->size)};
     NT_ASSERT(source->reference.id != 0);
+}
+
+/* Three rings per bone include a half-weight ring, so bending exercises blending. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void make_humanoid_mesh(cpu_mesh_t *source, bool clothes, bool local_space, const nt_skeletal_mat34_t *rest_model) {
+    typedef struct {
+        float position[3], uv[2];
+        uint8_t joints[4], weights[4];
+    } vertex_t;
+    const uint32_t segments = clothes ? 6U : HUMANOID_JOINT_COUNT - 1U;
+    const uint32_t vertices = segments * 24U;
+    const uint32_t indices = segments * 96U;
+    const uint32_t prefix = (uint32_t)sizeof(NtMeshAssetHeader) + (4U * (uint32_t)sizeof(NtStreamDesc));
+    source->stride = sizeof(vertex_t);
+    source->position = offsetof(vertex_t, position);
+    source->joints = offsetof(vertex_t, joints);
+    source->weights = offsetof(vertex_t, weights);
+    source->size = prefix + (vertices * source->stride) + (indices * (uint32_t)sizeof(uint16_t));
+    source->data = calloc(1, source->size);
+    NT_ASSERT(source->data != NULL);
+    NtMeshAssetHeader *header = (NtMeshAssetHeader *)source->data;
+    *header = (NtMeshAssetHeader){.magic = NT_MESH_MAGIC,
+                                  .version = NT_MESH_VERSION,
+                                  .stream_count = 4,
+                                  .index_type = 1,
+                                  .vertex_count = vertices,
+                                  .index_count = indices,
+                                  .vertex_data_size = vertices * source->stride,
+                                  .index_data_size = indices * 2U};
+    NtStreamDesc *streams = (NtStreamDesc *)(source->data + sizeof(*header));
+    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3};
+    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("uv").value, .type = NT_STREAM_FLOAT32, .count = 2};
+    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4};
+    streams[3] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1};
+    vertex_t *v = (vertex_t *)(source->data + prefix);
+    uint16_t *idx = (uint16_t *)(source->data + prefix + header->vertex_data_size);
+    uint32_t segment = 0;
+    for (uint16_t j = 1; j < HUMANOID_JOINT_COUNT; ++j) {
+        if (clothes && j != 1 && j != 2 && j != 6 && j != 7 && j != 10 && j != 11) {
+            continue;
+        }
+        const uint16_t parent = s_parent[j];
+        float a[3];
+        float direction[3];
+        for (uint32_t k = 0; k < 3; ++k) {
+            a[k] = rest_model[parent].r[k][3];
+            direction[k] = rest_model[j].r[k][3] - a[k];
+        }
+        float axis[3];
+        float u[3];
+        float w[3];
+        glm_vec3_copy(direction, axis);
+        glm_vec3_normalize(axis);
+        glm_vec3_cross(axis, (vec3){0, 0, 1}, u);
+        glm_vec3_normalize(u);
+        glm_vec3_cross(axis, u, w);
+        const float radius = (j <= 4 ? 0.24F : 0.10F) * (clothes ? 1.35F : 1.0F);
+        for (uint32_t ring = 0; ring < 3; ++ring) {
+            for (uint32_t side = 0; side < 8; ++side) {
+                vertex_t *out = &v[(segment * 24U) + (ring * 8U) + side];
+                const float angle = (float)side * (2.0F * GLM_PIf / 8.0F);
+                const float fraction = (float)ring * 0.5F;
+                for (uint32_t k = 0; k < 3; ++k) {
+                    const float authored = a[k] + (fraction * direction[k]) + (radius * ((cosf(angle) * u[k]) + (sinf(angle) * w[k])));
+                    const float translation[3] = {0.3F, 0.25F, -0.2F};
+                    out->position[k] = local_space ? (authored - translation[k]) / 1.25F : authored;
+                    if (segment == 0 && ring == 0 && side == 0) {
+                        header->aabb_min[k] = header->aabb_max[k] = out->position[k];
+                    } else {
+                        header->aabb_min[k] = fminf(header->aabb_min[k], out->position[k]);
+                        header->aabb_max[k] = fmaxf(header->aabb_max[k], out->position[k]);
+                    }
+                }
+                out->uv[0] = (float)side / 8.0F;
+                out->uv[1] = fraction;
+                out->joints[0] = (uint8_t)parent;
+                out->joints[1] = (uint8_t)j;
+                out->weights[1] = ring == 2 ? 255 : (uint8_t)(ring * 128U);
+                out->weights[0] = (uint8_t)(255U - out->weights[1]);
+                if (ring < 2) {
+                    const uint16_t base = (uint16_t)((segment * 24U) + (ring * 8U));
+                    const uint16_t x = (uint16_t)(base + side);
+                    const uint16_t y = (uint16_t)(base + ((side + 1U) % 8U));
+                    const uint16_t face[6] = {x, y, (uint16_t)(x + 8U), y, (uint16_t)(y + 8U), (uint16_t)(x + 8U)};
+                    memcpy(idx + ((size_t)segment * 96U) + ((size_t)ring * 48U) + ((size_t)side * 6U), face, sizeof face);
+                }
+            }
+        }
+        ++segment;
+    }
+    NT_ASSERT(segment == segments);
+}
+
+static void init_humanoid_meshes(void) {
+    nt_skeletal_mat34_t model[HUMANOID_JOINT_COUNT];
+    nt_skeletal_fk(&s_humanoid, s_rest, model, 0, HUMANOID_JOINT_COUNT);
+    const nt_skeletal_mat34_t clothes_space = {.r = {{1.25F, 0, 0, 0.3F}, {0, 1.25F, 0, 0.25F}, {0, 0, 1.25F, -0.2F}}};
+    for (uint16_t j = 0; j < HUMANOID_JOINT_COUNT; ++j) {
+        s_humanoid_remap[j] = j;
+        s_humanoid_inverse[0][j] = (nt_skeletal_mat34_t){.r = {{1, 0, 0, -model[j].r[0][3]}, {0, 1, 0, -model[j].r[1][3]}, {0, 0, 1, -model[j].r[2][3]}}};
+        nt_skeletal_mat34_mul(&s_humanoid_inverse[0][j], &clothes_space, &s_humanoid_inverse[1][j]);
+    }
+    for (uint32_t i = 0; i < 2; ++i) {
+        s_humanoid_skin[i] = (nt_skin_binding_t){.rig_compat_id = s_humanoid.rig_compat_id, .remap = s_humanoid_remap, .inverse_bind = s_humanoid_inverse[i], .palette_count = HUMANOID_JOINT_COUNT};
+    }
+    s_humanoid_clip = (nt_skeletal_clip_t){.rig_compat_id = s_humanoid.rig_compat_id,
+                                           .duration = 2.0,
+                                           .base = s_rest,
+                                           .blocks = &s_motion_blocks[0][0][0],
+                                           .q_joint = s_motion_joints,
+                                           .s_max = 1,
+                                           .sample_count = 49,
+                                           .joint_count = HUMANOID_JOINT_COUNT,
+                                           .n_q = 6};
+    for (uint32_t f = 0; f < 49; ++f) {
+        const float phase = (float)f * (2.0F * GLM_PIf / 48.0F);
+        for (uint32_t row = 0; row < 6; ++row) {
+            const float angles[3] = {sinf(phase + (float)row) * (row < 2 ? 0.17F : 0.61F), cosf(phase) * 0.14F, sinf(phase + ((float)row * 0.7F)) * 0.31F};
+            make_offset_quat(angles, s_motion_blocks[f][row]);
+        }
+    }
+    make_humanoid_mesh(&s_cpu_mesh[RIG_HUMANOID], false, false, model);
+    make_humanoid_mesh(&s_cpu_mesh[CPU_CLOTHES], true, true, model);
+    make_humanoid_mesh(&s_cpu_mesh[CPU_ORDER_CLOTHES], true, false, model);
+    const uint32_t sources[3] = {RIG_HUMANOID, CPU_CLOTHES, CPU_ORDER_CLOTHES};
+    for (uint32_t i = 0; i < 3; ++i) {
+        const cpu_mesh_t *source = &s_cpu_mesh[sources[i]];
+        s_procedural_mesh[i] = (nt_mesh_t){nt_gfx_activate_mesh(source->data, source->size)};
+        NT_ASSERT(s_procedural_mesh[i].id != 0);
+    }
 }
 
 static nt_material_t make_mesh_material(nt_resource_t texture, bool skinned) {
@@ -808,6 +972,7 @@ static void init_mesh_scene(void) {
         NT_ASSERT(added);
     }
     nt_transform_comp_update();
+    init_humanoid_meshes();
     s_mesh_resource[RIG_FOX] = nt_resource_request(ASSET_MESH_SKELETAL_SHOWCASE_FOX_MESH, NT_ASSET_MESH);
     s_mesh_resource[RIG_CESIUMMAN] = nt_resource_request(ASSET_MESH_SKELETAL_SHOWCASE_CESIUMMAN_MESH, NT_ASSET_MESH);
     s_skin_resource[RIG_FOX] = nt_resource_request(ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_FOX_NSKN, NT_ASSET_SKIN_BINDING);
@@ -836,13 +1001,20 @@ static void restore_mesh_scene(void) {
     NT_ASSERT(result == NT_OK);
     nt_program_ref_drop(&s_skin_program);
     nt_program_ref_drop(&s_static_program);
-    for (uint32_t i = 0; i < RIG_COUNT; ++i) {
+    const uint32_t sources[3] = {RIG_HUMANOID, CPU_CLOTHES, CPU_ORDER_CLOTHES};
+    for (uint32_t i = 0; i < 3; ++i) {
+        nt_gfx_deactivate_mesh(s_procedural_mesh[i].id);
+        const cpu_mesh_t *source = &s_cpu_mesh[sources[i]];
+        s_procedural_mesh[i] = (nt_mesh_t){nt_gfx_activate_mesh(source->data, source->size)};
+        NT_ASSERT(s_procedural_mesh[i].id != 0);
+    }
+    for (uint32_t i = 0; i < CPU_SOURCE_COUNT; ++i) {
         cpu_mesh_t *source = &s_cpu_mesh[i];
         if (source->reference.id != 0) {
             nt_gfx_deactivate_mesh(source->reference.id);
+            source->reference = (nt_mesh_t){nt_gfx_activate_mesh(source->output, source->size)};
+            NT_ASSERT(source->reference.id != 0);
         }
-        source->reference = source->output != NULL ? (nt_mesh_t){nt_gfx_activate_mesh(source->output, source->size)} : NT_MESH_INVALID;
-        NT_ASSERT(source->output == NULL || source->reference.id != 0);
     }
 }
 
@@ -850,7 +1022,10 @@ static void shutdown_mesh_scene(void) {
     nt_skinned_mesh_renderer_shutdown();
     nt_mesh_renderer_shutdown();
     nt_skeletal_gpu_shutdown();
-    for (uint32_t i = 0; i < RIG_COUNT; ++i) {
+    for (uint32_t i = 0; i < 3; ++i) {
+        nt_gfx_deactivate_mesh(s_procedural_mesh[i].id);
+    }
+    for (uint32_t i = 0; i < CPU_SOURCE_COUNT; ++i) {
         if (s_cpu_mesh[i].reference.id != 0) {
             nt_gfx_deactivate_mesh(s_cpu_mesh[i].reference.id);
         }
@@ -1154,7 +1329,7 @@ static void declare_player_rig_combo(skinned_scene_state_t *scene) {
     char rig_preview[64];
     (void)snprintf(rig_preview, sizeof rig_preview, "%s v", s_rig_names[p->rig]);
     if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("player/rig_combo"), rig_preview, &s_scene_combo_style, &scene->rig_combo_open)) {
-        for (uint32_t rig = RIG_FOX; rig < (uint32_t)RIG_COUNT; ++rig) {
+        for (uint32_t rig = RIG_HUMANOID; rig < (uint32_t)RIG_COUNT; ++rig) {
             if (nt_ui_combo_selectable(s_ui, rig, s_rig_names[rig], rig == (uint32_t)p->rig) && rig != (uint32_t)p->rig) {
                 player_select_rig(p, (rig_source_t)rig);
             }
@@ -1171,10 +1346,10 @@ static void declare_player_clip_combo(skinned_scene_state_t *scene) {
     (void)snprintf(clip_preview, sizeof clip_preview, "%s v", p->clip >= 0 ? s_clips[p->clip].name : "none");
     if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("player/clip_combo"), clip_preview, &s_joint_combo_style, &scene->clip_combo_open)) {
         for (int i = 0; i < CLIP_COUNT; ++i) {
-            if (!nt_resource_is_ready(s_clip_resource[i])) {
+            const nt_skeletal_clip_t *view = player_clip_view(i);
+            if (view == NULL) {
                 continue;
             }
-            const nt_skeletal_clip_t *view = nt_skeletal_assets_clip(s_clip_resource[i]);
             if (view->rig_compat_id.value != p->skel->rig_compat_id.value) {
                 continue;
             }
@@ -1234,8 +1409,17 @@ static void skinned_declare_controls(void) {
         if (nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("skinned/reference"), "Compare CPU (pauses)", &s_cpu_reference, &s_checkbox_style, &row, true)) {
             s_reference_dirty = true;
         }
-        (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("skinned/bones"), "Bones & marker", &s_show_bones, &s_checkbox_style, &row, true);
-        s_reference_dirty |= old_rig != p->rig || old_clip != p->clip || old_time != p->track.time;
+        (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("skinned/bones"), p->rig == RIG_HUMANOID ? "Bones & marker" : "Bones", &s_show_bones, &s_checkbox_style, &row, true);
+        const bool sharing_changed =
+            p->rig == RIG_HUMANOID && nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("skinned/independent"), "Independent clothes", &s_independent_clothes, &s_checkbox_style, &row, true);
+        if (old_rig != p->rig || old_clip != p->clip || old_time != p->track.time || sharing_changed) {
+            s_reference_dirty = true;
+            s_clothes_track = p->track;
+            const double offset_time = s_clothes_track.time + 0.45;
+            if (s_clothes_track.duration > 0.0) {
+                s_clothes_track.time = p->loop ? fmod(offset_time, s_clothes_track.duration) : fmin(offset_time, s_clothes_track.duration);
+            }
+        }
     }
 }
 
@@ -1408,42 +1592,90 @@ static void mesh_viewport(uint32_t part, uint32_t count) {
     nt_shape_renderer_set_cam_pos(eye);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void skinned_draw(void) {
     const character_player_t *p = &s_skinned_scene.player;
-    const nt_skin_binding_t *skin = nt_skeletal_assets_skin_binding(s_skin_resource[p->rig]);
-    if (p->skel == NULL || skin == NULL || g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F) {
+    const bool humanoid = p->rig == RIG_HUMANOID;
+    const nt_skin_binding_t *skins[2] = {humanoid ? &s_humanoid_skin[0] : nt_skeletal_assets_skin_binding(s_skin_resource[p->rig]), &s_humanoid_skin[1]};
+    if (p->skel == NULL || skins[0] == NULL || g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F) {
         return;
     }
-    const nt_entity_t e = s_mesh_entities[0];
-    cpu_mesh_t *source = &s_cpu_mesh[p->rig];
-    if (s_cpu_reference && source->data != NULL && (s_reference_dirty || source->output == NULL)) {
-        deform_cpu_mesh(source, skin, p);
-        s_reference_dirty = false;
+    const uint32_t count = humanoid ? 2U : 1U;
+    const nt_skeletal_mat34_t *models[2] = {p->model, s_independent_clothes ? s_clothes_model : p->model};
+    cpu_mesh_t *sources[2] = {&s_cpu_mesh[p->rig], &s_cpu_mesh[CPU_CLOTHES]};
+    const uint32_t textures[2] = {(uint32_t)p->rig, RIG_COUNT};
+    for (uint32_t i = 0; i < CPU_SOURCE_COUNT; ++i) {
+        cpu_mesh_t *source = &s_cpu_mesh[i];
+        if (source != sources[0] && (!humanoid || source != sources[1]) && source->reference.id != 0) {
+            nt_gfx_deactivate_mesh(source->reference.id);
+            source->reference = NT_MESH_INVALID;
+        }
     }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (s_cpu_reference && sources[i]->data != NULL && (s_reference_dirty || sources[i]->output == NULL)) {
+            deform_cpu_mesh(sources[i], skins[i], models[i], p->skel->joint_count);
+        }
+        const nt_entity_t e = s_mesh_entities[i];
+        const float angle = humanoid ? 0.3F : 0.0F;
+        const float q[4] = {0, sinf(angle * 0.5F), 0, cosf(angle * 0.5F)};
+        nt_transform_comp_set_rotation(e, q);
+        nt_transform_comp_set_position(e, humanoid ? 0.2F : 0, 0, humanoid ? 0.1F : 0);
+        const float scale = humanoid ? 1.05F : 1.0F;
+        nt_transform_comp_set_scale(e, scale, scale, scale);
+    }
+    s_reference_dirty = false;
+    nt_transform_comp_update();
     const uint32_t views = s_cpu_reference ? 2U : 1U;
     for (uint32_t view = 0; view < views; ++view) {
         const bool cpu = view == 1;
-        const nt_mesh_t mesh = cpu ? source->reference : (nt_mesh_t){nt_resource_get(s_mesh_resource[p->rig])};
-        const nt_material_t material = cpu ? s_static_material[p->rig] : s_skin_material[p->rig];
-        if ((!cpu && !nt_resource_is_ready(s_mesh_resource[p->rig])) || mesh.id == 0 || !nt_resource_is_ready(s_texture_resource[p->rig]) ||
-            !nt_gfx_program_ready(nt_material_get_info(material)->program)) {
-            continue;
+        nt_render_item_t items[2];
+        uint32_t ready = 0;
+        if (!cpu) {
+            nt_skeletal_gpu_begin_frame();
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            const nt_mesh_t gpu_mesh = humanoid ? s_procedural_mesh[i] : (nt_mesh_t){nt_resource_get(s_mesh_resource[p->rig])};
+            const nt_mesh_t mesh = cpu ? sources[i]->reference : gpu_mesh;
+            const nt_material_t material = cpu ? s_static_material[textures[i]] : s_skin_material[textures[i]];
+            if ((!cpu && !humanoid && !nt_resource_is_ready(s_mesh_resource[p->rig])) || mesh.id == 0 || !nt_resource_is_ready(s_texture_resource[textures[i]]) ||
+                !nt_gfx_program_ready(nt_material_get_info(material)->program)) {
+                continue;
+            }
+            const nt_entity_t e = s_mesh_entities[i];
+            *nt_mesh_comp_handle(e) = mesh;
+            *nt_material_comp_handle(e) = material;
+            items[ready++] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
+            if (!cpu) {
+                nt_skeletal_mat34_t *palette = nt_skeletal_gpu_reserve(skins[i]->palette_count, nt_skin_comp_handle(e));
+                nt_skin_palette_build(skins[i], models[i], p->skel->joint_count, palette, skins[i]->palette_count);
+            }
         }
         mesh_viewport(view, views);
-        *nt_mesh_comp_handle(e) = mesh;
-        *nt_material_comp_handle(e) = material;
-        const nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
         if (cpu) {
-            nt_mesh_renderer_draw_list(&item, 1);
+            nt_mesh_renderer_draw_list(items, ready);
         } else {
-            nt_skeletal_gpu_begin_frame();
-            nt_skeletal_mat34_t *palette = nt_skeletal_gpu_reserve(skin->palette_count, nt_skin_comp_handle(e));
-            nt_skin_palette_build(skin, p->model, p->skel->joint_count, palette, skin->palette_count);
             nt_skeletal_gpu_flush();
-            nt_skinned_mesh_renderer_draw_list(&item, 1);
+            nt_skinned_mesh_renderer_draw_list(items, ready);
         }
         if (s_show_bones) {
-            draw_skeleton(p->skel, p->model, -1, false, s_fit_scale);
+            nt_skeletal_mat34_t world;
+            nt_skeletal_mat34_t bones[SKELETAL_SHOWCASE_MAX_JOINTS];
+            nt_skeletal_mat34_from_mat4(nt_transform_comp_world_matrix(s_mesh_entities[0]), &world);
+            for (uint16_t j = 0; j < p->skel->joint_count; ++j) {
+                nt_skeletal_mat34_mul(&world, &p->model[j], &bones[j]);
+            }
+            draw_skeleton(p->skel, bones, -1, false, s_fit_scale);
+            if (humanoid) {
+                const float point[3] = {0.2F, 0.1F, 0.15F};
+                float marker[3];
+                for (uint32_t r = 0; r < 3; ++r) {
+                    marker[r] = bones[8].r[r][3];
+                    for (uint32_t k = 0; k < 3; ++k) {
+                        marker[r] += bones[8].r[r][k] * point[k];
+                    }
+                }
+                nt_shape_renderer_sphere(marker, 0.11F, (float[4]){1, 0.2F, 0.2F, 1});
+            }
             nt_shape_renderer_flush();
         }
     }
@@ -1662,7 +1894,7 @@ int main(int argc, char *argv[]) {
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_mesh, .deactivate = nt_gfx_deactivate_mesh});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     /* Capacity counts every skeletal asset of the mounted packs: an NSKL and an NSKN per imported rig plus the clips. */
-    nt_skeletal_assets_init((uint32_t)((2 * (RIG_COUNT - 1)) + CLIP_COUNT));
+    nt_skeletal_assets_init((uint32_t)((2 * (RIG_COUNT - 1)) + CLIP_COUNT - 1));
     nt_resource_register_type(NT_ASSET_SKELETON, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_skeleton, .deactivate = nt_skeletal_assets_deactivate_skeleton});
     nt_resource_register_type(NT_ASSET_SKIN_BINDING, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_skin_binding, .deactivate = nt_skeletal_assets_deactivate_skin_binding});
     nt_resource_register_type(NT_ASSET_CLIP, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_clip, .deactivate = nt_skeletal_assets_deactivate_clip});
@@ -1692,7 +1924,9 @@ int main(int argc, char *argv[]) {
     s_rig_resource[RIG_FOX] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_FOX_NSKL, NT_ASSET_SKELETON);
     s_rig_resource[RIG_CESIUMMAN] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_CESIUMMAN_NSKL, NT_ASSET_SKELETON);
     for (int i = 0; i < CLIP_COUNT; ++i) {
-        s_clip_resource[i] = nt_resource_request(s_clips[i].id, NT_ASSET_CLIP);
+        if (s_clips[i].id.value != 0) {
+            s_clip_resource[i] = nt_resource_request(s_clips[i].id, NT_ASSET_CLIP);
+        }
     }
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .textures = {{.name = "u_texture", .resource = s_atlas_texture}}, .texture_count = 1, .blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_sprite"});
@@ -1728,9 +1962,9 @@ int main(int argc, char *argv[]) {
 #endif
 #endif
 
+    init_humanoid();
     init_mesh_scene();
     init_ui_styles();
-    init_humanoid();
     s_skinned_scene.player.rig = RIG_FOX;
     skinned_reset();
     switch_scene(0);
