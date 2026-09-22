@@ -68,6 +68,10 @@ typedef struct {
 /* Update i since the last reset (history capacity 16; zero past it). */
 nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t index);
 uint32_t nt_gfx_fake_update_buffer_count(void);
+/* Borrowed bytes from the last update_buffer call. Valid only until the caller
+ * reuses/frees its staging storage; renderer tests inspect it immediately. */
+const void *nt_gfx_fake_last_update_buffer_data(void);
+uint32_t nt_gfx_fake_last_update_buffer_size(void);
 /* nt_hash32 of the bytes the last created VERTEX / INDEX buffer uploaded -- pins that mesh wire
  * decode ran before the upload. Scope is per buffer creation, not per mesh: a mesh that creates no
  * index buffer leaves the previous one readable. Only nt_gfx_fake_reset clears them. */
@@ -92,6 +96,7 @@ uint32_t nt_gfx_fake_vertex_input_create_count(void);
 uint32_t nt_gfx_fake_bind_vertex_input_count(void);
 uint32_t nt_gfx_fake_last_bound_vertex_input(void);
 uint32_t nt_gfx_fake_last_uniform_program(void);
+void nt_gfx_fake_vertex_attrib_default(uint8_t location, float out[4]);
 void nt_gfx_fake_fail_next_vertex_input_create(void);
 void nt_gfx_fake_reset(void);
 

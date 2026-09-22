@@ -1,3 +1,4 @@
+#define NT_LOG_DOMAIN "mesh_renderer_test"
 #include "test_helpers/nt_gfx_fake.h"
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
@@ -6,6 +7,7 @@
 /* clang-format off */
 /* NT_TEST_ACCESS defined via CMake target_compile_definitions */
 #include "renderers/nt_mesh_renderer.h"
+#include "renderers/nt_renderer_shared.h"
 #include "graphics/nt_gfx.h"
 #include "entity/nt_entity.h"
 #include "transform_comp/nt_transform_comp.h"
@@ -149,9 +151,7 @@ static nt_mesh_t create_test_mesh_two_streams(void) {
 
 static nt_program_t create_test_program(void) { return nt_gfx_fake_make_program(NULL, 0); }
 
-static nt_program_t create_test_sampler_program(const char *const *names, uint8_t count) { return nt_gfx_fake_make_program(names, count); }
-
-static nt_program_t create_test_tex_program(void) { return create_test_sampler_program((const char *const[]){"u_tex"}, 1); }
+static nt_program_t create_test_tex_program(void) { return nt_gfx_fake_make_program((const char *const[]){"u_tex"}, 1); }
 
 static nt_material_t create_test_material_with_attr(nt_program_t program, nt_color_mode_t color_mode, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
 
@@ -778,7 +778,7 @@ void test_declared_sampler_unknown_to_the_program_is_ignored(void) {
  * whatever the previous material left on that unit. */
 void test_material_missing_a_program_sampler_asserts(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_program_t two = create_test_sampler_program((const char *const[]){"u_tex", "u_second"}, 2);
+    nt_program_t two = nt_gfx_fake_make_program((const char *const[]){"u_tex", "u_second"}, 2);
     nt_material_t mat = create_test_material_textured(two, nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
@@ -790,7 +790,7 @@ void test_material_missing_a_program_sampler_asserts(void) {
 /* The texture goes to the unit the link assigned, not to the material slot index. */
 void test_texture_lands_on_the_program_sampler_unit(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_program_t second_unit = create_test_sampler_program((const char *const[]){"u_other", "u_tex"}, 2);
+    nt_program_t second_unit = nt_gfx_fake_make_program((const char *const[]){"u_other", "u_tex"}, 2);
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.program = second_unit;
@@ -1525,12 +1525,12 @@ void test_restore_on_inactive_renderer_does_nothing(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_stream_to_vertex_type_total(void) {
-    TEST_ASSERT_EQUAL(NT_VERTEX_FLOAT, nt_stream_to_vertex_type(NT_STREAM_FLOAT32));
-    TEST_ASSERT_EQUAL(NT_VERTEX_HALF, nt_stream_to_vertex_type(NT_STREAM_FLOAT16));
-    TEST_ASSERT_EQUAL(NT_VERTEX_INT16, nt_stream_to_vertex_type(NT_STREAM_INT16));
-    TEST_ASSERT_EQUAL(NT_VERTEX_UINT16, nt_stream_to_vertex_type(NT_STREAM_UINT16));
-    TEST_ASSERT_EQUAL(NT_VERTEX_INT8, nt_stream_to_vertex_type(NT_STREAM_INT8));
-    TEST_ASSERT_EQUAL(NT_VERTEX_UINT8, nt_stream_to_vertex_type(NT_STREAM_UINT8));
+    TEST_ASSERT_EQUAL(NT_VERTEX_FLOAT, nt_renderer_stream_to_vertex_type(NT_STREAM_FLOAT32));
+    TEST_ASSERT_EQUAL(NT_VERTEX_HALF, nt_renderer_stream_to_vertex_type(NT_STREAM_FLOAT16));
+    TEST_ASSERT_EQUAL(NT_VERTEX_INT16, nt_renderer_stream_to_vertex_type(NT_STREAM_INT16));
+    TEST_ASSERT_EQUAL(NT_VERTEX_UINT16, nt_renderer_stream_to_vertex_type(NT_STREAM_UINT16));
+    TEST_ASSERT_EQUAL(NT_VERTEX_INT8, nt_renderer_stream_to_vertex_type(NT_STREAM_INT8));
+    TEST_ASSERT_EQUAL(NT_VERTEX_UINT8, nt_renderer_stream_to_vertex_type(NT_STREAM_UINT8));
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

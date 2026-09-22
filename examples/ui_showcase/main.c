@@ -599,11 +599,8 @@ static nt_atlas_region_ref_t s_tabs_icon_sel_ref;
 static int s_active_tab;
 // #endregion
 
-// #region reusable focused-panel helper (game-side; built from existing nt_ui widgets)
-/* Props_fn populates the right-hand props card directly (declare_props_panel owns the card), so this
- * only emits the per-tab title -- no nested card, avoiding a card-in-card double border. */
-static void showcase_panel_begin(nt_ui_context_t *ctx, const char *title) { nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, g_current->body); }
-static void showcase_panel_end(nt_ui_context_t *ctx) { (void)ctx; }
+// #region focused-panel title
+static void showcase_panel_title(nt_ui_context_t *ctx, const char *title) { nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), title, g_current->body); }
 // #endregion
 
 // #region widget tab render fns
@@ -1574,7 +1571,7 @@ static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
 static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
-    showcase_panel_begin(ctx, "Slice9 properties");
+    showcase_panel_title(ctx, "Slice9 properties");
 
     (void)snprintf(buf, sizeof buf, "Inset L  %d", st->s9.inset_l);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
@@ -1604,8 +1601,6 @@ static void props_slice9(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)snprintf(buf, sizeof buf, "Corner scale  %.2f", (double)st->s9.slice9_scale);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
     (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_s9scale, NULL, &st->s9.slice9_scale, 0.5F, 3.0F, 0.0F, g_current->slider_props, &sdecl, true);
-
-    showcase_panel_end(ctx);
 }
 
 /* Progress panel: a slider drives the bar value 0..1 + an auto-animate toggle. */
@@ -1613,7 +1608,7 @@ static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
     static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(40)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
-    showcase_panel_begin(ctx, "Progress properties");
+    showcase_panel_title(ctx, "Progress properties");
 
     (void)snprintf(buf, sizeof buf, "Value  %.2f", (double)st->prog.value);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
@@ -1621,15 +1616,13 @@ static void props_progress(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_value, NULL, &st->prog.value, 0.0F, 1.0F, 0.0F, g_current->slider_props, &sdecl, !st->prog.auto_anim);
 
     (void)nt_ui_toggle(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/props_auto"), "Auto-animate", &st->prog.auto_anim, g_current->toggle, &row, true);
-
-    showcase_panel_end(ctx);
 }
 
 /* Button-transform panel: rotation / scale / offset sliders drive the live transform each frame. */
 static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
-    showcase_panel_begin(ctx, "Transform properties");
+    showcase_panel_title(ctx, "Transform properties");
 
     (void)snprintf(buf, sizeof buf, "Rotation  %.0f deg", (double)st->btn_xform.rotation_deg);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
@@ -1658,8 +1651,6 @@ static void props_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
         st->btn_xform.offset_x = 0.0F;
         st->btn_xform.offset_y = 0.0F;
     }
-
-    showcase_panel_end(ctx);
 }
 
 /* Runtime modal style: re-seeded from the palette each frame, then overlaid with the panel values. */
@@ -3329,7 +3320,7 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
     static const Clay_ElementDeclaration sdecl = {.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_FIXED(26)}}};
     static const char *const types[3] = {"Scale-pop", "Fade", "Slide"};
     static const char *const edges[4] = {"Bottom", "Top", "Left", "Right"};
-    showcase_panel_begin(ctx, "Modal properties");
+    showcase_panel_title(ctx, "Modal properties");
 
     modal_seg_select(ctx, "Open", nt_ui_id("showcase/modal_open_type"), types, 3, &st->modal.open_type, 80);
     if (st->modal.open_type == 2) {
@@ -3359,15 +3350,13 @@ static void props_modal(nt_ui_context_t *ctx, tab_state_t *st) {
     (void)snprintf(buf, sizeof buf, "Backdrop alpha  %.2f", (double)st->modal.backdrop_alpha);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
     (void)nt_ui_slider_float(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_props_backdrop, NULL, &st->modal.backdrop_alpha, 0.0F, 1.0F, 0.0F, g_current->slider_props, &sdecl, true);
-
-    showcase_panel_end(ctx);
 }
 
 /* Stress panel: segmented label count (500/1500/3000/6000) + the live frame gpu_ms / draw-calls readout. */
 static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
     static const int counts[4] = {500, 1500, 3000, 6000};
-    showcase_panel_begin(ctx, "Stress properties");
+    showcase_panel_title(ctx, "Stress properties");
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Label count", g_current->caption);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
@@ -3397,8 +3386,6 @@ static void props_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     (void)snprintf(buf, sizeof buf, "draw calls: %u", nt_ui_get_last_walk_draw_calls(ctx));
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->caption);
-
-    showcase_panel_end(ctx);
 }
 // #endregion
 

@@ -120,6 +120,8 @@ static bool s_fake_fail_next_backend_restore;
 static bool s_fake_fail_next_render_target_create;
 static bool s_fake_fail_next_render_target_resize;
 static uint32_t s_fake_last_update_buffer_offset;
+static const void *s_fake_last_update_buffer_data;
+static uint32_t s_fake_last_update_buffer_size;
 static uint32_t s_fake_last_instance_offset;
 static uint32_t s_fake_last_instance_vertex_input; /* recorder: last VI handle bind_instance_buffer named */
 static nt_blend_state_t s_fake_last_pipeline_blend;
@@ -128,6 +130,9 @@ static uint32_t s_fake_bind_vertex_input_count;
 static uint32_t s_fake_last_bound_vertex_input; /* recorder: last handle bind_vertex_input received */
 static uint32_t s_fake_last_uniform_program;    /* recorder: last program a uniform write named */
 static bool s_fake_fail_next_vertex_input_create;
+static uint16_t s_fake_vertex_input_enabled_locations[UINT16_MAX + 1U];
+static uint16_t s_fake_bound_enabled_locations;
+static float s_fake_vertex_attrib_defaults[NT_GFX_MAX_VERTEX_ATTRS][4];
 
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot) {
     if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
@@ -168,6 +173,8 @@ nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t in
     return valid ? s_fake_update_texture_rects[index] : (nt_gfx_fake_update_texture_rect_t){0};
 }
 uint32_t nt_gfx_fake_update_buffer_count(void) { return s_fake_update_buffer_count; }
+const void *nt_gfx_fake_last_update_buffer_data(void) { return s_fake_last_update_buffer_data; }
+uint32_t nt_gfx_fake_last_update_buffer_size(void) { return s_fake_last_update_buffer_size; }
 uint32_t nt_gfx_fake_last_vertex_buffer_hash(void) { return s_fake_last_vertex_buffer_hash; }
 uint32_t nt_gfx_fake_last_index_buffer_hash(void) { return s_fake_last_index_buffer_hash; }
 uint32_t nt_gfx_fake_backend_restore_count(void) { return s_fake_backend_restore_count; }
@@ -203,6 +210,10 @@ uint32_t nt_gfx_fake_vertex_input_create_count(void) { return s_fake_vertex_inpu
 uint32_t nt_gfx_fake_bind_vertex_input_count(void) { return s_fake_bind_vertex_input_count; }
 uint32_t nt_gfx_fake_last_bound_vertex_input(void) { return s_fake_last_bound_vertex_input; }
 uint32_t nt_gfx_fake_last_uniform_program(void) { return s_fake_last_uniform_program; }
+void nt_gfx_fake_vertex_attrib_default(uint8_t location, float out[4]) {
+    NT_ASSERT(location < NT_GFX_MAX_VERTEX_ATTRS && out != NULL);
+    memcpy(out, s_fake_vertex_attrib_defaults[location], sizeof(s_fake_vertex_attrib_defaults[location]));
+}
 void nt_gfx_fake_fail_next_vertex_input_create(void) { s_fake_fail_next_vertex_input_create = true; }
 
 void nt_gfx_fake_reset(void) {
@@ -235,6 +246,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_texture_desc = (nt_texture_desc_t){0};
     s_fake_last_depth_texture_backend = 0;
     s_fake_last_update_buffer_offset = 0;
+    s_fake_last_update_buffer_data = NULL;
+    s_fake_last_update_buffer_size = 0;
     s_fake_last_instance_offset = 0;
     s_fake_last_instance_vertex_input = 0;
     s_fake_last_pipeline_blend = (nt_blend_state_t){0};
@@ -417,7 +430,6 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
 uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
-    (void)desc;
     (void)vbo_backend;
     (void)ibo_backend;
     s_fake_vertex_input_create_count++;
@@ -425,15 +437,29 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
         s_fake_fail_next_vertex_input_create = false;
         return 0;
     }
+    uint16_t enabled = 0;
+    for (uint8_t i = 0; i < desc->layout.attr_count; i++) {
+        enabled |= (uint16_t)(1U << desc->layout.attrs[i].location);
+    }
+    for (uint8_t i = 0; i < desc->instance_layout.attr_count; i++) {
+        enabled |= (uint16_t)(1U << desc->instance_layout.attrs[i].location);
+    }
+    s_fake_vertex_input_enabled_locations[slot] = enabled;
     return slot;
 }
 
-void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) { (void)backend_handle; }
+void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
+    s_fake_vertex_input_enabled_locations[backend_handle] = 0;
+    if (s_fake_last_bound_vertex_input == backend_handle) {
+        s_fake_bound_enabled_locations = 0;
+    }
+}
 
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
     NT_ASSERT(backend_handle != 0 && "bind_vertex_input: requires a live handle");
     s_fake_bind_vertex_input_count++;
     s_fake_last_bound_vertex_input = backend_handle;
+    s_fake_bound_enabled_locations = s_fake_vertex_input_enabled_locations[backend_handle];
 }
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
@@ -531,9 +557,9 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
 
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size) {
     (void)backend_handle;
-    (void)data;
-    (void)size;
     s_fake_last_update_buffer_offset = offset;
+    s_fake_last_update_buffer_data = data;
+    s_fake_last_update_buffer_size = size;
     s_fake_update_buffer_count++;
 }
 
@@ -601,11 +627,8 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
 }
 
 void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {
-    (void)location;
-    (void)x;
-    (void)y;
-    (void)z;
-    (void)w;
+    NT_ASSERT(location < NT_GFX_MAX_VERTEX_ATTRS);
+    memcpy(s_fake_vertex_attrib_defaults[location], (float[4]){x, y, z, w}, sizeof(float[4]));
 }
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
@@ -659,26 +682,39 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
     (void)val;
 }
 
+static void fake_complete_draw(void) {
+    /* GL leaves a generic attribute unspecified after drawing with that array enabled. */
+    for (uint8_t location = 0; location < NT_GFX_MAX_VERTEX_ATTRS; location++) {
+        if ((s_fake_bound_enabled_locations & (uint16_t)(1U << location)) != 0) {
+            memset(s_fake_vertex_attrib_defaults[location], 0, sizeof(s_fake_vertex_attrib_defaults[location]));
+        }
+    }
+}
+
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) {
     fake_record_draw(0, 1);
+    fake_complete_draw();
     (void)first_vertex;
     (void)num_vertices;
 }
 
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type) {
     fake_record_draw(num_indices, 1);
+    fake_complete_draw();
     (void)first_index;
     (void)index_type;
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
     fake_record_draw(0, instance_count);
+    fake_complete_draw();
     (void)first_vertex;
     (void)num_vertices;
 }
 
 void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
     fake_record_draw(num_indices, instance_count);
+    fake_complete_draw();
     (void)first_index;
     (void)index_type;
 }

@@ -162,8 +162,6 @@ static cJSON *capture_produce(void *vctx) {
     free(png);
     return payload;
 }
-
-static void capture_ctx_free(void *ctx) { free(ctx); }
 // #endregion
 
 // #region handlers
@@ -212,7 +210,7 @@ static bool defer_capture(uint32_t x, uint32_t gl_y, uint32_t w, uint32_t h, uin
     ctx->w = w;
     ctx->h = h;
     ctx->factor = factor;
-    return nt_devapi_defer_current_with_result(1, capture_produce, ctx, capture_ctx_free, NT_DEVAPI_ERR_CAPTURE_FAILED, "deferred capture producer failed (framebuffer readback or PNG encode error)");
+    return nt_devapi_defer_current_with_result(1, capture_produce, ctx, free, NT_DEVAPI_ERR_CAPTURE_FAILED, "deferred capture producer failed (framebuffer readback or PNG encode error)");
 }
 
 /* capture.frame {scale?}: defers a full-framebuffer capture (x=0,y=0,w=fb_width,h=fb_height). */

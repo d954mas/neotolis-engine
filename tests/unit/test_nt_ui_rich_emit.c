@@ -36,11 +36,6 @@ static ui_walker_fixture_t s_fx;
 /* White region's name_hash in the minimal fixture atlas (ui_atlas.c "WHITEENU"). */
 #define FX_WHITE_NAME_HASH 0x57484954454E4555ULL
 
-/* Inline rich images now ride the PLAIN u8 sprite path: the gate only needs a valid base
- * material (nt_ui_image renders via the walker's base sprite material, not a per-image one).
- * The fixture already binds a standard sprite material, so reuse it. */
-static nt_material_t make_rich_image_material(void) { return s_fx.sprite_material; }
-
 void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     nt_mem_scratch_reset();
@@ -494,7 +489,7 @@ static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign
  * emits draw_n spans on the same line. The image rides the plain nt_ui_image sprite emit,
  * text rides draw_n -- both present. */
 static void test_inline_image_emits_sprite_and_text(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
     nt_text_renderer_test_reset_call_counters();
     frame_text_image_text(mat, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
 
@@ -519,7 +514,7 @@ static void test_inline_image_defaults_material_from_ctx(void) {
  * <color> r=255 g=128 b=0 a=255 emits that per-vertex color on the region quad (the walker
  * packs the run tint into backgroundColor -> a_color, not a float4 custom block). */
 static void test_inline_image_tint_packed(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
     /* 0xAABBGGRR: r=255 g=128 b=0 a=255 -> orange, alpha 1. */
     frame_text_image_text(mat, NT_RICH_VALIGN_MIDDLE, 0xFF0080FFU);
 
@@ -568,7 +563,7 @@ static void frame_image_with_opacity(nt_material_t img_mat, float opacity) {
  * TEXT/sprite opacity fold (the walker folds accum_opacity into backgroundColor.a). At opacity 1.0
  * the tint stays full (no fade). */
 static void test_inline_image_fades_with_parent_opacity(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
 
     frame_image_with_opacity(mat, 1.0F);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "image quad (opacity 1)");
@@ -622,7 +617,7 @@ static void frame_two_images(nt_material_t img_mat) {
 /* (6c) two same-band inline images COALESCE: set_material binds once in rich_emit_images and both quads
  * share one staging batch with no flush between them, so the band drains in ONE non-empty flush, not two. */
 static void test_two_inline_images_coalesce(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
     frame_two_images(mat);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "both inline images emit in the immediate pass");
@@ -640,7 +635,7 @@ static void test_two_inline_images_coalesce(void) {
 /* Inline rich images self-emit in the CUSTOM block's sprite batch, NOT as Clay IMAGE commands: a
  * two-image block reports image-COMMAND count 0 while the rich-image probe reports 2. */
 static void test_inline_images_not_in_image_command_count(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
     frame_two_images(mat); /* [text][img][text][img][text] -- two inline images, no nt_ui_image */
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "both inline images emit in the rich self-emit (probe == 2)");
@@ -656,7 +651,7 @@ static void test_inline_image_resolves_by_name(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.atlas.white_region_idx, ref.region, "by-name resolve lands on the white region index");
 
     /* And the widget emits using that resolved region (region index recorded by the solver). */
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
     frame_text_image_text(mat, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.atlas.white_region_idx, nt_ui_rich_test_image_region(s_fx.ctx), "widget emits the by-name-resolved region");
 }
@@ -664,7 +659,7 @@ static void test_inline_image_resolves_by_name(void) {
 /* (8) the image sits at the solver's valign-correct y: a TOP-valign image's solved y equals
  * the line pen_y (box top), distinct from a BASELINE image. The solved atom y is the emit y. */
 static void test_inline_image_valign_y(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
 
     frame_text_image_text(mat, NT_RICH_VALIGN_TOP, 0xFFFFFFFFU);
     const float y_top = nt_ui_rich_test_image_y(s_fx.ctx);
@@ -1041,7 +1036,7 @@ static float frame_tuned_wave_image_y(nt_material_t img_mat, const nt_ui_rich_fx
 /* (10b) BUILDER push_effect_ex: a big-amplitude tuned wave shifts the image quad y differently than
  * the default wave -- proving the by-value params reach the stock fn at emit through the per-block table. */
 static void test_fx_push_effect_ex_tunes_emit(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
     const float t = 0.25F;
     const float y_default = frame_tuned_wave_image_y(mat, NULL, t); /* NULL -> stock default */
     nt_ui_rich_fx_params_t big = {.amp = 14.0F, .speed = 5.0F};
@@ -1127,7 +1122,7 @@ static void frame_effected_image(nt_material_t img_mat, nt_ui_rich_fx_fn effect_
 /* (11) an effect on an IMAGE run shifts the image quad (vs no effect) AND the line/box layout
  * is identical with vs without the effect (visual-only). */
 static void test_fx_image_shifts_quad_visual_only(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
 
     /* No effect: record the image quad's first-vertex y + the solved total height. */
     frame_effected_image(mat, 0U, 0.0F);
@@ -1153,7 +1148,7 @@ static void test_fx_image_shifts_quad_visual_only(void) {
 /* (12) fade_in with alpha 0 (time 0) skips the image atom emit entirely (zero sprite verts);
  * the layout is unchanged regardless. */
 static void test_fx_fade_in_skips_image(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
 
     /* time 0: every atom's fade window is closed -> the image is skipped. */
     frame_effected_image(mat, nt_ui_rich_fx_fade_in, 0.0F);
@@ -2036,7 +2031,7 @@ static void frame_text_image_object(void) {
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
-    base.image_material = make_rich_image_material();
+    base.image_material = s_fx.sprite_material;
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     nt_pointer_t mouse = {0};
@@ -2108,7 +2103,7 @@ static void test_layer_override(void) {
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
-    base.image_material = make_rich_image_material();
+    base.image_material = s_fx.sprite_material;
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     s_order_img_at_object_draw = 0xFFFFFFFFU;           /* sentinel: stays unset if the object never draws */
@@ -2282,7 +2277,7 @@ static void frame_two_layer_images(nt_material_t img_mat) {
 /* (L5) per-band drain + ascending z (otherwise visual-only): a layer-0 red + layer-1 green image drain as
  * two non-empty sprite flushes (not one coalesced batch), and ascending band order makes layer-1 green emit LAST. */
 static void test_layer_drain_orders_ascending(void) {
-    const nt_material_t mat = make_rich_image_material();
+    const nt_material_t mat = s_fx.sprite_material;
     frame_two_layer_images(mat);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "two images on two layers both emit");
@@ -2313,7 +2308,7 @@ static void test_mixed_auto_and_explicit_layers(void) {
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
-    base.image_material = make_rich_image_material();
+    base.image_material = s_fx.sprite_material;
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
     nt_pointer_t mouse = {0};

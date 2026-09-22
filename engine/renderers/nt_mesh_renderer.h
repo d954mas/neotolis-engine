@@ -33,6 +33,7 @@ typedef struct {
 
 static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_instances = 4096, .max_pipelines = 64, .max_mesh_layouts = 4}; }
 
+/* desc is required, non-NULL and borrowed for the duration of the call. */
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
 /* Retains CPU storage and initialization; drops GPU caches and recreates buffers.
@@ -61,8 +62,5 @@ uint32_t nt_mesh_renderer_test_ring_cursor(void);
 bool nt_mesh_renderer_test_initialized(void);
 #endif
 // #endregion
-
-/* Stream type → vertex attribute type mapping (used by pipeline builder, testable) */
-nt_vertex_type_t nt_stream_to_vertex_type(uint8_t type);
 
 #endif /* NT_MESH_RENDERER_H */

@@ -1627,8 +1627,6 @@ static inline void prep_sprite_dispatch_mat(nt_material_t desired, nt_ui_sprite_
     bind->dirty = false;
 }
 
-static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, nt_ui_sprite_bind_t *bind) { prep_sprite_dispatch_mat(ctx->sprite_material, bind); }
-
 static inline void mat4_mul_vec4_flat(const float m[16], const float v[4], float out[4]) {
     out[0] = (m[0] * v[0]) + (m[4] * v[1]) + (m[8] * v[2]) + (m[12] * v[3]);
     out[1] = (m[1] * v[0]) + (m[5] * v[1]) + (m[9] * v[2]) + (m[13] * v[3]);
@@ -1693,7 +1691,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
         counters->rect_command_count++;
-        prep_sprite_dispatch(ctx, bind);
+        prep_sprite_dispatch_mat(ctx->sprite_material, bind);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         uint32_t col = nt_color_pack_clay(r->backgroundColor);
         col = apply_opacity(col, ws->accum_opacity);
@@ -1702,7 +1700,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         counters->border_command_count++;
-        prep_sprite_dispatch(ctx, bind);
+        prep_sprite_dispatch_mat(ctx->sprite_material, bind);
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
         local.renderData.border.color.a = (float)lrintf(local.renderData.border.color.a * ws->accum_opacity);

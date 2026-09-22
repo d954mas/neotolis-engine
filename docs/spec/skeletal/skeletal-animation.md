@@ -1,6 +1,6 @@
 # Skeletal Animation
 
-**Status:** architecture specification v0.5 (2026-09-19), implementation in progress under epic #472; the pose ABI, FK, binding math, rig identity, clip sampling over a base pose and sampled rows, the track clock (driven by the skeletal showcase's Playback scene), the NSKL/NSKN/NANM wire formats at version 5 (NANM = base pose + sampled rows, no bake certificate) including both sets of bounds, their builder encoders, the runtime adapters and the glTF import of a rig, its skin binding, its skinned meshes and its clips (with the error report; the skeletal showcase packs carry that import, the runtime activates them and plays the clips) are implemented; mix/override/additive, banks, GPU staging and the renderer are not. Function names of unimplemented parts are provisional; responsibilities, coordinate spaces, ownership, memory and behavior are normative. Changes to this chapter land together with the code that implements them.
+**Status:** architecture specification v0.5 (2026-09-19), implementation in progress under epic #472; the pose ABI, FK, binding math, rig identity, clip sampling over a base pose and sampled rows, the track clock (driven by the skeletal showcase's Playback scene), the NSKL/NSKN/NANM wire formats at version 5 (NANM = base pose + sampled rows, no bake certificate) including both sets of bounds, their builder encoders, the runtime adapters, the glTF import of a rig, its skin binding, its skinned meshes and clips, GPU palette staging, `skin_comp`, the skinned mesh renderer and its shader ABI are implemented; mix/override/additive and runtime banks are not. Function names of unimplemented parts are provisional; responsibilities, coordinate spaces, ownership, memory and behavior are normative. Changes to this chapter land together with the code that implements them.
 
 Related: [Principles](../core/principles.md), [API contracts](../core/api-contracts.md), [Render architecture](../render/architecture.md), [Items, sorting, batching](../render/items-sorting-batching.md), [Material](../render/material.md), [Resource](../assets/resource.md), [Builder](../builder/builder.md).
 
@@ -234,19 +234,69 @@ A binding is valid until the context's next `begin_frame` or graphics invalidati
 
 **`skin_comp`** (`engine/skin_comp`, implemented) stores one by-value `nt_deformation_binding_t` per entity in the `mesh_comp` pattern (`init/shutdown/add/has/remove`, `nt_skin_comp_handle(entity)` asserts presence). `add` starts from the zero binding; drawing it is the renderer's assert (§13). Swap-and-pop moves the 16 B value; `remove` frees nothing — the texture is borrowed. Under `NT_INTROSPECT_ENABLED` the component describes its texture handle, origins and alpha like the other render components, so a devapi bot can spot an entity left on the zero binding.
 
-## 13. Renderer (planned, #488)
+## 13. Renderer (implemented, #523)
 
-`skinned_mesh_renderer_draw_list(items, count, context)` consumes existing 16-byte render items in the given order; through entity it reads mesh/material/world/color and `skin_comp`. No sampling, FK, mode selection, culling or sorting.
+`nt_skinned_mesh_renderer_draw_list(items, count)` consumes existing 16-byte
+render items in the given order; through entity it reads
+mesh/material/world/color and `skin_comp`. No sampling, FK, mode selection,
+culling or sorting.
 
-**One skinning vertex program per pass, always two frames.** The shader fetches both frame origins and interpolates by alpha; CPU palettes are the case `frame1 == frame0`, `alpha == 0` (second fetch hits the same texels). There is no program kind, no per-run mode uniform, no material pair and no kind↔program validator: every material submitted here implements the documented shader ABI. `u_skin_matrices` (declared `highp sampler2D`; GLSL ES defaults samplers to `lowp`) is a renderer-reserved name; materials own surface textures/params/state (this specializes [Material](../render/material.md) for this renderer, like other specialized bindings). `joints`/`weights` reach the program through the material `attr_map` like every other stream; unmapped streams are skipped, so a skinned MESH still draws through `mesh_renderer`. The program's non-sampler uniforms must fit the backend's 16-entry cache. #487 measures always-lerp against a single-fetch variant; a second program appears only if that number justifies it.
+**One skinning vertex program per pass, always two frames.** The shader fetches
+both frame origins and interpolates by alpha; CPU palettes are the case
+`frame1 == frame0`, `alpha == 0` (the second fetch hits the same texels). There
+is no program kind, per-run mode uniform, material pair or kind↔program
+validator: every material submitted here implements the documented shader ABI.
+`assets/shaders/common/skin.glsl` declares the skin, world and color inputs and
+owns the shared fetch, blend and guarded-vector functions. Skinned vertex
+shaders include it instead of the static renderer's `common/instance.glsl`;
+the material maps the mesh's joints and weights streams to the locations
+declared there. The common shader and renderer implementation own their numeric
+attribute locations and instance offsets, which are not specification ABI.
+`joints`/`weights` reach the program through the material `attr_map` like every
+other stream. Unmapped streams are skipped, so a skinned MESH still draws
+through `nt_mesh_renderer`. The program's non-sampler uniforms must fit the
+backend's 16-entry cache. #487 measures always-lerp against a single-fetch
+variant; a second program appears only if that number justifies it.
 
-**Sampler set.** Surface textures plus bones are bound in **one complete** `nt_gfx_apply_texture_bindings` call (five entries; the shared helper array holds `NT_MATERIAL_MAX_TEXTURES` = 4 — this renderer has its own). Reapply when material **or** deformation texture changes; reset tracking at each `draw_list`.
+**Sampler set.** The material explicitly declares `u_skin_matrices` as a
+`highp sampler2D` within `NT_MATERIAL_MAX_TEXTURES` = 4. The renderer replaces
+that declared slot's resource and sampler with the current deformation texture
+and its default sampler, resolves the surface slots normally, and applies the
+complete combined set in one `nt_gfx_apply_texture_bindings` call. The declared
+placeholder resource and sampler have no effect in this renderer. Reapply when
+the material or deformation texture changes; reset tracking at each
+`draw_list`.
 
-**Batching.** `batch_key(material, mesh)` stays the exact two-slot packing; equal key is a candidate run, and the run also requires equal deformation texture and pass state. Frame origins, alpha, world and color are per-instance. Only adjacent compatible items merge; the game's order wins.
+**Batching.** `nt_mesh_renderer_batch_key(material, mesh)` stays the exact
+two-slot packing. An equal key is a candidate run, and the run also requires an
+equal deformation texture. Frame origins, alpha, world and color are
+per-instance. Only adjacent compatible items merge; the game's order wins.
 
-**Instance layout** is owned by the renderer header (world rows 3, color 1, frame origins 1 as four UINT16, alpha 1 = 6 of 8 instance attributes; stride 64–76 B, independent of the mesh renderer's 64-byte cap). `joints` arrive through float attributes with shader integer conversion and `weights` normalized, in the stream layouts the builder chapter fixes (Skin streams, under Builder validation). FLOAT16 lane sums deviate from 1 by at most `4·2⁻¹¹`, and no builder gate exists for that deviation. Stored lane order is heaviest-first, ties broken towards the lower joint index (§16): a contract of the export, not an accident of the reduction. Locations are not part of this specification.
+**Instance layout** carries three world rows, four UINT16 frame origin
+coordinates and one float alpha, followed by optional color. Its renderer-owned
+stride is 60 B with no color, 64 B with normalized RGBA8, and 76 B with FLOAT4
+color; it is independent of the mesh renderer's 64-byte cap. `joints` arrive through float
+attributes with shader integer conversion and `weights` normalized, in the
+stream layouts the builder chapter fixes (Skin streams, under Builder
+validation). FLOAT16 lane sums deviate from 1 by at most `4·2⁻¹¹`, and no
+builder gate exists for that deviation. Stored lane order is heaviest-first,
+ties broken towards the lower joint index (§16): a contract of the export, not
+an accident of the reduction. Locations are not part of this specification.
 
-**Normals/tangents.** LBS approximation with the linear part of the blended matrix and the world normal transform. One guard: `len2 = dot(n,n); n = (len2 > EPS && len2 < BIG) ? n·inversesqrt(len2) : FIXED_UNIT` with `EPS = 1e-12`, `BIG = 1e30` in `highp` — a two-sided comparison rather than `isnan`/`isinf`, because NaN generation is optional in GLSL ES; tangent orthogonalized against the final normal with the same guard. Finite output is promised for finite matrices and weights (bank matrices come from finite CPU math; CPU palettes are finite by construction), not correct lighting on collapsed geometry. The fast profile is named `POSITIVE_UNIFORM_SCALE_FAST`: positive-uniform joint and world scale, validated by the builder over the full mesh→joint→skeleton chain; CPU skeleton math still supports nonuniform scale. It is a named restriction, not a runtime enum.
+**Normals/tangents.** LBS approximation with the linear part of the blended
+matrix and the world linear transform. One guard:
+`len2 = dot(n,n); n = (len2 > EPS && len2 < BIG) ? n·inversesqrt(len2) : FIXED_UNIT`
+with `EPS = 1e-12`, `BIG = 1e30` in `highp` — a two-sided comparison rather
+than `isnan`/`isinf`, because NaN generation is optional in GLSL ES. The tangent
+is Gram–Schmidt orthogonalized against the final normal with the same guard and
+a deterministic orthogonal fallback. Finite output is promised for finite
+matrices and weights, not correct lighting on collapsed geometry. The fast
+profile is named `POSITIVE_UNIFORM_SCALE_FAST`: the developer uses this
+material/shader only when joint and world scales are positive and uniform. The
+current builder does not validate that restriction; #529 adds its default
+warning, explicit acknowledgement flag and a separate accurate-normal
+material/shader. CPU skeleton math still supports nonuniform scale. The profile
+is a material choice, not a runtime enum or automatic renderer branch.
 
 **Passes.** All passes use the same frame binding. Baseline multipass: assign pass material → build/sort list → draw → next pass. WebGL2 needs only 2D float textures with NEAREST filters, `texelFetch`, instanced attributes; no SSBO/compute/texture arrays/float render targets/float-linear filtering.
 
@@ -417,19 +467,26 @@ glTF is the normative source reference; import selects the canonical rig (skin/n
 - `skeletal_bank` (planned): bank init/bake/lookup over `skeletal` + gfx interface.
 - `skeletal_gpu` (`engine/skeletal_gpu`, one module `nt_skeletal_gpu`): frame staging/upload and `nt_deformation_binding_t` (§12); depends on the gfx interface and on `skeletal` for the matrix layout only.
 - `skin_comp` (`engine/skin_comp`, one module `nt_skin_comp`): the by-value binding component (§12) over `comp_storage`.
-- `skinned_mesh_renderer` (planned, #523).
+- `skinned_mesh_renderer` (`engine/renderers`, one module
+  `nt_skinned_mesh_renderer`): instanced drawing over prepared deformation
+  bindings (§13). Its public static-link chain is
+  `nt_skinned_mesh_renderer → nt_skin_comp → nt_skeletal_gpu → nt_skeletal`;
+  static archive linking may discard unused CPU kernel objects.
 - `skeletal_assets` (`engine/skeletal_assets`, one module `nt_skeletal_assets`): the optional NSKL/NSKN/NANM adapters (§15) over `skeletal` + `resource`. `skeletal` itself links neither, so a headless CPU build links no pack code. `skeletal_ik`, `skeletal_retarget` as extensions. Track assign/release/crossfade are game-side field writes (§6).
 - Kernels retain no inputs and keep no mutable global evaluation state; concurrent calls (if a game ever schedules them) need immutable shared inputs, disjoint outputs/workspaces and caller synchronization — no engine job system, staging reservation or atomics exist or are planned.
 
-v1 composition checks without LTO (planned, #488): no animation (no animation symbols at all, `skeletal_assets` included); headless CPU without gfx (`skeletal` only, no resource symbol through it); full v1. Extensions add CPU + IK (#481) and CPU + retarget (#483). A bank-only character allocates no PoseInstance.
+v1 composition checks without LTO remain planned in #488: no animation (no
+animation symbols at all, `skeletal_assets` included); headless CPU without gfx
+(`skeletal` only, no resource symbol through it); full v1. Extensions add CPU +
+IK (#481) and CPU + retarget (#483). A bank-only character allocates no
+PoseInstance.
 
 ## 18. Verification
 
-**Implemented:** math (helpers, roots, non-identity binds, `bind·inverse_bind = I` at the bind pose, two bindings one pose, rig identity against the published vector); clips (base-pose channels, a stepped source on the grid, cubic resampling and the error report (importer, against closed-form references and the Khronos clips), reverse, seek, duration 0, multi-loop, non-binary grids and durations, structural payload rejections: exact size, grid, write indices — and values that activate untouched); the rig, skinned-mesh and binding imports with their content errors; tracks (wrap, clamp, reverse, pause, residue on the duration); lifetimes (slot reuse, unload/reload, one id in two packs, pool overflow); GPU preparation (frame placement under the texel layout, row wrap, one-rectangle flush, capacity/width asserts, texture recreate on restore and the failed-restore retry, `skin_comp` swap-and-pop and slot reuse). **Planned:** CPU vs GPU agreement; ABI alignment under `-fsanitize=alignment`; composition (`q/−q` for every input incl. the first, exact zero-dot pair, `±170°`, zero totals, all-zero joint weights, asymmetric parent/child weights, non-unit scale, override strength under changing mix gains, interruption at fixed capacity with constant memory); bank (FP16/32, row-crossing and seam pairs, `sample_count == 1` clips, `3·P ≤ width`, FP16 tolerance assert, matrices equal to the CPU path at frame times, rebake after context loss from live views); render (mixed static/skinned order, A/B/A deformation textures with full sampler reapply, per-instance frames in one batch, degenerate normals finite); lifetimes (loss/restore of lists and programs); memory/linking (no hot heap, asserted overflow, composition symbol checks); performance (separate sample/mix/FK/palette/upload/bake timings, draws, bytes, resident memory, `.wasm.gz`; comparisons only on identical content and quality).
+**Implemented:** math (helpers, roots, non-identity binds, `bind·inverse_bind = I` at the bind pose, two bindings one pose, rig identity against the published vector); clips (base-pose channels, a stepped source on the grid, cubic resampling and the error report (importer, against closed-form references and the Khronos clips), reverse, seek, duration 0, multi-loop, non-binary grids and durations, structural payload rejections: exact size, grid, write indices — and values that activate untouched); the rig, skinned-mesh and binding imports with their content errors; tracks (wrap, clamp, reverse, pause, residue on the duration); lifetimes (slot reuse, unload/reload, one id in two packs, pool overflow); GPU preparation (frame placement under the texel layout, row wrap, one-rectangle flush, capacity/width asserts, texture recreate on restore and the failed-restore retry, `skin_comp` swap-and-pop and slot reuse); renderer contract tests (adjacent batching and splitting, A/B/A deformation textures with complete sampler reapply, per-instance frames, all color modes, failure/retry and GPU restore, static rendering of a mesh with unmapped skin streams); real-GL CPU/GPU agreement for two palettes and matrix interpolation, plus finite deterministic degenerate normal/tangent fallbacks. **Planned:** ABI alignment under `-fsanitize=alignment`; composition (`q/−q` for every input incl. the first, exact zero-dot pair, `±170°`, zero totals, all-zero joint weights, asymmetric parent/child weights, non-unit scale, override strength under changing mix gains, interruption at fixed capacity with constant memory); bank (FP16/32, row-crossing and seam pairs, `sample_count == 1` clips, `3·P ≤ width`, FP16 tolerance assert, matrices equal to the CPU path at frame times, rebake after context loss from live views); lifetimes (loss/restore of lists and programs); memory/linking (no hot heap, asserted overflow, composition symbol checks); performance (separate sample/mix/FK/palette/upload/bake timings, draws, bytes, resident memory, `.wasm.gz`; comparisons only on identical content and quality).
 
 **Benchmark workload.** Performance numbers come from one fixed workload: joints J ∈ {30, 60, 100}, characters C ∈ {1, 100, 1000}, tracks T ∈ {1, 2, 4}, a logical frame of `sample → mix → FK`. The layout microbenchmark times each stage in a separate repeated batch after a full-frame warm-up; its total is the sum of the three stage medians, not a separately measured full-frame time. The rig is a synthetic chain with branches (`parent[j] = j − 1` for 80 % of joints, otherwise a random earlier joint from a fixed LCG seed, relabelled to preorder) and the keyframes are deterministic random unit quaternions and translations. Poses for all characters are one contiguous C × J buffer per layout, so cache behaviour across characters is part of the measurement; every buffer is allocated once and reused. The reported metric is ns per skeleton joint per stage (the C × J joints of one frame, so a stage's cost scales visibly with T), median of 5 repetitions after a warm-up. `tools/research/skeletal_layout/` runs it today on synthetic kernels over three pose storages (AoS 40 B, padded AoS 48 B, ten-channel SoA) to justify the initial ABI; #487 measures the real kernels on the same workload and #492 revisits the layout with SIMD.
 
 ## 19. Outside v1
 
 Continuous bridge, IK, ragdoll, retargeting (builder and runtime), Q16, block codec, SIMD, root-motion/event traversal, evaluation-rate LOD — extensions with issues. Without issues: catalogs/AnimationSet, serialized banks in packs, morph targets (a future authored morph path applies mesh-local deltas before skinning and the world transform; representation deferred), mirroring, unskinned node animation, N-way mixing inside baked playback, dual quaternions, compute skinning, per-bone envelopes, a normal-angle bake gate (not transferable across bindings), a caller-owned sampling cache (only if #487 shows sampling dominates; #492), FBX/DAE builder adapters into the same canonical rig/clip/skin data, runtime threading, `transform_comp` inheritance, joint-set/influence-count LOD (only after #494 and profiling); no LOD enum, seam or automatic distance policy.
-

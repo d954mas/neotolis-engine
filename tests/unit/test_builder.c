@@ -1113,13 +1113,13 @@ void test_glob_shaders(void) {
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
-    /* Verify pack has 2 assets */
+    /* Verify every fixture shader was added. */
     FILE *f = fopen(pack_path, "rb");
     TEST_ASSERT_NOT_NULL(f);
 
     NtPackHeader hdr;
     TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
-    TEST_ASSERT_EQUAL_UINT16(2, hdr.asset_count);
+    TEST_ASSERT_EQUAL_UINT16(5, hdr.asset_count);
 
     (void)fclose(f);
 }

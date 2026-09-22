@@ -50,6 +50,7 @@ alternative, what each catches. The developer decides.
 
 ## Code and design
 
+- Keep a helper only when it names non-obvious logic, enforces a contract, or serves a module/callback boundary. Use clear field access and calls directly; repetition alone does not justify a wrapper. Judge by meaning, not line count.
 - Comments explain a non-obvious WHY, preferably one line, at most 2–3. No history, commit/issue references, Phase/REVIEW/CHUNK tags, test-name pins, user quotes or experimental boilerplate in source; explanations of changes belong in commits/PRs. Point at a spec only for a contract the code cannot show (a coordinate space, a wire invariant), by chapter and section title, never by section number.
 - Use `// #region name` / `// #endregion` in long functions, with no blank line just inside either marker. Preserve existing short inline comments.
 - Organize large files with regions rather than extra translation units; cross-TU calls inhibit inlining without LTO.

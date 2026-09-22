@@ -26,17 +26,31 @@ to; `nt_material_create` asserts a non-NULL name for both and keeps its
 param without a name is a declaration nothing can bind, so presence is decided
 by `index < count` and consumers never test the name for NULL.
 
-A material declares every sampler its program uses; gfx validates the complete
-set at every material transition (the sprite renderer at every cmd, since a page
-split can change the atlas page mid-material). Each active slot must resolve to a
-texture, so register a placeholder with
-`nt_resource_set_placeholder_texture` for slots that load asynchronously. A
-declared name the program does not sample is ignored before its handle is
+A material declares every sampler its program uses. A specialized renderer may
+document that it supplies the runtime texture and sampler for one named
+declaration, but the declaration still belongs to the material/program contract
+and counts toward the material limit. The renderer substitutes that slot and
+applies one complete combined set; it does not add a hidden binding. The
+implemented example is `u_skin_matrices`: a skinned material declares it within
+its four slots, while `nt_skinned_mesh_renderer` supplies the current
+deformation texture and its default sampler. That slot's descriptor resource may
+therefore be invalid, and its resource and sampler are ignored by this renderer.
+
+Normally each active slot must resolve to a texture, so register a placeholder
+with `nt_resource_set_placeholder_texture` for slots that load asynchronously.
+A declared name the program does not sample is ignored before its handle is
 inspected, so one material can over-declare for a family of shaders. The slot
 index is not the texture unit: gfx resolves the semantic name through immutable
-program reflection, and two materials may list the same samplers in any order. A material carries at most
-`NT_MATERIAL_MAX_TEXTURES` (4) slots, so a material-driven program may sample at
-most 4 of the 8 units a program can link.
+program reflection, and two materials may list the same samplers in any order.
+A material carries at most `NT_MATERIAL_MAX_TEXTURES` (4) slots, including
+renderer-supplied declarations, so a material-driven program may sample at most
+4 of the 8 units a program can link.
+
+Sprite and text keep two legacy renderer-specific exceptions until #528. Sprite
+declares its atlas-page sampler in slot 0 but substitutes the page resource per
+command. Text declares no material textures and supplies its font samplers
+outside the material declaration. New specialized renderers follow the declared
+renderer-supplied semantic rule above.
 
 `nt_material_create` asserts that no two slots name the same sampler uniform:
 two slots on one unit would fight over it at every draw.
@@ -120,14 +134,18 @@ Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at run
 A material stores the declared `nt_resource_t` for each texture slot and never a
 resolved handle. Renderers call `nt_resource_get` where they already transition
 material state: the mesh renderer at each material change inside a `draw_list`,
-the sprite renderer when a command opens. A sprite command snapshots its
-textures at open and its params at flush, so a mid-frame `nt_material_set_param`
-also applies to queued commands. Slot 0 of a sprite material is the atlas page:
-the renderer substitutes the page into the open command before it stages any
-index (splitting the command when it already holds indices, which copies the
-snapshot), so the declared slot-0 resource is never resolved. A text material
-declares no textures, so the text renderer resolves no material textures; it
-binds the font's own textures. There is no material step.
+the sprite renderer when a command opens. A documented renderer-supplied
+semantic is replaced before resolve: the skinned renderer does not inspect the
+declared resource or sampler for `u_skin_matrices`, supplies both from the
+entity's deformation binding, then applies the full declared set. A sprite
+command snapshots its textures at open and its params at flush, so a mid-frame
+`nt_material_set_param` also applies to queued commands. Slot 0 of a sprite
+material is the atlas page: the renderer substitutes the page into the open
+command before it stages any index (splitting the command when it already holds
+indices, which copies the snapshot), so the declared slot-0 resource is never
+resolved. A text material declares no textures, so the text renderer resolves no
+material textures; it binds the font's own textures. These sprite/text legacy
+exceptions are tracked by #528. There is no material step.
 
 Between `nt_resource_init` and `nt_resource_shutdown`, the published view of a
 handle changes only inside `nt_resource_step`. `nt_resource_shutdown` unpublishes

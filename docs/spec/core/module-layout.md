@@ -44,6 +44,7 @@ engine/
     graphics/               # swappable: nt_gfx.h + gl/ + stub/ (real impl dir is "gl")
     basisu/                 # swappable: nt_basisu_transcoder.h + stub/ (real impl is a top-level C++ TU)
     meshwire/               # swappable: nt_meshwire.h + stub/ (+ builder-only nt_meshwire_encoder)
+    renderers/              # fixed optional renderers over nt_gfx_interface
     postfx/                 # optional fixed helpers over nt_gfx_interface
     ui/
     font/
@@ -135,6 +136,15 @@ implementation. `engine/postfx` is optional and currently starts with
 `nt_postfx_blur`. It links `nt_gfx_interface`; each executable or test still
 selects the concrete gfx implementation (`nt_gfx` or `nt_gfx_stub`) at the link
 layer.
+
+`engine/renderers/nt_skinned_mesh_renderer` is another fixed optional module.
+It consumes the existing render components plus `skin_comp`; it does not sample
+animation or select a graphics implementation. Its current `PUBLIC` CMake
+dependencies include the chain
+`nt_skinned_mesh_renderer → nt_skin_comp → nt_skeletal_gpu → nt_skeletal`.
+Static archive linking can still discard unused CPU kernel objects. The
+composition-symbol checks that prove the intended variants without LTO remain
+#488 scope.
 
 `nt_postfx_blur` is a gaussian blur helper, not a post-processing graph. It
 borrows ready source, temp, and destination handles for each call; their

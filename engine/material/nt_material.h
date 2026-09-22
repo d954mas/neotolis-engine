@@ -34,6 +34,9 @@ typedef enum {
 
 typedef struct {
     const char *name; /* required sampler uniform name; hashed at create, not retained */
+    /* Normally resolved by the renderer. A documented renderer-supplied
+     * semantic may leave this invalid; that renderer ignores resource and
+     * sampler and supplies both at draw time. */
     nt_resource_t resource;
     nt_sampler_t sampler; /* override; .id==0 = use texture's asset-baked default */
 } nt_material_texture_desc_t;
@@ -94,8 +97,9 @@ typedef struct {
      * program that died with the GL context or that its owner destroyed -- ask
      * nt_gfx_program_ready(program) before building a pipeline from it. */
     nt_program_t program;
-    /* Declared at create and never rewritten (unlike params); renderers call
-     * nt_resource_get on these at draw. */
+    /* Declared at create and never rewritten (unlike params). Renderers normally
+     * resolve these at draw; a documented supplied semantic may replace its
+     * resource and sampler without inspecting either stored value. */
     nt_resource_t tex_resources[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
     nt_sampler_t tex_samplers[NT_MATERIAL_MAX_TEXTURES]; /* per-binding sampler override; .id==0 means use texture's default */

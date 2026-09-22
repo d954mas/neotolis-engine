@@ -325,8 +325,6 @@ static bool render_targets_ready(void) {
            nt_gfx_texture_ready(s_demo.scene_depth) && nt_gfx_texture_ready(s_demo.blur_color);
 }
 
-static void init_ui_refs(void) { s_white_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value); }
-
 static void try_bind_ui_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
         uint32_t white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
@@ -672,7 +670,7 @@ int main(void) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_RTT_SHOWCASE_UI_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_RTT_SHOWCASE_UI_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_RTT_SHOWCASE_FONT, NT_ASSET_FONT);
-    init_ui_refs();
+    s_white_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
