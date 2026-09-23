@@ -23,12 +23,8 @@ typedef const struct nt_gl_offset_tag *nt_gl_offset_t;
 static inline nt_gl_offset_t nt_gl_offset(uintptr_t bytes) { return (nt_gl_offset_t)bytes; } // NOLINT(performance-no-int-to-ptr)
 
 // #region counting (every build)
-static inline void nt_gl_count(nt_gfx_gl_call_t call) {
-    nt_gfx_require_tick();
-    uint32_t *count = &g_nt_gfx.counters.gl[call];
-    NT_ASSERT(*count != UINT32_MAX);
-    (*count)++;
-}
+/* Out of line: inlined at every call site it grew a wasm-release example by ~2%. */
+static inline void nt_gl_count(nt_gfx_gl_call_t call) { nt_gfx_count_gl_call(call); }
 
 static inline void nt_gl_count_payload(uint64_t *calls, uint64_t *bytes, uint64_t size) {
     NT_ASSERT(*calls != UINT64_MAX && size <= UINT64_MAX - *bytes);
