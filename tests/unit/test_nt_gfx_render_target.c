@@ -682,29 +682,6 @@ static void test_context_restore_recreates_backend_from_retained_descriptor(void
     nt_gfx_end_frame();
 }
 
-static void test_context_restore_retries_after_backend_recreate_failure(void) {
-    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
-    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
-
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame();
-    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-
-    nt_gfx_fake_fail_next_backend_restore();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame();
-    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_backend_restore_count());
-
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_backend_restore_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_gpu_caps_probe_count());
-    nt_gfx_end_frame();
-}
-
 /* A failed web recreate leaves no context; retrying every frame would only fail again. */
 static void test_context_restore_waits_after_a_restore_that_leaves_the_backend_lost(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
@@ -914,7 +891,6 @@ int main(void) {
     RUN_TEST(test_pass_sequencing_and_capacity_misuse_assert);
     RUN_TEST(test_resize_preserves_depth_mode_accessor_matrix);
     RUN_TEST(test_context_restore_recreates_backend_from_retained_descriptor);
-    RUN_TEST(test_context_restore_retries_after_backend_recreate_failure);
     RUN_TEST(test_context_restore_waits_after_a_restore_that_leaves_the_backend_lost);
     RUN_TEST(test_context_restore_stays_lost_when_the_recreate_latches_a_loss);
     RUN_TEST(test_context_restore_waits_while_backend_remains_lost);

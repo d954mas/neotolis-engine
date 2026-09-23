@@ -194,24 +194,36 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 nt_gfx_capture_state_t g_nt_gfx_capture;
 #endif
 
-/* Frontend loss probe: the backend query stays pure, so a newly detected loss
- * marks the current observation interval; an already-known loss rejects work
- * without marking later ticks. */
+/* The frontend alone marks losses: once per tick, and only for a new detection. */
+static void observe_context_loss(void) {
+    if (!s_gfx.tick_aborted) {
+        s_gfx.tick_aborted = true;
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_CONTEXT_LOST);
+    }
+}
+
+/* Success-path probe: reads the backend's event flag, no JS call. An
+ * already-known loss rejects work without marking later ticks. */
 static bool gfx_context_lost(void) {
     if (g_nt_gfx.context_lost) {
         return true;
     }
     const bool lost = nt_gfx_backend_is_context_lost();
     if (lost) {
-        nt_gfx_observe_context_loss();
+        observe_context_loss();
     }
     return lost;
 }
 
 /* A backend failure caused by a loss is the recoverable CONTEXT_LOST and logs
- * nothing; only a failure on a live context is an error. */
+ * nothing; only a failure on a live context is an error. The browser is asked
+ * because the loss event may still be queued. */
 static nt_gfx_event_reason_t backend_failed(const char *what) {
-    if (gfx_context_lost()) {
+    if (g_nt_gfx.context_lost) {
+        return NT_GFX_REASON_CONTEXT_LOST;
+    }
+    if (nt_gfx_backend_query_context_lost()) {
+        observe_context_loss();
         return NT_GFX_REASON_CONTEXT_LOST;
     }
     if (what != NULL) {
@@ -228,13 +240,6 @@ const char *nt_gfx_gl_call_name(uint32_t call) {
     return call < NT_GFX_GL_COUNT ? names[call] : NULL;
 }
 #endif
-
-void nt_gfx_observe_context_loss(void) {
-    if (!s_gfx.tick_aborted) {
-        s_gfx.tick_aborted = true;
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_CONTEXT_LOST);
-    }
-}
 
 #if NT_GFX_CAPTURE_ENABLED
 void nt_gfx_capture_request(void) {
@@ -333,7 +338,10 @@ static void capture_initial_state(void) {
     for (uint32_t i = 1; i <= s_gfx.sampler_count; i++) {
         capture_resource_definition(NT_GFX_OBJECT_SAMPLER, i);
     }
-    nt_gfx_backend_capture_initial_state();
+    /* Until a restore, backend tables hold dead names, some for pipelines and vertex inputs already freed. */
+    if (!g_nt_gfx.context_lost) {
+        nt_gfx_backend_capture_initial_state();
+    }
 }
 #else
 #define NT_GFX_DEFINE_RESOURCE(kind, id) ((void)0)
@@ -718,7 +726,7 @@ static nt_gfx_event_reason_t begin_frame(void) {
     }
     if (backend_context_lost && !g_nt_gfx.context_lost) {
         /* First detection: mark the tick once and wipe all backend handles */
-        nt_gfx_observe_context_loss();
+        observe_context_loss();
         for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
             s_gfx.shader_backends[i] = 0;
         }
@@ -782,28 +790,33 @@ static nt_gfx_event_reason_t begin_frame(void) {
     if (g_nt_gfx.context_lost) {
         /* The whole restore is one operation; render-target definitions and backend calls sit inside it. */
         NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
-        if (!nt_gfx_backend_recreate_all_resources()) {
-            NT_GFX_END(NT_GFX_REASON_BACKEND_FAILURE);
-            NT_LOG_ERROR("WebGL context restore failed");
-            return NT_GFX_REASON_UNREADY;
-        }
-        /* The recreate may itself latch a new loss; restoring onto it would publish dead objects. */
-        if (nt_gfx_backend_is_context_lost()) {
+        /* A failed recreate leaves no context, which stays lost for good; a
+         * successful one can meet a new loss, and restoring onto it would
+         * publish dead objects. */
+        const bool recreated = nt_gfx_backend_recreate_all_resources();
+        if (!recreated || nt_gfx_backend_query_context_lost()) {
+            observe_context_loss();
             NT_GFX_END(NT_GFX_REASON_CONTEXT_LOST);
+            if (!recreated) {
+                NT_LOG_ERROR("WebGL context restore failed");
+            }
             return NT_GFX_REASON_CONTEXT_LOST;
         }
         g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
         g_nt_gfx.context_lost = false;
         s_gfx.scissor_enabled = false;
-        g_nt_gfx.context_restored = true;
         bool render_targets_restored = true;
         for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
-            if (nt_pool_slot_alive(&s_gfx.render_target_pool, i)) {
-                if (!render_target_recreate_backend(i)) {
-                    render_targets_restored = false;
+            if (nt_pool_slot_alive(&s_gfx.render_target_pool, i) && !render_target_recreate_backend(i)) {
+                /* A loss here is wiped by the next begin_frame's first detection. */
+                if (backend_failed(NULL) == NT_GFX_REASON_CONTEXT_LOST) {
+                    NT_GFX_END(NT_GFX_REASON_CONTEXT_LOST);
+                    return NT_GFX_REASON_CONTEXT_LOST;
                 }
+                render_targets_restored = false;
             }
         }
+        g_nt_gfx.context_restored = true;
         NT_GFX_END(NT_GFX_REASON_ACCEPTED);
         if (render_targets_restored) {
             NT_LOG_INFO("WebGL context restored -- render targets restored, game must re-create other resources");
@@ -871,7 +884,7 @@ static nt_gfx_event_reason_t read_pixels(int x, int y, int w, int h, uint8_t *ou
         return NT_GFX_REASON_CAPACITY;
     }
     if (!nt_gfx_backend_read_pixels(x, y, w, h, out)) {
-        return NT_GFX_REASON_BACKEND_FAILURE; /* GL read error -> capture_failed, not an encode of uninitialized memory. */
+        return backend_failed(NULL); /* GL read error -> capture_failed, not an encode of uninitialized memory. */
     }
 
     /* Single in-place row swap: GL bottom-left -> top-left. Row stride = w*4. */
@@ -1048,7 +1061,7 @@ static nt_gfx_event_reason_t make_program(nt_shader_t vs, nt_shader_t fs, nt_pro
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
     uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
-    if (backend == 0 && gfx_context_lost()) {
+    if (backend == 0 && backend_failed(NULL) == NT_GFX_REASON_CONTEXT_LOST) {
         nt_pool_free(&s_gfx.program_pool, id);
         return NT_GFX_REASON_CONTEXT_LOST;
     }
@@ -1983,7 +1996,7 @@ static nt_gfx_event_reason_t resolve_sampler_backend(uint32_t texture_slot, nt_s
         e->backend = nt_gfx_backend_create_sampler(&e->desc);
         if (e->backend == 0) {
             /* A loss must not spend the one-shot log a live failure needs. */
-            if (gfx_context_lost()) {
+            if (backend_failed(NULL) == NT_GFX_REASON_CONTEXT_LOST) {
                 return NT_GFX_REASON_CONTEXT_LOST;
             }
             NT_LOG_ERROR_ONCE("apply_texture_bindings: sampler recreation failed");

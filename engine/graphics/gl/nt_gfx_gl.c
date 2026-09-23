@@ -607,11 +607,8 @@ static bool nt_gfx_gl_drain_errors(void) {
 
 static void nt_gfx_gl_init_context_features(void) {
     /* Emscripten keeps a recorded error across contexts: calls that reached the
-     * dead context must not fail the fresh one's first error check. A drained
-     * error may be the new context's loss, so it must not hide one. */
-    if (nt_gfx_gl_drain_errors()) {
-        (void)nt_gfx_gl_ctx_query_lost();
-    }
+     * dead context must not fail the fresh one's first error check. */
+    (void)nt_gfx_gl_drain_errors();
 #if NT_GFX_GPU_TIMING_ENABLED
     s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
     s_debug_groups_enabled = nt_gfx_gl_ctx_enable_debug_groups();
@@ -691,6 +688,8 @@ void nt_gfx_backend_shutdown(void) {
 }
 
 bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
+
+bool nt_gfx_backend_query_context_lost(void) { return nt_gfx_gl_ctx_query_lost(); }
 
 void nt_gfx_backend_ack_context_loss(void) { nt_gfx_gl_ctx_ack_loss(); }
 
@@ -875,10 +874,7 @@ void nt_gfx_backend_drop_timer_segments(void) {
 
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
     if (!enabled && s_timer_user_enabled && s_timer_enabled) {
-        if (nt_gfx_backend_is_context_lost()) {
-            if (!g_nt_gfx.context_lost) {
-                nt_gfx_observe_context_loss();
-            }
+        if (nt_gfx_gl_ctx_is_lost()) {
             nt_gfx_backend_drop_timer_segments();
         } else {
             nt_gfx_backend_end_segment();
@@ -985,11 +981,12 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { gl_set_viewport(x
 bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
     NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
     /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
-    (void)nt_gfx_gl_drain_errors();
+    const bool stale = nt_gfx_gl_drain_errors();
     NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, out_rgba8);
     /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
-       partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
-    return NT_GL_RET0(glGetError) == GL_NO_ERROR;
+       partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage.
+       A drained error may have been the loss's only report, after which a lost read raises none. */
+    return NT_GL_RET0(glGetError) == GL_NO_ERROR && !(stale && nt_gfx_gl_ctx_query_lost());
 }
 
 /* ---- Pipeline bind ---- */
@@ -1532,7 +1529,6 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     GLuint vao = 0;
     NT_GL_GEN(glGenVertexArrays, 1, &vao);
     if (vao == 0) {
-        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
         return 0;
     }
     gl_bind_vao(vao);
@@ -1604,8 +1600,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     GLuint buf;
     NT_GL_GEN(glGenBuffers, 1, &buf);
     if (buf == 0) {
-        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
-        return 0;                         /* storing name 0 would alias the free-slot sentinel */
+        return 0; /* storing name 0 would alias the free-slot sentinel */
     }
     GLenum target;
     switch (desc->type) {
@@ -1832,9 +1827,8 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
 static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     GLenum pending_error = NT_GL_RET0(glGetError);
     /* A loss the browser confirms is a recoverable outcome the caller rolls back,
-       not a programmer error; the query also latches it before its event arrives. */
+       not a programmer error. */
     if (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_query_lost()) {
-        nt_gfx_observe_context_loss();
         return false;
     }
     NT_ASSERT(pending_error == GL_NO_ERROR && "pending GL error before texture upload");
@@ -1851,7 +1845,6 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     GLuint tex;
     NT_GL_GEN(glGenTextures, 1, &tex);
     if (tex == 0) {
-        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
         return 0;
     }
     if (!nt_gfx_gl_begin_texture_upload(tex)) {
@@ -1983,7 +1976,6 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
     GLuint depth_rbo = 0;
     NT_GL_GEN(glGenFramebuffers, 1, &fbo);
     if (fbo == 0) {
-        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
         return false;
     }
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
@@ -1993,7 +1985,6 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
     if (desc->depth_storage == NT_RT_DEPTH_BUFFER) {
         NT_GL_GEN(glGenRenderbuffers, 1, &depth_rbo);
         if (depth_rbo == 0) {
-            (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
             NT_GL_DELETE(glDeleteFramebuffers, 1, &fbo);
             NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, restore_fbo);
             s_bound_framebuffer = restore_fbo;
@@ -2257,7 +2248,6 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     GLuint s = 0;
     NT_GL_GEN(glGenSamplers, 1, &s);
     if (s == 0) {
-        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
         return 0;
     }
     NT_GL(glSamplerParameteri, s, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));

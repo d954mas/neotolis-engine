@@ -106,9 +106,6 @@ static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, n
         const nt_gfx_event_reason_t nt_gfx_reason = (reason);                                                                                                                                          \
         nt_gfx_end_op(&nt_gfx_scope, (created), nt_gfx_reason);                                                                                                                                        \
     } while (0)
-
-/* Marks the open tick aborted once. */
-void nt_gfx_observe_context_loss(void);
 // #endregion
 
 /* ---- Render state machine ---- */
@@ -145,6 +142,9 @@ typedef enum {
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);
 bool nt_gfx_backend_is_context_lost(void);
+/* Asks the browser directly: a loss whose event has not arrived yet is latched
+ * and reported. Only for failure paths; success paths read is_context_lost. */
+bool nt_gfx_backend_query_context_lost(void);
 /* Consumes a reported loss; afterwards is_context_lost follows the live state. */
 void nt_gfx_backend_ack_context_loss(void);
 

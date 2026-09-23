@@ -400,15 +400,15 @@ resets them and advances `frame_sequence`; render frames reset nothing.
 `last_frame` stays unchanged until the next end or shutdown; before the first
 end its status is UNAVAILABLE. Readers early in a callback, before its draws,
 read `last_frame`. A no-render tick reports zero draws; old geometry is never
-reused. A tick is ABORTED when a loss is detected during it (by begin_frame, a
-create that probes the backend, a resize or lazy sampler recreate that probes
-after a backend failure, a backend upload whose pending GL error the browser
-confirms as a loss, or disabling GPU timing on a lost context) or the context
-is still known lost at its end. A rejection on an already-known loss does not by
-itself mark the tick: begin_frame, frontend probes and GPU-timing disable ignore a
-known loss, and only a newly detected one marks the tick. end_tick does not
-probe the backend: a loss in a tick without a probe marks the next tick that
-probes.
+reused. A tick is ABORTED when a loss is detected during it or the context is
+still known lost at its end. Only the frontend marks a loss, and only a newly
+detected one: begin_frame's first detection, a restore that fails or meets a new
+loss, a frontend pre-check that reads a loss the backend reports but the frontend
+does not know yet, and a backend failure the frontend attributes to a loss (a
+create, a render-target resize or restore, a readback, a lazy sampler recreate).
+A rejection on an already-known loss does not by itself mark the tick. end_tick
+does not probe the backend: a loss in a tick without a probe marks the next tick
+that probes.
 A tick whose begin_frame restores a lost context and then completes is COMPLETE.
 
 The web context learns of a loss from the canvas `webglcontextlost` and
@@ -418,25 +418,32 @@ shells must not. Loss checks on success paths read the flags these events set an
 make no JS call. A loss stays reported until the next begin_frame consumes it, so
 a loss and restore that both happen between two frames (a background tab) still
 wipe the backend tables at that begin_frame and restore at the next one. The
-browser reports a loss at once but queues its event, so some paths query the
-browser directly and report a loss whose event has not arrived yet like one that
-has: shader and program creation, once per create, before the Emscripten calls
-that throw on the null object some browsers return on a lost context; and paths
-where GL already reported a failure — a generated name of 0 (texture, buffer,
-vertex array including the one made at context setup, sampler, framebuffer,
-renderbuffer, GPU timer query), link, uniform reflection, framebuffer
-completeness, a GL error pending before a texture upload or raised by it, and a
-fresh context's error drain that consumed an error. A create, a render-target
-resize or a lazy sampler recreate at bind that failed this way returns
-`CONTEXT_LOST`, not `BACKEND_FAILURE` or `UNREADY`, and logs no error (the
-sampler's one-shot error log stays unspent). A timer query named 0 leaves its
-segment unallocated and the segment is skipped, because `beginQuery` throws on
-it. A restore whose recreate latches a new loss (such as the setup vertex
-array's name 0) ends its CONTEXT operation with `CONTEXT_LOST`, restores no
-render target and does not report the context restored; the next begin_frame
-consumes the loss and waits for the browser. A fresh context (init or restore)
-first drains GL errors: Emscripten keeps a recorded error across contexts, so a
-call that reached the dead context must not fail the fresh one's first check.
+browser reports a loss at once but queues its event, so a loss whose event has
+not arrived yet is found by asking the browser directly, which latches it like
+the event would. The frontend asks, through the backend's query hook, whenever a
+backend call reports a failure and after every restore's recreate: a create, a
+render-target resize or restore, a readback or a lazy sampler recreate at bind
+that failed on a loss returns `CONTEXT_LOST`, not `BACKEND_FAILURE` or
+`UNREADY`, and logs no error (the sampler's one-shot error log stays unspent).
+The backend asks only where the answer changes what it does: shader and program
+creation, once per create, before the Emscripten calls that throw on the null
+object some browsers return on a lost context; error logs for link, uniform
+reflection, framebuffer completeness and texture creation, which a loss
+suppresses; a GL error pending before a texture upload, which a loss turns from
+an assert into a rolled-back failure; a readback after its error drain consumed
+an error, which may have been the loss's only report; the vertex array made at
+context setup, whose name 0 asserts only on a live context; and a GPU timer
+query named 0, which leaves its segment unallocated and skipped, because
+`beginQuery` throws on it. A restore whose recreate fails or that the browser
+then reports lost marks the tick, ends its CONTEXT operation with `CONTEXT_LOST`,
+restores no render target and does not report the context restored; a failed
+recreate is a context-creation failure and logs one error, and the next
+begin_frame consumes a new loss and waits for the browser. A render target whose
+restore fails on a loss ends the CONTEXT operation the same way without an error
+log and skips the frame; the next begin_frame wipes the names that restore
+already made as a first detection. A fresh context (init or restore) first
+drains GL errors: Emscripten keeps a recorded error across contexts, so a call
+that reached the dead context must not fail the fresh one's first check.
 Every error drain stops after 16 errors: WebGL returns `CONTEXT_LOST_WEBGL`
 once, but a native robust context may repeat `GL_CONTEXT_LOST`.
 
@@ -491,7 +498,7 @@ A context restore is one CONTEXT operation inside the begin_frame that performs
 it; the render-target DEFINITION and BACKEND records of the restore sit between
 its BEGIN and RESULT, including a DEFINITION with `complete=0` for a target
 whose recreation failed. It ends ACCEPTED when the context came back and
-BACKEND_FAILURE when recreation failed. Raw GL names are valid within their
+CONTEXT_LOST when recreation failed or met a loss. Raw GL names are valid within their
 context segment; a CONTEXT operation in the stream separates segments, and
 frontend handles are the identity across them.
 
@@ -573,7 +580,9 @@ The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, bound
 frontend handles) opens the snapshot. The other frontend INITIAL records and the
 frontend resource definitions follow, then the backend `INITIAL/STATE` record
 (`NT_GFX_INITIAL_BACKEND`, cached GL names and framebuffer size) and the backend's
-own definitions.
+own definitions. A snapshot taken while the context is known lost has no backend
+records: until a restore, the backend tables hold dead names, some for pipelines
+and vertex inputs the loss already freed.
 Among INITIAL records, `detail` is meaningful only on INITIAL/STATE.
 Program publication and initial state include `INITIAL/SAMPLER` records with
 backend program slot, name hash, location, unit and sampler class in args 0–4.

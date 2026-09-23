@@ -7,7 +7,9 @@
 #include <string.h>
 
 #if NT_GFX_CAPTURE_ENABLED
-void nt_gfx_backend_capture_initial_state(void) {}
+static uint32_t s_fake_backend_snapshot_count;
+void nt_gfx_backend_capture_initial_state(void) { s_fake_backend_snapshot_count++; }
+uint32_t nt_gfx_fake_backend_snapshot_count(void) { return s_fake_backend_snapshot_count; }
 #endif
 
 // #region sampler units
@@ -118,9 +120,9 @@ static uint32_t s_fake_last_destroyed_texture;
 static uint8_t s_fake_fail_buffer_creates;
 static bool s_fake_fail_next_program_create;
 static bool s_fake_lose_context_on_program_create;
+static bool s_fake_lose_context_on_texture_create;
 static bool s_fake_fail_next_pipeline_create;
 static bool s_fake_fail_next_sampler_create;
-static bool s_fake_fail_next_backend_restore;
 static bool s_fake_fail_next_backend_restore_lost;
 static bool s_fake_lose_context_during_next_restore;
 static bool s_fake_fail_next_render_target_create;
@@ -204,9 +206,9 @@ void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
 }
 void nt_gfx_fake_fail_next_program_create(void) { s_fake_fail_next_program_create = true; }
 void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
+void nt_gfx_fake_lose_context_on_texture_create(void) { s_fake_lose_context_on_texture_create = true; }
 void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_create = true; }
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
-void nt_gfx_fake_fail_next_backend_restore(void) { s_fake_fail_next_backend_restore = true; }
 void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend_restore_lost = true; }
 void nt_gfx_fake_lose_context_during_next_restore(void) { s_fake_lose_context_during_next_restore = true; }
 void nt_gfx_fake_set_context_lost(bool lost) { s_fake_context_lost = lost; }
@@ -273,10 +275,13 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_buffer_creates = 0;
     s_fake_fail_next_program_create = false;
     s_fake_lose_context_on_program_create = false;
+    s_fake_lose_context_on_texture_create = false;
     s_fake_fail_next_pipeline_create = false;
     s_fake_fail_next_sampler_create = false;
-    s_fake_fail_next_backend_restore = false;
     s_fake_fail_next_backend_restore_lost = false;
+#if NT_GFX_CAPTURE_ENABLED
+    s_fake_backend_snapshot_count = 0;
+#endif
     s_fake_lose_context_during_next_restore = false;
     s_fake_fail_next_render_target_create = false;
     s_fake_fail_next_render_target_resize = false;
@@ -341,6 +346,12 @@ void nt_gfx_backend_shutdown(void) {
 }
 
 bool nt_gfx_backend_is_context_lost(void) { return s_fake_loss_pending || s_fake_context_lost; }
+
+/* Like the browser query, a confirmed loss stays reported until begin_frame acknowledges it. */
+bool nt_gfx_backend_query_context_lost(void) {
+    s_fake_loss_pending |= s_fake_context_lost;
+    return nt_gfx_backend_is_context_lost();
+}
 
 void nt_gfx_backend_ack_context_loss(void) { s_fake_loss_pending = false; }
 
@@ -498,6 +509,10 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) { (void)backend_hand
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     s_fake_last_texture_desc = *desc;
     s_fake_texture_create_count++;
+    if (s_fake_lose_context_on_texture_create) {
+        s_fake_lose_context_on_texture_create = false;
+        s_fake_context_lost = true;
+    }
     if (s_fake_context_lost) {
         return 0; /* glGenTextures returns no name on a lost context */
     }
@@ -740,10 +755,6 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     }
     s_fake_backend_restore_count++;
     s_fake_loss_pending = false; /* a fresh context, like the web backend's */
-    if (s_fake_fail_next_backend_restore) {
-        s_fake_fail_next_backend_restore = false;
-        return false;
-    }
     if (s_fake_fail_next_backend_restore_lost) {
         s_fake_fail_next_backend_restore_lost = false;
         s_fake_context_lost = true;

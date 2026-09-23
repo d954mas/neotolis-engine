@@ -443,6 +443,7 @@ static void test_failed_restore_is_retried_by_the_next_one(void) {
      * state is recoverable, so it must not crash a game that blurs every frame. */
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_fake_draw_trace_reset(true);
+    nt_gfx_begin_frame(); /* consumes the loss the failed relink latched */
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
     nt_gfx_end_frame();

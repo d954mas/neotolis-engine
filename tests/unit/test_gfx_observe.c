@@ -1,9 +1,19 @@
 #include <string.h>
 
 #include "graphics/nt_gfx.h"
+#include "log/nt_log.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "unity.h"
+
+static uint32_t s_error_logs;
+
+static void count_error_logs(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)domain;
+    (void)msg;
+    (void)user;
+    s_error_logs += level == NT_LOG_LEVEL_ERROR;
+}
 
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
@@ -313,24 +323,22 @@ static void test_restore_frame_completes_with_one_context_result(void) {
     TEST_ASSERT_EQUAL_UINT32(1, capture.snapshot.counters.accepted[NT_GFX_OP_CONTEXT]);
 }
 
-static void test_failed_restore_ends_context_with_backend_failure(void) {
-    record_next_tick();
+/* A failed recreate leaves no context: a loss, marked once, with the one error log a permanent failure gets. */
+static void test_failed_restore_ends_context_lost(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_end_tick();
     record_next_tick();
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_fake_fail_next_backend_restore();
+    nt_gfx_fake_fail_next_backend_restore_lost();
+    s_error_logs = 0;
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1 : 0, s_error_logs);
     nt_gfx_end_tick();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    bool failed = false;
-    for (uint32_t i = 0; i < capture.count; i++) {
-        const nt_gfx_event_t *e = &capture.events[i];
-        failed |= e->kind == NT_GFX_EVENT_RESULT && e->operation == NT_GFX_OP_CONTEXT && e->reason == NT_GFX_REASON_BACKEND_FAILURE;
-    }
-    TEST_ASSERT_TRUE(failed);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, capture.snapshot.status);
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
+    TEST_ASSERT_EQUAL_UINT32(1, loss_markers(capture));
 }
 
 static void test_loss_latched_by_the_recreate_ends_context_lost(void) {
@@ -339,6 +347,7 @@ static void test_loss_latched_by_the_recreate_ends_context_lost(void) {
     record_next_tick();
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_fake_lose_context_during_next_restore();
+    s_error_logs = 0;
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
@@ -346,6 +355,51 @@ static void test_loss_latched_by_the_recreate_ends_context_lost(void) {
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
     TEST_ASSERT_EQUAL_UINT32(0, capture.snapshot.counters.accepted[NT_GFX_OP_CONTEXT]);
+    TEST_ASSERT_EQUAL_UINT32(1, loss_markers(capture));
+    TEST_ASSERT_EQUAL_UINT32(0, s_error_logs);
+}
+
+/* A render target whose restore meets a new loss is that loss, not a live failure. */
+static void test_render_target_restore_meeting_a_loss_ends_context_lost(void) {
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    record_next_tick();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_fake_lose_context_on_texture_create();
+    s_error_logs = 0;
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
+    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(target));
+    TEST_ASSERT_EQUAL_UINT32(0, s_error_logs);
+    nt_gfx_end_tick();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, capture.snapshot.status);
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
+    TEST_ASSERT_EQUAL_UINT32(1, loss_markers(capture));
+
+    /* The next begin_frame wipes the restored names as a first detection; the one after restores. */
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
+    nt_gfx_end_frame();
+}
+
+/* Backend tables keep dead names until a restore, so a snapshot of a lost context skips them. */
+static void test_snapshot_on_a_known_loss_skips_backend_state(void) {
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    record_next_tick();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_backend_snapshot_count());
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
+    record_next_tick();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_backend_snapshot_count());
 }
 
 static void test_resize_failing_on_a_latched_loss_ends_context_lost(void) {
@@ -712,6 +766,7 @@ static void test_exact_capacity_and_one_record_short(void) {
 #endif
 
 int main(void) {
+    nt_log_add_sink(count_error_logs, NULL);
     UNITY_BEGIN();
     RUN_TEST(test_render_frames_sum_and_end_tick_resets);
     RUN_TEST(test_instanced_products_are_widened_before_multiplication);
@@ -733,8 +788,10 @@ int main(void) {
     RUN_TEST(test_rejected_destroys_and_resize_assert_inside_a_recorded_tick);
 #endif
     RUN_TEST(test_restore_frame_completes_with_one_context_result);
-    RUN_TEST(test_failed_restore_ends_context_with_backend_failure);
+    RUN_TEST(test_failed_restore_ends_context_lost);
     RUN_TEST(test_loss_latched_by_the_recreate_ends_context_lost);
+    RUN_TEST(test_render_target_restore_meeting_a_loss_ends_context_lost);
+    RUN_TEST(test_snapshot_on_a_known_loss_skips_backend_state);
     RUN_TEST(test_resize_failing_on_a_latched_loss_ends_context_lost);
     RUN_TEST(test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost);
     RUN_TEST(test_restore_defines_render_targets_inside_the_context_operation);

@@ -398,12 +398,15 @@ default sampler state; it does not preserve pixels. Consumers must redraw
 offscreen contents after resize or context restore.
 While the backend reports a lost context, `nt_gfx_begin_frame` skips the frame
 without attempting recreation. Recreation starts only after the backend leaves
-the lost state; a failed recreation that leaves the backend live is retried on a
-later frame, and one that leaves it reporting a loss waits like any loss. On the
-web a failed recreation leaves no context and no loss listener, so the engine
-stays lost and no later frame recovers it.
+the lost state. A failed recreation is a context-creation failure: it logs one
+error and is reported as a loss, and on the web it leaves no context and no loss
+listener, so the engine stays lost and no later frame recovers it. Only the
+frontend marks a loss in frame observation; backend failures caused by a loss
+are reported as `CONTEXT_LOST` without an error log.
 After the context recovers, each render target is recreated once. A failed target
-remains unready; its owner destroys and recreates it, or uses a fallback.
+remains unready; its owner destroys and recreates it, or uses a fallback. A
+target whose recreation meets a new loss is that loss: the frame is skipped and
+the next frame handles it like any loss.
 
 Render-target descriptors explicitly separate depth storage from depth format.
 `NONE` has no depth format or attachment, `BUFFER` has a non-sampleable depth

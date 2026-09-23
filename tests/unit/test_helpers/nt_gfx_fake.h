@@ -53,6 +53,8 @@ uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index);
 void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]);
 void nt_gfx_fake_fail_next_program_create(void);
 void nt_gfx_fake_lose_context_on_program_create(void);
+/* The next texture create meets a live loss, as a restore's render-target recreate can. */
+void nt_gfx_fake_lose_context_on_texture_create(void);
 void nt_gfx_fake_fail_next_pipeline_create(void);
 void nt_gfx_fake_fail_next_sampler_create(void);
 uint16_t nt_gfx_fake_last_render_target_width(void);
@@ -84,7 +86,6 @@ uint32_t nt_gfx_fake_texture_destroy_count(void);
 /* Backend handle of the last destroyed texture; handle 0 is a no-op, as on GL. */
 uint32_t nt_gfx_fake_last_destroyed_texture(void);
 void nt_gfx_fake_fail_buffer_creates(uint8_t mask);
-void nt_gfx_fake_fail_next_backend_restore(void);
 /* A failed web recreate leaves no context: the backend stays lost. */
 void nt_gfx_fake_fail_next_backend_restore_lost(void);
 /* The recreate succeeds but latches a new loss, as a setup probe can. */
@@ -106,6 +107,10 @@ uint32_t nt_gfx_fake_last_bound_vertex_input(void);
 uint32_t nt_gfx_fake_last_uniform_program(void);
 void nt_gfx_fake_vertex_attrib_default(uint8_t location, float out[4]);
 void nt_gfx_fake_fail_next_vertex_input_create(void);
+#if NT_GFX_CAPTURE_ENABLED
+/* Backend snapshots taken for recorded ticks since the last reset. */
+uint32_t nt_gfx_fake_backend_snapshot_count(void);
+#endif
 void nt_gfx_fake_reset(void);
 
 #endif
