@@ -436,7 +436,10 @@ static double s_observe_values[40];
 EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) { nt_gfx_capture_set_enabled(enabled != 0); }
 EMSCRIPTEN_KEEPALIVE int nt_test_observe_status(void) { return (int)nt_gfx_capture_read().status; }
 EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
-    NT_ASSERT(index >= 0 && index < 40);
+    /* JS-supplied index: an out-of-range probe reads as -1 instead of trapping. */
+    if (index < 0 || index >= (int)(sizeof(s_observe_values) / sizeof(s_observe_values[0]))) {
+        return -1.0;
+    }
     return s_observe_values[index];
 }
 EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {

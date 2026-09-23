@@ -276,6 +276,86 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     TEST_ASSERT_EQUAL_UINT32(3, skips);
     TEST_ASSERT_FALSE(capture.overflow);
 }
+
+static uint32_t render_target_depth_names(uint32_t first, uint32_t *out_depth) {
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    uint32_t count = 0;
+    for (uint32_t i = first; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_RENDER_TARGET) {
+            *out_depth = event->data.backend.args[2];
+            count++;
+        }
+    }
+    return count;
+}
+
+static void test_render_target_backend_definitions_carry_depth_renderbuffer(void) {
+    const nt_render_target_desc_t desc = {.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8, .depth_storage = NT_RT_DEPTH_BUFFER, .depth_format = NT_TEXTURE_FORMAT_DEPTH24};
+    nt_render_target_t inherited = nt_gfx_make_render_target(&desc);
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    uint32_t depth = 0;
+    TEST_ASSERT_EQUAL_UINT32(1, render_target_depth_names(0, &depth));
+    TEST_ASSERT_NOT_EQUAL(0, depth);
+    uint32_t created_from = nt_gfx_capture_read().count;
+    nt_render_target_t created = nt_gfx_make_render_target(&desc);
+    uint32_t created_depth = 0;
+    TEST_ASSERT_EQUAL_UINT32(1, render_target_depth_names(created_from, &created_depth));
+    TEST_ASSERT_NOT_EQUAL(0, created_depth);
+    TEST_ASSERT_NOT_EQUAL(depth, created_depth);
+    (void)nt_gfx_observe_end_frame();
+    TEST_ASSERT_FALSE(nt_gfx_capture_read().overflow);
+    nt_gfx_destroy_render_target(created);
+    nt_gfx_destroy_render_target(inherited);
+}
+
+static void test_initial_uniform_records_cover_only_vec4(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "uniform mat4 m; uniform float f; void main(){gl_Position=m*vec4(f);}"});
+    nt_shader_t fs = nt_gfx_make_shader(
+        &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform vec4 tint; uniform int mode; out vec4 color; void main(){color=tint*float(mode);}"});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_NOT_EQUAL(0, program.id);
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    (void)nt_gfx_observe_end_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    uint32_t records = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_INITIAL && event->operation == NT_GFX_OP_UNIFORM_VEC4) {
+            TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("tint").value, event->data.backend.args[1]);
+            records++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, records);
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
+static void test_readback_is_recorded_as_issued_call(void) {
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    uint8_t pixel[4] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    (void)nt_gfx_observe_end_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    uint32_t reads = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_READPIXELS) {
+            TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[2]);
+            TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[6]);
+            reads++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, reads);
+}
 #endif
 #if NT_GFX_COUNTERS_ENABLED
 static void test_payloads_before_render_and_without_frames(void) {
@@ -475,6 +555,9 @@ int main(void) {
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_capture_publishes_resize_mappings_and_skip_reasons);
     RUN_TEST(test_new_program_defines_sampler_names_and_inactive_uniforms);
+    RUN_TEST(test_render_target_backend_definitions_carry_depth_renderbuffer);
+    RUN_TEST(test_initial_uniform_records_cover_only_vec4);
+    RUN_TEST(test_readback_is_recorded_as_issued_call);
 #endif
 #if NT_GFX_COUNTERS_ENABLED
     RUN_TEST(test_payloads_before_render_and_without_frames);

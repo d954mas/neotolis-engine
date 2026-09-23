@@ -585,6 +585,7 @@ typedef enum {
     NT_GFX_EVENT_SKIP,
     NT_GFX_EVENT_INITIAL,
     NT_GFX_EVENT_DEFINITION,
+    NT_GFX_EVENT_ARGUMENT, /* request argument belonging to the enclosing BEGIN */
 } nt_gfx_event_kind_t;
 
 typedef enum {
@@ -652,12 +653,13 @@ typedef enum {
 } nt_gfx_event_reason_t;
 
 /* Concrete issued-call detail; integer args follow the GL signature. Pointer
- * arguments become presence bits (uploads) or object names (gen/delete); payload
- * bytes are separate. Float/vector arguments use values; no CPU pointers survive. */
+ * arguments become presence bits (uploads, readback outputs, labels) or object
+ * names (gen/delete, one per slot after the count); payload bytes are separate. Float/vector arguments use values; no CPU pointers survive. */
 typedef enum {
     NT_GFX_GL_NONE = 0,
     NT_GFX_GL_ACTIVETEXTURE,
     NT_GFX_GL_ATTACHSHADER,
+    NT_GFX_GL_BEGINQUERY,
     NT_GFX_GL_BINDBUFFER,
     NT_GFX_GL_BINDBUFFERBASE,
     NT_GFX_GL_BINDFRAMEBUFFER,
@@ -680,6 +682,7 @@ typedef enum {
     NT_GFX_GL_DELETEBUFFERS,
     NT_GFX_GL_DELETEFRAMEBUFFERS,
     NT_GFX_GL_DELETEPROGRAM,
+    NT_GFX_GL_DELETEQUERIES,
     NT_GFX_GL_DELETERENDERBUFFERS,
     NT_GFX_GL_DELETESAMPLERS,
     NT_GFX_GL_DELETESHADER,
@@ -694,18 +697,26 @@ typedef enum {
     NT_GFX_GL_DRAWELEMENTSINSTANCED,
     NT_GFX_GL_ENABLE,
     NT_GFX_GL_ENABLEVERTEXATTRIBARRAY,
+    NT_GFX_GL_ENDQUERY,
     NT_GFX_GL_FRAMEBUFFERRENDERBUFFER,
     NT_GFX_GL_FRAMEBUFFERTEXTURE2D,
     NT_GFX_GL_GENBUFFERS,
     NT_GFX_GL_GENFRAMEBUFFERS,
+    NT_GFX_GL_GENQUERIES,
     NT_GFX_GL_GENRENDERBUFFERS,
     NT_GFX_GL_GENSAMPLERS,
     NT_GFX_GL_GENTEXTURES,
     NT_GFX_GL_GENVERTEXARRAYS,
     NT_GFX_GL_GENERATEMIPMAP,
+    NT_GFX_GL_GETINTEGERV,
+    NT_GFX_GL_GETQUERYOBJECTUIV,
+    NT_GFX_GL_GETQUERYOBJECTUI64V,
     NT_GFX_GL_LINKPROGRAM,
     NT_GFX_GL_PIXELSTOREI,
     NT_GFX_GL_POLYGONOFFSET,
+    NT_GFX_GL_POPDEBUGGROUP,
+    NT_GFX_GL_PUSHDEBUGGROUP,
+    NT_GFX_GL_READPIXELS,
     NT_GFX_GL_RENDERBUFFERSTORAGE,
     NT_GFX_GL_SAMPLERPARAMETERI,
     NT_GFX_GL_SCISSOR,
@@ -727,7 +738,8 @@ typedef enum {
 } nt_gfx_gl_call_t;
 
 /* Pointer-free records. BEGIN/RESULT delimit nested operations; INITIAL and
- * DEFINITION describe inherited state and never represent issued calls.
+ * DEFINITION describe inherited or resource state and never represent issued
+ * calls; ARGUMENT carries per-element request arguments of the enclosing BEGIN.
  * object is a full typed frontend handle; raw names live only in backend data
  * and are scoped by context_sequence. Unknown inherited values are explicit. */
 typedef struct {

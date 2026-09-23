@@ -103,6 +103,64 @@ static void test_loss_detected_during_creation_aborts_observation(void) {
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, nt_gfx_capture_read().status);
 }
 
+static void test_restore_frame_completes_under_new_context_sequence(void) {
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_observe_begin_frame();
+    uint64_t lost_sequence = nt_gfx_capture_read().events[0].context_sequence;
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, nt_gfx_observe_end_frame()->status);
+
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_observe_begin_frame();
+    TEST_ASSERT_EQUAL_UINT64(lost_sequence, nt_gfx_capture_read().events[0].context_sequence);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, nt_gfx_observe_end_frame()->status);
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, capture.status);
+    TEST_ASSERT_FALSE(capture.overflow);
+    const nt_gfx_event_t *last = &capture.events[capture.count - 1];
+    TEST_ASSERT_EQUAL(NT_GFX_EVENT_RESULT, last->kind);
+    TEST_ASSERT_EQUAL(NT_GFX_OP_FRAME, last->operation);
+    TEST_ASSERT_EQUAL_UINT64(lost_sequence + 1, last->context_sequence);
+}
+
+static void test_overflow_and_loss_finalize_aborted(void) {
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.capture_capacity = 1;
+    nt_gfx_init(&desc);
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    nt_gfx_fake_set_context_lost(true);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, nt_gfx_observe_end_frame()->status);
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_TRUE(capture.overflow);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, capture.status);
+}
+
+static void test_sampler_cache_hit_defines_nothing(void) {
+    const nt_sampler_desc_t sampler_desc = {.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR};
+    nt_sampler_t sampler = nt_gfx_make_sampler(&sampler_desc);
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_observe_begin_frame();
+    uint32_t start = nt_gfx_capture_read().count;
+    TEST_ASSERT_EQUAL_UINT32(sampler.id, nt_gfx_make_sampler(&sampler_desc).id);
+    (void)nt_gfx_observe_end_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    bool cache = false;
+    for (uint32_t i = start; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        TEST_ASSERT_FALSE(e->kind == NT_GFX_EVENT_DEFINITION && e->object_kind == NT_GFX_OBJECT_SAMPLER);
+        cache |= e->kind == NT_GFX_EVENT_RESULT && e->object == sampler.id && e->reason == NT_GFX_REASON_CACHE;
+    }
+    TEST_ASSERT_TRUE(cache);
+}
+
 static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 24});
     nt_gfx_capture_set_enabled(true);
@@ -255,6 +313,9 @@ int main(void) {
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_resource_operations_keep_published_handles_after_destroy);
     RUN_TEST(test_loss_detected_during_creation_aborts_observation);
+    RUN_TEST(test_restore_frame_completes_under_new_context_sequence);
+    RUN_TEST(test_overflow_and_loss_finalize_aborted);
+    RUN_TEST(test_sampler_cache_hit_defines_nothing);
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);

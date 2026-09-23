@@ -336,13 +336,7 @@ void nt_gfx_backend_shutdown(void) {
     s_fake_max_programs = 0;
 }
 
-bool nt_gfx_backend_is_context_lost(void) {
-    bool lost = s_fake_context_lost || s_fake_backend_missing;
-    if (lost) {
-        nt_gfx_observe_context_loss();
-    }
-    return lost;
-}
+bool nt_gfx_backend_is_context_lost(void) { return s_fake_context_lost || s_fake_backend_missing; }
 
 void nt_gfx_backend_begin_frame(void) {}
 
@@ -745,6 +739,9 @@ bool nt_gfx_backend_recreate_all_resources(void) {
         return false;
     }
     s_fake_backend_missing = false;
+#if NT_GFX_CAPTURE_ENABLED
+    g_nt_gfx_observation.context_sequence++;
+#endif
     return true;
 }
 

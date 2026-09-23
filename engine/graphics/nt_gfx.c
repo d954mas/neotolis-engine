@@ -195,6 +195,16 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 nt_gfx_observation_t g_nt_gfx_observation;
 #endif
 
+/* Frontend loss probe: the backend query stays pure, so every detection that
+ * rejects work also marks the current observation interval. */
+static bool gfx_context_lost(void) {
+    bool lost = g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost();
+    if (lost) {
+        nt_gfx_observe_context_loss();
+    }
+    return lost;
+}
+
 #if NT_GFX_COUNTERS_ENABLED
 static void observe_apply_stats_policy(bool enabled) {
     if (enabled && !g_nt_gfx_observation.stats_enabled) {
@@ -220,7 +230,7 @@ void nt_gfx_stats_set_enabled(bool enabled) {
 nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) {
 #if NT_GFX_COUNTERS_ENABLED
     nt_gfx_upload_totals_t result = g_nt_gfx_observation.uploads;
-    result.available = g_nt_gfx_observation.stats_enabled && g_nt_gfx_observation.backend >= NT_GFX_BACKEND_OPENGL;
+    result.available = g_nt_gfx_observation.stats_enabled && (g_nt_gfx_observation.backend == NT_GFX_BACKEND_OPENGL || g_nt_gfx_observation.backend == NT_GFX_BACKEND_WEBGL);
     return result;
 #else
     return (nt_gfx_upload_totals_t){0};
@@ -365,7 +375,9 @@ void nt_gfx_observe_begin_frame(void) {
     g_nt_gfx_observation.sequence++;
     g_nt_gfx_observation.active = true;
     g_nt_gfx_observation.gfx_begun = false;
-    g_nt_gfx_observation.aborted = g_nt_gfx.context_lost;
+    /* A loss carried in from earlier aborts only if it is observed again or
+     * still present at end; a begin_frame that restores completes normally. */
+    g_nt_gfx_observation.aborted = false;
 #if NT_GFX_COUNTERS_ENABLED
     observe_apply_stats_policy(g_nt_gfx_observation.stats_requested);
     g_nt_gfx_observation.working = (nt_gfx_counters_t){0};
@@ -389,7 +401,7 @@ nt_gfx_counters_t nt_gfx_stats_read(void) {
         result = g_nt_gfx_observation.working;
         result.frame_sequence = g_nt_gfx_observation.sequence;
         result.availability = NT_GFX_COUNTERS_FRONTEND;
-        if (g_nt_gfx_observation.backend >= NT_GFX_BACKEND_OPENGL) {
+        if (g_nt_gfx_observation.backend == NT_GFX_BACKEND_OPENGL || g_nt_gfx_observation.backend == NT_GFX_BACKEND_WEBGL) {
             result.availability |= NT_GFX_COUNTERS_BACKEND;
         }
         if (g_nt_gfx_observation.gfx_begun) {
@@ -639,14 +651,8 @@ static nt_texture_desc_t render_target_depth_texture_desc(const nt_render_target
     };
 }
 
-static nt_texture_t render_target_make_attachment(const nt_texture_desc_t *desc) {
-    nt_texture_t tex = nt_gfx_make_texture(desc);
-    if (tex.id != 0) {
-        s_gfx.texture_metas[nt_pool_slot_index(tex.id)].render_target_owned = true;
-        NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, tex.id);
-    }
-    return tex;
-}
+/* Ownership is set before the texture's definition is recorded, so capture sees one final definition. */
+static nt_texture_t make_texture(const nt_texture_desc_t *desc, bool render_target_owned);
 
 static bool render_target_color_sampler_valid(const nt_render_target_desc_t *desc) {
     return desc->color_min_filter >= NT_FILTER_NEAREST && desc->color_min_filter <= NT_FILTER_LINEAR && desc->color_mag_filter >= NT_FILTER_NEAREST && desc->color_mag_filter <= NT_FILTER_LINEAR &&
@@ -791,6 +797,9 @@ static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t
 void nt_gfx_begin_frame(void) {
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_RENDER_FRAME, event.object_kind = NT_GFX_OBJECT_NONE; event.object = 0; event.detail = 0;);
     bool backend_context_lost = nt_gfx_backend_is_context_lost();
+    if (backend_context_lost) {
+        nt_gfx_observe_context_loss();
+    }
     if (backend_context_lost && !g_nt_gfx.context_lost) {
         /* First detection: wipe all backend handles */
         for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
@@ -1095,7 +1104,7 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
     NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, fs.id) && "make_program: invalid fragment shader handle");
 
     /* The browser can recover before begin_frame resets the backend tables. */
-    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+    if (gfx_context_lost()) {
         NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM, 0, NT_GFX_REASON_CONTEXT_LOST);
         return NT_PROGRAM_INVALID;
     }
@@ -1116,7 +1125,7 @@ nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
     uint32_t backend = nt_gfx_backend_create_program(vs_backend, fs_backend);
-    if (backend == 0 && nt_gfx_backend_is_context_lost()) {
+    if (backend == 0 && gfx_context_lost()) {
         nt_pool_free(&s_gfx.program_pool, id);
         NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM, 0, NT_GFX_REASON_CONTEXT_LOST);
         return NT_PROGRAM_INVALID;
@@ -1208,7 +1217,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     /* Same predicate as make_program: context loss is what zeroes the program
      * backend, so without this every renderer would trap on the readiness assert
      * below -- and the browser can recover before begin_frame resets the tables. */
-    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+    if (gfx_context_lost()) {
         NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_PIPELINE, 0, NT_GFX_REASON_CONTEXT_LOST);
         return result;
     }
@@ -1258,7 +1267,7 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
      * or a failed backend allocation returns an invalid handle. */
     nt_vertex_input_t result = {0};
     NT_ASSERT(desc != NULL);
-    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+    if (gfx_context_lost()) {
         NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_VERTEX_INPUT, 0, NT_GFX_REASON_CONTEXT_LOST);
         return result;
     }
@@ -1355,7 +1364,7 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     }
     /* Same recoverable contract as the other make_* creators -- without this
      * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
-    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+    if (gfx_context_lost()) {
         NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_BUFFER, 0, NT_GFX_REASON_CONTEXT_LOST);
         return result;
     }
@@ -1401,7 +1410,7 @@ static bool texture_compressed_format_supported(nt_texture_format_t format) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
+static nt_texture_t make_texture(const nt_texture_desc_t *desc, bool render_target_owned) {
     NT_GFX_RECORD(
         NT_GFX_EVENT_BEGIN, NT_GFX_OP_CREATE, event.object_kind = NT_GFX_OBJECT_TEXTURE; if (desc != NULL) {
             event.data.resource.width = desc->width;
@@ -1418,7 +1427,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     /* Under a lost context glGenTextures records GL_INVALID_OPERATION in
      * Emscripten's module-global GL.lastError, which survives context
      * recreation and would trip the next upload's pending-error assert. */
-    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+    if (gfx_context_lost()) {
         NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_TEXTURE, 0, NT_GFX_REASON_CONTEXT_LOST);
         return result;
     }
@@ -1530,6 +1539,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     }
     s_gfx.texture_metas[slot].mip_count = mip_count;
     s_gfx.texture_metas[slot].default_sampler = default_sampler;
+    s_gfx.texture_metas[slot].render_target_owned = render_target_owned;
 
     result.id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, result.id);
@@ -1537,6 +1547,8 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
                   event.reason = NT_GFX_REASON_ACCEPTED;);
     return result;
 }
+
+nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) { return make_texture(desc, false); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc) {
@@ -1611,7 +1623,7 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
     uint32_t slot = nt_pool_slot_index(id);
 
     nt_texture_desc_t color_desc = render_target_color_texture_desc(desc);
-    nt_texture_t color = render_target_make_attachment(&color_desc);
+    nt_texture_t color = make_texture(&color_desc, true);
     if (color.id == 0) {
         nt_pool_free(&s_gfx.render_target_pool, id);
         NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET, 0, NT_GFX_REASON_BACKEND_FAILURE);
@@ -1621,7 +1633,7 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
     nt_texture_t depth = {0};
     if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
         nt_texture_desc_t depth_desc = render_target_depth_texture_desc(desc);
-        depth = render_target_make_attachment(&depth_desc);
+        depth = make_texture(&depth_desc, true);
         if (depth.id == 0) {
             destroy_texture_slot(color, true);
             nt_pool_free(&s_gfx.render_target_pool, id);
@@ -2081,8 +2093,8 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
     uint8_t applied_mask = 0;
     for (uint8_t i = 0; i < count; i++) {
         nt_gfx_sampler_info_t info = {0};
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_TEXTURE_SET, event.object_kind = NT_GFX_OBJECT_TEXTURE; event.object = bindings[i].texture.id;
-                      event.data.binding.name = bindings[i].name.value; event.data.binding.secondary = bindings[i].sampler.id;);
+        NT_GFX_RECORD(NT_GFX_EVENT_ARGUMENT, NT_GFX_OP_TEXTURE_SET, event.object_kind = NT_GFX_OBJECT_TEXTURE; event.object = bindings[i].texture.id; event.data.binding.name = bindings[i].name.value;
+                      event.data.binding.secondary = bindings[i].sampler.id;);
         if (!nt_gfx_backend_program_sampler_info(program_backend, bindings[i].name.value, &info)) {
             NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_TEXTURE_SET, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = bindings[i].name.value;);
             continue;
@@ -2258,8 +2270,10 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
             /* Hit; lazy-recreate backend if context loss zeroed it. */
             if (s_gfx.sampler_cache[i].backend == 0 && !g_nt_gfx.context_lost) {
                 s_gfx.sampler_cache[i].backend = nt_gfx_backend_create_sampler(&s_gfx.sampler_cache[i].desc);
+                if (s_gfx.sampler_cache[i].backend != 0) {
+                    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, i + 1);
+                }
             }
-            NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, i + 1);
             NT_GFX_RESULT(NT_GFX_OP_CREATE, NT_GFX_OBJECT_SAMPLER, i + 1, NT_GFX_REASON_CACHE);
             return (nt_sampler_t){.id = i + 1};
         }
@@ -2739,7 +2753,11 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
     return nt_gfx_backend_poll_segment_time_ns(name, out_ns);
 }
 
-void nt_gfx_set_gpu_timing_enabled(bool enabled) { nt_gfx_backend_set_gpu_timing_enabled(enabled); }
+void nt_gfx_set_gpu_timing_enabled(bool enabled) {
+    /* Disabling on a lost context drops the backend's queries; that probe is a loss observation. */
+    (void)gfx_context_lost();
+    nt_gfx_backend_set_gpu_timing_enabled(enabled);
+}
 
 bool nt_gfx_is_gpu_timing_supported(void) { return nt_gfx_backend_is_gpu_timing_supported(); }
 
@@ -2865,7 +2883,7 @@ static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt
 static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     /* make_texture would refuse the result anyway; bail before transcoding
      * the whole chain into staging. */
-    if (g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost()) {
+    if (gfx_context_lost()) {
         return 0;
     }
     const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;

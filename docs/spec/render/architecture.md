@@ -385,7 +385,8 @@ The host may bracket one callback with `nt_gfx_observe_begin_frame` and
 These are diagnostic boundaries, independent of render begin/end and simulation
 time. Each interval contains zero or one gfx frame and any number of passes.
 Calls require gfx IDLE, except that known context loss permits finalization.
-Missing/nested boundaries assert. No host wiring is added implicitly by app/gfx.
+Missing/nested boundaries assert when a counters or capture producer is compiled
+in; OFF/stub boundaries are inert. No host wiring is added implicitly by app/gfx.
 
 `nt_gfx_stats_read` returns current counters by value; outside the interval or
 with counters disabled they are unavailable. Two reads with the same sequence
@@ -428,7 +429,11 @@ event array at init (default zero); enabling capture without capacity asserts.
 There is no growth or allocation while recording. Each pointer-free POD event
 is 112 bytes, including padding; 16384 records reserve 1.75 MiB. Other storage
 consists of fixed control state and counter snapshots, with no second event array.
-All record bytes are initialized before publication.
+All record bytes are initialized before publication. Every recorded begin first
+snapshots inherited state, including one definition per live resource (plus
+program uniform/sampler and vertex-input attribute records), into the same array.
+Size the capacity for that snapshot plus the frame's commands; a capacity below
+the snapshot overflows before any command is recorded.
 
 `nt_gfx_capture_read` returns metadata by value and an immutable event prefix.
 The prefix remains valid until the next **recorded** begin or shutdown; frames
@@ -438,17 +443,24 @@ and redirecting the saved view's pointer to the owned array. An empty view has
 a NULL pointer. The finalized view retains its matching counter snapshot by value
 even after subsequent counters-only frames overwrite the module's last snapshot.
 
-BEGIN/RESULT records delimit nested operations. Issued backend calls do not
+BEGIN/RESULT records delimit nested operations. `ARGUMENT` records are request
+arguments belonging to the enclosing BEGIN (one per texture binding of a texture
+set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
 prove GL success or GPU completion. Metadata distinguishes recording from
-finalized, complete, truncated and aborted captures. Overflow is separately
+finalized, complete, truncated and aborted captures. An interval is aborted only
+when a loss is observed during it or the context is still lost at its end; an
+interval whose gfx begin_frame restores a previously lost context and then
+completes is complete. Overflow is separately
 reported even when aborted, stops event appends, and never truncates counters.
 Runtime recording changes during observation apply next begin.
 
 The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t` and
 carry raw GL names scoped to `context_sequence`. `backend.args` follows the GL
-integer argument order; pointer payload arguments are presence bits, single-name
-gen/delete arguments contain that name, and indexed offsets are byte offsets.
+integer argument order; pointer payload, readback output and debug-label arguments
+are presence bits, gen/delete arguments contain the count followed by each name,
+and indexed offsets are byte offsets. Readback, timer-query and debug-group calls
+are issued calls too and are recorded like any other.
 Float arguments occupy `backend.values` in float argument order. Matrix and vec4
 calls use `uniform` with the location in `name`, float count in `count`, and
 copied values. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
