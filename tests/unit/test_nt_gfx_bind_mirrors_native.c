@@ -291,9 +291,8 @@ static void test_vertex_inputs_alternate_under_one_pipeline(void) {
     nt_gfx_end_frame();
 }
 
-/* Counts REAL glVertexAttribPointer calls via glad-pointer swap, so a
- * reintroduced re-pointing path is caught even if it bypasses the source
- * counters in nt_gfx_gl.c. */
+/* Counts REAL glVertexAttribPointer calls via glad-pointer swap, so a raw GL
+ * call that skips the NT_GL wrapper (and its counter) is still caught. */
 static uint32_t s_real_attrib_pointer_calls;
 static PFNGLVERTEXATTRIBPOINTERPROC s_saved_attrib_pointer;
 static void GLAD_API_PTR counting_vertex_attrib_pointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) {
@@ -324,7 +323,7 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    nt_gfx_gl_test_reset_counters();
+    const uint32_t attrib_pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
     const uint32_t vao_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindVertexArray];
     s_real_attrib_pointer_calls = 0;
     s_saved_attrib_pointer = glad_glVertexAttribPointer;
@@ -342,13 +341,13 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_end_pass();
     /* Captured before end_frame so teardown binds cannot pollute it. */
     uint32_t frame_vao_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindVertexArray] - vao_binds;
+    uint32_t frame_attrib_pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer] - attrib_pointers;
     nt_gfx_end_frame();
     /* Restore before any assert -- a failure longjmps past this line. */
     glad_glVertexAttribPointer = s_saved_attrib_pointer;
     /* The carried-over VAO dedups the first bind; one bind per vertex-input switch. */
     TEST_ASSERT_EQUAL_UINT32(2, frame_vao_binds);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_static_attrib_pointer_calls());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_instance_attrib_pointer_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, frame_attrib_pointers);       /* just the instance re-point */
     TEST_ASSERT_EQUAL_UINT32(1, s_real_attrib_pointer_calls); /* just the instance re-point */
 }
 

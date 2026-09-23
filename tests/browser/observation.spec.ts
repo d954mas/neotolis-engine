@@ -57,7 +57,8 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
   const runs = await page.evaluate(() => {
     const hooks = (window as unknown as { __nt: ObserveHooks }).__nt;
     const control = (window as unknown as { observeControl: CallControl }).observeControl;
-    return [0, 1, 2].map(mode => {
+    // Mode 0 runs again after mode 1: an unrequested tick must leave that capture untouched.
+    return [0, 1, 0, 2].map(mode => {
       control.calls = {};
       control.payloads = {};
       control.bytes = {};
@@ -74,7 +75,7 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
       };
     });
   });
-  for (const run of runs) {
+  for (const [index, run] of runs.entries()) {
     const v = run.values;
     expect(run.pixel).toBe(0xffc08040);
     expect(v[1]).toBe(1); // capture compiled in
@@ -97,9 +98,15 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
     expect(v[16]).toBe(sum(run.payloads, buffers));
     expect(v[17]).toBe(sum(run.payloads, textures));
     expect(v.slice(26, 31)).toEqual([...buffers, ...textures].map(name => run.calls[name] || 0));
-    if (run.mode === 0) {
-      // No request: the probe tick records nothing.
+    if (run.mode === 0 && index === 0) {
+      // No request yet: nothing was ever recorded.
       expect(v.slice(11, 14)).toEqual([0, 0, 0]);
+    } else if (run.mode === 0) {
+      // No request: the mode-1 capture is still the finalized one.
+      const recorded = runs[index - 1].values;
+      expect(v.slice(11, 14)).toEqual(recorded.slice(11, 14));
+      expect(v[18]).toBe(recorded[18]);
+      expect(v[18]).toBeGreaterThan(0);
     } else if (run.mode === 1) {
       expect(v[11]).toBe(0);
       expect(v[12]).toBeGreaterThan(0);

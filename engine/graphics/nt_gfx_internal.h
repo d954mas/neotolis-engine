@@ -256,13 +256,6 @@ void nt_gfx_backend_drop_timer_segments(void);
 // #endregion
 
 #ifdef NT_TEST_ACCESS
-/* GL-backend-only counters (defined in gl/nt_gfx_gl.c; link only from tests
- * using the real GL backend). Static = divisor-0 glVertexAttribPointer calls,
- * issued only at vertex-input creation; instance = divisor-1 calls,
- * legitimately per-draw. Steady-state frames must show static == 0. */
-void nt_gfx_gl_test_reset_counters(void);
-uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void);
-uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void);
 /* Raw GL-mirror reads: a test can pin that destroy cleared an entry without
  * depending on the driver recycling the deleted GL name. */
 uint32_t nt_gfx_gl_test_cached_vao(void);

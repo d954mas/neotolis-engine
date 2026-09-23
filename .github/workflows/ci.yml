@@ -170,7 +170,7 @@ jobs:
           symbols="$("$EMSDK/upstream/bin/llvm-nm" --defined-only build/engine/wasm-release/libnt_gfx.a)"
           # Positive control: the listing must see ordinary gfx symbols.
           grep -q "nt_gfx_init" <<< "$symbols"
-          for producer in g_nt_gfx_capture nt_gfx_backend_capture_initial_state; do
+          for producer in g_nt_gfx_capture nt_gfx_backend_capture_initial_state nt_gfx_gl_call_name; do
             if grep -q "$producer" <<< "$symbols"; then
               echo "wasm-release nt_gfx retains capture producer: $producer"
               exit 1
@@ -445,7 +445,7 @@ jobs:
       - name: Check diagnostics configuration and runtime matrix
         run: |
           python3 scripts/check_diagnostics_config.py
-          python3 scripts/check_diagnostics_runtime.py
+          xvfb-run python3 scripts/check_diagnostics_runtime.py
 
       - name: Test optional UI features under NDEBUG
         run: |

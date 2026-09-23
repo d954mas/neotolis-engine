@@ -27,7 +27,7 @@ static inline nt_gl_offset_t nt_gl_offset(uintptr_t bytes) { return (nt_gl_offse
  * A tick is always open between init and shutdown, so every call lands in one. */
 #define NT_GL_COUNT_(call) ((void)g_nt_gfx.counters.gl[call]++)
 
-/* A payload counts once per call with non-NULL data; NULL storage and orphaning do not.
+/* One count per call with non-NULL data; NULL storage (including NULL orphaning) does not count.
  * `call` is a constant at every call site, so the buffer/texture choice folds away. */
 static inline void nt_gl_count_upload(nt_gfx_gl_call_t call, const void *data, uint64_t bytes) {
     if (data == NULL) {
@@ -95,14 +95,14 @@ static inline GLuint nt_gl_close_uint(GLuint result) {
 }
 
 #ifdef NT_PLATFORM_WEB
-#define NT_GL_PLATFORM_TYPES_
+/* WebGL has no debug callback; a private type keeps the _Generic association unconditional. */
+typedef const struct nt_gl_no_callback_tag *nt_gl_callback_t;
 #else
-static inline void nt_gl_put_callback(GLDEBUGPROC callback) { nt_gl_put_unsigned(callback != NULL ? 1U : 0U); }
-#define NT_GL_PLATFORM_TYPES_                                                                                                                                                                          \
-    GLDEBUGPROC:                                                                                                                                                                                       \
-    nt_gl_put_callback,
+typedef GLDEBUGPROC nt_gl_callback_t;
 #endif
+static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_unsigned(callback != NULL ? 1U : 0U); }
 
+// clang-format off
 #define NT_GL_PUT_(arg)                                                                                                                                                                                \
     _Generic((arg),                                                                                                                                                                                    \
         _Bool: nt_gl_put_unsigned,                                                                                                                                                                     \
@@ -122,7 +122,9 @@ static inline void nt_gl_put_callback(GLDEBUGPROC callback) { nt_gl_put_unsigned
         nt_gl_offset_t: nt_gl_put_offset,                                                                                                                                                              \
         const GLchar **: nt_gl_put_strings,                                                                                                                                                            \
         const GLchar *const *: nt_gl_put_strings,                                                                                                                                                      \
-        NT_GL_PLATFORM_TYPES_ default: nt_gl_put_pointer)(arg)
+        nt_gl_callback_t: nt_gl_put_callback,                                                                                                                                                          \
+        default: nt_gl_put_pointer)(arg)
+// clang-format on
 #define NT_GL_NARGS_(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, n, ...) n
 #define NT_GL_NARGS(...) NT_GL_NARGS_(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
 #define NT_GL_CAT_(a, b) a##b

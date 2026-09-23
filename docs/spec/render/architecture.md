@@ -401,9 +401,11 @@ resets them and advances `frame_sequence`; render frames reset nothing.
 end its status is UNAVAILABLE. Readers early in a callback, before its draws,
 read `last_frame`. A no-render tick reports zero draws; old geometry is never
 reused. A tick is ABORTED when a loss is detected during it (by begin_frame, a
-create that probes the backend, or a backend upload that sees
-`CONTEXT_LOST_WEBGL`) or the context is still known lost at its end. A rejection
-on an already-known loss does not by itself mark the tick. end_tick does not
+create that probes the backend, a backend upload that sees
+`CONTEXT_LOST_WEBGL`, or disabling GPU timing on a lost context) or the context
+is still known lost at its end. A rejection on an already-known loss does not by
+itself mark the tick: frontend probes return early on a known loss, and only a
+newly detected one marks the tick. end_tick does not
 probe the backend: a loss in a tick without a probe marks the next tick that
 probes.
 A tick whose begin_frame restores a lost context and then completes is COMPLETE.
@@ -445,8 +447,10 @@ mip/subrectangle, and failed creates keep already-issued work.
 was ACCEPTED, in every build: every public operation, readback and GPU timer
 segment calls included, is one BEGIN/END pair, and END is the only place that
 counts it. It counts every operation, nested ones included (render-target
-attachments, default samplers, cascaded destroys). Cache hits, rejections and
-losses are not counted there; texture
+attachments, default samplers, cascaded destroys). Only frontend cache hits
+(END reason CACHE), rejections and losses are left out; an operation whose
+backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
+(SKIP/INACTIVE) still ends ACCEPTED and counts. Texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
 The frame sequence resets at initialization.
@@ -535,14 +539,21 @@ vec4 values; `UNKNOWN` means no retained value. These INITIAL records can occur
 inside CREATE when the program first becomes available. Inactive names emit
 SKIP/INACTIVE; cache skips are distinct from invalid requests.
 
+`SKIP` records mark work that was not issued without ending an operation:
+backend cache skips (`SKIP/CACHE`), inactive uniform or texture-set names
+(`SKIP/INACTIVE`), and the loss marker: one `SKIP/CONTEXT` with reason
+`CONTEXT_LOST` at the first loss detection in a tick.
+
 Pipeline state records use integers 0–12 for program, depth enable/write/function,
 cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha
 operation and polygon offset enable. Values 0–5 hold blend color, offset factor
 and units. Frontend definitions use full handles and frontend enums; backend
 definitions use slots and backend enums; initial state uses the current raw
 program name. Vertex-input creation copies each static/instance attribute with
-its divisor, layout, and known buffer. Inherited layouts/UBO bindings/scissor
-rectangles unavailable in existing CPU state are explicitly unknown. Capture
+its divisor, layout, and known buffer. Inherited layouts and UBO bindings
+unavailable in existing CPU state are explicitly unknown. The initial SCISSOR
+rectangle is UNKNOWN because the frontend mirror is not authoritative after a
+context loss. Capture
 never adds a persistent GL-state mirror or queries GL to reconstruct them.
 
 ## Renderer complexity classes

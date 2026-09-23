@@ -195,10 +195,14 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 nt_gfx_capture_state_t g_nt_gfx_capture;
 #endif
 
-/* Frontend loss probe: the backend query stays pure, so every detection that
- * rejects work also marks the current observation interval. */
+/* Frontend loss probe: the backend query stays pure, so a newly detected loss
+ * marks the current observation interval; an already-known loss rejects work
+ * without marking later ticks. */
 static bool gfx_context_lost(void) {
-    bool lost = g_nt_gfx.context_lost || nt_gfx_backend_is_context_lost();
+    if (g_nt_gfx.context_lost) {
+        return true;
+    }
+    const bool lost = nt_gfx_backend_is_context_lost();
     if (lost) {
         nt_gfx_observe_context_loss();
     }
@@ -329,13 +333,11 @@ static void capture_start(void) {
     g_nt_gfx_capture.request_pending = false;
     g_nt_gfx_capture.recording = true;
     g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
-    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_FRAME, event.reason = NT_GFX_REASON_NONE);
     capture_initial_state();
 }
 
 static void capture_end_tick(void) {
     if (g_nt_gfx_capture.recording) {
-        NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_FRAME, event.reason = g_nt_gfx.last_frame.status == NT_GFX_FRAME_ABORTED ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_ACCEPTED);
         g_nt_gfx_capture.view.snapshot = g_nt_gfx.last_frame;
         g_nt_gfx_capture.recording = false;
     }
@@ -518,10 +520,10 @@ void nt_gfx_shutdown(void) {
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
-    /* Clear global block registry */
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
 #endif
+    /* Clear global block registry */
     memset(s_global_blocks, 0, sizeof(s_global_blocks));
     s_global_block_count = 0;
 }
@@ -600,7 +602,7 @@ static nt_gfx_event_reason_t destroy_texture(nt_texture_t tex, bool allow_render
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS && "destroy_texture called inside a pass");
     if (s_gfx.render_state == NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("destroy_texture called inside a pass");
-        return NT_GFX_REASON_INVALID_HANDLE;
+        return NT_GFX_REASON_INVALID_ARGUMENT;
     }
     nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
     s_gfx.texture_backends[slot] = 0;
@@ -1730,7 +1732,7 @@ static nt_gfx_event_reason_t destroy_render_target(nt_render_target_t rt) {
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
     if (s_gfx.render_state == NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("destroy_render_target called inside a pass");
-        return NT_GFX_REASON_INVALID_HANDLE;
+        return NT_GFX_REASON_INVALID_ARGUMENT;
     }
     uint32_t slot = nt_pool_slot_index(rt.id);
     nt_gfx_backend_destroy_render_target(s_gfx.render_target_backends[slot]);
@@ -1755,7 +1757,7 @@ static nt_gfx_event_reason_t resize_render_target(nt_render_target_t rt, uint16_
     NT_ASSERT(valid && "resize_render_target: invalid handle");
     if (!valid) {
         NT_LOG_ERROR("resize_render_target: invalid handle");
-        return NT_GFX_REASON_INVALID_ARGUMENT;
+        return NT_GFX_REASON_INVALID_HANDLE;
     }
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
     if (s_gfx.render_state == NT_GFX_STATE_PASS) {
@@ -2707,8 +2709,6 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event.data.state.integers[0] = enabled);
-    /* Disabling on a lost context drops the backend's queries; that probe is a loss observation. */
-    (void)gfx_context_lost();
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_REASON_ACCEPTED);
 }

@@ -423,7 +423,9 @@ static void test_complete_capture_matches_gl_counters(void) {
     TEST_ASSERT_EQUAL_UINT64(s_texture_bytes, c->texture_upload_bytes);
 }
 
-/* Teardown deletes live objects through the GL funnel after the event array is freed. */
+/* Teardown deletes live objects through the GL funnel after the event array is freed.
+ * A record written there is a heap-use-after-free that only the ASan build catches:
+ * CI's Linux native-debug-test run (Debug + clang => -fsanitize=address,undefined). */
 static void test_shutdown_while_recording_writes_no_record(void) {
     nt_gfx_capture_request();
     nt_gfx_end_tick();

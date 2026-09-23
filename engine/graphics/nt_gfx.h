@@ -498,9 +498,8 @@ typedef enum {
     NT_GFX_FRAME_ABORTED,
 } nt_gfx_frame_status_t;
 
-/* Public operations (BEGIN/END pairs) and the record-only FRAME/STATE markers. */
+/* Public operations (BEGIN/END pairs) and the record-only STATE marker. */
 typedef enum {
-    NT_GFX_OP_FRAME,
     NT_GFX_OP_RENDER_FRAME,
     NT_GFX_OP_END_RENDER_FRAME,
     NT_GFX_OP_PASS,

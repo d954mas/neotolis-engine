@@ -56,6 +56,11 @@
 
 #endif
 
+/* glGetError value WebGL reports once on context loss; no GL header here defines it. */
+#ifndef GL_CONTEXT_LOST_WEBGL
+#define GL_CONTEXT_LOST_WEBGL 0x9242U
+#endif
+
 /* ---- Pipeline backend data ---- */
 
 /* Per-program standalone locations, including each array element. */
@@ -351,19 +356,8 @@ uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend) {
     return (1U << s_programs[program_backend].sampler_count) - 1U;
 }
 
-// #region test counters
+// #region test mirror reads
 #ifdef NT_TEST_ACCESS
-static uint32_t s_test_static_attrib_pointer_calls;   /* divisor-0 glVertexAttribPointer */
-static uint32_t s_test_instance_attrib_pointer_calls; /* divisor-1 glVertexAttribPointer */
-
-void nt_gfx_gl_test_reset_counters(void) {
-    s_test_static_attrib_pointer_calls = 0;
-    s_test_instance_attrib_pointer_calls = 0;
-}
-
-uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void) { return s_test_static_attrib_pointer_calls; }
-uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void) { return s_test_instance_attrib_pointer_calls; }
-
 uint32_t nt_gfx_gl_test_cached_vao(void) { return s_gl_cache.vao; }
 uint32_t nt_gfx_gl_test_cached_program(void) { return s_gl_cache.program; }
 
@@ -859,6 +853,7 @@ void nt_gfx_backend_drop_timer_segments(void) {
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
     if (!enabled && s_timer_user_enabled && s_timer_enabled) {
         if (nt_gfx_backend_is_context_lost()) {
+            nt_gfx_observe_context_loss();
             nt_gfx_backend_drop_timer_segments();
         } else {
             nt_gfx_backend_end_segment();
@@ -1509,9 +1504,6 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
             const nt_vertex_attr_t *attr = &desc->layout.attrs[i];
             NT_GL(glEnableVertexAttribArray, attr->location);
             NT_GL(glVertexAttribPointer, attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)desc->layout.stride, nt_gl_offset(attr->offset));
-#ifdef NT_TEST_ACCESS
-            s_test_static_attrib_pointer_calls++;
-#endif
         }
     }
     if (ibo_backend != 0 && ibo_backend <= s_init_desc.max_buffers) {
@@ -1686,9 +1678,6 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
         const nt_vertex_attr_t *attr = &vi->instance_attrs[i];
         NT_GL(glVertexAttribPointer, attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)vi->instance_stride,
               nt_gl_offset(attr->offset + byte_offset));
-#ifdef NT_TEST_ACCESS
-        s_test_instance_attrib_pointer_calls++;
-#endif
     }
 }
 
@@ -1803,7 +1792,7 @@ static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     GLenum pending_error = NT_GL_RET0(glGetError);
     /* WebGL reports a loss once through glGetError; that is a recoverable
        outcome the caller rolls back, not a programmer error. */
-    bool context_lost = pending_error == 0x9242U /* GL_CONTEXT_LOST_WEBGL */ || (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_is_lost());
+    bool context_lost = pending_error == GL_CONTEXT_LOST_WEBGL || (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_is_lost());
     if (context_lost) {
         nt_gfx_observe_context_loss();
     }
@@ -1868,7 +1857,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
 
     GLenum first_error = GL_NO_ERROR;
     for (GLenum e = NT_GL_RET0(glGetError); e != GL_NO_ERROR; e = NT_GL_RET0(glGetError)) {
-        if (e == 0x9242U) { /* GL_CONTEXT_LOST_WEBGL */
+        if (e == GL_CONTEXT_LOST_WEBGL) {
             nt_gfx_observe_context_loss();
         }
         if (first_error == GL_NO_ERROR) {
