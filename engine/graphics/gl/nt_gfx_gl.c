@@ -56,11 +56,6 @@
 
 #endif
 
-/* glGetError value WebGL reports once on context loss; no GL header here defines it. */
-#ifndef GL_CONTEXT_LOST_WEBGL
-#define GL_CONTEXT_LOST_WEBGL 0x9242U
-#endif
-
 /* ---- Pipeline backend data ---- */
 
 /* Per-program standalone locations, including each array element. */
@@ -600,10 +595,22 @@ static GLenum map_texture_wrap(nt_texture_wrap_t w) {
 
 /* ==== Backend interface implementation ==== */
 
+/* Bounded: WebGL returns CONTEXT_LOST_WEBGL once, but a native robust context
+ * may repeat GL_CONTEXT_LOST forever. Returns whether any error was pending. */
+static bool nt_gfx_gl_drain_errors(void) {
+    bool drained = false;
+    for (int i = 0; i < 16 && NT_GL_RET0(glGetError) != GL_NO_ERROR; i++) {
+        drained = true;
+    }
+    return drained;
+}
+
 static void nt_gfx_gl_init_context_features(void) {
     /* Emscripten keeps a recorded error across contexts: calls that reached the
-     * dead context must not fail the fresh one's first error check. */
-    while (NT_GL_RET0(glGetError) != GL_NO_ERROR) {
+     * dead context must not fail the fresh one's first error check. A drained
+     * error may be the new context's loss, so it must not hide one. */
+    if (nt_gfx_gl_drain_errors()) {
+        (void)nt_gfx_gl_ctx_query_lost();
     }
 #if NT_GFX_GPU_TIMING_ENABLED
     s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
@@ -692,7 +699,7 @@ void nt_gfx_backend_ack_context_loss(void) { nt_gfx_gl_ctx_ack_loss(); }
 // #region GPU timer segments — begin/end
 #if NT_GFX_GPU_TIMING_ENABLED
 /* Find existing segment by name hash, or allocate a new slot with its own
- * ring of GL_TIME_ELAPSED queries. Linear scan is fine for small N (<= 16). */
+ * ring of GL_TIME_ELAPSED queries; -1 when the context is lost. Linear scan is fine for small N (<= 16). */
 static int8_t segment_find_or_alloc(nt_hash32_t name_hash) {
     for (uint8_t i = 0; i < s_segment_count; i++) {
         if (s_segments[i].name_hash.value == name_hash.value) {
@@ -703,6 +710,13 @@ static int8_t segment_find_or_alloc(nt_hash32_t name_hash) {
     nt_gfx_segment_state_t *seg = &s_segments[s_segment_count];
     seg->name_hash = name_hash;
     NT_GL_GEN(glGenQueries, NT_GFX_TIMER_RING, seg->queries);
+    for (uint8_t i = 0; i < NT_GFX_TIMER_RING; i++) {
+        if (seg->queries[i] == 0) {
+            /* A lost context generates name 0, and beginQuery throws on it; the slot stays free. */
+            (void)nt_gfx_gl_ctx_query_lost();
+            return -1;
+        }
+    }
     memset(seg->in_flight, 0, sizeof(seg->in_flight));
     seg->head = 0;
     seg->tail = 0;
@@ -726,6 +740,9 @@ void nt_gfx_backend_begin_segment(const char *name) {
     nt_hash32_t name_hash = nt_hash32_str(name);
     NT_ASSERT(s_active_segment < 0 && "GL_TIME_ELAPSED cannot nest — close current segment first");
     int8_t idx = segment_find_or_alloc(name_hash);
+    if (idx < 0) {
+        return;
+    }
     nt_gfx_segment_state_t *seg = &s_segments[idx];
     if (seg->in_flight[seg->head]) {
         /* Ring full — try to drain oldest first; it's likely ready by now. Only reset
@@ -968,8 +985,7 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { gl_set_viewport(x
 bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
     NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
     /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
-    while (NT_GL_RET0(glGetError) != GL_NO_ERROR) {
-    }
+    (void)nt_gfx_gl_drain_errors();
     NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, out_rgba8);
     /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
        partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
@@ -1882,17 +1898,13 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     const uint8_t top_level = (desc->gen_mipmaps && desc->data) ? nt_texture_full_chain_levels(desc->width, desc->height) : levels;
     NT_GL(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)(top_level - 1));
 
-    GLenum first_error = GL_NO_ERROR;
-    for (GLenum e = NT_GL_RET0(glGetError); e != GL_NO_ERROR; e = NT_GL_RET0(glGetError)) {
-        if (e == GL_CONTEXT_LOST_WEBGL) {
-            nt_gfx_observe_context_loss();
-        }
-        if (first_error == GL_NO_ERROR) {
-            first_error = e;
-        }
-    }
+    const GLenum first_error = NT_GL_RET0(glGetError);
     if (first_error != GL_NO_ERROR) {
-        NT_LOG_ERROR("texture creation failed: GL error 0x%04X", (unsigned)first_error);
+        (void)nt_gfx_gl_drain_errors();
+        /* A loss is the caller's recoverable CONTEXT_LOST; its frontend probe marks the tick. */
+        if (!nt_gfx_gl_ctx_query_lost()) {
+            NT_LOG_ERROR("texture creation failed: GL error 0x%04X", (unsigned)first_error);
+        }
         NT_GL_DELETE(glDeleteTextures, 1, &tex);
         return 0;
     }

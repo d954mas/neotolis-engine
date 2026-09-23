@@ -518,9 +518,10 @@ static void test_texture_mips_storage_and_subrect_payloads(void) {
     nt_gfx_end_tick();
 }
 
-static void test_failed_upload_keeps_issued_bytes_and_observed_loss(void) {
+/* The error code alone never reports a loss: only the browser's isContextLost does, and native has none. */
+static void test_failed_upload_keeps_issued_bytes(void) {
     const uint8_t pixels[64] = {0};
-    const GLenum errors[] = {GL_OUT_OF_MEMORY, 0x9242U};
+    const GLenum errors[] = {GL_OUT_OF_MEMORY, 0x9242U /* CONTEXT_LOST_WEBGL */};
     for (uint32_t i = 0; i < 2; i++) {
         s_upload_error = errors[i];
         nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
@@ -529,7 +530,7 @@ static void test_failed_upload_keeps_issued_bytes_and_observed_loss(void) {
         const nt_gfx_frame_snapshot_t *snapshot = &g_nt_gfx.last_frame;
         TEST_ASSERT_EQUAL_UINT64(1, snapshot->counters.texture_upload_calls);
         TEST_ASSERT_EQUAL_UINT64(64, snapshot->counters.texture_upload_bytes);
-        TEST_ASSERT_EQUAL(i == 0 ? NT_GFX_FRAME_COMPLETE : NT_GFX_FRAME_ABORTED, snapshot->status);
+        TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, snapshot->status);
     }
 }
 
@@ -673,7 +674,7 @@ int main(void) {
     RUN_TEST(test_payloads_before_render_land_in_their_tick);
     RUN_TEST(test_texture_mips_storage_and_subrect_payloads);
     RUN_TEST(test_r8_odd_width_update_counts_exact_bytes);
-    RUN_TEST(test_failed_upload_keeps_issued_bytes_and_observed_loss);
+    RUN_TEST(test_failed_upload_keeps_issued_bytes);
     RUN_TEST(test_repeated_frames_separate_requests_from_issued_calls);
     RUN_TEST(test_compressed_mips_use_issued_block_sizes);
     RUN_TEST(test_attribute_pointer_calls_are_counted_per_issue);

@@ -13,6 +13,7 @@
 #include "fs/nt_fs.h"
 #endif
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h" /* loss_seen reads the backend loss latch */
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
 #include "input/nt_input.h"
@@ -370,6 +371,8 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_loss_window(int step) {
     }
     }
 }
+/* Pure flag read, no browser query: 0 proves a loss-window step cannot take the known-loss path. */
+EMSCRIPTEN_KEEPALIVE int nt_test_loss_seen(void) { return nt_gfx_backend_is_context_lost() ? 1 : 0; }
 /* Basis fixture: basis_fixture.ntpack's 128x128 RGBA texture with a full 8-level chain, left half
  * (200,40,40,255), right half (40,40,200,128). Levels are reached through sampler overrides. */
 #define BASIS_FIXTURE_SIZE 128.0F
@@ -734,6 +737,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'gpu_supported': function() { return _nt_test_gpu_supported() !== 0; },
         'float_probe': function(useTexture) { return _nt_test_float_probe(useTexture); },
         'loss_window': function(step) { return _nt_test_loss_window(step) >>> 0; },
+        'loss_seen': function() { return _nt_test_loss_seen() !== 0; },
         'basis_ready': function() { return _nt_test_basis_ready() !== 0; },
         'basis_format': function() { return _nt_test_basis_format(); },
         'basis_rgb_format': function() { return _nt_test_basis_rgb_format(); },

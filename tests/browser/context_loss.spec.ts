@@ -8,6 +8,7 @@ declare global {
       programs_ready(): boolean;
       float_texture_linear(): boolean;
       loss_window(step: number): number;
+      loss_seen(): boolean;
       field_css(): { x: number; y: number; w: number; h: number };
       hide_probe(mode: number): void;
       basis_ready(): boolean;
@@ -405,6 +406,8 @@ async function createInLossWindow(page: Page, steps: number[]): Promise<number[]
     window.__ntLossExtension = loss;
     const stages = window.__nt!.loss_window(0);
     loss.loseContext();
+    // A step that ran on an already-known loss would pass through the known-loss path instead.
+    if (window.__nt!.loss_seen()) throw new Error('the engine saw the loss before the steps ran');
     return [stages, ...list.map((step) => window.__nt!.loss_window(step))];
   }, steps);
 }
@@ -425,7 +428,7 @@ async function restoreAndDraw(page: Page, errors: string[]): Promise<void> {
 async function returnNullCreatesWhenLost(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const proto = WebGL2RenderingContext.prototype as unknown as Record<string, (this: WebGL2RenderingContext, ...args: unknown[]) => unknown>;
-    for (const name of ['createShader', 'createProgram', 'createTexture', 'createBuffer', 'createVertexArray', 'createSampler', 'createFramebuffer', 'createRenderbuffer']) {
+    for (const name of ['createShader', 'createProgram', 'createTexture', 'createBuffer', 'createVertexArray', 'createSampler', 'createFramebuffer', 'createRenderbuffer', 'createQuery']) {
       const create = proto[name];
       proto[name] = function(...args: unknown[]) {
         return this.isContextLost() ? null : create.apply(this, args);
@@ -433,6 +436,33 @@ async function returnNullCreatesWhenLost(page: Page): Promise<void> {
     }
   });
 }
+
+// Emscripten writes query name 0 for a null createQuery, and beginQuery throws a TypeError on it.
+test('context loss: a GPU timer segment first opened before the lost event is skipped (create* returns null)', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = trackErrors(page);
+  await returnNullCreatesWhenLost(page);
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.basis_ready(), null, { timeout: 30_000 });
+  type TimerApi = { gpu_supported(): boolean; gpu_command(operation: number, segment?: number): number };
+  const supported = await page.evaluate(() => (window.__nt as unknown as TimerApi).gpu_supported());
+  test.skip(!supported, 'GPU timer queries unavailable on this browser or build; timer allocation path unverified');
+  const seen = await page.evaluate(() => {
+    const api = window.__nt as unknown as TimerApi;
+    const loss = document.querySelector('canvas')!.getContext('webgl2')!.getExtension('WEBGL_lose_context');
+    if (!loss) throw new Error('WEBGL_lose_context unavailable');
+    window.__ntLossExtension = loss;
+    api.gpu_command(3);
+    loss.loseContext();
+    const known = window.__nt!.loss_seen();
+    api.gpu_command(0, 2);
+    api.gpu_command(1);
+    return known;
+  });
+  expect(seen, 'the segment must be opened before the engine hears of the loss').toBe(false);
+  await restoreAndDraw(page, errors);
+  expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+});
 
 for (const nullCreates of [false, true]) {
   const variant = nullCreates ? ' (create* returns null)' : '';

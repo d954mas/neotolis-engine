@@ -85,6 +85,10 @@ uint32_t nt_gfx_fake_texture_destroy_count(void);
 uint32_t nt_gfx_fake_last_destroyed_texture(void);
 void nt_gfx_fake_fail_buffer_creates(uint8_t mask);
 void nt_gfx_fake_fail_next_backend_restore(void);
+/* A failed web recreate leaves no context: the backend stays lost. */
+void nt_gfx_fake_fail_next_backend_restore_lost(void);
+/* The recreate succeeds but latches a new loss, as a setup probe can. */
+void nt_gfx_fake_lose_context_during_next_restore(void);
 void nt_gfx_fake_fail_next_render_target_create(void);
 void nt_gfx_fake_fail_next_render_target_resize(void);
 /* Live loss state; the web backend's event latch is modeled separately below. */

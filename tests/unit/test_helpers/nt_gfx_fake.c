@@ -121,6 +121,8 @@ static bool s_fake_lose_context_on_program_create;
 static bool s_fake_fail_next_pipeline_create;
 static bool s_fake_fail_next_sampler_create;
 static bool s_fake_fail_next_backend_restore;
+static bool s_fake_fail_next_backend_restore_lost;
+static bool s_fake_lose_context_during_next_restore;
 static bool s_fake_fail_next_render_target_create;
 static bool s_fake_fail_next_render_target_resize;
 static uint32_t s_fake_last_update_buffer_offset;
@@ -205,6 +207,8 @@ void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_p
 void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_create = true; }
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore(void) { s_fake_fail_next_backend_restore = true; }
+void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend_restore_lost = true; }
+void nt_gfx_fake_lose_context_during_next_restore(void) { s_fake_lose_context_during_next_restore = true; }
 void nt_gfx_fake_set_context_lost(bool lost) { s_fake_context_lost = lost; }
 void nt_gfx_fake_lose_and_restore_context(void) { s_fake_loss_pending = true; }
 uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update_buffer_offset; }
@@ -272,6 +276,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_next_pipeline_create = false;
     s_fake_fail_next_sampler_create = false;
     s_fake_fail_next_backend_restore = false;
+    s_fake_fail_next_backend_restore_lost = false;
+    s_fake_lose_context_during_next_restore = false;
     s_fake_fail_next_render_target_create = false;
     s_fake_fail_next_render_target_resize = false;
 }
@@ -737,6 +743,16 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     if (s_fake_fail_next_backend_restore) {
         s_fake_fail_next_backend_restore = false;
         return false;
+    }
+    if (s_fake_fail_next_backend_restore_lost) {
+        s_fake_fail_next_backend_restore_lost = false;
+        s_fake_context_lost = true;
+        return false;
+    }
+    if (s_fake_lose_context_during_next_restore) {
+        s_fake_lose_context_during_next_restore = false;
+        s_fake_loss_pending = true;
+        s_fake_context_lost = true;
     }
     return true;
 }

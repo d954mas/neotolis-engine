@@ -399,7 +399,9 @@ offscreen contents after resize or context restore.
 While the backend reports a lost context, `nt_gfx_begin_frame` skips the frame
 without attempting recreation. Recreation starts only after the backend leaves
 the lost state; a failed recreation that leaves the backend live is retried on a
-later frame, and one that leaves it reporting a loss waits like any loss.
+later frame, and one that leaves it reporting a loss waits like any loss. On the
+web a failed recreation leaves no context and no loss listener, so the engine
+stays lost and no later frame recovers it.
 After the context recovers, each render target is recreated once. A failed target
 remains unready; its owner destroys and recreates it, or uses a fallback.
 

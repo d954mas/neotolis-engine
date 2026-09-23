@@ -401,8 +401,9 @@ resets them and advances `frame_sequence`; render frames reset nothing.
 end its status is UNAVAILABLE. Readers early in a callback, before its draws,
 read `last_frame`. A no-render tick reports zero draws; old geometry is never
 reused. A tick is ABORTED when a loss is detected during it (by begin_frame, a
-create that probes the backend, a backend upload whose pending GL error the
-browser confirms as a loss, or disabling GPU timing on a lost context) or the context
+create that probes the backend, a resize or lazy sampler recreate that probes
+after a backend failure, a backend upload whose pending GL error the browser
+confirms as a loss, or disabling GPU timing on a lost context) or the context
 is still known lost at its end. A rejection on an already-known loss does not by
 itself mark the tick: begin_frame, frontend probes and GPU-timing disable ignore a
 known loss, and only a newly detected one marks the tick. end_tick does not
@@ -423,12 +424,21 @@ has: shader and program creation, once per create, before the Emscripten calls
 that throw on the null object some browsers return on a lost context; and paths
 where GL already reported a failure — a generated name of 0 (texture, buffer,
 vertex array including the one made at context setup, sampler, framebuffer,
-renderbuffer), link, uniform reflection, framebuffer completeness, and a pending
-GL error before an upload that the browser confirms as a loss. A create failed
-this way returns `CONTEXT_LOST`, not `BACKEND_FAILURE`, and logs no error. A
-fresh context (init or restore) first drains GL errors: Emscripten keeps a
-recorded error across contexts, so a call that reached the dead context must not
-fail the fresh one's first check.
+renderbuffer, GPU timer query), link, uniform reflection, framebuffer
+completeness, a GL error pending before a texture upload or raised by it, and a
+fresh context's error drain that consumed an error. A create, a render-target
+resize or a lazy sampler recreate at bind that failed this way returns
+`CONTEXT_LOST`, not `BACKEND_FAILURE` or `UNREADY`, and logs no error (the
+sampler's one-shot error log stays unspent). A timer query named 0 leaves its
+segment unallocated and the segment is skipped, because `beginQuery` throws on
+it. A restore whose recreate latches a new loss (such as the setup vertex
+array's name 0) ends its CONTEXT operation with `CONTEXT_LOST`, restores no
+render target and does not report the context restored; the next begin_frame
+consumes the loss and waits for the browser. A fresh context (init or restore)
+first drains GL errors: Emscripten keeps a recorded error across contexts, so a
+call that reached the dead context must not fail the fresh one's first check.
+Every error drain stops after 16 errors: WebGL returns `CONTEXT_LOST_WEBGL`
+once, but a native robust context may repeat `GL_CONTEXT_LOST`.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
