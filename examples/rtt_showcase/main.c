@@ -632,6 +632,8 @@ int main(void) {
     gfx_desc.max_textures = 32;
     gfx_desc.max_pipelines = 32;
     nt_gfx_init(&gfx_desc);
+    /* Loading creates gfx resources; like every frame, it runs inside a tick. */
+    nt_gfx_begin_tick();
     nt_gfx_register_global_block("Globals", 0);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB
@@ -727,9 +729,11 @@ int main(void) {
     nt_platform_web_loading_complete();
 #endif
 
+    nt_gfx_end_tick();
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+    nt_gfx_begin_tick(); /* teardown tick; nt_gfx_shutdown discards it */
     nt_gfx_destroy_render_target(s_demo.blur);
     nt_gfx_destroy_render_target(s_demo.temp);
     nt_gfx_destroy_render_target(s_demo.scene);

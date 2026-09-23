@@ -9,9 +9,17 @@
 typedef struct {
     nt_gfx_backend_kind_t backend; /* set by the backend at init */
     nt_gfx_upload_totals_t uploads;
+    bool tick_open;
+    bool tick_aborted;
+    bool lifecycle; /* inside nt_gfx_init / nt_gfx_shutdown: the only gfx work allowed outside a tick */
 } nt_gfx_observation_t;
 
 extern nt_gfx_observation_t g_nt_gfx_observation;
+
+/* Every gfx operation and GL call belongs to a tick, so none escapes the tick's counters. */
+static inline void nt_gfx_require_tick(void) {
+    NT_ASSERT((g_nt_gfx_observation.tick_open || g_nt_gfx_observation.lifecycle) && "gfx work outside a tick: wrap it in nt_gfx_begin_tick/nt_gfx_end_tick");
+}
 
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
@@ -69,10 +77,12 @@ static inline void nt_gfx_capture_result(const nt_gfx_scope_t *scope, uint32_t o
     NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event.object_kind = scope->kind; event.object = object; event.reason = reason);
 }
 #define NT_GFX_BEGIN(scope_op, scope_kind, scope_object)                                                                                                                                               \
+    nt_gfx_require_tick();                                                                                                                                                                             \
     const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event.object_kind = (scope_kind); event.object = (scope_object))
 /* The trailing statements fill the request fields of the BEGIN record. */
 #define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...)                                                                                                                                  \
+    nt_gfx_require_tick();                                                                                                                                                                             \
     const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event.object_kind = (scope_kind); event.object = (scope_object); __VA_ARGS__)
 #define NT_GFX_END(reason) nt_gfx_capture_result(&nt_gfx_scope, nt_gfx_scope.object, (reason))
@@ -84,8 +94,8 @@ static inline void nt_gfx_capture_result(const nt_gfx_scope_t *scope, uint32_t o
         nt_gfx_capture_result(&nt_gfx_scope, (created), nt_gfx_reason);                                                                                                                                \
     } while (0)
 #else
-#define NT_GFX_BEGIN(scope_op, scope_kind, scope_object) ((void)0)
-#define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...) ((void)0)
+#define NT_GFX_BEGIN(scope_op, scope_kind, scope_object) nt_gfx_require_tick()
+#define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...) nt_gfx_require_tick()
 #define NT_GFX_END(reason) ((void)(reason))
 #define NT_GFX_END_OBJECT(reason, created) ((void)(reason))
 #endif

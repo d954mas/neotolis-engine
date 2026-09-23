@@ -133,6 +133,7 @@ static inline void nt_gl_record_uniform(nt_gfx_gl_call_t call, GLint location, u
 #define NT_GL_LAST_4(a, b, c, d) d
 #define NT_GL_LAST_3(a, b, c) c
 
+/* Capture builds evaluate the arguments twice (record, then call): keep them side-effect-free. */
 #define NT_GL(fn, ...)                                                                                                                                                                                 \
     do {                                                                                                                                                                                               \
         NT_GL_RECORD_CALL(NT_GFX_GL_##fn, 0, __VA_ARGS__);                                                                                                                                             \

@@ -387,6 +387,8 @@ int main(void) {
     nt_input_init();
     nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .max_vertex_inputs = 64, .max_render_targets = 16, .depth = true});
+    /* Loading creates gfx resources; like every frame, it runs inside a tick. */
+    nt_gfx_begin_tick();
     nt_shape_renderer_init();
 
     /* ---- Entity system init ---- */
@@ -418,9 +420,11 @@ int main(void) {
     set_shape_scale();
     set_shape_color();
 
+    nt_gfx_end_tick();
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+    nt_gfx_begin_tick(); /* teardown tick; nt_gfx_shutdown discards it */
     nt_drawable_comp_shutdown();
     nt_transform_comp_shutdown();
     nt_entity_shutdown();

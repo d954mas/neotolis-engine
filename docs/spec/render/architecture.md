@@ -380,18 +380,24 @@ or a shadow-map system.
 
 ## Frame observation
 
-Every host callback that may touch gfx is one **tick**: the host calls
-`nt_gfx_begin_tick` before resource preparation and `nt_gfx_end_tick` after its
-last render frame, also when nothing renders. Ticks are a mandatory host
-contract in every build, independent of simulation time; app/gfx never add them
-implicitly. Both require gfx IDLE; known context loss also permits end. Nested
-or missing ticks assert, and `nt_gfx_begin_frame`/`nt_gfx_end_frame` assert an
-open tick. A tick holds any number of render frames and passes; their counters
+All gfx work between `nt_gfx_init` and `nt_gfx_shutdown` happens inside a
+**tick**, so no operation or GL call escapes the counters. Every host callback
+that may touch gfx is one tick: the host calls `nt_gfx_begin_tick` before
+resource preparation and `nt_gfx_end_tick` after its last render frame, also
+when nothing renders. Loading before the main loop runs in an explicit load
+tick (init, begin_tick, load, end_tick, run), and teardown in a tick that
+`nt_gfx_shutdown` discards (begin_tick, renderer and resource shutdowns,
+`nt_gfx_shutdown`). Every public gfx operation asserts an open tick; only the
+internals of `nt_gfx_init` and `nt_gfx_shutdown` (context creation, capability
+probes, ground state, final deletes) run outside one. Ticks are a mandatory
+host contract in every build, independent of simulation time; app/gfx never
+add them implicitly. Both require gfx IDLE; known context loss also permits
+end. Nested or missing ticks assert. A tick holds any number of render frames and passes; their counters
 sum. Shutdown discards an open tick without a snapshot. The stub is stateless:
 its ticks are inert and it never publishes a snapshot.
 
-`g_nt_gfx.counters` holds the live counters of the open tick; between ticks
-they keep accumulating out-of-tick work. `nt_gfx_begin_tick` is their only reset and advances
+`g_nt_gfx.counters` holds the live counters of the open tick; outside a tick
+only init/shutdown internals touch them. `nt_gfx_begin_tick` is their only reset and advances
 `frame_sequence`; render frames reset nothing. `nt_gfx_end_tick` copies the
 counters and a status into `g_nt_gfx.last_frame`, the last closed tick, which
 stays unchanged until the next end or shutdown; before the first end its status

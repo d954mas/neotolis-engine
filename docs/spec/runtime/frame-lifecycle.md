@@ -44,7 +44,10 @@ nt_gfx_end_tick       ← copies counters into g_nt_gfx.last_frame
 ```
 
 The host owns the gfx tick and closes it on every return path of its callback,
-also when nothing renders. Code that runs before this callback's draws (devapi
+also when nothing renders. Gfx work outside the frame callback gets its own
+tick too: `nt_gfx_init`, then a load tick around pre-loop resource creation,
+and a teardown tick opened before renderer/resource shutdowns that
+`nt_gfx_shutdown` discards. Only gfx init/shutdown internals run outside a tick. Code that runs before this callback's draws (devapi
 commands, early stats readers) reads the previous tick from
 `g_nt_gfx.last_frame`. See [frame observation](../render/architecture.md#frame-observation).
 

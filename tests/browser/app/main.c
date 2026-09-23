@@ -286,7 +286,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_diagnostics_config(int field) {
 }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_diagnostics_preset(void) { return NT_TEST_PRESET_NAME; }
 EMSCRIPTEN_KEEPALIVE int nt_test_gpu_supported(void) { return nt_gfx_is_gpu_timing_supported() ? 1 : 0; }
-EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
+static int float_probe(int use_texture) {
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     if ((use_texture != 0 && !caps->has_float_texture_linear) || (use_texture == 0 && !caps->has_float_render_target)) {
         return -1;
@@ -313,8 +313,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_program_t program = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    /* JS calls this between host callbacks, so the probe owns its tick. */
-    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     if (target.id != 0) {
         nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.25F, 0.5F, 0.75F, 1.0F}});
@@ -330,7 +328,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    nt_gfx_end_tick();
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
@@ -342,6 +339,13 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
         nt_gfx_destroy_texture(texture);
     }
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
+}
+/* JS calls the probes between host callbacks, so each one owns a tick. */
+EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
+    nt_gfx_begin_tick();
+    const int result = float_probe(use_texture);
+    nt_gfx_end_tick();
+    return result;
 }
 /* Basis fixture: basis_fixture.ntpack's 128x128 RGBA texture with a full 8-level chain, left half
  * (200,40,40,255), right half (40,40,200,128). Levels are reached through sampler overrides. */
@@ -365,7 +369,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_basis_caps(void) {
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_build_targets(void) { return (NT_BASISU_HAS_BC7 ? 1 : 0) | (NT_BASISU_HAS_ASTC ? 2 : 0) | (NT_BASISU_HAS_ETC2 ? 4 : 0); }
 EMSCRIPTEN_KEEPALIVE int nt_test_basis_build_codecs(void) { return (NT_BASISU_HAS_ETC1S ? 1 : 0) | (NT_BASISU_HAS_UASTC ? 2 : 0); }
 /* -1 when the build has no UASTC decoder for the embedded blob. */
-EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
+static int basis_single_pixel_format(void) {
 #if !NT_BASISU_HAS_UASTC
     return -1;
 #else
@@ -386,10 +390,16 @@ EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
     return format;
 #endif
 }
+EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
+    nt_gfx_begin_tick();
+    const int result = basis_single_pixel_format();
+    nt_gfx_end_tick();
+    return result;
+}
 /* Packed RGBA (r | g<<8 | b<<16 | a<<24) of texel (0,0) of one fixture level (0, 3 or 7), drawn
  * through a 1x1 render target with an explicit-LOD sampler override. 0xFFFFFFFF = fixture not ready
  * or readback failed. */
-EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
+static unsigned int basis_sample(int level) {
     NT_ASSERT(level == 0 || level == 3 || level == 7);
     const nt_texture_t tex = basis_fixture_texture();
     if (tex.id == 0 || !nt_gfx_texture_ready(tex)) {
@@ -415,8 +425,6 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     /* Centre of texel (0,0) at the requested level (the single texel at level 7). */
     const float texel = 0.5F / (BASIS_FIXTURE_SIZE / (float)(1 << level));
     const float uv[4] = {texel, texel, (float)level, 0.0F};
-    /* JS calls this between host callbacks, so the probe owns its tick. */
-    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 1.0F, 1.0F}});
     nt_gfx_bind_pipeline(pipeline);
@@ -429,7 +437,6 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    nt_gfx_end_tick();
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
@@ -437,6 +444,12 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_render_target(target);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
+}
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
+    nt_gfx_begin_tick();
+    const unsigned int result = basis_sample(level);
+    nt_gfx_end_tick();
+    return result;
 }
 static double s_observe_values[40];
 EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) { nt_gfx_capture_set_enabled(enabled != 0); }
@@ -531,7 +544,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8) | ((uint32_t)pixel[2] << 16) | ((uint32_t)pixel[3] << 24)) : 0;
 }
 
-EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
+static double gpu_command(int operation, int segment) {
     const char *names[] = {"diagnostics-a", "diagnostics-b", "diagnostics-c"};
     NT_ASSERT(segment >= 0 && segment < 3);
     switch (operation) {
@@ -548,10 +561,8 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
         nt_gfx_set_gpu_timing_enabled(true);
         break;
     case 4:
-        nt_gfx_begin_tick();
         nt_gfx_begin_frame();
         nt_gfx_end_frame();
-        nt_gfx_end_tick();
         break;
     case 5: {
         uint64_t ns = 0;
@@ -562,6 +573,12 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
         break;
     }
     return 0.0;
+}
+EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
+    nt_gfx_begin_tick();
+    const double result = gpu_command(operation, segment);
+    nt_gfx_end_tick();
+    return result;
 }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
@@ -1021,6 +1038,8 @@ int main(int argc, char *argv[]) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.capture_capacity = 16384;
     nt_gfx_init(&gfx_desc);
+    /* Loading creates gfx resources; like every frame, it runs inside a tick. */
+    nt_gfx_begin_tick();
     nt_gfx_register_global_block("Globals", 0);
 
     nt_http_init();
@@ -1171,9 +1190,11 @@ int main(int argc, char *argv[]) {
 #endif
 
     nt_log_info("browser_smoke: starting");
+    nt_gfx_end_tick();
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+    nt_gfx_begin_tick(); /* teardown tick; nt_gfx_shutdown discards it */
     nt_ui_destroy_context(s_ctx);
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();

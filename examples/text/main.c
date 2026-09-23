@@ -454,6 +454,8 @@ int main(void) {
     /* 4. GFX init */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
+    /* Loading creates gfx resources; like every frame, it runs inside a tick. */
+    nt_gfx_begin_tick();
 
     /* Register global UBO block (slot 0 for Globals: view_proj etc.) */
     nt_gfx_register_global_block("Globals", 0);
@@ -537,10 +539,12 @@ int main(void) {
     nt_resource_set_activate_time_budget(0);
 
     /* 16. Run main loop */
+    nt_gfx_end_tick();
     nt_app_run(frame);
 
     /* 17. Shutdown (native only) */
 #ifndef NT_PLATFORM_WEB
+    nt_gfx_begin_tick(); /* teardown tick; nt_gfx_shutdown discards it */
     nt_text_renderer_shutdown();
     nt_font_destroy(s_font);
     nt_font_shutdown();

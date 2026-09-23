@@ -9,6 +9,7 @@
 #include "skeletal_gpu/nt_skeletal_gpu.h"
 #include "skin_comp/nt_skin_comp.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #define TEXEL_FLOATS 4U
@@ -16,7 +17,7 @@
 static bool s_gpu_up;
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 8, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 4});
+    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 8, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 4});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 8});
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 4});
     s_gpu_up = false;

@@ -142,8 +142,6 @@ static struct {
 
     nt_gfx_render_state_t render_state;
     bool context_restore_retry;
-    bool tick_open;
-    bool tick_aborted;
     uint32_t counter_availability; /* NT_GFX_COUNTERS_* bits, fixed at init */
     uint32_t active_render_target;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
@@ -215,8 +213,8 @@ nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) {
 }
 
 void nt_gfx_observe_context_loss(void) {
-    if (s_gfx.tick_open && !s_gfx.tick_aborted) {
-        s_gfx.tick_aborted = true;
+    if (g_nt_gfx_observation.tick_open && !g_nt_gfx_observation.tick_aborted) {
+        g_nt_gfx_observation.tick_aborted = true;
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_CONTEXT_LOST);
     }
 }
@@ -367,13 +365,13 @@ static void capture_end_tick(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion, not real branching
 void nt_gfx_begin_tick(void) {
     NT_ASSERT(g_nt_gfx.initialized);
-    NT_ASSERT(!s_gfx.tick_open && "begin_tick: previous tick is still open");
+    NT_ASSERT(!g_nt_gfx_observation.tick_open && "begin_tick: previous tick is still open");
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_tick: a render frame is open");
     NT_ASSERT(g_nt_gfx.counters.frame_sequence != UINT64_MAX);
-    s_gfx.tick_open = true;
+    g_nt_gfx_observation.tick_open = true;
     /* A loss carried in from earlier aborts only if it is observed again or
      * still present at end; a begin_frame that restores completes normally. */
-    s_gfx.tick_aborted = false;
+    g_nt_gfx_observation.tick_aborted = false;
     g_nt_gfx.counters = (nt_gfx_counters_t){
         .frame_sequence = g_nt_gfx.counters.frame_sequence + 1,
         .availability = s_gfx.counter_availability,
@@ -384,16 +382,16 @@ void nt_gfx_begin_tick(void) {
 }
 
 void nt_gfx_end_tick(void) {
-    NT_ASSERT(s_gfx.tick_open && "end_tick: no open tick");
+    NT_ASSERT(g_nt_gfx_observation.tick_open && "end_tick: no open tick");
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
     g_nt_gfx.last_frame = (nt_gfx_frame_snapshot_t){
         .counters = g_nt_gfx.counters,
-        .status = (s_gfx.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
+        .status = (g_nt_gfx_observation.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
     };
 #if NT_GFX_CAPTURE_ENABLED
     capture_end_tick();
 #endif
-    s_gfx.tick_open = false;
+    g_nt_gfx_observation.tick_open = false;
 }
 // #endregion
 
@@ -412,6 +410,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
     memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
+    g_nt_gfx_observation.lifecycle = true;
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
     NT_ASSERT(desc->capture_capacity == 0 || sizeof(nt_gfx_event_t) <= SIZE_MAX / desc->capture_capacity);
@@ -466,10 +465,13 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
         s_gfx.counter_availability |= NT_GFX_COUNTERS_BACKEND;
     }
     g_nt_gfx.counters.availability = s_gfx.counter_availability;
+    g_nt_gfx_observation.lifecycle = false;
     g_nt_gfx.initialized = true;
 }
 
 void nt_gfx_shutdown(void) {
+    /* An open tick is discarded; teardown work below needs none. */
+    g_nt_gfx_observation.lifecycle = true;
 #if NT_GFX_CAPTURE_ENABLED
     g_nt_gfx_capture.recording = false;
     free(g_nt_gfx_capture.events);
@@ -846,7 +848,7 @@ static nt_gfx_event_reason_t begin_frame(void) {
 }
 
 void nt_gfx_begin_frame(void) {
-    NT_ASSERT(s_gfx.tick_open && "begin_frame: call nt_gfx_begin_tick first");
+    NT_ASSERT(g_nt_gfx_observation.tick_open && "begin_frame: call nt_gfx_begin_tick first");
     NT_GFX_BEGIN(NT_GFX_OP_RENDER_FRAME, NT_GFX_OBJECT_NONE, 0);
     NT_GFX_END(begin_frame());
 }
@@ -869,7 +871,7 @@ static nt_gfx_event_reason_t end_frame(void) {
 }
 
 void nt_gfx_end_frame(void) {
-    NT_ASSERT(s_gfx.tick_open && "end_frame: the tick closed before the render frame");
+    NT_ASSERT(g_nt_gfx_observation.tick_open && "end_frame: the tick closed before the render frame");
     NT_GFX_BEGIN(NT_GFX_OP_END_RENDER_FRAME, NT_GFX_OBJECT_NONE, 0);
     NT_GFX_END(end_frame());
 }

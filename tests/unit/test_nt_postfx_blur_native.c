@@ -3,6 +3,7 @@
 
 #include "graphics/nt_gfx.h"
 #include "postfx/nt_postfx_blur.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -12,7 +13,7 @@
 
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
-    nt_gfx_init(&desc);
+    nt_gfx_test_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
 

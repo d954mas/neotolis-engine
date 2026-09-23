@@ -13,6 +13,7 @@
 #include "renderers/nt_text_renderer.h"
 #include "debug_overlay/nt_debug_overlay.h"
 #include "unity.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 /* clang-format on */
 
 /* Overlay reads its display data from nt_metrics: format_lines reads fps/cpu/gpu/draws + user
@@ -44,7 +45,8 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 /* clang-format on */
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
+    nt_gfx_test_init(
+        &(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
     nt_text_renderer_init();
     nt_text_renderer_test_reset_call_counters();
     nt_metrics_init();

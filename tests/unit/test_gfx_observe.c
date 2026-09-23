@@ -127,6 +127,8 @@ static void test_tick_contract_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
     NT_TEST_EXPECT_ASSERT(nt_gfx_end_frame());
     NT_TEST_EXPECT_ASSERT(nt_gfx_end_tick());
+    /* Operations outside a tick would escape its counters. */
+    NT_TEST_EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}));
     nt_gfx_begin_tick();
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_tick());
     nt_gfx_begin_frame();
@@ -212,7 +214,9 @@ static void test_overflow_and_loss_finalize_aborted(void) {
 
 static void test_sampler_cache_hit_defines_nothing(void) {
     const nt_sampler_desc_t sampler_desc = {.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR};
+    nt_gfx_begin_tick();
     nt_sampler_t sampler = nt_gfx_make_sampler(&sampler_desc);
+    nt_gfx_end_tick();
     nt_gfx_capture_set_enabled(true);
     nt_gfx_begin_tick();
     uint32_t start = nt_gfx_capture_read().count;
@@ -261,11 +265,12 @@ static void test_every_operation_records_one_begin_and_one_result(void) {
     TEST_ASSERT_EQUAL_UINT32(0, depth);
     TEST_ASSERT_TRUE(target_result);
     TEST_ASSERT_TRUE(invalid_buffer);
-    nt_gfx_destroy_render_target(target);
 }
 
 static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
+    nt_gfx_begin_tick();
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 24});
+    nt_gfx_end_tick();
     nt_gfx_capture_set_enabled(true);
     nt_gfx_begin_tick();
     nt_gfx_capture_view_t initial = nt_gfx_capture_read();
@@ -288,9 +293,11 @@ static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
 }
 
 static void test_draw_trace_preserves_arguments_and_live_prefix(void) {
+    nt_gfx_begin_tick();
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    nt_gfx_end_tick();
     nt_gfx_capture_set_enabled(true);
     nt_gfx_begin_tick();
     nt_gfx_begin_frame();

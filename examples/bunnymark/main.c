@@ -588,6 +588,8 @@ int main(void) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
+    /* Loading creates gfx resources; like every frame, it runs inside a tick. */
+    nt_gfx_begin_tick();
     nt_gfx_register_global_block("Globals", 0);
 
     nt_http_init();
@@ -700,9 +702,11 @@ int main(void) {
                 (unsigned)s_canvas_h(), "premultiplied", s_hd_active ? "HD" : "SD", BUNNY_INITIAL_COUNT, BUNNY_CLICK_SPAWN_COUNT, BUNNY_HOLD_SPAWN_RATE, (unsigned)BUNNY_MAX, s_hd_available ? 1 : 0,
                 "unknown");
 
+    nt_gfx_end_tick();
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+    nt_gfx_begin_tick(); /* teardown tick; nt_gfx_shutdown discards it */
     nt_debug_overlay_shutdown();
     nt_text_renderer_shutdown();
     nt_font_destroy(s_overlay_font);
