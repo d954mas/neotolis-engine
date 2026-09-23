@@ -46,7 +46,7 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
     const v = run.values;
     expect(run.pixel).toBe(0xffc08040);
     expect(v[1]).toBe(1); // capture compiled in
-    expect(v[2]).toBe(2); // COMPLETE counters, independent of capture overflow.
+    expect(v[2]).toBe(1); // COMPLETE counters, independent of capture overflow.
     expect(v[3]).toBe(1);
     expect(v.slice(4, 6)).toEqual([16, 32]); // Preparation before gfx begin.
     expect(v.slice(14, 18)).toEqual([16, 32, 1, 2]);
@@ -59,12 +59,12 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
     if (run.mode === 1) {
       expect(v[11]).toBe(0);
       expect(v[12]).toBeGreaterThan(0);
-      expect(v[13]).toBe(2);
+      expect(v[13]).toBe(1);
       expect(v.slice(20, 26)).toEqual(['useProgram', 'bindVertexArray', 'bindTexture', 'bindSampler', 'uniform4fv', 'uniform1i'].map(name => run.calls[name] || 0));
     } else if (run.mode === 2) {
       expect(v[11]).toBe(1);
       expect(v[12]).toBe(16384);
-      expect(v[13]).toBe(3); // TRUNCATED capture.
+      expect(v[13]).toBe(2); // TRUNCATED capture.
     }
   }
   expect(errors).toEqual([]);
@@ -83,10 +83,10 @@ test('gfx observation marks context loss aborted and resumes complete frames', a
     hooks.observe_record(1);
     loss.loseContext();
   });
-  await page.waitForFunction(() => (window as unknown as { __nt: ObserveHooks }).__nt.observe_status() === 4);
+  await page.waitForFunction(() => (window as unknown as { __nt: ObserveHooks }).__nt.observe_status() === 3);
   await page.evaluate(() => (window as unknown as { observationLoss: WEBGL_lose_context }).observationLoss.restoreContext());
   await page.waitForFunction(() => {
     const hooks = (window as unknown as { __nt: ObserveHooks }).__nt;
-    return hooks.observe_status() === 2 && hooks.programs_ready();
+    return hooks.observe_status() === 1 && hooks.programs_ready();
   });
 });

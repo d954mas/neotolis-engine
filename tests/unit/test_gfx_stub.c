@@ -106,16 +106,20 @@ static void test_stub_packs_pipeline_keys(void) {
 
 /* The stub is stateless: ticks are inert. */
 static void test_stub_observation_is_unavailable(void) {
+#if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_set_enabled(true);
+#endif
     nt_gfx_end_tick();
     nt_gfx_end_tick();
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.availability);
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, g_nt_gfx.last_frame.status);
     TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.last_frame.counters.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.frame_sequence);
+#if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    TEST_ASSERT_FALSE(capture.available);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, capture.status);
     TEST_ASSERT_EQUAL_UINT32(0, capture.count);
     TEST_ASSERT_NULL(capture.events);
+#endif
 }
 
 int main(void) {

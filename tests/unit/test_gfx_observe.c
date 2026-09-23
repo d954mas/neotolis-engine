@@ -65,14 +65,6 @@ static void test_instanced_products_are_widened_before_multiplication(void) {
     draw_teardown();
 }
 
-static void test_availability_is_fixed_per_build_and_backend(void) {
-    const uint32_t expected = NT_GFX_COUNTERS_DRAWS | NT_GFX_COUNTERS_FRONTEND;
-    TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.counters.availability);
-    nt_gfx_end_tick();
-    TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.counters.availability);
-    TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.last_frame.counters.availability);
-}
-
 static void test_loss_aborts_the_tick_and_restore_completes_it(void) {
     nt_gfx_fake_set_context_lost(true);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
@@ -387,7 +379,7 @@ static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t before = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL(NT_GFX_CAPTURE_RECORDING, before.phase);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, before.status);
     TEST_ASSERT_TRUE(before.count > 0);
     nt_gfx_event_t saved = before.events[0];
     nt_gfx_end_frame();
@@ -395,9 +387,7 @@ static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     nt_gfx_end_tick();
     nt_gfx_frame_snapshot_t snapshot = g_nt_gfx.last_frame;
     nt_gfx_capture_view_t after = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL(NT_GFX_CAPTURE_FINALIZED, after.phase);
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, after.status);
-    TEST_ASSERT_EQUAL_UINT64(snapshot.counters.frame_sequence, after.frame_sequence);
     TEST_ASSERT_EQUAL_MEMORY(&saved, &before.events[0], sizeof(saved));
     TEST_ASSERT_TRUE(after.count > before.count);
     TEST_ASSERT_EQUAL_MEMORY(&snapshot, &after.snapshot, sizeof(snapshot));
@@ -407,7 +397,6 @@ static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     nt_gfx_end_frame();
     nt_gfx_end_tick();
     nt_gfx_capture_view_t retained = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT64(after.frame_sequence, retained.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(after.count, retained.count);
     TEST_ASSERT_EQUAL_MEMORY(&after.snapshot, &retained.snapshot, sizeof(snapshot));
     TEST_ASSERT_EQUAL_MEMORY(&saved, &retained.events[0], sizeof(saved));
@@ -428,7 +417,6 @@ static void test_capture_overflow_does_not_stop_counters(void) {
     TEST_ASSERT_TRUE(capture.overflow);
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_TRUNCATED, capture.status);
     TEST_ASSERT_EQUAL_UINT64(snapshot->counters.frame_sequence, capture.snapshot.counters.frame_sequence);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_COUNTERS_DRAWS | NT_GFX_COUNTERS_FRONTEND, snapshot->counters.availability);
 }
 
 static void test_capture_toggle_applies_to_the_next_tick(void) {
@@ -440,14 +428,15 @@ static void test_capture_toggle_applies_to_the_next_tick(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     nt_gfx_capture_set_enabled(false);
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL(NT_GFX_CAPTURE_RECORDING, nt_gfx_capture_read().phase);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, nt_gfx_capture_read().status);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_gfx_capture_read().count);
     nt_gfx_end_frame();
     nt_gfx_end_tick();
-    uint64_t sequence = nt_gfx_capture_read().frame_sequence;
+    uint64_t sequence = nt_gfx_capture_read().snapshot.counters.frame_sequence;
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
     nt_gfx_end_tick();
-    TEST_ASSERT_EQUAL_UINT64(sequence, nt_gfx_capture_read().frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(sequence, nt_gfx_capture_read().snapshot.counters.frame_sequence);
 }
 
 static void test_exact_capacity_and_one_record_short(void) {
@@ -474,7 +463,6 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_render_frames_sum_and_end_tick_resets);
     RUN_TEST(test_instanced_products_are_widened_before_multiplication);
-    RUN_TEST(test_availability_is_fixed_per_build_and_backend);
     RUN_TEST(test_loss_aborts_the_tick_and_restore_completes_it);
     RUN_TEST(test_loss_after_begin_frame_marks_the_next_tick);
     RUN_TEST(test_first_tick_counts_initial_resource_creation);

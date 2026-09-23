@@ -433,8 +433,20 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
 static double s_observe_values[40];
-EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) { nt_gfx_capture_set_enabled(enabled != 0); }
-EMSCRIPTEN_KEEPALIVE int nt_test_observe_status(void) { return (int)nt_gfx_capture_read().status; }
+EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) {
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_capture_set_enabled(enabled != 0);
+#else
+    (void)enabled;
+#endif
+}
+EMSCRIPTEN_KEEPALIVE int nt_test_observe_status(void) {
+#if NT_GFX_CAPTURE_ENABLED
+    return (int)nt_gfx_capture_read().status;
+#else
+    return (int)NT_GFX_FRAME_UNAVAILABLE;
+#endif
+}
 EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
     /* JS-supplied index: an out-of-range probe reads as -1 instead of trapping. */
     if (index < 0 || index >= (int)(sizeof(s_observe_values) / sizeof(s_observe_values[0]))) {
@@ -444,7 +456,9 @@ EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
 }
 EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     memset(s_observe_values, 0, sizeof(s_observe_values));
+#if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_set_enabled(mode != 0);
+#endif
     /* Close the tick JS called into, so the probe's work is one tick of its own. */
     nt_gfx_end_tick();
     const uint8_t pixels[16] = {64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255};
@@ -493,7 +507,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_destroy_buffer(buffer);
     nt_gfx_end_tick();
     nt_gfx_frame_snapshot_t snapshot = g_nt_gfx.last_frame;
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
     s_observe_values[2] = snapshot.status;
     s_observe_values[3] = nt_gfx_draw_calls(&snapshot.counters);
@@ -504,13 +517,15 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     s_observe_values[8] = snapshot.counters.gl[NT_GFX_GL_glBindTexture];
     s_observe_values[9] = snapshot.counters.gl[NT_GFX_GL_glBindSampler];
     s_observe_values[10] = snapshot.counters.gl[NT_GFX_GL_glUniform4fv] + snapshot.counters.gl[NT_GFX_GL_glUniform1i];
-    s_observe_values[11] = capture.overflow;
-    s_observe_values[12] = capture.count;
-    s_observe_values[13] = capture.status;
     s_observe_values[14] = (double)snapshot.counters.buffer_upload_bytes;
     s_observe_values[15] = (double)snapshot.counters.texture_upload_bytes;
     s_observe_values[16] = (double)snapshot.counters.buffer_upload_calls;
     s_observe_values[17] = (double)snapshot.counters.texture_upload_calls;
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    s_observe_values[11] = capture.overflow;
+    s_observe_values[12] = capture.count;
+    s_observe_values[13] = capture.status;
     const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_glUseProgram, NT_GFX_GL_glBindVertexArray, NT_GFX_GL_glBindTexture, NT_GFX_GL_glBindSampler, NT_GFX_GL_glUniform4fv, NT_GFX_GL_glUniform1i};
     for (uint32_t i = 0; i < capture.count; i++) {
         if (capture.events[i].kind != NT_GFX_EVENT_BACKEND) {
@@ -523,6 +538,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
         }
     }
     nt_gfx_capture_set_enabled(false);
+#endif
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8) | ((uint32_t)pixel[2] << 16) | ((uint32_t)pixel[3] << 24)) : 0;
 }
 

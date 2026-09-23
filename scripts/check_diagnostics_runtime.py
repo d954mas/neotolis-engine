@@ -72,13 +72,13 @@ def main():
                 if library is None:
                     raise RuntimeError(f"{name}: nt_gfx archive not found among {libraries}")
                 symbols = run([nm, "--defined-only", str(library)], args.output / f"{name}-symbols.log")
-                if capture == "OFF":
-                    for producer in ("g_nt_gfx_capture", "capture_resource_definition", "nt_gfx_capture_append", "nt_gfx_backend_capture_initial_state"):
-                        if producer in symbols:
-                            raise RuntimeError(f"{name}: disabled producer remains: {producer}")
-                elif "g_nt_gfx_capture" not in symbols:
-                    # Positive control: the absence check above must be able to see this symbol.
-                    raise RuntimeError(f"{name}: enabled producer g_nt_gfx_capture is missing from the symbol listing")
+                # Extern symbols only: statics and inline helpers may vanish from either build.
+                for producer in ("g_nt_gfx_capture", "nt_gfx_backend_capture_initial_state", "nt_gfx_gl_call_name"):
+                    if capture == "OFF" and producer in symbols:
+                        raise RuntimeError(f"{name}: disabled producer remains: {producer}")
+                    if capture == "ON" and producer not in symbols:
+                        # Positive control: the absence check must be able to see these symbols.
+                        raise RuntimeError(f"{name}: enabled producer {producer} is missing from the symbol listing")
             else:
                 print(f"UNVERIFIED: {name} producer symbols; install llvm-nm or nm", flush=True)
             print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, capture={capture}, resource={resource}, metrics={metrics}, inspector={ui_debug}, UI checks={ui_checks}, asserts={asserts}; {len(targets)} tests", flush=True)

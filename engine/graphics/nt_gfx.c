@@ -142,7 +142,7 @@ static struct {
 
     nt_gfx_render_state_t render_state;
     bool context_restore_retry;
-    uint32_t counter_availability; /* NT_GFX_COUNTERS_* bits, fixed at init */
+    bool tick_aborted; /* a probe observed context loss during the open tick */
     uint32_t active_render_target;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
@@ -191,7 +191,6 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 /* ---- Lifecycle ---- */
 
 // #region frame observation
-nt_gfx_observation_t g_nt_gfx_observation;
 #if NT_GFX_CAPTURE_ENABLED
 nt_gfx_capture_state_t g_nt_gfx_capture;
 #endif
@@ -216,39 +215,28 @@ const char *nt_gfx_gl_call_name(uint32_t call) {
 #endif
 
 void nt_gfx_observe_context_loss(void) {
-    if (!g_nt_gfx_observation.tick_aborted) {
-        g_nt_gfx_observation.tick_aborted = true;
+    if (!s_gfx.tick_aborted) {
+        s_gfx.tick_aborted = true;
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_CONTEXT_LOST);
     }
 }
 
-void nt_gfx_capture_set_enabled(bool enabled) {
 #if NT_GFX_CAPTURE_ENABLED
+void nt_gfx_capture_set_enabled(bool enabled) {
     NT_ASSERT(!enabled || g_nt_gfx_capture.capacity > 0);
     g_nt_gfx_capture.requested = enabled;
-#else
-    (void)enabled;
-#endif
 }
 
 nt_gfx_capture_view_t nt_gfx_capture_read(void) {
-#if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_view_t result = g_nt_gfx_capture.view;
-    result.available = g_nt_gfx.initialized;
-    result.backend = g_nt_gfx_observation.backend;
     result.events = result.count > 0 ? g_nt_gfx_capture.events : NULL;
     return result;
-#else
-    return (nt_gfx_capture_view_t){0};
-#endif
 }
+#endif
 
 #if NT_GFX_CAPTURE_ENABLED
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one record schema per owned resource kind
 static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) {
-    if (!g_nt_gfx_capture.recording || g_nt_gfx_capture.view.overflow) {
-        return;
-    }
     uint32_t slot = nt_pool_slot_index(id);
     NT_GFX_RECORD(
         NT_GFX_EVENT_DEFINITION, NT_GFX_OP_CREATE, event.object_kind = kind; event.object = id; switch (kind) {
@@ -311,9 +299,9 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
 #define NT_GFX_DEFINE_RESOURCE(kind, id) capture_resource_definition(kind, id)
 
 static void capture_initial_state(void) {
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event.data.state.integers[0] = s_gfx.bound_pipeline; event.data.state.integers[1] = s_gfx.bound_vertex_input;
-                  event.data.state.integers[2] = s_gfx.active_render_target; event.data.state.integers[3] = s_gfx.bound_index_type; event.data.state.integers[4] = s_gfx.texture_set_state;
-                  event.data.state.integers[5] = g_nt_gfx.context_lost;);
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event.detail = NT_GFX_INITIAL_FRONTEND; event.data.state.integers[0] = s_gfx.bound_pipeline;
+                  event.data.state.integers[1] = s_gfx.bound_vertex_input; event.data.state.integers[2] = s_gfx.active_render_target; event.data.state.integers[3] = s_gfx.bound_index_type;
+                  event.data.state.integers[4] = s_gfx.texture_set_state; event.data.state.integers[5] = g_nt_gfx.context_lost;);
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR_ENABLE, event.data.state.integers[0] = s_gfx.scissor_enabled);
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, event.reason = NT_GFX_REASON_UNKNOWN);
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_UBO, event.reason = NT_GFX_REASON_UNKNOWN);
@@ -321,13 +309,13 @@ static void capture_initial_state(void) {
     const nt_gfx_object_kind_t kinds[] = {NT_GFX_OBJECT_SHADER, NT_GFX_OBJECT_PROGRAM, NT_GFX_OBJECT_PIPELINE,     NT_GFX_OBJECT_VERTEX_INPUT,
                                           NT_GFX_OBJECT_BUFFER, NT_GFX_OBJECT_TEXTURE, NT_GFX_OBJECT_RENDER_TARGET};
     for (uint32_t p = 0; p < sizeof(pools) / sizeof(pools[0]); p++) {
-        for (uint32_t i = 1; i <= pools[p]->capacity && !g_nt_gfx_capture.view.overflow; i++) {
+        for (uint32_t i = 1; i <= pools[p]->capacity; i++) {
             if (nt_pool_slot_alive(pools[p], i)) {
                 capture_resource_definition(kinds[p], pools[p]->slots[i].id);
             }
         }
     }
-    for (uint32_t i = 1; i <= s_gfx.sampler_count && !g_nt_gfx_capture.view.overflow; i++) {
+    for (uint32_t i = 1; i <= s_gfx.sampler_count; i++) {
         capture_resource_definition(NT_GFX_OBJECT_SAMPLER, i);
     }
     nt_gfx_backend_capture_initial_state();
@@ -340,12 +328,7 @@ static void capture_initial_state(void) {
 void nt_gfx_capture_start(void) {
     g_nt_gfx_capture.armed = false;
     g_nt_gfx_capture.recording = true;
-    g_nt_gfx_capture.view = (nt_gfx_capture_view_t){
-        .frame_sequence = g_nt_gfx.counters.frame_sequence,
-        .context_sequence = g_nt_gfx_capture.context_sequence,
-        .phase = NT_GFX_CAPTURE_RECORDING,
-        .status = NT_GFX_FRAME_RECORDING,
-    };
+    g_nt_gfx_capture.view = (nt_gfx_capture_view_t){.context_sequence = g_nt_gfx_capture.context_sequence};
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_FRAME, event.reason = NT_GFX_REASON_ACCEPTED);
     capture_initial_state();
 }
@@ -357,7 +340,6 @@ static void capture_end_tick(void) {
     if (g_nt_gfx_capture.recording) {
         NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_FRAME, event.reason = g_nt_gfx.last_frame.status == NT_GFX_FRAME_ABORTED ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_ACCEPTED);
         nt_gfx_capture_view_t *capture = &g_nt_gfx_capture.view;
-        capture->phase = NT_GFX_CAPTURE_FINALIZED;
         capture->status = g_nt_gfx.last_frame.status;
         if (capture->status == NT_GFX_FRAME_COMPLETE && capture->overflow) {
             capture->status = NT_GFX_FRAME_TRUNCATED;
@@ -370,11 +352,8 @@ static void capture_end_tick(void) {
 
 /* The next tick starts at once: gfx work is always inside a tick between init and shutdown. */
 static void open_tick(void) {
-    g_nt_gfx_observation.tick_aborted = false;
-    g_nt_gfx.counters = (nt_gfx_counters_t){
-        .frame_sequence = g_nt_gfx.counters.frame_sequence + 1,
-        .availability = s_gfx.counter_availability,
-    };
+    s_gfx.tick_aborted = false;
+    g_nt_gfx.counters = (nt_gfx_counters_t){.frame_sequence = g_nt_gfx.counters.frame_sequence + 1};
 #if NT_GFX_CAPTURE_ENABLED
     g_nt_gfx_capture.armed = g_nt_gfx_capture.requested;
 #endif
@@ -385,7 +364,7 @@ void nt_gfx_end_tick(void) {
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
     g_nt_gfx.last_frame = (nt_gfx_frame_snapshot_t){
         .counters = g_nt_gfx.counters,
-        .status = (g_nt_gfx_observation.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
+        .status = (s_gfx.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
     };
 #if NT_GFX_CAPTURE_ENABLED
     capture_end_tick();
@@ -408,7 +387,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
-    memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
     NT_ASSERT(desc->capture_capacity == 0 || sizeof(nt_gfx_event_t) <= SIZE_MAX / desc->capture_capacity);
@@ -460,11 +438,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     /* Detect GPU compressed texture capabilities */
     g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
 
-    s_gfx.counter_availability = NT_GFX_COUNTERS_DRAWS | NT_GFX_COUNTERS_FRONTEND;
-    if (g_nt_gfx_observation.backend == NT_GFX_BACKEND_OPENGL || g_nt_gfx_observation.backend == NT_GFX_BACKEND_WEBGL) {
-        s_gfx.counter_availability |= NT_GFX_COUNTERS_BACKEND;
-    }
-    g_nt_gfx.counters.availability = s_gfx.counter_availability;
     g_nt_gfx.initialized = true;
 }
 
@@ -554,7 +527,6 @@ void nt_gfx_shutdown(void) {
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
     /* Clear global block registry */
-    memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
 #endif
@@ -1287,16 +1259,14 @@ static nt_gfx_event_reason_t make_vertex_input(const nt_vertex_input_desc_t *des
     result.id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_VERTEX_INPUT, result.id);
 #if NT_GFX_CAPTURE_ENABLED
-    if (g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow) {
-        const nt_vertex_layout_t *layouts[] = {&desc->layout, &desc->instance_layout};
-        for (uint32_t layout = 0; layout < 2; layout++) {
-            for (uint32_t a = 0; a < layouts[layout]->attr_count; a++) {
-                const nt_vertex_attr_t *attr = &layouts[layout]->attrs[a];
-                NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event.object_kind = NT_GFX_OBJECT_VERTEX_INPUT; event.object = result.id;
-                              event.data.attribute.buffer = layout == 0 ? desc->vertex_buffer.id : 0; event.data.attribute.offset = attr->offset; event.data.attribute.stride = layouts[layout]->stride;
-                              event.data.attribute.location = attr->location; event.data.attribute.type = (uint32_t)attr->type; event.data.attribute.count = attr->count;
-                              event.data.attribute.normalized = attr->normalized; event.data.attribute.divisor = layout;);
-            }
+    const nt_vertex_layout_t *layouts[] = {&desc->layout, &desc->instance_layout};
+    for (uint32_t layout = 0; layout < 2; layout++) {
+        for (uint32_t a = 0; a < layouts[layout]->attr_count; a++) {
+            const nt_vertex_attr_t *attr = &layouts[layout]->attrs[a];
+            NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event.object_kind = NT_GFX_OBJECT_VERTEX_INPUT; event.object = result.id;
+                          event.data.attribute.buffer = layout == 0 ? desc->vertex_buffer.id : 0; event.data.attribute.offset = attr->offset; event.data.attribute.stride = layouts[layout]->stride;
+                          event.data.attribute.location = attr->location; event.data.attribute.type = (uint32_t)attr->type; event.data.attribute.count = attr->count;
+                          event.data.attribute.normalized = attr->normalized; event.data.attribute.divisor = layout;);
         }
     }
 #endif

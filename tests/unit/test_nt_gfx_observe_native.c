@@ -455,7 +455,6 @@ static void test_payloads_before_render_land_in_their_tick(void) {
     nt_gfx_end_tick();
     const nt_gfx_frame_snapshot_t *end = &g_nt_gfx.last_frame;
     TEST_ASSERT_EQUAL_UINT64(76, end->counters.buffer_upload_bytes);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_COUNTERS_DRAWS | NT_GFX_COUNTERS_FRONTEND | NT_GFX_COUNTERS_BACKEND, end->counters.availability);
     /* Both ticks together saw every payload the driver received. */
     TEST_ASSERT_EQUAL_UINT64(s_buffer_calls, 3);
     TEST_ASSERT_EQUAL_UINT64(s_buffer_bytes, 92);
@@ -501,7 +500,9 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 64});
     const float color[4] = {1.0F, 0.5F, 0.0F, 1.0F};
+#if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_set_enabled(true);
+#endif
     nt_gfx_end_tick();
     for (uint32_t frame = 0; frame < 2; frame++) {
         s_program_calls = s_vao_calls = s_uniform_calls = s_ubo_calls = 0;

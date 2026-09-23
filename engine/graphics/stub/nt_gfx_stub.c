@@ -34,9 +34,9 @@ const char *nt_gfx_gl_call_name(uint32_t call) {
     (void)call;
     return NULL;
 }
-#endif
 void nt_gfx_capture_set_enabled(bool enabled) { (void)enabled; }
 nt_gfx_capture_view_t nt_gfx_capture_read(void) { return (nt_gfx_capture_view_t){0}; }
+#endif
 
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 

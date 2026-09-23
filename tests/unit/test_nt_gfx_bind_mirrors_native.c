@@ -325,6 +325,7 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_end_frame();
 
     nt_gfx_gl_test_reset_counters();
+    const uint32_t vao_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindVertexArray];
     s_real_attrib_pointer_calls = 0;
     s_saved_attrib_pointer = glad_glVertexAttribPointer;
     glad_glVertexAttribPointer = counting_vertex_attrib_pointer;
@@ -340,7 +341,7 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_draw_instanced(0, 3, 1);
     nt_gfx_end_pass();
     /* Captured before end_frame so teardown binds cannot pollute it. */
-    uint32_t frame_vao_binds = nt_gfx_gl_test_vao_binds();
+    uint32_t frame_vao_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindVertexArray] - vao_binds;
     nt_gfx_end_frame();
     /* Restore before any assert -- a failure longjmps past this line. */
     glad_glVertexAttribPointer = s_saved_attrib_pointer;
@@ -669,7 +670,7 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    nt_gfx_gl_test_reset_counters();
+    const uint32_t sampler_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler];
     install_state_counters();
     nt_gfx_begin_frame();
     begin_black_pass();
@@ -693,7 +694,7 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.blend_func_separate);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_texture);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_sampler_binds());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler] - sampler_binds);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.viewport);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.clear_color);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.clear_depth);
@@ -1282,7 +1283,7 @@ static void test_same_sampler_on_a_slot_binds_once(void) {
     uint32_t sampler_backend = nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(tex));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, sampler_backend);
 
-    nt_gfx_gl_test_reset_counters();
+    const uint32_t sampler_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler];
     nt_gfx_begin_frame();
     begin_black_pass();
     backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
@@ -1299,7 +1300,7 @@ static void test_same_sampler_on_a_slot_binds_once(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_sampler_binds());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler] - sampler_binds);
     TEST_ASSERT_EQUAL_UINT32(sampler_backend, nt_gfx_gl_test_cached_sampler(0));
     TEST_ASSERT_EQUAL_INT((GLint)sampler_backend, sampler_name_on_unit(0));
 }
@@ -1322,7 +1323,7 @@ static void test_override_binds_one_sampler(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, override_backend);
     TEST_ASSERT_NOT_EQUAL_UINT32(default_backend, override_backend);
 
-    nt_gfx_gl_test_reset_counters();
+    const uint32_t sampler_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler];
     nt_gfx_begin_frame();
     begin_black_pass();
     backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
@@ -1330,7 +1331,7 @@ static void test_override_binds_one_sampler(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_gl_test_sampler_binds());
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler] - sampler_binds);
     TEST_ASSERT_EQUAL_UINT32(default_backend, nt_gfx_gl_test_cached_sampler(0));
     TEST_ASSERT_EQUAL_UINT32(override_backend, nt_gfx_gl_test_cached_sampler(1));
     TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_gl_test_cached_sampler(0), nt_gfx_gl_test_cached_sampler(1));
@@ -1356,9 +1357,9 @@ static void test_ground_state_reissues_sampler_bind(void) {
     nt_texture_t fresh = make_pixel_texture(white);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, fresh.id);
 
-    nt_gfx_gl_test_reset_counters();
+    const uint32_t sampler_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler];
     backend_bind_texture_unit(fresh, NT_SAMPLER_DEFAULT, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_sampler_binds());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler] - sampler_binds);
     TEST_ASSERT_NOT_EQUAL_INT(0, sampler_name_on_unit(0));
 }
 // #endregion

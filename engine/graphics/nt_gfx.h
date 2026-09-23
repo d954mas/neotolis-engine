@@ -493,26 +493,11 @@ typedef struct {
 
 // #region tick counters and observation
 typedef enum {
-    NT_GFX_BACKEND_NONE = 0,
-    NT_GFX_BACKEND_FAKE,
-    NT_GFX_BACKEND_OPENGL,
-    NT_GFX_BACKEND_WEBGL,
-} nt_gfx_backend_kind_t;
-
-typedef enum {
-    NT_GFX_FRAME_UNAVAILABLE = 0, /* no closed tick yet, empty capture, or stub */
-    NT_GFX_FRAME_RECORDING,
+    NT_GFX_FRAME_UNAVAILABLE = 0, /* no closed tick yet, capture still recording or empty, or stub */
     NT_GFX_FRAME_COMPLETE,
     NT_GFX_FRAME_TRUNCATED,
     NT_GFX_FRAME_ABORTED,
 } nt_gfx_frame_status_t;
-
-/* Availability bits are fixed per backend at gfx init. */
-enum {
-    NT_GFX_COUNTERS_DRAWS = 1,    /* draw calls and submitted geometry */
-    NT_GFX_COUNTERS_FRONTEND = 2, /* accepted[] operation counters; every real frontend */
-    NT_GFX_COUNTERS_BACKEND = 4,  /* issued GL calls and payloads; GL/WebGL backends only */
-};
 
 /* Public operations (BEGIN/END pairs) and the record-only FRAME/STATE markers. */
 typedef enum {
@@ -663,7 +648,7 @@ typedef enum { NT_GFX_GL_NONE = 0, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_ENUM_) NT_GFX_
 #undef NT_GFX_GL_CALL_ENUM_
 
 /* All fields are values. Submitted geometry is not shader/GPU work.
- * Unavailable fields (see availability) stay zero: unmeasured, not measured zero.
+ * Backends without GL (the test fake) leave gl[] and uploads zero.
  * Vertices/indices multiply by instance count; instances counts instanced draws only.
  * accepted[] counts public operations by nt_gfx_operation_t that ended ACCEPTED,
  * nested ones included (render-target attachments, default samplers, cascaded
@@ -671,7 +656,6 @@ typedef enum { NT_GFX_GL_NONE = 0, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_ENUM_) NT_GFX_
  * non-NULL payload and their bytes (NULL storage and generated mips excluded). */
 typedef struct {
     uint64_t frame_sequence;
-    uint32_t availability;
     uint64_t vertices;
     uint64_t indices;
     uint64_t instances; /* instanced draws only */
@@ -692,12 +676,6 @@ typedef struct {
     nt_gfx_counters_t counters;
     nt_gfx_frame_status_t status;
 } nt_gfx_frame_snapshot_t;
-
-typedef enum {
-    NT_GFX_CAPTURE_NONE = 0,
-    NT_GFX_CAPTURE_RECORDING,
-    NT_GFX_CAPTURE_FINALIZED,
-} nt_gfx_capture_phase_t;
 
 typedef enum {
     NT_GFX_EVENT_BEGIN,
@@ -786,14 +764,16 @@ typedef struct {
 
 _Static_assert(sizeof(nt_gfx_event_t) == 104, "capture record layout must remain explicit");
 
+/* detail of INITIAL/STATE records: which layer's inherited state they snapshot. */
+enum {
+    NT_GFX_INITIAL_FRONTEND = 0,
+    NT_GFX_INITIAL_BACKEND = 1,
+};
+
 typedef struct {
-    uint64_t frame_sequence;
     uint64_t context_sequence; /* GL context generation when the capture started */
-    nt_gfx_backend_kind_t backend;
-    bool available;
     bool overflow;
-    nt_gfx_capture_phase_t phase;
-    nt_gfx_frame_status_t status;
+    nt_gfx_frame_status_t status; /* UNAVAILABLE until the recorded tick ends */
     const nt_gfx_event_t *events;
     uint32_t count;
     nt_gfx_frame_snapshot_t snapshot; /* matching finalized tick, even after later unrecorded ticks */
@@ -809,14 +789,14 @@ void nt_gfx_end_tick(void);
 #if NT_GFX_CAPTURE_ENABLED
 /* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
 const char *nt_gfx_gl_call_name(uint32_t call);
-#endif
 /* Defaults to false; enabling requires nonzero init capacity. A change applies
- * to the next tick. OFF/stub is inert. */
+ * to the next tick. The stub is inert. */
 void nt_gfx_capture_set_enabled(bool enabled);
 /* Metadata by value; immutable event prefix until the next recorded tick's first
  * gfx work or shutdown, so read right after end_tick. Copy count records and
  * metadata to keep. Empty views have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
+#endif
 // #endregion
 
 /* ---- GPU format capabilities ---- */

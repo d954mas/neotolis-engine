@@ -6,13 +6,6 @@
 #include "pool/nt_pool.h"
 
 // #region observation storage and owning-site counters
-typedef struct {
-    nt_gfx_backend_kind_t backend; /* set by the backend at init */
-    bool tick_aborted;
-} nt_gfx_observation_t;
-
-extern nt_gfx_observation_t g_nt_gfx_observation;
-
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
     uint64_t context_sequence; /* GL context generation; advances on each successful restore */
@@ -47,8 +40,6 @@ static inline bool nt_gfx_capture_accepts(void) { return g_nt_gfx_capture.record
 static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
     nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
     capture->call = NULL;
-    capture->call_ints = 0;
-    capture->call_floats = 0;
     if (!nt_gfx_capture_accepts()) {
         return;
     }
@@ -56,6 +47,8 @@ static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
         capture->view.overflow = true;
         return;
     }
+    capture->call_ints = 0;
+    capture->call_floats = 0;
     nt_gfx_event_t *event = &capture->events[capture->view.count];
     memset(event, 0, sizeof(*event));
     event->kind = NT_GFX_EVENT_BACKEND;
@@ -283,9 +276,7 @@ void nt_gfx_backend_drop_timer_segments(void);
 void nt_gfx_gl_test_reset_counters(void);
 uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void);
 uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void);
-uint32_t nt_gfx_gl_test_vao_binds(void);
 /* glBindSampler calls that reached GL; a deduplicated bind does not count. */
-uint32_t nt_gfx_gl_test_sampler_binds(void);
 /* Raw GL-mirror reads: a test can pin that destroy cleared an entry without
  * depending on the driver recycling the deleted GL name. */
 uint32_t nt_gfx_gl_test_cached_vao(void);

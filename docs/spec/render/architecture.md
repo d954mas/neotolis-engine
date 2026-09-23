@@ -415,12 +415,11 @@ counts, multiplied by instance count for instanced calls; instances counts only
 instances in instanced calls. These are not rasterized triangles or
 vertex-shader invocations.
 
-The `availability` bits depend only on the backend kind and are fixed at init:
-DRAWS and FRONTEND for every frontend, BACKEND (issued GL calls and payloads)
-only on GL/WebGL. Unavailable fields stay zero, meaning unmeasured; the test
-fake cannot claim measured GL calls. `NT_GFX_CAPTURE_ENABLED` is a numeric
-interface definition published by the interface target, so every consumer sees
-the same configuration.
+Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
+upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
+definition published by the interface target, so every consumer sees the same
+configuration; `nt_gfx_capture_set_enabled` and `nt_gfx_capture_read` exist only
+when it is 1.
 
 `gl[]` counts every issued GL call by `nt_gfx_gl_call_t`, queries included:
 the backend issues GL only through its `NT_GL*` funnel, which counts with an
@@ -473,8 +472,9 @@ until the next **recorded** tick starts (its first gfx work overwrites it) or
 shutdown; ticks with recording disabled preserve it. Two counts in the same sequence delimit
 an operation interval. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
-a NULL pointer. The finalized view retains its matching tick snapshot by value even after
-later unrecorded ticks overwrite `g_nt_gfx.last_frame`.
+a NULL pointer. The finalized view retains its matching tick snapshot (and so
+its `frame_sequence`) by value even after later unrecorded ticks overwrite
+`g_nt_gfx.last_frame`.
 
 Every recorded public operation produces exactly one BEGIN, carrying its
 request arguments, and one RESULT, carrying the outcome reason; a creator's
@@ -484,9 +484,9 @@ names are in the DEFINITION record. Operations issued inside another operation
 RESULT. `ARGUMENT` records are request
 arguments belonging to the enclosing BEGIN (one per texture binding of a texture
 set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
-prove GL success or GPU completion. Metadata distinguishes recording from
-finalized, complete, truncated and aborted captures; a capture carries its
-tick's status. Overflow is separately
+prove GL success or GPU completion. The view status is UNAVAILABLE while a tick
+records and becomes the finalized tick's COMPLETE, TRUNCATED or ABORTED at its
+end_tick. Overflow is separately
 reported even when aborted, stops event appends, and never truncates counters.
 Recording changes inside a tick apply to the next tick.
 
@@ -514,6 +514,9 @@ carry the full handle, current backend slot and available dimensions/relationshi
 Replacement names and surviving handles receive fresh definitions on resize or
 restore. Definitions remain meaningful after resource destruction or slot reuse.
 
+Initial state opens with one `INITIAL/STATE` record per layer: `detail` is
+`NT_GFX_INITIAL_FRONTEND` for bound frontend handles and `NT_GFX_INITIAL_BACKEND`
+for the backend's cached GL names and framebuffer size.
 Program publication and initial state include `INITIAL/SAMPLER` records with
 backend program slot, name hash, location, unit and sampler class in args 0–4.
 `INITIAL/UNIFORM_VEC4` gives program slot/name hash/location in args 0–2 and cached

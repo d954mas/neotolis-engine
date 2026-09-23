@@ -51,27 +51,21 @@ static inline void nt_gl_count_upload(nt_gfx_gl_call_t call, const void *data, u
 
 // #region recording (capture builds)
 #if NT_GFX_CAPTURE_ENABLED
+/* The put helpers run only while a call record is open: the NT_GL_* forms check once per call. */
 static inline void nt_gl_put_unsigned(uint64_t value) {
-    nt_gfx_event_t *event = g_nt_gfx_capture.call;
-    if (event != NULL) {
-        NT_ASSERT(g_nt_gfx_capture.call_ints < 12);
-        event->data.backend.args[g_nt_gfx_capture.call_ints++] = (uint32_t)value;
-    }
+    NT_ASSERT(g_nt_gfx_capture.call_ints < 12);
+    g_nt_gfx_capture.call->data.backend.args[g_nt_gfx_capture.call_ints++] = (uint32_t)value;
 }
 static inline void nt_gl_put_signed(int64_t value) { nt_gl_put_unsigned((uint64_t)value); }
 static inline void nt_gl_put_float(float value) {
-    nt_gfx_event_t *event = g_nt_gfx_capture.call;
-    if (event != NULL) {
-        NT_ASSERT(g_nt_gfx_capture.call_floats < 4);
-        event->data.backend.values[g_nt_gfx_capture.call_floats++] = value;
-    }
+    NT_ASSERT(g_nt_gfx_capture.call_floats < 4);
+    g_nt_gfx_capture.call->data.backend.values[g_nt_gfx_capture.call_floats++] = value;
 }
 static inline void nt_gl_put_double(double value) { nt_gl_put_float((float)value); }
 static inline void nt_gl_put_pointer(const void *pointer) { nt_gl_put_unsigned(pointer != NULL ? 1U : 0U); }
 static inline void nt_gl_put_offset(nt_gl_offset_t offset) { nt_gl_put_unsigned((uintptr_t)offset); }
 static inline void nt_gl_put_strings(const GLchar *const *strings) { nt_gl_put_pointer((const void *)strings); }
 static inline void nt_gl_put_names(GLsizei count, const GLuint *names) {
-    NT_ASSERT(count >= 0 && count < 12);
     nt_gl_put_unsigned((uint32_t)count);
     for (GLsizei i = 0; i < count; i++) {
         nt_gl_put_unsigned(names[i]);
@@ -80,20 +74,22 @@ static inline void nt_gl_put_names(GLsizei count, const GLuint *names) {
 static inline void nt_gl_put_uniform(GLint location, uint32_t float_count, const GLfloat *values) {
     nt_gfx_event_t *event = g_nt_gfx_capture.call;
     NT_ASSERT(float_count <= 16);
-    if (event != NULL) {
-        event->data.uniform.name = (uint32_t)location;
-        event->data.uniform.count = float_count;
-        memcpy(event->data.uniform.values, values, float_count * sizeof(float));
-    }
+    event->data.uniform.name = (uint32_t)location;
+    event->data.uniform.count = float_count;
+    memcpy(event->data.uniform.values, values, float_count * sizeof(float));
 }
 static inline void nt_gl_close(void) { nt_gfx_capture_commit_call(); }
 static inline GLint nt_gl_close_int(GLint result) {
-    nt_gl_put_signed(result);
+    if (g_nt_gfx_capture.call != NULL) {
+        nt_gl_put_signed(result);
+    }
     nt_gl_close();
     return result;
 }
 static inline GLuint nt_gl_close_uint(GLuint result) {
-    nt_gl_put_unsigned(result);
+    if (g_nt_gfx_capture.call != NULL) {
+        nt_gl_put_unsigned(result);
+    }
     nt_gl_close();
     return result;
 }
@@ -145,9 +141,11 @@ static inline void nt_gl_put_callback(GLDEBUGPROC callback) { nt_gl_put_unsigned
 #define NT_GL_LAST_4(a, b, c, d) d
 
 #define NT_GL_OPEN_(call) (NT_GL_COUNT_(call), nt_gfx_capture_open_call(call))
-#define NT_GL_ARGS_(...) (NT_GL_CAT(NT_GL_EACH_, NT_GL_NARGS(__VA_ARGS__))(__VA_ARGS__))
-#define NT_GL_NAMES_(count, names) nt_gl_put_names((count), (names))
-#define NT_GL_UNIFORM_VALUES_(float_count, location, ...) nt_gl_put_uniform((location), (float_count), NT_GL_CAT(NT_GL_LAST_, NT_GL_NARGS(location, __VA_ARGS__))(location, __VA_ARGS__))
+#define NT_GL_RECORDING_() (g_nt_gfx_capture.call != NULL)
+#define NT_GL_ARGS_(...) (NT_GL_RECORDING_() ? (NT_GL_CAT(NT_GL_EACH_, NT_GL_NARGS(__VA_ARGS__))(__VA_ARGS__)) : (void)0)
+#define NT_GL_NAMES_(count, names) (NT_GL_RECORDING_() ? nt_gl_put_names((count), (names)) : (void)0)
+#define NT_GL_UNIFORM_VALUES_(float_count, location, ...)                                                                                                                                              \
+    (NT_GL_RECORDING_() ? nt_gl_put_uniform((location), (float_count), NT_GL_CAT(NT_GL_LAST_, NT_GL_NARGS(location, __VA_ARGS__))(location, __VA_ARGS__)) : (void)0)
 #define NT_GL_CLOSE_() nt_gl_close()
 #define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLint: nt_gl_close_int, GLuint: nt_gl_close_uint)(result)
 #else
@@ -175,8 +173,14 @@ static inline void nt_gl_put_callback(GLDEBUGPROC callback) { nt_gl_put_unsigned
 #define NT_GL_RET(fn, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_RESULT_(fn(__VA_ARGS__)))
 #define NT_GL_RET0(fn) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_CLOSE_RESULT_(fn()))
 #define NT_GL_UPLOAD(data, bytes, fn, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), nt_gl_count_upload(NT_GFX_GL_##fn, (data), (bytes)), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_(), fn(__VA_ARGS__))
-#define NT_GL_GEN(fn, count, names) (NT_GL_OPEN_(NT_GFX_GL_##fn), fn((count), (names)), NT_GL_NAMES_(count, names), NT_GL_CLOSE_())
-#define NT_GL_DELETE(fn, count, names) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_NAMES_(count, names), NT_GL_CLOSE_(), fn((count), (names)))
+/* The count and every name must fit backend.args[12]; counts are constants at every site. */
+#define NT_GL_NAMES_FIT_(count)                                                                                                                                                                        \
+    ((void)sizeof(struct {                                                                                                                                                                             \
+        _Static_assert((count) >= 0 && (count) < 12, "gen/delete names exceed the record");                                                                                                            \
+        int unused;                                                                                                                                                                                    \
+    }))
+#define NT_GL_GEN(fn, count, names) (NT_GL_NAMES_FIT_(count), NT_GL_OPEN_(NT_GFX_GL_##fn), fn((count), (names)), NT_GL_NAMES_(count, names), NT_GL_CLOSE_())
+#define NT_GL_DELETE(fn, count, names) (NT_GL_NAMES_FIT_(count), NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_NAMES_(count, names), NT_GL_CLOSE_(), fn((count), (names)))
 #define NT_GL_UNIFORM(fn, float_count, location, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_UNIFORM_VALUES_(float_count, location, __VA_ARGS__), NT_GL_CLOSE_(), fn(location, __VA_ARGS__))
 #define NT_GL_ISSUED(name, ...) (NT_GL_OPEN_(NT_GFX_GL_##name), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_())
 

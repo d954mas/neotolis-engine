@@ -2,8 +2,8 @@
 """Fail when the GL backend issues a GL call outside the NT_GL* funnel.
 
 Every GL call in engine/graphics/gl must go through the macros in
-nt_gfx_gl_calls.h, which count it, require an open tick and record it. A bare
-`glFoo(` or `glad_glFoo(` call would escape all three.
+nt_gfx_gl_calls.h, which count it and, in capture builds, record it. A bare
+`glFoo(`, `glad_glFoo(`, `emscripten_glFoo(` or `(glFoo)(` call would escape both.
 """
 
 import re
@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GL_DIR = ROOT / "engine" / "graphics" / "gl"
 FUNNEL = GL_DIR / "nt_gfx_gl_calls.h"
-BARE_CALL = re.compile(r"\b(?:glad_)?gl[A-Z]\w*\s*\(")
+BARE_CALL = re.compile(r"\b(?:glad_|emscripten_)?gl[A-Z]\w*\s*\)?\s*\(")
 FUNNEL_CALL = re.compile(r"\bNT_GL\w*\(")
 
 
@@ -29,14 +29,14 @@ def main() -> int:
         return 1
     failures = []
     funnel_calls = 0
-    for path in sorted(GL_DIR.glob("*.[ch]")):
+    for path in sorted(GL_DIR.rglob("*.[ch]")):
         if path == FUNNEL:
             continue
         code = strip_comments_and_strings(path.read_text(encoding="utf-8"))
         funnel_calls += len(FUNNEL_CALL.findall(code))
         for match in BARE_CALL.finditer(code):
             line = code.count("\n", 0, match.start()) + 1
-            failures.append(f"{path.relative_to(ROOT).as_posix()}:{line}: bare GL call '{match.group(0).rstrip('( ')}' bypasses the NT_GL funnel")
+            failures.append(f"{path.relative_to(ROOT).as_posix()}:{line}: bare GL call '{match.group(0).rstrip('() ')}' bypasses the NT_GL funnel")
     # Positive control: the scan must see the funnel in use, or it proves nothing.
     if funnel_calls == 0:
         print("check_gl_calls: no NT_GL* calls found; the scan is not looking at the backend", file=sys.stderr)
