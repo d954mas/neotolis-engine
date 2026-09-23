@@ -902,7 +902,8 @@ static void frame(void) {
 #endif
         nt_gfx_end_frame();
         nt_window_swap_buffers();
-        return; /* the restore frame shares the next callback's gfx tick */
+        nt_gfx_end_tick();
+        return;
     }
 
     nt_font_step();

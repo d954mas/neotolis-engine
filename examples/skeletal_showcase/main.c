@@ -1211,7 +1211,8 @@ static void frame(void) {
         if (nt_app_render_enabled()) {
             nt_window_swap_buffers();
         }
-        return; /* the restore frame shares the next callback's gfx tick */
+        nt_gfx_end_tick();
+        return;
     }
     nt_font_step();
     const bool render_enabled = nt_app_render_enabled();
