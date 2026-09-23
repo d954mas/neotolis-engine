@@ -1,42 +1,43 @@
 # Size Report: skeletal_showcase (wasm-analysis-paired)
-# Commit: 4eb112a
+# Commit: b585b1e
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 392 B
-Import               605 B
-Function             251 B
+Type                 450 B
+Import               619 B
+Function             316 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
-Elem                  89 B
-Code              284228 B
-Data               19870 B
-Custom              8109 B
+Elem                 140 B
+Code              318336 B
+Data               21558 B
+Custom              9710 B
 ---------------- ----------
-TOTAL             313654 B
+TOTAL             351239 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-55942 B   frame
+56305 B   frame
+22813 B   main
 18269 B   dispatch_command
-14358 B   main
-11052 B   nt_shape_renderer_init
+11056 B   nt_shape_renderer_init
  8830 B   Clay__ConfigureOpenElementPtr
- 7737 B   nt_font_lookup_glyph_offset
+ 7745 B   nt_font_lookup_glyph_offset
+ 7238 B   skinned_draw
  6666 B   nt_ui_combo_begin
  6059 B   Clay__SizeContainersAlongAxis
  5873 B   nt_ui_scroll_begin
- 5833 B   slider_core
- 5733 B   declare_properties
+ 5834 B   slider_core
+ 5737 B   declare_properties
  5643 B   Clay__InitializeEphemeralMemory
- 5042 B   nt_gfx_activate_mesh
- 4312 B   playback_declare_controls
+ 4581 B   skinned_declare_controls
+ 4291 B   nt_skinned_mesh_renderer_draw_list
  4005 B   Clay__MeasureTextCached
  3365 B   Clay__CloseElement
  3310 B   nt_sprite_renderer_set_material
@@ -44,18 +45,17 @@ TOTAL             313654 B
  3011 B   fmt_fp
  2667 B   nt_http_request_ex
  2629 B   scrollbar_emit_axis
+ 2625 B   nt_gfx_activate_mesh
  2448 B   nt_ui_checkbox
  2429 B   printf_core
  2368 B   atlas_on_resolve
+ 2084 B   nt_meshwire_decode_indices
  1989 B   nt_ui_button_begin
  1906 B   nt_sprite_renderer_emit_region
  1896 B   Clay__InitializePersistentMemory
- 1859 B   emit_text
- 1851 B   __rem_pio2f
- 1747 B   nt_hash64
 
-Total functions: 249
-Total code size: 283804 B
+Total functions: 314
+Total code size: 317821 B
 
 ## Built Engine Archives
 
@@ -126,5 +126,5 @@ TOTAL (archives)         4233354 B
 
 ## Data Segments Summary
 
-Segments: 62
-Total data size: 19429 B
+Segments: 71
+Total data size: 21054 B
