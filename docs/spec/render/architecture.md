@@ -462,12 +462,16 @@ reported even when aborted, stops event appends, and never truncates counters.
 Recording changes inside a tick apply at the next begin_tick.
 
 The `object_kind` and `object` pair identifies a full frontend handle, including
-its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t` and
-carry raw GL names scoped to `context_sequence`. `backend.args` follows the GL
-integer argument order; pointer payload, readback output and debug-label arguments
-are presence bits, gen/delete arguments contain the count followed by each name,
-and indexed offsets are byte offsets. Readback, timer-query and debug-group calls
-are issued calls too and are recorded like any other.
+its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
+values are named after the issued function (`NT_GFX_GL_glBindVertexArray`), and
+carry raw GL names scoped to `context_sequence`; their operation is always STATE,
+the enclosing BEGIN names the frontend operation. Each issued call is recorded
+exactly once, at the call site, by the same statement that issues it.
+`backend.args` follows the GL integer argument order; pointer payload, readback
+output and debug-label arguments are presence bits, gen/delete arguments contain
+the count followed by each name, `glCreate*` records the returned name, and
+indexed offsets are byte offsets. Readback, timer-query and debug-group calls are
+issued calls too and are recorded like any other.
 Float arguments occupy `backend.values` in float argument order. Matrix and vec4
 calls use `uniform` with the location in `name`, float count in `count`, and
 copied values. `backend.bytes` is actual CPU upload payload, zero for NULL storage.

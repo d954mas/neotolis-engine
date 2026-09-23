@@ -36,10 +36,11 @@ static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
     }
     memcpy(&capture->events[capture->view.count++], event, sizeof(*event));
 }
+static inline bool nt_gfx_capture_accepts(void) { return g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow; }
 /* Arguments and record construction disappear entirely in capture-OFF builds. */
 #define NT_GFX_RECORD(event_kind, event_operation, ...)                                                                                                                                                \
     do {                                                                                                                                                                                               \
-        if (g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow) {                                                                                                                           \
+        if (nt_gfx_capture_accepts()) {                                                                                                                                                                \
             nt_gfx_event_t event;                                                                                                                                                                      \
             memset(&event, 0, sizeof(event));                                                                                                                                                          \
             event.context_sequence = g_nt_gfx_capture.context_sequence;                                                                                                                                \

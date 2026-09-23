@@ -516,7 +516,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     s_observe_values[15] = (double)snapshot.counters.texture_upload_bytes;
     s_observe_values[16] = (double)snapshot.counters.buffer_upload_calls;
     s_observe_values[17] = (double)snapshot.counters.texture_upload_calls;
-    const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_USEPROGRAM, NT_GFX_GL_BINDVERTEXARRAY, NT_GFX_GL_BINDTEXTURE, NT_GFX_GL_BINDSAMPLER, NT_GFX_GL_UNIFORM4FV, NT_GFX_GL_UNIFORM1I};
+    const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_glUseProgram, NT_GFX_GL_glBindVertexArray, NT_GFX_GL_glBindTexture, NT_GFX_GL_glBindSampler, NT_GFX_GL_glUniform4fv, NT_GFX_GL_glUniform1i};
     for (uint32_t i = 0; i < capture.count; i++) {
         if (capture.events[i].kind != NT_GFX_EVENT_BACKEND) {
             continue;

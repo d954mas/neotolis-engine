@@ -327,6 +327,48 @@ static void test_initial_uniform_records_cover_only_vec4(void) {
     nt_gfx_destroy_shader(vs);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks three argument kinds
+static void test_issued_calls_record_floats_names_and_payloads(void) {
+    const uint8_t data[16] = {0};
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_begin_tick();
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = sizeof(data), .data = data});
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.25F, 0.5F, 0.75F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_end_tick();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t generated = 0;
+    bool uploaded = false;
+    bool cleared = false;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind != NT_GFX_EVENT_BACKEND) {
+            continue;
+        }
+        if (event->detail == NT_GFX_GL_glGenBuffers) {
+            TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[0]);
+            generated = event->data.backend.args[1];
+        }
+        if (event->detail == NT_GFX_GL_glBufferData) {
+            TEST_ASSERT_EQUAL_UINT32(sizeof(data), event->data.backend.args[1]);
+            TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[2]);
+            TEST_ASSERT_EQUAL_UINT64(sizeof(data), event->data.backend.bytes);
+            uploaded = true;
+        }
+        /* Exactly representable values, so equality is exact. */
+        const float *color = event->data.backend.values;
+        if (event->detail == NT_GFX_GL_glClearColor && color[0] == 0.25F && color[1] == 0.5F && color[2] == 0.75F && color[3] == 1.0F) {
+            cleared = true;
+        }
+    }
+    TEST_ASSERT_NOT_EQUAL(0, generated);
+    TEST_ASSERT_TRUE(uploaded && cleared);
+    nt_gfx_destroy_buffer(buffer);
+}
+
 static void test_readback_is_recorded_as_issued_call(void) {
     nt_gfx_capture_set_enabled(true);
     nt_gfx_begin_tick();
@@ -341,7 +383,7 @@ static void test_readback_is_recorded_as_issued_call(void) {
     uint32_t reads = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_READPIXELS) {
+        if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_glReadPixels) {
             TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[2]);
             TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[6]);
             reads++;
@@ -472,10 +514,10 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.uniform_calls);
         TEST_ASSERT_EQUAL_UINT32(2, c.ubo_calls);
 #if NT_GFX_CAPTURE_ENABLED
-        TEST_ASSERT_EQUAL_UINT32(c.program_calls, captured_calls(NT_GFX_GL_USEPROGRAM));
-        TEST_ASSERT_EQUAL_UINT32(c.vao_calls, captured_calls(NT_GFX_GL_BINDVERTEXARRAY));
-        TEST_ASSERT_EQUAL_UINT32(c.uniform_calls, captured_calls(NT_GFX_GL_UNIFORM4FV));
-        TEST_ASSERT_EQUAL_UINT32(c.ubo_calls, captured_calls(NT_GFX_GL_BINDBUFFERBASE));
+        TEST_ASSERT_EQUAL_UINT32(c.program_calls, captured_calls(NT_GFX_GL_glUseProgram));
+        TEST_ASSERT_EQUAL_UINT32(c.vao_calls, captured_calls(NT_GFX_GL_glBindVertexArray));
+        TEST_ASSERT_EQUAL_UINT32(c.uniform_calls, captured_calls(NT_GFX_GL_glUniform4fv));
+        TEST_ASSERT_EQUAL_UINT32(c.ubo_calls, captured_calls(NT_GFX_GL_glBindBufferBase));
 #endif
     }
 }
@@ -542,6 +584,7 @@ int main(void) {
     RUN_TEST(test_new_program_defines_sampler_names_and_inactive_uniforms);
     RUN_TEST(test_render_target_backend_definitions_carry_depth_renderbuffer);
     RUN_TEST(test_initial_uniform_records_cover_only_vec4);
+    RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
     RUN_TEST(test_readback_is_recorded_as_issued_call);
 #endif
     RUN_TEST(test_payloads_before_render_and_without_frames);
