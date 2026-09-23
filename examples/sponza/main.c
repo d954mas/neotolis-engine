@@ -358,7 +358,7 @@ static void load_scene_from_manifest(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_gfx_observe_begin_frame();
+    nt_gfx_begin_tick();
     nt_window_poll();
     nt_input_poll();
 
@@ -609,8 +609,7 @@ static void frame(void) {
                 float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
                 float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
                 nt_log_info("FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%" PRIu64 " verts=%" PRIu64 " tris=%" PRIu64 " items=%u/%u", (double)avg_fps, (double)min_fps, (double)g_nt_app.dt,
-                            (double)s_move_speed, g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.instances, g_nt_gfx.frame_stats.vertices, g_nt_gfx.frame_stats.indices / 3, item_count,
-                            s_entity_count);
+                            (double)s_move_speed, g_nt_gfx.counters.draw_calls, g_nt_gfx.counters.instances, g_nt_gfx.counters.vertices, g_nt_gfx.counters.indices / 3, item_count, s_entity_count);
                 s_stats_accum = 0.0;
                 s_stats_frames = 0;
                 s_stats_max_dt = 0.0F;
@@ -623,7 +622,7 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
-    (void)nt_gfx_observe_end_frame();
+    nt_gfx_end_tick();
 }
 
 int main(void) {

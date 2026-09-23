@@ -469,7 +469,7 @@ static void draw_shapes(void) {
 /* ---- frame callback ---- */
 
 static void frame(void) {
-    nt_gfx_observe_begin_frame();
+    nt_gfx_begin_tick();
     nt_window_poll();
     nt_input_poll();
     float dt = g_nt_app.dt;
@@ -491,7 +491,7 @@ static void frame(void) {
     if (s_log_timer >= 1.0F) {
         float avg = s_dt_sum / (float)s_dt_count;
         float render_avg = s_render_sum / (float)s_dt_count;
-        nt_gfx_frame_stats_t stats = g_nt_gfx.frame_stats;
+        const nt_gfx_counters_t stats = g_nt_gfx.last_frame.counters; /* previous tick; this one has not drawn yet */
         uint32_t batch_dc = stats.draw_calls - stats.draw_calls_instanced;
         uint64_t tris = stats.indices / 3;
         printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f\n"
@@ -597,7 +597,7 @@ static void frame(void) {
         nt_app_quit();
     }
 #endif
-    (void)nt_gfx_observe_end_frame();
+    nt_gfx_end_tick();
 }
 
 int main(void) {

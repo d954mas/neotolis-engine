@@ -142,6 +142,9 @@ static struct {
 
     nt_gfx_render_state_t render_state;
     bool context_restore_retry;
+    bool tick_open;
+    bool tick_aborted;
+    uint32_t counter_availability; /* NT_GFX_COUNTERS_* bits, fixed at init */
     uint32_t active_render_target;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
@@ -205,36 +208,21 @@ static bool gfx_context_lost(void) {
     return lost;
 }
 
-#if NT_GFX_COUNTERS_ENABLED
-static void observe_apply_stats_policy(bool enabled) {
-    if (enabled && !g_nt_gfx_observation.stats_enabled) {
-        NT_ASSERT(g_nt_gfx_observation.uploads.epoch != UINT64_MAX);
-        uint64_t epoch = g_nt_gfx_observation.uploads.epoch + 1;
-        g_nt_gfx_observation.uploads = (nt_gfx_upload_totals_t){.epoch = epoch};
-    }
-    g_nt_gfx_observation.stats_enabled = enabled;
-}
-#endif
-
-void nt_gfx_stats_set_enabled(bool enabled) {
-#if NT_GFX_COUNTERS_ENABLED
-    g_nt_gfx_observation.stats_requested = enabled;
-    if (!g_nt_gfx_observation.active) {
-        observe_apply_stats_policy(enabled);
-    }
-#else
-    (void)enabled;
-#endif
-}
-
 nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) {
 #if NT_GFX_COUNTERS_ENABLED
     nt_gfx_upload_totals_t result = g_nt_gfx_observation.uploads;
-    result.available = g_nt_gfx_observation.stats_enabled && (g_nt_gfx_observation.backend == NT_GFX_BACKEND_OPENGL || g_nt_gfx_observation.backend == NT_GFX_BACKEND_WEBGL);
+    result.available = (s_gfx.counter_availability & NT_GFX_COUNTERS_BACKEND) != 0;
     return result;
 #else
     return (nt_gfx_upload_totals_t){0};
 #endif
+}
+
+void nt_gfx_observe_context_loss(void) {
+    if (s_gfx.tick_open && !s_gfx.tick_aborted) {
+        s_gfx.tick_aborted = true;
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_CONTEXT_LOST);
+    }
 }
 
 void nt_gfx_capture_set_enabled(bool enabled) {
@@ -352,11 +340,11 @@ static void capture_initial_state(void) {
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
-static void capture_begin_frame(void) {
+static void capture_begin_tick(void) {
     g_nt_gfx_observation.recording = g_nt_gfx_observation.capture_requested;
     if (g_nt_gfx_observation.recording) {
         g_nt_gfx_observation.capture = (nt_gfx_capture_view_t){
-            .frame_sequence = g_nt_gfx_observation.sequence,
+            .frame_sequence = g_nt_gfx.counters.frame_sequence,
             .phase = NT_GFX_CAPTURE_RECORDING,
             .status = NT_GFX_FRAME_RECORDING,
         };
@@ -364,96 +352,52 @@ static void capture_begin_frame(void) {
         capture_initial_state();
     }
 }
-#endif
 
-void nt_gfx_observe_begin_frame(void) {
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
-    NT_ASSERT(g_nt_gfx.initialized);
-    NT_ASSERT(!g_nt_gfx_observation.active);
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
-    NT_ASSERT(g_nt_gfx_observation.sequence != UINT64_MAX);
-    g_nt_gfx_observation.sequence++;
-    g_nt_gfx_observation.active = true;
-    g_nt_gfx_observation.gfx_begun = false;
-    /* A loss carried in from earlier aborts only if it is observed again or
-     * still present at end; a begin_frame that restores completes normally. */
-    g_nt_gfx_observation.aborted = false;
-#if NT_GFX_COUNTERS_ENABLED
-    observe_apply_stats_policy(g_nt_gfx_observation.stats_requested);
-    g_nt_gfx_observation.working = (nt_gfx_counters_t){0};
-    g_nt_gfx_observation.upload_start = g_nt_gfx_observation.uploads;
-#endif
-#if NT_GFX_CAPTURE_ENABLED
-    capture_begin_frame();
-#endif
-#endif
-}
-
-nt_gfx_counters_t nt_gfx_stats_read(void) {
-    nt_gfx_counters_t result = {0};
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
-    if (!g_nt_gfx_observation.active) {
-        return result;
-    }
-    result.frame_sequence = g_nt_gfx_observation.sequence;
-#if NT_GFX_COUNTERS_ENABLED
-    if (g_nt_gfx_observation.stats_enabled) {
-        result = g_nt_gfx_observation.working;
-        result.frame_sequence = g_nt_gfx_observation.sequence;
-        result.availability = NT_GFX_COUNTERS_FRONTEND;
-        if (g_nt_gfx_observation.backend == NT_GFX_BACKEND_OPENGL || g_nt_gfx_observation.backend == NT_GFX_BACKEND_WEBGL) {
-            result.availability |= NT_GFX_COUNTERS_BACKEND;
-        }
-        if (g_nt_gfx_observation.gfx_begun) {
-            result.draw_calls = g_nt_gfx.frame_stats.draw_calls;
-            result.draw_calls_instanced = g_nt_gfx.frame_stats.draw_calls_instanced;
-            result.vertices = g_nt_gfx.frame_stats.vertices;
-            result.indices = g_nt_gfx.frame_stats.indices;
-            result.instances = g_nt_gfx.frame_stats.instances;
-        }
-        result.buffer_upload_calls = g_nt_gfx_observation.uploads.buffer_calls - g_nt_gfx_observation.upload_start.buffer_calls;
-        result.buffer_upload_bytes = g_nt_gfx_observation.uploads.buffer_bytes - g_nt_gfx_observation.upload_start.buffer_bytes;
-        result.texture_upload_calls = g_nt_gfx_observation.uploads.texture_calls - g_nt_gfx_observation.upload_start.texture_calls;
-        result.texture_upload_bytes = g_nt_gfx_observation.uploads.texture_bytes - g_nt_gfx_observation.upload_start.texture_bytes;
-    }
-#endif
-#endif
-    return result;
-}
-
-#if NT_GFX_CAPTURE_ENABLED
-static void capture_end_frame(void) {
+static void capture_end_tick(void) {
     if (g_nt_gfx_observation.recording) {
-        NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_FRAME, event.reason = g_nt_gfx_observation.last.status == NT_GFX_FRAME_ABORTED ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_ACCEPTED);
+        NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_FRAME, event.reason = g_nt_gfx.last_frame.status == NT_GFX_FRAME_ABORTED ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_ACCEPTED);
         nt_gfx_capture_view_t *capture = &g_nt_gfx_observation.capture;
         capture->phase = NT_GFX_CAPTURE_FINALIZED;
-        capture->status = g_nt_gfx_observation.last.status;
+        capture->status = g_nt_gfx.last_frame.status;
         if (capture->status == NT_GFX_FRAME_COMPLETE && capture->overflow) {
             capture->status = NT_GFX_FRAME_TRUNCATED;
         }
-        capture->snapshot = g_nt_gfx_observation.last;
+        capture->snapshot = g_nt_gfx.last_frame;
         g_nt_gfx_observation.recording = false;
     }
 }
 #endif
 
-const nt_gfx_frame_snapshot_t *nt_gfx_observe_end_frame(void) {
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
-    NT_ASSERT(g_nt_gfx_observation.active);
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
-    g_nt_gfx_observation.last = (nt_gfx_frame_snapshot_t){
-        .counters = nt_gfx_stats_read(),
-        .status = (g_nt_gfx_observation.aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion, not real branching
+void nt_gfx_begin_tick(void) {
+    NT_ASSERT(g_nt_gfx.initialized);
+    NT_ASSERT(!s_gfx.tick_open && "begin_tick: previous tick is still open");
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_tick: a render frame is open");
+    NT_ASSERT(g_nt_gfx.counters.frame_sequence != UINT64_MAX);
+    s_gfx.tick_open = true;
+    /* A loss carried in from earlier aborts only if it is observed again or
+     * still present at end; a begin_frame that restores completes normally. */
+    s_gfx.tick_aborted = false;
+    g_nt_gfx.counters = (nt_gfx_counters_t){
+        .frame_sequence = g_nt_gfx.counters.frame_sequence + 1,
+        .availability = s_gfx.counter_availability,
     };
 #if NT_GFX_CAPTURE_ENABLED
-    capture_end_frame();
+    capture_begin_tick();
 #endif
-    g_nt_gfx_observation.active = false;
-    return &g_nt_gfx_observation.last;
-#else
-    static const nt_gfx_frame_snapshot_t unavailable;
-    return &unavailable;
+}
+
+void nt_gfx_end_tick(void) {
+    NT_ASSERT(s_gfx.tick_open && "end_tick: no open tick");
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
+    g_nt_gfx.last_frame = (nt_gfx_frame_snapshot_t){
+        .counters = g_nt_gfx.counters,
+        .status = (s_gfx.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
+    };
+#if NT_GFX_CAPTURE_ENABLED
+    capture_end_tick();
 #endif
+    s_gfx.tick_open = false;
 }
 // #endregion
 
@@ -474,7 +418,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 #if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
 #endif
-    nt_gfx_stats_set_enabled(true);
 #if NT_GFX_CAPTURE_ENABLED
     NT_ASSERT(desc->capture_capacity == 0 || sizeof(nt_gfx_event_t) <= SIZE_MAX / desc->capture_capacity);
     g_nt_gfx_observation.capacity = desc->capture_capacity;
@@ -523,6 +466,14 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     /* Detect GPU compressed texture capabilities */
     g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
 
+    s_gfx.counter_availability = NT_GFX_COUNTERS_DRAWS;
+#if NT_GFX_COUNTERS_ENABLED
+    s_gfx.counter_availability |= NT_GFX_COUNTERS_FRONTEND;
+    if (g_nt_gfx_observation.backend == NT_GFX_BACKEND_OPENGL || g_nt_gfx_observation.backend == NT_GFX_BACKEND_WEBGL) {
+        s_gfx.counter_availability |= NT_GFX_COUNTERS_BACKEND;
+    }
+#endif
+    g_nt_gfx.counters.availability = s_gfx.counter_availability;
     g_nt_gfx.initialized = true;
 }
 
@@ -795,6 +746,7 @@ static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — context-loss recovery branches push it just over 25
 void nt_gfx_begin_frame(void) {
+    NT_ASSERT(s_gfx.tick_open && "begin_frame: call nt_gfx_begin_tick first");
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_RENDER_FRAME, event.object_kind = NT_GFX_OBJECT_NONE; event.object = 0; event.detail = 0;);
     bool backend_context_lost = nt_gfx_backend_is_context_lost();
     if (backend_context_lost) {
@@ -900,18 +852,12 @@ void nt_gfx_begin_frame(void) {
         return;
     }
     s_gfx.render_state = NT_GFX_STATE_FRAME;
-    memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
-    if (g_nt_gfx_observation.active) {
-        NT_ASSERT(!g_nt_gfx_observation.gfx_begun);
-        g_nt_gfx_observation.gfx_begun = true;
-    }
-#endif
     nt_gfx_backend_begin_frame();
     NT_GFX_RESULT(NT_GFX_OP_RENDER_FRAME, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_ACCEPTED);
 }
 
 void nt_gfx_end_frame(void) {
+    NT_ASSERT(s_gfx.tick_open && "end_frame: the tick closed before the render frame");
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_END_RENDER_FRAME, event.object_kind = NT_GFX_OBJECT_NONE; event.object = 0; event.detail = 0;);
     stage_frame_tick();
     if (g_nt_gfx.context_lost) {
@@ -930,8 +876,6 @@ void nt_gfx_end_frame(void) {
     g_nt_gfx.context_restored = false;
     NT_GFX_RESULT(NT_GFX_OP_END_RENDER_FRAME, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_ACCEPTED);
 }
-
-uint32_t nt_gfx_get_frame_draw_calls(void) { return g_nt_gfx.frame_stats.draw_calls; }
 
 /* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
  * so bad size returns false (bot-param validation is the L2 concern). */
@@ -2472,10 +2416,10 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls != UINT32_MAX);
-    g_nt_gfx.frame_stats.draw_calls++;
-    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - num_vertices);
-    g_nt_gfx.frame_stats.vertices += num_vertices;
+    NT_ASSERT(g_nt_gfx.counters.draw_calls != UINT32_MAX);
+    g_nt_gfx.counters.draw_calls++;
+    NT_ASSERT(g_nt_gfx.counters.vertices <= UINT64_MAX - num_vertices);
+    g_nt_gfx.counters.vertices += num_vertices;
     nt_gfx_backend_draw(first_vertex, num_vertices);
     NT_GFX_RESULT(NT_GFX_OP_DRAW, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
 }
@@ -2509,14 +2453,14 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls != UINT32_MAX);
-    g_nt_gfx.frame_stats.draw_calls++;
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls_instanced != UINT32_MAX);
-    g_nt_gfx.frame_stats.draw_calls_instanced++;
-    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (uint64_t)num_vertices * instance_count);
-    g_nt_gfx.frame_stats.vertices += (uint64_t)num_vertices * instance_count;
-    NT_ASSERT(g_nt_gfx.frame_stats.instances <= UINT64_MAX - instance_count);
-    g_nt_gfx.frame_stats.instances += instance_count;
+    NT_ASSERT(g_nt_gfx.counters.draw_calls != UINT32_MAX);
+    g_nt_gfx.counters.draw_calls++;
+    NT_ASSERT(g_nt_gfx.counters.draw_calls_instanced != UINT32_MAX);
+    g_nt_gfx.counters.draw_calls_instanced++;
+    NT_ASSERT(g_nt_gfx.counters.vertices <= UINT64_MAX - (uint64_t)num_vertices * instance_count);
+    g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
+    NT_ASSERT(g_nt_gfx.counters.instances <= UINT64_MAX - instance_count);
+    g_nt_gfx.counters.instances += instance_count;
     nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
     NT_GFX_RESULT(NT_GFX_OP_DRAW_INSTANCED, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
 }
@@ -2551,12 +2495,12 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();
 
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls != UINT32_MAX);
-    g_nt_gfx.frame_stats.draw_calls++;
-    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - num_vertices);
-    g_nt_gfx.frame_stats.vertices += num_vertices;
-    NT_ASSERT(g_nt_gfx.frame_stats.indices <= UINT64_MAX - num_indices);
-    g_nt_gfx.frame_stats.indices += num_indices;
+    NT_ASSERT(g_nt_gfx.counters.draw_calls != UINT32_MAX);
+    g_nt_gfx.counters.draw_calls++;
+    NT_ASSERT(g_nt_gfx.counters.vertices <= UINT64_MAX - num_vertices);
+    g_nt_gfx.counters.vertices += num_vertices;
+    NT_ASSERT(g_nt_gfx.counters.indices <= UINT64_MAX - num_indices);
+    g_nt_gfx.counters.indices += num_indices;
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
     NT_GFX_RESULT(NT_GFX_OP_DRAW_INDEXED, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
 }
@@ -2592,16 +2536,16 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();
 
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls != UINT32_MAX);
-    g_nt_gfx.frame_stats.draw_calls++;
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls_instanced != UINT32_MAX);
-    g_nt_gfx.frame_stats.draw_calls_instanced++;
-    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (uint64_t)num_vertices * instance_count);
-    g_nt_gfx.frame_stats.vertices += (uint64_t)num_vertices * instance_count;
-    NT_ASSERT(g_nt_gfx.frame_stats.indices <= UINT64_MAX - (uint64_t)num_indices * instance_count);
-    g_nt_gfx.frame_stats.indices += (uint64_t)num_indices * instance_count;
-    NT_ASSERT(g_nt_gfx.frame_stats.instances <= UINT64_MAX - instance_count);
-    g_nt_gfx.frame_stats.instances += instance_count;
+    NT_ASSERT(g_nt_gfx.counters.draw_calls != UINT32_MAX);
+    g_nt_gfx.counters.draw_calls++;
+    NT_ASSERT(g_nt_gfx.counters.draw_calls_instanced != UINT32_MAX);
+    g_nt_gfx.counters.draw_calls_instanced++;
+    NT_ASSERT(g_nt_gfx.counters.vertices <= UINT64_MAX - (uint64_t)num_vertices * instance_count);
+    g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
+    NT_ASSERT(g_nt_gfx.counters.indices <= UINT64_MAX - (uint64_t)num_indices * instance_count);
+    g_nt_gfx.counters.indices += (uint64_t)num_indices * instance_count;
+    NT_ASSERT(g_nt_gfx.counters.instances <= UINT64_MAX - instance_count);
+    g_nt_gfx.counters.instances += instance_count;
     nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
     NT_GFX_RESULT(NT_GFX_OP_DRAW_INDEXED_INSTANCED, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
 }

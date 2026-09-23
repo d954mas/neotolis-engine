@@ -207,7 +207,7 @@ static void render_pattern(void) {
 
 static void frame(void) {
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-    nt_gfx_observe_begin_frame();
+    nt_gfx_begin_tick();
 #endif
     /* Host owns measurement; nt_metrics only stores. */
 #if NT_METRICS_ENABLED
@@ -280,7 +280,7 @@ static void frame(void) {
         nt_app_quit();
     }
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-    (void)nt_gfx_observe_end_frame();
+    nt_gfx_end_tick();
 #endif
 }
 

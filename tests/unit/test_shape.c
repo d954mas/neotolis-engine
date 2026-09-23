@@ -3,6 +3,7 @@
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "renderers/nt_shape_renderer.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #include <math.h>
@@ -11,7 +12,7 @@
 static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
 
 void setUp(void) {
-    nt_gfx_init(
+    nt_gfx_test_init(
         &(nt_gfx_desc_t){.max_shaders = 32, .max_programs = 32, .max_pipelines = 32, .max_buffers = 128, .max_textures = 32, .max_meshes = 32, .max_vertex_inputs = 32, .max_render_targets = 16});
     nt_gfx_fake_reset();
     nt_shape_renderer_init();
@@ -437,7 +438,7 @@ void test_shape_failed_restore_flush_discards_staging(void) {
 
     assert_shape_staging_empty();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
 }
 
 void test_shape_failed_restore_preserves_settings(void) {
@@ -525,7 +526,7 @@ void test_shape_failed_restore_instance_staging_stays_bounded(void) {
         assert_shape_staging_empty();
     }
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
 }
 
 void test_shape_failed_restore_geometry_staging_stays_bounded(void) {
@@ -570,7 +571,7 @@ void test_shape_failed_restore_geometry_staging_stays_bounded(void) {
     nt_shape_renderer_flush();
     assert_shape_staging_empty();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
 }
 
 int main(void) {

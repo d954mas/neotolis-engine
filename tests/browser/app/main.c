@@ -313,6 +313,8 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_program_t program = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    /* JS calls this between host callbacks, so the probe owns its tick. */
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     if (target.id != 0) {
         nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.25F, 0.5F, 0.75F, 1.0F}});
@@ -328,6 +330,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    nt_gfx_end_tick();
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
@@ -412,6 +415,8 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     /* Centre of texel (0,0) at the requested level (the single texel at level 7). */
     const float texel = 0.5F / (BASIS_FIXTURE_SIZE / (float)(1 << level));
     const float uv[4] = {texel, texel, (float)level, 0.0F};
+    /* JS calls this between host callbacks, so the probe owns its tick. */
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 1.0F, 1.0F}});
     nt_gfx_bind_pipeline(pipeline);
@@ -424,6 +429,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    nt_gfx_end_tick();
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
@@ -444,16 +450,15 @@ EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
 }
 EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     memset(s_observe_values, 0, sizeof(s_observe_values));
-    nt_gfx_stats_set_enabled(true);
     nt_gfx_capture_set_enabled(mode != 0);
-    nt_gfx_observe_begin_frame();
+    nt_gfx_begin_tick();
     const uint8_t pixels[16] = {64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255};
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
     nt_gfx_update_buffer(buffer, 0, pixels, 16);
     nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
     nt_texture_t spare = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8});
     nt_gfx_update_texture(spare, 0, 0, 2, 2, pixels);
-    nt_gfx_counters_t preparation = nt_gfx_stats_read();
+    nt_gfx_counters_t preparation = g_nt_gfx.counters;
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 2, .height = 2, .color_format = NT_TEXTURE_FORMAT_RGBA8});
     nt_shader_t vs =
         nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}"});
@@ -491,7 +496,8 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_destroy_texture(texture);
     nt_gfx_destroy_texture(spare);
     nt_gfx_destroy_buffer(buffer);
-    nt_gfx_frame_snapshot_t snapshot = *nt_gfx_observe_end_frame();
+    nt_gfx_end_tick();
+    nt_gfx_frame_snapshot_t snapshot = g_nt_gfx.last_frame;
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     s_observe_values[0] = NT_GFX_COUNTERS_ENABLED;
     s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
@@ -543,8 +549,10 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
         nt_gfx_set_gpu_timing_enabled(true);
         break;
     case 4:
+        nt_gfx_begin_tick();
         nt_gfx_begin_frame();
         nt_gfx_end_frame();
+        nt_gfx_end_tick();
         break;
     case 5: {
         uint64_t ns = 0;
@@ -828,7 +836,7 @@ static bool gpu_restore_step(void) {
 }
 
 static void frame(void) {
-    nt_gfx_observe_begin_frame();
+    nt_gfx_begin_tick();
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
@@ -979,7 +987,7 @@ static void frame(void) {
 #ifdef __EMSCRIPTEN__
         /* Count frames that actually submitted geometry: reaching the draw path
          * proves nothing if every renderer skipped. */
-        if (nt_gfx_get_frame_draw_calls() > 0U) {
+        if (g_nt_gfx.counters.draw_calls > 0U) {
             s_nt_drawn_frames++;
         }
 #endif
@@ -989,7 +997,7 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
-    (void)nt_gfx_observe_end_frame();
+    nt_gfx_end_tick();
 }
 // #endregion
 

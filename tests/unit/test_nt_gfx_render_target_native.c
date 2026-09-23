@@ -1,6 +1,7 @@
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -37,7 +38,7 @@ void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_textures = 2;
     desc.max_render_targets = 1;
-    nt_gfx_init(&desc);
+    nt_gfx_test_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
 
@@ -1450,7 +1451,7 @@ static void assert_reflection_query_failure_retries(GLenum skipped_query) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_programs = 2;
-    nt_gfx_init(&desc);
+    nt_gfx_test_init(&desc);
 
     uint32_t vs = nt_gfx_backend_create_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_VERTEX,

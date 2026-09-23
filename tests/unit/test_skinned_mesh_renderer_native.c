@@ -17,6 +17,7 @@
 
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #include <math.h>
@@ -466,7 +467,7 @@ void setUp(void) {
     g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = RT_W, .height = RT_H};
     nt_window_init();
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&(nt_gfx_desc_t){
+    nt_gfx_test_init(&(nt_gfx_desc_t){
         .max_shaders = 8,
         .max_programs = 4,
         .max_pipelines = 8,

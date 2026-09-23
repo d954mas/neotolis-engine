@@ -6,6 +6,7 @@
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #include <math.h>
@@ -52,7 +53,7 @@ static const uint16_t s_test_rg16ui_4x4[4 * 4 * 2] = {
 };
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
 }
 
 void tearDown(void) {
@@ -168,7 +169,7 @@ void test_gfx_init_shutdown(void) {
     nt_gfx_shutdown();
     TEST_ASSERT_FALSE(g_nt_gfx.initialized);
     /* Re-init for tearDown */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
 }
 
 /* ---- High-level: make/destroy shader ---- */
@@ -196,7 +197,7 @@ void test_gfx_defaults_applied(void) {
     /* Shutdown current, re-init with defaults */
     nt_gfx_shutdown();
     nt_gfx_desc_t defaults = nt_gfx_desc_defaults();
-    nt_gfx_init(&defaults);
+    nt_gfx_test_init(&defaults);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
     /* Verify we can allocate more than 4 shaders (proves defaults > test setUp) */
@@ -208,7 +209,7 @@ void test_gfx_defaults_applied(void) {
 
     /* Re-init for tearDown */
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
 }
 
 /* ---- Pipeline: create with valid shaders, destroy ---- */
@@ -648,7 +649,7 @@ void test_gfx_apply_texture_bindings_skips_backend_for_textureless_program(void)
     /* bind_pipeline already applies the empty set, so a samplerless program draws without apply. */
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
 
     apply_texture_set(NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
@@ -817,12 +818,12 @@ void test_gfx_pipeline_change_preserves_texture_set_only_for_same_program(void) 
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
 
     nt_gfx_bind_pipeline(second_pipeline);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
     end_texture_binding_test_pass();
 }
 
@@ -835,7 +836,7 @@ void test_gfx_draws_require_complete_texture_set_for_bound_program(void) {
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
     EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 0, 0, 1));
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
     end_texture_binding_test_pass();
 }
 
@@ -892,7 +893,7 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     apply_texture_set(bindings, 2);
     const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
     const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
-    const uint32_t draw_calls = nt_gfx_get_frame_draw_calls();
+    const uint32_t draw_calls = g_nt_gfx.counters.draw_calls;
 
     bindings[1].texture = husk;
     nt_gfx_apply_texture_bindings(bindings, 2);
@@ -902,7 +903,7 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
     /* A reported failure skips the draw instead of drawing the previous set. */
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(draw_calls, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(draw_calls, g_nt_gfx.counters.draw_calls);
     end_texture_binding_test_pass();
 }
 
@@ -934,13 +935,13 @@ void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
     nt_gfx_draw_instanced(0, 3, 1);
     nt_gfx_draw_indexed(0, 3, 3);
     nt_gfx_draw_indexed_instanced(0, 3, 3, 1);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
 
     apply_texture_set(bindings, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_sampler(1));
     nt_gfx_draw_indexed(0, 3, 3);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
     end_texture_binding_test_pass();
 }
 
@@ -1003,7 +1004,7 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_programs = 1;
-    nt_gfx_init(&desc);
+    nt_gfx_test_init(&desc);
     nt_gfx_fake_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
@@ -1065,12 +1066,12 @@ void test_gfx_destroy_program_destroys_its_pipelines(void) {
     nt_gfx_bind_pipeline(untouched);
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
 
     /* The dead ones bind to nothing, so the next draw has no pipeline at all. */
     nt_gfx_bind_pipeline(a);
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -2567,7 +2568,7 @@ void test_register_global_block_max(void) {
 void test_register_global_block_cleared_on_shutdown(void) {
     nt_gfx_register_global_block("Globals", 0);
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
     const nt_global_block_t *blocks;
     uint32_t count;
     nt_gfx_get_global_blocks(&blocks, &count);
@@ -2934,7 +2935,7 @@ void test_gfx_restored_frame_rejects_draws(void) {
     bind_test_vertex_input();
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -2946,7 +2947,7 @@ void test_gfx_restored_frame_rejects_draws(void) {
     nt_gfx_bind_pipeline(rebuilt);
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
@@ -2972,13 +2973,13 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
     nt_gfx_bind_pipeline(live);
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
 
     nt_gfx_bind_pipeline(dead); /* rejected: stale handle */
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
     EXPECT_ASSERT(nt_gfx_set_uniform_int(nt_hash32_str("u_tex"), 0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -3002,12 +3003,11 @@ void test_gfx_frame_draw_calls(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
-    /* Counter starts at 0 (setUp called nt_gfx_init which zero-inits g_nt_gfx;
-     * the static counter sits in BSS and is also 0 on the first test call). */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    /* setUp opened a fresh tick, so the counter starts at 0. */
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
 
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
@@ -3015,24 +3015,25 @@ void test_gfx_frame_draw_calls(void) {
 
     /* Fire each of the 4 entry points exactly once. */
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
     nt_gfx_draw_indexed(0, 0, 0);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.draw_calls);
     nt_gfx_draw_instanced(0, 0, 0);
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.draw_calls);
     nt_gfx_draw_indexed_instanced(0, 0, 0, 0);
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.counters.draw_calls);
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    /* Counter persists across end_frame (frame_stats does too; reset is begin_frame's job). */
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_get_frame_draw_calls());
-
-    /* Next begin_frame must reset to 0. */
+    /* Counters persist across render frames; only the next tick resets them. */
+    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.counters.draw_calls);
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.counters.draw_calls);
     nt_gfx_end_frame();
+    nt_gfx_test_next_tick();
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.counters.draw_calls);
 
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_shader(vs);

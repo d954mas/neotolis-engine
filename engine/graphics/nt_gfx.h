@@ -494,17 +494,7 @@ typedef struct {
     float clear_depth;
 } nt_pass_desc_t;
 
-/* ---- Frame statistics ---- */
-
-typedef struct {
-    uint32_t draw_calls;           /* all GPU draw calls */
-    uint32_t draw_calls_instanced; /* of those, instanced */
-    uint64_t vertices;
-    uint64_t indices;
-    uint64_t instances; /* total objects drawn via instanced calls */
-} nt_gfx_frame_stats_t;
-
-// #region frame observation
+// #region tick counters and observation
 typedef enum {
     NT_GFX_BACKEND_NONE = 0,
     NT_GFX_BACKEND_FAKE,
@@ -513,23 +503,23 @@ typedef enum {
 } nt_gfx_backend_kind_t;
 
 typedef enum {
-    NT_GFX_FRAME_UNAVAILABLE = 0,
+    NT_GFX_FRAME_UNAVAILABLE = 0, /* no closed tick yet, empty capture, or stub */
     NT_GFX_FRAME_RECORDING,
     NT_GFX_FRAME_COMPLETE,
     NT_GFX_FRAME_TRUNCATED,
     NT_GFX_FRAME_ABORTED,
 } nt_gfx_frame_status_t;
 
+/* Availability bits are fixed per build and backend at gfx init. */
 enum {
-    NT_GFX_COUNTERS_FRONTEND = 1,
-    NT_GFX_COUNTERS_BACKEND = 2,
+    NT_GFX_COUNTERS_DRAWS = 1,    /* draw calls and submitted geometry; every build */
+    NT_GFX_COUNTERS_FRONTEND = 2, /* request counters; NT_GFX_COUNTERS_ENABLED */
+    NT_GFX_COUNTERS_BACKEND = 4,  /* issued GL calls and payloads; counters on a GL backend */
 };
 
 /* Payload calls only: NULL storage, generated mips and rendering are excluded.
- * Deltas require one gfx init lifetime, equal nonzero epoch and available=true
- * at both endpoints. Sequence/epoch identifiers reset at gfx initialization. */
+ * Totals span one gfx init lifetime, including work outside ticks. */
 typedef struct {
-    uint64_t epoch;
     uint64_t buffer_calls;
     uint64_t buffer_bytes;
     uint64_t texture_calls;
@@ -538,7 +528,8 @@ typedef struct {
 } nt_gfx_upload_totals_t;
 
 /* All fields are values. Submitted geometry is not shader/GPU work.
- * availability is a bitset; zero means unmeasured, not measured zero. */
+ * Unavailable fields (see availability) stay zero: unmeasured, not measured zero.
+ * Vertices/indices multiply by instance count; instances counts instanced draws only. */
 typedef struct {
     uint64_t frame_sequence;
     uint32_t availability;
@@ -795,25 +786,20 @@ typedef struct {
     nt_gfx_frame_status_t status;
     const nt_gfx_event_t *events;
     uint32_t count;
-    nt_gfx_frame_snapshot_t snapshot; /* matching finalized counters, even after later counter-only frames */
+    nt_gfx_frame_snapshot_t snapshot; /* matching finalized tick, even after later unrecorded ticks */
 } nt_gfx_capture_view_t;
 
-/* Optional host-owned interval, at gfx IDLE, enclosing 0..1 gfx frames.
- * Call before resource preparation and end even when rendering is disabled.
- * These boundaries never advance rendering or poll the graphics context. */
-void nt_gfx_observe_begin_frame(void);
-/* Borrowed module snapshot, valid until the next observe_end_frame or shutdown.
- * Always non-NULL; OFF/stub returns an unavailable snapshot. Copy by value to keep. */
-const nt_gfx_frame_snapshot_t *nt_gfx_observe_end_frame(void);
-/* Current interval by value; unavailable outside it or with counters disabled. */
-nt_gfx_counters_t nt_gfx_stats_read(void);
-/* Includes payloads outside observation intervals; frame boundaries never reset it. */
+/* Mandatory host tick around one host callback, at gfx IDLE: begin before resource
+ * preparation, end after the last render frame, also when nothing renders. A tick
+ * holds any number of gfx frames, whose counters sum. begin_tick is the only reset
+ * of g_nt_gfx.counters; end_tick copies them and the status into g_nt_gfx.last_frame.
+ * Ticks never advance rendering or poll the graphics context. */
+void nt_gfx_begin_tick(void);
+void nt_gfx_end_tick(void);
+/* Includes payloads outside ticks; ticks never reset it. */
 nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void);
-/* Starts enabled when compiled in. Inside an interval takes effect next begin;
- * outside takes effect immediately. Re-enabling starts a new upload epoch. */
-void nt_gfx_stats_set_enabled(bool enabled);
-/* Defaults to false; enabling requires nonzero init capacity. Changes during
- * observation apply next begin. OFF/stub is inert. */
+/* Defaults to false; enabling requires nonzero init capacity. Changes inside a
+ * tick apply at the next begin_tick. OFF/stub is inert. */
 void nt_gfx_capture_set_enabled(bool enabled);
 /* Metadata by value; immutable event prefix until next recorded begin/shutdown.
  * Copy count records and metadata to keep. Empty views have events=NULL. */
@@ -834,7 +820,8 @@ typedef struct {
 /* ---- Global state ---- */
 
 typedef struct {
-    nt_gfx_frame_stats_t frame_stats;
+    nt_gfx_counters_t counters;         /* live; reset only by begin_tick, so between ticks they also hold out-of-tick work */
+    nt_gfx_frame_snapshot_t last_frame; /* last closed tick; UNAVAILABLE before the first */
     nt_gfx_gpu_caps_t gpu_caps;
     bool context_lost;
     bool context_restored;
@@ -879,6 +866,7 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 
 /* ---- Frame / Pass ---- */
 
+/* Both require an open tick; neither resets counters. */
 void nt_gfx_begin_frame(void);
 void nt_gfx_end_frame(void);
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
@@ -1012,11 +1000,6 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices);
 void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
-
-/* Convenience getter for g_nt_gfx.frame_stats.draw_calls. Reset by
- * nt_gfx_begin_frame, incremented by every public draw function. Read
- * by nt_debug_overlay; equivalent to reading frame_stats.draw_calls directly. */
-uint32_t nt_gfx_get_frame_draw_calls(void);
 
 /* Reads an (x,y,w,h) sub-rect of the bound default framebuffer into caller-owned `out`:
  * rgba8 (row pitch w*4), TOP-LEFT origin (GL's bottom-left read is y-flipped once here),

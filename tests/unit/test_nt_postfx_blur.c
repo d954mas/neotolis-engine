@@ -3,6 +3,7 @@
 #include "postfx/nt_postfx_blur.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #include <math.h>
@@ -45,7 +46,7 @@ static nt_render_target_desc_t blur_rt_desc(uint16_t width, uint16_t height, con
 }
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){
+    nt_gfx_test_init(&(nt_gfx_desc_t){
         .max_shaders = 8,
         .max_programs = 8,
         .max_pipelines = 8,
@@ -403,7 +404,7 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
 
     TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_fake_render_target_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.draw_calls);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pass_target_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(temp), nt_gfx_fake_pass_target_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(dest), nt_gfx_fake_pass_target_at(1));

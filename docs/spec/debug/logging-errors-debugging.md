@@ -37,6 +37,11 @@ suppression of prebuilt libraries; it cannot remove their caller-side work.
 `native-release-test` select ON; production Release presets select OFF.
 UI/gfx interfaces and the `nt_resource` target publish numeric 0/1 values.
 Gfx counters and capture are described in [frame observation](../render/architecture.md#frame-observation).
+Draw counts exist in every build. The devapi `render.info` command runs early
+in a tick, so its `draw_calls` is the last closed tick's
+(`g_nt_gfx.last_frame`). The `nt_metrics` `draw_calls` channel is whatever the
+host pushes: example hosts push `g_nt_gfx.counters.draw_calls` after rendering,
+inside the same tick.
 The resource header does not require the flag; only its implementation checks it.
 No producer depends
 on `NT_METRICS_ENABLED`: the game may consume measurements directly.

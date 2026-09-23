@@ -23,6 +23,7 @@ void game_shutdown(void);
 ## Engine frame order
 
 ```text
+nt_gfx_begin_tick     ← host tick opens: resets g_nt_gfx.counters
 platform_step
 input_begin_frame
     → if pointer pressed && audio suspended → audio_try_resume()
@@ -37,8 +38,15 @@ nt_mem_scratch_reset  ← frame scratch arena cleared (see memory.md — memory 
 fixed_update loop
 game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
-game_render           ← nt_ui_walk reads scratch pointers
+game_render           ← nt_ui_walk reads scratch pointers; any number of
+                        nt_gfx_begin_frame/end_frame pairs
+nt_gfx_end_tick       ← copies counters into g_nt_gfx.last_frame
 ```
+
+The host owns the gfx tick and closes it on every return path of its callback,
+also when nothing renders. Code that runs before this callback's draws (devapi
+commands, early stats readers) reads the previous tick from
+`g_nt_gfx.last_frame`. See [frame observation](../render/architecture.md#frame-observation).
 
 `nt_mem_scratch_reset()` MUST run before any scratch allocation in the
 current frame — typically right after `audio_update`. Allocating then

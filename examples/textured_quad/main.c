@@ -167,7 +167,7 @@ static void print_status(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_gfx_observe_begin_frame();
+    nt_gfx_begin_tick();
     nt_window_poll();
     nt_input_poll();
 
@@ -369,8 +369,8 @@ static void frame(void) {
         /* One-time log to verify batching */
         static bool s_stats_logged;
         if (!s_stats_logged) {
-            nt_log_info(">> Render stats: %u draw calls, %u instanced, %" PRIu64 " instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
-                        g_nt_gfx.frame_stats.instances, item_count);
+            nt_log_info(">> Render stats: %u draw calls, %u instanced, %" PRIu64 " instances (from %u items)", g_nt_gfx.counters.draw_calls, g_nt_gfx.counters.draw_calls_instanced,
+                        g_nt_gfx.counters.instances, item_count);
             s_stats_logged = true;
         }
     }
@@ -379,7 +379,7 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
-    (void)nt_gfx_observe_end_frame();
+    nt_gfx_end_tick();
 }
 
 int main(void) {

@@ -107,6 +107,7 @@ static void link_program(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
+    nt_gfx_begin_tick();
     nt_window_poll();
     nt_input_poll();
 
@@ -221,6 +222,7 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
+    nt_gfx_end_tick();
 }
 
 int main(void) {

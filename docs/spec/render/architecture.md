@@ -380,44 +380,50 @@ or a shadow-map system.
 
 ## Frame observation
 
-The host may bracket one callback with `nt_gfx_observe_begin_frame` and
-`nt_gfx_observe_end_frame`, before resource preparation and after rendering.
-These are diagnostic boundaries, independent of render begin/end and simulation
-time. Each interval contains zero or one gfx frame and any number of passes.
-Calls require gfx IDLE, except that known context loss permits finalization.
-Missing/nested boundaries assert when a counters or capture producer is compiled
-in; OFF/stub boundaries are inert. No host wiring is added implicitly by app/gfx.
+Every host callback that may touch gfx is one **tick**: the host calls
+`nt_gfx_begin_tick` before resource preparation and `nt_gfx_end_tick` after its
+last render frame, also when nothing renders. Ticks are a mandatory host
+contract in every build, independent of simulation time; app/gfx never add them
+implicitly. Both require gfx IDLE; known context loss also permits end. Nested
+or missing ticks assert, and `nt_gfx_begin_frame`/`nt_gfx_end_frame` assert an
+open tick. A tick holds any number of render frames and passes; their counters
+sum. Shutdown discards an open tick without a snapshot. The stub is stateless:
+its ticks are inert and it never publishes a snapshot.
 
-`nt_gfx_stats_read` returns current counters by value; outside the interval or
-with counters disabled they are unavailable. Two reads with the same sequence
-measure an interval by field subtraction. Stage totals are subsets of the whole
-frame, not additional totals. The bitset distinguishes frontend observations
-from real backend observations; the test fake cannot claim measured GL calls.
+`g_nt_gfx.counters` holds the live counters of the open tick; between ticks
+they keep accumulating out-of-tick work. `nt_gfx_begin_tick` is their only reset and advances
+`frame_sequence`; render frames reset nothing. `nt_gfx_end_tick` copies the
+counters and a status into `g_nt_gfx.last_frame`, the last closed tick, which
+stays unchanged until the next end or shutdown; before the first end its status
+is UNAVAILABLE. Readers early in a callback, before its draws, read `last_frame`.
+A no-render tick reports zero draws; old geometry is never reused. A tick is
+ABORTED only when a loss is observed during it or the context is still lost at
+its end; a tick whose begin_frame restores a lost context and then completes is
+COMPLETE. Work outside ticks shows only in lifetime upload totals.
 
-End returns a borrowed POD snapshot that stays unchanged until the next end
-or shutdown. Copy it by value for caller-owned history. A no-render callback
-still produces a new sequence and zero draws; old geometry is never reused.
-Existing `frame_stats` remains the only live draw/geometry source, reset by
-gfx begin_frame; `nt_gfx_get_frame_draw_calls` retains its uint32 live contract.
-Geometry and instance fields are always uint64, independent of counter options;
-operands widen to uint64 before multiplication and accumulation asserts overflow.
-Vertices/indices are submitted counts, multiplied by instance count for
-instanced calls; instances counts only instances in instanced calls. These are
-not rasterized triangles or vertex-shader invocations.
+Draw calls, instanced draw calls and submitted geometry are counted in every
+build. Geometry and instance fields are uint64; operands widen before
+multiplication and accumulation asserts overflow. Vertices/indices are submitted
+counts, multiplied by instance count for instanced calls; instances counts only
+instances in instanced calls. These are not rasterized triangles or
+vertex-shader invocations.
 
 `NT_GFX_COUNTERS_ENABLED` and `NT_GFX_CAPTURE_ENABLED` are independent numeric
-interface definitions. Counters start enabled when compiled in. A stats toggle
-inside an interval takes effect at the next begin; outside it applies immediately.
-OFF/stub reads are explicitly unavailable. Counter widths/flags are published
-by the interface target so every consumer uses the same configuration.
+interface definitions published by the interface target, so every consumer
+sees the same configuration. Counters add request, issued-call and upload
+fields; there is no runtime toggle. The `availability` bits are fixed per build
+and backend at init: DRAWS always, FRONTEND with counters, BACKEND with counters
+on a GL backend. Unavailable fields stay zero, meaning unmeasured; the test fake
+cannot claim measured GL calls.
 
-`nt_gfx_upload_totals_read` exposes lifetime CPU payload calls/bytes, including
-work outside observation intervals. Deltas require availability and equal
-epochs within one gfx initialization lifetime. Sequence, context and epoch
-identifiers reset at initialization. Re-enabling counters starts a new epoch. NULL-data storage and generated
+`nt_gfx_upload_totals_read` exposes CPU payload calls/bytes for one gfx init
+lifetime, including work outside ticks; it is available only with backend
+counters. Upload sites advance these totals and the live tick counters together,
+so per-tick payload fields need no baseline. NULL-data storage and generated
 mips are excluded; non-NULL orphaning counts once. Texture bytes use the actual
 GPU format for each mip/subrectangle. Failed creates retain already-issued work.
-Per-frame payload fields subtract the begin baseline from these canonical totals.
+Sequence and context identifiers reset at initialization.
+
 Bind requests count accepted frontend operations; call fields count actual GL
 calls, including temporary program, service VAO and upload texture bindings.
 Requests minus calls is not a cache-skip count. Uniform calls include link-time
@@ -429,30 +435,28 @@ event array at init (default zero); enabling capture without capacity asserts.
 There is no growth or allocation while recording. Each pointer-free POD event
 is 112 bytes, including padding; 16384 records reserve 1.75 MiB. Other storage
 consists of fixed control state and counter snapshots, with no second event array.
-All record bytes are initialized before publication. Every recorded begin first
+All record bytes are initialized before publication. Every recorded begin_tick first
 snapshots inherited state, including one definition per live resource (plus
 program uniform/sampler and vertex-input attribute records), into the same array.
-Size the capacity for that snapshot plus the frame's commands; a capacity below
+Size the capacity for that snapshot plus the tick's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
 `nt_gfx_capture_read` returns metadata by value and an immutable event prefix.
-The prefix remains valid until the next **recorded** begin or shutdown; frames
-with recording disabled preserve it. Two counts in the same sequence delimit
+The prefix remains valid until the next **recorded** begin_tick or shutdown;
+ticks with recording disabled preserve it. Two counts in the same sequence delimit
 an operation interval. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
-a NULL pointer. The finalized view retains its matching counter snapshot by value
-even after subsequent counters-only frames overwrite the module's last snapshot.
+a NULL pointer. The finalized view retains its matching tick snapshot by value even after
+later unrecorded ticks overwrite `g_nt_gfx.last_frame`.
 
 BEGIN/RESULT records delimit nested operations. `ARGUMENT` records are request
 arguments belonging to the enclosing BEGIN (one per texture binding of a texture
 set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
 prove GL success or GPU completion. Metadata distinguishes recording from
-finalized, complete, truncated and aborted captures. An interval is aborted only
-when a loss is observed during it or the context is still lost at its end; an
-interval whose gfx begin_frame restores a previously lost context and then
-completes is complete. Overflow is separately
+finalized, complete, truncated and aborted captures; a capture carries its
+tick's status. Overflow is separately
 reported even when aborted, stops event appends, and never truncates counters.
-Runtime recording changes during observation apply next begin.
+Recording changes inside a tick apply at the next begin_tick.
 
 The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t` and

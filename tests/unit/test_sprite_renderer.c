@@ -28,6 +28,7 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "unity.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 /* clang-format on */
 
 /* ---- Mock atlas blob builder (mirrors test_atlas / test_sprite_comp) ---- */
@@ -460,7 +461,7 @@ void setUp(void) {
     s_radial_shared_program = NT_PROGRAM_INVALID;
 
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(
+    nt_gfx_test_init(
         &(nt_gfx_desc_t){.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16, .max_render_targets = 16});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();
@@ -753,7 +754,7 @@ void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(voi
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0);
     nt_sprite_renderer_flush();
     nt_gfx_fake_draw_trace_reset(true);
-    const uint64_t vertices_before = g_nt_gfx.frame_stats.vertices;
+    const uint64_t vertices_before = g_nt_gfx.counters.vertices;
 
     nt_sprite_renderer_set_material(mat);
     for (uint32_t i = 0; i < 4; i++) {
@@ -785,7 +786,7 @@ void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(voi
         TEST_ASSERT_EQUAL_UINT32(i == 0 ? 24 : 6, draw.num_indices);
     }
     /* 16 + 4 + 4: the per-cmd delta, not 3x the batch total. */
-    TEST_ASSERT_EQUAL_UINT64(24U, g_nt_gfx.frame_stats.vertices - vertices_before);
+    TEST_ASSERT_EQUAL_UINT64(24U, g_nt_gfx.counters.vertices - vertices_before);
 }
 
 /* Queued work outlives the program it was built on when the owner destroys it

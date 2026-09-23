@@ -7,13 +7,9 @@
 
 // #region observation storage and owning-site counters
 #if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
+/* Optional producers only; tick state and draw counters live in every build. */
 typedef struct {
-    uint64_t sequence;
     nt_gfx_backend_kind_t backend;
-    bool active;
-    bool gfx_begun;
-    bool aborted;
-    nt_gfx_frame_snapshot_t last;
 #if NT_GFX_CAPTURE_ENABLED
     uint64_t context_sequence;
     bool capture_requested;
@@ -23,11 +19,7 @@ typedef struct {
     nt_gfx_capture_view_t capture;
 #endif
 #if NT_GFX_COUNTERS_ENABLED
-    bool stats_requested;
-    bool stats_enabled;
-    nt_gfx_counters_t working;
     nt_gfx_upload_totals_t uploads;
-    nt_gfx_upload_totals_t upload_start;
 #endif
 } nt_gfx_observation_t;
 
@@ -70,35 +62,34 @@ static inline void nt_gfx_capture_result(nt_gfx_operation_t operation, nt_gfx_ob
 #define NT_GFX_RESULT(...) ((void)0)
 #endif
 
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
-static inline void nt_gfx_observe_context_loss(void) {
-    if (g_nt_gfx_observation.active && !g_nt_gfx_observation.aborted) {
-        g_nt_gfx_observation.aborted = true;
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_CONTEXT_LOST);
-    }
-}
-#else
-#define nt_gfx_observe_context_loss() ((void)0)
-#endif
+/* Marks the open tick aborted once; outside a tick a loss is not attributed. */
+void nt_gfx_observe_context_loss(void);
 
 #if NT_GFX_COUNTERS_ENABLED
 static inline void nt_gfx_observe_count(uint32_t *counter) {
-    if (g_nt_gfx_observation.active && g_nt_gfx_observation.stats_enabled) {
-        NT_ASSERT(*counter != UINT32_MAX);
-        (*counter)++;
-    }
+    NT_ASSERT(*counter != UINT32_MAX);
+    (*counter)++;
 }
-#define NT_GFX_COUNT(field) nt_gfx_observe_count(&g_nt_gfx_observation.working.field)
-static inline void nt_gfx_observe_upload(bool texture, const void *data, uint64_t size) {
-    if (!g_nt_gfx_observation.stats_enabled || data == NULL) {
-        return;
-    }
-    nt_gfx_upload_totals_t *totals = &g_nt_gfx_observation.uploads;
-    uint64_t *calls = texture ? &totals->texture_calls : &totals->buffer_calls;
-    uint64_t *bytes = texture ? &totals->texture_bytes : &totals->buffer_bytes;
+#define NT_GFX_COUNT(field) nt_gfx_observe_count(&g_nt_gfx.counters.field)
+static inline void nt_gfx_observe_payload(uint64_t *calls, uint64_t *bytes, uint64_t size) {
     NT_ASSERT(*calls != UINT64_MAX && size <= UINT64_MAX - *bytes);
     (*calls)++;
     *bytes += size;
+}
+/* Lifetime totals and the live tick counters advance together; begin_tick resets only the latter. */
+static inline void nt_gfx_observe_upload(bool texture, const void *data, uint64_t size) {
+    if (data == NULL) {
+        return;
+    }
+    nt_gfx_upload_totals_t *totals = &g_nt_gfx_observation.uploads;
+    nt_gfx_counters_t *live = &g_nt_gfx.counters;
+    if (texture) {
+        nt_gfx_observe_payload(&totals->texture_calls, &totals->texture_bytes, size);
+        nt_gfx_observe_payload(&live->texture_upload_calls, &live->texture_upload_bytes, size);
+    } else {
+        nt_gfx_observe_payload(&totals->buffer_calls, &totals->buffer_bytes, size);
+        nt_gfx_observe_payload(&live->buffer_upload_calls, &live->buffer_upload_bytes, size);
+    }
 }
 #define NT_GFX_COUNT_UPLOAD(texture, data, size) nt_gfx_observe_upload(texture, data, size)
 #else

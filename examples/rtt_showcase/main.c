@@ -511,6 +511,7 @@ static void draw_default_frame(void) {
 }
 
 static void frame(void) {
+    nt_gfx_begin_tick();
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
@@ -536,6 +537,7 @@ static void frame(void) {
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_lost) {
         nt_window_swap_buffers();
+        nt_gfx_end_tick();
         return;
     }
     if (g_nt_gfx.context_restored) {
@@ -572,11 +574,13 @@ static void frame(void) {
          * this frame draws nothing -- the next one is built from scratch. */
         nt_gfx_end_frame();
         nt_window_swap_buffers();
+        nt_gfx_end_tick();
         return;
     }
     if (!s_demo.render_resources_ready || !render_targets_ready()) {
         nt_gfx_end_frame();
         nt_window_swap_buffers();
+        nt_gfx_end_tick();
         return;
     }
 
@@ -605,6 +609,7 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
+    nt_gfx_end_tick();
 }
 
 int main(void) {

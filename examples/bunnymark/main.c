@@ -271,7 +271,7 @@ static float bunnymark_poll_gpu_ms(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_gfx_observe_begin_frame();
+    nt_gfx_begin_tick();
     /* frame_ms is the wall delta between frame starts; cpu_ms brackets the work below. */
 #if NT_METRICS_ENABLED
     static double s_last_begin = 0.0;
@@ -540,7 +540,7 @@ static void frame(void) {
 #else
         .gpu_ms = -1.0F,
 #endif
-        .draw_calls = nt_gfx_get_frame_draw_calls(),
+        .draw_calls = g_nt_gfx.counters.draw_calls,
         .mem_used = s_mem_used,
     };
     nt_metrics_sample(&mf);
@@ -563,7 +563,7 @@ static void frame(void) {
 #endif
 
     nt_window_swap_buffers();
-    (void)nt_gfx_observe_end_frame();
+    nt_gfx_end_tick();
 }
 
 /* ---- Main ---- */

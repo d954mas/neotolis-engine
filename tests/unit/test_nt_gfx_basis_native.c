@@ -10,6 +10,7 @@
 #include "nt_basisu_encoder.h"
 #include "nt_builder.h"
 #include "nt_texture_format.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -47,7 +48,8 @@ void setUp(void) {
         .height = 128,
     };
     nt_window_init();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 8, .max_textures = 16, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 4});
+    nt_gfx_test_init(
+        &(nt_gfx_desc_t){.max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 8, .max_textures = 16, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 4});
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
 

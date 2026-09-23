@@ -253,6 +253,7 @@ static void set_shape_color(void) {
 /* ---- frame callback ---- */
 
 static void frame(void) {
+    nt_gfx_begin_tick();
     nt_window_poll();
     nt_input_poll();
     float dt = g_nt_app.dt;
@@ -367,6 +368,7 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
+    nt_gfx_end_tick();
 }
 
 int main(void) {

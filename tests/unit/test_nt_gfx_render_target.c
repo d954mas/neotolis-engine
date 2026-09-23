@@ -4,6 +4,7 @@
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #include <stdint.h>
@@ -30,7 +31,7 @@ static nt_render_target_desc_t rt_desc(nt_render_target_depth_t depth) {
 }
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){
+    nt_gfx_test_init(&(nt_gfx_desc_t){
         .max_shaders = 4,
         .max_programs = 4,
         .max_pipelines = 4,

@@ -28,14 +28,9 @@ void nt_gfx_begin_frame(void) {}
 
 void nt_gfx_end_frame(void) {}
 
-void nt_gfx_observe_begin_frame(void) {}
-const nt_gfx_frame_snapshot_t *nt_gfx_observe_end_frame(void) {
-    static const nt_gfx_frame_snapshot_t unavailable;
-    return &unavailable;
-}
-nt_gfx_counters_t nt_gfx_stats_read(void) { return (nt_gfx_counters_t){0}; }
+void nt_gfx_begin_tick(void) {}
+void nt_gfx_end_tick(void) {}
 nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) { return (nt_gfx_upload_totals_t){0}; }
-void nt_gfx_stats_set_enabled(bool enabled) { (void)enabled; }
 void nt_gfx_capture_set_enabled(bool enabled) { (void)enabled; }
 nt_gfx_capture_view_t nt_gfx_capture_read(void) { return (nt_gfx_capture_view_t){0}; }
 
@@ -243,8 +238,6 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     (void)num_vertices;
     (void)instance_count;
 }
-
-uint32_t nt_gfx_get_frame_draw_calls(void) { return 0; }
 
 // Signature follows the public readback API.
 // NOLINTNEXTLINE(readability-non-const-parameter)
