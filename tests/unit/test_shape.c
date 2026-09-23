@@ -437,7 +437,7 @@ void test_shape_failed_restore_flush_discards_staging(void) {
 
     assert_shape_staging_empty();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 void test_shape_failed_restore_preserves_settings(void) {
@@ -525,7 +525,7 @@ void test_shape_failed_restore_instance_staging_stays_bounded(void) {
         assert_shape_staging_empty();
     }
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 void test_shape_failed_restore_geometry_staging_stays_bounded(void) {
@@ -570,7 +570,7 @@ void test_shape_failed_restore_geometry_staging_stays_bounded(void) {
     nt_shape_renderer_flush();
     assert_shape_staging_empty();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 int main(void) {

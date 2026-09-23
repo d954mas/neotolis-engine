@@ -449,7 +449,7 @@ static void test_payloads_before_render_land_in_their_tick(void) {
     nt_gfx_counters_t live = g_nt_gfx.counters;
     TEST_ASSERT_EQUAL_UINT64(2, live.buffer_upload_calls);
     TEST_ASSERT_EQUAL_UINT64(76, live.buffer_upload_bytes);
-    TEST_ASSERT_EQUAL_UINT32(0, live.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&live));
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
     nt_gfx_end_tick();

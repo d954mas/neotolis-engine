@@ -665,14 +665,13 @@ typedef enum { NT_GFX_GL_NONE = 0, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_ENUM_) NT_GFX_
 /* All fields are values. Submitted geometry is not shader/GPU work.
  * Unavailable fields (see availability) stay zero: unmeasured, not measured zero.
  * Vertices/indices multiply by instance count; instances counts instanced draws only.
- * accepted[] counts public operations by nt_gfx_operation_t that ended ACCEPTED;
- * gl[] counts every issued GL call by nt_gfx_gl_call_t; uploads count calls with a
+ * accepted[] counts public operations by nt_gfx_operation_t that ended ACCEPTED,
+ * nested ones included (render-target attachments, default samplers, cascaded
+ * destroys); gl[] counts every issued GL call by nt_gfx_gl_call_t; uploads count calls with a
  * non-NULL payload and their bytes (NULL storage and generated mips excluded). */
 typedef struct {
     uint64_t frame_sequence;
     uint32_t availability;
-    uint32_t draw_calls;
-    uint32_t draw_calls_instanced;
     uint64_t vertices;
     uint64_t indices;
     uint64_t instances; /* instanced draws only */
@@ -683,6 +682,11 @@ typedef struct {
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END reason was ACCEPTED */
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
+
+/* Accepted draw calls of every kind. */
+static inline uint32_t nt_gfx_draw_calls(const nt_gfx_counters_t *c) {
+    return c->accepted[NT_GFX_OP_DRAW] + c->accepted[NT_GFX_OP_DRAW_INSTANCED] + c->accepted[NT_GFX_OP_DRAW_INDEXED] + c->accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED];
+}
 
 typedef struct {
     nt_gfx_counters_t counters;
@@ -737,9 +741,9 @@ typedef enum {
  * DEFINITION describe inherited or resource state and never represent issued
  * calls; ARGUMENT carries per-element request arguments of the enclosing BEGIN.
  * object is a full typed frontend handle; raw names live only in backend data
- * and are scoped by context_sequence. Unknown inherited values are explicit. */
+ * and belong to the view's context_sequence until an ACCEPTED CONTEXT result,
+ * which starts the next context. Unknown inherited values are explicit. */
 typedef struct {
-    uint64_t context_sequence;
     nt_gfx_event_kind_t kind;
     nt_gfx_operation_t operation;
     nt_gfx_object_kind_t object_kind;
@@ -780,10 +784,11 @@ typedef struct {
     } data;
 } nt_gfx_event_t;
 
-_Static_assert(sizeof(nt_gfx_event_t) == 112, "capture record layout must remain explicit");
+_Static_assert(sizeof(nt_gfx_event_t) == 104, "capture record layout must remain explicit");
 
 typedef struct {
     uint64_t frame_sequence;
+    uint64_t context_sequence; /* GL context generation when the capture started */
     nt_gfx_backend_kind_t backend;
     bool available;
     bool overflow;

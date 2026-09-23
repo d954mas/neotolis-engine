@@ -496,7 +496,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
     s_observe_values[2] = snapshot.status;
-    s_observe_values[3] = snapshot.counters.draw_calls;
+    s_observe_values[3] = nt_gfx_draw_calls(&snapshot.counters);
     s_observe_values[4] = (double)preparation.buffer_upload_bytes;
     s_observe_values[5] = (double)preparation.texture_upload_bytes;
     s_observe_values[6] = snapshot.counters.gl[NT_GFX_GL_glUseProgram];
@@ -978,7 +978,7 @@ static void frame(void) {
 #ifdef __EMSCRIPTEN__
         /* Count frames that actually submitted geometry: reaching the draw path
          * proves nothing if every renderer skipped. */
-        if (g_nt_gfx.counters.draw_calls > 0U) {
+        if (nt_gfx_draw_calls(&g_nt_gfx.counters) > 0U) {
             s_nt_drawn_frames++;
         }
 #endif

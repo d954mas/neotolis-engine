@@ -38,7 +38,7 @@ UI/gfx interfaces and the `nt_resource` target publish numeric 0/1 values.
 Gfx counters (always built) and capture are described in [frame observation](../render/architecture.md#frame-observation). The devapi `render.info` command runs early
 in a tick, so its `draw_calls` is the last closed tick's
 (`g_nt_gfx.last_frame`). The `nt_metrics` `draw_calls` channel is whatever the
-host pushes: example hosts push `g_nt_gfx.counters.draw_calls` after rendering,
+host pushes: example hosts push `nt_gfx_draw_calls(&g_nt_gfx.counters)` after rendering,
 inside the same tick.
 The resource header does not require the flag; only its implementation checks it.
 No producer depends

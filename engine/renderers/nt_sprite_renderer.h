@@ -207,7 +207,7 @@ uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void);
 /* Draw commands staged but not yet flushed. */
 uint32_t nt_sprite_renderer_test_cmd_count(void);
-/* Per-renderer test counter (separate from g_nt_gfx.counters.draw_calls). */
+/* Per-renderer test counter (separate from nt_gfx_draw_calls). */
 uint32_t nt_sprite_renderer_test_draw_call_count(void);
 /* Current staging vertex_count (resets on flush). */
 uint32_t nt_sprite_renderer_test_vertex_count(void);

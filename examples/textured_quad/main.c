@@ -368,8 +368,8 @@ static void frame(void) {
         /* One-time log to verify batching */
         static bool s_stats_logged;
         if (!s_stats_logged) {
-            nt_log_info(">> Render stats: %u draw calls, %u instanced, %" PRIu64 " instances (from %u items)", g_nt_gfx.counters.draw_calls, g_nt_gfx.counters.draw_calls_instanced,
-                        g_nt_gfx.counters.instances, item_count);
+            nt_log_info(">> Render stats: %u draw calls, %u instanced, %" PRIu64 " instances (from %u items)", nt_gfx_draw_calls(&g_nt_gfx.counters),
+                        g_nt_gfx.counters.accepted[NT_GFX_OP_DRAW_INSTANCED] + g_nt_gfx.counters.accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED], g_nt_gfx.counters.instances, item_count);
             s_stats_logged = true;
         }
     }

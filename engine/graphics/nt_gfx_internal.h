@@ -15,7 +15,7 @@ extern nt_gfx_observation_t g_nt_gfx_observation;
 
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
-    uint64_t context_sequence;
+    uint64_t context_sequence; /* GL context generation; advances on each successful restore */
     bool requested;
     bool armed; /* this tick records, starting at its first operation */
     bool recording;
@@ -58,7 +58,6 @@ static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
     }
     nt_gfx_event_t *event = &capture->events[capture->view.count];
     memset(event, 0, sizeof(*event));
-    event->context_sequence = capture->context_sequence;
     event->kind = NT_GFX_EVENT_BACKEND;
     event->operation = NT_GFX_OP_STATE;
     event->detail = (uint32_t)call;
@@ -76,7 +75,6 @@ static inline void nt_gfx_capture_commit_call(void) {
         if (nt_gfx_capture_accepts()) {                                                                                                                                                                \
             nt_gfx_event_t event;                                                                                                                                                                      \
             memset(&event, 0, sizeof(event));                                                                                                                                                          \
-            event.context_sequence = g_nt_gfx_capture.context_sequence;                                                                                                                                \
             event.kind = (event_kind);                                                                                                                                                                 \
             event.operation = (event_operation);                                                                                                                                                       \
             __VA_ARGS__;                                                                                                                                                                               \

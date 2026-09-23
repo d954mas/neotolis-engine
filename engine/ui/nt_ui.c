@@ -1915,7 +1915,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     nt_ui_walk_counters_t counters = {0};
 
     /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
-    const uint32_t calls_at_entry = g_nt_gfx.counters.draw_calls;
+    const uint32_t calls_at_entry = nt_gfx_draw_calls(&g_nt_gfx.counters);
     // #endregion
 
     // #region viewport-bind
@@ -2059,7 +2059,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     nt_gfx_set_scissor_enabled(false);
 
     /* Guard against a CUSTOM handler resetting the gfx counter → unsigned wrap. */
-    const uint32_t calls_after = g_nt_gfx.counters.draw_calls;
+    const uint32_t calls_after = nt_gfx_draw_calls(&g_nt_gfx.counters);
     NT_ASSERT(calls_after >= calls_at_entry && "nt_ui_walk: frame draw-call counter went backwards");
     if (update_metrics) {
         ctx->last_walk_draw_call_delta = calls_after - calls_at_entry;

@@ -491,12 +491,13 @@ static void frame(void) {
         float avg = s_dt_sum / (float)s_dt_count;
         float render_avg = s_render_sum / (float)s_dt_count;
         const nt_gfx_counters_t stats = g_nt_gfx.last_frame.counters; /* previous tick; this one has not drawn yet */
-        uint32_t batch_dc = stats.draw_calls - stats.draw_calls_instanced;
+        const uint32_t inst_dc = stats.accepted[NT_GFX_OP_DRAW_INSTANCED] + stats.accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED];
+        uint32_t batch_dc = nt_gfx_draw_calls(&stats) - inst_dc;
         uint64_t tris = stats.indices / 3;
         printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f\n"
                "        dc=%u (batch=%u inst=%u)  obj=%" PRIu64 "  verts=%" PRIu64 "  tris=%" PRIu64 "  idx=%" PRIu64 "\n",
-               s_shape_count, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)render_avg, (double)s_render_max, (double)(1.0F / avg), stats.draw_calls, batch_dc,
-               stats.draw_calls_instanced, stats.instances, stats.vertices, tris, stats.indices);
+               s_shape_count, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)render_avg, (double)s_render_max, (double)(1.0F / avg), nt_gfx_draw_calls(&stats), batch_dc, inst_dc,
+               stats.instances, stats.vertices, tris, stats.indices);
         s_dt_max = 0.0F;
         s_dt_sum = 0.0F;
         s_dt_count = 0;

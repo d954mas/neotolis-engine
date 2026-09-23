@@ -342,6 +342,7 @@ void nt_gfx_capture_start(void) {
     g_nt_gfx_capture.recording = true;
     g_nt_gfx_capture.view = (nt_gfx_capture_view_t){
         .frame_sequence = g_nt_gfx.counters.frame_sequence,
+        .context_sequence = g_nt_gfx_capture.context_sequence,
         .phase = NT_GFX_CAPTURE_RECORDING,
         .status = NT_GFX_FRAME_RECORDING,
     };
@@ -809,11 +810,17 @@ static nt_gfx_event_reason_t begin_frame(void) {
     }
 
     if (g_nt_gfx.context_lost) {
+        /* The whole restore is one operation; render-target recreations nest inside it. */
+        NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
         if (!nt_gfx_backend_recreate_all_resources()) {
+            NT_GFX_END(NT_GFX_REASON_BACKEND_FAILURE);
             s_gfx.context_restore_retry = true;
             NT_LOG_ERROR("WebGL context restore failed");
             return NT_GFX_REASON_UNREADY;
         }
+#if NT_GFX_CAPTURE_ENABLED
+        g_nt_gfx_capture.context_sequence++; /* the ACCEPTED CONTEXT result marks the switch in the stream */
+#endif
         g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
         s_gfx.context_restore_retry = false;
         g_nt_gfx.context_lost = false;
@@ -827,6 +834,7 @@ static nt_gfx_event_reason_t begin_frame(void) {
                 }
             }
         }
+        NT_GFX_END(NT_GFX_REASON_ACCEPTED);
         if (render_targets_restored) {
             NT_LOG_INFO("WebGL context restored -- render targets restored, game must re-create other resources");
         } else {
@@ -2432,7 +2440,6 @@ static void assert_instance_attribs_pointed(void) {
  * the caller draws indexed on a non-indexed input. */
 static void assert_indexed_draw_has_index_type(void) { NT_ASSERT(s_gfx.bound_index_type != NT_INDEX_NONE && "draw_indexed: bound vertex input is non-indexed"); }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic records and capacity assertions expand at owning sites
 static nt_gfx_event_reason_t draw(uint32_t first_vertex, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
@@ -2455,9 +2462,6 @@ static nt_gfx_event_reason_t draw(uint32_t first_vertex, uint32_t num_vertices) 
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
-    NT_ASSERT(g_nt_gfx.counters.draw_calls != UINT32_MAX);
-    g_nt_gfx.counters.draw_calls++;
-    NT_ASSERT(g_nt_gfx.counters.vertices <= UINT64_MAX - num_vertices);
     g_nt_gfx.counters.vertices += num_vertices;
     nt_gfx_backend_draw(first_vertex, num_vertices);
     return NT_GFX_REASON_ACCEPTED;
@@ -2469,7 +2473,6 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     NT_GFX_END(draw(first_vertex, num_vertices));
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic records and capacity assertions expand at owning sites
 static nt_gfx_event_reason_t draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
@@ -2492,13 +2495,7 @@ static nt_gfx_event_reason_t draw_instanced(uint32_t first_vertex, uint32_t num_
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
-    NT_ASSERT(g_nt_gfx.counters.draw_calls != UINT32_MAX);
-    g_nt_gfx.counters.draw_calls++;
-    NT_ASSERT(g_nt_gfx.counters.draw_calls_instanced != UINT32_MAX);
-    g_nt_gfx.counters.draw_calls_instanced++;
-    NT_ASSERT(g_nt_gfx.counters.vertices <= UINT64_MAX - (uint64_t)num_vertices * instance_count);
     g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
-    NT_ASSERT(g_nt_gfx.counters.instances <= UINT64_MAX - instance_count);
     g_nt_gfx.counters.instances += instance_count;
     nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
     return NT_GFX_REASON_ACCEPTED;
@@ -2510,7 +2507,6 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     NT_GFX_END(draw_instanced(first_vertex, num_vertices, instance_count));
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic records and capacity assertions expand at owning sites
 static nt_gfx_event_reason_t draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
@@ -2534,11 +2530,7 @@ static nt_gfx_event_reason_t draw_indexed(uint32_t first_index, uint32_t num_ind
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();
 
-    NT_ASSERT(g_nt_gfx.counters.draw_calls != UINT32_MAX);
-    g_nt_gfx.counters.draw_calls++;
-    NT_ASSERT(g_nt_gfx.counters.vertices <= UINT64_MAX - num_vertices);
     g_nt_gfx.counters.vertices += num_vertices;
-    NT_ASSERT(g_nt_gfx.counters.indices <= UINT64_MAX - num_indices);
     g_nt_gfx.counters.indices += num_indices;
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
     return NT_GFX_REASON_ACCEPTED;
@@ -2550,7 +2542,6 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     NT_GFX_END(draw_indexed(first_index, num_indices, num_vertices));
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic records and capacity assertions expand at owning sites
 static nt_gfx_event_reason_t draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
@@ -2574,15 +2565,8 @@ static nt_gfx_event_reason_t draw_indexed_instanced(uint32_t first_index, uint32
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();
 
-    NT_ASSERT(g_nt_gfx.counters.draw_calls != UINT32_MAX);
-    g_nt_gfx.counters.draw_calls++;
-    NT_ASSERT(g_nt_gfx.counters.draw_calls_instanced != UINT32_MAX);
-    g_nt_gfx.counters.draw_calls_instanced++;
-    NT_ASSERT(g_nt_gfx.counters.vertices <= UINT64_MAX - (uint64_t)num_vertices * instance_count);
     g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
-    NT_ASSERT(g_nt_gfx.counters.indices <= UINT64_MAX - (uint64_t)num_indices * instance_count);
     g_nt_gfx.counters.indices += (uint64_t)num_indices * instance_count;
-    NT_ASSERT(g_nt_gfx.counters.instances <= UINT64_MAX - instance_count);
     g_nt_gfx.counters.instances += instance_count;
     nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
     return NT_GFX_REASON_ACCEPTED;

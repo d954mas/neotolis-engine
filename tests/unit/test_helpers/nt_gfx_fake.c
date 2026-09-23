@@ -737,9 +737,6 @@ bool nt_gfx_backend_recreate_all_resources(void) {
         return false;
     }
     s_fake_backend_missing = false;
-#if NT_GFX_CAPTURE_ENABLED
-    g_nt_gfx_capture.context_sequence++;
-#endif
     return true;
 }
 

@@ -403,7 +403,7 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
 
     TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_fake_render_target_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.counters));
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pass_target_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(temp), nt_gfx_fake_pass_target_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(dest), nt_gfx_fake_pass_target_at(1));

@@ -539,7 +539,7 @@ static void frame(void) {
 #else
         .gpu_ms = -1.0F,
 #endif
-        .draw_calls = g_nt_gfx.counters.draw_calls,
+        .draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters),
         .mem_used = s_mem_used,
     };
     nt_metrics_sample(&mf);

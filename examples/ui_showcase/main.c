@@ -3861,7 +3861,7 @@ static void frame(void) {
 #else
         .gpu_ms = -1.0F,
 #endif
-        .draw_calls = g_nt_gfx.counters.draw_calls,
+        .draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters),
         .mem_used = s_mem_used,
         .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
         .scratch_used = (uint32_t)nt_mem_scratch_used(),

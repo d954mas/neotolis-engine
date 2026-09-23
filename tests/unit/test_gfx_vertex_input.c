@@ -372,7 +372,7 @@ void test_draw_indexed_asserts_on_non_indexed_vi(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(indexed);
     nt_gfx_draw_indexed(0, 3, 3); /* index type captured from the IBO */
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     /* A non-indexed vertex input CLEARS the index type -- indexed draw traps
      * instead of silently reusing the previous binding's type. */
     nt_gfx_bind_vertex_input(non_indexed);
@@ -397,7 +397,7 @@ void test_instanced_draw_asserts_before_instance_pointing(void) {
     EXPECT_ASSERT(nt_gfx_draw(0, 3));
     nt_gfx_bind_instance_buffer(stream, 0);
     nt_gfx_draw_instanced(0, 3, 2);
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -410,7 +410,7 @@ void test_attributeless_vi_draws(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3); /* gl_VertexID path: no buffers, no attribs */
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -440,7 +440,7 @@ void test_pipeline_and_vertex_input_bind_orthogonally(void) {
     nt_gfx_bind_vertex_input(vi_plain);
     nt_gfx_draw(0, 3);
 
-    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -470,7 +470,7 @@ void test_draw_without_vertex_input_asserts(void) {
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 3, 3));
     EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 1));
     EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 3, 3, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
@@ -500,7 +500,7 @@ void test_destroying_instance_buffer_unpoints_dependents(void) {
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_bind_instance_buffer(stream, 0);
     nt_gfx_draw_instanced(0, 3, 2);
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.draw_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_destroy_buffer(stream);
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi)); /* instance buffers do not cascade-destroy */

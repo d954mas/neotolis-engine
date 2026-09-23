@@ -408,7 +408,9 @@ A tick whose begin_frame restores a lost context and then completes is COMPLETE.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
-multiplication and accumulation asserts overflow. Vertices/indices are submitted
+multiplication, and uint64 sums cannot overflow within a tick. Draw calls are
+not a separate field: `nt_gfx_draw_calls()` sums the four accepted draw
+operations. Vertices/indices are submitted
 counts, multiplied by instance count for instanced calls; instances counts only
 instances in instanced calls. These are not rasterized triangles or
 vertex-shader invocations.
@@ -439,15 +441,24 @@ mip/subrectangle, and failed creates keep already-issued work.
 `accepted[]` counts public operations by `nt_gfx_operation_t` whose END reason
 was ACCEPTED, in every build: every public operation, readback and GPU timer
 segment calls included, is one BEGIN/END pair, and END is the only place that
-counts it. Cache hits, rejections and losses are not counted there; texture
+counts it. It counts every operation, nested ones included (render-target
+attachments, default samplers, cascaded destroys). Cache hits, rejections and
+losses are not counted there; texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
 Sequence and context identifiers reset at initialization.
 
+A context restore is one CONTEXT operation inside the begin_frame that performs
+it; render-target recreations nest in it. It ends ACCEPTED when the context came
+back and BACKEND_FAILURE when recreation failed. The view's `context_sequence`
+is the GL context generation when the capture started; each ACCEPTED CONTEXT
+result in the stream starts the next generation, so raw GL names before and
+after it belong to different contexts.
+
 Command recording starts disabled. `nt_gfx_desc_t.capture_capacity` reserves one
 event array at init (default zero); enabling capture without capacity asserts.
 There is no growth or allocation while recording. Each pointer-free POD event
-is 112 bytes, including padding; 16384 records reserve 1.75 MiB. Other storage
+is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Other storage
 consists of fixed control state and counter snapshots, with no second event array.
 All record bytes are initialized before publication. A recorded tick starts at
 its first gfx work (or at its end_tick if it has none) and first snapshots
@@ -482,7 +493,7 @@ Recording changes inside a tick apply to the next tick.
 The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
 values are named after the issued function (`NT_GFX_GL_glBindVertexArray`), and
-carry raw GL names scoped to `context_sequence`; their operation is always STATE,
+carry raw GL names of one GL context; their operation is always STATE,
 the enclosing BEGIN names the frontend operation. Each issued call is recorded
 exactly once, at the call site, by the same statement that issues it.
 `backend.args` follows the GL integer argument order; pointer payload, readback
