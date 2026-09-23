@@ -709,7 +709,6 @@ typedef enum {
     NT_GFX_REASON_BACKEND_FAILURE,
     NT_GFX_REASON_CAPACITY,
     NT_GFX_REASON_UNKNOWN,
-    NT_GFX_REASON_EMPTY,
 } nt_gfx_event_reason_t;
 
 /* Pointer-free records. Each public operation is one BEGIN (request) and one

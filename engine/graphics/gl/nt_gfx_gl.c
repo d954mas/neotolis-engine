@@ -223,53 +223,57 @@ static struct {
 #if NT_GFX_CAPTURE_ENABLED
 static void capture_program_definition(uint32_t i) {
     const nt_gfx_gl_program_t *program = &s_programs[i];
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_PROGRAM; event.data.backend.args[0] = i; event.data.backend.args[1] = program->program;);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_PROGRAM; event->data.backend.args[0] = i; event->data.backend.args[1] = program->program;);
     for (uint32_t u = 0; u < program->uniform_count; u++) {
         if ((program->vec4_mask & (1U << u)) == 0) {
             continue;
         }
         NT_GFX_RECORD(
-            NT_GFX_EVENT_INITIAL, NT_GFX_OP_UNIFORM_VEC4, event.data.backend.args[0] = i; event.data.backend.args[1] = program->uniforms[u].name_hash;
-            event.data.backend.args[2] = (uint32_t)program->uniforms[u].location; if ((program->vec4_valid & (1U << u)) != 0) {
-                memcpy(event.data.backend.values, program->vec4_values[u], sizeof(event.data.backend.values));
-            } else { event.reason = NT_GFX_REASON_UNKNOWN; });
+            NT_GFX_EVENT_INITIAL, NT_GFX_OP_UNIFORM_VEC4, event->data.backend.args[0] = i; event->data.backend.args[1] = program->uniforms[u].name_hash;
+            event->data.backend.args[2] = (uint32_t)program->uniforms[u].location; if ((program->vec4_valid & (1U << u)) != 0) {
+                memcpy(event->data.backend.values, program->vec4_values[u], sizeof(event->data.backend.values));
+            } else { event->reason = NT_GFX_REASON_UNKNOWN; });
     }
     for (uint32_t u = 0; u < program->sampler_count; u++) {
-        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SAMPLER, event.data.backend.args[0] = i; event.data.backend.args[1] = program->sampler_units[u].name_hash;
-                      event.data.backend.args[2] = (uint32_t)program->sampler_units[u].location; event.data.backend.args[3] = u; event.data.backend.args[4] = program->sampler_units[u].sampler_class;);
+        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SAMPLER, event->data.backend.args[0] = i; event->data.backend.args[1] = program->sampler_units[u].name_hash;
+                      event->data.backend.args[2] = (uint32_t)program->sampler_units[u].location; event->data.backend.args[3] = u;
+                      event->data.backend.args[4] = program->sampler_units[u].sampler_class;);
     }
+}
+
+static void capture_pipeline_definition(uint32_t slot) {
+    const nt_gfx_gl_pipeline_t *pip = &s_pipelines[slot];
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_PIPELINE, event->detail = slot; event->data.state.integers[0] = pip->program_slot; event->data.state.integers[1] = pip->depth_test_enabled;
+                  event->data.state.integers[2] = pip->depth_write_enabled; event->data.state.integers[3] = pip->depth_func; event->data.state.integers[4] = pip->cull_mode;
+                  event->data.state.integers[5] = pip->blend_enabled; event->data.state.integers[6] = pip->blend_src_rgb; event->data.state.integers[7] = pip->blend_dst_rgb;
+                  event->data.state.integers[8] = pip->blend_src_alpha; event->data.state.integers[9] = pip->blend_dst_alpha; event->data.state.integers[10] = pip->blend_op_rgb;
+                  event->data.state.integers[11] = pip->blend_op_alpha; event->data.state.integers[12] = pip->polygon_offset_enabled;
+                  memcpy(event->data.state.values, pip->blend_constant_color, 4 * sizeof(float)); event->data.state.values[4] = pip->polygon_offset_factor;
+                  event->data.state.values[5] = pip->polygon_offset_units;);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded snapshots of separate backend tables
 void nt_gfx_backend_capture_initial_state(void) {
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event.data.backend.args[0] = s_gl_cache.program; event.data.backend.args[1] = s_gl_cache.vao; event.data.backend.args[2] = s_bound_framebuffer;
-                  event.data.backend.args[3] = s_gl_cache.active_texture_unit; event.data.backend.args[4] = g_nt_window.fb_width; event.data.backend.args[5] = g_nt_window.fb_height;
-                  event.data.backend.args[6] = s_ebo_upload_vao; event.detail = NT_GFX_INITIAL_BACKEND;);
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_VIEWPORT, for (uint32_t i = 0; i < 4; i++) { event.data.state.integers[i] = (uint32_t)s_gl_cache.viewport[i]; });
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_PASS, memcpy(event.data.pass.color, s_gl_cache.clear_color, sizeof(event.data.pass.color)); event.data.pass.depth = s_gl_cache.clear_depth;);
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_PIPELINE, event.data.state.integers[0] = s_gl_cache.program; event.data.state.integers[1] = s_gl_cache.depth_test_enabled;
-                  event.data.state.integers[2] = s_gl_cache.depth_write_enabled; event.data.state.integers[3] = s_gl_cache.depth_func; event.data.state.integers[4] = s_gl_cache.cull_mode;
-                  event.data.state.integers[5] = s_gl_cache.blend_enabled; event.data.state.integers[6] = s_gl_cache.blend_src_rgb; event.data.state.integers[7] = s_gl_cache.blend_dst_rgb;
-                  event.data.state.integers[8] = s_gl_cache.blend_src_alpha; event.data.state.integers[9] = s_gl_cache.blend_dst_alpha; event.data.state.integers[10] = s_gl_cache.blend_op_rgb;
-                  event.data.state.integers[11] = s_gl_cache.blend_op_alpha; event.data.state.integers[12] = s_gl_cache.polygon_offset_enabled;
-                  memcpy(event.data.state.values, s_gl_cache.blend_constant_color, 4 * sizeof(float)); event.data.state.values[4] = s_gl_cache.polygon_offset_factor;
-                  event.data.state.values[5] = s_gl_cache.polygon_offset_units;);
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event->data.backend.args[0] = s_gl_cache.program; event->data.backend.args[1] = s_gl_cache.vao;
+                  event->data.backend.args[2] = s_bound_framebuffer; event->data.backend.args[3] = s_gl_cache.active_texture_unit; event->data.backend.args[4] = g_nt_window.fb_width;
+                  event->data.backend.args[5] = g_nt_window.fb_height; event->data.backend.args[6] = s_ebo_upload_vao; event->detail = NT_GFX_INITIAL_BACKEND;);
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_VIEWPORT, for (uint32_t i = 0; i < 4; i++) { event->data.state.integers[i] = (uint32_t)s_gl_cache.viewport[i]; });
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_PASS, memcpy(event->data.pass.color, s_gl_cache.clear_color, sizeof(event->data.pass.color)); event->data.pass.depth = s_gl_cache.clear_depth;);
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_PIPELINE, event->data.state.integers[0] = s_gl_cache.program; event->data.state.integers[1] = s_gl_cache.depth_test_enabled;
+                  event->data.state.integers[2] = s_gl_cache.depth_write_enabled; event->data.state.integers[3] = s_gl_cache.depth_func; event->data.state.integers[4] = s_gl_cache.cull_mode;
+                  event->data.state.integers[5] = s_gl_cache.blend_enabled; event->data.state.integers[6] = s_gl_cache.blend_src_rgb; event->data.state.integers[7] = s_gl_cache.blend_dst_rgb;
+                  event->data.state.integers[8] = s_gl_cache.blend_src_alpha; event->data.state.integers[9] = s_gl_cache.blend_dst_alpha; event->data.state.integers[10] = s_gl_cache.blend_op_rgb;
+                  event->data.state.integers[11] = s_gl_cache.blend_op_alpha; event->data.state.integers[12] = s_gl_cache.polygon_offset_enabled;
+                  memcpy(event->data.state.values, s_gl_cache.blend_constant_color, 4 * sizeof(float)); event->data.state.values[4] = s_gl_cache.polygon_offset_factor;
+                  event->data.state.values[5] = s_gl_cache.polygon_offset_units;);
     for (uint32_t i = 1; i <= s_init_desc.max_pipelines; i++) {
-        if (s_pipelines[i].program_slot == 0) {
-            continue;
+        if (s_pipelines[i].program_slot != 0) {
+            capture_pipeline_definition(i);
         }
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_PIPELINE, event.detail = i; event.data.state.integers[0] = s_pipelines[i].program_slot;
-                      event.data.state.integers[1] = s_pipelines[i].depth_test_enabled; event.data.state.integers[2] = s_pipelines[i].depth_write_enabled;
-                      event.data.state.integers[3] = s_pipelines[i].depth_func; event.data.state.integers[4] = s_pipelines[i].cull_mode; event.data.state.integers[5] = s_pipelines[i].blend_enabled;
-                      event.data.state.integers[6] = s_pipelines[i].blend_src_rgb; event.data.state.integers[7] = s_pipelines[i].blend_dst_rgb;
-                      event.data.state.integers[8] = s_pipelines[i].blend_src_alpha; event.data.state.integers[9] = s_pipelines[i].blend_dst_alpha;
-                      event.data.state.integers[10] = s_pipelines[i].blend_op_rgb; event.data.state.integers[11] = s_pipelines[i].blend_op_alpha;
-                      event.data.state.integers[12] = s_pipelines[i].polygon_offset_enabled; memcpy(event.data.state.values, s_pipelines[i].blend_constant_color, 4 * sizeof(float));
-                      event.data.state.values[4] = s_pipelines[i].polygon_offset_factor; event.data.state.values[5] = s_pipelines[i].polygon_offset_units;);
     }
     for (uint32_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
-        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_TEXTURE, event.data.backend.args[0] = unit; event.data.backend.args[1] = s_gl_cache.bound_textures[unit];
-                      event.data.backend.args[2] = s_gl_cache.bound_samplers[unit];);
+        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_TEXTURE, event->data.backend.args[0] = unit; event->data.backend.args[1] = s_gl_cache.bound_textures[unit];
+                      event->data.backend.args[2] = s_gl_cache.bound_samplers[unit];);
     }
     for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
         const nt_gfx_gl_program_t *program = &s_programs[i];
@@ -282,32 +286,32 @@ void nt_gfx_backend_capture_initial_state(void) {
         if (s_buffer_gl[i] == 0) {
             continue;
         }
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_BUFFER; event.data.backend.args[0] = i; event.data.backend.args[1] = s_buffer_gl[i];);
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_BUFFER; event->data.backend.args[0] = i; event->data.backend.args[1] = s_buffer_gl[i];);
     }
     for (uint32_t i = 1; i <= s_init_desc.max_textures; i++) {
         if (s_texture_gl[i] == 0) {
             continue;
         }
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_TEXTURE; event.data.backend.args[0] = i; event.data.backend.args[1] = s_texture_gl[i];);
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_TEXTURE; event->data.backend.args[0] = i; event->data.backend.args[1] = s_texture_gl[i];);
     }
     for (uint32_t i = 1; i <= s_init_desc.max_vertex_inputs; i++) {
         if (s_vertex_inputs[i].vao == 0) {
             continue;
         }
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_VERTEX_INPUT; event.data.backend.args[0] = i; event.data.backend.args[1] = s_vertex_inputs[i].vao;);
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = i; event->data.backend.args[1] = s_vertex_inputs[i].vao;);
         for (uint32_t a = 0; a < s_vertex_inputs[i].instance_attr_count; a++) {
             const nt_vertex_attr_t *attr = &s_vertex_inputs[i].instance_attrs[a];
-            NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event.detail = i; event.reason = NT_GFX_REASON_UNKNOWN; event.data.attribute.location = attr->location;
-                          event.data.attribute.type = (uint32_t)attr->type; event.data.attribute.count = attr->count; event.data.attribute.normalized = attr->normalized;
-                          event.data.attribute.offset = attr->offset; event.data.attribute.stride = s_vertex_inputs[i].instance_stride; event.data.attribute.divisor = 1;);
+            NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->detail = i; event->reason = NT_GFX_REASON_UNKNOWN; event->data.attribute.location = attr->location;
+                          event->data.attribute.type = (uint32_t)attr->type; event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized;
+                          event->data.attribute.offset = attr->offset; event->data.attribute.stride = s_vertex_inputs[i].instance_stride; event->data.attribute.divisor = 1;);
         }
     }
     for (uint32_t i = 1; i <= s_init_desc.max_render_targets; i++) {
         if (s_render_targets[i].fbo == 0) {
             continue;
         }
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_RENDER_TARGET; event.data.backend.args[0] = i; event.data.backend.args[1] = s_render_targets[i].fbo;
-                      event.data.backend.args[2] = s_render_targets[i].depth_rbo;);
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = i; event->data.backend.args[1] = s_render_targets[i].fbo;
+                      event->data.backend.args[2] = s_render_targets[i].depth_rbo;);
     }
 }
 #endif
@@ -1004,7 +1008,7 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         NT_GL(glUseProgram, program);
         s_gl_cache.program = program;
     } else {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_PIPELINE, event.reason = NT_GFX_REASON_CACHE; event.detail = NT_GFX_GL_glUseProgram; event.data.backend.args[0] = program;);
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_PIPELINE, event->reason = NT_GFX_REASON_CACHE; event->detail = NT_GFX_GL_glUseProgram; event->data.backend.args[0] = program;);
     }
 
     /* Depth test */
@@ -1084,7 +1088,7 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
     int index = program_get_uniform_index(program_backend, name_hash);
     if (index < 0) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_MAT4, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = name_hash; event.data.binding.secondary = program_backend;);
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_MAT4, event->reason = NT_GFX_REASON_INACTIVE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
         return;
     }
     NT_GL_UNIFORM(glUniformMatrix4fv, 16, s_programs[program_backend].uniforms[index].location, 1, GL_FALSE, matrix);
@@ -1093,13 +1097,13 @@ void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_has
 void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec) {
     int index = program_get_uniform_index(program_backend, name_hash);
     if (index < 0) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_VEC4, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = name_hash; event.data.binding.secondary = program_backend;);
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_VEC4, event->reason = NT_GFX_REASON_INACTIVE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
         return;
     }
     nt_gfx_gl_program_t *prog = &s_programs[program_backend];
     const uint16_t bit = (uint16_t)(1U << (uint32_t)index);
     if ((prog->vec4_valid & bit) != 0 && memcmp(prog->vec4_values[index], (const void *)vec, sizeof(prog->vec4_values[index])) == 0) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_VEC4, event.reason = NT_GFX_REASON_CACHE; event.data.binding.name = name_hash; event.data.binding.secondary = program_backend;);
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_VEC4, event->reason = NT_GFX_REASON_CACHE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
         return;
     }
     NT_GL_UNIFORM(glUniform4fv, 4, prog->uniforms[index].location, 1, vec);
@@ -1113,7 +1117,7 @@ void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_has
 void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val) {
     int index = program_get_uniform_index(program_backend, name_hash);
     if (index < 0) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_FLOAT, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = name_hash; event.data.binding.secondary = program_backend;);
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_FLOAT, event->reason = NT_GFX_REASON_INACTIVE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
         return;
     }
     NT_GL(glUniform1f, s_programs[program_backend].uniforms[index].location, val);
@@ -1126,7 +1130,7 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
         nt_gfx_sampler_info_t sampler_info = {0};
         const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
         NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_INT, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = name_hash; event.data.binding.secondary = program_backend;);
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_INT, event->reason = NT_GFX_REASON_INACTIVE; event->data.binding.name = name_hash; event->data.binding.secondary = program_backend;);
         return;
     }
     NT_GL(glUniform1i, s_programs[program_backend].uniforms[index].location, val);
@@ -1500,13 +1504,9 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->polygon_offset_factor = desc->polygon_offset_factor;
     pip->polygon_offset_units = desc->polygon_offset_units;
 
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_PIPELINE, event.detail = slot; event.data.state.integers[0] = pip->program_slot; event.data.state.integers[1] = pip->depth_test_enabled;
-                  event.data.state.integers[2] = pip->depth_write_enabled; event.data.state.integers[3] = pip->depth_func; event.data.state.integers[4] = pip->cull_mode;
-                  event.data.state.integers[5] = pip->blend_enabled; event.data.state.integers[6] = pip->blend_src_rgb; event.data.state.integers[7] = pip->blend_dst_rgb;
-                  event.data.state.integers[8] = pip->blend_src_alpha; event.data.state.integers[9] = pip->blend_dst_alpha; event.data.state.integers[10] = pip->blend_op_rgb;
-                  event.data.state.integers[11] = pip->blend_op_alpha; event.data.state.integers[12] = pip->polygon_offset_enabled;
-                  memcpy(event.data.state.values, pip->blend_constant_color, 4 * sizeof(float)); event.data.state.values[4] = pip->polygon_offset_factor;
-                  event.data.state.values[5] = pip->polygon_offset_units;);
+#if NT_GFX_CAPTURE_ENABLED
+    capture_pipeline_definition(slot);
+#endif
     return slot;
 }
 
@@ -1562,7 +1562,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     }
     s_vertex_inputs[slot].instance_attr_count = inst_count;
     s_vertex_inputs[slot].instance_stride = desc->instance_layout.stride;
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_VERTEX_INPUT; event.data.backend.args[0] = slot; event.data.backend.args[1] = vao;);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = slot; event->data.backend.args[1] = vao;);
     return slot;
 }
 
@@ -1591,7 +1591,7 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
         gl_bind_vao(vao);
         s_gl_cache.vao = vao;
     } else {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_VERTEX_INPUT, event.reason = NT_GFX_REASON_CACHE; event.detail = NT_GFX_GL_glBindVertexArray; event.data.backend.args[0] = vao;);
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_VERTEX_INPUT, event->reason = NT_GFX_REASON_CACHE; event->detail = NT_GFX_GL_glBindVertexArray; event->data.backend.args[0] = vao;);
     }
 }
 
@@ -1643,7 +1643,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
 
     s_buffer_gl[slot] = buf;
     s_buffer_targets[slot] = target;
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_BUFFER; event.data.backend.args[0] = slot; event.data.backend.args[1] = buf;);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_BUFFER; event->data.backend.args[0] = slot; event->data.backend.args[1] = buf;);
     return slot;
 }
 
@@ -1926,7 +1926,7 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
 
     s_texture_gl[slot] = tex;
 
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_TEXTURE; event.data.backend.args[0] = slot; event.data.backend.args[1] = tex;);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_TEXTURE; event->data.backend.args[0] = slot; event->data.backend.args[1] = tex;);
     return slot;
 }
 
@@ -2072,8 +2072,8 @@ uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc
     if (!nt_gfx_gl_create_render_target_in_slot(slot, desc, color_backend, depth_texture_backend)) {
         return 0;
     }
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_RENDER_TARGET; event.data.backend.args[0] = slot; event.data.backend.args[1] = s_render_targets[slot].fbo;
-                  event.data.backend.args[2] = s_render_targets[slot].depth_rbo;);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = slot; event->data.backend.args[1] = s_render_targets[slot].fbo;
+                  event->data.backend.args[2] = s_render_targets[slot].depth_rbo;);
     return slot;
 }
 
@@ -2163,20 +2163,20 @@ static void nt_gfx_gl_commit_render_target_resize(uint32_t backend_handle, uint3
     nt_gfx_gl_render_target_t old = s_render_targets[backend_handle];
     GLuint old_color = s_texture_gl[color_backend];
     s_texture_gl[color_backend] = staging->color;
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_TEXTURE; event.data.backend.args[0] = color_backend; event.data.backend.args[1] = staging->color;);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_TEXTURE; event->data.backend.args[0] = color_backend; event->data.backend.args[1] = staging->color;);
     nt_gfx_gl_forget_texture(old_color);
     NT_GL_DELETE(glDeleteTextures, 1, &old_color);
 
     if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
         GLuint old_depth = s_texture_gl[depth_backend];
         s_texture_gl[depth_backend] = staging->depth;
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_TEXTURE; event.data.backend.args[0] = depth_backend; event.data.backend.args[1] = staging->depth;);
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_TEXTURE; event->data.backend.args[0] = depth_backend; event->data.backend.args[1] = staging->depth;);
         nt_gfx_gl_forget_texture(old_depth);
         NT_GL_DELETE(glDeleteTextures, 1, &old_depth);
     }
     s_render_targets[backend_handle] = staging->target;
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_RENDER_TARGET; event.data.backend.args[0] = backend_handle; event.data.backend.args[1] = staging->target.fbo;
-                  event.data.backend.args[2] = staging->target.depth_rbo;);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = backend_handle;
+                  event->data.backend.args[1] = staging->target.fbo; event->data.backend.args[2] = staging->target.depth_rbo;);
     if (s_bound_framebuffer == old.fbo) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, staging->target.fbo);
         s_bound_framebuffer = staging->target.fbo;
@@ -2226,8 +2226,8 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && s_texture_gl[backend_handle] != 0 && "bind_texture: requires a live texture");
     GLuint tex = s_texture_gl[backend_handle];
     if (s_gl_cache.bound_textures[slot] == tex) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_TEXTURE, event.detail = NT_GFX_GL_glBindTexture; event.reason = NT_GFX_REASON_CACHE; event.data.backend.args[0] = tex;
-                      event.data.backend.args[1] = slot;);
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_TEXTURE, event->detail = NT_GFX_GL_glBindTexture; event->reason = NT_GFX_REASON_CACHE; event->data.backend.args[0] = tex;
+                      event->data.backend.args[1] = slot;);
         return; /* already bound to this slot */
     }
     GLenum unit = GL_TEXTURE0 + slot;
@@ -2281,8 +2281,8 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(backend_handle != 0 && "bind_sampler: sampling without a sampler object");
     GLuint sampler = (GLuint)backend_handle;
     if (s_gl_cache.bound_samplers[slot] == sampler) {
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_SAMPLER, event.detail = NT_GFX_GL_glBindSampler; event.reason = NT_GFX_REASON_CACHE; event.data.backend.args[0] = sampler;
-                      event.data.backend.args[1] = slot;);
+        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_SAMPLER, event->detail = NT_GFX_GL_glBindSampler; event->reason = NT_GFX_REASON_CACHE; event->data.backend.args[0] = sampler;
+                      event->data.backend.args[1] = slot;);
         return;
     }
     NT_GL(glBindSampler, slot, sampler);

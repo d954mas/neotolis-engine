@@ -23,30 +23,31 @@ extern nt_gfx_capture_state_t g_nt_gfx_capture;
 
 #if NT_GFX_CAPTURE_ENABLED
 void nt_gfx_backend_capture_initial_state(void);
-static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
+/* Zeroes the next record in place; the caller publishes it by advancing count.
+ * NULL when not recording or full; a full array marks overflow. */
+static inline nt_gfx_event_t *nt_gfx_capture_reserve(void) {
     nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+    if (!capture->recording || capture->view.overflow) {
+        return NULL;
+    }
     if (capture->view.count == capture->capacity) {
         capture->view.overflow = true;
-        return;
+        return NULL;
     }
-    memcpy(&capture->events[capture->view.count++], event, sizeof(*event));
+    nt_gfx_event_t *event = &capture->events[capture->view.count];
+    memset(event, 0, sizeof(*event));
+    return event;
 }
-static inline bool nt_gfx_capture_accepts(void) { return g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow; }
 /* Issued-call records are filled in place: open reserves the next slot, commit publishes it. */
 static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
     nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
     capture->call = NULL;
-    if (!nt_gfx_capture_accepts()) {
-        return;
-    }
-    if (capture->view.count == capture->capacity) {
-        capture->view.overflow = true;
+    nt_gfx_event_t *event = nt_gfx_capture_reserve();
+    if (event == NULL) {
         return;
     }
     capture->call_ints = 0;
     capture->call_floats = 0;
-    nt_gfx_event_t *event = &capture->events[capture->view.count];
-    memset(event, 0, sizeof(*event));
     event->kind = NT_GFX_EVENT_BACKEND;
     event->operation = NT_GFX_OP_STATE;
     event->detail = (uint32_t)call;
@@ -61,13 +62,12 @@ static inline void nt_gfx_capture_commit_call(void) {
 /* Arguments and record construction disappear entirely in capture-OFF builds. */
 #define NT_GFX_RECORD(event_kind, event_operation, ...)                                                                                                                                                \
     do {                                                                                                                                                                                               \
-        if (nt_gfx_capture_accepts()) {                                                                                                                                                                \
-            nt_gfx_event_t event;                                                                                                                                                                      \
-            memset(&event, 0, sizeof(event));                                                                                                                                                          \
-            event.kind = (event_kind);                                                                                                                                                                 \
-            event.operation = (event_operation);                                                                                                                                                       \
+        nt_gfx_event_t *const event = nt_gfx_capture_reserve();                                                                                                                                        \
+        if (event != NULL) {                                                                                                                                                                           \
+            event->kind = (event_kind);                                                                                                                                                                \
+            event->operation = (event_operation);                                                                                                                                                      \
             __VA_ARGS__;                                                                                                                                                                               \
-            nt_gfx_capture_append(&event);                                                                                                                                                             \
+            g_nt_gfx_capture.view.count++;                                                                                                                                                             \
         }                                                                                                                                                                                              \
     } while (0)
 #else
@@ -88,16 +88,16 @@ static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, n
     if (reason == NT_GFX_REASON_ACCEPTED) {
         g_nt_gfx.counters.accepted[scope->operation]++;
     }
-    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event.object_kind = scope->kind; event.object = object; event.reason = reason);
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event->object_kind = scope->kind; event->object = object; event->reason = reason);
 }
 
 #define NT_GFX_BEGIN(scope_op, scope_kind, scope_object)                                                                                                                                               \
     const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
-    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event.object_kind = (scope_kind); event.object = (scope_object))
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event->object_kind = (scope_kind); event->object = (scope_object))
 /* The trailing statements fill the request fields of the BEGIN record. */
 #define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...)                                                                                                                                  \
     const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
-    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event.object_kind = (scope_kind); event.object = (scope_object); __VA_ARGS__)
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event->object_kind = (scope_kind); event->object = (scope_object); __VA_ARGS__)
 #define NT_GFX_END(reason) nt_gfx_end_op(&nt_gfx_scope, nt_gfx_scope.object, (reason))
 /* Creators end with the handle they produced (zero on failure); the reason is
  * evaluated first so the implementation has written the handle. */

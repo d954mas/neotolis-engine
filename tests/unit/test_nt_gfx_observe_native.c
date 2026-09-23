@@ -244,6 +244,7 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     uint32_t names = 0;
     uint32_t units = 0;
     uint32_t skips = 0;
+    uint32_t pipeline_states = 0;
     nt_gfx_operation_t stack[16] = {0};
     uint32_t depth = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
@@ -260,6 +261,11 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
         if (event->kind == NT_GFX_EVENT_SKIP && event->reason == NT_GFX_REASON_INACTIVE) {
             skips++;
         }
+        /* Pipeline state is defined once, by the backend, in its slots and enums. */
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_PIPELINE) {
+            TEST_ASSERT_EQUAL(NT_GFX_OBJECT_NONE, event->object_kind);
+            pipeline_states++;
+        }
         if (event->kind == NT_GFX_EVENT_BEGIN) {
             TEST_ASSERT_LESS_THAN_UINT32(16, depth);
             stack[depth++] = event->operation;
@@ -272,6 +278,7 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     TEST_ASSERT_EQUAL_UINT32(3, names);
     TEST_ASSERT_EQUAL_UINT32(3, units);
     TEST_ASSERT_EQUAL_UINT32(3, skips);
+    TEST_ASSERT_EQUAL_UINT32(1, pipeline_states);
     TEST_ASSERT_FALSE(capture.overflow);
 }
 

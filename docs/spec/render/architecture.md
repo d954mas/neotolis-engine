@@ -489,7 +489,8 @@ counts it. It counts every operation, nested ones included (render-target
 attachments, default samplers, cascaded destroys). Only frontend cache hits
 (END reason CACHE), rejections and losses are left out; an operation whose
 backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
-(SKIP/INACTIVE) still ends ACCEPTED and counts. Texture
+(SKIP/INACTIVE) still ends ACCEPTED and counts. A GPU timer poll with no result
+yet ends `UNREADY`. Texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
 The frame sequence resets at initialization.
@@ -599,10 +600,11 @@ backend cache skips (`SKIP/CACHE`), inactive uniform or texture-set names
 Pipeline state records use integers 0–12 for program, depth enable/write/function,
 cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha
 operation and polygon offset enable. Values 0–5 hold blend color, offset factor
-and units. Frontend definitions use full handles and frontend enums; backend
-definitions use slots and backend enums, and backend `DEFINITION/PIPELINE` and
-`DEFINITION/ATTRIBUTE` records carry the pipeline or vertex-input backend slot in
-`detail`; initial state uses the current raw
+and units. Only the backend defines pipeline state: its `DEFINITION/PIPELINE`
+record uses the program backend slot and backend enums, and the frontend
+pipeline definition carries the program handle in `related[0]`. Backend
+`DEFINITION/PIPELINE` and `DEFINITION/ATTRIBUTE` records carry the pipeline or
+vertex-input backend slot in `detail`; initial state uses the current raw
 program name. Vertex-input creation copies each static/instance attribute with
 its divisor, layout, and known buffer. Inherited layouts and UBO bindings
 unavailable in existing CPU state are explicitly unknown. The initial SCISSOR
