@@ -1172,7 +1172,7 @@ uint8_t nt_resource_get_asset_type(nt_resource_t handle) {
     return s_resource.slots[index].asset_type;
 }
 
-const uint8_t *nt_resource_get_asset_data(nt_resource_t handle, uint32_t *out_size) {
+const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
     if (out_size) {
         *out_size = 0;
     }
@@ -1180,6 +1180,9 @@ const uint8_t *nt_resource_get_asset_data(nt_resource_t handle, uint32_t *out_si
 
     if (index == 0 || index > s_resource.slot_count) {
         return NULL;
+    }
+    if (s_resource.slots[index].asset_type != NT_ASSET_BLOB) {
+        return NULL; /* not a blob */
     }
 
     /* Follow the published named entry; released indices are invalidated before reuse. */
@@ -1202,25 +1205,13 @@ const uint8_t *nt_resource_get_asset_data(nt_resource_t handle, uint32_t *out_si
     if (!pack->mounted || pack->blob == NULL) {
         return NULL;
     }
-    return asset_data_ptr(meta, out_size);
-}
-
-const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
-    if (out_size != NULL) {
-        *out_size = 0;
-    }
-    if (nt_resource_get_asset_type(handle) != NT_ASSET_BLOB) {
+    if (meta->size <= sizeof(NtBlobAssetHeader)) {
         return NULL;
     }
-    uint32_t size = 0;
-    const uint8_t *data = nt_resource_get_asset_data(handle, &size);
-    if (data == NULL || size <= sizeof(NtBlobAssetHeader)) {
-        return NULL;
+    if (out_size) {
+        *out_size = meta->size - (uint32_t)sizeof(NtBlobAssetHeader);
     }
-    if (out_size != NULL) {
-        *out_size = size - (uint32_t)sizeof(NtBlobAssetHeader);
-    }
-    return data + sizeof(NtBlobAssetHeader);
+    return pack->blob + meta->offset + sizeof(NtBlobAssetHeader);
 }
 
 /* ---- Metadata query ---- */

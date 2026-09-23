@@ -99,19 +99,6 @@ Accessors reject zero and unallocated indices with their documented empty result
 `nt_resource_is_ready()` means the published winner is fully usable, not merely
 that a runtime handle exists somewhere in the stack.
 
-`nt_resource_get_asset_data(handle, &size)` returns the complete wire payload,
-including its asset header, of the published READY file provider. The optional
-size output receives the wire size, or zero on failure. Invalid/unallocated
-handles, invalidated owners, virtual providers and missing/evicted pack bytes
-return NULL. READY GPU objects do not imply resident source bytes.
-
-The view borrows immutable pack storage until provider change/invalidation,
-eviction, unmount or shutdown. Copy once the resource is READY (polling after
-`nt_resource_step()` is fine) to retain CPU data. The getter does not allocate, decode, activate, pin, update TTL or issue I/O.
-It follows the published named entry and its canonical owner; it does not select
-a target provider independently. The registered activator owns typed validation.
-`nt_resource_get_blob` keeps its BLOB-only, header-stripping contract.
-
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 
 `nt_resource_publication_epoch()` exposes a monotonic change counter for systems that want to skip work when published slot data has not changed.

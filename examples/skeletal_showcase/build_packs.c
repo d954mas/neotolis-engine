@@ -113,6 +113,7 @@ static void add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx,
     nt_tex_opts_t texture_opts = nt_tex_opts_defaults();
     texture_opts.compress = (nt_basisu_encode_opts_t){0};
     texture_opts.gen_mipmaps = true;
+    texture_opts.max_size = 256; /* deformation checks need no texel detail */
     nt_builder_add_texture_from_memory(rig_ctx, texture->data, texture->size, desc->texture_id, &texture_opts);
 
     for (uint32_t c = 0; c < desc->clip_count; c++) {

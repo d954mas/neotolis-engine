@@ -109,9 +109,9 @@ axes in RGB.
 
 ## Skinned Meshes
 
-The scene owns the character track and a second track for independent clothes. Every
-frame it refetches the selected skeleton and clip views after `resource_step`,
-writes `track.speed` and `track.flags` from the controls, calls
+The scene owns one character track. Every frame the example refetches the
+selected skeleton and clip views right after `resource_step`, before the controls
+and the scene read them; the scene then writes `track.speed` and `track.flags` from the controls, calls
 `nt_skeletal_tracks_advance` with the frame `dt`, samples the clip at
 `track.time` with `nt_skeletal_sample` and runs `nt_skeletal_fk` (over the
 rest pose when no clip is selected). The stage draws the mesh with depth test
@@ -151,21 +151,21 @@ forward. The `Step` and `Time` grid comes from the clip itself,
 
 ### CPU comparison
 
-`Compare CPU (pauses)` freezes the player and shows GPU skinning on the left,
-CPU reference on the right. They use the same pose, camera, texture, sampler and
-depth settings. Matching images are the expected result. `Step`, the time slider
-and clip selection update both views; disable comparison to enable Play again.
-Reset also remains paused while comparison is enabled.
+`CPU reference (pauses)` freezes the player and draws the CPU-deformed mesh in
+place of GPU skinning, with the same pose, camera, texture, sampler and depth
+settings. The visual check is that nothing changes when toggled. `Step`, the
+time slider and clip selection move the reference; disable it to enable Play
+again. Reset also remains paused while the reference is enabled.
 
-The example copies both exported MESH payloads once after load via
-`nt_resource_get_asset_data`, decodes SOA/index compression, and keeps its own
-source bytes through pack/GPU invalidation. Four packed weight bytes divided by
+The MESH type registration's `on_post_resolve` copies each imported mesh when
+its provider publishes, decodes SOA/index compression, and keeps its own source
+bytes independent of the pack and the GPU. Four packed weight bytes divided by
 255 feed a scalar CPU deformation. Its RAW result is rasterized by the static
-mesh renderer. Geometry is rebuilt on explicit pose changes, not each paused
-frame, and survives context loss in CPU memory. Activated meshes are immutable,
-so each rebuild re-activates the reference mesh; scrubbing pays that per frame
-until #542 adds a vertex update. This is a verification mode of
-the example, not a general CPU renderer or a required engine animation path.
+mesh renderer and survives context loss in CPU memory. The reference is rebuilt
+only when the model pose differs from the one it was built from. Activated
+meshes are immutable, so each rebuild re-activates the reference mesh; scrubbing
+pays that per frame until #542 adds a vertex update. This is a verification mode
+of the example, not a general CPU renderer or a required engine animation path.
 
 ### Body and clothes
 
@@ -177,8 +177,8 @@ Its vertices contain `inverse(C) * authored_position` and its binding contains
 receive the same nonidentity entity world transform, applied once after skinning.
 
 Shared pose evaluates one track but builds two palettes because the inverse
-binds differ. `Independent clothes` evaluates the second track with a 0.45-second
-phase offset; it leaves the body's clock unchanged. These are skinned garments,
+binds differ. `Independent clothes` samples the clip for the clothes 0.45 s ahead
+of the body's clock (wrapped or clamped like the track); it adds no second track. These are skinned garments,
 without cloth physics. `Bones & marker` transforms a point (0.2, 0.1, 0.15) on the
 left hand through `E * G[hand]`; there is no socket object or attachment API.
 
@@ -258,16 +258,19 @@ cmake --build --preset native-debug --target skeletal_showcase
 ```
 
 Run from `build/examples/skeletal_showcase/native-debug`, select Skinned Meshes,
-enable Compare CPU, disable Bones and keep Controls visible for the report. Keep the engine loop running; only the
-character player pauses. From the repository root, with Pillow and NumPy installed:
+choose the pose, enable CPU reference, disable Bones and keep Controls visible for
+the report. Keep the engine loop running; only the character player pauses. From
+the repository root, with Pillow and NumPy installed:
 
 ```bash
 python -m tools.devapi.scenarios.skeletal_compare --output build/skeletal-compare
 ```
 
-This uses `SocketTransport` and `DevApiClient.capture_frame(scale=1)`, saves the
-full PNG, both stage halves and a JSON report, and exits with an assertion
-failure if any-channel delta >2 affects more than 0.5% of the union of visible
+This uses `SocketTransport` and `DevApiClient.capture_frame(scale=1)`: it
+captures the stage with the CPU reference, clicks `CPU reference` off, captures
+GPU skinning at the same pose and clicks it back on. It saves both stage images
+and a JSON report, and exits with an error if the pose moved between the
+captures or any-channel delta >2 affects more than 0.5% of the union of visible
 model pixels. Empty coverage fails. The background must stay uniform and clear;
 UI, ground and bones must be outside the compared area. Matching images are
 expected: CPU computes positions while the static renderer still rasterizes them
@@ -281,8 +284,8 @@ cmake --build --preset wasm-debug --target skeletal_showcase
 python -m http.server 8125 --bind 127.0.0.1 --directory build/examples/skeletal_showcase/wasm-debug
 ```
 
-Open `http://127.0.0.1:8125`, select the same comparison pose, then use the
-existing browser bridge. Capture replies are deferred; wait for the actual PNG:
+Open `http://127.0.0.1:8125`, select the same pose, then capture once with and
+once without `CPU reference` through the existing browser bridge. Capture replies are deferred; wait for the actual PNG:
 
 ```js
 const command = {method: "capture.frame", request_id: 1, params: {scale: 1}};
@@ -314,3 +317,7 @@ All comparisons met the 0.5% coverage threshold. Both backends measured the
 ordering table for N=1, 2, 17 and 256 with Shared binding off/on. This verifies
 unlit position deformation and batching; it does not verify lighting normals,
 cloth simulation, performance budgets or the full context-loss/retry sequence.
+After the switch from a split view to the `CPU reference` toggle, the native
+toggle captures were rerun (Fox Walk, CesiumMan, humanoid shared and independent,
+stepped while paused): 0 mismatched pixels each. The WebGL2 captures predate the
+toggle and were not rerun.
