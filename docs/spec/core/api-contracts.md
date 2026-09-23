@@ -398,7 +398,8 @@ default sampler state; it does not preserve pixels. Consumers must redraw
 offscreen contents after resize or context restore.
 While the backend reports a lost context, `nt_gfx_begin_frame` skips the frame
 without attempting recreation. Recreation starts only after the backend leaves
-the lost state; a failed backend-context recreation is retried on a later frame.
+the lost state; a failed recreation that leaves the backend live is retried on a
+later frame, and one that leaves it reporting a loss waits like any loss.
 After the context recovers, each render target is recreated once. A failed target
 remains unready; its owner destroys and recreates it, or uses a fallback.
 

@@ -401,8 +401,8 @@ resets them and advances `frame_sequence`; render frames reset nothing.
 end its status is UNAVAILABLE. Readers early in a callback, before its draws,
 read `last_frame`. A no-render tick reports zero draws; old geometry is never
 reused. A tick is ABORTED when a loss is detected during it (by begin_frame, a
-create that probes the backend, a backend upload that sees
-`CONTEXT_LOST_WEBGL`, or disabling GPU timing on a lost context) or the context
+create that probes the backend, a backend upload whose pending GL error the
+browser confirms as a loss, or disabling GPU timing on a lost context) or the context
 is still known lost at its end. A rejection on an already-known loss does not by
 itself mark the tick: begin_frame, frontend probes and GPU-timing disable ignore a
 known loss, and only a newly detected one marks the tick. end_tick does not
@@ -416,10 +416,19 @@ handler calls `preventDefault` (the browser restores only a handled loss), so
 shells must not. Loss checks on success paths read the flags these events set and
 make no JS call. A loss stays reported until the next begin_frame consumes it, so
 a loss and restore that both happen between two frames (a background tab) still
-wipe the backend tables at that begin_frame and restore at the next one. Paths
-where GL already reported a failure (link, uniform reflection, framebuffer
-completeness, a pending error before an upload) query the browser directly: a
-loss whose event has not arrived yet is then reported like one that has.
+wipe the backend tables at that begin_frame and restore at the next one. The
+browser reports a loss at once but queues its event, so some paths query the
+browser directly and report a loss whose event has not arrived yet like one that
+has: shader and program creation, once per create, before the Emscripten calls
+that throw on the null object some browsers return on a lost context; and paths
+where GL already reported a failure — a generated name of 0 (texture, buffer,
+vertex array including the one made at context setup, sampler, framebuffer,
+renderbuffer), link, uniform reflection, framebuffer completeness, and a pending
+GL error before an upload that the browser confirms as a loss. A create failed
+this way returns `CONTEXT_LOST`, not `BACKEND_FAILURE`, and logs no error. A
+fresh context (init or restore) first drains GL errors: Emscripten keeps a
+recorded error across contexts, so a call that reached the dead context must not
+fail the fresh one's first check.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
@@ -438,7 +447,7 @@ configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read` and
 
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
 through its `NT_GL*` funnel, queries included. Platform context management
-(context create/destroy, loss events, `isContextLost` queries on failure paths)
+(context create/destroy, loss events, `isContextLost` queries on creation and failure paths)
 is not counted. The funnel
 counts with an inline constant-index increment and (with capture) records in the same
 expression that issues the call; a grep gate rejects any bare `gl*` call in

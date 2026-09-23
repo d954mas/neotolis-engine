@@ -111,8 +111,8 @@ for a synchronous `WEBGL_lose_context.loseContext()`.
 
 A link failure is a developer error and traps (`NT_ASSERT`) rather than
 returning an invalid handle. `nt_gfx_make_program` returns an invalid handle on
-a lost context, including pending engine recovery after the browser has restored
-it, and for a live stage handle whose GPU object an earlier loss discarded --
+a lost context, including a loss the browser reports before its lost event
+arrives and pending engine recovery after the browser has restored it, and for a live stage handle whose GPU object an earlier loss discarded --
 that stage is permanently unready, so the owner recreates it and links again.
 A stale stage handle is a developer error and still traps. Because the builder validates each stage
 separately and never links a pair, the trap is also where mismatched varyings

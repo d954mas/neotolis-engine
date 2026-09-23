@@ -81,6 +81,7 @@ static void GLAD_API_PTR capture_delete_vao(GLsizei count, const GLuint *names) 
     (void)count;
     (void)names;
 }
+static GLenum GLAD_API_PTR capture_get_error(void) { return GL_NO_ERROR; }
 
 void setUp(void) {
     glad_glGenQueries = capture_gen;
@@ -93,6 +94,7 @@ void setUp(void) {
     glad_glGetQueryObjectui64v = capture_result;
     glad_glGenVertexArrays = capture_gen_vao;
     glad_glDeleteVertexArrays = capture_delete_vao;
+    glad_glGetError = capture_get_error;
     s_fixture_lost = false;
     s_fixture_supported = true;
     s_fixture_available = false;

@@ -345,6 +345,31 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     }
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
+/* context_loss.spec.ts calls steps 1-3 right after a synchronous loseContext(): the browser already
+ * reports the loss while its lost event is still queued. Step 0 compiles the stages beforehand. */
+static nt_shader_t s_nt_window_stages[2];
+EMSCRIPTEN_KEEPALIVE uint32_t nt_test_loss_window(int step) {
+    const char *vs_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }";
+    const char *fs_source = "precision mediump float; out vec4 color; void main() { color = vec4(1.0); }";
+    switch (step) {
+    case 0:
+        s_nt_window_stages[0] = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
+        s_nt_window_stages[1] = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
+        return (s_nt_window_stages[0].id != 0 && s_nt_window_stages[1].id != 0) ? 1U : 0U;
+    case 1: {
+        nt_program_t program = nt_gfx_make_program(s_nt_window_stages[0], s_nt_window_stages[1]);
+        nt_gfx_destroy_shader(s_nt_window_stages[0]);
+        nt_gfx_destroy_shader(s_nt_window_stages[1]);
+        return program.id;
+    }
+    case 2:
+        return nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source}).id;
+    default: {
+        const uint8_t pixels[16] = {255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255};
+        return nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels}).id;
+    }
+    }
+}
 /* Basis fixture: basis_fixture.ntpack's 128x128 RGBA texture with a full 8-level chain, left half
  * (200,40,40,255), right half (40,40,200,128). Levels are reached through sampler overrides. */
 #define BASIS_FIXTURE_SIZE 128.0F
@@ -708,6 +733,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'observe_status': function() { return _nt_test_observe_status(); },
         'gpu_supported': function() { return _nt_test_gpu_supported() !== 0; },
         'float_probe': function(useTexture) { return _nt_test_float_probe(useTexture); },
+        'loss_window': function(step) { return _nt_test_loss_window(step) >>> 0; },
         'basis_ready': function() { return _nt_test_basis_ready() !== 0; },
         'basis_format': function() { return _nt_test_basis_format(); },
         'basis_rgb_format': function() { return _nt_test_basis_rgb_format(); },

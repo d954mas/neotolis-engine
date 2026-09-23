@@ -112,7 +112,6 @@ static uint32_t s_fake_last_depth_texture_backend;
 static uint32_t s_fake_next_texture_backend;
 static bool s_fake_context_lost;
 static bool s_fake_loss_pending; /* a reported loss until begin_frame acknowledges it */
-static bool s_fake_backend_missing;
 static uint8_t s_fake_fail_texture_creates;
 static uint32_t s_fake_texture_destroy_count;
 static uint32_t s_fake_last_destroyed_texture;
@@ -264,7 +263,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_next_vertex_input_create = false;
     s_fake_context_lost = false;
     s_fake_loss_pending = false;
-    s_fake_backend_missing = false;
     s_fake_fail_texture_creates = 0;
     s_fake_texture_destroy_count = 0;
     s_fake_last_destroyed_texture = 0;
@@ -336,7 +334,7 @@ void nt_gfx_backend_shutdown(void) {
     s_fake_max_programs = 0;
 }
 
-bool nt_gfx_backend_is_context_lost(void) { return s_fake_loss_pending || s_fake_context_lost || s_fake_backend_missing; }
+bool nt_gfx_backend_is_context_lost(void) { return s_fake_loss_pending || s_fake_context_lost; }
 
 void nt_gfx_backend_ack_context_loss(void) { s_fake_loss_pending = false; }
 
@@ -735,12 +733,11 @@ bool nt_gfx_backend_recreate_all_resources(void) {
         memset(s_fake_program_table, 0, ((size_t)s_fake_max_programs + 1U) * sizeof(nt_gfx_fake_program_t));
     }
     s_fake_backend_restore_count++;
+    s_fake_loss_pending = false; /* a fresh context, like the web backend's */
     if (s_fake_fail_next_backend_restore) {
         s_fake_fail_next_backend_restore = false;
-        s_fake_backend_missing = true;
         return false;
     }
-    s_fake_backend_missing = false;
     return true;
 }
 

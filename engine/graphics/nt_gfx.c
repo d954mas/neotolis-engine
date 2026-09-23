@@ -141,7 +141,6 @@ static struct {
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
 
     nt_gfx_render_state_t render_state;
-    bool context_restore_retry;
     bool tick_aborted; /* a probe observed context loss during the open tick */
     uint32_t active_render_target;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
@@ -760,12 +759,11 @@ static nt_gfx_event_reason_t begin_frame(void) {
          * on next begin_segment via the lazy-find-or-alloc path. */
         nt_gfx_backend_drop_timer_segments();
         g_nt_gfx.context_lost = true;
-        s_gfx.context_restore_retry = false;
         NT_LOG_ERROR("WebGL context lost");
         return NT_GFX_REASON_CONTEXT_LOST; /* Skip frame */
     }
 
-    if (backend_context_lost && !s_gfx.context_restore_retry) {
+    if (backend_context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
 
@@ -774,12 +772,10 @@ static nt_gfx_event_reason_t begin_frame(void) {
         NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
         if (!nt_gfx_backend_recreate_all_resources()) {
             NT_GFX_END(NT_GFX_REASON_BACKEND_FAILURE);
-            s_gfx.context_restore_retry = true;
             NT_LOG_ERROR("WebGL context restore failed");
             return NT_GFX_REASON_UNREADY;
         }
         g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
-        s_gfx.context_restore_retry = false;
         g_nt_gfx.context_lost = false;
         s_gfx.scissor_enabled = false;
         g_nt_gfx.context_restored = true;
@@ -991,8 +987,11 @@ static nt_gfx_event_reason_t make_shader(const nt_shader_desc_t *desc, nt_shader
 
     uint32_t backend = nt_gfx_backend_create_shader(desc);
     if (backend == 0) {
-        NT_LOG_ERROR("backend shader creation failed");
         nt_pool_free(&s_gfx.shader_pool, id);
+        if (gfx_context_lost()) {
+            return NT_GFX_REASON_CONTEXT_LOST;
+        }
+        NT_LOG_ERROR("backend shader creation failed");
         return NT_GFX_REASON_BACKEND_FAILURE;
     }
 
@@ -1221,8 +1220,11 @@ static nt_gfx_event_reason_t make_vertex_input(const nt_vertex_input_desc_t *des
     uint32_t slot = nt_pool_slot_index(id);
     uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, slot);
     if (backend == 0) {
-        NT_LOG_ERROR("backend vertex input creation failed");
         nt_pool_free(&s_gfx.vertex_input_pool, id);
+        if (gfx_context_lost()) {
+            return NT_GFX_REASON_CONTEXT_LOST;
+        }
+        NT_LOG_ERROR("backend vertex input creation failed");
         return NT_GFX_REASON_BACKEND_FAILURE;
     }
     NT_ASSERT(backend == slot && "create_vertex_input: backend must mirror the pool slot");
@@ -1279,8 +1281,11 @@ static nt_gfx_event_reason_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer
 
     uint32_t backend = nt_gfx_backend_create_buffer(desc);
     if (backend == 0) {
-        NT_LOG_ERROR("backend buffer creation failed");
         nt_pool_free(&s_gfx.buffer_pool, id);
+        if (gfx_context_lost()) {
+            return NT_GFX_REASON_CONTEXT_LOST;
+        }
+        NT_LOG_ERROR("backend buffer creation failed");
         return NT_GFX_REASON_BACKEND_FAILURE;
     }
 
@@ -1329,9 +1334,6 @@ static nt_gfx_event_reason_t make_texture(const nt_texture_desc_t *desc, bool re
     if (!desc) {
         return NT_GFX_REASON_INVALID_ARGUMENT;
     }
-    /* Under a lost context glGenTextures records GL_INVALID_OPERATION in
-     * Emscripten's module-global GL.lastError, which survives context
-     * recreation and would trip the next upload's pending-error assert. */
     if (gfx_context_lost()) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
@@ -1406,8 +1408,11 @@ static nt_gfx_event_reason_t make_texture(const nt_texture_desc_t *desc, bool re
 
     uint32_t backend = nt_gfx_backend_create_texture(&local_desc);
     if (backend == 0) {
-        NT_LOG_ERROR("backend texture creation failed");
         nt_pool_free(&s_gfx.texture_pool, id);
+        if (gfx_context_lost()) {
+            return NT_GFX_REASON_CONTEXT_LOST;
+        }
+        NT_LOG_ERROR("backend texture creation failed");
         return NT_GFX_REASON_BACKEND_FAILURE;
     }
 
@@ -1422,7 +1427,7 @@ static nt_gfx_event_reason_t make_texture(const nt_texture_desc_t *desc, bool re
     if (default_sampler.id == 0) {
         nt_gfx_backend_destroy_texture(backend);
         nt_pool_free(&s_gfx.texture_pool, id);
-        return NT_GFX_REASON_BACKEND_FAILURE;
+        return gfx_context_lost() ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_BACKEND_FAILURE;
     }
 
     uint32_t slot = nt_pool_slot_index(id);
@@ -1521,7 +1526,7 @@ static nt_gfx_event_reason_t make_render_target(const nt_render_target_desc_t *d
     nt_texture_t color = create_texture(&color_desc, true);
     if (color.id == 0) {
         nt_pool_free(&s_gfx.render_target_pool, id);
-        return NT_GFX_REASON_BACKEND_FAILURE;
+        return gfx_context_lost() ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_BACKEND_FAILURE;
     }
 
     nt_texture_t depth = {0};
@@ -1531,7 +1536,7 @@ static nt_gfx_event_reason_t make_render_target(const nt_render_target_desc_t *d
         if (depth.id == 0) {
             destroy_texture_slot(color, true);
             nt_pool_free(&s_gfx.render_target_pool, id);
-            return NT_GFX_REASON_BACKEND_FAILURE;
+            return gfx_context_lost() ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_BACKEND_FAILURE;
         }
     }
 
@@ -1552,7 +1557,7 @@ static nt_gfx_event_reason_t make_render_target(const nt_render_target_desc_t *d
         destroy_texture_slot(color, true);
         memset(&s_gfx.render_target_metas[slot], 0, sizeof(nt_gfx_render_target_meta_t));
         nt_pool_free(&s_gfx.render_target_pool, id);
-        return NT_GFX_REASON_BACKEND_FAILURE;
+        return gfx_context_lost() ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_BACKEND_FAILURE;
     }
 
     s_gfx.render_target_metas[slot].complete = true;
@@ -2203,6 +2208,9 @@ static nt_gfx_event_reason_t make_sampler(const nt_sampler_desc_t *desc, nt_samp
     NT_ASSERT(s_gfx.sampler_count < NT_GFX_MAX_SAMPLERS && "sampler cache full; raise NT_GFX_MAX_SAMPLERS");
     uint32_t backend = nt_gfx_backend_create_sampler(&normalized);
     if (backend == 0) {
+        if (gfx_context_lost()) {
+            return NT_GFX_REASON_CONTEXT_LOST;
+        }
         NT_LOG_ERROR("make_sampler: backend failed");
         return NT_GFX_REASON_BACKEND_FAILURE;
     }

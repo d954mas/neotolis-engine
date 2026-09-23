@@ -601,7 +601,10 @@ static GLenum map_texture_wrap(nt_texture_wrap_t w) {
 /* ==== Backend interface implementation ==== */
 
 static void nt_gfx_gl_init_context_features(void) {
-
+    /* Emscripten keeps a recorded error across contexts: calls that reached the
+     * dead context must not fail the fresh one's first error check. */
+    while (NT_GL_RET0(glGetError) != GL_NO_ERROR) {
+    }
 #if NT_GFX_GPU_TIMING_ENABLED
     s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
     s_debug_groups_enabled = nt_gfx_gl_ctx_enable_debug_groups();
@@ -1129,6 +1132,10 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
 /* ---- Resource management (shader / buffer / pipeline) ---- */
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
+    /* A browser that returns a null shader on a lost context makes Emscripten's glShaderSource throw. */
+    if (nt_gfx_gl_ctx_query_lost()) {
+        return 0;
+    }
     GLenum gl_type = (desc->type == NT_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
     GLuint shader = NT_GL_RET(glCreateShader, gl_type);
 
@@ -1207,6 +1214,10 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
  * link failure, after logging both stages and the program log. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
+    /* Emscripten's glCreateProgram throws on the null program some browsers return on a lost context. */
+    if (nt_gfx_gl_ctx_query_lost()) {
+        return 0;
+    }
     GLuint program = NT_GL_RET0(glCreateProgram);
     NT_GL(glAttachShader, program, (GLuint)vs_backend);
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
@@ -1505,6 +1516,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     GLuint vao = 0;
     NT_GL_GEN(glGenVertexArrays, 1, &vao);
     if (vao == 0) {
+        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
         return 0;
     }
     gl_bind_vao(vao);
@@ -1576,7 +1588,8 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     GLuint buf;
     NT_GL_GEN(glGenBuffers, 1, &buf);
     if (buf == 0) {
-        return 0; /* lost context: storing name 0 would alias the free-slot sentinel */
+        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
+        return 0;                         /* storing name 0 would alias the free-slot sentinel */
     }
     GLenum target;
     switch (desc->type) {
@@ -1802,13 +1815,13 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
  * misattributed to this upload. */
 static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     GLenum pending_error = NT_GL_RET0(glGetError);
-    /* WebGL reports a loss once through glGetError; that is a recoverable
-       outcome the caller rolls back, not a programmer error. */
-    bool context_lost = pending_error == GL_CONTEXT_LOST_WEBGL || (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_query_lost());
-    if (context_lost) {
+    /* A loss the browser confirms is a recoverable outcome the caller rolls back,
+       not a programmer error; the query also latches it before its event arrives. */
+    if (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_query_lost()) {
         nt_gfx_observe_context_loss();
+        return false;
     }
-    NT_ASSERT((pending_error == GL_NO_ERROR || context_lost) && "pending GL error before texture upload");
+    NT_ASSERT(pending_error == GL_NO_ERROR && "pending GL error before texture upload");
     if (pending_error != GL_NO_ERROR) {
         NT_LOG_ERROR("pending GL error before texture upload: 0x%04X", (unsigned)pending_error);
         return false;
@@ -1821,10 +1834,12 @@ static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
 static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     GLuint tex;
     NT_GL_GEN(glGenTextures, 1, &tex);
-    if (tex == 0 || !nt_gfx_gl_begin_texture_upload(tex)) {
-        if (tex != 0) {
-            NT_GL_DELETE(glDeleteTextures, 1, &tex);
-        }
+    if (tex == 0) {
+        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
+        return 0;
+    }
+    if (!nt_gfx_gl_begin_texture_upload(tex)) {
+        NT_GL_DELETE(glDeleteTextures, 1, &tex);
         return 0;
     }
 
@@ -1956,6 +1971,7 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
     GLuint depth_rbo = 0;
     NT_GL_GEN(glGenFramebuffers, 1, &fbo);
     if (fbo == 0) {
+        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
         return false;
     }
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
@@ -1965,6 +1981,7 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
     if (desc->depth_storage == NT_RT_DEPTH_BUFFER) {
         NT_GL_GEN(glGenRenderbuffers, 1, &depth_rbo);
         if (depth_rbo == 0) {
+            (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
             NT_GL_DELETE(glDeleteFramebuffers, 1, &fbo);
             NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, restore_fbo);
             s_bound_framebuffer = restore_fbo;
@@ -2228,6 +2245,7 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     GLuint s = 0;
     NT_GL_GEN(glGenSamplers, 1, &s);
     if (s == 0) {
+        (void)nt_gfx_gl_ctx_query_lost(); /* latches a loss whose event has not arrived yet */
         return 0;
     }
     NT_GL(glSamplerParameteri, s, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));

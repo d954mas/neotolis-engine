@@ -7,6 +7,7 @@ declare global {
       drawn_frames(): number;
       programs_ready(): boolean;
       float_texture_linear(): boolean;
+      loss_window(step: number): number;
       field_css(): { x: number; y: number; w: number; h: number };
       hide_probe(mode: number): void;
       basis_ready(): boolean;
@@ -383,3 +384,79 @@ test('context loss: a loss and restore between two frames still runs the restore
   expect(await page.evaluate(() => (window as unknown as { __nt: { restore_status(): number } }).__nt.restore_status()), 'the restore tick completes').toBe(1);
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
 });
+
+function trackErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text === 'ERROR [gfx] WebGL context lost') return;
+    if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
+  });
+  return errors;
+}
+
+// Chrome reports isContextLost() at once but queues webglcontextlost as a task, so every step runs
+// before the engine has heard of the loss.
+async function createInLossWindow(page: Page, steps: number[]): Promise<number[]> {
+  return page.evaluate((list) => {
+    const loss = document.querySelector('canvas')!.getContext('webgl2')!.getExtension('WEBGL_lose_context');
+    if (!loss) throw new Error('WEBGL_lose_context unavailable');
+    window.__ntLossExtension = loss;
+    const stages = window.__nt!.loss_window(0);
+    loss.loseContext();
+    return [stages, ...list.map((step) => window.__nt!.loss_window(step))];
+  }, steps);
+}
+
+async function restoreAndDraw(page: Page, errors: string[]): Promise<void> {
+  await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready(), null, { timeout: 10_000 });
+  await page.evaluate(() => window.__ntLossExtension!.restoreContext());
+  // An abort stops the app, so the wait reports the errors that stopped it.
+  await page.waitForFunction(() => window.__nt!.programs_ready() && window.__nt!.basis_ready(), null, { timeout: 30_000 }).catch((error: Error) => {
+    throw new Error(error.message + '\nerrors: ' + JSON.stringify(errors));
+  });
+  const drawn = await page.evaluate(() => window.__nt!.drawn_frames());
+  await page.waitForFunction((n) => window.__nt!.drawn_frames() > n + 2, drawn, { timeout: 30_000 });
+}
+
+// Current Chromium returns live objects from create* on a lost context; browsers that return null make
+// Emscripten throw on a null program and record GL_INVALID_OPERATION for a null generated name.
+async function returnNullCreatesWhenLost(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const proto = WebGL2RenderingContext.prototype as unknown as Record<string, (this: WebGL2RenderingContext, ...args: unknown[]) => unknown>;
+    for (const name of ['createShader', 'createProgram', 'createTexture', 'createBuffer', 'createVertexArray', 'createSampler', 'createFramebuffer', 'createRenderbuffer']) {
+      const create = proto[name];
+      proto[name] = function(...args: unknown[]) {
+        return this.isContextLost() ? null : create.apply(this, args);
+      };
+    }
+  });
+}
+
+for (const nullCreates of [false, true]) {
+  const variant = nullCreates ? ' (create* returns null)' : '';
+
+  test('context loss: shader and program creates before the lost event report the loss' + variant, async ({ page }) => {
+    test.setTimeout(60_000);
+    const errors = trackErrors(page);
+    if (nullCreates) await returnNullCreatesWhenLost(page);
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
+    expect(await createInLossWindow(page, [1, 2]), 'stages compile live; program and shader report the loss').toEqual([1, 0, 0]);
+    await restoreAndDraw(page, errors);
+    expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+  });
+
+  test('context loss: a texture created before the lost event leaves no error for the restored context' + variant, async ({ page }) => {
+    test.setTimeout(60_000);
+    const errors = trackErrors(page);
+    if (nullCreates) await returnNullCreatesWhenLost(page);
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.basis_ready(), null, { timeout: 30_000 });
+    expect(await createInLossWindow(page, [3]), 'the texture reports the loss').toEqual([1, 0]);
+    // Restore re-uploads every texture; a GL error left from the dead context would trip the first one.
+    await restoreAndDraw(page, errors);
+    expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+  });
+}
