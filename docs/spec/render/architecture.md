@@ -389,8 +389,8 @@ of each frame callback, also when nothing renders. Work between init and the
 first end_tick (init itself, pre-loop loading) is the first tick; teardown work
 after the last end_tick lands in a tick that `nt_gfx_shutdown` discards without
 a snapshot. Ticks are a host contract in every build, independent of simulation
-time; app/gfx never close one implicitly. end_tick requires gfx IDLE; known
-context loss also permits it. A tick holds any number of render frames and
+time; app/gfx never close one implicitly. end_tick requires gfx IDLE: only
+begin_frame marks a context lost, before it leaves IDLE. A tick holds any number of render frames and
 passes; their counters sum. The stub is stateless: its end_tick is inert and it
 never publishes a snapshot.
 
@@ -400,10 +400,12 @@ resets them and advances `frame_sequence`; render frames reset nothing.
 `last_frame` stays unchanged until the next end or shutdown; before the first
 end its status is UNAVAILABLE. Readers early in a callback, before its draws,
 read `last_frame`. A no-render tick reports zero draws; old geometry is never
-reused. A tick is ABORTED when a frontend probe (begin_frame, or an operation
-that rejects work on a lost context) observed a loss during it, or the context
-is still known lost at its end. end_tick does not probe the backend: a loss
-after the last begin_frame marks the next tick, whose begin_frame observes it.
+reused. A tick is ABORTED when a loss is detected during it (by begin_frame, a
+create that probes the backend, or a backend upload that sees
+`CONTEXT_LOST_WEBGL`) or the context is still known lost at its end. A rejection
+on an already-known loss does not by itself mark the tick. end_tick does not
+probe the backend: a loss in a tick without a probe marks the next tick that
+probes.
 A tick whose begin_frame restores a lost context and then completes is COMPLETE.
 
 All counters are built and counted in every build; there is no counter option
@@ -418,18 +420,20 @@ vertex-shader invocations.
 Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
 upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
 definition published by the interface target, so every consumer sees the same
-configuration; `nt_gfx_capture_request` and `nt_gfx_capture_read` exist only
-when it is 1.
+configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read` and
+`nt_gfx_gl_call_name` exist only when it is 1.
 
-`gl[]` counts every issued GL call by `nt_gfx_gl_call_t`, queries included:
-the backend issues GL only through its `NT_GL*` funnel, which counts with an
-inline constant-index increment and (with capture) records in the same
+`gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
+through its `NT_GL*` funnel, queries included. Platform context management
+(context create/destroy, `isContextLost` probes) is not counted. The funnel
+counts with an inline constant-index increment and (with capture) records in the same
 expression that issues the call; a grep gate rejects any bare `gl*` call in
 `engine/graphics/gl`. The funnel does no per-call tick check: a tick is
 always open between init and shutdown. The
 single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
 and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
-directly (`getExtension`) are counted and recorded at their C call site; the
+directly (`getExtension`) are counted and recorded at their C call site through
+`NT_GL_ISSUED`; the
 JS that Emscripten's GL layer runs behind a C call (lazy uniform location
 lookup, state shadowing) is a documented boundary: counters and capture see the
 C API call. Payload fields count calls with non-NULL CPU data and their bytes,
@@ -445,14 +449,15 @@ attachments, default samplers, cascaded destroys). Cache hits, rejections and
 losses are not counted there; texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
-Sequence and context identifiers reset at initialization.
+The frame sequence resets at initialization.
 
 A context restore is one CONTEXT operation inside the begin_frame that performs
-it; render-target recreations nest in it. It ends ACCEPTED when the context came
-back and BACKEND_FAILURE when recreation failed. The view's `context_sequence`
-is the GL context generation when the capture started; each ACCEPTED CONTEXT
-result in the stream starts the next generation, so raw GL names before and
-after it belong to different contexts.
+it; the render-target DEFINITION and BACKEND records of the restore sit between
+its BEGIN and RESULT, including a DEFINITION with `complete=0` for a target
+whose recreation failed. It ends ACCEPTED when the context came back and
+BACKEND_FAILURE when recreation failed. Raw GL names are valid within their
+context segment; a CONTEXT operation in the stream separates segments, and
+frontend handles are the identity across them.
 
 Command recording is one-shot: `nt_gfx_capture_request` asks for the next tick
 to be recorded. The end_tick that closes the requesting tick consumes the request
@@ -490,11 +495,10 @@ names are in the DEFINITION record. Operations issued inside another operation
 RESULT. `ARGUMENT` records are request
 arguments belonging to the enclosing BEGIN (one per texture binding of a texture
 set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
-prove GL success or GPU completion. The view status is UNAVAILABLE while a tick
-records and becomes the finalized tick's COMPLETE, TRUNCATED or ABORTED at its
-end_tick. Overflow is separately
-reported even when aborted, stops event appends, and never truncates counters.
-A request inside a tick applies to the next tick.
+prove GL success or GPU completion. The view's `snapshot.status` is UNAVAILABLE
+while a tick records and becomes the finalized tick's COMPLETE or ABORTED at its
+end_tick; `overflow` alone reports an incomplete event stream, even when
+aborted. Overflow stops event appends and never truncates counters.
 
 The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
@@ -523,6 +527,7 @@ restore. Definitions remain meaningful after resource destruction or slot reuse.
 Initial state opens with one `INITIAL/STATE` record per layer: `detail` is
 `NT_GFX_INITIAL_FRONTEND` for bound frontend handles and `NT_GFX_INITIAL_BACKEND`
 for the backend's cached GL names and framebuffer size.
+Among INITIAL records, `detail` is meaningful only on INITIAL/STATE.
 Program publication and initial state include `INITIAL/SAMPLER` records with
 backend program slot, name hash, location, unit and sampler class in args 0–4.
 `INITIAL/UNIFORM_VEC4` gives program slot/name hash/location in args 0–2 and cached

@@ -396,7 +396,7 @@ static void test_complete_capture_matches_gl_counters(void) {
     nt_gfx_destroy_buffer(buffer);
     nt_gfx_end_tick();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, capture.status);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, capture.snapshot.status);
     uint32_t recorded[NT_GFX_GL_COUNT] = {0};
     uint32_t total = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
@@ -421,6 +421,23 @@ static void test_complete_capture_matches_gl_counters(void) {
     TEST_ASSERT_EQUAL_UINT64(s_buffer_bytes, c->buffer_upload_bytes);
     TEST_ASSERT_EQUAL_UINT64(s_texture_calls, c->texture_upload_calls);
     TEST_ASSERT_EQUAL_UINT64(s_texture_bytes, c->texture_upload_bytes);
+}
+
+/* Teardown deletes live objects through the GL funnel after the event array is freed. */
+static void test_shutdown_while_recording_writes_no_record(void) {
+    nt_gfx_capture_request();
+    nt_gfx_end_tick();
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buffer.id);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, nt_gfx_capture_read().snapshot.status);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, captured_calls(NT_GFX_GL_glBufferData));
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.capture_capacity = 4096;
+    nt_gfx_init(&desc);
+    nt_gfx_capture_view_t view = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT32(0, view.count);
+    TEST_ASSERT_NULL(view.events);
 }
 
 static void test_readback_is_recorded_as_issued_call(void) {
@@ -467,8 +484,8 @@ static void test_payloads_before_render_land_in_their_tick(void) {
     const nt_gfx_frame_snapshot_t *end = &g_nt_gfx.last_frame;
     TEST_ASSERT_EQUAL_UINT64(76, end->counters.buffer_upload_bytes);
     /* Both ticks together saw every payload the driver received. */
-    TEST_ASSERT_EQUAL_UINT64(s_buffer_calls, 3);
-    TEST_ASSERT_EQUAL_UINT64(s_buffer_bytes, 92);
+    TEST_ASSERT_EQUAL_UINT64(3, s_buffer_calls);
+    TEST_ASSERT_EQUAL_UINT64(92, s_buffer_bytes);
 }
 
 /* Single-byte rows are not padded to the unpack alignment: an odd width counts exact bytes. */
@@ -649,6 +666,7 @@ int main(void) {
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
     RUN_TEST(test_complete_capture_matches_gl_counters);
     RUN_TEST(test_readback_is_recorded_as_issued_call);
+    RUN_TEST(test_shutdown_while_recording_writes_no_record);
 #endif
     RUN_TEST(test_payloads_before_render_land_in_their_tick);
     RUN_TEST(test_texture_mips_storage_and_subrect_payloads);

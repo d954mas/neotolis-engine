@@ -495,7 +495,6 @@ typedef struct {
 typedef enum {
     NT_GFX_FRAME_UNAVAILABLE = 0, /* no closed tick yet, capture still recording or empty, or stub */
     NT_GFX_FRAME_COMPLETE,
-    NT_GFX_FRAME_TRUNCATED,
     NT_GFX_FRAME_ABORTED,
 } nt_gfx_frame_status_t;
 
@@ -718,9 +717,9 @@ typedef enum {
  * RESULT (reason; creators add the handle); nested operations sit between. INITIAL and
  * DEFINITION describe inherited or resource state and never represent issued
  * calls; ARGUMENT carries per-element request arguments of the enclosing BEGIN.
- * object is a full typed frontend handle; raw names live only in backend data
- * and belong to the view's context_sequence until an ACCEPTED CONTEXT result,
- * which starts the next context. Unknown inherited values are explicit. */
+ * object is a full typed frontend handle and the cross-context identity; raw names
+ * live only in backend data and are valid within their context segment, which a
+ * CONTEXT operation ends. Unknown inherited values are explicit. */
 typedef struct {
     nt_gfx_event_kind_t kind;
     nt_gfx_operation_t operation;
@@ -771,18 +770,15 @@ enum {
 };
 
 typedef struct {
-    uint64_t context_sequence; /* GL context generation when the capture started */
     bool overflow;
-    nt_gfx_frame_status_t status; /* UNAVAILABLE until the recorded tick ends */
     const nt_gfx_event_t *events;
     uint32_t count;
-    nt_gfx_frame_snapshot_t snapshot; /* matching finalized tick, even after later unrecorded ticks */
+    nt_gfx_frame_snapshot_t snapshot; /* matching finalized tick, even after later unrecorded ticks; UNAVAILABLE while recording */
 } nt_gfx_capture_view_t;
 
 /* The one host tick boundary: nt_gfx_init opens the first tick and every end_tick
  * closes the open one and opens the next, so all gfx work between init and shutdown
- * belongs to a tick; shutdown discards the open one. Requires gfx IDLE (or a lost
- * context). A tick holds any number of gfx frames, whose counters sum. end_tick
+ * belongs to a tick; shutdown discards the open one. Requires gfx IDLE. A tick holds any number of gfx frames, whose counters sum. end_tick
  * copies the counters and status into g_nt_gfx.last_frame, then resets
  * g_nt_gfx.counters. Ticks never advance rendering. */
 void nt_gfx_end_tick(void);

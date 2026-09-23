@@ -8,8 +8,7 @@
 // #region observation storage and owning-site counters
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
-    uint64_t context_sequence; /* GL context generation; advances on each successful restore */
-    bool request_pending;      /* the next tick records */
+    bool request_pending; /* the next tick records */
     bool recording;
     nt_gfx_event_t *events;
     uint32_t capacity;
@@ -75,8 +74,8 @@ static inline void nt_gfx_capture_commit_call(void) {
 #define NT_GFX_RECORD(...) ((void)0)
 #endif
 
-/* One public operation = one BEGIN and one END, in every build. BEGIN keeps
- * op/kind/object in a wrapper-local scope, so operations
+/* One public operation = one BEGIN and one END, in every build. BEGIN declares
+ * op/kind/object as a wrapper-local scope, so operations
  * nested inside the implementation cannot clobber them. END counts an ACCEPTED
  * reason in accepted[op]; capture builds also record the request and result. */
 typedef struct {
@@ -84,8 +83,6 @@ typedef struct {
     nt_gfx_object_kind_t kind;
     uint32_t object;
 } nt_gfx_scope_t;
-
-static inline nt_gfx_scope_t nt_gfx_begin_op(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object) { return (nt_gfx_scope_t){operation, kind, object}; }
 
 static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_event_reason_t reason) {
     if (reason == NT_GFX_REASON_ACCEPTED) {
@@ -95,11 +92,11 @@ static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, n
 }
 
 #define NT_GFX_BEGIN(scope_op, scope_kind, scope_object)                                                                                                                                               \
-    const nt_gfx_scope_t nt_gfx_scope = nt_gfx_begin_op((scope_op), (scope_kind), (scope_object));                                                                                                     \
+    const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event.object_kind = (scope_kind); event.object = (scope_object))
 /* The trailing statements fill the request fields of the BEGIN record. */
 #define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...)                                                                                                                                  \
-    const nt_gfx_scope_t nt_gfx_scope = nt_gfx_begin_op((scope_op), (scope_kind), (scope_object));                                                                                                     \
+    const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event.object_kind = (scope_kind); event.object = (scope_object); __VA_ARGS__)
 #define NT_GFX_END(reason) nt_gfx_end_op(&nt_gfx_scope, nt_gfx_scope.object, (reason))
 /* Creators end with the handle they produced (zero on failure); the reason is
@@ -266,7 +263,6 @@ void nt_gfx_backend_drop_timer_segments(void);
 void nt_gfx_gl_test_reset_counters(void);
 uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void);
 uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void);
-/* glBindSampler calls that reached GL; a deduplicated bind does not count. */
 /* Raw GL-mirror reads: a test can pin that destroy cleared an entry without
  * depending on the driver recycling the deleted GL name. */
 uint32_t nt_gfx_gl_test_cached_vao(void);

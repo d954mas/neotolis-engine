@@ -328,20 +328,15 @@ static void capture_initial_state(void) {
 static void capture_start(void) {
     g_nt_gfx_capture.request_pending = false;
     g_nt_gfx_capture.recording = true;
-    g_nt_gfx_capture.view = (nt_gfx_capture_view_t){.context_sequence = g_nt_gfx_capture.context_sequence};
-    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_FRAME, event.reason = NT_GFX_REASON_ACCEPTED);
+    g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_FRAME, event.reason = NT_GFX_REASON_NONE);
     capture_initial_state();
 }
 
 static void capture_end_tick(void) {
     if (g_nt_gfx_capture.recording) {
         NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_FRAME, event.reason = g_nt_gfx.last_frame.status == NT_GFX_FRAME_ABORTED ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_ACCEPTED);
-        nt_gfx_capture_view_t *capture = &g_nt_gfx_capture.view;
-        capture->status = g_nt_gfx.last_frame.status;
-        if (capture->status == NT_GFX_FRAME_COMPLETE && capture->overflow) {
-            capture->status = NT_GFX_FRAME_TRUNCATED;
-        }
-        capture->snapshot = g_nt_gfx.last_frame;
+        g_nt_gfx_capture.view.snapshot = g_nt_gfx.last_frame;
         g_nt_gfx_capture.recording = false;
     }
 }
@@ -355,7 +350,7 @@ static void open_tick(void) {
 
 void nt_gfx_end_tick(void) {
     NT_ASSERT(g_nt_gfx.initialized);
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
     g_nt_gfx.last_frame = (nt_gfx_frame_snapshot_t){
         .counters = g_nt_gfx.counters,
         .status = (s_gfx.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
@@ -390,7 +385,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
     NT_ASSERT(desc->capture_capacity == 0 || sizeof(nt_gfx_event_t) <= SIZE_MAX / desc->capture_capacity);
     g_nt_gfx_capture.capacity = desc->capture_capacity;
-    g_nt_gfx_capture.context_sequence = 1;
     if (desc->capture_capacity > 0) {
         g_nt_gfx_capture.events = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * sizeof(nt_gfx_event_t));
         NT_ASSERT(g_nt_gfx_capture.events != NULL);
@@ -660,6 +654,7 @@ static bool render_target_recreate_backend(uint32_t slot) {
     nt_texture_desc_t color_desc = render_target_color_texture_desc(&meta->desc);
     if (!render_target_recreate_attachment(meta->color, &color_desc)) {
         meta->complete = false;
+        NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, s_gfx.render_target_pool.slots[slot].id);
         return false;
     }
     uint32_t depth_backend = 0;
@@ -667,6 +662,7 @@ static bool render_target_recreate_backend(uint32_t slot) {
         nt_texture_desc_t depth_desc = render_target_depth_texture_desc(&meta->desc);
         if (!render_target_recreate_attachment(meta->depth, &depth_desc)) {
             meta->complete = false;
+            NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, s_gfx.render_target_pool.slots[slot].id);
             return false;
         }
         depth_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->depth.id)];
@@ -780,7 +776,7 @@ static nt_gfx_event_reason_t begin_frame(void) {
     }
 
     if (g_nt_gfx.context_lost) {
-        /* The whole restore is one operation; render-target recreations nest inside it. */
+        /* The whole restore is one operation; render-target definitions and backend calls sit inside it. */
         NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
         if (!nt_gfx_backend_recreate_all_resources()) {
             NT_GFX_END(NT_GFX_REASON_BACKEND_FAILURE);
@@ -788,9 +784,6 @@ static nt_gfx_event_reason_t begin_frame(void) {
             NT_LOG_ERROR("WebGL context restore failed");
             return NT_GFX_REASON_UNREADY;
         }
-#if NT_GFX_CAPTURE_ENABLED
-        g_nt_gfx_capture.context_sequence++; /* the ACCEPTED CONTEXT result marks the switch in the stream */
-#endif
         g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
         s_gfx.context_restore_retry = false;
         g_nt_gfx.context_lost = false;

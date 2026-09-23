@@ -440,7 +440,7 @@ static bool s_observe_request_now;
 EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) { s_observe_repeat = enabled != 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_observe_status(void) {
 #if NT_GFX_CAPTURE_ENABLED
-    return (int)nt_gfx_capture_read().status;
+    return (int)nt_gfx_capture_read().snapshot.status;
 #else
     return (int)NT_GFX_FRAME_UNAVAILABLE;
 #endif
@@ -529,7 +529,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     s_observe_values[11] = capture.overflow;
     s_observe_values[12] = capture.count;
-    s_observe_values[13] = capture.status;
+    s_observe_values[13] = capture.snapshot.status;
     const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_glUseProgram, NT_GFX_GL_glBindVertexArray, NT_GFX_GL_glBindTexture, NT_GFX_GL_glBindSampler, NT_GFX_GL_glUniform4fv, NT_GFX_GL_glUniform1i};
     for (uint32_t i = 0; i < capture.count; i++) {
         if (capture.events[i].kind != NT_GFX_EVENT_BACKEND) {
