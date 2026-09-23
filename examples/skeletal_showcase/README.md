@@ -1,14 +1,9 @@
 # Skeletal showcase
 
-`skeletal_showcase` ships two scenes over the existing `nt_skeletal` kernels:
-`Skeleton & Pose` poses an original code-defined humanoid and two imported
-Khronos rigs through `nt_skeletal_fk`, and `Playback` plays the imported glTF
-clips of those rigs on one caller-owned track through `nt_skeletal_sample`.
-The packs carry the skeleton, skin binding, skinned mesh and clips of both
-rigs, but the stage draws bone primitives only, with the existing shape
-renderer. The GPU skinning renderer is implemented; its showcase integration
-is planned in [#524](https://github.com/d954mas/neotolis-engine/issues/524).
-There is no IK, mixer or animation library.
+`Skeleton & Pose` edits joint offsets on the code-defined humanoid and imported
+Khronos rigs. `Skinned Meshes` plays their imported clips on textured meshes with
+explicit palette upload. It includes the former Playback controls and optional
+bones; there is no separate Playback scene, IK, mixer or animation library.
 
 Build and run the native example with:
 
@@ -29,7 +24,7 @@ cmake --preset wasm-debug
 cmake --build --preset wasm-debug --target skeletal_showcase
 ```
 
-The scene list contains two entries, `Skeleton & Pose` and `Playback`. The top
+The scene list contains `Skeleton & Pose`, `Skinned Meshes` and `Order & Instancing`. The top
 selector selects a scene; the right panel holds the scene's controls. Stage
 orbit is owned by the shell: drag with the left mouse button inside the stage,
 drag with the right mouse button to pan, and use the wheel to zoom. UI controls
@@ -42,7 +37,7 @@ holds the sprite and text shaders, the UI atlas, the font, and for each of the
 two Khronos rigs its NSKL skeleton, NSKN skin binding and skinned MESH. The
 clips pack, `skeletal_showcase_clips.ntpack`, holds the four clips (Fox
 `Survey`, `Walk`, `Run` and the CesiumMan walk). Both packs mount at init, and
-the Playback scene plays the clips of the second pack on the skeletons of the
+the Skinned Meshes scene plays the clips of the second pack on the skeletons of the
 first, which is how the showcase exercises "a clip from another pack on an
 already-loaded skeleton". `raw/README.md` lists the raw inputs and their
 attribution.
@@ -50,8 +45,9 @@ attribution.
 Each glb is parsed once; its rig is imported with the default selection (skin 0,
 no cut) and fed to both builder contexts. The skinned mesh is primitive 0 of the
 mesh of the node that instantiates skin 0, exported with `POSITION`, `JOINTS`
-and `WEIGHTS` and, for CesiumMan only, `NORMAL` (the Fox primitive has none);
-nothing draws it yet. Every clip is sampled at 24 fps, and the builder prints
+and `WEIGHTS`, float32 `TEXCOORD_0` and, for CesiumMan only, `NORMAL` (the Fox primitive has none).
+Base-color textures come from each primitive material and ship as RAW with mipmaps.
+Both CPU and GPU use the same textured unlit shading; normals are not used. Every clip is sampled at 24 fps, and the builder prints
 one report line per clip:
 
 ```
@@ -88,7 +84,7 @@ above), `Fox` and `CesiumMan`. The last two are the Khronos glTF sample
 assets in `raw/` (see `raw/README.md` and the `*-LICENSE.txt` files for their
 CC-BY 4.0 attribution); `build_packs.c` imports each one with the default rig
 selection (skin 0, no cut) into an NSKL skeleton, and this scene shows only its
-rest pose; the clips play in `Playback`. Imported joints carry
+rest pose; the clips play in `Skinned Meshes`. Imported joints carry
 `joint_id` hashes but no names, so their list reads `j00 C14E6FD1`. Every rig
 is framed the same way: after FK at rest the scene computes the joint
 centroid and extent, aims the camera at the centroid, and scales the camera
@@ -111,21 +107,20 @@ resulting model-space 3x4 matrix. Offsets are composed in the fixed order
 matrix comes from the full `nt_skeletal_fk` pass. `Axes on` draws local X/Y/Z
 axes in RGB.
 
-## Playback
+## Skinned Meshes
 
-The scene owns one `nt_skeletal_track_t` and nothing else moves time: every
-frame it refetches the selected skeleton and clip views after `resource_step`,
-writes `track.speed` and `track.flags` from the controls, calls
+The scene owns one character track. Every frame the example refetches the
+selected skeleton and clip views right after `resource_step`, before the controls
+and the scene read them; the scene then writes `track.speed` and `track.flags` from the controls, calls
 `nt_skeletal_tracks_advance` with the frame `dt`, samples the clip at
 `track.time` with `nt_skeletal_sample` and runs `nt_skeletal_fk` (over the
-rest pose when no clip is selected). The stage draws the pose with the same
-bone primitives and framing as `Skeleton & Pose`, without a selected subtree.
+rest pose when no clip is selected). The stage draws the mesh with depth test
+and depth writes. `Bones` enables the bone overlay; the humanoid also shows a hand marker.
 
 Controls, top to bottom:
 
-- `Character`: `Fox` or `CesiumMan` (the humanoid has no clips and is not
-  offered). Switching deselects the clip and refits the camera. While the
-  skeleton is not ready the panel shows `loading...`.
+- `Character`: `Humanoid`, `Fox` or `CesiumMan`. Switching deselects the clip
+  and refits the camera. Clip controls wait for the skeleton to load.
 - `Clip`: every loaded clip whose `rig_compat_id` matches the selected
   skeleton, so CesiumMan lists its one clip and the Fox skeleton takes
   `Fox Survey`, `Fox Walk` and `Fox Run` in any order without being reloaded.
@@ -154,6 +149,67 @@ Controls, top to bottom:
 forward. The `Step` and `Time` grid comes from the clip itself,
 `duration / (sample_count - 1)`, not from a constant.
 
+### CPU comparison
+
+`CPU reference (pauses)` freezes the player and draws the CPU-deformed mesh in
+place of GPU skinning, with the same pose, camera, texture, sampler and depth
+settings. The visual check is that nothing changes when toggled. `Step`, the
+time slider and clip selection move the reference; disable it to enable Play
+again. Reset also remains paused while the reference is enabled.
+
+The MESH type registration's `on_post_resolve` copies each imported mesh when
+its provider publishes, decodes SOA/index compression, and keeps its own source
+bytes independent of the pack and the GPU. Four packed weight bytes divided by
+255 feed a scalar CPU deformation. Its RAW result is rasterized by the static
+mesh renderer and survives context loss in CPU memory. The reference is rebuilt
+only when the model pose differs from the one it was built from. Activated
+meshes are immutable, so each rebuild re-activates the reference mesh; scrubbing
+pays that per frame until #542 adds a vertex update. This is a verification mode
+of the example, not a general CPU renderer or a required engine animation path.
+
+### Body and clothes
+
+`Humanoid motion` is an asymmetric, code-authored two-second clip. White body
+and blue shirt have mixed-weight vertices. The shirt vertices use a different
+mesh space: `C` scales by 1.25 and translates by (0.3, 0.25, -0.2).
+Its vertices contain `inverse(C) * authored_position` and its binding contains
+`IB_body * C`, so the two transforms cancel before deformation. Both meshes
+receive the same nonidentity entity world transform, applied once after skinning.
+
+Shared pose evaluates one track but builds two palettes because the inverse
+binds differ. `Independent clothes` samples the clip for the clothes 0.45 s ahead
+of the body's clock (wrapped or clamped like the track). These are skinned garments,
+without cloth physics. `Bones & marker` transforms a point (0.2, 0.1, 0.15) on the
+left hand through `E * G[hand]`; there is no socket object or attachment API.
+
+## Order & Instancing
+
+The instance slider selects an active prefix of 256 preallocated entities and
+tracks. Inactive tracks pause; changing the count preserves their times.
+`Shared binding` evaluates one pose and copies its deformation binding to all
+active entities. Otherwise each active track produces its own palette. Tracks
+keep advancing in either mode. One workspace is reused for sample/FK.
+
+The game submits items in the displayed order without sorting. Alternating
+meshes uses body and a shirt mesh in the body's authored space under the same
+inverse binds; alternating materials uses two actual material handles.
+
+| Mode | Pass 1 draws | Pass 2 draws |
+| --- | --- | --- |
+| Grouped | 1 | 1 |
+| Alternating meshes | N | N |
+| Alternating materials | N | 1 |
+
+`Two passes` draws the same poses/world transforms into two viewports within
+one gfx pass. Pass 2 assigns one tint material and rebuilds the batch keys.
+It does not test transitions between two `nt_gfx_begin_pass` calls. Both draws
+reuse one palette upload. Per-pass counters show measured draw calls and
+instances plus the expected count for that completed frame, excluding UI.
+
+The palette texture is 96 by 256 RGBA32F texels. Each 21-joint palette occupies
+one row: 1008 useful bytes, 1536 uploaded bytes. Shared mode builds one palette;
+independent mode builds N. Both views together draw 2N instances.
+
 ## Shell
 
 The Controls panel header contains the common `Reset` button; `Reset` and `R`
@@ -180,7 +236,7 @@ and stage orbit/pan/zoom. Then switch `Rig` to `CesiumMan` and `Fox`, orbit
 each one, and check that the framing, joint size and grid match the
 humanoid's.
 
-Playback: switch the scene to `Playback`; Fox stands at rest and the status
+Playback: switch the scene to `Skinned Meshes`; Fox stands at rest and the status
 line reads `no clip`. Open `Clip`: the three Fox entries are listed and
 `CesiumMan` is not. Select `Fox Walk` and confirm the legs cycle and the
 status time wraps at the duration; select `Fox Run` and confirm the skeleton
@@ -190,3 +246,73 @@ holds; check `Reverse` and confirm it runs back to 0 and holds. Pause, press
 `Step` a few times and confirm the time moves by one sample per press; drag `Time`
 and confirm the pose follows. Switch `Character` to `CesiumMan`: `Clip` lists
 only `CesiumMan`; select it and confirm the walk plays upright.
+
+
+### Capture and compare
+
+Enable the existing DevAPI groups when configuring a capture build:
+
+```bash
+cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_UI=ON
+cmake --build --preset native-debug --target skeletal_showcase
+```
+
+Run from `build/examples/skeletal_showcase/native-debug`, select Skinned Meshes,
+choose the pose, enable CPU reference, disable Bones and keep Controls visible for
+the report. Keep the engine loop running; only the character player pauses. From
+the repository root, with Pillow and NumPy installed:
+
+```bash
+python -m tools.devapi.scenarios.skeletal_compare --output build/skeletal-compare
+```
+
+This uses `SocketTransport` and `DevApiClient.capture_frame(scale=1)`: it
+captures the stage with the CPU reference, clicks `CPU reference` off, captures
+GPU skinning at the same pose and clicks it back on. It saves both stage images
+and a JSON report, and exits with an error if the pose moved between the
+captures or any-channel delta >2 affects more than 0.5% of the union of visible
+model pixels. Empty coverage fails. The background must stay uniform and clear;
+UI, ground and bones must be outside the compared area. Matching images are
+expected: CPU computes positions while the static renderer still rasterizes them
+on the GPU.
+
+After activating the pinned SDK, build the WebGL2 capture variant:
+
+```bash
+cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_UI=ON
+cmake --build --preset wasm-debug --target skeletal_showcase
+python -m http.server 8125 --bind 127.0.0.1 --directory build/examples/skeletal_showcase/wasm-debug
+```
+
+Open `http://127.0.0.1:8125`, select the same pose, then capture once with and
+once without `CPU reference` through the existing browser bridge. Capture replies are deferred; wait for the actual PNG:
+
+```js
+const command = {method: "capture.frame", request_id: 1, params: {scale: 1}};
+let reply = window.__devapi.submit(JSON.stringify(command));
+const deadline = performance.now() + 5000;
+while (!reply && performance.now() < deadline) {
+    await new Promise(requestAnimationFrame);
+    reply = window.__devapi.poll();
+}
+if (!reply) throw new Error("Capture timed out");
+const response = JSON.parse(reply);
+if (!response.ok) throw new Error(JSON.stringify(response.error));
+const image = new Image();
+image.src = "data:image/png;base64," + response.result.data;
+document.body.append(image);
+```
+
+The Python comparator's `compare(client, output, backend)` also accepts a
+`DevApiClient(PlaywrightTransport(page))` for automated browser captures.
+Context-loss restoration is reviewed in code; a full loss/retry run remains
+outside this showcase's evidence.
+
+
+Verification of the current code is native only. `skeletal_compare` measured 0
+mismatched pixels for Fox Walk, CesiumMan and the humanoid with shared and
+independent clothes, each stepped while paused. The ordering table was checked
+for N=17 with two passes. The WebGL2 capture pair of the `CPU reference` toggle
+is unverified. This covers unlit position deformation and batching; it does not
+verify lighting normals, cloth simulation, performance budgets or the full
+context-loss/retry sequence.

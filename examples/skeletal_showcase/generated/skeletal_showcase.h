@@ -10,9 +10,16 @@
 #define ASSET_MESH_SKELETAL_SHOWCASE_FOX_MESH ((nt_hash64_t){0xAF72CC79187B59D2ULL}) /* skeletal_showcase/fox.mesh */
 
 /* --- TEXTURE --- */
+#define ASSET_TEXTURE_SKELETAL_SHOWCASE_CESIUMMAN_TEXTURE ((nt_hash64_t){0xA25488F991E7DB9FULL}) /* skeletal_showcase/cesiumman.texture */
+#define ASSET_TEXTURE_SKELETAL_SHOWCASE_FOX_TEXTURE ((nt_hash64_t){0x8756094D602640AFULL}) /* skeletal_showcase/fox.texture */
+#define ASSET_TEXTURE_SKELETAL_SHOWCASE_TINT_TEXTURE ((nt_hash64_t){0xADFD7062B73081D1ULL}) /* skeletal_showcase/tint.texture */
+#define ASSET_TEXTURE_SKELETAL_SHOWCASE_WHITE_TEXTURE ((nt_hash64_t){0x20A6950FDA55BD5FULL}) /* skeletal_showcase/white.texture */
 #define ASSET_TEXTURE_SKELETAL_SHOWCASE_UI_TEX0 ((nt_hash64_t){0x7CA2C6FD03D37F1AULL}) /* skeletal_showcase_ui/tex0 */
 
 /* --- SHADER --- */
+#define ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG ((nt_hash64_t){0x407D2737917D7489ULL}) /* assets/shaders/mesh_inst.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT ((nt_hash64_t){0xABD22A1B5B29F6E6ULL}) /* assets/shaders/mesh_inst.vert */
+#define ASSET_SHADER_ASSETS_SHADERS_SKINNED_VERT ((nt_hash64_t){0x70360EFDD326CBEEULL}) /* assets/shaders/skinned.vert */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG ((nt_hash64_t){0x96ED6312E7B10087ULL}) /* assets/shaders/sprite.frag */
@@ -42,6 +49,9 @@
 
 #if NT_HASH_LABELS
 static inline void skeletal_showcase_register_labels(void) {
+    (void)nt_hash64_str("assets/shaders/mesh_inst.frag");
+    (void)nt_hash64_str("assets/shaders/mesh_inst.vert");
+    (void)nt_hash64_str("assets/shaders/skinned.vert");
     (void)nt_hash64_str("assets/shaders/slug_text.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.vert");
     (void)nt_hash64_str("assets/shaders/sprite.frag");
@@ -49,10 +59,14 @@ static inline void skeletal_showcase_register_labels(void) {
     (void)nt_hash64_str("skeletal_showcase/cesiumman.mesh");
     (void)nt_hash64_str("skeletal_showcase/cesiumman.nskl");
     (void)nt_hash64_str("skeletal_showcase/cesiumman.nskn");
+    (void)nt_hash64_str("skeletal_showcase/cesiumman.texture");
     (void)nt_hash64_str("skeletal_showcase/font");
     (void)nt_hash64_str("skeletal_showcase/fox.mesh");
     (void)nt_hash64_str("skeletal_showcase/fox.nskl");
     (void)nt_hash64_str("skeletal_showcase/fox.nskn");
+    (void)nt_hash64_str("skeletal_showcase/fox.texture");
+    (void)nt_hash64_str("skeletal_showcase/tint.texture");
+    (void)nt_hash64_str("skeletal_showcase/white.texture");
     (void)nt_hash64_str("skeletal_showcase_ui");
     (void)nt_hash64_str("skeletal_showcase_ui/_white");
     (void)nt_hash64_str("skeletal_showcase_ui/box_off");
