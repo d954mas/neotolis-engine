@@ -108,7 +108,7 @@ static const struct {
     {"Fox Walk", ASSET_CLIP_SKELETAL_SHOWCASE_FOX_WALK_NANM},
     {"Fox Run", ASSET_CLIP_SKELETAL_SHOWCASE_FOX_RUN_NANM},
     {"CesiumMan", ASSET_CLIP_SKELETAL_SHOWCASE_CESIUMMAN_NANM},
-    {"Humanoid motion", {0}},
+    {"Humanoid motion", {0}}, /* id 0: the code-authored s_humanoid_clip */
 };
 #define CLIP_COUNT ((int)(sizeof s_clips / sizeof s_clips[0]))
 
@@ -246,6 +246,7 @@ static bool s_skip_scene_interaction_this_frame;
 static nt_ui_context_t *s_ui;
 NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 static nt_buffer_t s_frame_ubo;
+static nt_frame_uniforms_t s_frame_uniforms; /* filled each frame; stage parts set its camera */
 static nt_resource_t s_atlas;
 static nt_resource_t s_atlas_texture;
 static nt_resource_t s_font_resource;
@@ -332,7 +333,6 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
 #define SKELETAL_SCENE_COUNT ((int)(sizeof s_scene_registry / sizeof s_scene_registry[0]))
 static void switch_scene(int next_scene);
 static void reset_active_scene(void);
-static void draw_stage(const nt_ui_scale_t *scale, const mat4 vp, const float eye[3]);
 // #endregion
 
 // #region pose and camera
@@ -604,7 +604,7 @@ static void update_stage_camera(const nt_pointer_t *pointer, const nt_ui_scale_t
 // #endregion
 
 static const nt_skeletal_clip_t *player_clip_view(int clip) {
-    if (clip == CLIP_COUNT - 1) {
+    if (s_clips[clip].id.value == 0) {
         return &s_humanoid_clip;
     }
     return nt_resource_is_ready(s_clip_resource[clip]) ? nt_skeletal_assets_clip(s_clip_resource[clip]) : NULL;
@@ -1034,7 +1034,7 @@ static void init_mesh_scene(void) {
     /* Static meshes are only the CPU reference: one body and one shirt. */
     result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_instances = 2, .max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
-    /* The instance ring holds both ordering passes, so pass 2 never overwrites data pass 1 draws from. */
+    /* The instance ring has room for both ordering passes, so a frame wraps it at most once. */
     result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 2 * SKELETAL_SHOWCASE_MAX_INSTANCES, .max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
     for (uint32_t i = 0; i < SKELETAL_SHOWCASE_MAX_INSTANCES + 2U; ++i) {
@@ -1601,24 +1601,6 @@ static void draw_ground(float scale) {
 
 static bool in_selected_subtree(const nt_skeletal_skeleton_t *skel, int selected, uint32_t j) { return selected >= 0 && j >= (uint32_t)selected && j < (uint32_t)skel->subtree_end[selected]; }
 
-static void draw_stage(const nt_ui_scale_t *scale, const mat4 vp, const float eye[3]) {
-    const float stage_w = s_stage_bbox.width > 1.0F ? s_stage_bbox.width : 600.0F;
-    const float stage_h = s_stage_bbox.height > 1.0F ? s_stage_bbox.height : 600.0F;
-    const int fb_h = g_nt_window.fb_height > 0U ? (int)g_nt_window.fb_height : 600;
-    const nt_ui_viewport_t viewport = nt_ui_viewport_from_scale(scale);
-    const int vx = (int)(viewport.x + (s_stage_bbox.x * scale->scale_x));
-    const int vy = fb_h - (int)(viewport.y + ((s_stage_bbox.y + stage_h) * scale->scale_y));
-    const int vw = (int)(stage_w * scale->scale_x);
-    const int vh = (int)(stage_h * scale->scale_y);
-    nt_gfx_set_viewport(vx, vy, vw, vh);
-    nt_gfx_set_scissor(vx, vy, vw, vh);
-    nt_gfx_set_scissor_enabled(true);
-
-    nt_shape_renderer_set_vp((const float *)vp);
-    nt_shape_renderer_set_cam_pos(eye);
-    nt_shape_renderer_set_depth(true);
-}
-
 static const float s_scaffold_color[4] = {0.45F, 0.50F, 0.58F, 1.0F};
 
 /* Parent->child links whose parent is (or is not) origin scaffolding: those
@@ -1687,26 +1669,25 @@ static void skeleton_draw(void) {
     draw_skeleton(skel, s_skeleton_scene.model, s_skeleton_scene.selected_joint, s_skeleton_scene.show_axes, s_fit_scale);
 }
 
-/* Both ordering passes use equal pixel rectangles and the same camera, with one
- * projection for their aspect ratio. The shell restores the full UI viewport. */
-static void mesh_viewport(uint32_t part, uint32_t count) {
+/* Part `part` of `count` equal side-by-side stage rectangles, all with the same
+ * camera and one projection for their aspect ratio. The shell restores the full UI viewport. */
+static void stage_viewport(uint32_t part, uint32_t count) {
     const nt_ui_viewport_t viewport = nt_ui_viewport_from_scale(&s_ui_scale);
-    const int width = (int)(s_stage_bbox.width * s_ui_scale.scale_x) / (int)count;
-    const int height = (int)(s_stage_bbox.height * s_ui_scale.scale_y);
+    const int stage_width = (int)(s_stage_bbox.width * s_ui_scale.scale_x) / (int)count;
+    const int stage_height = (int)(s_stage_bbox.height * s_ui_scale.scale_y);
+    const int width = stage_width > 0 ? stage_width : 1; /* a collapsed stage still gets a finite projection */
+    const int height = stage_height > 0 ? stage_height : 1;
     const int x = (int)(viewport.x + (s_stage_bbox.x * s_ui_scale.scale_x)) + ((int)part * width);
     const int y = (int)g_nt_window.fb_height - (int)(viewport.y + ((s_stage_bbox.y + s_stage_bbox.height) * s_ui_scale.scale_y));
     nt_gfx_set_viewport(x, y, width, height);
     nt_gfx_set_scissor(x, y, width, height);
-    nt_frame_uniforms_t uniforms = {0};
     mat4 vp;
-    float eye[3];
-    make_camera_vp(vp, (float)width / (float)height, eye);
-    memcpy(uniforms.view_proj, vp, sizeof vp);
-    memcpy(uniforms.camera_pos, eye, sizeof eye);
-    nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof uniforms);
+    make_camera_vp(vp, (float)width / (float)height, s_frame_uniforms.camera_pos);
+    memcpy(s_frame_uniforms.view_proj, vp, sizeof vp);
+    nt_gfx_update_buffer(s_frame_ubo, 0, &s_frame_uniforms, sizeof s_frame_uniforms);
     nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
     nt_shape_renderer_set_vp((const float *)vp);
-    nt_shape_renderer_set_cam_pos(eye);
+    nt_shape_renderer_set_cam_pos(s_frame_uniforms.camera_pos);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1771,6 +1752,7 @@ static void skinned_draw(void) {
         nt_skinned_mesh_renderer_draw_list(items, ready);
     }
     if (s_show_bones) {
+        nt_shape_renderer_set_depth(false); /* bones are an overlay: most sit inside the mesh */
         nt_skeletal_mat34_t world;
         nt_skeletal_mat34_t bones[SKELETAL_SHOWCASE_MAX_JOINTS];
         nt_skeletal_mat34_from_mat4(nt_transform_comp_world_matrix(s_mesh_entities[0]), &world);
@@ -1828,7 +1810,7 @@ static void ordering_draw(void) {
             *nt_material_comp_handle(e) = material;
             items[i] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
         }
-        mesh_viewport(pass, passes);
+        stage_viewport(pass, passes);
         const nt_gfx_frame_stats_t before = g_nt_gfx.frame_stats;
         nt_skinned_mesh_renderer_draw_list(items, count);
         s_order_stats.draws[pass] = g_nt_gfx.frame_stats.draw_calls - before.draw_calls;
@@ -1917,15 +1899,11 @@ static void frame(void) {
 
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
-    nt_frame_uniforms_t uniforms = {0};
-    uniforms.resolution[0] = fb_w;
-    uniforms.resolution[1] = fb_h;
-    uniforms.resolution[2] = 1.0F / fb_w;
-    uniforms.resolution[3] = 1.0F / fb_h;
-    uniforms.time[0] = 0.0F;
-    uniforms.time[1] = g_nt_app.dt;
-    uniforms.near_far[0] = CAMERA_NEAR * s_fit_scale;
-    uniforms.near_far[1] = CAMERA_FAR * s_fit_scale;
+    s_frame_uniforms = (nt_frame_uniforms_t){
+        .resolution = {fb_w, fb_h, 1.0F / fb_w, 1.0F / fb_h},
+        .time = {0.0F, g_nt_app.dt},
+        .near_far = {CAMERA_NEAR * s_fit_scale, CAMERA_FAR * s_fit_scale},
+    };
 
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
@@ -1933,7 +1911,7 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof uniforms, .label = "skeletal_frame_uniforms"});
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof s_frame_uniforms, .label = "skeletal_frame_uniforms"});
         restore_mesh_scene();
         nt_shape_renderer_restore_gpu();
         (void)nt_sprite_renderer_restore_gpu();
@@ -1983,24 +1961,15 @@ static void frame(void) {
             s_camera_fit_height = s_stage_bbox.height;
         }
         update_stage_camera(&g_nt_input.pointers[0], &s_ui_scale);
-        mat4 stage_vp;
-        float eye[3];
-        const float stage_w = s_stage_bbox.width > 1.0F ? s_stage_bbox.width : 600.0F;
-        const float stage_h = s_stage_bbox.height > 1.0F ? s_stage_bbox.height : 600.0F;
-        make_camera_vp(stage_vp, stage_w / stage_h, eye);
-        memcpy(uniforms.view_proj, stage_vp, sizeof stage_vp);
-        uniforms.camera_pos[0] = eye[0];
-        uniforms.camera_pos[1] = eye[1];
-        uniforms.camera_pos[2] = eye[2];
         if (render_enabled) {
-            nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof uniforms);
-            nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-            draw_stage(&s_ui_scale, stage_vp, eye);
+            nt_gfx_set_scissor_enabled(true);
+            nt_shape_renderer_set_depth(true);
+            stage_viewport(0, 1);
             s_scene_registry[s_active_scene].draw();
             end_stage();
 
-            nt_ui_make_screen_view_proj(s_ui_scale.logical_w, s_ui_scale.logical_h, uniforms.view_proj);
-            nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof uniforms);
+            nt_ui_make_screen_view_proj(s_ui_scale.logical_w, s_ui_scale.logical_h, s_frame_uniforms.view_proj);
+            nt_gfx_update_buffer(s_frame_ubo, 0, &s_frame_uniforms, sizeof s_frame_uniforms);
             nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
             nt_ui_target_t target = nt_ui_scale_make_target(&s_ui_scale);
             nt_ui_walk(s_ui, &target);
