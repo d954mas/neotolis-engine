@@ -21,7 +21,6 @@
 #include "nt_pack_format.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 /* clang-format on */
 
 static nt_mesh_t make_mesh(void) {
@@ -219,7 +218,7 @@ void setUp(void) {
     s_program_warnings = 0;
     nt_log_add_sink(capture_program_warning, NULL);
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_test_init(&(nt_gfx_desc_t){
+    nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 8,
         .max_programs = 8,
         .max_pipelines = 16, /* skinned 8 + static 2 + headroom */

@@ -28,7 +28,6 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "unity.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 /* clang-format on */
 
 /* ---- Mock atlas blob builder (mirrors test_atlas / test_sprite_comp) ---- */
@@ -461,7 +460,7 @@ void setUp(void) {
     s_radial_shared_program = NT_PROGRAM_INVALID;
 
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_test_init(
+    nt_gfx_init(
         &(nt_gfx_desc_t){.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16, .max_render_targets = 16});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();

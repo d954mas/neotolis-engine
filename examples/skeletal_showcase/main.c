@@ -1160,7 +1160,6 @@ static void mount_pack(const char *name) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_gfx_begin_tick();
     nt_window_poll();
 #ifdef NT_DEVAPI_ENABLED
     nt_devapi_update();
@@ -1212,8 +1211,7 @@ static void frame(void) {
         if (nt_app_render_enabled()) {
             nt_window_swap_buffers();
         }
-        nt_gfx_end_tick();
-        return;
+        return; /* the restore frame shares the next callback's gfx tick */
     }
     nt_font_step();
     const bool render_enabled = nt_app_render_enabled();
@@ -1293,8 +1291,6 @@ int main(int argc, char *argv[]) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.depth = true;
     nt_gfx_init(&gfx_desc);
-    /* Loading creates gfx resources; like every frame, it runs inside a tick. */
-    nt_gfx_begin_tick();
     nt_gfx_register_global_block("Globals", 0);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB
@@ -1381,11 +1377,9 @@ int main(int argc, char *argv[]) {
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
 #endif
-    nt_gfx_end_tick();
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    nt_gfx_begin_tick(); /* teardown tick; nt_gfx_shutdown discards it */
 #ifdef NT_DEVAPI_ENABLED
     nt_devapi_net_stop();
     nt_devapi_shutdown();

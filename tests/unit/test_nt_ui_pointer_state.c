@@ -11,7 +11,6 @@
 #include "test_helpers/ui_test_arena.h"
 #include "ui/nt_ui.h"
 #include "unity.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 /* clang-format on */
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
@@ -19,7 +18,7 @@ static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_
 
 void setUp(void) {
     /* gfx pulled in transitively via nt_font/nt_resource; stub is fine. */
-    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 16});
     nt_ui_module_init();
 }
 

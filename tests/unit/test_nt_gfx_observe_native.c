@@ -168,38 +168,42 @@ static uint32_t captured_calls(nt_gfx_gl_call_t call) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- inspect the two identity layers before and after resize
 static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
-    nt_gfx_begin_tick();
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 8, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
-    nt_gfx_end_tick();
     nt_texture_t color = nt_gfx_render_target_color(target);
     nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
-    nt_gfx_capture_view_t before = nt_gfx_capture_read();
+    nt_gfx_end_tick();
+    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 13, 7));
+    nt_gfx_set_scissor_enabled(false);
+    nt_gfx_end_tick();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    /* Inherited definitions precede the resize; fresh ones follow it. */
+    uint32_t resize = 0;
+    while (resize < capture.count && !(capture.events[resize].kind == NT_GFX_EVENT_BEGIN && capture.events[resize].operation == NT_GFX_OP_RESIZE)) {
+        resize++;
+    }
+    TEST_ASSERT_LESS_THAN_UINT32(capture.count, resize);
     uint32_t texture_slot = 0;
     uint32_t old_name = 0;
-    for (uint32_t i = 0; i < before.count; i++) {
-        const nt_gfx_event_t *event = &before.events[i];
+    for (uint32_t i = 0; i < resize; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->object_kind == NT_GFX_OBJECT_TEXTURE && event->object == color.id) {
             texture_slot = event->data.resource.backend;
         }
     }
     TEST_ASSERT_NOT_EQUAL(0, texture_slot);
-    for (uint32_t i = 0; i < before.count; i++) {
-        const nt_gfx_event_t *event = &before.events[i];
+    for (uint32_t i = 0; i < resize; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_TEXTURE && event->data.backend.args[0] == texture_slot) {
             old_name = event->data.backend.args[1];
         }
     }
     TEST_ASSERT_NOT_EQUAL(0, old_name);
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 13, 7));
-    nt_gfx_set_scissor_enabled(false);
-    nt_gfx_end_tick();
-    nt_gfx_capture_view_t after = nt_gfx_capture_read();
     bool dimensions = false;
     bool mapping = false;
     bool cache = false;
-    for (uint32_t i = before.count; i < after.count; i++) {
-        const nt_gfx_event_t *event = &after.events[i];
+    for (uint32_t i = resize; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->object_kind == NT_GFX_OBJECT_TEXTURE && event->object == color.id) {
             TEST_ASSERT_EQUAL_UINT32(13, event->data.resource.width);
             TEST_ASSERT_EQUAL_UINT32(7, event->data.resource.height);
@@ -216,12 +220,11 @@ static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
         }
     }
     TEST_ASSERT_TRUE(dimensions && mapping && cache);
-    TEST_ASSERT_FALSE(after.overflow);
 }
 
 static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    nt_gfx_end_tick();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D a; uniform sampler2D b; out vec4 color; void main(){color=texture(a,vec2(0.0))+texture(b,vec2(0.0));}"});
@@ -272,14 +275,14 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     TEST_ASSERT_FALSE(capture.overflow);
 }
 
-static uint32_t render_target_depth_names(uint32_t first, uint32_t *out_depth) {
+static uint32_t render_target_depth_names(uint32_t *out_depth, uint32_t capacity) {
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     uint32_t count = 0;
-    for (uint32_t i = first; i < capture.count; i++) {
+    for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_RENDER_TARGET) {
-            *out_depth = event->data.backend.args[2];
-            count++;
+            TEST_ASSERT_LESS_THAN_UINT32(capacity, count);
+            out_depth[count++] = event->data.backend.args[2];
         }
     }
     return count;
@@ -287,35 +290,29 @@ static uint32_t render_target_depth_names(uint32_t first, uint32_t *out_depth) {
 
 static void test_render_target_backend_definitions_carry_depth_renderbuffer(void) {
     const nt_render_target_desc_t desc = {.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8, .depth_storage = NT_RT_DEPTH_BUFFER, .depth_format = NT_TEXTURE_FORMAT_DEPTH24};
-    nt_gfx_begin_tick();
     (void)nt_gfx_make_render_target(&desc);
-    nt_gfx_end_tick();
     nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
-    uint32_t depth = 0;
-    TEST_ASSERT_EQUAL_UINT32(1, render_target_depth_names(0, &depth));
-    TEST_ASSERT_NOT_EQUAL(0, depth);
-    uint32_t created_from = nt_gfx_capture_read().count;
+    nt_gfx_end_tick();
     (void)nt_gfx_make_render_target(&desc);
-    uint32_t created_depth = 0;
-    TEST_ASSERT_EQUAL_UINT32(1, render_target_depth_names(created_from, &created_depth));
-    TEST_ASSERT_NOT_EQUAL(0, created_depth);
-    TEST_ASSERT_NOT_EQUAL(depth, created_depth);
     nt_gfx_end_tick();
     TEST_ASSERT_FALSE(nt_gfx_capture_read().overflow);
+    /* The inherited target's definition, then the created one's. */
+    uint32_t depth[2] = {0};
+    TEST_ASSERT_EQUAL_UINT32(2, render_target_depth_names(depth, 2));
+    TEST_ASSERT_NOT_EQUAL(0, depth[0]);
+    TEST_ASSERT_NOT_EQUAL(0, depth[1]);
+    TEST_ASSERT_NOT_EQUAL(depth[0], depth[1]);
 }
 
 static void test_initial_uniform_records_cover_only_vec4(void) {
-    nt_gfx_begin_tick();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "uniform mat4 m; uniform float f; void main(){gl_Position=m*vec4(f);}"});
     nt_shader_t fs = nt_gfx_make_shader(
         &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform vec4 tint; uniform int mode; out vec4 color; void main(){color=tint*float(mode);}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL(0, program.id);
-    nt_gfx_end_tick();
     nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
     nt_gfx_end_tick();
+    nt_gfx_end_tick(); /* a recorded tick without gfx work still snapshots inherited state */
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     uint32_t records = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
@@ -332,7 +329,7 @@ static void test_initial_uniform_records_cover_only_vec4(void) {
 static void test_issued_calls_record_floats_names_and_payloads(void) {
     const uint8_t data[16] = {0};
     nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    nt_gfx_end_tick();
     (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = sizeof(data), .data = data});
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.25F, 0.5F, 0.75F, 1.0F}, .clear_depth = 1.0F});
@@ -375,7 +372,7 @@ static void test_complete_capture_matches_gl_counters(void) {
     const uint8_t pixels[16] = {0};
     const float tint[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    nt_gfx_end_tick();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D tex; uniform vec4 tint; out vec4 color; void main(){color=texture(tex,vec2(0.5))*tint;}"});
@@ -417,7 +414,7 @@ static void test_complete_capture_matches_gl_counters(void) {
 
 static void test_readback_is_recorded_as_issued_call(void) {
     nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    nt_gfx_end_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     uint8_t pixel[4] = {0};
@@ -438,17 +435,15 @@ static void test_readback_is_recorded_as_issued_call(void) {
     TEST_ASSERT_EQUAL_UINT32(1, reads);
 }
 #endif
-/* Work outside ticks shows only in lifetime totals; uploads before begin_frame land in the tick. */
+/* Uploads before begin_frame land in the open tick. */
 static void test_payloads_before_render_land_in_their_tick(void) {
     const uint8_t data[64] = {0};
-    nt_gfx_begin_tick();
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = sizeof(data)});
     TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.buffer_upload_calls);
     nt_gfx_update_buffer(buffer, 0, data, 16);
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL_UINT64(16, g_nt_gfx.last_frame.counters.buffer_upload_bytes);
 
-    nt_gfx_begin_tick();
     nt_gfx_orphan_buffer(buffer, data, sizeof(data));
     nt_gfx_update_buffer(buffer, 8, data, 12);
     nt_gfx_counters_t live = g_nt_gfx.counters;
@@ -468,7 +463,6 @@ static void test_payloads_before_render_land_in_their_tick(void) {
 
 static void test_texture_mips_storage_and_subrect_payloads(void) {
     const uint8_t pixels[84] = {0};
-    nt_gfx_begin_tick();
     nt_texture_t storage = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8});
     TEST_ASSERT_TRUE(storage.id != 0);
     TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.texture_upload_calls);
@@ -487,7 +481,6 @@ static void test_failed_upload_keeps_issued_bytes_and_observed_loss(void) {
     const uint8_t pixels[64] = {0};
     const GLenum errors[] = {GL_OUT_OF_MEMORY, 0x9242U};
     for (uint32_t i = 0; i < 2; i++) {
-        nt_gfx_begin_tick();
         s_upload_error = errors[i];
         nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
         TEST_ASSERT_EQUAL_UINT32(0, texture.id);
@@ -502,25 +495,36 @@ static void test_failed_upload_keeps_issued_bytes_and_observed_loss(void) {
 static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     const char *vs_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }";
     const char *fs_source = "precision mediump float; uniform vec4 u_color; out vec4 color; void main() { color = u_color; }";
-    nt_gfx_begin_tick();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 64});
     const float color[4] = {1.0F, 0.5F, 0.0F, 1.0F};
-    nt_gfx_end_tick();
     nt_gfx_capture_set_enabled(true);
+    nt_gfx_end_tick();
     for (uint32_t frame = 0; frame < 2; frame++) {
         s_program_calls = s_vao_calls = s_uniform_calls = s_ubo_calls = 0;
-        nt_gfx_begin_tick();
+        nt_gfx_begin_frame();
+        nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+        for (uint32_t repeat = 0; repeat < 2; repeat++) {
+            nt_gfx_bind_pipeline(pipeline);
+            nt_gfx_bind_vertex_input(vi);
+            nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), color);
+            nt_gfx_bind_uniform_buffer(ubo, 0);
+        }
+        nt_gfx_set_uniform_vec4(nt_hash32_str("inactive"), color);
+        nt_gfx_draw(0, 3);
+        nt_gfx_end_pass();
+        nt_gfx_end_frame();
+        nt_gfx_end_tick();
 #if NT_GFX_CAPTURE_ENABLED
         if (frame == 1) {
-            nt_gfx_capture_view_t initial = nt_gfx_capture_read();
+            nt_gfx_capture_view_t capture = nt_gfx_capture_read();
             bool color_known = false;
             bool viewport_known = false;
-            for (uint32_t i = 0; i < initial.count; i++) {
-                const nt_gfx_event_t *e = &initial.events[i];
+            for (uint32_t i = 0; i < capture.count; i++) {
+                const nt_gfx_event_t *e = &capture.events[i];
                 if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UNIFORM_VEC4 && e->data.backend.args[1] == nt_hash32_str("u_color").value) {
                     TEST_ASSERT_EQUAL(NT_GFX_REASON_NONE, e->reason);
                     TEST_ASSERT_EQUAL_MEMORY(color, e->data.backend.values, sizeof(color));
@@ -536,19 +540,6 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
             TEST_ASSERT_TRUE(viewport_known);
         }
 #endif
-        nt_gfx_begin_frame();
-        nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-        for (uint32_t repeat = 0; repeat < 2; repeat++) {
-            nt_gfx_bind_pipeline(pipeline);
-            nt_gfx_bind_vertex_input(vi);
-            nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), color);
-            nt_gfx_bind_uniform_buffer(ubo, 0);
-        }
-        nt_gfx_set_uniform_vec4(nt_hash32_str("inactive"), color);
-        nt_gfx_draw(0, 3);
-        nt_gfx_end_pass();
-        nt_gfx_end_frame();
-        nt_gfx_end_tick();
         nt_gfx_counters_t c = g_nt_gfx.last_frame.counters;
         TEST_ASSERT_EQUAL_UINT32(2, c.accepted[NT_GFX_OP_PIPELINE]);
         TEST_ASSERT_EQUAL_UINT32(2, c.accepted[NT_GFX_OP_VERTEX_INPUT]);
@@ -580,7 +571,6 @@ static void test_compressed_mips_use_issued_block_sizes(void) {
         TEST_IGNORE_MESSAGE("Compressed payload unverified: no supported block format");
     }
     const uint8_t blocks[80] = {0};
-    nt_gfx_begin_tick();
     nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 8, .height = 4, .format = format, .level_count = 4, .data = blocks});
     TEST_ASSERT_NOT_EQUAL(0, texture.id);
     nt_gfx_end_tick();
@@ -592,7 +582,6 @@ static void test_compressed_mips_use_issued_block_sizes(void) {
 }
 
 static void test_attribute_pointer_calls_are_counted_per_issue(void) {
-    nt_gfx_begin_tick();
     nt_buffer_t vertices = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 64});
     nt_buffer_t instances = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 64});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){

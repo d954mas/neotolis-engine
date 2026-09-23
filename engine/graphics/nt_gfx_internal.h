@@ -8,22 +8,16 @@
 // #region observation storage and owning-site counters
 typedef struct {
     nt_gfx_backend_kind_t backend; /* set by the backend at init */
-    bool tick_open;
     bool tick_aborted;
-    bool lifecycle; /* inside nt_gfx_init / nt_gfx_shutdown: the only gfx work allowed outside a tick */
 } nt_gfx_observation_t;
 
 extern nt_gfx_observation_t g_nt_gfx_observation;
-
-/* Every gfx operation and GL call belongs to a tick, so none escapes the tick's counters. */
-static inline void nt_gfx_require_tick(void) {
-    NT_ASSERT((g_nt_gfx_observation.tick_open || g_nt_gfx_observation.lifecycle) && "gfx work outside a tick: wrap it in nt_gfx_begin_tick/nt_gfx_end_tick");
-}
 
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
     uint64_t context_sequence;
     bool requested;
+    bool armed; /* this tick records, starting at its first operation */
     bool recording;
     nt_gfx_event_t *events;
     uint32_t capacity;
@@ -46,6 +40,8 @@ static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
     }
     memcpy(&capture->events[capture->view.count++], event, sizeof(*event));
 }
+/* A recorded tick starts at its first operation, so the previous capture stays readable until then. */
+void nt_gfx_capture_start(void);
 static inline bool nt_gfx_capture_accepts(void) { return g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow; }
 /* Issued-call records are filled in place: open reserves the next slot, commit publishes it. */
 static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
@@ -91,8 +87,8 @@ static inline void nt_gfx_capture_commit_call(void) {
 #define NT_GFX_RECORD(...) ((void)0)
 #endif
 
-/* One public operation = one BEGIN and one END, in every build. BEGIN requires
- * an open tick and keeps op/kind/object in a wrapper-local scope, so operations
+/* One public operation = one BEGIN and one END, in every build. BEGIN starts an
+ * armed recording and keeps op/kind/object in a wrapper-local scope, so operations
  * nested inside the implementation cannot clobber them. END counts an ACCEPTED
  * reason in accepted[op]; capture builds also record the request and result. */
 typedef struct {
@@ -102,7 +98,11 @@ typedef struct {
 } nt_gfx_scope_t;
 
 static inline nt_gfx_scope_t nt_gfx_begin_op(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object) {
-    nt_gfx_require_tick();
+#if NT_GFX_CAPTURE_ENABLED
+    if (g_nt_gfx_capture.armed) {
+        nt_gfx_capture_start();
+    }
+#endif
     return (nt_gfx_scope_t){operation, kind, object};
 }
 
@@ -129,7 +129,7 @@ static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, n
         nt_gfx_end_op(&nt_gfx_scope, (created), nt_gfx_reason);                                                                                                                                        \
     } while (0)
 
-/* Marks the open tick aborted once; outside a tick a loss is not attributed. */
+/* Marks the open tick aborted once. */
 void nt_gfx_observe_context_loss(void);
 // #endregion
 

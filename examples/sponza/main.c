@@ -358,7 +358,6 @@ static void load_scene_from_manifest(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_gfx_begin_tick();
     nt_window_poll();
     nt_input_poll();
 
@@ -652,8 +651,6 @@ int main(void) {
     /* The vertex-input default is derived from max_meshes(128); scale it too. */
     gfx_desc.max_vertex_inputs = 256 * 4 + 48;
     nt_gfx_init(&gfx_desc);
-    /* Loading creates gfx resources; like every frame, it runs inside a tick. */
-    nt_gfx_begin_tick();
 
     /* Register global UBO blocks */
     nt_gfx_register_global_block("Globals", 0);
@@ -744,12 +741,10 @@ int main(void) {
     /* 17. Loading screen stays until geo pack is ready (see frame()) */
 
     /* 18. Run main loop */
-    nt_gfx_end_tick();
     nt_app_run(frame);
 
     /* 19. Shutdown (native only) */
 #ifndef NT_PLATFORM_WEB
-    nt_gfx_begin_tick(); /* teardown tick; nt_gfx_shutdown discards it */
     nt_mesh_renderer_shutdown();
     nt_drawable_comp_shutdown();
     nt_material_comp_shutdown();

@@ -794,24 +794,23 @@ typedef struct {
     nt_gfx_frame_snapshot_t snapshot; /* matching finalized tick, even after later unrecorded ticks */
 } nt_gfx_capture_view_t;
 
-/* Mandatory host tick: every gfx operation between nt_gfx_init and nt_gfx_shutdown
- * runs inside one (host callbacks, a load tick before the loop, a teardown tick
- * that shutdown discards); operations outside a tick assert. Both calls require
- * gfx IDLE. A tick holds any number of gfx frames, whose counters sum. begin_tick
- * is the only reset of g_nt_gfx.counters; end_tick probes for context loss, then
- * copies the counters and status into g_nt_gfx.last_frame. Ticks never advance
- * rendering. */
-void nt_gfx_begin_tick(void);
+/* The one host tick boundary: nt_gfx_init opens the first tick and every end_tick
+ * closes the open one and opens the next, so all gfx work between init and shutdown
+ * belongs to a tick; shutdown discards the open one. Requires gfx IDLE (or a lost
+ * context). A tick holds any number of gfx frames, whose counters sum. end_tick
+ * copies the counters and status into g_nt_gfx.last_frame, then resets
+ * g_nt_gfx.counters. Ticks never advance rendering. */
 void nt_gfx_end_tick(void);
 #if NT_GFX_CAPTURE_ENABLED
 /* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
 const char *nt_gfx_gl_call_name(uint32_t call);
 #endif
-/* Defaults to false; enabling requires nonzero init capacity. Changes inside a
- * tick apply at the next begin_tick. OFF/stub is inert. */
+/* Defaults to false; enabling requires nonzero init capacity. A change applies
+ * to the next tick. OFF/stub is inert. */
 void nt_gfx_capture_set_enabled(bool enabled);
-/* Metadata by value; immutable event prefix until next recorded begin/shutdown.
- * Copy count records and metadata to keep. Empty views have events=NULL. */
+/* Metadata by value; immutable event prefix until the next recorded tick's first
+ * gfx work or shutdown, so read right after end_tick. Copy count records and
+ * metadata to keep. Empty views have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 // #endregion
 
@@ -829,7 +828,7 @@ typedef struct {
 /* ---- Global state ---- */
 
 typedef struct {
-    nt_gfx_counters_t counters;         /* live; reset only by begin_tick, so between ticks they also hold out-of-tick work */
+    nt_gfx_counters_t counters;         /* live counters of the open tick; reset only by end_tick */
     nt_gfx_frame_snapshot_t last_frame; /* last closed tick; UNAVAILABLE before the first */
     nt_gfx_gpu_caps_t gpu_caps;
     bool context_lost;
@@ -875,7 +874,7 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 
 /* ---- Frame / Pass ---- */
 
-/* Both require an open tick; neither resets counters. */
+/* Neither resets counters; only end_tick does. */
 void nt_gfx_begin_frame(void);
 void nt_gfx_end_frame(void);
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);

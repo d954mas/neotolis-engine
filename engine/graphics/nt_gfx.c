@@ -216,7 +216,7 @@ const char *nt_gfx_gl_call_name(uint32_t call) {
 #endif
 
 void nt_gfx_observe_context_loss(void) {
-    if (g_nt_gfx_observation.tick_open && !g_nt_gfx_observation.tick_aborted) {
+    if (!g_nt_gfx_observation.tick_aborted) {
         g_nt_gfx_observation.tick_aborted = true;
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_CONTEXT_LOST);
     }
@@ -337,20 +337,22 @@ static void capture_initial_state(void) {
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
-static void capture_begin_tick(void) {
-    g_nt_gfx_capture.recording = g_nt_gfx_capture.requested;
-    if (g_nt_gfx_capture.recording) {
-        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){
-            .frame_sequence = g_nt_gfx.counters.frame_sequence,
-            .phase = NT_GFX_CAPTURE_RECORDING,
-            .status = NT_GFX_FRAME_RECORDING,
-        };
-        NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_FRAME, event.reason = NT_GFX_REASON_ACCEPTED);
-        capture_initial_state();
-    }
+void nt_gfx_capture_start(void) {
+    g_nt_gfx_capture.armed = false;
+    g_nt_gfx_capture.recording = true;
+    g_nt_gfx_capture.view = (nt_gfx_capture_view_t){
+        .frame_sequence = g_nt_gfx.counters.frame_sequence,
+        .phase = NT_GFX_CAPTURE_RECORDING,
+        .status = NT_GFX_FRAME_RECORDING,
+    };
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_FRAME, event.reason = NT_GFX_REASON_ACCEPTED);
+    capture_initial_state();
 }
 
 static void capture_end_tick(void) {
+    if (g_nt_gfx_capture.armed) {
+        nt_gfx_capture_start(); /* a tick without gfx work still records its frame */
+    }
     if (g_nt_gfx_capture.recording) {
         NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_FRAME, event.reason = g_nt_gfx.last_frame.status == NT_GFX_FRAME_ABORTED ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_ACCEPTED);
         nt_gfx_capture_view_t *capture = &g_nt_gfx_capture.view;
@@ -365,31 +367,20 @@ static void capture_end_tick(void) {
 }
 #endif
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion, not real branching
-void nt_gfx_begin_tick(void) {
-    NT_ASSERT(g_nt_gfx.initialized);
-    NT_ASSERT(!g_nt_gfx_observation.tick_open && "begin_tick: previous tick is still open");
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_tick: a render frame is open");
-    NT_ASSERT(g_nt_gfx.counters.frame_sequence != UINT64_MAX);
-    g_nt_gfx_observation.tick_open = true;
-    /* A loss carried in from earlier aborts only if it is observed again or
-     * still present at end; a begin_frame that restores completes normally. */
+/* The next tick starts at once: gfx work is always inside a tick between init and shutdown. */
+static void open_tick(void) {
     g_nt_gfx_observation.tick_aborted = false;
     g_nt_gfx.counters = (nt_gfx_counters_t){
         .frame_sequence = g_nt_gfx.counters.frame_sequence + 1,
         .availability = s_gfx.counter_availability,
     };
 #if NT_GFX_CAPTURE_ENABLED
-    capture_begin_tick();
+    g_nt_gfx_capture.armed = g_nt_gfx_capture.requested;
 #endif
 }
 
 void nt_gfx_end_tick(void) {
-    NT_ASSERT(g_nt_gfx_observation.tick_open && "end_tick: no open tick");
-    /* A loss after the last probe would otherwise close the tick COMPLETE with calls dropped. */
-    if (nt_gfx_backend_is_context_lost()) {
-        nt_gfx_observe_context_loss();
-    }
+    NT_ASSERT(g_nt_gfx.initialized);
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
     g_nt_gfx.last_frame = (nt_gfx_frame_snapshot_t){
         .counters = g_nt_gfx.counters,
@@ -398,7 +389,7 @@ void nt_gfx_end_tick(void) {
 #if NT_GFX_CAPTURE_ENABLED
     capture_end_tick();
 #endif
-    g_nt_gfx_observation.tick_open = false;
+    open_tick();
 }
 // #endregion
 
@@ -417,7 +408,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
     memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
-    g_nt_gfx_observation.lifecycle = true;
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
     NT_ASSERT(desc->capture_capacity == 0 || sizeof(nt_gfx_event_t) <= SIZE_MAX / desc->capture_capacity);
@@ -428,6 +418,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
         NT_ASSERT(g_nt_gfx_capture.events != NULL);
     }
 #endif
+    /* Init work, like everything after it, belongs to the first tick. */
+    open_tick();
 
     nt_pool_init(&s_gfx.shader_pool, desc->max_shaders);
     nt_pool_init(&s_gfx.program_pool, desc->max_programs);
@@ -472,14 +464,13 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
         s_gfx.counter_availability |= NT_GFX_COUNTERS_BACKEND;
     }
     g_nt_gfx.counters.availability = s_gfx.counter_availability;
-    g_nt_gfx_observation.lifecycle = false;
     g_nt_gfx.initialized = true;
 }
 
 void nt_gfx_shutdown(void) {
-    /* An open tick is discarded; teardown work below needs none. */
-    g_nt_gfx_observation.lifecycle = true;
+    /* The open tick is discarded without a snapshot; teardown calls must not start a recording. */
 #if NT_GFX_CAPTURE_ENABLED
+    g_nt_gfx_capture.armed = false;
     g_nt_gfx_capture.recording = false;
     free(g_nt_gfx_capture.events);
 #endif
@@ -855,7 +846,6 @@ static nt_gfx_event_reason_t begin_frame(void) {
 }
 
 void nt_gfx_begin_frame(void) {
-    NT_ASSERT(g_nt_gfx_observation.tick_open && "begin_frame: call nt_gfx_begin_tick first");
     NT_GFX_BEGIN(NT_GFX_OP_RENDER_FRAME, NT_GFX_OBJECT_NONE, 0);
     NT_GFX_END(begin_frame());
 }
@@ -878,7 +868,6 @@ static nt_gfx_event_reason_t end_frame(void) {
 }
 
 void nt_gfx_end_frame(void) {
-    NT_ASSERT(g_nt_gfx_observation.tick_open && "end_frame: the tick closed before the render frame");
     NT_GFX_BEGIN(NT_GFX_OP_END_RENDER_FRAME, NT_GFX_OBJECT_NONE, 0);
     NT_GFX_END(end_frame());
 }

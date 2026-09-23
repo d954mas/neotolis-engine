@@ -4,7 +4,6 @@
 
 #include "graphics/nt_gfx.h"
 #include "renderers/nt_shape_renderer.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -23,7 +22,7 @@ static nt_render_target_t s_target;
 
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
-    nt_gfx_test_init(&desc);
+    nt_gfx_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
     s_target = nt_gfx_make_render_target(&(nt_render_target_desc_t){

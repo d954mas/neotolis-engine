@@ -21,7 +21,6 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "time/nt_time.h"
 #include "unity.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 /* clang-format on */
 
 /* ---- Test blob builder (identical to test_font.c) ---- */
@@ -245,8 +244,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
     nt_gfx_fake_reset();
-    nt_gfx_test_init(
-        &(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
     /* Band before curve: units the renderer must query, not the 0/1 a hardcode would use. */
     nt_gfx_fake_set_samplers_typed((const char *const[]){"u_band_texture", "u_curve_texture"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_UINT, NT_GFX_SAMPLER_CLASS_FLOAT}, 2);
     nt_hash_init(&(nt_hash_desc_t){0});
@@ -796,7 +794,7 @@ void test_font_cache_flush_preserves_the_entire_run(void) {
 
     nt_text_renderer_set_underline(true);
     nt_text_renderer_set_strikethrough(true);
-    nt_gfx_test_next_tick();
+    nt_gfx_end_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -889,7 +887,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
         s_error_count = 0;
         const uint32_t uploads = nt_gfx_fake_update_texture_count();
         const uint32_t binds = nt_gfx_fake_bound_texture_count();
-        nt_gfx_test_next_tick();
+        nt_gfx_end_tick();
         nt_gfx_begin_frame();
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
         nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -914,7 +912,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
         const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'A');
         TEST_ASSERT_NOT_NULL(glyph);
         TEST_ASSERT_FALSE(glyph->is_tofu);
-        nt_gfx_test_next_tick();
+        nt_gfx_end_tick();
         nt_gfx_begin_frame();
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
         nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -1046,7 +1044,7 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     nt_font_step();
     nt_text_renderer_set_material(material);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_test_next_tick();
+    nt_gfx_end_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_flush();

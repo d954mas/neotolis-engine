@@ -3,7 +3,6 @@
 #include "postfx/nt_postfx_blur.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #include <math.h>
@@ -46,7 +45,7 @@ static nt_render_target_desc_t blur_rt_desc(uint16_t width, uint16_t height, con
 }
 
 void setUp(void) {
-    nt_gfx_test_init(&(nt_gfx_desc_t){
+    nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 8,
         .max_programs = 8,
         .max_pipelines = 8,

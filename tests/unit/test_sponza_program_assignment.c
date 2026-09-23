@@ -18,7 +18,6 @@ static void count_material_assignment(nt_material_t material, nt_program_t progr
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
 #include "nt_shader_format.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #define TEST_NODE_COUNT 4U
@@ -139,7 +138,7 @@ void setUp(void) {
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
     gfx.max_programs = 8;
-    nt_gfx_test_init(&gfx);
+    nt_gfx_init(&gfx);
     nt_http_init();
     nt_fs_init();
     nt_resource_init(&(nt_resource_desc_t){0});

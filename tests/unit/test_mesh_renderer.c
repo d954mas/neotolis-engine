@@ -25,7 +25,6 @@
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
 #include "unity.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 /* clang-format on */
 
 #define TEST_MAX_VERTEX_INPUTS 160
@@ -270,7 +269,7 @@ void setUp(void) {
     s_test_tex_pack_created = false;
     nt_log_add_sink(capture_program_warning, NULL);
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_test_init(&(nt_gfx_desc_t){
+    nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 32,
         .max_programs = 64,
         .max_pipelines = 64,

@@ -6,7 +6,6 @@
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
 #include "test_helpers/nt_gfx_fake.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #include <math.h>
@@ -53,7 +52,7 @@ static const uint16_t s_test_rg16ui_4x4[4 * 4 * 2] = {
 };
 
 void setUp(void) {
-    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
 }
 
 void tearDown(void) {
@@ -169,7 +168,7 @@ void test_gfx_init_shutdown(void) {
     nt_gfx_shutdown();
     TEST_ASSERT_FALSE(g_nt_gfx.initialized);
     /* Re-init for tearDown */
-    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
 }
 
 /* ---- High-level: make/destroy shader ---- */
@@ -197,7 +196,7 @@ void test_gfx_defaults_applied(void) {
     /* Shutdown current, re-init with defaults */
     nt_gfx_shutdown();
     nt_gfx_desc_t defaults = nt_gfx_desc_defaults();
-    nt_gfx_test_init(&defaults);
+    nt_gfx_init(&defaults);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
     /* Verify we can allocate more than 4 shaders (proves defaults > test setUp) */
@@ -209,7 +208,7 @@ void test_gfx_defaults_applied(void) {
 
     /* Re-init for tearDown */
     nt_gfx_shutdown();
-    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
 }
 
 /* ---- Pipeline: create with valid shaders, destroy ---- */
@@ -1004,7 +1003,7 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_programs = 1;
-    nt_gfx_test_init(&desc);
+    nt_gfx_init(&desc);
     nt_gfx_fake_reset();
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
@@ -2568,7 +2567,7 @@ void test_register_global_block_max(void) {
 void test_register_global_block_cleared_on_shutdown(void) {
     nt_gfx_register_global_block("Globals", 0);
     nt_gfx_shutdown();
-    nt_gfx_test_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
     const nt_global_block_t *blocks;
     uint32_t count;
     nt_gfx_get_global_blocks(&blocks, &count);
@@ -3031,7 +3030,7 @@ void test_gfx_frame_draw_calls(void) {
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.counters.draw_calls);
     nt_gfx_end_frame();
-    nt_gfx_test_next_tick();
+    nt_gfx_end_tick();
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
     TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.counters.draw_calls);
 

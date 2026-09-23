@@ -29,8 +29,7 @@ static void draw_teardown(void) {
     nt_gfx_end_frame();
 }
 
-static void test_render_frames_sum_and_only_begin_tick_resets(void) {
-    nt_gfx_begin_tick();
+static void test_render_frames_sum_and_end_tick_resets(void) {
     TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.counters.frame_sequence);
     draw_setup();
     nt_gfx_draw(0, 3);
@@ -49,13 +48,10 @@ static void test_render_frames_sum_and_only_begin_tick_resets(void) {
     TEST_ASSERT_EQUAL_UINT64(27, g_nt_gfx.last_frame.counters.vertices);
     TEST_ASSERT_EQUAL_UINT64(4, g_nt_gfx.last_frame.counters.instances);
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.counters.accepted[NT_GFX_OP_PIPELINE]);
-    /* Closing a tick copies; it does not reset. */
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.draw_calls);
-
-    nt_gfx_begin_tick();
+    /* Closing a tick opens the next one with fresh counters. */
     TEST_ASSERT_EQUAL_UINT64(2, g_nt_gfx.counters.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.counters.draw_calls);
+
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL_UINT64(2, g_nt_gfx.last_frame.counters.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.last_frame.counters.draw_calls);
@@ -63,38 +59,32 @@ static void test_render_frames_sum_and_only_begin_tick_resets(void) {
 }
 
 static void test_instanced_products_are_widened_before_multiplication(void) {
-    nt_gfx_begin_tick();
     draw_setup();
     nt_gfx_draw_instanced(0, 65536, 65537);
     TEST_ASSERT_EQUAL_UINT64(UINT64_C(4295032832), g_nt_gfx.counters.vertices);
     draw_teardown();
-    nt_gfx_end_tick();
 }
 
 static void test_availability_is_fixed_per_build_and_backend(void) {
     const uint32_t expected = NT_GFX_COUNTERS_DRAWS | NT_GFX_COUNTERS_FRONTEND;
     TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.counters.availability);
-    nt_gfx_begin_tick();
-    TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.counters.availability);
     nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.counters.availability);
     TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.last_frame.counters.availability);
 }
 
 static void test_loss_aborts_the_tick_and_restore_completes_it(void) {
-    nt_gfx_begin_tick();
     nt_gfx_fake_set_context_lost(true);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, g_nt_gfx.last_frame.status);
 
-    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, g_nt_gfx.last_frame.status);
 
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     nt_gfx_end_frame();
@@ -102,19 +92,20 @@ static void test_loss_aborts_the_tick_and_restore_completes_it(void) {
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, g_nt_gfx.last_frame.status);
 }
 
-/* A loss after the last frontend probe still aborts the tick: end_tick probes the backend. */
-static void test_loss_after_begin_frame_aborts_the_tick(void) {
-    nt_gfx_begin_tick();
+/* end_tick does not probe: a loss after the last begin_frame marks the next tick. */
+static void test_loss_after_begin_frame_marks_the_next_tick(void) {
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_end_frame();
     nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, g_nt_gfx.last_frame.status);
+    nt_gfx_begin_frame();
+    nt_gfx_end_tick();
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, g_nt_gfx.last_frame.status);
 }
 
-/* Pre-loop loading runs in a load tick, so its creations are counted like any frame's. */
-static void test_load_tick_counts_initial_resource_creation(void) {
-    nt_gfx_begin_tick();
+/* Loading after init lands in the first tick, so its creations are counted like any frame's. */
+static void test_first_tick_counts_initial_resource_creation(void) {
     (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
     (void)nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     (void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
@@ -125,9 +116,7 @@ static void test_load_tick_counts_initial_resource_creation(void) {
 }
 
 static void test_shutdown_discards_an_open_tick(void) {
-    nt_gfx_begin_tick();
     nt_gfx_end_tick();
-    nt_gfx_begin_tick();
     draw_setup();
     nt_gfx_draw(0, 3);
     draw_teardown();
@@ -137,30 +126,28 @@ static void test_shutdown_discards_an_open_tick(void) {
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, g_nt_gfx.last_frame.status);
     TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.last_frame.counters.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.draw_calls);
-    nt_gfx_begin_tick();
     TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.counters.frame_sequence);
-    nt_gfx_end_tick();
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-static void test_tick_contract_asserts(void) {
-    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
-    NT_TEST_EXPECT_ASSERT(nt_gfx_end_frame());
-    NT_TEST_EXPECT_ASSERT(nt_gfx_end_tick());
-    /* Operations outside a tick would escape its counters. */
-    NT_TEST_EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}));
-    nt_gfx_begin_tick();
-    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_tick());
+static void test_end_tick_with_an_open_render_frame_asserts(void) {
     nt_gfx_begin_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_end_tick());
     nt_gfx_end_frame();
     nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, g_nt_gfx.last_frame.status);
 }
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
-static void test_resource_operations_keep_published_handles_after_destroy(void) {
+/* Recording applies from the next tick on. */
+static void record_next_tick(void) {
     nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    nt_gfx_end_tick();
+}
+
+static void test_resource_operations_keep_published_handles_after_destroy(void) {
+    record_next_tick();
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 24});
     nt_gfx_destroy_buffer(buffer);
     nt_gfx_end_tick();
@@ -179,8 +166,7 @@ static void test_resource_operations_keep_published_handles_after_destroy(void) 
 }
 
 static void test_loss_detected_during_creation_aborts_observation(void) {
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    record_next_tick();
     nt_gfx_fake_set_context_lost(true);
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
     TEST_ASSERT_EQUAL_UINT32(0, buffer.id);
@@ -190,19 +176,17 @@ static void test_loss_detected_during_creation_aborts_observation(void) {
 }
 
 static void test_restore_frame_completes_under_new_context_sequence(void) {
-    nt_gfx_capture_set_enabled(true);
+    record_next_tick();
     nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_tick();
-    uint64_t lost_sequence = nt_gfx_capture_read().events[0].context_sequence;
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, g_nt_gfx.last_frame.status);
+    uint64_t lost_sequence = nt_gfx_capture_read().events[0].context_sequence;
 
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_tick();
-    TEST_ASSERT_EQUAL_UINT64(lost_sequence, nt_gfx_capture_read().events[0].context_sequence);
     nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT64(lost_sequence, nt_gfx_capture_read().events[0].context_sequence);
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     nt_gfx_end_frame();
     nt_gfx_end_tick();
@@ -221,8 +205,7 @@ static void test_overflow_and_loss_finalize_aborted(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 1;
     nt_gfx_init(&desc);
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    record_next_tick();
     nt_gfx_fake_set_context_lost(true);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
     nt_gfx_end_tick();
@@ -234,15 +217,16 @@ static void test_overflow_and_loss_finalize_aborted(void) {
 
 static void test_sampler_cache_hit_defines_nothing(void) {
     const nt_sampler_desc_t sampler_desc = {.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR};
-    nt_gfx_begin_tick();
     nt_sampler_t sampler = nt_gfx_make_sampler(&sampler_desc);
-    nt_gfx_end_tick();
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
-    uint32_t start = nt_gfx_capture_read().count;
+    record_next_tick();
     TEST_ASSERT_EQUAL_UINT32(sampler.id, nt_gfx_make_sampler(&sampler_desc).id);
     nt_gfx_end_tick();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    /* The request starts after the inherited definitions. */
+    uint32_t start = 0;
+    while (start < capture.count && !(capture.events[start].kind == NT_GFX_EVENT_BEGIN && capture.events[start].operation != NT_GFX_OP_FRAME)) {
+        start++;
+    }
     bool cache = false;
     for (uint32_t i = start; i < capture.count; i++) {
         const nt_gfx_event_t *e = &capture.events[i];
@@ -254,8 +238,7 @@ static void test_sampler_cache_hit_defines_nothing(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks nesting, pairing and creator handles
 static void test_every_operation_records_one_begin_and_one_result(void) {
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    record_next_tick();
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(NULL).id);
@@ -290,8 +273,7 @@ static void test_every_operation_records_one_begin_and_one_result(void) {
 /* accepted[] and the recorded ACCEPTED results come from the same END, per operation. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one tick mixes accepted, cached and rejected operations
 static void test_accepted_counters_match_recorded_results(void) {
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    record_next_tick();
     draw_setup();
     nt_gfx_draw(0, 3);
     nt_gfx_set_scissor_enabled(false); /* unchanged: a cache result, not counted */
@@ -315,11 +297,10 @@ static void test_accepted_counters_match_recorded_results(void) {
 }
 
 static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
-    nt_gfx_begin_tick();
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 24});
+    record_next_tick();
+    nt_gfx_destroy_buffer(buffer);
     nt_gfx_end_tick();
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
     nt_gfx_capture_view_t initial = nt_gfx_capture_read();
     bool buffer_found = false;
     bool scissor_unknown = false;
@@ -335,18 +316,13 @@ static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     }
     TEST_ASSERT_TRUE(buffer_found);
     TEST_ASSERT_TRUE(scissor_unknown);
-    nt_gfx_destroy_buffer(buffer);
-    nt_gfx_end_tick();
 }
 
 static void test_draw_trace_preserves_arguments_and_live_prefix(void) {
-    nt_gfx_begin_tick();
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    nt_gfx_end_tick();
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    record_next_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
@@ -377,12 +353,16 @@ static void test_draw_trace_preserves_arguments_and_live_prefix(void) {
 
 static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    record_next_tick();
+    /* An armed tick records from its first gfx work. */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
+    nt_gfx_begin_frame();
     nt_gfx_capture_view_t before = nt_gfx_capture_read();
     TEST_ASSERT_EQUAL(NT_GFX_CAPTURE_RECORDING, before.phase);
     TEST_ASSERT_TRUE(before.count > 0);
     nt_gfx_event_t saved = before.events[0];
+    nt_gfx_end_frame();
+    nt_gfx_capture_set_enabled(false);
     nt_gfx_end_tick();
     nt_gfx_frame_snapshot_t snapshot = g_nt_gfx.last_frame;
     nt_gfx_capture_view_t after = nt_gfx_capture_read();
@@ -393,8 +373,9 @@ static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     TEST_ASSERT_TRUE(after.count > before.count);
     TEST_ASSERT_EQUAL_MEMORY(&snapshot, &after.snapshot, sizeof(snapshot));
 
-    nt_gfx_capture_set_enabled(false);
-    nt_gfx_begin_tick();
+    /* Unrecorded ticks keep the finalized capture. */
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
     nt_gfx_end_tick();
     nt_gfx_capture_view_t retained = nt_gfx_capture_read();
     TEST_ASSERT_EQUAL_UINT64(after.frame_sequence, retained.frame_sequence);
@@ -408,8 +389,7 @@ static void test_capture_overflow_does_not_stop_counters(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 1;
     nt_gfx_init(&desc);
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    record_next_tick();
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
     nt_gfx_end_tick();
@@ -422,24 +402,27 @@ static void test_capture_overflow_does_not_stop_counters(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_COUNTERS_DRAWS | NT_GFX_COUNTERS_FRONTEND, snapshot->counters.availability);
 }
 
-static void test_capture_toggle_waits_until_next_begin(void) {
-    nt_gfx_begin_tick();
+static void test_capture_toggle_applies_to_the_next_tick(void) {
     nt_gfx_capture_set_enabled(true);
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     nt_gfx_end_tick();
-    nt_gfx_begin_tick();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     nt_gfx_capture_set_enabled(false);
+    nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL(NT_GFX_CAPTURE_RECORDING, nt_gfx_capture_read().phase);
+    nt_gfx_end_frame();
     nt_gfx_end_tick();
     uint64_t sequence = nt_gfx_capture_read().frame_sequence;
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL_UINT64(sequence, nt_gfx_capture_read().frame_sequence);
 }
 
 static void test_exact_capacity_and_one_record_short(void) {
-    nt_gfx_capture_set_enabled(true);
-    nt_gfx_begin_tick();
+    record_next_tick();
     nt_gfx_end_tick();
     uint32_t needed = nt_gfx_capture_read().count;
     TEST_ASSERT_GREATER_THAN_UINT32(1, needed);
@@ -448,8 +431,7 @@ static void test_exact_capacity_and_one_record_short(void) {
         nt_gfx_desc_t desc = nt_gfx_desc_defaults();
         desc.capture_capacity = needed - missing;
         nt_gfx_init(&desc);
-        nt_gfx_capture_set_enabled(true);
-        nt_gfx_begin_tick();
+        record_next_tick();
         nt_gfx_end_tick();
         nt_gfx_capture_view_t view = nt_gfx_capture_read();
         TEST_ASSERT_EQUAL_UINT32(needed - missing, view.count);
@@ -461,15 +443,15 @@ static void test_exact_capacity_and_one_record_short(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_render_frames_sum_and_only_begin_tick_resets);
+    RUN_TEST(test_render_frames_sum_and_end_tick_resets);
     RUN_TEST(test_instanced_products_are_widened_before_multiplication);
     RUN_TEST(test_availability_is_fixed_per_build_and_backend);
     RUN_TEST(test_loss_aborts_the_tick_and_restore_completes_it);
-    RUN_TEST(test_loss_after_begin_frame_aborts_the_tick);
-    RUN_TEST(test_load_tick_counts_initial_resource_creation);
+    RUN_TEST(test_loss_after_begin_frame_marks_the_next_tick);
+    RUN_TEST(test_first_tick_counts_initial_resource_creation);
     RUN_TEST(test_shutdown_discards_an_open_tick);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_tick_contract_asserts);
+    RUN_TEST(test_end_tick_with_an_open_render_frame_asserts);
 #endif
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_resource_operations_keep_published_handles_after_destroy);
@@ -483,7 +465,7 @@ int main(void) {
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);
     RUN_TEST(test_capture_overflow_does_not_stop_counters);
-    RUN_TEST(test_capture_toggle_waits_until_next_begin);
+    RUN_TEST(test_capture_toggle_applies_to_the_next_tick);
     RUN_TEST(test_exact_capacity_and_one_record_short);
 #endif
     return UNITY_END();

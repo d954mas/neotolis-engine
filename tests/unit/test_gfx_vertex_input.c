@@ -3,7 +3,6 @@
 #include "graphics/nt_gfx_internal.h"
 #include "nt_mesh_format.h"
 #include "test_helpers/nt_gfx_fake.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #include <setjmp.h>
@@ -36,7 +35,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
     } while (0)
 
 void setUp(void) {
-    nt_gfx_test_init(&(nt_gfx_desc_t){
+    nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS, .max_render_targets = 4});
     nt_gfx_fake_reset();
 }

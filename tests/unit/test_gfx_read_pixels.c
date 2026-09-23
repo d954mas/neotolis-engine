@@ -3,7 +3,6 @@
  * gradient, no GL context — the only L1 readback layer CTest can prove headless). */
 
 #include "graphics/nt_gfx.h"
-#include "test_helpers/nt_gfx_test_tick.h"
 #include "unity.h"
 
 #include <stdint.h>
@@ -12,7 +11,7 @@
 /* Readback is a gfx operation, so it runs inside a tick. */
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
-    nt_gfx_test_init(&desc);
+    nt_gfx_init(&desc);
 }
 void tearDown(void) { nt_gfx_shutdown(); }
 

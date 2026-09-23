@@ -510,34 +510,9 @@ static void draw_default_frame(void) {
     draw_solid_quad(-0.92F, 0.82F, 0.92F, 0.89F, s_demo.handles_stable ? stable : unstable);
 }
 
-static void frame(void) {
-    nt_gfx_begin_tick();
-    nt_window_poll();
-    nt_input_poll();
-    nt_mem_scratch_reset();
-
-#ifndef NT_PLATFORM_WEB
-    if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-        nt_app_quit();
-    }
-#endif
-    if (nt_input_key_is_pressed(NT_KEY_R)) {
-        bool make_large = !s_demo.large_target;
-        rtt_resize_result_t resize_result = make_large ? resize_targets(768, 432) : resize_targets(512, 288);
-        /* Resizing targets cannot repair a failed renderer restore. */
-        s_demo.render_resources_ready = s_demo.render_resources_ready && resize_result != RTT_RESIZE_UNUSABLE;
-        if (resize_result == RTT_RESIZE_COMMITTED) {
-            s_demo.large_target = make_large;
-        }
-    }
-    nt_resource_step();
-    link_programs();
-    try_bind_ui_resources();
-
+static void render_frame(void) {
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_lost) {
-        nt_window_swap_buffers();
-        nt_gfx_end_tick();
         return;
     }
     if (g_nt_gfx.context_restored) {
@@ -573,14 +548,10 @@ static void frame(void) {
         /* Everything decided before begin_frame described the dead context, so
          * this frame draws nothing -- the next one is built from scratch. */
         nt_gfx_end_frame();
-        nt_window_swap_buffers();
-        nt_gfx_end_tick();
         return;
     }
     if (!s_demo.render_resources_ready || !render_targets_ready()) {
         nt_gfx_end_frame();
-        nt_window_swap_buffers();
-        nt_gfx_end_tick();
         return;
     }
 
@@ -607,7 +578,32 @@ static void frame(void) {
     draw_ui_overlay();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+}
 
+static void frame(void) {
+    nt_window_poll();
+    nt_input_poll();
+    nt_mem_scratch_reset();
+
+#ifndef NT_PLATFORM_WEB
+    if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+        nt_app_quit();
+    }
+#endif
+    if (nt_input_key_is_pressed(NT_KEY_R)) {
+        bool make_large = !s_demo.large_target;
+        rtt_resize_result_t resize_result = make_large ? resize_targets(768, 432) : resize_targets(512, 288);
+        /* Resizing targets cannot repair a failed renderer restore. */
+        s_demo.render_resources_ready = s_demo.render_resources_ready && resize_result != RTT_RESIZE_UNUSABLE;
+        if (resize_result == RTT_RESIZE_COMMITTED) {
+            s_demo.large_target = make_large;
+        }
+    }
+    nt_resource_step();
+    link_programs();
+    try_bind_ui_resources();
+
+    render_frame();
     nt_window_swap_buffers();
     nt_gfx_end_tick();
 }
@@ -632,8 +628,6 @@ int main(void) {
     gfx_desc.max_textures = 32;
     gfx_desc.max_pipelines = 32;
     nt_gfx_init(&gfx_desc);
-    /* Loading creates gfx resources; like every frame, it runs inside a tick. */
-    nt_gfx_begin_tick();
     nt_gfx_register_global_block("Globals", 0);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB
@@ -729,11 +723,9 @@ int main(void) {
     nt_platform_web_loading_complete();
 #endif
 
-    nt_gfx_end_tick();
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    nt_gfx_begin_tick(); /* teardown tick; nt_gfx_shutdown discards it */
     nt_gfx_destroy_render_target(s_demo.blur);
     nt_gfx_destroy_render_target(s_demo.temp);
     nt_gfx_destroy_render_target(s_demo.scene);

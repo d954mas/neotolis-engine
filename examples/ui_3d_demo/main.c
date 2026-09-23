@@ -775,7 +775,6 @@ static float ui3d_poll_gpu_ms(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
-    nt_gfx_begin_tick();
     /* frame_ms is the wall delta between frame starts; cpu_ms brackets the work below. */
 #if NT_METRICS_ENABLED
     static double s_last_begin = 0.0;
@@ -903,8 +902,7 @@ static void frame(void) {
 #endif
         nt_gfx_end_frame();
         nt_window_swap_buffers();
-        nt_gfx_end_tick();
-        return;
+        return; /* the restore frame shares the next callback's gfx tick */
     }
 
     nt_font_step();
@@ -1054,8 +1052,6 @@ int main(int argc, char *argv[]) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.depth = true;
     nt_gfx_init(&gfx_desc);
-    /* Loading creates gfx resources; like every frame, it runs inside a tick. */
-    nt_gfx_begin_tick();
     nt_gfx_register_global_block("Globals", 0);
 
     nt_http_init();
@@ -1193,11 +1189,9 @@ int main(int argc, char *argv[]) {
 
     nt_log_info("ui_3d_demo: walk + look + click world panels (SHAPE left, SPEED right). Esc quit.");
 
-    nt_gfx_end_tick();
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    nt_gfx_begin_tick(); /* teardown tick; nt_gfx_shutdown discards it */
     nt_ui_destroy_context(s_ctx);
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();

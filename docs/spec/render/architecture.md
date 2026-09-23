@@ -381,32 +381,30 @@ or a shadow-map system.
 ## Frame observation
 
 All gfx work between `nt_gfx_init` and `nt_gfx_shutdown` happens inside a
-**tick**, so no operation or GL call escapes the counters. Every host callback
-that may touch gfx is one tick: the host calls `nt_gfx_begin_tick` before
-resource preparation and `nt_gfx_end_tick` after its last render frame, also
-when nothing renders. Loading before the main loop runs in an explicit load
-tick (init, begin_tick, load, end_tick, run), and teardown in a tick that
-`nt_gfx_shutdown` discards (begin_tick, renderer and resource shutdowns,
-`nt_gfx_shutdown`). Every public gfx operation asserts an open tick; only the
-internals of `nt_gfx_init` and `nt_gfx_shutdown` (context creation, capability
-probes, ground state, final deletes) run outside one. Ticks are a mandatory
-host contract in every build, independent of simulation time; app/gfx never
-add them implicitly. Both require gfx IDLE; known context loss also permits
-end. Nested or missing ticks assert. A tick holds any number of render frames and passes; their counters
-sum. Shutdown discards an open tick without a snapshot. The stub is stateless:
-its ticks are inert and it never publishes a snapshot.
+**tick**, so no operation or GL call escapes the counters. `nt_gfx_end_tick` is
+the only boundary: `nt_gfx_init` opens the first tick, and every end_tick closes
+the open tick and at once opens the next, so there is no state outside a tick
+and nothing to assert about it. The host calls `nt_gfx_end_tick` once at the end
+of each frame callback, also when nothing renders. Work between init and the
+first end_tick (init itself, pre-loop loading) is the first tick; teardown work
+after the last end_tick lands in a tick that `nt_gfx_shutdown` discards without
+a snapshot. Ticks are a host contract in every build, independent of simulation
+time; app/gfx never close one implicitly. end_tick requires gfx IDLE; known
+context loss also permits it. A tick holds any number of render frames and
+passes; their counters sum. The stub is stateless: its end_tick is inert and it
+never publishes a snapshot.
 
-`g_nt_gfx.counters` holds the live counters of the open tick; outside a tick
-only init/shutdown internals touch them. `nt_gfx_begin_tick` is their only reset and advances
-`frame_sequence`; render frames reset nothing. `nt_gfx_end_tick` copies the
-counters and a status into `g_nt_gfx.last_frame`, the last closed tick, which
-stays unchanged until the next end or shutdown; before the first end its status
-is UNAVAILABLE. Readers early in a callback, before its draws, read `last_frame`.
-A no-render tick reports zero draws; old geometry is never reused. A tick is
-ABORTED only when a loss is observed during it or the context is still lost at
-its end (end_tick probes the backend itself, so a loss after the last frame
-still aborts); a tick whose begin_frame restores a lost context and then completes is
-COMPLETE.
+`g_nt_gfx.counters` holds the live counters of the open tick. `nt_gfx_end_tick`
+copies them and a status into `g_nt_gfx.last_frame`, the last closed tick, then
+resets them and advances `frame_sequence`; render frames reset nothing.
+`last_frame` stays unchanged until the next end or shutdown; before the first
+end its status is UNAVAILABLE. Readers early in a callback, before its draws,
+read `last_frame`. A no-render tick reports zero draws; old geometry is never
+reused. A tick is ABORTED when a frontend probe (begin_frame, or an operation
+that rejects work on a lost context) observed a loss during it, or the context
+is still known lost at its end. end_tick does not probe the backend: a loss
+after the last begin_frame marks the next tick, whose begin_frame observes it.
+A tick whose begin_frame restores a lost context and then completes is COMPLETE.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
@@ -426,9 +424,8 @@ the same configuration.
 the backend issues GL only through its `NT_GL*` funnel, which counts with an
 inline constant-index increment and (with capture) records in the same
 expression that issues the call; a grep gate rejects any bare `gl*` call in
-`engine/graphics/gl`. The funnel does no per-call tick check: every backend
-path runs under a frontend operation whose BEGIN requires the tick, or inside
-`nt_gfx_init`/`nt_gfx_shutdown`. The
+`engine/graphics/gl`. The funnel does no per-call tick check: a tick is
+always open between init and shutdown. The
 single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
 and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
 directly (`getExtension`) are counted and recorded at their C call site; the
@@ -452,15 +449,17 @@ event array at init (default zero); enabling capture without capacity asserts.
 There is no growth or allocation while recording. Each pointer-free POD event
 is 112 bytes, including padding; 16384 records reserve 1.75 MiB. Other storage
 consists of fixed control state and counter snapshots, with no second event array.
-All record bytes are initialized before publication. Every recorded begin_tick first
-snapshots inherited state, including one definition per live resource (plus
+All record bytes are initialized before publication. A recorded tick starts at
+its first gfx work (or at its end_tick if it has none) and first snapshots
+inherited state, including one definition per live resource (plus
 program uniform/sampler and vertex-input attribute records), into the same array.
 Size the capacity for that snapshot plus the tick's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
 `nt_gfx_capture_read` returns metadata by value and an immutable event prefix.
-The prefix remains valid until the next **recorded** begin_tick or shutdown;
-ticks with recording disabled preserve it. Two counts in the same sequence delimit
+Read a finished capture right after `nt_gfx_end_tick`: the prefix remains valid
+until the next **recorded** tick starts (its first gfx work overwrites it) or
+shutdown; ticks with recording disabled preserve it. Two counts in the same sequence delimit
 an operation interval. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
 a NULL pointer. The finalized view retains its matching tick snapshot by value even after
@@ -478,7 +477,7 @@ prove GL success or GPU completion. Metadata distinguishes recording from
 finalized, complete, truncated and aborted captures; a capture carries its
 tick's status. Overflow is separately
 reported even when aborted, stops event appends, and never truncates counters.
-Recording changes inside a tick apply at the next begin_tick.
+Recording changes inside a tick apply to the next tick.
 
 The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
