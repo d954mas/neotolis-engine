@@ -165,14 +165,14 @@ jobs:
           emcmake cmake --preset wasm-release
           cmake --build --preset wasm-release
 
-      - name: Verify gfx observation producers are absent in WASM release
+      - name: Verify gfx capture producers are absent in WASM release
         run: |
           symbols="$("$EMSDK/upstream/bin/llvm-nm" --defined-only build/engine/wasm-release/libnt_gfx.a)"
           # Positive control: the listing must see ordinary gfx symbols.
           grep -q "nt_gfx_init" <<< "$symbols"
-          for producer in g_nt_gfx_observation nt_gfx_backend_capture_initial_state; do
+          for producer in g_nt_gfx_capture nt_gfx_backend_capture_initial_state; do
             if grep -q "$producer" <<< "$symbols"; then
-              echo "wasm-release nt_gfx retains observation producer: $producer"
+              echo "wasm-release nt_gfx retains capture producer: $producer"
               exit 1
             fi
           done

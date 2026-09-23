@@ -43,9 +43,8 @@ def main():
             ui_debug = "ON" if floor == 1 else "OFF"
             ui_checks = "ON" if floor == 0 else "OFF"
             obs = "ON" if metrics == "ON" else "OFF"
-            counters, capture = ui, gpu
+            capture = gpu
             if asserts == 1 or (floor >= 2 and metrics == "ON"):
-                counters = "OFF" if ui == "ON" else "ON"
                 capture = "OFF" if gpu == "ON" else "ON"
             if obs == "ON":
                 targets += ("test_devapi_obs",)
@@ -55,7 +54,7 @@ def main():
             run(["cmake", "--preset", "native-release-test", "-B", str(build),
                  f"-DNT_PRESET_NAME={name}", f"-DNT_LOG_MIN_LEVEL={floor}",
                  f"-DNT_RESOURCE_TIMING_ENABLED={resource}", f"-DNT_UI_TIMING_ENABLED={ui}", f"-DNT_GFX_GPU_TIMING_ENABLED={gpu}",
-                 f"-DNT_GFX_COUNTERS_ENABLED={counters}", f"-DNT_GFX_CAPTURE_ENABLED={capture}",
+                 f"-DNT_GFX_CAPTURE_ENABLED={capture}",
                  f"-DNT_METRICS_ENABLED={metrics}", f"-DNT_UI_DEBUG_TOOLS={ui_debug}", f"-DNT_UI_CHECKS={ui_checks}",
                  "-DNT_LOG_RING_ENABLED=ON", "-DNT_INTROSPECT_ENABLED=ON",
                  "-DNT_INTROSPECT_WRITE_ENABLED=ON", f"-DNT_DEVAPI_ENABLED={obs}",
@@ -73,16 +72,16 @@ def main():
                 if library is None:
                     raise RuntimeError(f"{name}: nt_gfx archive not found among {libraries}")
                 symbols = run([nm, "--defined-only", str(library)], args.output / f"{name}-symbols.log")
-                if counters == "OFF" and capture == "OFF":
-                    for producer in ("g_nt_gfx_observation", "capture_resource_definition", "nt_gfx_capture_append", "nt_gfx_backend_capture_initial_state"):
+                if capture == "OFF":
+                    for producer in ("g_nt_gfx_capture", "capture_resource_definition", "nt_gfx_capture_append", "nt_gfx_backend_capture_initial_state"):
                         if producer in symbols:
                             raise RuntimeError(f"{name}: disabled producer remains: {producer}")
-                elif "g_nt_gfx_observation" not in symbols:
+                elif "g_nt_gfx_capture" not in symbols:
                     # Positive control: the absence check above must be able to see this symbol.
-                    raise RuntimeError(f"{name}: enabled producer g_nt_gfx_observation is missing from the symbol listing")
+                    raise RuntimeError(f"{name}: enabled producer g_nt_gfx_capture is missing from the symbol listing")
             else:
                 print(f"UNVERIFIED: {name} producer symbols; install llvm-nm or nm", flush=True)
-            print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, counters={counters}, capture={capture}, resource={resource}, metrics={metrics}, inspector={ui_debug}, UI checks={ui_checks}, asserts={asserts}; {len(targets)} tests", flush=True)
+            print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, capture={capture}, resource={resource}, metrics={metrics}, inspector={ui_debug}, UI checks={ui_checks}, asserts={asserts}; {len(targets)} tests", flush=True)
     except (OSError, RuntimeError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

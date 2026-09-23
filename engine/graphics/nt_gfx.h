@@ -5,9 +5,6 @@
 #error "NT_GFX_GPU_TIMING_ENABLED must be defined by the nt_gfx_interface target"
 #endif
 
-#ifndef NT_GFX_COUNTERS_ENABLED
-#error "NT_GFX_COUNTERS_ENABLED must be defined by the nt_gfx_interface target"
-#endif
 #ifndef NT_GFX_CAPTURE_ENABLED
 #error "NT_GFX_CAPTURE_ENABLED must be defined by the nt_gfx_interface target"
 #endif
@@ -512,9 +509,9 @@ typedef enum {
 
 /* Availability bits are fixed per build and backend at gfx init. */
 enum {
-    NT_GFX_COUNTERS_DRAWS = 1,    /* draw calls and submitted geometry; every build */
-    NT_GFX_COUNTERS_FRONTEND = 2, /* request counters; NT_GFX_COUNTERS_ENABLED */
-    NT_GFX_COUNTERS_BACKEND = 4,  /* issued GL calls and payloads; counters on a GL backend */
+    NT_GFX_COUNTERS_DRAWS = 1,    /* draw calls and submitted geometry */
+    NT_GFX_COUNTERS_FRONTEND = 2, /* request counters; every real frontend */
+    NT_GFX_COUNTERS_BACKEND = 4,  /* issued GL calls and payloads; GL/WebGL backends only */
 };
 
 /* Payload calls only: NULL storage, generated mips and rendering are excluded.

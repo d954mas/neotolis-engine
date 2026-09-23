@@ -32,12 +32,10 @@ suppression of prebuilt libraries; it cannot remove their caller-side work.
 
 ## Optional measurements
 
-`NT_UI_TIMING_ENABLED`, `NT_GFX_GPU_TIMING_ENABLED`, `NT_GFX_COUNTERS_ENABLED`,
-`NT_GFX_CAPTURE_ENABLED` and `NT_RESOURCE_TIMING_ENABLED` are independent CMake options, all OFF by default regardless of build type. Debug presets and
+`NT_UI_TIMING_ENABLED`, `NT_GFX_GPU_TIMING_ENABLED`, `NT_GFX_CAPTURE_ENABLED` and `NT_RESOURCE_TIMING_ENABLED` are independent CMake options, all OFF by default regardless of build type. Debug presets and
 `native-release-test` select ON; production Release presets select OFF.
 UI/gfx interfaces and the `nt_resource` target publish numeric 0/1 values.
-Gfx counters and capture are described in [frame observation](../render/architecture.md#frame-observation).
-Draw counts exist in every build. The devapi `render.info` command runs early
+Gfx counters (always built) and capture are described in [frame observation](../render/architecture.md#frame-observation). The devapi `render.info` command runs early
 in a tick, so its `draw_calls` is the last closed tick's
 (`g_nt_gfx.last_frame`). The `nt_metrics` `draw_calls` channel is whatever the
 host pushes: example hosts push `g_nt_gfx.counters.draw_calls` after rendering,

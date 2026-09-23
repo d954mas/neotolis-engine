@@ -499,7 +499,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_end_tick();
     nt_gfx_frame_snapshot_t snapshot = g_nt_gfx.last_frame;
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    s_observe_values[0] = NT_GFX_COUNTERS_ENABLED;
     s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
     s_observe_values[2] = snapshot.status;
     s_observe_values[3] = snapshot.counters.draw_calls;

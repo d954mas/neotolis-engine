@@ -48,11 +48,7 @@ static void test_render_frames_sum_and_only_begin_tick_resets(void) {
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.counters.draw_calls_instanced);
     TEST_ASSERT_EQUAL_UINT64(27, g_nt_gfx.last_frame.counters.vertices);
     TEST_ASSERT_EQUAL_UINT64(4, g_nt_gfx.last_frame.counters.instances);
-#if NT_GFX_COUNTERS_ENABLED
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.counters.pipeline_requests);
-#else
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.last_frame.counters.pipeline_requests);
-#endif
     /* Closing a tick copies; it does not reset. */
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.draw_calls);
 
@@ -76,7 +72,7 @@ static void test_instanced_products_are_widened_before_multiplication(void) {
 }
 
 static void test_availability_is_fixed_per_build_and_backend(void) {
-    const uint32_t expected = NT_GFX_COUNTERS_DRAWS | (NT_GFX_COUNTERS_ENABLED ? NT_GFX_COUNTERS_FRONTEND : 0U);
+    const uint32_t expected = NT_GFX_COUNTERS_DRAWS | NT_GFX_COUNTERS_FRONTEND;
     TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.counters.availability);
     nt_gfx_begin_tick();
     TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.counters.availability);
@@ -333,9 +329,7 @@ static void test_capture_overflow_does_not_stop_counters(void) {
     TEST_ASSERT_TRUE(capture.overflow);
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_TRUNCATED, capture.status);
     TEST_ASSERT_EQUAL_UINT64(snapshot->counters.frame_sequence, capture.snapshot.counters.frame_sequence);
-#if NT_GFX_COUNTERS_ENABLED
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_COUNTERS_DRAWS | NT_GFX_COUNTERS_FRONTEND, snapshot->counters.availability);
-#endif
 }
 
 static void test_capture_toggle_waits_until_next_begin(void) {

@@ -254,7 +254,7 @@ static void capture_program_definition(uint32_t i) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- bounded snapshots of separate backend tables
 void nt_gfx_backend_capture_initial_state(void) {
-    if (g_nt_gfx_observation.capture.overflow) {
+    if (g_nt_gfx_capture.view.overflow) {
         return;
     }
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event.data.backend.args[0] = s_gl_cache.program; event.data.backend.args[1] = s_gl_cache.vao; event.data.backend.args[2] = s_bound_framebuffer;
@@ -269,7 +269,7 @@ void nt_gfx_backend_capture_initial_state(void) {
                   event.data.state.integers[11] = s_gl_cache.blend_op_alpha; event.data.state.integers[12] = s_gl_cache.polygon_offset_enabled;
                   memcpy(event.data.state.values, s_gl_cache.blend_constant_color, 4 * sizeof(float)); event.data.state.values[4] = s_gl_cache.polygon_offset_factor;
                   event.data.state.values[5] = s_gl_cache.polygon_offset_units;);
-    for (uint32_t i = 1; i <= s_init_desc.max_pipelines && !g_nt_gfx_observation.capture.overflow; i++) {
+    for (uint32_t i = 1; i <= s_init_desc.max_pipelines && !g_nt_gfx_capture.view.overflow; i++) {
         if (s_pipelines[i].program_slot == 0) {
             continue;
         }
@@ -286,26 +286,26 @@ void nt_gfx_backend_capture_initial_state(void) {
         NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_TEXTURE, event.data.backend.args[0] = unit; event.data.backend.args[1] = s_gl_cache.bound_textures[unit];
                       event.data.backend.args[2] = s_gl_cache.bound_samplers[unit];);
     }
-    for (uint32_t i = 1; i <= s_init_desc.max_programs && !g_nt_gfx_observation.capture.overflow; i++) {
+    for (uint32_t i = 1; i <= s_init_desc.max_programs && !g_nt_gfx_capture.view.overflow; i++) {
         const nt_gfx_gl_program_t *program = &s_programs[i];
         if (program->program == 0) {
             continue;
         }
         capture_program_definition(i);
     }
-    for (uint32_t i = 1; i <= s_init_desc.max_buffers && !g_nt_gfx_observation.capture.overflow; i++) {
+    for (uint32_t i = 1; i <= s_init_desc.max_buffers && !g_nt_gfx_capture.view.overflow; i++) {
         if (s_buffer_gl[i] == 0) {
             continue;
         }
         NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_BUFFER; event.data.backend.args[0] = i; event.data.backend.args[1] = s_buffer_gl[i];);
     }
-    for (uint32_t i = 1; i <= s_init_desc.max_textures && !g_nt_gfx_observation.capture.overflow; i++) {
+    for (uint32_t i = 1; i <= s_init_desc.max_textures && !g_nt_gfx_capture.view.overflow; i++) {
         if (s_texture_gl[i] == 0) {
             continue;
         }
         NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event.detail = NT_GFX_OBJECT_TEXTURE; event.data.backend.args[0] = i; event.data.backend.args[1] = s_texture_gl[i];);
     }
-    for (uint32_t i = 1; i <= s_init_desc.max_vertex_inputs && !g_nt_gfx_observation.capture.overflow; i++) {
+    for (uint32_t i = 1; i <= s_init_desc.max_vertex_inputs && !g_nt_gfx_capture.view.overflow; i++) {
         if (s_vertex_inputs[i].vao == 0) {
             continue;
         }
@@ -317,7 +317,7 @@ void nt_gfx_backend_capture_initial_state(void) {
                           event.data.attribute.offset = attr->offset; event.data.attribute.stride = s_vertex_inputs[i].instance_stride; event.data.attribute.divisor = 1;);
         }
     }
-    for (uint32_t i = 1; i <= s_init_desc.max_render_targets && !g_nt_gfx_observation.capture.overflow; i++) {
+    for (uint32_t i = 1; i <= s_init_desc.max_render_targets && !g_nt_gfx_capture.view.overflow; i++) {
         if (s_render_targets[i].fbo == 0) {
             continue;
         }
@@ -683,12 +683,10 @@ static void nt_gfx_gl_init_context_features(void) {
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc);
     s_init_desc = *desc;
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
 #ifdef NT_PLATFORM_WEB
     g_nt_gfx_observation.backend = NT_GFX_BACKEND_WEBGL;
 #else
     g_nt_gfx_observation.backend = NT_GFX_BACKEND_OPENGL;
-#endif
 #endif
 
     if (!nt_gfx_gl_ctx_create(&s_init_desc)) {
@@ -1586,7 +1584,7 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     write_sampler_units(program, &s_programs[slot]);
     s_programs[slot].program = program;
 #if NT_GFX_CAPTURE_ENABLED
-    if (g_nt_gfx_observation.recording && !g_nt_gfx_observation.capture.overflow) {
+    if (g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow) {
         capture_program_definition(slot);
     }
 #endif
@@ -2634,8 +2632,8 @@ bool nt_gfx_backend_recreate_all_resources(void) {
         return false;
     }
 #if NT_GFX_CAPTURE_ENABLED
-    NT_ASSERT(g_nt_gfx_observation.context_sequence != UINT64_MAX);
-    g_nt_gfx_observation.context_sequence++;
+    NT_ASSERT(g_nt_gfx_capture.context_sequence != UINT64_MAX);
+    g_nt_gfx_capture.context_sequence++;
 #endif
 
     /* Zero out all backend-side arrays -- old GL names are invalid. */

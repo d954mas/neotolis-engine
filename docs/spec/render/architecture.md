@@ -401,24 +401,22 @@ ABORTED only when a loss is observed during it or the context is still lost at
 its end; a tick whose begin_frame restores a lost context and then completes is
 COMPLETE. Work outside ticks shows only in lifetime upload totals.
 
-Draw calls, instanced draw calls and submitted geometry are counted in every
-build. Geometry and instance fields are uint64; operands widen before
+All counters are built and counted in every build; there is no counter option
+or runtime toggle. Geometry and instance fields are uint64; operands widen before
 multiplication and accumulation asserts overflow. Vertices/indices are submitted
 counts, multiplied by instance count for instanced calls; instances counts only
 instances in instanced calls. These are not rasterized triangles or
 vertex-shader invocations.
 
-`NT_GFX_COUNTERS_ENABLED` and `NT_GFX_CAPTURE_ENABLED` are independent numeric
-interface definitions published by the interface target, so every consumer
-sees the same configuration. Counters add request, issued-call and upload
-fields; there is no runtime toggle. The `availability` bits are fixed per build
-and backend at init: DRAWS always, FRONTEND with counters, BACKEND with counters
-on a GL backend. Unavailable fields stay zero, meaning unmeasured; the test fake
-cannot claim measured GL calls.
+The `availability` bits depend only on the backend kind and are fixed at init:
+DRAWS and FRONTEND for every frontend, BACKEND (issued GL calls and payloads)
+only on GL/WebGL. Unavailable fields stay zero, meaning unmeasured; the test
+fake cannot claim measured GL calls. `NT_GFX_CAPTURE_ENABLED` is a numeric
+interface definition published by the interface target, so every consumer sees
+the same configuration.
 
 `nt_gfx_upload_totals_read` exposes CPU payload calls/bytes for one gfx init
-lifetime, including work outside ticks; it is available only with backend
-counters. Upload sites advance these totals and the live tick counters together,
+lifetime, including work outside ticks; it is available only on GL/WebGL. Upload sites advance these totals and the live tick counters together,
 so per-tick payload fields need no baseline. NULL-data storage and generated
 mips are excluded; non-NULL orphaning counts once. Texture bytes use the actual
 GPU format for each mip/subrectangle. Failed creates retain already-issued work.

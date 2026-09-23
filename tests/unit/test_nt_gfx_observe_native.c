@@ -154,7 +154,6 @@ void tearDown(void) {
 }
 
 #if NT_GFX_CAPTURE_ENABLED
-#if NT_GFX_COUNTERS_ENABLED
 static uint32_t captured_calls(nt_gfx_gl_call_t call) {
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_FALSE(capture.overflow);
@@ -166,7 +165,6 @@ static uint32_t captured_calls(nt_gfx_gl_call_t call) {
     }
     return count;
 }
-#endif
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- inspect the two identity layers before and after resize
 static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
@@ -352,7 +350,6 @@ static void test_readback_is_recorded_as_issued_call(void) {
     TEST_ASSERT_EQUAL_UINT32(1, reads);
 }
 #endif
-#if NT_GFX_COUNTERS_ENABLED
 /* Work outside ticks shows only in lifetime totals; uploads before begin_frame land in the tick. */
 static void test_payloads_before_render_and_without_frames(void) {
     const uint8_t data[64] = {0};
@@ -530,12 +527,6 @@ static void test_static_and_instance_pointer_calls_have_distinct_owners(void) {
     TEST_ASSERT_EQUAL_UINT32(2, counters.instance_attribute_calls);
     TEST_ASSERT_EQUAL_UINT32(s_attribute_calls, counters.static_attribute_calls + counters.instance_attribute_calls);
 }
-#else
-static void test_compiled_off_is_unavailable(void) {
-    TEST_ASSERT_FALSE(nt_gfx_upload_totals_read().available);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_COUNTERS_DRAWS, g_nt_gfx.counters.availability);
-}
-#endif
 
 int main(void) {
     /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
@@ -553,16 +544,12 @@ int main(void) {
     RUN_TEST(test_initial_uniform_records_cover_only_vec4);
     RUN_TEST(test_readback_is_recorded_as_issued_call);
 #endif
-#if NT_GFX_COUNTERS_ENABLED
     RUN_TEST(test_payloads_before_render_and_without_frames);
     RUN_TEST(test_texture_mips_storage_and_subrect_payloads);
     RUN_TEST(test_failed_upload_keeps_issued_bytes_and_observed_loss);
     RUN_TEST(test_repeated_frames_separate_requests_from_issued_calls);
     RUN_TEST(test_compressed_mips_use_issued_block_sizes);
     RUN_TEST(test_static_and_instance_pointer_calls_have_distinct_owners);
-#else
-    RUN_TEST(test_compiled_off_is_unavailable);
-#endif
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

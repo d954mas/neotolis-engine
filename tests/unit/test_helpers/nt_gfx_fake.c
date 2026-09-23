@@ -315,9 +315,7 @@ static void fake_record_draw(uint32_t num_indices, uint32_t instance_count) {
 }
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
     g_nt_gfx_observation.backend = NT_GFX_BACKEND_FAKE;
-#endif
     NT_ASSERT(desc != NULL);
     nt_gfx_fake_draw_trace_reset(false);
     free(s_fake_program_table);
@@ -740,7 +738,7 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     }
     s_fake_backend_missing = false;
 #if NT_GFX_CAPTURE_ENABLED
-    g_nt_gfx_observation.context_sequence++;
+    g_nt_gfx_capture.context_sequence++;
 #endif
     return true;
 }

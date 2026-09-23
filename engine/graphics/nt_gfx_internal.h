@@ -6,43 +6,43 @@
 #include "pool/nt_pool.h"
 
 // #region observation storage and owning-site counters
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
-/* Optional producers only; tick state and draw counters live in every build. */
 typedef struct {
-    nt_gfx_backend_kind_t backend;
-#if NT_GFX_CAPTURE_ENABLED
-    uint64_t context_sequence;
-    bool capture_requested;
-    bool recording;
-    nt_gfx_event_t *events;
-    uint32_t capacity;
-    nt_gfx_capture_view_t capture;
-#endif
-#if NT_GFX_COUNTERS_ENABLED
+    nt_gfx_backend_kind_t backend; /* set by the backend at init */
     nt_gfx_upload_totals_t uploads;
-#endif
 } nt_gfx_observation_t;
 
 extern nt_gfx_observation_t g_nt_gfx_observation;
+
+#if NT_GFX_CAPTURE_ENABLED
+typedef struct {
+    uint64_t context_sequence;
+    bool requested;
+    bool recording;
+    nt_gfx_event_t *events;
+    uint32_t capacity;
+    nt_gfx_capture_view_t view;
+} nt_gfx_capture_state_t;
+
+extern nt_gfx_capture_state_t g_nt_gfx_capture;
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
 void nt_gfx_backend_capture_initial_state(void);
 static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
-    nt_gfx_observation_t *obs = &g_nt_gfx_observation;
-    if (obs->capture.count == obs->capacity) {
-        obs->capture.overflow = true;
+    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+    if (capture->view.count == capture->capacity) {
+        capture->view.overflow = true;
         return;
     }
-    memcpy(&obs->events[obs->capture.count++], event, sizeof(*event));
+    memcpy(&capture->events[capture->view.count++], event, sizeof(*event));
 }
-/* Arguments and record construction disappear entirely in counters-only builds. */
+/* Arguments and record construction disappear entirely in capture-OFF builds. */
 #define NT_GFX_RECORD(event_kind, event_operation, ...)                                                                                                                                                \
     do {                                                                                                                                                                                               \
-        if (g_nt_gfx_observation.recording && !g_nt_gfx_observation.capture.overflow) {                                                                                                                \
+        if (g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow) {                                                                                                                           \
             nt_gfx_event_t event;                                                                                                                                                                      \
             memset(&event, 0, sizeof(event));                                                                                                                                                          \
-            event.context_sequence = g_nt_gfx_observation.context_sequence;                                                                                                                            \
+            event.context_sequence = g_nt_gfx_capture.context_sequence;                                                                                                                                \
             event.kind = (event_kind);                                                                                                                                                                 \
             event.operation = (event_operation);                                                                                                                                                       \
             __VA_ARGS__;                                                                                                                                                                               \
@@ -65,7 +65,6 @@ static inline void nt_gfx_capture_result(nt_gfx_operation_t operation, nt_gfx_ob
 /* Marks the open tick aborted once; outside a tick a loss is not attributed. */
 void nt_gfx_observe_context_loss(void);
 
-#if NT_GFX_COUNTERS_ENABLED
 static inline void nt_gfx_observe_count(uint32_t *counter) {
     NT_ASSERT(*counter != UINT32_MAX);
     (*counter)++;
@@ -92,10 +91,6 @@ static inline void nt_gfx_observe_upload(bool texture, const void *data, uint64_
     }
 }
 #define NT_GFX_COUNT_UPLOAD(texture, data, size) nt_gfx_observe_upload(texture, data, size)
-#else
-#define NT_GFX_COUNT(field) ((void)0)
-#define NT_GFX_COUNT_UPLOAD(texture, data, size) ((void)0)
-#endif
 // #endregion
 
 /* ---- Render state machine ---- */

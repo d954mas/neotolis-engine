@@ -45,7 +45,7 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
   for (const run of runs) {
     const v = run.values;
     expect(run.pixel).toBe(0xffc08040);
-    expect(v.slice(0, 2)).toEqual([1, 1]);
+    expect(v[1]).toBe(1); // capture compiled in
     expect(v[2]).toBe(2); // COMPLETE counters, independent of capture overflow.
     expect(v[3]).toBe(1);
     expect(v.slice(4, 6)).toEqual([16, 32]); // Preparation before gfx begin.

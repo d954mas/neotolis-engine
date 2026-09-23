@@ -194,8 +194,9 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 /* ---- Lifecycle ---- */
 
 // #region frame observation
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
 nt_gfx_observation_t g_nt_gfx_observation;
+#if NT_GFX_CAPTURE_ENABLED
+nt_gfx_capture_state_t g_nt_gfx_capture;
 #endif
 
 /* Frontend loss probe: the backend query stays pure, so every detection that
@@ -209,13 +210,9 @@ static bool gfx_context_lost(void) {
 }
 
 nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) {
-#if NT_GFX_COUNTERS_ENABLED
     nt_gfx_upload_totals_t result = g_nt_gfx_observation.uploads;
     result.available = (s_gfx.counter_availability & NT_GFX_COUNTERS_BACKEND) != 0;
     return result;
-#else
-    return (nt_gfx_upload_totals_t){0};
-#endif
 }
 
 void nt_gfx_observe_context_loss(void) {
@@ -227,8 +224,8 @@ void nt_gfx_observe_context_loss(void) {
 
 void nt_gfx_capture_set_enabled(bool enabled) {
 #if NT_GFX_CAPTURE_ENABLED
-    NT_ASSERT(!enabled || g_nt_gfx_observation.capacity > 0);
-    g_nt_gfx_observation.capture_requested = enabled;
+    NT_ASSERT(!enabled || g_nt_gfx_capture.capacity > 0);
+    g_nt_gfx_capture.requested = enabled;
 #else
     (void)enabled;
 #endif
@@ -236,10 +233,10 @@ void nt_gfx_capture_set_enabled(bool enabled) {
 
 nt_gfx_capture_view_t nt_gfx_capture_read(void) {
 #if NT_GFX_CAPTURE_ENABLED
-    nt_gfx_capture_view_t result = g_nt_gfx_observation.capture;
+    nt_gfx_capture_view_t result = g_nt_gfx_capture.view;
     result.available = g_nt_gfx.initialized;
     result.backend = g_nt_gfx_observation.backend;
-    result.events = result.count > 0 ? g_nt_gfx_observation.events : NULL;
+    result.events = result.count > 0 ? g_nt_gfx_capture.events : NULL;
     return result;
 #else
     return (nt_gfx_capture_view_t){0};
@@ -249,7 +246,7 @@ nt_gfx_capture_view_t nt_gfx_capture_read(void) {
 #if NT_GFX_CAPTURE_ENABLED
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one record schema per owned resource kind
 static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) {
-    if (!g_nt_gfx_observation.recording || g_nt_gfx_observation.capture.overflow) {
+    if (!g_nt_gfx_capture.recording || g_nt_gfx_capture.view.overflow) {
         return;
     }
     uint32_t slot = nt_pool_slot_index(id);
@@ -324,13 +321,13 @@ static void capture_initial_state(void) {
     const nt_gfx_object_kind_t kinds[] = {NT_GFX_OBJECT_SHADER, NT_GFX_OBJECT_PROGRAM, NT_GFX_OBJECT_PIPELINE,     NT_GFX_OBJECT_VERTEX_INPUT,
                                           NT_GFX_OBJECT_BUFFER, NT_GFX_OBJECT_TEXTURE, NT_GFX_OBJECT_RENDER_TARGET};
     for (uint32_t p = 0; p < sizeof(pools) / sizeof(pools[0]); p++) {
-        for (uint32_t i = 1; i <= pools[p]->capacity && !g_nt_gfx_observation.capture.overflow; i++) {
+        for (uint32_t i = 1; i <= pools[p]->capacity && !g_nt_gfx_capture.view.overflow; i++) {
             if (nt_pool_slot_alive(pools[p], i)) {
                 capture_resource_definition(kinds[p], pools[p]->slots[i].id);
             }
         }
     }
-    for (uint32_t i = 1; i <= s_gfx.sampler_count && !g_nt_gfx_observation.capture.overflow; i++) {
+    for (uint32_t i = 1; i <= s_gfx.sampler_count && !g_nt_gfx_capture.view.overflow; i++) {
         capture_resource_definition(NT_GFX_OBJECT_SAMPLER, i);
     }
     nt_gfx_backend_capture_initial_state();
@@ -341,9 +338,9 @@ static void capture_initial_state(void) {
 
 #if NT_GFX_CAPTURE_ENABLED
 static void capture_begin_tick(void) {
-    g_nt_gfx_observation.recording = g_nt_gfx_observation.capture_requested;
-    if (g_nt_gfx_observation.recording) {
-        g_nt_gfx_observation.capture = (nt_gfx_capture_view_t){
+    g_nt_gfx_capture.recording = g_nt_gfx_capture.requested;
+    if (g_nt_gfx_capture.recording) {
+        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){
             .frame_sequence = g_nt_gfx.counters.frame_sequence,
             .phase = NT_GFX_CAPTURE_RECORDING,
             .status = NT_GFX_FRAME_RECORDING,
@@ -354,16 +351,16 @@ static void capture_begin_tick(void) {
 }
 
 static void capture_end_tick(void) {
-    if (g_nt_gfx_observation.recording) {
+    if (g_nt_gfx_capture.recording) {
         NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_FRAME, event.reason = g_nt_gfx.last_frame.status == NT_GFX_FRAME_ABORTED ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_ACCEPTED);
-        nt_gfx_capture_view_t *capture = &g_nt_gfx_observation.capture;
+        nt_gfx_capture_view_t *capture = &g_nt_gfx_capture.view;
         capture->phase = NT_GFX_CAPTURE_FINALIZED;
         capture->status = g_nt_gfx.last_frame.status;
         if (capture->status == NT_GFX_FRAME_COMPLETE && capture->overflow) {
             capture->status = NT_GFX_FRAME_TRUNCATED;
         }
         capture->snapshot = g_nt_gfx.last_frame;
-        g_nt_gfx_observation.recording = false;
+        g_nt_gfx_capture.recording = false;
     }
 }
 #endif
@@ -415,16 +412,15 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
-#endif
 #if NT_GFX_CAPTURE_ENABLED
+    memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
     NT_ASSERT(desc->capture_capacity == 0 || sizeof(nt_gfx_event_t) <= SIZE_MAX / desc->capture_capacity);
-    g_nt_gfx_observation.capacity = desc->capture_capacity;
-    g_nt_gfx_observation.context_sequence = 1;
+    g_nt_gfx_capture.capacity = desc->capture_capacity;
+    g_nt_gfx_capture.context_sequence = 1;
     if (desc->capture_capacity > 0) {
-        g_nt_gfx_observation.events = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * sizeof(nt_gfx_event_t));
-        NT_ASSERT(g_nt_gfx_observation.events != NULL);
+        g_nt_gfx_capture.events = (nt_gfx_event_t *)malloc((size_t)desc->capture_capacity * sizeof(nt_gfx_event_t));
+        NT_ASSERT(g_nt_gfx_capture.events != NULL);
     }
 #endif
 
@@ -466,21 +462,18 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     /* Detect GPU compressed texture capabilities */
     g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
 
-    s_gfx.counter_availability = NT_GFX_COUNTERS_DRAWS;
-#if NT_GFX_COUNTERS_ENABLED
-    s_gfx.counter_availability |= NT_GFX_COUNTERS_FRONTEND;
+    s_gfx.counter_availability = NT_GFX_COUNTERS_DRAWS | NT_GFX_COUNTERS_FRONTEND;
     if (g_nt_gfx_observation.backend == NT_GFX_BACKEND_OPENGL || g_nt_gfx_observation.backend == NT_GFX_BACKEND_WEBGL) {
         s_gfx.counter_availability |= NT_GFX_COUNTERS_BACKEND;
     }
-#endif
     g_nt_gfx.counters.availability = s_gfx.counter_availability;
     g_nt_gfx.initialized = true;
 }
 
 void nt_gfx_shutdown(void) {
 #if NT_GFX_CAPTURE_ENABLED
-    g_nt_gfx_observation.recording = false;
-    free(g_nt_gfx_observation.events);
+    g_nt_gfx_capture.recording = false;
+    free(g_nt_gfx_capture.events);
 #endif
     /* Delete GL objects before backend teardown, which destroys the WebGL context. */
 
@@ -561,8 +554,9 @@ void nt_gfx_shutdown(void) {
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
     /* Clear global block registry */
-#if NT_GFX_COUNTERS_ENABLED || NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_observation, 0, sizeof(g_nt_gfx_observation));
+#if NT_GFX_CAPTURE_ENABLED
+    memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
 #endif
     memset(s_global_blocks, 0, sizeof(s_global_blocks));
     s_global_block_count = 0;
@@ -1274,7 +1268,7 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
     result.id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_VERTEX_INPUT, result.id);
 #if NT_GFX_CAPTURE_ENABLED
-    if (g_nt_gfx_observation.recording && !g_nt_gfx_observation.capture.overflow) {
+    if (g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow) {
         const nt_vertex_layout_t *layouts[] = {&desc->layout, &desc->instance_layout};
         for (uint32_t layout = 0; layout < 2; layout++) {
             for (uint32_t a = 0; a < layouts[layout]->attr_count; a++) {

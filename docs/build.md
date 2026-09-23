@@ -85,7 +85,7 @@ is no longer a valid configuration.
 | `NT_RESOURCE_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_UI_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_GFX_GPU_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
-| `NT_GFX_COUNTERS_ENABLED`, `NT_GFX_CAPTURE_ENABLED` | OFF | Independent gfx producers: request/issued-call/upload counters and command capture. Debug/release-test ON; production Release OFF. No runtime counter toggle; command recording is opt-in. Draw/geometry counters and ticks exist in every build. |
+| `NT_GFX_CAPTURE_ENABLED` | OFF | Bounded gfx command capture. Debug/release-test ON; production Release OFF. Recording is opt-in at runtime. Ticks and all gfx counters exist in every build. |
 | `NT_UI_CHECKS` | OFF | Duplicate-key scans in menu/combo lists. Debug/release-test ON; production Release OFF. Independent of inspector and assert mode; ordinary pointer, index and capacity assertions remain active when this flag is OFF. |
 | `NT_UI_DEBUG_TOOLS` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, `NT_INTROSPECT_ENABLED` | OFF | Independent options. Debug/release-test presets select ON; production Release selects OFF. |
@@ -276,8 +276,8 @@ Run the scripts serially; they use separate build directories and also run in
 `check.sh --push`. The runtime matrix covers log/rich-parser consumers at every
 log floor with FULL asserts, TRAP positive paths, timing producers ON/OFF,
 metrics independence, UI key checks ON with inspector OFF and OFF with inspector ON,
-and inspector ON with UI timing OFF. Gfx observation exercises all four independent
-counters/capture combinations, including fake/frontend and unavailable stub paths.
+and inspector ON with UI timing OFF. Gfx observation exercises capture ON and OFF,
+including fake/frontend and inert stub paths.
 `tests/browser/observation.spec.ts` independently intercepts WebGL calls, checks
 uploads before render begin and compares output pixels with recording off/on/full.
 
