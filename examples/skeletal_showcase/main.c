@@ -367,8 +367,8 @@ static void set_camera_fit(const float center[3], float scale) {
     reset_camera();
 }
 
-/* Borrowed view of a rig: the pointer may change on reload, so scenes refetch
- * it after resource_step. NULL means the imported skeleton is not ready. */
+/* Borrowed view of a rig: the pointer may change on reload, so views are
+ * refetched once per frame after resource_step. NULL means the imported skeleton is not ready. */
 static const nt_skeletal_skeleton_t *rig_view(rig_source_t rig) {
     const nt_skeletal_skeleton_t *view = NULL;
     if (rig == RIG_HUMANOID) {
@@ -761,7 +761,7 @@ static void retain_cpu_output(cpu_mesh_t *source) {
     memcpy(source->output, source->data, source->size);
 }
 
-/* The standard MESH activator already checked structure. Decode once at load;
+/* The standard MESH activator already checked structure. Decode once per publication;
  * keep exactly its packed attribute bytes for the independent scalar reference. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void copy_mesh_source(cpu_mesh_t *source, const uint8_t *wire) {

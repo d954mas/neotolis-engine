@@ -178,7 +178,7 @@ receive the same nonidentity entity world transform, applied once after skinning
 
 Shared pose evaluates one track but builds two palettes because the inverse
 binds differ. `Independent clothes` samples the clip for the clothes 0.45 s ahead
-of the body's clock (wrapped or clamped like the track); it adds no second track. These are skinned garments,
+of the body's clock (wrapped or clamped like the track). These are skinned garments,
 without cloth physics. `Bones & marker` transforms a point (0.2, 0.1, 0.15) on the
 left hand through `E * G[hand]`; there is no socket object or attachment API.
 
@@ -309,15 +309,10 @@ Context-loss restoration is reviewed in code; a full loss/retry run remains
 outside this showcase's evidence.
 
 
-Verification on the implementation branch covered all four imported clips at
-zero, an internal sample, the endpoint and between samples, plus endpoint-to-loop
-normalization. Native and Chromium WebGL2 (ANGLE SwiftShader) also compared the
-procedural body/clothes with shared and independent poses under nonidentity E/C.
-All comparisons met the 0.5% coverage threshold. Both backends measured the
-ordering table for N=1, 2, 17 and 256 with Shared binding off/on. This verifies
-unlit position deformation and batching; it does not verify lighting normals,
-cloth simulation, performance budgets or the full context-loss/retry sequence.
-After the switch from a split view to the `CPU reference` toggle, the native
-toggle captures were rerun (Fox Walk, CesiumMan, humanoid shared and independent,
-stepped while paused): 0 mismatched pixels each. The WebGL2 captures predate the
-toggle and were not rerun.
+Verification of the current code is native only. `skeletal_compare` measured 0
+mismatched pixels for Fox Walk, CesiumMan and the humanoid with shared and
+independent clothes, each stepped while paused. The ordering table was checked
+for N=17 with two passes. The WebGL2 capture pair of the `CPU reference` toggle
+is unverified. This covers unlit position deformation and batching; it does not
+verify lighting normals, cloth simulation, performance budgets or the full
+context-loss/retry sequence.
