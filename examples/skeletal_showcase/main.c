@@ -761,6 +761,13 @@ static void ordering_cancel_input(void) { s_order_combo_open = false; }
 // #endregion
 
 // #region scene meshes
+/* Deformation rewrites only positions; the other streams and indices stay as copied. */
+static void retain_cpu_output(cpu_mesh_t *source) {
+    source->output = malloc(source->size);
+    NT_ASSERT(source->output != NULL);
+    memcpy(source->output, source->data, source->size);
+}
+
 /* The standard MESH activator already checked structure. Decode once at load;
  * keep exactly its packed attribute bytes for the independent scalar reference. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -809,6 +816,7 @@ static void copy_mesh_source(cpu_mesh_t *source, const uint8_t *wire) {
     raw->vertex_wire = NT_MESH_WIRE_VTX_RAW;
     raw->index_wire = NT_MESH_WIRE_IDX_RAW;
     raw->index_data_size = header->index_count * index_size;
+    retain_cpu_output(source);
 }
 
 static void finish_mesh_sources(void) {
@@ -830,11 +838,6 @@ static void finish_mesh_sources(void) {
 }
 
 static void deform_cpu_mesh(cpu_mesh_t *source, const nt_skin_binding_t *skin, const nt_skeletal_mat34_t *model, uint16_t joint_count) {
-    if (source->output == NULL) {
-        source->output = malloc(source->size);
-        NT_ASSERT(source->output != NULL);
-    }
-    memcpy(source->output, source->data, source->size);
     const NtMeshAssetHeader *header = (const NtMeshAssetHeader *)source->data;
     const uint32_t prefix = (uint32_t)sizeof(*header) + (header->stream_count * (uint32_t)sizeof(NtStreamDesc));
     nt_skeletal_mat34_t palette[SKELETAL_SHOWCASE_MAX_PALETTE];
@@ -948,6 +951,7 @@ static void make_humanoid_mesh(cpu_mesh_t *source, bool clothes, bool local_spac
         ++segment;
     }
     NT_ASSERT(segment == segments);
+    retain_cpu_output(source);
 }
 
 static void init_humanoid_meshes(void) {
@@ -1021,9 +1025,11 @@ static void init_mesh_scene(void) {
     NT_ASSERT(result == NT_OK);
     result = nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 3 * SKELETAL_SHOWCASE_MAX_PALETTE, .height = SKELETAL_SHOWCASE_MAX_INSTANCES});
     NT_ASSERT(result == NT_OK);
-    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_instances = SKELETAL_SHOWCASE_MAX_INSTANCES, .max_pipelines = 8, .max_mesh_layouts = 4});
+    /* Static meshes are only the CPU reference: one body and one shirt. */
+    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_instances = 2, .max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
-    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = SKELETAL_SHOWCASE_MAX_INSTANCES, .max_pipelines = 8, .max_mesh_layouts = 4});
+    /* The instance ring holds both ordering passes, so pass 2 never overwrites data pass 1 draws from. */
+    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 2 * SKELETAL_SHOWCASE_MAX_INSTANCES, .max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
     for (uint32_t i = 0; i < SKELETAL_SHOWCASE_MAX_INSTANCES + 2U; ++i) {
         const nt_entity_t e = nt_entity_create();
@@ -1737,7 +1743,7 @@ static void skinned_draw(void) {
         }
     }
     for (uint32_t i = 0; i < count; ++i) {
-        if (s_cpu_reference && sources[i]->data != NULL && (s_reference_dirty || sources[i]->output == NULL)) {
+        if (s_cpu_reference && sources[i]->data != NULL && (s_reference_dirty || sources[i]->reference.id == 0)) {
             deform_cpu_mesh(sources[i], skins[i], models[i], p->skel->joint_count);
         }
         const nt_entity_t e = s_mesh_entities[i];

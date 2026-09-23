@@ -171,7 +171,9 @@ uint32_t nt_resource_publication_epoch(void);
  * Borrowed immutable pack bytes: copy to retain beyond provider change/invalidation,
  * eviction, unmount or shutdown. Does not load, pin, decode, or update residency.
  * Returns NULL for invalid/unallocated handles, unavailable providers or absent bytes
- * (including virtual assets). Optional out_size receives wire size on success, 0 otherwise. */
+ * (including virtual assets). READY does not imply resident bytes: evicted packs and
+ * owners invalidated until the next step return NULL. Optional out_size receives wire
+ * size on success, 0 otherwise. */
 const uint8_t *nt_resource_get_asset_data(nt_resource_t handle, uint32_t *out_size);
 
 /* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready,

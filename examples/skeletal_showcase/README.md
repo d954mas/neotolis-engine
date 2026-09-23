@@ -162,7 +162,9 @@ The example copies both exported MESH payloads once after load via
 source bytes through pack/GPU invalidation. Four packed weight bytes divided by
 255 feed a scalar CPU deformation. Its RAW result is rasterized by the static
 mesh renderer. Geometry is rebuilt on explicit pose changes, not each paused
-frame, and survives context loss in CPU memory. This is a verification mode of
+frame, and survives context loss in CPU memory. Activated meshes are immutable,
+so each rebuild re-activates the reference mesh; scrubbing pays that per frame
+until #542 adds a vertex update. This is a verification mode of
 the example, not a general CPU renderer or a required engine animation path.
 
 ### Body and clothes

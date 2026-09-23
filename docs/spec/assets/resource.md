@@ -106,8 +106,8 @@ handles, invalidated owners, virtual providers and missing/evicted pack bytes
 return NULL. READY GPU objects do not imply resident source bytes.
 
 The view borrows immutable pack storage until provider change/invalidation,
-eviction, unmount or shutdown. Copy during explicit scene loading to retain CPU
-data. The getter does not allocate, decode, activate, pin, update TTL or issue I/O.
+eviction, unmount or shutdown. Copy once the resource is READY (polling after
+`nt_resource_step()` is fine) to retain CPU data. The getter does not allocate, decode, activate, pin, update TTL or issue I/O.
 It follows the published named entry and its canonical owner; it does not select
 a target provider independently. The registered activator owns typed validation.
 `nt_resource_get_blob` keeps its BLOB-only, header-stripping contract.
