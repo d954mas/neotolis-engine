@@ -418,7 +418,7 @@ vertex-shader invocations.
 Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
 upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
 definition published by the interface target, so every consumer sees the same
-configuration; `nt_gfx_capture_set_enabled` and `nt_gfx_capture_read` exist only
+configuration; `nt_gfx_capture_request` and `nt_gfx_capture_read` exist only
 when it is 1.
 
 `gl[]` counts every issued GL call by `nt_gfx_gl_call_t`, queries included:
@@ -454,13 +454,19 @@ is the GL context generation when the capture started; each ACCEPTED CONTEXT
 result in the stream starts the next generation, so raw GL names before and
 after it belong to different contexts.
 
-Command recording starts disabled. `nt_gfx_desc_t.capture_capacity` reserves one
-event array at init (default zero); enabling capture without capacity asserts.
+Command recording is one-shot: `nt_gfx_capture_request` asks for the next tick
+to be recorded. The end_tick that closes the requesting tick consumes the request
+and starts recording the tick it opens; without a request no tick records. The
+first tick never records. A request made during a recorded tick replaces that
+capture at the end_tick that finishes it, so read a capture in the following
+tick before requesting again: readable captures are at most every other tick.
+`nt_gfx_desc_t.capture_capacity` reserves one
+event array at init (default zero); a request without capacity asserts.
 There is no growth or allocation while recording. Each pointer-free POD event
 is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Other storage
 consists of fixed control state and counter snapshots, with no second event array.
 All record bytes are initialized before publication. A recorded tick starts at
-its first gfx work (or at its end_tick if it has none) and first snapshots
+the end_tick that opens it and first snapshots
 inherited state, including one definition per live resource (plus
 program uniform/sampler and vertex-input attribute records), into the same array.
 Size the capacity for that snapshot plus the tick's commands; a capacity below
@@ -468,8 +474,8 @@ the snapshot overflows before any command is recorded.
 
 `nt_gfx_capture_read` returns metadata by value and an immutable event prefix.
 Read a finished capture right after `nt_gfx_end_tick`: the prefix remains valid
-until the next **recorded** tick starts (its first gfx work overwrites it) or
-shutdown; ticks with recording disabled preserve it. Two counts in the same sequence delimit
+until the end_tick that starts the next requested recording overwrites it, or
+shutdown; unrequested ticks preserve it. Two counts in the same sequence delimit
 an operation interval. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
 a NULL pointer. The finalized view retains its matching tick snapshot (and so
@@ -488,7 +494,7 @@ prove GL success or GPU completion. The view status is UNAVAILABLE while a tick
 records and becomes the finalized tick's COMPLETE, TRUNCATED or ABORTED at its
 end_tick. Overflow is separately
 reported even when aborted, stops event appends, and never truncates counters.
-Recording changes inside a tick apply to the next tick.
+A request inside a tick applies to the next tick.
 
 The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose

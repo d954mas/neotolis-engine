@@ -789,11 +789,11 @@ void nt_gfx_end_tick(void);
 #if NT_GFX_CAPTURE_ENABLED
 /* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
 const char *nt_gfx_gl_call_name(uint32_t call);
-/* Defaults to false; enabling requires nonzero init capacity. A change applies
- * to the next tick. The stub is inert. */
-void nt_gfx_capture_set_enabled(bool enabled);
-/* Metadata by value; immutable event prefix until the next recorded tick's first
- * gfx work or shutdown, so read right after end_tick. Copy count records and
+/* One-shot: the next tick records, starting at the end_tick that opens it.
+ * Requires nonzero init capacity. The stub is inert. */
+void nt_gfx_capture_request(void);
+/* Metadata by value; immutable event prefix until the end_tick that starts the
+ * next requested recording, or shutdown, so read right after end_tick. Copy count records and
  * metadata to keep. Empty views have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 #endif

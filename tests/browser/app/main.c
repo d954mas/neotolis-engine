@@ -433,13 +433,11 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
 static double s_observe_values[40];
-EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) {
-#if NT_GFX_CAPTURE_ENABLED
-    nt_gfx_capture_set_enabled(enabled != 0);
-#else
-    (void)enabled;
-#endif
-}
+/* Requests every other frame: a request consumed at end_tick replaces the capture it
+ * just finished, so the unrequested frame between keeps that capture readable. */
+static bool s_observe_repeat;
+static bool s_observe_request_now;
+EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) { s_observe_repeat = enabled != 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_observe_status(void) {
 #if NT_GFX_CAPTURE_ENABLED
     return (int)nt_gfx_capture_read().status;
@@ -457,7 +455,9 @@ EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
 EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     memset(s_observe_values, 0, sizeof(s_observe_values));
 #if NT_GFX_CAPTURE_ENABLED
-    nt_gfx_capture_set_enabled(mode != 0);
+    if (mode != 0) {
+        nt_gfx_capture_request();
+    }
 #endif
     /* Close the tick JS called into, so the probe's work is one tick of its own. */
     nt_gfx_end_tick();
@@ -541,7 +541,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
             }
         }
     }
-    nt_gfx_capture_set_enabled(false);
 #endif
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8) | ((uint32_t)pixel[2] << 16) | ((uint32_t)pixel[3] << 24)) : 0;
 }
@@ -1008,6 +1007,12 @@ static void frame(void) {
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
+#if defined(__EMSCRIPTEN__) && NT_GFX_CAPTURE_ENABLED
+    s_observe_request_now = !s_observe_request_now;
+    if (s_observe_repeat && s_observe_request_now) {
+        nt_gfx_capture_request();
+    }
+#endif
     nt_gfx_end_tick();
 }
 // #endregion

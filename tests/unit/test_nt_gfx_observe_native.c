@@ -170,7 +170,7 @@ static uint32_t captured_calls(nt_gfx_gl_call_t call) {
 static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 8, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
     nt_texture_t color = nt_gfx_render_target_color(target);
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
     nt_gfx_end_tick();
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 13, 7));
     nt_gfx_set_scissor_enabled(false);
@@ -223,7 +223,7 @@ static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
 }
 
 static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
     nt_gfx_end_tick();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
@@ -291,7 +291,7 @@ static uint32_t render_target_depth_names(uint32_t *out_depth, uint32_t capacity
 static void test_render_target_backend_definitions_carry_depth_renderbuffer(void) {
     const nt_render_target_desc_t desc = {.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8, .depth_storage = NT_RT_DEPTH_BUFFER, .depth_format = NT_TEXTURE_FORMAT_DEPTH24};
     (void)nt_gfx_make_render_target(&desc);
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
     nt_gfx_end_tick();
     (void)nt_gfx_make_render_target(&desc);
     nt_gfx_end_tick();
@@ -310,7 +310,7 @@ static void test_initial_uniform_records_cover_only_vec4(void) {
         &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform vec4 tint; uniform int mode; out vec4 color; void main(){color=tint*float(mode);}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL(0, program.id);
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
     nt_gfx_end_tick();
     nt_gfx_end_tick(); /* a recorded tick without gfx work still snapshots inherited state */
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
@@ -328,7 +328,7 @@ static void test_initial_uniform_records_cover_only_vec4(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks three argument kinds
 static void test_issued_calls_record_floats_names_and_payloads(void) {
     const uint8_t data[16] = {0};
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
     nt_gfx_end_tick();
     (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = sizeof(data), .data = data});
     nt_gfx_begin_frame();
@@ -371,7 +371,7 @@ static void test_issued_calls_record_floats_names_and_payloads(void) {
 static void test_complete_capture_matches_gl_counters(void) {
     const uint8_t pixels[16] = {0};
     const float tint[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
     nt_gfx_end_tick();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
@@ -424,7 +424,7 @@ static void test_complete_capture_matches_gl_counters(void) {
 }
 
 static void test_readback_is_recorded_as_issued_call(void) {
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
     nt_gfx_end_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -524,7 +524,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 64});
     const float color[4] = {1.0F, 0.5F, 0.0F, 1.0F};
 #if NT_GFX_CAPTURE_ENABLED
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
 #endif
     nt_gfx_end_tick();
     for (uint32_t frame = 0; frame < 2; frame++) {
@@ -579,6 +579,9 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
 #if NT_GFX_CAPTURE_ENABLED
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glUseProgram], captured_calls(NT_GFX_GL_glUseProgram));
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glBindVertexArray], captured_calls(NT_GFX_GL_glBindVertexArray));
+        /* An empty tick starts the next recording only after this one was read. */
+        nt_gfx_capture_request();
+        nt_gfx_end_tick();
 #endif
     }
 }

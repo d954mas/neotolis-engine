@@ -9,8 +9,7 @@
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
     uint64_t context_sequence; /* GL context generation; advances on each successful restore */
-    bool requested;
-    bool armed; /* this tick records, starting at its first operation */
+    bool request_pending;      /* the next tick records */
     bool recording;
     nt_gfx_event_t *events;
     uint32_t capacity;
@@ -33,8 +32,6 @@ static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
     }
     memcpy(&capture->events[capture->view.count++], event, sizeof(*event));
 }
-/* A recorded tick starts at its first operation, so the previous capture stays readable until then. */
-void nt_gfx_capture_start(void);
 static inline bool nt_gfx_capture_accepts(void) { return g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow; }
 /* Issued-call records are filled in place: open reserves the next slot, commit publishes it. */
 static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
@@ -78,8 +75,8 @@ static inline void nt_gfx_capture_commit_call(void) {
 #define NT_GFX_RECORD(...) ((void)0)
 #endif
 
-/* One public operation = one BEGIN and one END, in every build. BEGIN starts an
- * armed recording and keeps op/kind/object in a wrapper-local scope, so operations
+/* One public operation = one BEGIN and one END, in every build. BEGIN keeps
+ * op/kind/object in a wrapper-local scope, so operations
  * nested inside the implementation cannot clobber them. END counts an ACCEPTED
  * reason in accepted[op]; capture builds also record the request and result. */
 typedef struct {
@@ -88,14 +85,7 @@ typedef struct {
     uint32_t object;
 } nt_gfx_scope_t;
 
-static inline nt_gfx_scope_t nt_gfx_begin_op(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object) {
-#if NT_GFX_CAPTURE_ENABLED
-    if (g_nt_gfx_capture.armed) {
-        nt_gfx_capture_start();
-    }
-#endif
-    return (nt_gfx_scope_t){operation, kind, object};
-}
+static inline nt_gfx_scope_t nt_gfx_begin_op(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object) { return (nt_gfx_scope_t){operation, kind, object}; }
 
 static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_event_reason_t reason) {
     if (reason == NT_GFX_REASON_ACCEPTED) {

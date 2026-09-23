@@ -247,7 +247,7 @@ void nt_gfx_backend_capture_initial_state(void) {
                   event.data.backend.args[6] = s_ebo_upload_vao; event.detail = NT_GFX_INITIAL_BACKEND;);
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_VIEWPORT, for (uint32_t i = 0; i < 4; i++) { event.data.state.integers[i] = (uint32_t)s_gl_cache.viewport[i]; });
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_PASS, memcpy(event.data.pass.color, s_gl_cache.clear_color, sizeof(event.data.pass.color)); event.data.pass.depth = s_gl_cache.clear_depth;);
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_PIPELINE, event.detail = 0; event.data.state.integers[0] = s_gl_cache.program; event.data.state.integers[1] = s_gl_cache.depth_test_enabled;
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_PIPELINE, event.data.state.integers[0] = s_gl_cache.program; event.data.state.integers[1] = s_gl_cache.depth_test_enabled;
                   event.data.state.integers[2] = s_gl_cache.depth_write_enabled; event.data.state.integers[3] = s_gl_cache.depth_func; event.data.state.integers[4] = s_gl_cache.cull_mode;
                   event.data.state.integers[5] = s_gl_cache.blend_enabled; event.data.state.integers[6] = s_gl_cache.blend_src_rgb; event.data.state.integers[7] = s_gl_cache.blend_dst_rgb;
                   event.data.state.integers[8] = s_gl_cache.blend_src_alpha; event.data.state.integers[9] = s_gl_cache.blend_dst_alpha; event.data.state.integers[10] = s_gl_cache.blend_op_rgb;

@@ -132,9 +132,9 @@ static void test_end_tick_with_an_open_render_frame_asserts(void) {
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
-/* Recording applies from the next tick on. */
+/* The end_tick that consumes a request starts recording the tick it opens. */
 static void record_next_tick(void) {
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
     nt_gfx_end_tick();
 }
 
@@ -176,6 +176,7 @@ static void test_restore_frame_completes_under_new_context_sequence(void) {
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, g_nt_gfx.last_frame.status);
     const uint64_t lost_sequence = nt_gfx_capture_read().context_sequence;
 
+    record_next_tick();
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
@@ -195,7 +196,7 @@ static void test_restore_frame_completes_under_new_context_sequence(void) {
     TEST_ASSERT_EQUAL_UINT32(1, restores);
     TEST_ASSERT_EQUAL_UINT32(1, capture.snapshot.counters.accepted[NT_GFX_OP_CONTEXT]);
 
-    nt_gfx_end_tick();
+    record_next_tick();
     TEST_ASSERT_EQUAL_UINT64(lost_sequence + 1, nt_gfx_capture_read().context_sequence);
 }
 
@@ -205,6 +206,7 @@ static void test_failed_restore_ends_context_with_backend_failure(void) {
     nt_gfx_begin_frame();
     nt_gfx_end_tick();
     const uint64_t lost_sequence = nt_gfx_capture_read().context_sequence;
+    record_next_tick();
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_fake_fail_next_backend_restore();
     nt_gfx_begin_frame();
@@ -217,7 +219,7 @@ static void test_failed_restore_ends_context_with_backend_failure(void) {
         failed |= e->kind == NT_GFX_EVENT_RESULT && e->operation == NT_GFX_OP_CONTEXT && e->reason == NT_GFX_REASON_BACKEND_FAILURE;
     }
     TEST_ASSERT_TRUE(failed);
-    nt_gfx_end_tick();
+    record_next_tick();
     TEST_ASSERT_EQUAL_UINT64(lost_sequence, nt_gfx_capture_read().context_sequence);
 }
 
@@ -375,15 +377,12 @@ static void test_draw_trace_preserves_arguments_and_live_prefix(void) {
 static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     record_next_tick();
-    /* An armed tick records from its first gfx work. */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
-    nt_gfx_begin_frame();
     nt_gfx_capture_view_t before = nt_gfx_capture_read();
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, before.status);
     TEST_ASSERT_TRUE(before.count > 0);
     nt_gfx_event_t saved = before.events[0];
+    nt_gfx_begin_frame();
     nt_gfx_end_frame();
-    nt_gfx_capture_set_enabled(false);
     nt_gfx_end_tick();
     nt_gfx_frame_snapshot_t snapshot = g_nt_gfx.last_frame;
     nt_gfx_capture_view_t after = nt_gfx_capture_read();
@@ -400,6 +399,17 @@ static void test_capture_prefix_lifetime_and_saved_snapshot(void) {
     TEST_ASSERT_EQUAL_UINT32(after.count, retained.count);
     TEST_ASSERT_EQUAL_MEMORY(&after.snapshot, &retained.snapshot, sizeof(snapshot));
     TEST_ASSERT_EQUAL_MEMORY(&saved, &retained.events[0], sizeof(saved));
+
+    /* A request leaves the finished capture intact until its end_tick starts recording. */
+    nt_gfx_capture_request();
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
+    nt_gfx_capture_view_t pending = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, pending.status);
+    TEST_ASSERT_EQUAL_UINT32(after.count, pending.count);
+    TEST_ASSERT_EQUAL_MEMORY(&after.snapshot, &pending.snapshot, sizeof(snapshot));
+    nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, nt_gfx_capture_read().status);
 }
 
 static void test_capture_overflow_does_not_stop_counters(void) {
@@ -419,19 +429,18 @@ static void test_capture_overflow_does_not_stop_counters(void) {
     TEST_ASSERT_EQUAL_UINT64(snapshot->counters.frame_sequence, capture.snapshot.counters.frame_sequence);
 }
 
-static void test_capture_toggle_applies_to_the_next_tick(void) {
-    nt_gfx_capture_set_enabled(true);
+static void test_capture_request_records_only_the_next_tick(void) {
+    nt_gfx_capture_request();
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
     nt_gfx_end_tick();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_capture_read().count);
-    nt_gfx_capture_set_enabled(false);
-    nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, nt_gfx_capture_read().status);
     TEST_ASSERT_GREATER_THAN_UINT32(0, nt_gfx_capture_read().count);
+    nt_gfx_begin_frame();
     nt_gfx_end_frame();
     nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, nt_gfx_capture_read().status);
     uint64_t sequence = nt_gfx_capture_read().snapshot.counters.frame_sequence;
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
@@ -496,7 +505,7 @@ int main(void) {
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);
     RUN_TEST(test_capture_overflow_does_not_stop_counters);
-    RUN_TEST(test_capture_toggle_applies_to_the_next_tick);
+    RUN_TEST(test_capture_request_records_only_the_next_tick);
     RUN_TEST(test_capture_read_after_shutdown_is_empty);
     RUN_TEST(test_exact_capacity_and_one_record_short);
 #endif

@@ -107,7 +107,7 @@ static void test_stub_packs_pipeline_keys(void) {
 /* The stub is stateless: ticks are inert. */
 static void test_stub_observation_is_unavailable(void) {
 #if NT_GFX_CAPTURE_ENABLED
-    nt_gfx_capture_set_enabled(true);
+    nt_gfx_capture_request();
 #endif
     nt_gfx_end_tick();
     nt_gfx_end_tick();

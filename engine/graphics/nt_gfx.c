@@ -222,9 +222,9 @@ void nt_gfx_observe_context_loss(void) {
 }
 
 #if NT_GFX_CAPTURE_ENABLED
-void nt_gfx_capture_set_enabled(bool enabled) {
-    NT_ASSERT(!enabled || g_nt_gfx_capture.capacity > 0);
-    g_nt_gfx_capture.requested = enabled;
+void nt_gfx_capture_request(void) {
+    NT_ASSERT(g_nt_gfx_capture.capacity > 0);
+    g_nt_gfx_capture.request_pending = true;
 }
 
 nt_gfx_capture_view_t nt_gfx_capture_read(void) {
@@ -325,8 +325,8 @@ static void capture_initial_state(void) {
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
-void nt_gfx_capture_start(void) {
-    g_nt_gfx_capture.armed = false;
+static void capture_start(void) {
+    g_nt_gfx_capture.request_pending = false;
     g_nt_gfx_capture.recording = true;
     g_nt_gfx_capture.view = (nt_gfx_capture_view_t){.context_sequence = g_nt_gfx_capture.context_sequence};
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_FRAME, event.reason = NT_GFX_REASON_ACCEPTED);
@@ -334,9 +334,6 @@ void nt_gfx_capture_start(void) {
 }
 
 static void capture_end_tick(void) {
-    if (g_nt_gfx_capture.armed) {
-        nt_gfx_capture_start(); /* a tick without gfx work still records its frame */
-    }
     if (g_nt_gfx_capture.recording) {
         NT_GFX_RECORD(NT_GFX_EVENT_RESULT, NT_GFX_OP_FRAME, event.reason = g_nt_gfx.last_frame.status == NT_GFX_FRAME_ABORTED ? NT_GFX_REASON_CONTEXT_LOST : NT_GFX_REASON_ACCEPTED);
         nt_gfx_capture_view_t *capture = &g_nt_gfx_capture.view;
@@ -354,9 +351,6 @@ static void capture_end_tick(void) {
 static void open_tick(void) {
     s_gfx.tick_aborted = false;
     g_nt_gfx.counters = (nt_gfx_counters_t){.frame_sequence = g_nt_gfx.counters.frame_sequence + 1};
-#if NT_GFX_CAPTURE_ENABLED
-    g_nt_gfx_capture.armed = g_nt_gfx_capture.requested;
-#endif
 }
 
 void nt_gfx_end_tick(void) {
@@ -370,6 +364,11 @@ void nt_gfx_end_tick(void) {
     capture_end_tick();
 #endif
     open_tick();
+#if NT_GFX_CAPTURE_ENABLED
+    if (g_nt_gfx_capture.request_pending) {
+        capture_start();
+    }
+#endif
 }
 // #endregion
 
@@ -442,9 +441,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_shutdown(void) {
-    /* The open tick is discarded without a snapshot; teardown calls must not start a recording. */
+    /* The open tick is discarded without a snapshot; teardown calls must not record into the freed array. */
 #if NT_GFX_CAPTURE_ENABLED
-    g_nt_gfx_capture.armed = false;
     g_nt_gfx_capture.recording = false;
     free(g_nt_gfx_capture.events);
 #endif
