@@ -439,6 +439,19 @@ static void test_capture_toggle_applies_to_the_next_tick(void) {
     TEST_ASSERT_EQUAL_UINT64(sequence, nt_gfx_capture_read().snapshot.counters.frame_sequence);
 }
 
+static void test_capture_read_after_shutdown_is_empty(void) {
+    record_next_tick();
+    nt_gfx_end_tick();
+    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_gfx_capture_read().count);
+    nt_gfx_shutdown();
+    nt_gfx_capture_view_t view = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT32(0, view.count);
+    TEST_ASSERT_NULL(view.events);
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, view.status);
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&desc);
+}
+
 static void test_exact_capacity_and_one_record_short(void) {
     record_next_tick();
     nt_gfx_end_tick();
@@ -484,6 +497,7 @@ int main(void) {
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);
     RUN_TEST(test_capture_overflow_does_not_stop_counters);
     RUN_TEST(test_capture_toggle_applies_to_the_next_tick);
+    RUN_TEST(test_capture_read_after_shutdown_is_empty);
     RUN_TEST(test_exact_capacity_and_one_record_short);
 #endif
     return UNITY_END();

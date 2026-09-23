@@ -407,9 +407,20 @@ static void test_complete_capture_matches_gl_counters(void) {
         }
     }
     TEST_ASSERT_GREATER_THAN_UINT32(20, total);
+    const nt_gfx_counters_t *c = &capture.snapshot.counters;
     for (uint32_t call = 1; call < NT_GFX_GL_COUNT; call++) {
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(capture.snapshot.counters.gl[call], recorded[call], nt_gfx_gl_call_name(call));
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(c->gl[call], recorded[call], nt_gfx_gl_call_name(call));
     }
+    /* The hooks count what the driver received, independently of the funnel. */
+    TEST_ASSERT_EQUAL_UINT32(s_program_calls, c->gl[NT_GFX_GL_glUseProgram]);
+    TEST_ASSERT_EQUAL_UINT32(s_vao_calls, c->gl[NT_GFX_GL_glBindVertexArray]);
+    TEST_ASSERT_EQUAL_UINT32(s_uniform_calls, c->gl[NT_GFX_GL_glUniform4fv]);
+    TEST_ASSERT_EQUAL_UINT32(s_ubo_calls, c->gl[NT_GFX_GL_glBindBufferBase]);
+    TEST_ASSERT_EQUAL_UINT32(s_attribute_calls, c->gl[NT_GFX_GL_glVertexAttribPointer]);
+    TEST_ASSERT_EQUAL_UINT64(s_buffer_calls, c->buffer_upload_calls);
+    TEST_ASSERT_EQUAL_UINT64(s_buffer_bytes, c->buffer_upload_bytes);
+    TEST_ASSERT_EQUAL_UINT64(s_texture_calls, c->texture_upload_calls);
+    TEST_ASSERT_EQUAL_UINT64(s_texture_bytes, c->texture_upload_bytes);
 }
 
 static void test_readback_is_recorded_as_issued_call(void) {
@@ -458,6 +469,18 @@ static void test_payloads_before_render_land_in_their_tick(void) {
     /* Both ticks together saw every payload the driver received. */
     TEST_ASSERT_EQUAL_UINT64(s_buffer_calls, 3);
     TEST_ASSERT_EQUAL_UINT64(s_buffer_bytes, 92);
+}
+
+/* Single-byte rows are not padded to the unpack alignment: an odd width counts exact bytes. */
+static void test_r8_odd_width_update_counts_exact_bytes(void) {
+    const uint8_t pixels[9] = {0};
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 3, .height = 3, .format = NT_TEXTURE_FORMAT_R8, .data = pixels});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, texture.id);
+    nt_gfx_end_tick();
+    nt_gfx_update_texture(texture, 0, 1, 3, 1, pixels);
+    nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.counters.texture_upload_calls);
+    TEST_ASSERT_EQUAL_UINT64(3, g_nt_gfx.last_frame.counters.texture_upload_bytes);
 }
 
 static void test_texture_mips_storage_and_subrect_payloads(void) {
@@ -626,6 +649,7 @@ int main(void) {
 #endif
     RUN_TEST(test_payloads_before_render_land_in_their_tick);
     RUN_TEST(test_texture_mips_storage_and_subrect_payloads);
+    RUN_TEST(test_r8_odd_width_update_counts_exact_bytes);
     RUN_TEST(test_failed_upload_keeps_issued_bytes_and_observed_loss);
     RUN_TEST(test_repeated_frames_separate_requests_from_issued_calls);
     RUN_TEST(test_compressed_mips_use_issued_block_sizes);

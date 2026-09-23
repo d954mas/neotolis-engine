@@ -278,8 +278,9 @@ log floor with FULL asserts, TRAP positive paths, timing producers ON/OFF,
 metrics independence, UI key checks ON with inspector OFF and OFF with inspector ON,
 and inspector ON with UI timing OFF. Gfx observation exercises capture ON and OFF,
 including fake/frontend and inert stub paths.
-`tests/browser/observation.spec.ts` independently intercepts WebGL calls, checks
-uploads before render begin and compares output pixels with recording off/on/full.
+`tests/browser/observation.spec.ts` independently intercepts WebGL calls and
+upload payloads, checks uploads before render begin and compares output pixels
+with recording off/on/full.
 
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,

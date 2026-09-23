@@ -521,6 +521,10 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     s_observe_values[15] = (double)snapshot.counters.texture_upload_bytes;
     s_observe_values[16] = (double)snapshot.counters.buffer_upload_calls;
     s_observe_values[17] = (double)snapshot.counters.texture_upload_calls;
+    const nt_gfx_gl_call_t uploads[] = {NT_GFX_GL_glBufferData, NT_GFX_GL_glBufferSubData, NT_GFX_GL_glTexImage2D, NT_GFX_GL_glTexSubImage2D, NT_GFX_GL_glCompressedTexImage2D};
+    for (uint32_t j = 0; j < 5; j++) {
+        s_observe_values[26 + j] = snapshot.counters.gl[uploads[j]];
+    }
 #if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     s_observe_values[11] = capture.overflow;
