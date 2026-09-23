@@ -462,10 +462,6 @@ void setUp(void) {
     char *skin_source = NULL;
     char *reference_source = NULL;
     char *fragment_source = NULL;
-    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = RT_W, .height = RT_H};
-    nt_window_init();
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_test_init(&(nt_gfx_desc_t){
         .max_shaders = 8,
@@ -570,7 +566,6 @@ void tearDown(void) {
     s_skin_vs = (nt_shader_t){0};
     nt_gfx_shutdown();
     nt_hash_shutdown();
-    nt_window_shutdown();
     s_initialized = false;
 }
 
@@ -662,9 +657,18 @@ static void test_colored_then_none_restores_white_for_both_color_layouts(void) {
 }
 
 int main(void) {
+    /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
+    if (!glfwInit()) {
+        return 1;
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = RT_W, .height = RT_H};
+    nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_palette_frames_and_interpolation_match_cpu_reference);
     RUN_TEST(test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic);
     RUN_TEST(test_colored_then_none_restores_white_for_both_color_layouts);
-    return UNITY_END();
+    int failures = UNITY_END();
+    nt_window_shutdown();
+    return failures;
 }

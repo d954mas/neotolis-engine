@@ -25,16 +25,6 @@ static void assert_rgba(const uint8_t *pixels, uint32_t pixel_count, uint8_t r, 
 }
 
 void setUp(void) {
-    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    g_nt_window = (nt_window_t){
-        .max_dpr = 1.0F,
-        .resizable = false,
-        .width = 64,
-        .height = 64,
-    };
-    nt_window_init();
-
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_textures = 2;
     desc.max_render_targets = 1;
@@ -42,10 +32,7 @@ void setUp(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
 
-void tearDown(void) {
-    nt_gfx_shutdown();
-    nt_window_shutdown();
-}
+void tearDown(void) { nt_gfx_shutdown(); }
 
 static void test_render_target_resize_without_spare_texture_slots(void) {
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
@@ -1502,6 +1489,18 @@ static void test_missing_uniform_name_length_releases_program_for_retry(void) { 
 static void test_missing_uniform_details_releases_partial_cache_for_retry(void) { assert_reflection_query_failure_retries(0); }
 
 int main(void) {
+    /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
+    if (!glfwInit()) {
+        return 1;
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window = (nt_window_t){
+        .max_dpr = 1.0F,
+        .resizable = false,
+        .width = 64,
+        .height = 64,
+    };
+    nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format_and_wrap);
@@ -1538,5 +1537,7 @@ int main(void) {
     RUN_TEST(test_missing_active_uniform_count_releases_program_for_retry);
     RUN_TEST(test_missing_uniform_name_length_releases_program_for_retry);
     RUN_TEST(test_missing_uniform_details_releases_partial_cache_for_retry);
-    return UNITY_END();
+    int failures = UNITY_END();
+    nt_window_shutdown();
+    return failures;
 }

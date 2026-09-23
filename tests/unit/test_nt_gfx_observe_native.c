@@ -106,10 +106,6 @@ static void GLAD_API_PTR count_attribute_pointer(GLuint index, GLint size, GLenu
 }
 
 void setUp(void) {
-    TEST_ASSERT_TRUE(glfwInit());
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .width = 16, .height = 16};
-    nt_window_init();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;
     nt_gfx_init(&desc);
@@ -155,7 +151,6 @@ void tearDown(void) {
     glad_glCompressedTexImage2D = s_compressed_image;
     glad_glVertexAttribPointer = s_attribute_pointer;
     nt_gfx_shutdown();
-    nt_window_shutdown();
 }
 
 #if NT_GFX_CAPTURE_ENABLED
@@ -543,6 +538,13 @@ static void test_compiled_off_is_unavailable(void) {
 #endif
 
 int main(void) {
+    /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
+    if (!glfwInit()) {
+        return 1;
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .width = 16, .height = 16};
+    nt_window_init();
     UNITY_BEGIN();
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_capture_publishes_resize_mappings_and_skip_reasons);
@@ -561,5 +563,7 @@ int main(void) {
 #else
     RUN_TEST(test_compiled_off_is_unavailable);
 #endif
-    return UNITY_END();
+    int failures = UNITY_END();
+    nt_window_shutdown();
+    return failures;
 }

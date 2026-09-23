@@ -46,10 +46,6 @@ static const uint16_t s_tri_indices[3] = {0, 1, 2};
 static const uint16_t s_degenerate_indices[3] = {0, 0, 0};
 
 void setUp(void) {
-    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = 16, .height = 16};
-    nt_window_init();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_test_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -64,7 +60,6 @@ void tearDown(void) {
     remove_state_counters();
     disarm_get_error_poison();
     nt_gfx_shutdown();
-    nt_window_shutdown();
 }
 
 static nt_buffer_t make_vbo(const float *data) {
@@ -1511,6 +1506,13 @@ static void test_vec4_cache_compares_bytes_and_last_value(void) {
 }
 
 int main(void) {
+    /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
+    if (!glfwInit()) {
+        return 1;
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = 16, .height = 16};
+    nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_vec4_repeat_skips_physical_upload);
     RUN_TEST(test_vec4_cache_follows_program_lifetime);
@@ -1545,5 +1547,7 @@ int main(void) {
     RUN_TEST(test_same_sampler_on_a_slot_binds_once);
     RUN_TEST(test_override_binds_one_sampler);
     RUN_TEST(test_ground_state_reissues_sampler_bind);
-    return UNITY_END();
+    int failures = UNITY_END();
+    nt_window_shutdown();
+    return failures;
 }

@@ -22,16 +22,6 @@ static const float k_identity_vp[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0
 static nt_render_target_t s_target;
 
 void setUp(void) {
-    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    g_nt_window = (nt_window_t){
-        .max_dpr = 1.0F,
-        .resizable = false,
-        .width = RT_W,
-        .height = RT_H,
-    };
-    nt_window_init();
-
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_test_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -60,7 +50,6 @@ void tearDown(void) {
     nt_shape_renderer_shutdown();
     nt_gfx_destroy_render_target(s_target);
     nt_gfx_shutdown();
-    nt_window_shutdown();
 }
 
 /* Sample one pixel from a top-left-oriented full-frame readback. */
@@ -139,8 +128,22 @@ static void test_ring_wrap_still_renders(void) {
 }
 
 int main(void) {
+    /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
+    if (!glfwInit()) {
+        return 1;
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window = (nt_window_t){
+        .max_dpr = 1.0F,
+        .resizable = false,
+        .width = RT_W,
+        .height = RT_H,
+    };
+    nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_multi_flush_ring_offsets_render_correctly);
     RUN_TEST(test_ring_wrap_still_renders);
-    return UNITY_END();
+    int failures = UNITY_END();
+    nt_window_shutdown();
+    return failures;
 }

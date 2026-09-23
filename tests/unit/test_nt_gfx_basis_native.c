@@ -39,24 +39,12 @@ static uint32_t s_blob_size;
 static nt_basisu_info_t s_info;
 
 void setUp(void) {
-    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    g_nt_window = (nt_window_t){
-        .max_dpr = 1.0F,
-        .resizable = false,
-        .width = 128,
-        .height = 128,
-    };
-    nt_window_init();
     nt_gfx_test_init(
         &(nt_gfx_desc_t){.max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 8, .max_textures = 16, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 4});
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
 
-void tearDown(void) {
-    nt_gfx_shutdown();
-    nt_window_shutdown();
-}
+void tearDown(void) { nt_gfx_shutdown(); }
 
 // #region fixture
 
@@ -434,6 +422,18 @@ void test_resized_render_target_color_caps_max_level(void) {
 // #endregion
 
 int main(void) {
+    /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
+    if (!glfwInit()) {
+        return 1;
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window = (nt_window_t){
+        .max_dpr = 1.0F,
+        .resizable = false,
+        .width = 128,
+        .height = 128,
+    };
+    nt_window_init();
     UNITY_BEGIN();
     nt_basisu_transcoder_global_init();
     nt_basisu_encoder_init();
@@ -458,5 +458,7 @@ int main(void) {
     RUN_TEST(test_single_level_texture_caps_max_level_and_still_samples);
     RUN_TEST(test_partial_chain_caps_max_level_and_samples_its_last_level);
     RUN_TEST(test_resized_render_target_color_caps_max_level);
-    return UNITY_END();
+    int failures = UNITY_END();
+    nt_window_shutdown();
+    return failures;
 }
