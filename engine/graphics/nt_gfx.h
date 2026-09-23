@@ -510,9 +510,53 @@ typedef enum {
 /* Availability bits are fixed per backend at gfx init. */
 enum {
     NT_GFX_COUNTERS_DRAWS = 1,    /* draw calls and submitted geometry */
-    NT_GFX_COUNTERS_FRONTEND = 2, /* request counters; every real frontend */
+    NT_GFX_COUNTERS_FRONTEND = 2, /* accepted[] operation counters; every real frontend */
     NT_GFX_COUNTERS_BACKEND = 4,  /* issued GL calls and payloads; GL/WebGL backends only */
 };
+
+/* Public operations (BEGIN/END pairs) and the record-only FRAME/STATE markers. */
+typedef enum {
+    NT_GFX_OP_FRAME,
+    NT_GFX_OP_RENDER_FRAME,
+    NT_GFX_OP_END_RENDER_FRAME,
+    NT_GFX_OP_PASS,
+    NT_GFX_OP_END_PASS,
+    NT_GFX_OP_CREATE,
+    NT_GFX_OP_DESTROY,
+    NT_GFX_OP_RESIZE,
+    NT_GFX_OP_PIPELINE,
+    NT_GFX_OP_VERTEX_INPUT,
+    NT_GFX_OP_TEXTURE_SET,
+    NT_GFX_OP_TEXTURE,
+    NT_GFX_OP_SAMPLER,
+    NT_GFX_OP_VIEWPORT,
+    NT_GFX_OP_SCISSOR,
+    NT_GFX_OP_SCISSOR_ENABLE,
+    NT_GFX_OP_UNIFORM_MAT4,
+    NT_GFX_OP_UNIFORM_VEC4,
+    NT_GFX_OP_UNIFORM_FLOAT,
+    NT_GFX_OP_UNIFORM_INT,
+    NT_GFX_OP_UNIFORM_BLOCK,
+    NT_GFX_OP_UBO,
+    NT_GFX_OP_BUFFER_UPLOAD,
+    NT_GFX_OP_BUFFER_ORPHAN,
+    NT_GFX_OP_TEXTURE_UPLOAD,
+    NT_GFX_OP_ATTRIBUTE,
+    NT_GFX_OP_ATTRIBUTE_DEFAULT,
+    NT_GFX_OP_INSTANCE_BUFFER,
+    NT_GFX_OP_DRAW,
+    NT_GFX_OP_DRAW_INSTANCED,
+    NT_GFX_OP_DRAW_INDEXED,
+    NT_GFX_OP_DRAW_INDEXED_INSTANCED,
+    NT_GFX_OP_CONTEXT,
+    NT_GFX_OP_STATE,
+    NT_GFX_OP_READ_PIXELS,
+    NT_GFX_OP_SEGMENT_BEGIN,
+    NT_GFX_OP_SEGMENT_END,
+    NT_GFX_OP_SEGMENT_POLL,
+    NT_GFX_OP_GPU_TIMING,
+    NT_GFX_OP_COUNT
+} nt_gfx_operation_t;
 
 /* Every function the GL backend issues, queries included; the single source of
  * nt_gfx_gl_call_t, NT_GFX_GL_COUNT and the call names. getExtension is the WebGL
@@ -621,6 +665,7 @@ typedef enum { NT_GFX_GL_NONE = 0, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_ENUM_) NT_GFX_
 /* All fields are values. Submitted geometry is not shader/GPU work.
  * Unavailable fields (see availability) stay zero: unmeasured, not measured zero.
  * Vertices/indices multiply by instance count; instances counts instanced draws only.
+ * accepted[] counts public operations by nt_gfx_operation_t that ended ACCEPTED;
  * gl[] counts every issued GL call by nt_gfx_gl_call_t; uploads count calls with a
  * non-NULL payload and their bytes (NULL storage and generated mips excluded). */
 typedef struct {
@@ -631,16 +676,11 @@ typedef struct {
     uint64_t vertices;
     uint64_t indices;
     uint64_t instances; /* instanced draws only */
-    uint32_t pipeline_requests;
-    uint32_t vertex_input_requests;
-    uint32_t texture_requests;
-    uint32_t sampler_requests;
-    uint32_t uniform_requests;
-    uint32_t ubo_requests;
     uint64_t buffer_upload_calls;
     uint64_t buffer_upload_bytes;
     uint64_t texture_upload_calls;
     uint64_t texture_upload_bytes;
+    uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END reason was ACCEPTED */
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
 
@@ -664,43 +704,6 @@ typedef enum {
     NT_GFX_EVENT_DEFINITION,
     NT_GFX_EVENT_ARGUMENT, /* request argument belonging to the enclosing BEGIN */
 } nt_gfx_event_kind_t;
-
-typedef enum {
-    NT_GFX_OP_FRAME,
-    NT_GFX_OP_RENDER_FRAME,
-    NT_GFX_OP_END_RENDER_FRAME,
-    NT_GFX_OP_PASS,
-    NT_GFX_OP_END_PASS,
-    NT_GFX_OP_CREATE,
-    NT_GFX_OP_DESTROY,
-    NT_GFX_OP_RESIZE,
-    NT_GFX_OP_PIPELINE,
-    NT_GFX_OP_VERTEX_INPUT,
-    NT_GFX_OP_TEXTURE_SET,
-    NT_GFX_OP_TEXTURE,
-    NT_GFX_OP_SAMPLER,
-    NT_GFX_OP_VIEWPORT,
-    NT_GFX_OP_SCISSOR,
-    NT_GFX_OP_SCISSOR_ENABLE,
-    NT_GFX_OP_UNIFORM_MAT4,
-    NT_GFX_OP_UNIFORM_VEC4,
-    NT_GFX_OP_UNIFORM_FLOAT,
-    NT_GFX_OP_UNIFORM_INT,
-    NT_GFX_OP_UNIFORM_BLOCK,
-    NT_GFX_OP_UBO,
-    NT_GFX_OP_BUFFER_UPLOAD,
-    NT_GFX_OP_BUFFER_ORPHAN,
-    NT_GFX_OP_TEXTURE_UPLOAD,
-    NT_GFX_OP_ATTRIBUTE,
-    NT_GFX_OP_ATTRIBUTE_DEFAULT,
-    NT_GFX_OP_INSTANCE_BUFFER,
-    NT_GFX_OP_DRAW,
-    NT_GFX_OP_DRAW_INSTANCED,
-    NT_GFX_OP_DRAW_INDEXED,
-    NT_GFX_OP_DRAW_INDEXED_INSTANCED,
-    NT_GFX_OP_CONTEXT,
-    NT_GFX_OP_STATE,
-} nt_gfx_operation_t;
 
 typedef enum {
     NT_GFX_OBJECT_NONE,
@@ -791,11 +794,13 @@ typedef struct {
     nt_gfx_frame_snapshot_t snapshot; /* matching finalized tick, even after later unrecorded ticks */
 } nt_gfx_capture_view_t;
 
-/* Mandatory host tick around one host callback, at gfx IDLE: begin before resource
- * preparation, end after the last render frame, also when nothing renders. A tick
- * holds any number of gfx frames, whose counters sum. begin_tick is the only reset
- * of g_nt_gfx.counters; end_tick copies them and the status into g_nt_gfx.last_frame.
- * Ticks never advance rendering or poll the graphics context. */
+/* Mandatory host tick: every gfx operation between nt_gfx_init and nt_gfx_shutdown
+ * runs inside one (host callbacks, a load tick before the loop, a teardown tick
+ * that shutdown discards); operations outside a tick assert. Both calls require
+ * gfx IDLE. A tick holds any number of gfx frames, whose counters sum. begin_tick
+ * is the only reset of g_nt_gfx.counters; end_tick probes for context loss, then
+ * copies the counters and status into g_nt_gfx.last_frame. Ticks never advance
+ * rendering. */
 void nt_gfx_begin_tick(void);
 void nt_gfx_end_tick(void);
 #if NT_GFX_CAPTURE_ENABLED

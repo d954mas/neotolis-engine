@@ -550,10 +550,10 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
         nt_gfx_end_frame();
         nt_gfx_end_tick();
         nt_gfx_counters_t c = g_nt_gfx.last_frame.counters;
-        TEST_ASSERT_EQUAL_UINT32(2, c.pipeline_requests);
-        TEST_ASSERT_EQUAL_UINT32(2, c.vertex_input_requests);
-        TEST_ASSERT_EQUAL_UINT32(3, c.uniform_requests);
-        TEST_ASSERT_EQUAL_UINT32(2, c.ubo_requests);
+        TEST_ASSERT_EQUAL_UINT32(2, c.accepted[NT_GFX_OP_PIPELINE]);
+        TEST_ASSERT_EQUAL_UINT32(2, c.accepted[NT_GFX_OP_VERTEX_INPUT]);
+        TEST_ASSERT_EQUAL_UINT32(3, c.accepted[NT_GFX_OP_UNIFORM_VEC4]);
+        TEST_ASSERT_EQUAL_UINT32(2, c.accepted[NT_GFX_OP_UBO]);
         TEST_ASSERT_EQUAL_UINT32(s_program_calls, c.gl[NT_GFX_GL_glUseProgram]);
         TEST_ASSERT_EQUAL_UINT32(s_vao_calls, c.gl[NT_GFX_GL_glBindVertexArray]);
         TEST_ASSERT_EQUAL_UINT32(s_uniform_calls, c.gl[NT_GFX_GL_glUniform4fv]);

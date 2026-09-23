@@ -386,6 +386,10 @@ void nt_gfx_begin_tick(void) {
 
 void nt_gfx_end_tick(void) {
     NT_ASSERT(g_nt_gfx_observation.tick_open && "end_tick: no open tick");
+    /* A loss after the last probe would otherwise close the tick COMPLETE with calls dropped. */
+    if (nt_gfx_backend_is_context_lost()) {
+        nt_gfx_observe_context_loss();
+    }
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE || g_nt_gfx.context_lost);
     g_nt_gfx.last_frame = (nt_gfx_frame_snapshot_t){
         .counters = g_nt_gfx.counters,
@@ -881,26 +885,26 @@ void nt_gfx_end_frame(void) {
 
 /* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
  * so bad size returns false (bot-param validation is the L2 concern). */
-bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+static nt_gfx_event_reason_t read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
     if (w <= 0 || h <= 0) {
-        return false;
+        return NT_GFX_REASON_INVALID_ARGUMENT;
     }
     NT_ASSERT(out != NULL); /* L1 writes the readback (and row-swaps) through out — NULL is a caller bug. */
     if (out == NULL) {
-        return false;
+        return NT_GFX_REASON_INVALID_ARGUMENT;
     }
     /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
        early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed. */
     if (g_nt_gfx.context_lost) {
-        return false;
+        return NT_GFX_REASON_CONTEXT_LOST;
     }
     /* Compute in uint64_t so w*h*4 cannot overflow before the cap check. */
     uint64_t need = (uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U;
     if (need > (uint64_t)out_cap) {
-        return false;
+        return NT_GFX_REASON_CAPACITY;
     }
     if (!nt_gfx_backend_read_pixels(x, y, w, h, out)) {
-        return false; /* GL read error -> capture_failed, not an encode of uninitialized memory. */
+        return NT_GFX_REASON_BACKEND_FAILURE; /* GL read error -> capture_failed, not an encode of uninitialized memory. */
     }
 
     /* Single in-place row swap: GL bottom-left -> top-left. Row stride = w*4. */
@@ -916,7 +920,15 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
         top += stride;
         bot -= stride;
     }
-    return true;
+    return NT_GFX_REASON_ACCEPTED;
+}
+
+bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_READ_PIXELS, NT_GFX_OBJECT_NONE, 0, event.data.state.integers[0] = (uint32_t)x; event.data.state.integers[1] = (uint32_t)y;
+                         event.data.state.integers[2] = (uint32_t)w; event.data.state.integers[3] = (uint32_t)h);
+    const nt_gfx_event_reason_t reason = read_pixels(x, y, w, h, out, out_cap);
+    NT_GFX_END(reason);
+    return reason == NT_GFX_REASON_ACCEPTED;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1920,7 +1932,6 @@ static nt_gfx_event_reason_t bind_pipeline(nt_pipeline_t pip) {
     }
     /* Loss frees pipeline slots, so a live slot always has a backend. */
     s_gfx.bound_pipeline = pip.id;
-    NT_GFX_COUNT(pipeline_requests);
     nt_gfx_backend_bind_pipeline(slot);
     return NT_GFX_REASON_ACCEPTED;
 }
@@ -1949,7 +1960,6 @@ static nt_gfx_event_reason_t bind_vertex_input(nt_vertex_input_t vi) {
     uint32_t slot = nt_pool_slot_index(vi.id);
     /* Loss frees vertex-input slots, so a live slot always has a backend. */
     s_gfx.bound_vertex_input = vi.id;
-    NT_GFX_COUNT(vertex_input_requests);
     /* NT_INDEX_NONE for a non-indexed vertex input: cleared, not stale. */
     s_gfx.bound_index_type = s_gfx.vertex_input_metas[slot].index_type;
     nt_gfx_backend_bind_vertex_input(slot);
@@ -2101,8 +2111,6 @@ static nt_gfx_event_reason_t apply_texture_bindings(const nt_gfx_texture_binding
         if ((applied_mask & (uint8_t)(1U << unit)) == 0) {
             continue;
         }
-        NT_GFX_COUNT(texture_requests);
-        NT_GFX_COUNT(sampler_requests);
         nt_gfx_backend_bind_texture(texture_backends[unit], unit);
         nt_gfx_backend_bind_sampler(sampler_backends[unit], unit);
     }
@@ -2352,7 +2360,6 @@ static nt_gfx_event_reason_t set_uniform_mat4(nt_hash32_t name, const float *mat
         return NT_GFX_REASON_CONTEXT_LOST;
     }
     NT_ASSERT(matrix != NULL);
-    NT_GFX_COUNT(uniform_requests);
     nt_gfx_backend_set_uniform_mat4(uniform_target_program(), name.value, matrix);
     return NT_GFX_REASON_ACCEPTED;
 }
@@ -2369,7 +2376,6 @@ static nt_gfx_event_reason_t set_uniform_vec4(nt_hash32_t name, const float *vec
         return NT_GFX_REASON_CONTEXT_LOST;
     }
     NT_ASSERT(vec != NULL);
-    NT_GFX_COUNT(uniform_requests);
     nt_gfx_backend_set_uniform_vec4(uniform_target_program(), name.value, vec);
     return NT_GFX_REASON_ACCEPTED;
 }
@@ -2385,7 +2391,6 @@ static nt_gfx_event_reason_t set_uniform_float(nt_hash32_t name, float val) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
-    NT_GFX_COUNT(uniform_requests);
     nt_gfx_backend_set_uniform_float(uniform_target_program(), name.value, val);
     return NT_GFX_REASON_ACCEPTED;
 }
@@ -2399,7 +2404,6 @@ static nt_gfx_event_reason_t set_uniform_int(nt_hash32_t name, int val) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
-    NT_GFX_COUNT(uniform_requests);
     nt_gfx_backend_set_uniform_int(uniform_target_program(), name.value, val);
     return NT_GFX_REASON_ACCEPTED;
 }
@@ -2688,7 +2692,6 @@ static nt_gfx_event_reason_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot)
         NT_LOG_ERROR_ONCE("bind_uniform_buffer: buffer has no live backend");
         return NT_GFX_REASON_UNREADY;
     }
-    NT_GFX_COUNT(ubo_requests);
     nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
     return NT_GFX_REASON_ACCEPTED;
 }
@@ -2724,35 +2727,56 @@ void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, ui
     NT_GFX_END(update_buffer(buf, offset, data, size));
 }
 
-void nt_gfx_begin_segment(const char *name) {
+static nt_gfx_event_reason_t begin_segment(const char *name) {
     NT_ASSERT(name != NULL);
     if (g_nt_gfx.context_lost) {
-        return;
+        return NT_GFX_REASON_CONTEXT_LOST;
     }
     nt_gfx_backend_begin_segment(name);
+    return NT_GFX_REASON_ACCEPTED;
+}
+
+void nt_gfx_begin_segment(const char *name) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_BEGIN, NT_GFX_OBJECT_NONE, 0, event.data.binding.name = name != NULL ? nt_hash32_str(name).value : 0);
+    NT_GFX_END(begin_segment(name));
+}
+
+static nt_gfx_event_reason_t end_segment(void) {
+    if (g_nt_gfx.context_lost) {
+        return NT_GFX_REASON_CONTEXT_LOST;
+    }
+    nt_gfx_backend_end_segment();
+    return NT_GFX_REASON_ACCEPTED;
 }
 
 void nt_gfx_end_segment(void) {
-    if (g_nt_gfx.context_lost) {
-        return;
-    }
-    nt_gfx_backend_end_segment();
+    NT_GFX_BEGIN(NT_GFX_OP_SEGMENT_END, NT_GFX_OBJECT_NONE, 0);
+    NT_GFX_END(end_segment());
 }
 
-bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
+static nt_gfx_event_reason_t poll_segment_time_ns(const char *name, uint64_t *out_ns) {
     NT_ASSERT(name != NULL && out_ns != NULL);
 #if NT_GFX_GPU_TIMING_ENABLED
     if (g_nt_gfx.context_lost) {
-        return false;
+        return NT_GFX_REASON_CONTEXT_LOST;
     }
 #endif
-    return nt_gfx_backend_poll_segment_time_ns(name, out_ns);
+    return nt_gfx_backend_poll_segment_time_ns(name, out_ns) ? NT_GFX_REASON_ACCEPTED : NT_GFX_REASON_EMPTY;
+}
+
+bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_POLL, NT_GFX_OBJECT_NONE, 0, event.data.binding.name = name != NULL ? nt_hash32_str(name).value : 0);
+    const nt_gfx_event_reason_t reason = poll_segment_time_ns(name, out_ns);
+    NT_GFX_END(reason);
+    return reason == NT_GFX_REASON_ACCEPTED;
 }
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event.data.state.integers[0] = enabled);
     /* Disabling on a lost context drops the backend's queries; that probe is a loss observation. */
     (void)gfx_context_lost();
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
+    NT_GFX_END(NT_GFX_REASON_ACCEPTED);
 }
 
 bool nt_gfx_is_gpu_timing_supported(void) { return nt_gfx_backend_is_gpu_timing_supported(); }

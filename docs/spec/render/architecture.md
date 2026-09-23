@@ -404,7 +404,8 @@ stays unchanged until the next end or shutdown; before the first end its status
 is UNAVAILABLE. Readers early in a callback, before its draws, read `last_frame`.
 A no-render tick reports zero draws; old geometry is never reused. A tick is
 ABORTED only when a loss is observed during it or the context is still lost at
-its end; a tick whose begin_frame restores a lost context and then completes is
+its end (end_tick probes the backend itself, so a loss after the last frame
+still aborts); a tick whose begin_frame restores a lost context and then completes is
 COMPLETE.
 
 All counters are built and counted in every build; there is no counter option
@@ -433,8 +434,14 @@ lookup, state shadowing) is a documented boundary: counters and capture see the
 C API call. Payload fields count calls with non-NULL CPU data and their bytes,
 in the same funnel; NULL storage and generated mips are excluded, non-NULL
 orphaning counts once, texture bytes use the actual GPU format for each
-mip/subrectangle, and failed creates keep already-issued work. Requests count
-accepted frontend operations; requests minus calls is not a cache-skip count.
+mip/subrectangle, and failed creates keep already-issued work.
+
+`accepted[]` counts public operations by `nt_gfx_operation_t` whose END reason
+was ACCEPTED, in every build: every public operation, readback and GPU timer
+segment calls included, is one BEGIN/END pair, and END is the only place that
+counts it. Cache hits, rejections and losses are not counted there; texture
+sets count per operation, while per-unit binds show in `gl[]`. Accepted
+operations minus GL calls is not a cache-skip count.
 Sequence and context identifiers reset at initialization.
 
 Command recording starts disabled. `nt_gfx_desc_t.capture_capacity` reserves one

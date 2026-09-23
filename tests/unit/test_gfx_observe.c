@@ -48,7 +48,7 @@ static void test_render_frames_sum_and_only_begin_tick_resets(void) {
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.counters.draw_calls_instanced);
     TEST_ASSERT_EQUAL_UINT64(27, g_nt_gfx.last_frame.counters.vertices);
     TEST_ASSERT_EQUAL_UINT64(4, g_nt_gfx.last_frame.counters.instances);
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.counters.pipeline_requests);
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.counters.accepted[NT_GFX_OP_PIPELINE]);
     /* Closing a tick copies; it does not reset. */
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.draw_calls);
 
@@ -100,6 +100,28 @@ static void test_loss_aborts_the_tick_and_restore_completes_it(void) {
     nt_gfx_end_frame();
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, g_nt_gfx.last_frame.status);
+}
+
+/* A loss after the last frontend probe still aborts the tick: end_tick probes the backend. */
+static void test_loss_after_begin_frame_aborts_the_tick(void) {
+    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, g_nt_gfx.last_frame.status);
+}
+
+/* Pre-loop loading runs in a load tick, so its creations are counted like any frame's. */
+static void test_load_tick_counts_initial_resource_creation(void) {
+    nt_gfx_begin_tick();
+    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
+    (void)nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    (void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.counters.frame_sequence);
+    /* The texture also creates its default sampler: four accepted creations. */
+    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.counters.accepted[NT_GFX_OP_CREATE]);
 }
 
 static void test_shutdown_discards_an_open_tick(void) {
@@ -265,6 +287,33 @@ static void test_every_operation_records_one_begin_and_one_result(void) {
     TEST_ASSERT_TRUE(invalid_buffer);
 }
 
+/* accepted[] and the recorded ACCEPTED results come from the same END, per operation. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one tick mixes accepted, cached and rejected operations
+static void test_accepted_counters_match_recorded_results(void) {
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_begin_tick();
+    draw_setup();
+    nt_gfx_draw(0, 3);
+    nt_gfx_set_scissor_enabled(false); /* unchanged: a cache result, not counted */
+    nt_gfx_bind_pipeline((nt_pipeline_t){0});
+    draw_teardown();
+    (void)nt_gfx_make_buffer(NULL);
+    nt_gfx_end_tick();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t recorded[NT_GFX_OP_COUNT] = {0};
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind == NT_GFX_EVENT_RESULT && e->reason == NT_GFX_REASON_ACCEPTED && e->operation != NT_GFX_OP_FRAME) {
+            recorded[e->operation]++;
+        }
+    }
+    TEST_ASSERT_GREATER_THAN_UINT32(0, recorded[NT_GFX_OP_DRAW]);
+    for (uint32_t op = 0; op < NT_GFX_OP_COUNT; op++) {
+        TEST_ASSERT_EQUAL_UINT32(recorded[op], capture.snapshot.counters.accepted[op]);
+    }
+}
+
 static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     nt_gfx_begin_tick();
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 24});
@@ -416,6 +465,8 @@ int main(void) {
     RUN_TEST(test_instanced_products_are_widened_before_multiplication);
     RUN_TEST(test_availability_is_fixed_per_build_and_backend);
     RUN_TEST(test_loss_aborts_the_tick_and_restore_completes_it);
+    RUN_TEST(test_loss_after_begin_frame_aborts_the_tick);
+    RUN_TEST(test_load_tick_counts_initial_resource_creation);
     RUN_TEST(test_shutdown_discards_an_open_tick);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_tick_contract_asserts);
@@ -427,6 +478,7 @@ int main(void) {
     RUN_TEST(test_overflow_and_loss_finalize_aborted);
     RUN_TEST(test_sampler_cache_hit_defines_nothing);
     RUN_TEST(test_every_operation_records_one_begin_and_one_result);
+    RUN_TEST(test_accepted_counters_match_recorded_results);
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);
