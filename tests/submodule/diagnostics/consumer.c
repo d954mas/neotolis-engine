@@ -30,6 +30,8 @@ _Static_assert(NT_RESOURCE_TIMING_ENABLED == NT426_EXPECT_RESOURCE_TIMING, "reso
 #elif defined(NT426_CHECK_GFX)
 #include "graphics/nt_gfx.h"
 _Static_assert(NT_GFX_GPU_TIMING_ENABLED == NT426_EXPECT_GFX_GPU_TIMING, "GPU timing interface configuration");
+_Static_assert(NT_GFX_COUNTERS_ENABLED == NT426_EXPECT_GFX_COUNTERS, "gfx counters interface configuration");
+_Static_assert(NT_GFX_CAPTURE_ENABLED == NT426_EXPECT_GFX_CAPTURE, "gfx capture interface configuration");
 #elif defined(NT426_CHECK_METRICS)
 #include "metrics/nt_metrics.h"
 _Static_assert(NT_METRICS_ENABLED == NT426_EXPECT_METRICS, "metrics target configuration");

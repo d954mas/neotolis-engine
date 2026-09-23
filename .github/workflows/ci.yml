@@ -165,6 +165,18 @@ jobs:
           emcmake cmake --preset wasm-release
           cmake --build --preset wasm-release
 
+      - name: Verify gfx observation producers are absent in WASM release
+        run: |
+          symbols="$("$EMSDK/upstream/bin/llvm-nm" --defined-only build/engine/wasm-release/libnt_gfx.a)"
+          # Positive control: the listing must see ordinary gfx symbols.
+          grep -q "nt_gfx_init" <<< "$symbols"
+          for producer in g_nt_gfx_observation nt_gfx_backend_capture_initial_state; do
+            if grep -q "$producer" <<< "$symbols"; then
+              echo "wasm-release nt_gfx retains observation producer: $producer"
+              exit 1
+            fi
+          done
+
       - name: Verify optional UI composition in WASM release
         run: |
           emcmake cmake -S tests/submodule -B build/_cmake/ui-composition-wasm-release -G Ninja -DENGINE_ROOT="$PWD" -DCMAKE_BUILD_TYPE=Release -DNT_BUILD_TESTS=OFF -DNT_FONT_EMBOLDEN_ENABLED=OFF -DNT_UI_CLAY_DEBUG_VIEW=OFF -DNT_UI_DEBUG_TOOLS=OFF

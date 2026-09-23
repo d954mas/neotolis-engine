@@ -66,17 +66,22 @@ def main():
                           "-R", "^(" + "|".join(targets) + ")$"], args.output / f"{name}-test.log")
             if f"100% tests passed, 0 tests failed out of {len(targets)}" not in output:
                 raise RuntimeError(f"{name}: expected all {len(targets)} registered tests\n{output}")
-            if counters == "OFF" and capture == "OFF":
-                nm = shutil.which("llvm-nm") or shutil.which("nm")
-                if nm:
-                    libraries = list((ROOT / "build" / "engine" / name).glob("*nt_gfx.*"))
-                    library = next(path for path in libraries if path.suffix in (".a", ".lib"))
-                    symbols = run([nm, "--defined-only", str(library)], args.output / f"{name}-symbols.log")
+            nm = shutil.which("llvm-nm") or shutil.which("nm")
+            if nm:
+                libraries = list((ROOT / "build" / "engine" / name).glob("*nt_gfx.*"))
+                library = next((path for path in libraries if path.suffix in (".a", ".lib")), None)
+                if library is None:
+                    raise RuntimeError(f"{name}: nt_gfx archive not found among {libraries}")
+                symbols = run([nm, "--defined-only", str(library)], args.output / f"{name}-symbols.log")
+                if counters == "OFF" and capture == "OFF":
                     for producer in ("g_nt_gfx_observation", "capture_resource_definition", "nt_gfx_capture_append", "nt_gfx_backend_capture_initial_state"):
                         if producer in symbols:
                             raise RuntimeError(f"{name}: disabled producer remains: {producer}")
-                else:
-                    print(f"UNVERIFIED: {name} producer symbols; install llvm-nm or nm", flush=True)
+                elif "g_nt_gfx_observation" not in symbols:
+                    # Positive control: the absence check above must be able to see this symbol.
+                    raise RuntimeError(f"{name}: enabled producer g_nt_gfx_observation is missing from the symbol listing")
+            else:
+                print(f"UNVERIFIED: {name} producer symbols; install llvm-nm or nm", flush=True)
             print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, counters={counters}, capture={capture}, resource={resource}, metrics={metrics}, inspector={ui_debug}, UI checks={ui_checks}, asserts={asserts}; {len(targets)} tests", flush=True)
     except (OSError, RuntimeError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
