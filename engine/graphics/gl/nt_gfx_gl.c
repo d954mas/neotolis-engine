@@ -853,7 +853,9 @@ void nt_gfx_backend_drop_timer_segments(void) {
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
     if (!enabled && s_timer_user_enabled && s_timer_enabled) {
         if (nt_gfx_backend_is_context_lost()) {
-            nt_gfx_observe_context_loss();
+            if (!g_nt_gfx.context_lost) {
+                nt_gfx_observe_context_loss();
+            }
             nt_gfx_backend_drop_timer_segments();
         } else {
             nt_gfx_backend_end_segment();
@@ -1100,10 +1102,11 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
     int index = program_get_uniform_index(program_backend, name_hash);
-    nt_gfx_sampler_info_t sampler_info = {0};
-    const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
-    NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
     if (index < 0) {
+        /* Samplers never enter the uniform table, so only a miss can name one. */
+        nt_gfx_sampler_info_t sampler_info = {0};
+        const bool is_sampler = nt_gfx_backend_program_sampler_info(program_backend, name_hash, &sampler_info);
+        NT_ASSERT(!is_sampler && "sampler uniforms are immutable; use nt_gfx_apply_texture_bindings");
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_UNIFORM_INT, event.reason = NT_GFX_REASON_INACTIVE; event.data.binding.name = name_hash; event.data.binding.secondary = program_backend;);
         return;
     }

@@ -328,22 +328,6 @@ static void capture_initial_state(void) {
 #define NT_GFX_DEFINE_RESOURCE(kind, id) ((void)0)
 #endif
 
-#if NT_GFX_CAPTURE_ENABLED
-static void capture_start(void) {
-    g_nt_gfx_capture.request_pending = false;
-    g_nt_gfx_capture.recording = true;
-    g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
-    capture_initial_state();
-}
-
-static void capture_end_tick(void) {
-    if (g_nt_gfx_capture.recording) {
-        g_nt_gfx_capture.view.snapshot = g_nt_gfx.last_frame;
-        g_nt_gfx_capture.recording = false;
-    }
-}
-#endif
-
 /* The next tick starts at once: gfx work is always inside a tick between init and shutdown. */
 static void open_tick(void) {
     s_gfx.tick_aborted = false;
@@ -358,13 +342,19 @@ void nt_gfx_end_tick(void) {
         .status = (s_gfx.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
     };
 #if NT_GFX_CAPTURE_ENABLED
-    capture_end_tick();
-#endif
-    open_tick();
-#if NT_GFX_CAPTURE_ENABLED
-    if (g_nt_gfx_capture.request_pending) {
-        capture_start();
+    if (g_nt_gfx_capture.recording) {
+        g_nt_gfx_capture.view.snapshot = g_nt_gfx.last_frame;
+        g_nt_gfx_capture.recording = false;
     }
+    open_tick();
+    if (g_nt_gfx_capture.request_pending) {
+        g_nt_gfx_capture.request_pending = false;
+        g_nt_gfx_capture.recording = true;
+        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
+        capture_initial_state();
+    }
+#else
+    open_tick();
 #endif
 }
 // #endregion
@@ -596,7 +586,7 @@ static nt_gfx_event_reason_t destroy_texture(nt_texture_t tex, bool allow_render
     NT_ASSERT((!s_gfx.texture_metas[slot].render_target_owned || allow_render_target_owned) && "destroy_texture: texture is owned by a render target");
     if (s_gfx.texture_metas[slot].render_target_owned && !allow_render_target_owned) {
         NT_LOG_ERROR("destroy_texture: texture is owned by a render target");
-        return NT_GFX_REASON_INVALID_HANDLE;
+        return NT_GFX_REASON_INVALID_ARGUMENT;
     }
     /* Pass-scoped draw state may still sample it; lifetime changes stay outside passes. */
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS && "destroy_texture called inside a pass");
@@ -651,29 +641,29 @@ static bool render_target_recreate_attachment(nt_texture_t tex, const nt_texture
     return true;
 }
 
-static bool render_target_recreate_backend(uint32_t slot) {
-    nt_gfx_render_target_meta_t *meta = &s_gfx.render_target_metas[slot];
+static bool render_target_recreate_objects(uint32_t slot) {
+    const nt_gfx_render_target_meta_t *meta = &s_gfx.render_target_metas[slot];
     nt_texture_desc_t color_desc = render_target_color_texture_desc(&meta->desc);
     if (!render_target_recreate_attachment(meta->color, &color_desc)) {
-        meta->complete = false;
-        NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, s_gfx.render_target_pool.slots[slot].id);
         return false;
     }
     uint32_t depth_backend = 0;
     if (meta->desc.depth_storage == NT_RT_DEPTH_TEXTURE) {
         nt_texture_desc_t depth_desc = render_target_depth_texture_desc(&meta->desc);
         if (!render_target_recreate_attachment(meta->depth, &depth_desc)) {
-            meta->complete = false;
-            NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, s_gfx.render_target_pool.slots[slot].id);
             return false;
         }
         depth_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->depth.id)];
     }
     uint32_t color_backend = s_gfx.texture_backends[nt_pool_slot_index(meta->color.id)];
     s_gfx.render_target_backends[slot] = nt_gfx_backend_create_render_target(&meta->desc, color_backend, depth_backend);
-    meta->complete = s_gfx.render_target_backends[slot] != 0;
+    return s_gfx.render_target_backends[slot] != 0;
+}
+
+static bool render_target_recreate_backend(uint32_t slot) {
+    s_gfx.render_target_metas[slot].complete = render_target_recreate_objects(slot);
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, s_gfx.render_target_pool.slots[slot].id);
-    return meta->complete;
+    return s_gfx.render_target_metas[slot].complete;
 }
 
 static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t height) {
@@ -711,11 +701,9 @@ static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — context-loss recovery branches push it just over 25
 static nt_gfx_event_reason_t begin_frame(void) {
     bool backend_context_lost = nt_gfx_backend_is_context_lost();
-    if (backend_context_lost) {
-        nt_gfx_observe_context_loss();
-    }
     if (backend_context_lost && !g_nt_gfx.context_lost) {
-        /* First detection: wipe all backend handles */
+        /* First detection: mark the tick once and wipe all backend handles */
+        nt_gfx_observe_context_loss();
         for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
             s_gfx.shader_backends[i] = 0;
         }
@@ -987,7 +975,6 @@ void nt_gfx_end_pass(void) {
 /* ---- Resource creation ---- */
 
 static nt_gfx_event_reason_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *out) {
-    nt_shader_t result = {0};
     if (!desc) {
         return NT_GFX_REASON_INVALID_ARGUMENT;
     }
@@ -1008,9 +995,8 @@ static nt_gfx_event_reason_t make_shader(const nt_shader_desc_t *desc, nt_shader
     uint32_t slot = nt_pool_slot_index(id);
     s_gfx.shader_backends[slot] = backend;
 
-    result.id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SHADER, result.id);
-    *out = result;
+    out->id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SHADER, id);
     return NT_GFX_REASON_ACCEPTED;
 }
 
@@ -1054,9 +1040,8 @@ static nt_gfx_event_reason_t make_program(nt_shader_t vs, nt_shader_t fs, nt_pro
 
     s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
 
-    nt_program_t result = {id};
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, result.id);
-    *out = result;
+    out->id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, id);
     return NT_GFX_REASON_ACCEPTED;
 }
 
@@ -1137,7 +1122,6 @@ static nt_gfx_event_reason_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pi
     /* Everything a caller controls is a developer error and traps. What is left
      * -- a lost context, a failed backend allocation -- returns an invalid handle
      * the caller retries on a later frame. */
-    nt_pipeline_t result = {0};
     NT_ASSERT(desc != NULL);
     /* Same predicate as make_program: context loss is what zeroes the program
      * backend, so without this every renderer would trap on the readiness assert
@@ -1164,9 +1148,9 @@ static nt_gfx_event_reason_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pi
 
     s_gfx.pipeline_programs[slot] = desc->program.id;
 
-    result.id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PIPELINE, result.id);
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_PIPELINE, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = result.id; event.data.state.integers[0] = desc->program.id;
+    out->id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PIPELINE, id);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_PIPELINE, event.object_kind = NT_GFX_OBJECT_PIPELINE; event.object = id; event.data.state.integers[0] = desc->program.id;
                   event.data.state.integers[1] = desc->depth_test; event.data.state.integers[2] = desc->depth_write; event.data.state.integers[3] = (uint32_t)desc->depth_func;
                   event.data.state.integers[4] = desc->cull_mode; event.data.state.integers[5] = desc->blend.enabled; event.data.state.integers[6] = (uint32_t)desc->blend.src_rgb;
                   event.data.state.integers[7] = (uint32_t)desc->blend.dst_rgb; event.data.state.integers[8] = (uint32_t)desc->blend.src_alpha;
@@ -1174,7 +1158,6 @@ static nt_gfx_event_reason_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pi
                   event.data.state.integers[11] = (uint32_t)desc->blend.op_alpha; event.data.state.integers[12] = desc->polygon_offset;
                   memcpy(event.data.state.values, desc->blend.constant_color, 4 * sizeof(float)); event.data.state.values[4] = desc->polygon_offset_factor;
                   event.data.state.values[5] = desc->polygon_offset_units;);
-    *out = result;
     return NT_GFX_REASON_ACCEPTED;
 }
 
@@ -1189,7 +1172,6 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 static nt_gfx_event_reason_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_vertex_input_t *out) {
     /* Same contract as make_pipeline: caller errors trap, only a lost context
      * or a failed backend allocation returns an invalid handle. */
-    nt_vertex_input_t result = {0};
     NT_ASSERT(desc != NULL);
     if (gfx_context_lost()) {
         return NT_GFX_REASON_CONTEXT_LOST;
@@ -1249,21 +1231,20 @@ static nt_gfx_event_reason_t make_vertex_input(const nt_vertex_input_desc_t *des
         .instance_pointed = false,
     };
 
-    result.id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_VERTEX_INPUT, result.id);
+    out->id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_VERTEX_INPUT, id);
 #if NT_GFX_CAPTURE_ENABLED
     const nt_vertex_layout_t *layouts[] = {&desc->layout, &desc->instance_layout};
     for (uint32_t layout = 0; layout < 2; layout++) {
         for (uint32_t a = 0; a < layouts[layout]->attr_count; a++) {
             const nt_vertex_attr_t *attr = &layouts[layout]->attrs[a];
-            NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event.object_kind = NT_GFX_OBJECT_VERTEX_INPUT; event.object = result.id;
+            NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event.object_kind = NT_GFX_OBJECT_VERTEX_INPUT; event.object = id;
                           event.data.attribute.buffer = layout == 0 ? desc->vertex_buffer.id : 0; event.data.attribute.offset = attr->offset; event.data.attribute.stride = layouts[layout]->stride;
                           event.data.attribute.location = attr->location; event.data.attribute.type = (uint32_t)attr->type; event.data.attribute.count = attr->count;
                           event.data.attribute.normalized = attr->normalized; event.data.attribute.divisor = layout;);
         }
     }
 #endif
-    *out = result;
     return NT_GFX_REASON_ACCEPTED;
 }
 
@@ -1279,7 +1260,6 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
 }
 
 static nt_gfx_event_reason_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {
-    nt_buffer_t result = {0};
     if (!desc) {
         return NT_GFX_REASON_INVALID_ARGUMENT;
     }
@@ -1307,9 +1287,8 @@ static nt_gfx_event_reason_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer
     s_gfx.buffer_metas[slot].index_type = desc->index_type;
     s_gfx.buffer_metas[slot].size = desc->size;
 
-    result.id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_BUFFER, result.id);
-    *out = result;
+    out->id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_BUFFER, id);
     return NT_GFX_REASON_ACCEPTED;
 }
 
@@ -1343,7 +1322,6 @@ static bool texture_compressed_format_supported(nt_texture_format_t format) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_gfx_event_reason_t make_texture(const nt_texture_desc_t *desc, bool render_target_owned, nt_texture_t *out) {
-    nt_texture_t result = {0};
     if (!desc) {
         return NT_GFX_REASON_INVALID_ARGUMENT;
     }
@@ -1457,9 +1435,8 @@ static nt_gfx_event_reason_t make_texture(const nt_texture_desc_t *desc, bool re
     s_gfx.texture_metas[slot].default_sampler = default_sampler;
     s_gfx.texture_metas[slot].render_target_owned = render_target_owned;
 
-    result.id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, result.id);
-    *out = result;
+    out->id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, id);
     return NT_GFX_REASON_ACCEPTED;
 }
 
@@ -1481,10 +1458,12 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) { return create_
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_gfx_event_reason_t make_render_target(const nt_render_target_desc_t *desc, nt_render_target_t *out) {
-    nt_render_target_t result = NT_RENDER_TARGET_INVALID;
     NT_ASSERT(desc != NULL);
     if (!desc) {
         return NT_GFX_REASON_INVALID_ARGUMENT;
+    }
+    if (gfx_context_lost()) {
+        return NT_GFX_REASON_CONTEXT_LOST;
     }
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
     if (s_gfx.render_state == NT_GFX_STATE_PASS) {
@@ -1573,9 +1552,8 @@ static nt_gfx_event_reason_t make_render_target(const nt_render_target_desc_t *d
     }
 
     s_gfx.render_target_metas[slot].complete = true;
-    result.id = id;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, result.id);
-    *out = result;
+    out->id = id;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, id);
     return NT_GFX_REASON_ACCEPTED;
 }
 
@@ -1768,6 +1746,10 @@ static nt_gfx_event_reason_t resize_render_target(nt_render_target_t rt, uint16_
     if (width == 0 || height == 0) {
         NT_LOG_ERROR("resize_render_target: zero dimension");
         return NT_GFX_REASON_INVALID_ARGUMENT;
+    }
+    /* A known loss zeroed the backend names the resize would reallocate. */
+    if (g_nt_gfx.context_lost) {
+        return NT_GFX_REASON_CONTEXT_LOST;
     }
     uint32_t slot = nt_pool_slot_index(rt.id);
     if (!render_target_resize_backend(slot, width, height)) {

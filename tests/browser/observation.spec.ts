@@ -7,6 +7,8 @@ type ObserveHooks = {
   observe_value(index: number): number;
   observe_record(enabled: number): void;
   observe_status(): number;
+  restore_ticks(): number;
+  restore_status(): number;
 };
 type CallControl = { active: boolean; calls: Record<string, number>; payloads: Record<string, number>; bytes: Record<string, number> };
 
@@ -108,11 +110,13 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
       expect(v[18]).toBe(recorded[18]);
       expect(v[18]).toBeGreaterThan(0);
     } else if (run.mode === 1) {
+      expect(v[18]).toBe(v[19]); // The capture finalized the probe's own tick.
       expect(v[11]).toBe(0);
       expect(v[12]).toBeGreaterThan(0);
       expect(v[13]).toBe(1);
       expect(v.slice(20, 26)).toEqual(['useProgram', 'bindVertexArray', 'bindTexture', 'bindSampler', 'uniform4fv', 'uniform1i'].map(name => run.calls[name] || 0));
     } else if (run.mode === 2) {
+      expect(v[18]).toBe(v[19]);
       expect(v[11]).toBe(1);
       expect(v[12]).toBe(16384);
       expect(v[13]).toBe(1); // COMPLETE tick; overflow alone marks the capture incomplete.
@@ -123,6 +127,8 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
 
 test('gfx observation marks context loss aborted and resumes complete frames', async ({ page }) => {
   test.setTimeout(60_000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
   await page.waitForFunction(() => (window as unknown as { __nt?: ObserveHooks }).__nt?.programs_ready());
   await page.evaluate(() => {
@@ -140,4 +146,10 @@ test('gfx observation marks context loss aborted and resumes complete frames', a
     const hooks = (window as unknown as { __nt: ObserveHooks }).__nt;
     return hooks.observe_status() === 1 && hooks.programs_ready();
   });
+  const restore = await page.evaluate(() => {
+    const hooks = (window as unknown as { __nt: ObserveHooks }).__nt;
+    return { ticks: hooks.restore_ticks(), status: hooks.restore_status() };
+  });
+  expect(restore).toEqual({ ticks: 1, status: 1 }); // The tick whose begin_frame restored is COMPLETE.
+  expect(errors).toEqual([]);
 });

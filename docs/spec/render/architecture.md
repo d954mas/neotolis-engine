@@ -404,8 +404,8 @@ reused. A tick is ABORTED when a loss is detected during it (by begin_frame, a
 create that probes the backend, a backend upload that sees
 `CONTEXT_LOST_WEBGL`, or disabling GPU timing on a lost context) or the context
 is still known lost at its end. A rejection on an already-known loss does not by
-itself mark the tick: frontend probes return early on a known loss, and only a
-newly detected one marks the tick. end_tick does not
+itself mark the tick: begin_frame, frontend probes and GPU-timing disable ignore a
+known loss, and only a newly detected one marks the tick. end_tick does not
 probe the backend: a loss in a tick without a probe marks the next tick that
 probes.
 A tick whose begin_frame restores a lost context and then completes is COMPLETE.
@@ -434,8 +434,9 @@ expression that issues the call; a grep gate rejects any bare `gl*` call in
 always open between init and shutdown. The
 single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
 and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
-directly (`getExtension`) are counted and recorded at their C call site through
-`NT_GL_ISSUED`; the
+directly (`getExtension` and the `glGetQueryObjectui64v` timer-result bridge) are
+counted and recorded through `NT_GL_ISSUED` at their C call site, in a separate
+statement just before the JS call; the
 JS that Emscripten's GL layer runs behind a C call (lazy uniform location
 lookup, state shadowing) is a documented boundary: counters and capture see the
 C API call. Payload fields count calls with non-NULL CPU data and their bytes,
@@ -470,7 +471,8 @@ first tick never records. A request made during a recorded tick replaces that
 capture at the end_tick that finishes it, so read a capture in the following
 tick before requesting again: readable captures are at most every other tick.
 `nt_gfx_desc_t.capture_capacity` reserves one
-event array at init (default zero); a request without capacity asserts.
+event array at init (default zero); a request without capacity asserts. Capture-OFF
+builds ignore the field.
 There is no growth or allocation while recording. Each pointer-free POD event
 is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Other storage
 consists of fixed control state and counter snapshots, with no second event array.
@@ -509,7 +511,8 @@ its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whos
 values are named after the issued function (`NT_GFX_GL_glBindVertexArray`), and
 carry raw GL names of one GL context; their operation is always STATE,
 the enclosing BEGIN names the frontend operation. Each issued call is recorded
-exactly once, at the call site, by the same statement that issues it.
+exactly once, at the call site, by the same statement that issues it (an
+`NT_GL_ISSUED` JS bridge: by the statement before the JS call).
 `backend.args` follows the GL integer argument order; pointer payload, readback
 output and debug-label arguments are presence bits, gen/delete arguments contain
 the count followed by each name, a returned value (`glCreate*`, `glGetError`,
@@ -525,12 +528,21 @@ Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
 resource kind and `backend.args[0..1]` as backend slot/raw GL name; render targets
 also supply the depth renderbuffer name at index 2. Frontend resource definitions
 carry the full handle, current backend slot and available dimensions/relationships.
-Replacement names and surviving handles receive fresh definitions on resize or
-restore. Definitions remain meaningful after resource destruction or slot reuse.
+Shader, program and vertex-input definitions carry reason `UNKNOWN`: the frontend
+retains no shader stage or source, program stage pair or vertex-input layout, so
+those fields are absent, not zero. A vertex input created during a recorded tick
+follows its definition with `DEFINITION/ATTRIBUTE` records.
+Resize and restore re-define render targets and their attachment textures with
+the replacement names. Other primary resources survive a loss as husks and get no
+fresh definition; pipelines and vertex inputs that the first detection frees get
+no DESTROY record. Samplers are re-defined when lazily recreated. Definitions
+remain meaningful after resource destruction or slot reuse.
 
-Initial state opens with one `INITIAL/STATE` record per layer: `detail` is
-`NT_GFX_INITIAL_FRONTEND` for bound frontend handles and `NT_GFX_INITIAL_BACKEND`
-for the backend's cached GL names and framebuffer size.
+The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, bound
+frontend handles) opens the snapshot. The other frontend INITIAL records and the
+frontend resource definitions follow, then the backend `INITIAL/STATE` record
+(`NT_GFX_INITIAL_BACKEND`, cached GL names and framebuffer size) and the backend's
+own definitions.
 Among INITIAL records, `detail` is meaningful only on INITIAL/STATE.
 Program publication and initial state include `INITIAL/SAMPLER` records with
 backend program slot, name hash, location, unit and sampler class in args 0–4.
@@ -542,13 +554,15 @@ SKIP/INACTIVE; cache skips are distinct from invalid requests.
 `SKIP` records mark work that was not issued without ending an operation:
 backend cache skips (`SKIP/CACHE`), inactive uniform or texture-set names
 (`SKIP/INACTIVE`), and the loss marker: one `SKIP/CONTEXT` with reason
-`CONTEXT_LOST` at the first loss detection in a tick.
+`CONTEXT_LOST` per new loss detection, at most one per tick. A known loss adds none.
 
 Pipeline state records use integers 0–12 for program, depth enable/write/function,
 cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha
 operation and polygon offset enable. Values 0–5 hold blend color, offset factor
 and units. Frontend definitions use full handles and frontend enums; backend
-definitions use slots and backend enums; initial state uses the current raw
+definitions use slots and backend enums, and backend `DEFINITION/PIPELINE` and
+`DEFINITION/ATTRIBUTE` records carry the pipeline or vertex-input backend slot in
+`detail`; initial state uses the current raw
 program name. Vertex-input creation copies each static/instance attribute with
 its divisor, layout, and known buffer. Inherited layouts and UBO bindings
 unavailable in existing CPU state are explicitly unknown. The initial SCISSOR

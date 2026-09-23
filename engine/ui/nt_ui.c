@@ -2058,7 +2058,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
     nt_gfx_set_scissor_enabled(false);
 
-    /* Counters reset only at nt_gfx_end_tick; a CUSTOM handler ending the tick mid-walk would wrap the delta. */
+    /* Counters reset only at nt_gfx_end_tick, which asserts IDLE, so a walk inside a pass never sees a reset. */
     const uint32_t calls_after = nt_gfx_draw_calls(&g_nt_gfx.counters);
     NT_ASSERT(calls_after >= calls_at_entry && "nt_ui_walk: frame draw-call counter went backwards");
     if (update_metrics) {

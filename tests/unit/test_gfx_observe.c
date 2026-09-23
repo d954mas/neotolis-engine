@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "graphics/nt_gfx.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
@@ -189,6 +191,81 @@ static void test_loss_detected_during_creation_aborts_observation(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(1, markers);
 }
+
+static uint32_t loss_markers(nt_gfx_capture_view_t capture) {
+    uint32_t markers = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        markers += e->kind == NT_GFX_EVENT_SKIP && e->operation == NT_GFX_OP_CONTEXT && e->reason == NT_GFX_REASON_CONTEXT_LOST;
+    }
+    return markers;
+}
+
+/* The first detection marks the tick once; begin_frame on the known loss adds no marker. */
+static void test_known_loss_begin_frame_adds_no_marker(void) {
+    record_next_tick();
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL_UINT32(1, loss_markers(nt_gfx_capture_read()));
+
+    record_next_tick();
+    nt_gfx_begin_frame();
+    nt_gfx_end_tick();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, capture.snapshot.status);
+    TEST_ASSERT_EQUAL_UINT32(0, loss_markers(capture));
+}
+
+static uint32_t result_reason(nt_gfx_capture_view_t capture, nt_gfx_operation_t operation, nt_gfx_object_kind_t kind) {
+    uint32_t reason = UINT32_MAX;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind == NT_GFX_EVENT_RESULT && e->operation == operation && e->object_kind == kind) {
+            reason = (uint32_t)e->reason;
+        }
+    }
+    return reason;
+}
+
+static void test_render_target_work_on_a_known_loss_ends_context_lost(void) {
+    const nt_render_target_desc_t rt_desc = {.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8};
+    nt_render_target_t target = nt_gfx_make_render_target(&rt_desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    record_next_tick();
+    TEST_ASSERT_FALSE(nt_gfx_resize_render_target(target, 8, 8));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_render_target(&rt_desc).id);
+    nt_gfx_end_tick();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET));
+    TEST_ASSERT_EQUAL_UINT32(0, loss_markers(capture));
+}
+
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* FULL traps before the rejection returns, so the recorded operation has a BEGIN and no RESULT. */
+static void test_rejected_destroys_and_resize_assert_inside_a_recorded_tick(void) {
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
+    record_next_tick();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(nt_gfx_render_target_color(target)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "owned by a render target"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_resize_render_target((nt_render_target_t){target.id + 1}, 8, 8));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "invalid handle"));
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "inside a pass"));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, result_reason(nt_gfx_capture_read(), NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE));
+}
+#endif
 
 static void test_restore_frame_completes_with_one_context_result(void) {
     record_next_tick();
@@ -575,6 +652,11 @@ int main(void) {
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_resource_operations_keep_published_handles_after_destroy);
     RUN_TEST(test_loss_detected_during_creation_aborts_observation);
+    RUN_TEST(test_known_loss_begin_frame_adds_no_marker);
+    RUN_TEST(test_render_target_work_on_a_known_loss_ends_context_lost);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_rejected_destroys_and_resize_assert_inside_a_recorded_tick);
+#endif
     RUN_TEST(test_restore_frame_completes_with_one_context_result);
     RUN_TEST(test_failed_restore_ends_context_with_backend_failure);
     RUN_TEST(test_restore_defines_render_targets_inside_the_context_operation);

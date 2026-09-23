@@ -1811,10 +1811,11 @@ static void ordering_draw(void) {
             items[i] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
         }
         stage_viewport(pass, passes);
-        const nt_gfx_counters_t before = g_nt_gfx.counters;
+        const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
+        const uint64_t instances_before = g_nt_gfx.counters.instances;
         nt_skinned_mesh_renderer_draw_list(items, count);
-        s_order_stats.draws[pass] = nt_gfx_draw_calls(&g_nt_gfx.counters) - nt_gfx_draw_calls(&before);
-        s_order_stats.instances[pass] = (uint32_t)(g_nt_gfx.counters.instances - before.instances);
+        s_order_stats.draws[pass] = nt_gfx_draw_calls(&g_nt_gfx.counters) - draws_before;
+        s_order_stats.instances[pass] = (uint32_t)(g_nt_gfx.counters.instances - instances_before);
         s_order_stats.expected[pass] = s_order_mode == 0 || (pass == 1 && s_order_mode == 2) ? 1U : count;
     }
 }
