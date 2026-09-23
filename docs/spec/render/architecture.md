@@ -395,11 +395,11 @@ passes; their counters sum. The stub is stateless: its end_tick is inert and it
 never publishes a snapshot.
 
 `g_nt_gfx.counters` holds the live counters of the open tick. `nt_gfx_end_tick`
-copies them and a status into `g_nt_gfx.last_frame`, the last closed tick, then
-resets them and advances `frame_sequence`; render frames reset nothing.
-`last_frame` stays unchanged until the next end or shutdown; before the first
+copies them and a status into `g_nt_gfx.last_tick`, the last closed tick, then
+resets them and advances `tick_sequence`; render frames reset nothing.
+`last_tick` stays unchanged until the next end or shutdown; before the first
 end its status is UNAVAILABLE. Readers early in a callback, before its draws,
-read `last_frame`. A no-render tick reports zero draws; old geometry is never
+read `last_tick`. A no-render tick reports zero draws; old geometry is never
 reused. A tick is ABORTED when a loss is detected during it or the context is
 still known lost at its end. Only the frontend marks a loss, and only a newly
 detected one: begin_frame's first detection, a restore that fails or meets a new
@@ -493,7 +493,8 @@ backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
 yet ends `UNREADY`. Texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
-The frame sequence resets at initialization.
+Each initialization restarts the tick sequence: the first tick after init is 1,
+and `last_tick` holds 0 until the first end_tick.
 
 A context restore is one CONTEXT operation inside the begin_frame that performs
 it; the render-target DEFINITION and BACKEND records of the restore sit between
@@ -529,8 +530,8 @@ shutdown; unrequested ticks preserve it. Two counts in the same sequence delimit
 an operation interval. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
 a NULL pointer. The finalized view retains its matching tick snapshot (and so
-its `frame_sequence`) by value even after later unrecorded ticks overwrite
-`g_nt_gfx.last_frame`.
+its `tick_sequence`) by value even after later unrecorded ticks overwrite
+`g_nt_gfx.last_tick`.
 
 Every recorded public operation produces exactly one BEGIN, carrying its
 request arguments, and one RESULT, carrying the outcome reason; a creator's

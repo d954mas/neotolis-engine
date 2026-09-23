@@ -834,7 +834,7 @@ if(NOT EMSCRIPTEN)
         # L2 time/render/frame group via submit(): discovery + forwarding to nt_app L1 +
         # bad_params + render.info + frame.current + yield-after-N-sim-advances + end-to-end step drain.
         # Links nt_app_stub (g_nt_app + nt_app_* the handlers forward to) and nt_gfx_fake
-        # (g_nt_gfx.last_frame draw_calls -> 0 for render.info; no font/material chain).
+        # (g_nt_gfx.last_tick draw_calls -> 0 for render.info; no font/material chain).
         if(NT_DEVAPI_GROUP_TIME)
             add_executable(test_devapi_time unit/test_devapi_time.c)
             target_link_libraries(test_devapi_time PRIVATE nt_devapi_time nt_devapi_discovery nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_fake nt_basisu_transcoder_stub nt_core nt_log_stub unity nt_meshwire_stub)

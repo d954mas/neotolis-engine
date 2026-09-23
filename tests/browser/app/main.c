@@ -483,7 +483,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_observe_status(void) {
 #if NT_GFX_CAPTURE_ENABLED
     return (int)nt_gfx_capture_read().snapshot.status;
 #else
-    return (int)NT_GFX_FRAME_UNAVAILABLE;
+    return (int)NT_GFX_TICK_UNAVAILABLE;
 #endif
 }
 EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
@@ -547,7 +547,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_destroy_texture(spare);
     nt_gfx_destroy_buffer(buffer);
     nt_gfx_end_tick();
-    nt_gfx_frame_snapshot_t snapshot = g_nt_gfx.last_frame;
+    nt_gfx_tick_snapshot_t snapshot = g_nt_gfx.last_tick;
     s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
     s_observe_values[2] = snapshot.status;
     s_observe_values[3] = nt_gfx_draw_calls(&snapshot.counters);
@@ -571,8 +571,8 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     s_observe_values[11] = capture.overflow;
     s_observe_values[12] = capture.count;
     s_observe_values[13] = capture.snapshot.status;
-    s_observe_values[18] = (double)capture.snapshot.counters.frame_sequence;
-    s_observe_values[19] = (double)snapshot.counters.frame_sequence;
+    s_observe_values[18] = (double)capture.snapshot.counters.tick_sequence;
+    s_observe_values[19] = (double)snapshot.counters.tick_sequence;
     const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_glUseProgram, NT_GFX_GL_glBindVertexArray, NT_GFX_GL_glBindTexture, NT_GFX_GL_glBindSampler, NT_GFX_GL_glUniform4fv, NT_GFX_GL_glUniform1i};
     for (uint32_t i = 0; i < capture.count; i++) {
         if (capture.events[i].kind != NT_GFX_EVENT_BACKEND) {
@@ -952,7 +952,7 @@ static void frame(void) {
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
 #if defined(__EMSCRIPTEN__)
-        s_nt_restore_sequence = g_nt_gfx.counters.frame_sequence;
+        s_nt_restore_sequence = g_nt_gfx.counters.tick_sequence;
 #endif
         /* One-shot per restored event; the GPU recreation below may retry. */
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -1084,9 +1084,9 @@ static void frame(void) {
 #endif
     nt_gfx_end_tick();
 #if defined(__EMSCRIPTEN__)
-    if (g_nt_gfx.last_frame.counters.frame_sequence == s_nt_restore_sequence) {
+    if (g_nt_gfx.last_tick.counters.tick_sequence == s_nt_restore_sequence) {
         s_nt_restore_ticks++;
-        s_nt_restore_status = (int)g_nt_gfx.last_frame.status;
+        s_nt_restore_status = (int)g_nt_gfx.last_tick.status;
     }
 #endif
 }

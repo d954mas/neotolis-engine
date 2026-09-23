@@ -3035,7 +3035,7 @@ void test_gfx_frame_draw_calls(void) {
     nt_gfx_end_frame();
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.last_frame.counters));
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.last_tick.counters));
 
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_shader(vs);

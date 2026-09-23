@@ -350,19 +350,19 @@ static void capture_initial_state(void) {
 /* The next tick starts at once: gfx work is always inside a tick between init and shutdown. */
 static void open_tick(void) {
     s_gfx.tick_aborted = false;
-    g_nt_gfx.counters = (nt_gfx_counters_t){.frame_sequence = g_nt_gfx.counters.frame_sequence + 1};
+    g_nt_gfx.counters = (nt_gfx_counters_t){.tick_sequence = g_nt_gfx.counters.tick_sequence + 1};
 }
 
 void nt_gfx_end_tick(void) {
     NT_ASSERT(g_nt_gfx.initialized);
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
-    g_nt_gfx.last_frame = (nt_gfx_frame_snapshot_t){
+    g_nt_gfx.last_tick = (nt_gfx_tick_snapshot_t){
         .counters = g_nt_gfx.counters,
-        .status = (s_gfx.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_FRAME_ABORTED : NT_GFX_FRAME_COMPLETE,
+        .status = (s_gfx.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_TICK_ABORTED : NT_GFX_TICK_COMPLETE,
     };
 #if NT_GFX_CAPTURE_ENABLED
     if (g_nt_gfx_capture.recording) {
-        g_nt_gfx_capture.view.snapshot = g_nt_gfx.last_frame;
+        g_nt_gfx_capture.view.snapshot = g_nt_gfx.last_tick;
         g_nt_gfx_capture.recording = false;
     }
     open_tick();

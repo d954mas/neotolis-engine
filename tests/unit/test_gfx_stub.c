@@ -111,12 +111,12 @@ static void test_stub_observation_is_unavailable(void) {
 #endif
     nt_gfx_end_tick();
     nt_gfx_end_tick();
-    TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, g_nt_gfx.last_frame.status);
-    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.last_frame.counters.frame_sequence);
-    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.frame_sequence);
+    TEST_ASSERT_EQUAL(NT_GFX_TICK_UNAVAILABLE, g_nt_gfx.last_tick.status);
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.last_tick.counters.tick_sequence);
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.tick_sequence);
 #if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, capture.snapshot.status);
+    TEST_ASSERT_EQUAL(NT_GFX_TICK_UNAVAILABLE, capture.snapshot.status);
     TEST_ASSERT_EQUAL_UINT32(0, capture.count);
     TEST_ASSERT_NULL(capture.events);
 #endif

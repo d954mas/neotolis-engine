@@ -493,10 +493,10 @@ typedef struct {
 
 // #region tick counters and observation
 typedef enum {
-    NT_GFX_FRAME_UNAVAILABLE = 0, /* no closed tick yet, capture still recording or empty, or stub */
-    NT_GFX_FRAME_COMPLETE,
-    NT_GFX_FRAME_ABORTED,
-} nt_gfx_frame_status_t;
+    NT_GFX_TICK_UNAVAILABLE = 0, /* no closed tick yet, capture still recording or empty, or stub */
+    NT_GFX_TICK_COMPLETE,
+    NT_GFX_TICK_ABORTED,
+} nt_gfx_tick_status_t;
 
 /* Public operations (BEGIN/END pairs) and the record-only STATE marker. */
 typedef enum {
@@ -653,7 +653,7 @@ typedef enum { NT_GFX_GL_NONE = 0, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_ENUM_) NT_GFX_
  * destroys); gl[] counts every issued GL call by nt_gfx_gl_call_t; uploads count calls with a
  * non-NULL payload and their bytes (NULL storage and generated mips excluded). */
 typedef struct {
-    uint64_t frame_sequence;
+    uint64_t tick_sequence;
     uint64_t vertices;
     uint64_t indices;
     uint64_t instances; /* instanced draws only */
@@ -672,8 +672,8 @@ static inline uint32_t nt_gfx_draw_calls(const nt_gfx_counters_t *c) {
 
 typedef struct {
     nt_gfx_counters_t counters;
-    nt_gfx_frame_status_t status;
-} nt_gfx_frame_snapshot_t;
+    nt_gfx_tick_status_t status;
+} nt_gfx_tick_snapshot_t;
 
 typedef enum {
     NT_GFX_EVENT_BEGIN,
@@ -771,13 +771,13 @@ typedef struct {
     bool overflow;
     const nt_gfx_event_t *events;
     uint32_t count;
-    nt_gfx_frame_snapshot_t snapshot; /* matching finalized tick, even after later unrecorded ticks; UNAVAILABLE while recording */
+    nt_gfx_tick_snapshot_t snapshot; /* matching finalized tick, even after later unrecorded ticks; UNAVAILABLE while recording */
 } nt_gfx_capture_view_t;
 
 /* The one host tick boundary: nt_gfx_init opens the first tick and every end_tick
  * closes the open one and opens the next, so all gfx work between init and shutdown
  * belongs to a tick; shutdown discards the open one. Requires gfx IDLE. A tick holds any number of gfx frames, whose counters sum. end_tick
- * copies the counters and status into g_nt_gfx.last_frame, then resets
+ * copies the counters and status into g_nt_gfx.last_tick, then resets
  * g_nt_gfx.counters. Ticks never advance rendering. */
 void nt_gfx_end_tick(void);
 #if NT_GFX_CAPTURE_ENABLED
@@ -807,8 +807,8 @@ typedef struct {
 /* ---- Global state ---- */
 
 typedef struct {
-    nt_gfx_counters_t counters;         /* live counters of the open tick; reset only by end_tick */
-    nt_gfx_frame_snapshot_t last_frame; /* last closed tick; UNAVAILABLE before the first */
+    nt_gfx_counters_t counters;       /* live counters of the open tick; reset only by end_tick */
+    nt_gfx_tick_snapshot_t last_tick; /* last closed tick; UNAVAILABLE before the first */
     nt_gfx_gpu_caps_t gpu_caps;
     bool context_lost;
     bool context_restored;
