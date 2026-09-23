@@ -18,10 +18,12 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
 
 void nt_gfx_gl_ctx_destroy(void) { /* GL context destroyed with GLFW window in nt_window_shutdown() */ }
 
-bool nt_gfx_gl_ctx_is_lost(void) {
-    /* Desktop GL contexts do not suffer context loss like WebGL */
-    return false;
-}
+/* Desktop GL contexts do not suffer context loss like WebGL */
+bool nt_gfx_gl_ctx_is_lost(void) { return false; }
+
+void nt_gfx_gl_ctx_ack_loss(void) {}
+
+bool nt_gfx_gl_ctx_query_lost(void) { return false; }
 
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     nt_gfx_gpu_caps_t caps = {0};

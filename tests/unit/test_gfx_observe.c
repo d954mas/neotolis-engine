@@ -114,6 +114,24 @@ static void test_known_loss_rejection_before_restore_keeps_the_tick_complete(voi
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, g_nt_gfx.last_frame.status);
 }
 
+/* A loss and restore between two frames still wipes at the next begin_frame and restores at the one after. */
+static void test_loss_and_restore_before_begin_frame_still_restore(void) {
+    nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(program));
+    nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_ABORTED, g_nt_gfx.last_frame.status);
+
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_gfx_end_frame();
+    nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL(NT_GFX_FRAME_COMPLETE, g_nt_gfx.last_frame.status);
+}
+
 /* Loading after init lands in the first tick, so its creations are counted like any frame's. */
 static void test_first_tick_counts_initial_resource_creation(void) {
     (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
@@ -644,6 +662,7 @@ int main(void) {
     RUN_TEST(test_loss_aborts_the_tick_and_restore_completes_it);
     RUN_TEST(test_loss_after_begin_frame_marks_the_next_tick);
     RUN_TEST(test_known_loss_rejection_before_restore_keeps_the_tick_complete);
+    RUN_TEST(test_loss_and_restore_before_begin_frame_still_restore);
     RUN_TEST(test_first_tick_counts_initial_resource_creation);
     RUN_TEST(test_shutdown_discards_an_open_tick);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL

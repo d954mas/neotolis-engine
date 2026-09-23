@@ -111,6 +111,7 @@ static nt_texture_desc_t s_fake_last_texture_desc;
 static uint32_t s_fake_last_depth_texture_backend;
 static uint32_t s_fake_next_texture_backend;
 static bool s_fake_context_lost;
+static bool s_fake_loss_pending; /* a reported loss until begin_frame acknowledges it */
 static bool s_fake_backend_missing;
 static uint8_t s_fake_fail_texture_creates;
 static uint32_t s_fake_texture_destroy_count;
@@ -206,6 +207,7 @@ void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_cre
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore(void) { s_fake_fail_next_backend_restore = true; }
 void nt_gfx_fake_set_context_lost(bool lost) { s_fake_context_lost = lost; }
+void nt_gfx_fake_lose_and_restore_context(void) { s_fake_loss_pending = true; }
 uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update_buffer_offset; }
 uint32_t nt_gfx_fake_last_instance_offset(void) { return s_fake_last_instance_offset; }
 uint32_t nt_gfx_fake_last_instance_vertex_input(void) { return s_fake_last_instance_vertex_input; }
@@ -261,6 +263,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_uniform_program = 0;
     s_fake_fail_next_vertex_input_create = false;
     s_fake_context_lost = false;
+    s_fake_loss_pending = false;
     s_fake_backend_missing = false;
     s_fake_fail_texture_creates = 0;
     s_fake_texture_destroy_count = 0;
@@ -333,7 +336,9 @@ void nt_gfx_backend_shutdown(void) {
     s_fake_max_programs = 0;
 }
 
-bool nt_gfx_backend_is_context_lost(void) { return s_fake_context_lost || s_fake_backend_missing; }
+bool nt_gfx_backend_is_context_lost(void) { return s_fake_loss_pending || s_fake_context_lost || s_fake_backend_missing; }
+
+void nt_gfx_backend_ack_context_loss(void) { s_fake_loss_pending = false; }
 
 void nt_gfx_backend_begin_frame(void) {}
 

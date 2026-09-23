@@ -612,7 +612,8 @@ static void nt_gfx_gl_init_context_features(void) {
     NT_GL_GEN(glGenVertexArrays, 1, &s_ebo_upload_vao);
     /* 0 with a live context would silently break every index-buffer upload on
      * core GL; 0 on an already-lost context is retried by the next restore. */
-    NT_ASSERT(s_ebo_upload_vao != 0 || nt_gfx_gl_ctx_is_lost());
+    const bool lost = s_ebo_upload_vao == 0 && nt_gfx_gl_ctx_query_lost();
+    NT_ASSERT(s_ebo_upload_vao != 0 || lost);
 }
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
@@ -680,6 +681,8 @@ void nt_gfx_backend_shutdown(void) {
 }
 
 bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
+
+void nt_gfx_backend_ack_context_loss(void) { nt_gfx_gl_ctx_ack_loss(); }
 
 /* ---- Frame / Pass ---- */
 
@@ -1212,9 +1215,12 @@ static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
     GLint linked = 0;
     NT_GL(glGetProgramiv, program, GL_LINK_STATUS, &linked);
     if (!linked) {
-        nt_gfx_gl_log_shader(vs_backend, "vertex");
-        nt_gfx_gl_log_shader(fs_backend, "fragment");
-        nt_gfx_gl_log_program(program);
+        /* A loss fails the link before its event arrives; the query latches it for the caller. */
+        if (!nt_gfx_gl_ctx_query_lost()) {
+            nt_gfx_gl_log_shader(vs_backend, "vertex");
+            nt_gfx_gl_log_shader(fs_backend, "fragment");
+            nt_gfx_gl_log_program(program);
+        }
 
         NT_GL(glDeleteProgram, program);
         return 0;
@@ -1411,7 +1417,10 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
         return 0; /* no free slots */
     }
 
-    if (!nt_gfx_gl_cache_uniforms(program, &s_programs[slot]) || nt_gfx_backend_is_context_lost()) {
+    if (!nt_gfx_gl_cache_uniforms(program, &s_programs[slot])) {
+        if (!nt_gfx_gl_ctx_query_lost()) {
+            NT_LOG_ERROR("program uniform reflection failed");
+        }
         NT_GL(glDeleteProgram, program);
         return 0;
     }
@@ -1795,7 +1804,7 @@ static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
     GLenum pending_error = NT_GL_RET0(glGetError);
     /* WebGL reports a loss once through glGetError; that is a recoverable
        outcome the caller rolls back, not a programmer error. */
-    bool context_lost = pending_error == GL_CONTEXT_LOST_WEBGL || (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_is_lost());
+    bool context_lost = pending_error == GL_CONTEXT_LOST_WEBGL || (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_query_lost());
     if (context_lost) {
         nt_gfx_observe_context_loss();
     }
@@ -1978,7 +1987,9 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
 
     GLenum status = NT_GL_RET(glCheckFramebufferStatus, GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-        NT_LOG_ERROR("render target incomplete: GL status 0x%04X", (unsigned)status);
+        if (!nt_gfx_gl_ctx_query_lost()) {
+            NT_LOG_ERROR("render target incomplete: GL status 0x%04X", (unsigned)status);
+        }
         if (depth_rbo != 0) {
             NT_GL_DELETE(glDeleteRenderbuffers, 1, &depth_rbo);
         }

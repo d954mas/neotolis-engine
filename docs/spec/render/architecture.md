@@ -410,6 +410,17 @@ probe the backend: a loss in a tick without a probe marks the next tick that
 probes.
 A tick whose begin_frame restores a lost context and then completes is COMPLETE.
 
+The web context learns of a loss from the canvas `webglcontextlost` and
+`webglcontextrestored` events, which the engine registers on its canvas; the lost
+handler calls `preventDefault` (the browser restores only a handled loss), so
+shells must not. Loss checks on success paths read the flags these events set and
+make no JS call. A loss stays reported until the next begin_frame consumes it, so
+a loss and restore that both happen between two frames (a background tab) still
+wipe the backend tables at that begin_frame and restore at the next one. Paths
+where GL already reported a failure (link, uniform reflection, framebuffer
+completeness, a pending error before an upload) query the browser directly: a
+loss whose event has not arrived yet is then reported like one that has.
+
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
 multiplication, and uint64 sums cannot overflow within a tick. Draw calls are
@@ -427,7 +438,8 @@ configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read` and
 
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
 through its `NT_GL*` funnel, queries included. Platform context management
-(context create/destroy, `isContextLost` probes) is not counted. The funnel
+(context create/destroy, loss events, `isContextLost` queries on failure paths)
+is not counted. The funnel
 counts with an inline constant-index increment and (with capture) records in the same
 expression that issues the call; a grep gate rejects any bare `gl*` call in
 `engine/graphics/gl`. The funnel does no per-call tick check: a tick is

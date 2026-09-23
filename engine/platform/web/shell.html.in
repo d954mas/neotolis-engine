@@ -69,10 +69,6 @@
             canvas: document.getElementById('canvas')
         };
 
-        document.getElementById('canvas').addEventListener('webglcontextlost', function(e) {
-            e.preventDefault();
-        });
-
         Module.onAbort = function(what) {
             var overlay = document.getElementById('crash-overlay');
             var msg = what || 'Application aborted unexpectedly';

@@ -282,7 +282,9 @@ Raw BLOB bytes have no activation to repeat. Invalidation of other asset types
 preserves BLOB owner/alias readiness and resident payloads.
 
 `nt_gfx_begin_frame()` detects a restored context and sets
-`g_nt_gfx.context_restored` for that frame. Resource readiness, resolved runtime
+`g_nt_gfx.context_restored` for that frame. Detection follows the browser's loss
+events, so a loss and restore between two frames still takes this path
+([frame observation](../render/architecture.md#frame-observation)). Resource readiness, resolved runtime
 handles, and render items computed before that call still describe the previous
 GPU context. The game must discard them and skip dependent draws for the restored
 frame.

@@ -2,6 +2,7 @@
 #include "graphics/gl/nt_gfx_gl_ctx.h"
 
 #include <emscripten.h>
+#include <emscripten/html5.h>
 #include <emscripten/html5_webgl.h>
 
 /* The cap-probe EM_JS bodies below reach the Emscripten GL registry (GL.currentContext.GLctx). GL lives
@@ -11,6 +12,25 @@
 EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString")
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
+static bool s_loss_pending; /* set by a lost event until begin_frame acknowledges it */
+static bool s_lost;
+
+static bool on_context_lost(int event_type, const void *reserved, void *user_data) {
+    (void)event_type;
+    (void)reserved;
+    (void)user_data;
+    s_loss_pending = true;
+    s_lost = true;
+    return true; /* preventDefault: the browser restores only a context whose loss was handled */
+}
+
+static bool on_context_restored(int event_type, const void *reserved, void *user_data) {
+    (void)event_type;
+    (void)reserved;
+    (void)user_data;
+    s_lost = false;
+    return true;
+}
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     EmscriptenWebGLContextAttributes attrs;
@@ -31,17 +51,33 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
         return false;
     }
     emscripten_webgl_make_context_current(s_gl_context);
+    s_loss_pending = false;
+    s_lost = false;
+    emscripten_set_webglcontextlost_callback("#canvas", NULL, false, on_context_lost);
+    emscripten_set_webglcontextrestored_callback("#canvas", NULL, false, on_context_restored);
     return true;
 }
 
 void nt_gfx_gl_ctx_destroy(void) {
+    emscripten_set_webglcontextlost_callback("#canvas", NULL, false, NULL);
+    emscripten_set_webglcontextrestored_callback("#canvas", NULL, false, NULL);
     if (s_gl_context > 0) {
         emscripten_webgl_destroy_context(s_gl_context);
         s_gl_context = 0;
     }
 }
 
-bool nt_gfx_gl_ctx_is_lost(void) { return s_gl_context <= 0 || emscripten_is_webgl_context_lost(s_gl_context) != 0; }
+bool nt_gfx_gl_ctx_is_lost(void) { return s_gl_context <= 0 || s_loss_pending || s_lost; }
+
+void nt_gfx_gl_ctx_ack_loss(void) { s_loss_pending = false; }
+
+bool nt_gfx_gl_ctx_query_lost(void) {
+    if (s_gl_context > 0 && emscripten_is_webgl_context_lost(s_gl_context) != 0) {
+        s_loss_pending = true;
+        s_lost = true;
+    }
+    return nt_gfx_gl_ctx_is_lost();
+}
 
 /* gl.getExtension() both checks AND enables the extension. The C wrapper counts
  * and records the JS call, which the GL funnel cannot see. */

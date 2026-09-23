@@ -87,7 +87,11 @@ void nt_gfx_fake_fail_buffer_creates(uint8_t mask);
 void nt_gfx_fake_fail_next_backend_restore(void);
 void nt_gfx_fake_fail_next_render_target_create(void);
 void nt_gfx_fake_fail_next_render_target_resize(void);
+/* Live loss state; the web backend's event latch is modeled separately below. */
 void nt_gfx_fake_set_context_lost(bool lost);
+/* The browser lost and restored the context before begin_frame: the loss stays
+ * reported until begin_frame acknowledges it. */
+void nt_gfx_fake_lose_and_restore_context(void);
 uint32_t nt_gfx_fake_last_update_buffer_offset(void);
 uint32_t nt_gfx_fake_last_instance_offset(void);
 uint32_t nt_gfx_fake_last_instance_vertex_input(void);

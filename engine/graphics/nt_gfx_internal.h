@@ -145,6 +145,8 @@ typedef enum {
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);
 bool nt_gfx_backend_is_context_lost(void);
+/* Consumes a reported loss; afterwards is_context_lost follows the live state. */
+void nt_gfx_backend_ack_context_loss(void);
 
 void nt_gfx_backend_begin_frame(void);
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend);

@@ -701,6 +701,10 @@ static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — context-loss recovery branches push it just over 25
 static nt_gfx_event_reason_t begin_frame(void) {
     bool backend_context_lost = nt_gfx_backend_is_context_lost();
+    if (backend_context_lost) {
+        /* A loss reported while one is known needs no second wipe, but must not stay latched. */
+        nt_gfx_backend_ack_context_loss();
+    }
     if (backend_context_lost && !g_nt_gfx.context_lost) {
         /* First detection: mark the tick once and wipe all backend handles */
         nt_gfx_observe_context_loss();
