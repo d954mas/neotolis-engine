@@ -1,8 +1,7 @@
+#include "graphics/gl/nt_gfx_gl_calls.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-
-#include <glad/gl.h>
 
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
@@ -33,8 +32,8 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     /* BC7 is core in GL 4.2+, ETC2 in GL 4.3+ — available without extensions */
     GLint major = 0;
     GLint minor = 0;
-    glGetIntegerv(GL_MAJOR_VERSION, &major);
-    glGetIntegerv(GL_MINOR_VERSION, &minor);
+    NT_GL(glGetIntegerv, GL_MAJOR_VERSION, &major);
+    NT_GL(glGetIntegerv, GL_MINOR_VERSION, &minor);
     int gl_ver = (major * 10) + minor;
     if (gl_ver >= 42) {
         caps.has_bc7 = true;
@@ -48,7 +47,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.has_float_texture_linear = gl_ver >= 30;
 
     GLint max_tex_size = 0;
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_tex_size);
+    NT_GL(glGetIntegerv, GL_MAX_TEXTURE_SIZE, &max_tex_size);
     caps.max_texture_size = (uint32_t)max_tex_size;
 
     return caps;
@@ -89,11 +88,11 @@ bool nt_gfx_gl_ctx_enable_debug_callback(void) {
     if (GLAD_GL_KHR_debug == 0) {
         return false; /* driver lacks KHR_debug — silently no-op, mirrors enable_debug_groups. */
     }
-    glEnable(GL_DEBUG_OUTPUT);
-    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); /* deliver on the offending call's stack so a breakpoint lands right. */
-    glDebugMessageCallback(nt_gl_debug_cb, NULL);
+    NT_GL(glEnable, GL_DEBUG_OUTPUT);
+    NT_GL(glEnable, GL_DEBUG_OUTPUT_SYNCHRONOUS); /* deliver on the offending call's stack so a breakpoint lands right. */
+    NT_GL(glDebugMessageCallback, nt_gl_debug_cb, NULL);
     /* Mute notification-severity chatter (buffer-mapping hints etc.) at the driver, not per-callback. */
-    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, NULL, GL_FALSE);
+    NT_GL(glDebugMessageControl, GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, NULL, GL_FALSE);
     return true;
 #else
     return false;

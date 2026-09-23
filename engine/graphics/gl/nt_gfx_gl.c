@@ -9,7 +9,6 @@
  */
 
 #include "core/nt_assert.h"
-#include "core/nt_platform.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
@@ -20,163 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- GL headers ---- */
-
-#ifdef NT_PLATFORM_WEB
-#include <GLES3/gl3.h>
-#else
-#include <glad/gl.h>
-#endif
-
-// #region issued-call recording
-/* NT_GL(glFn, args...) records the call as one BACKEND event, then issues it.
- * Recorded arguments follow GL order: integers go to backend.args, floats to
- * backend.values, payload/output pointers become presence bits and
- * nt_gl_offset() values stay byte offsets. Arguments are evaluated twice while
- * recording, so they must be free of side effects. Variants:
- *   NT_GL_UPLOAD(bytes, glFn, ...)  also records payload bytes when the payload is non-NULL
- *   NT_GL_GEN / NT_GL_DELETE        record the count followed by each object name
- *   NT_GL_UNIFORM(glFn, floats, ...) copies the value array of a vec4/mat4 uniform call
- *   NT_GL_CREATE(glFn, ...)         returns the created name and records it
- *   NT_GL0(glFn)                    argument-less calls */
-
-/* A distinct pointer type, so an offset into a bound buffer records as bytes, not presence. */
-typedef const struct nt_gl_offset_tag *nt_gl_offset_t;
-static inline nt_gl_offset_t nt_gl_offset(uintptr_t bytes) { return (nt_gl_offset_t)bytes; } // NOLINT(performance-no-int-to-ptr)
-
-#define NT_GL_CAT_(a, b) a##b
-#define NT_GL_CAT(a, b) NT_GL_CAT_(a, b)
-#define NT_GL_NARGS_(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, n, ...) n
-#define NT_GL_NARGS(...) NT_GL_NARGS_(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
-
-#if NT_GFX_CAPTURE_ENABLED
-typedef struct {
-    nt_gfx_event_t *event;
-    uint32_t ints;
-    uint32_t floats;
-    bool payload;
-} nt_gl_cursor_t;
-
-static inline void nt_gl_put_unsigned(nt_gl_cursor_t *cursor, uint64_t value) {
-    NT_ASSERT(cursor->ints < 12);
-    cursor->event->data.backend.args[cursor->ints++] = (uint32_t)value;
-}
-static inline void nt_gl_put_signed(nt_gl_cursor_t *cursor, int64_t value) { nt_gl_put_unsigned(cursor, (uint64_t)value); }
-static inline void nt_gl_put_float(nt_gl_cursor_t *cursor, float value) {
-    NT_ASSERT(cursor->floats < 4);
-    cursor->event->data.backend.values[cursor->floats++] = value;
-}
-static inline void nt_gl_put_double(nt_gl_cursor_t *cursor, double value) { nt_gl_put_float(cursor, (float)value); }
-static inline void nt_gl_put_pointer(nt_gl_cursor_t *cursor, const void *pointer) {
-    cursor->payload = cursor->payload || pointer != NULL;
-    nt_gl_put_unsigned(cursor, pointer != NULL ? 1U : 0U);
-}
-static inline void nt_gl_put_offset(nt_gl_cursor_t *cursor, nt_gl_offset_t offset) { nt_gl_put_unsigned(cursor, (uintptr_t)offset); }
-static inline void nt_gl_put_strings(nt_gl_cursor_t *cursor, const GLchar *const *strings) { nt_gl_put_pointer(cursor, (const void *)strings); }
-/* Payload bytes count only when a payload pointer was non-NULL. */
-static inline void nt_gl_put_bytes(nt_gl_cursor_t *cursor, uint64_t bytes) { cursor->event->data.backend.bytes = cursor->payload ? bytes : 0U; }
-
-#define NT_GL_PUT(cursor, arg)                                                                                                                                                                         \
-    _Generic((arg),                                                                                                                                                                                    \
-        _Bool: nt_gl_put_unsigned,                                                                                                                                                                     \
-        unsigned char: nt_gl_put_unsigned,                                                                                                                                                             \
-        unsigned short: nt_gl_put_unsigned,                                                                                                                                                            \
-        unsigned int: nt_gl_put_unsigned,                                                                                                                                                              \
-        unsigned long: nt_gl_put_unsigned,                                                                                                                                                             \
-        unsigned long long: nt_gl_put_unsigned,                                                                                                                                                        \
-        char: nt_gl_put_signed,                                                                                                                                                                        \
-        signed char: nt_gl_put_signed,                                                                                                                                                                 \
-        short: nt_gl_put_signed,                                                                                                                                                                       \
-        int: nt_gl_put_signed,                                                                                                                                                                         \
-        long: nt_gl_put_signed,                                                                                                                                                                        \
-        long long: nt_gl_put_signed,                                                                                                                                                                   \
-        float: nt_gl_put_float,                                                                                                                                                                        \
-        double: nt_gl_put_double,                                                                                                                                                                      \
-        nt_gl_offset_t: nt_gl_put_offset,                                                                                                                                                              \
-        const GLchar **: nt_gl_put_strings,                                                                                                                                                            \
-        const GLchar *const *: nt_gl_put_strings,                                                                                                                                                      \
-        default: nt_gl_put_pointer)((cursor), (arg))
-#define NT_GL_EACH_1(c, a) NT_GL_PUT(c, a)
-#define NT_GL_EACH_2(c, a, ...) NT_GL_PUT(c, a), NT_GL_EACH_1(c, __VA_ARGS__)
-#define NT_GL_EACH_3(c, a, ...) NT_GL_PUT(c, a), NT_GL_EACH_2(c, __VA_ARGS__)
-#define NT_GL_EACH_4(c, a, ...) NT_GL_PUT(c, a), NT_GL_EACH_3(c, __VA_ARGS__)
-#define NT_GL_EACH_5(c, a, ...) NT_GL_PUT(c, a), NT_GL_EACH_4(c, __VA_ARGS__)
-#define NT_GL_EACH_6(c, a, ...) NT_GL_PUT(c, a), NT_GL_EACH_5(c, __VA_ARGS__)
-#define NT_GL_EACH_7(c, a, ...) NT_GL_PUT(c, a), NT_GL_EACH_6(c, __VA_ARGS__)
-#define NT_GL_EACH_8(c, a, ...) NT_GL_PUT(c, a), NT_GL_EACH_7(c, __VA_ARGS__)
-#define NT_GL_EACH_9(c, a, ...) NT_GL_PUT(c, a), NT_GL_EACH_8(c, __VA_ARGS__)
-#define NT_GL_EACH_10(c, a, ...) NT_GL_PUT(c, a), NT_GL_EACH_9(c, __VA_ARGS__)
-
-/* Takes the call enum, not the GL name: glad defines GL names as macros, so the
- * token paste has to happen in the outermost macro, before they expand. */
-#define NT_GL_RECORD_CALL(call, payload_bytes, ...)                                                                                                                                                    \
-    NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_STATE, event.detail = (call); nt_gl_cursor_t nt_gl_cursor = {&event, 0, 0, false};                                                                   \
-                  NT_GL_CAT(NT_GL_EACH_, NT_GL_NARGS(__VA_ARGS__))(&nt_gl_cursor, __VA_ARGS__); nt_gl_put_bytes(&nt_gl_cursor, (payload_bytes)))
-/* Record-only form; the web timer bridge uses it for a result read GL makes through JS. */
-#define NT_GL_RECORD(fn, payload_bytes, ...) NT_GL_RECORD_CALL(NT_GFX_GL_##fn, payload_bytes, __VA_ARGS__)
-
-static inline void nt_gl_record_names(nt_gfx_gl_call_t call, GLsizei count, const GLuint *names) {
-    NT_ASSERT(count >= 0 && count < 12);
-    NT_GFX_RECORD(
-        NT_GFX_EVENT_BACKEND, NT_GFX_OP_STATE, event.detail = (uint32_t)call; event.data.backend.args[0] = (uint32_t)count;
-        for (GLsizei i = 0; i < count; i++) { event.data.backend.args[1 + i] = names[i]; });
-}
-static inline GLuint nt_gl_record_created(nt_gfx_gl_call_t call, GLuint name) {
-    NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_STATE, event.detail = (uint32_t)call; event.data.backend.args[0] = name);
-    return name;
-}
-static inline void nt_gl_record_uniform(nt_gfx_gl_call_t call, GLint location, uint32_t float_count, const GLfloat *values) {
-    NT_ASSERT(float_count <= 16);
-    NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_STATE, event.detail = (uint32_t)call; event.data.uniform.name = (uint32_t)location; event.data.uniform.count = float_count;
-                  memcpy(event.data.uniform.values, values, float_count * sizeof(float)));
-}
-#define NT_GL_LAST_4(a, b, c, d) d
-#define NT_GL_LAST_3(a, b, c) c
-
-/* Capture builds evaluate the arguments twice (record, then call): keep them side-effect-free. */
-#define NT_GL(fn, ...)                                                                                                                                                                                 \
-    do {                                                                                                                                                                                               \
-        NT_GL_RECORD_CALL(NT_GFX_GL_##fn, 0, __VA_ARGS__);                                                                                                                                             \
-        fn(__VA_ARGS__);                                                                                                                                                                               \
-    } while (0)
-#define NT_GL0(fn)                                                                                                                                                                                     \
-    do {                                                                                                                                                                                               \
-        NT_GFX_RECORD(NT_GFX_EVENT_BACKEND, NT_GFX_OP_STATE, event.detail = NT_GFX_GL_##fn);                                                                                                           \
-        fn();                                                                                                                                                                                          \
-    } while (0)
-#define NT_GL_UPLOAD(payload_bytes, fn, ...)                                                                                                                                                           \
-    do {                                                                                                                                                                                               \
-        NT_GL_RECORD_CALL(NT_GFX_GL_##fn, payload_bytes, __VA_ARGS__);                                                                                                                                 \
-        fn(__VA_ARGS__);                                                                                                                                                                               \
-    } while (0)
-#define NT_GL_GEN(fn, count, names)                                                                                                                                                                    \
-    do {                                                                                                                                                                                               \
-        fn((count), (names));                                                                                                                                                                          \
-        nt_gl_record_names(NT_GFX_GL_##fn, (count), (names));                                                                                                                                          \
-    } while (0)
-#define NT_GL_DELETE(fn, count, names)                                                                                                                                                                 \
-    do {                                                                                                                                                                                               \
-        nt_gl_record_names(NT_GFX_GL_##fn, (count), (names));                                                                                                                                          \
-        fn((count), (names));                                                                                                                                                                          \
-    } while (0)
-#define NT_GL_UNIFORM(fn, float_count, location, ...)                                                                                                                                                  \
-    do {                                                                                                                                                                                               \
-        nt_gl_record_uniform(NT_GFX_GL_##fn, (location), (float_count), NT_GL_CAT(NT_GL_LAST_, NT_GL_NARGS(location, __VA_ARGS__))(location, __VA_ARGS__));                                            \
-        fn(location, __VA_ARGS__);                                                                                                                                                                     \
-    } while (0)
-#define NT_GL_CREATE(fn, ...) nt_gl_record_created(NT_GFX_GL_##fn, fn(__VA_ARGS__))
-#define NT_GL_CREATE0(fn) nt_gl_record_created(NT_GFX_GL_##fn, fn())
-#else
-#define NT_GL_RECORD(fn, payload_bytes, ...) ((void)0)
-#define NT_GL(fn, ...) fn(__VA_ARGS__)
-#define NT_GL0(fn) fn()
-#define NT_GL_UPLOAD(payload_bytes, fn, ...) fn(__VA_ARGS__)
-#define NT_GL_GEN(fn, count, names) fn((count), (names))
-#define NT_GL_DELETE(fn, count, names) fn((count), (names))
-#define NT_GL_UNIFORM(fn, float_count, location, ...) fn(location, __VA_ARGS__)
-#define NT_GL_CREATE(fn, ...) fn(__VA_ARGS__)
-#define NT_GL_CREATE0(fn) fn()
-#endif
+#include "graphics/gl/nt_gfx_gl_calls.h"
 
 /* Native desktop GL 3.3 has only the double variant; WebGL only the float one. */
 #ifdef NT_PLATFORM_WEB
@@ -184,7 +27,6 @@ static inline void nt_gl_record_uniform(nt_gfx_gl_call_t call, GLint location, u
 #else
 #define nt_gl_clear_depth(d) NT_GL(glClearDepth, (double)(d))
 #endif
-// #endregion
 
 #if NT_GFX_GPU_TIMING_ENABLED
 /* EXT_disjoint_timer_query_webgl2 / ARB_timer_query constants. Spec-fixed
@@ -553,7 +395,6 @@ static void gl_bind_vao(GLuint vao) {
     s_test_vao_binds++;
 #endif
     NT_GL(glBindVertexArray, vao);
-    NT_GFX_COUNT(vao_calls);
 }
 
 /* The service VAO prevents EBO data operations from rewriting a draw VAO.
@@ -580,7 +421,6 @@ static void gl_set_viewport(int x, int y, int w, int h) {
 static void nt_gfx_gl_cache_ground_state(void) {
     gl_bind_vao(0);
     NT_GL(glUseProgram, 0);
-    NT_GFX_COUNT(program_calls);
     NT_GL(glDisable, GL_DEPTH_TEST);
     NT_GL(glDepthMask, GL_TRUE);
     NT_GL(glDepthFunc, GL_LESS);
@@ -595,7 +435,6 @@ static void nt_gfx_gl_cache_ground_state(void) {
     NT_GL(glActiveTexture, GL_TEXTURE0);
     for (uint32_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
         NT_GL(glBindSampler, unit, 0);
-        NT_GFX_COUNT(sampler_calls);
     }
     /* A zero-size viewport is legal GL and never equals a real pass, so the first
      * pass after grounding always re-issues. */
@@ -1015,7 +854,7 @@ bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 
 #ifdef NT_PLATFORM_WEB
     /* The JS bridge issues the same 64-bit result read. */
-    NT_GL_RECORD(glGetQueryObjectui64v, 0, q, GL_QUERY_RESULT, (const void *)out_ns);
+    NT_GL_ISSUED(glGetQueryObjectui64v, q, GL_QUERY_RESULT, (const void *)out_ns);
     *out_ns = (uint64_t)nt_gfx_gl_ctx_query_result(q);
 #else
     GLuint64 result = 0;
@@ -1146,12 +985,12 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { gl_set_viewport(x
 bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
     NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
     /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
-    while (glGetError() != GL_NO_ERROR) {
+    while (NT_GL_RET0(glGetError) != GL_NO_ERROR) {
     }
     NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, out_rgba8);
     /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
        partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
-    return glGetError() == GL_NO_ERROR;
+    return NT_GL_RET0(glGetError) == GL_NO_ERROR;
 }
 
 /* ---- Pipeline bind ---- */
@@ -1167,7 +1006,6 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     GLuint program = s_programs[pip->program_slot].program;
     if (s_gl_cache.program != program) {
         NT_GL(glUseProgram, program);
-        NT_GFX_COUNT(program_calls);
         s_gl_cache.program = program;
     } else {
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_PIPELINE, event.reason = NT_GFX_REASON_CACHE; event.detail = NT_GFX_GL_glUseProgram; event.data.backend.args[0] = program;);
@@ -1254,7 +1092,6 @@ void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_has
         return;
     }
     NT_GL_UNIFORM(glUniformMatrix4fv, 16, s_programs[program_backend].uniforms[index].location, 1, GL_FALSE, matrix);
-    NT_GFX_COUNT(uniform_calls);
 }
 
 void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec) {
@@ -1270,7 +1107,6 @@ void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_has
         return;
     }
     NT_GL_UNIFORM(glUniform4fv, 4, prog->uniforms[index].location, 1, vec);
-    NT_GFX_COUNT(uniform_calls);
     // Preserve uncached GL handling for other uniform types.
     if ((prog->vec4_mask & bit) != 0) {
         memcpy(prog->vec4_values[index], vec, sizeof(prog->vec4_values[index]));
@@ -1285,7 +1121,6 @@ void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_ha
         return;
     }
     NT_GL(glUniform1f, s_programs[program_backend].uniforms[index].location, val);
-    NT_GFX_COUNT(uniform_calls);
 }
 
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val) {
@@ -1298,7 +1133,6 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
         return;
     }
     NT_GL(glUniform1i, s_programs[program_backend].uniforms[index].location, val);
-    NT_GFX_COUNT(uniform_calls);
 }
 
 /* ---- Draw calls ---- */
@@ -1315,7 +1149,7 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     GLenum gl_type = (desc->type == NT_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
-    GLuint shader = NT_GL_CREATE(glCreateShader, gl_type);
+    GLuint shader = NT_GL_RET(glCreateShader, gl_type);
 
 #ifdef NT_PLATFORM_WEB
     const char *prefix = "#version 300 es\n";
@@ -1349,7 +1183,7 @@ static void nt_gfx_gl_log_lines(const char *log) {
 
 static void nt_gfx_gl_log_shader(uint32_t shader, const char *stage) {
     GLint len = 0;
-    glGetShaderiv((GLuint)shader, GL_INFO_LOG_LENGTH, &len);
+    NT_GL(glGetShaderiv, (GLuint)shader, GL_INFO_LOG_LENGTH, &len);
     if (len <= 1) {
         return;
     }
@@ -1357,7 +1191,7 @@ static void nt_gfx_gl_log_shader(uint32_t shader, const char *stage) {
     if (!log) {
         return;
     }
-    glGetShaderInfoLog((GLuint)shader, len, NULL, log);
+    NT_GL(glGetShaderInfoLog, (GLuint)shader, len, NULL, log);
     NT_LOG_ERROR("%s shader:", stage);
     nt_gfx_gl_log_lines(log);
     free(log);
@@ -1365,7 +1199,7 @@ static void nt_gfx_gl_log_shader(uint32_t shader, const char *stage) {
 
 static void nt_gfx_gl_log_program(uint32_t program) {
     GLint len = 0;
-    glGetProgramiv((GLuint)program, GL_INFO_LOG_LENGTH, &len);
+    NT_GL(glGetProgramiv, (GLuint)program, GL_INFO_LOG_LENGTH, &len);
     if (len <= 1) {
         return;
     }
@@ -1373,7 +1207,7 @@ static void nt_gfx_gl_log_program(uint32_t program) {
     if (!log) {
         return;
     }
-    glGetProgramInfoLog((GLuint)program, len, NULL, log);
+    NT_GL(glGetProgramInfoLog, (GLuint)program, len, NULL, log);
     NT_LOG_ERROR("program link:");
     nt_gfx_gl_log_lines(log);
     free(log);
@@ -1392,13 +1226,13 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
  * link failure, after logging both stages and the program log. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
-    GLuint program = NT_GL_CREATE0(glCreateProgram);
+    GLuint program = NT_GL_RET0(glCreateProgram);
     NT_GL(glAttachShader, program, (GLuint)vs_backend);
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
     NT_GL(glLinkProgram, program);
 
     GLint linked = 0;
-    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    NT_GL(glGetProgramiv, program, GL_LINK_STATUS, &linked);
     if (!linked) {
         nt_gfx_gl_log_shader(vs_backend, "vertex");
         nt_gfx_gl_log_shader(fs_backend, "fragment");
@@ -1412,9 +1246,8 @@ static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
     uint32_t block_count;
     nt_gfx_get_global_blocks(&blocks, &block_count);
     for (uint32_t bi = 0; bi < block_count; bi++) {
-        GLuint block_index = glGetUniformBlockIndex(program, blocks[bi].name);
+        GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, blocks[bi].name);
         if (block_index != GL_INVALID_INDEX) {
-            NT_GFX_COUNT(uniform_calls);
             NT_GL(glUniformBlockBinding, program, block_index, (GLuint)blocks[bi].binding_slot);
         }
     }
@@ -1508,7 +1341,7 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
     rec->vec4_valid = 0;
     *out_count = 0;
     GLint active_uniforms = -1;
-    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
+    NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORMS, &active_uniforms);
     if (active_uniforms < 0) {
         return false;
     }
@@ -1516,7 +1349,7 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
         return true;
     }
     GLint max_name_length = 0;
-    glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_length);
+    NT_GL(glGetProgramiv, program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &max_name_length);
     if (max_name_length <= 0) {
         return false;
     }
@@ -1528,7 +1361,7 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
         GLsizei ulen = 0;
         GLint usize = 0;
         GLenum utype = 0;
-        glGetActiveUniform(program, (GLuint)ui, max_name_length, &ulen, &usize, &utype, uname);
+        NT_GL(glGetActiveUniform, program, (GLuint)ui, max_name_length, &ulen, &usize, &utype, uname);
         if (ulen <= 0 || usize <= 0) {
             return false;
         }
@@ -1538,7 +1371,7 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
                 size_t suffix = (size_t)ulen - 3U;
                 nt_gfx_gl_write_array_index(uname + suffix, element);
             }
-            GLint loc = glGetUniformLocation(program, uname);
+            GLint loc = NT_GL_RET(glGetUniformLocation, program, uname);
             if (loc >= 0) {
                 const uint32_t name_hash = nt_hash32_str(uname).value;
                 nt_gfx_sampler_class_t sampler_class = NT_GFX_SAMPLER_CLASS_FLOAT;
@@ -1575,13 +1408,10 @@ static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) 
     }
     const GLuint saved = s_gl_cache.program;
     NT_GL(glUseProgram, program);
-    NT_GFX_COUNT(program_calls);
     for (uint8_t i = 0; i < rec->sampler_count; i++) {
         NT_GL(glUniform1i, rec->sampler_units[i].location, (GLint)i);
-        NT_GFX_COUNT(uniform_calls);
     }
     NT_GL(glUseProgram, saved);
-    NT_GFX_COUNT(program_calls);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
@@ -1629,7 +1459,6 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
     /* GL defers deletion while a program remains current. */
     if (s_gl_cache.program == program) {
         NT_GL(glUseProgram, 0);
-        NT_GFX_COUNT(program_calls);
         s_gl_cache.program = 0;
     }
     NT_GL(glDeleteProgram, program);
@@ -1702,7 +1531,6 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
             const nt_vertex_attr_t *attr = &desc->layout.attrs[i];
             NT_GL(glEnableVertexAttribArray, attr->location);
             NT_GL(glVertexAttribPointer, attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)desc->layout.stride, nt_gl_offset(attr->offset));
-            NT_GFX_COUNT(static_attribute_calls);
 #ifdef NT_TEST_ACCESS
             s_test_static_attrib_pointer_calls++;
 #endif
@@ -1789,8 +1617,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
         ebo_upload_begin();
     }
     NT_GL(glBindBuffer, target, buf);
-    NT_GL_UPLOAD(desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
-    NT_GFX_COUNT_UPLOAD(false, desc->data, desc->size);
+    NT_GL_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
     if (unhook_vao) {
         ebo_upload_end();
     }
@@ -1838,8 +1665,7 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
         ebo_upload_begin();
     }
     NT_GL(glBindBuffer, target, buf);
-    NT_GL_UPLOAD(size, glBufferSubData, target, (GLintptr)offset, (GLsizeiptr)size, data);
-    NT_GFX_COUNT_UPLOAD(false, data, size);
+    NT_GL_UPLOAD(data, size, glBufferSubData, target, (GLintptr)offset, (GLsizeiptr)size, data);
     if (unhook_vao) {
         ebo_upload_end();
     }
@@ -1861,8 +1687,7 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
      * contents and reclaim the old block once the GPU finishes consuming it,
      * avoiding the pipeline stall that glBufferSubData can introduce when
      * rewriting a buffer that's still in flight. */
-    NT_GL_UPLOAD(size, glBufferData, target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
-    NT_GFX_COUNT_UPLOAD(false, data, size);
+    NT_GL_UPLOAD(data, size, glBufferData, target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
     if (unhook_vao) {
         ebo_upload_end();
     }
@@ -1883,7 +1708,6 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
         const nt_vertex_attr_t *attr = &vi->instance_attrs[i];
         NT_GL(glVertexAttribPointer, attr->location, attr->count, map_vertex_type(attr->type), attr->normalized ? GL_TRUE : GL_FALSE, (GLsizei)vi->instance_stride,
               nt_gl_offset(attr->offset + byte_offset));
-        NT_GFX_COUNT(instance_attribute_calls);
 #ifdef NT_TEST_ACCESS
         s_test_instance_attrib_pointer_calls++;
 #endif
@@ -1898,7 +1722,6 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) 
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
     GLuint buf = s_buffer_gl[backend_handle];
     NT_GL(glBindBufferBase, GL_UNIFORM_BUFFER, slot, buf);
-    NT_GFX_COUNT(ubo_calls);
 }
 
 void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
@@ -1909,9 +1732,8 @@ void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *bloc
     if (program == 0) {
         return;
     }
-    GLuint block_index = glGetUniformBlockIndex(program, block_name);
+    GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, block_name);
     if (block_index != GL_INVALID_INDEX) {
-        NT_GFX_COUNT(uniform_calls);
         NT_GL(glUniformBlockBinding, program, block_index, slot);
     }
 }
@@ -1995,13 +1817,12 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
         s_gl_cache.active_texture_unit = NT_GFX_GL_UPLOAD_TEXTURE_UNIT;
     }
     NT_GL(glBindTexture, GL_TEXTURE_2D, tex);
-    NT_GFX_COUNT(texture_calls);
 }
 
 /* For upload paths that check glGetError afterwards — a stale error would be
  * misattributed to this upload. */
 static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
-    GLenum pending_error = glGetError();
+    GLenum pending_error = NT_GL_RET0(glGetError);
     /* WebGL reports a loss once through glGetError; that is a recoverable
        outcome the caller rolls back, not a programmer error. */
     bool context_lost = pending_error == 0x9242U /* GL_CONTEXT_LOST_WEBGL */ || (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_is_lost());
@@ -2047,11 +1868,10 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
         const uint32_t level_h = nt_texture_level_extent(desc->height, level);
         const uint64_t level_bytes = nt_texture_level_bytes(desc->format, level_w, level_h);
         if (gl.compressed) {
-            NT_GL_UPLOAD(level_bytes, glCompressedTexImage2D, GL_TEXTURE_2D, (GLint)level, gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, (GLsizei)level_bytes, level_data);
+            NT_GL_UPLOAD(level_data, level_bytes, glCompressedTexImage2D, GL_TEXTURE_2D, (GLint)level, gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, (GLsizei)level_bytes, level_data);
         } else {
-            NT_GL_UPLOAD(level_bytes, glTexImage2D, GL_TEXTURE_2D, (GLint)level, (GLint)gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, gl.format, gl.type, level_data);
+            NT_GL_UPLOAD(level_data, level_bytes, glTexImage2D, GL_TEXTURE_2D, (GLint)level, (GLint)gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, gl.format, gl.type, level_data);
         }
-        NT_GFX_COUNT_UPLOAD(true, level_data, level_bytes);
         if (level_data != NULL) {
             level_data += level_bytes;
         }
@@ -2069,7 +1889,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     NT_GL(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)(top_level - 1));
 
     GLenum first_error = GL_NO_ERROR;
-    for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) {
+    for (GLenum e = NT_GL_RET0(glGetError); e != GL_NO_ERROR; e = NT_GL_RET0(glGetError)) {
         if (e == 0x9242U) { /* GL_CONTEXT_LOST_WEBGL */
             nt_gfx_observe_context_loss();
         }
@@ -2125,8 +1945,7 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
         NT_GL(glPixelStorei, GL_UNPACK_ALIGNMENT, 1);
     }
 
-    NT_GL_UPLOAD(nt_texture_level_bytes(format, w, h), glTexSubImage2D, GL_TEXTURE_2D, 0, (GLint)x, (GLint)y, (GLsizei)w, (GLsizei)h, gl.format, gl.type, data);
-    NT_GFX_COUNT_UPLOAD(true, data, nt_texture_level_bytes(format, w, h));
+    NT_GL_UPLOAD(data, nt_texture_level_bytes(format, w, h), glTexSubImage2D, GL_TEXTURE_2D, 0, (GLint)x, (GLint)y, (GLsizei)w, (GLsizei)h, gl.format, gl.type, data);
 
     if (!gl.align4) {
         NT_GL(glPixelStorei, GL_UNPACK_ALIGNMENT, 4);
@@ -2187,7 +2006,7 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
         NT_GL(glFramebufferTexture2D, GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
     }
 
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    GLenum status = NT_GL_RET(glCheckFramebufferStatus, GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         NT_LOG_ERROR("render target incomplete: GL status 0x%04X", (unsigned)status);
         if (depth_rbo != 0) {
@@ -2416,7 +2235,6 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
         s_gl_cache.active_texture_unit = unit;
     }
     NT_GL(glBindTexture, GL_TEXTURE_2D, tex);
-    NT_GFX_COUNT(texture_calls);
     s_gl_cache.bound_textures[slot] = tex;
 }
 
@@ -2470,7 +2288,6 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     s_test_sampler_binds++;
 #endif
     NT_GL(glBindSampler, slot, sampler);
-    NT_GFX_COUNT(sampler_calls);
     s_gl_cache.bound_samplers[slot] = sampler;
 }
 

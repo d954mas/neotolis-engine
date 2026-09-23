@@ -517,11 +517,11 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     s_observe_values[3] = snapshot.counters.draw_calls;
     s_observe_values[4] = (double)preparation.buffer_upload_bytes;
     s_observe_values[5] = (double)preparation.texture_upload_bytes;
-    s_observe_values[6] = snapshot.counters.program_calls;
-    s_observe_values[7] = snapshot.counters.vao_calls;
-    s_observe_values[8] = snapshot.counters.texture_calls;
-    s_observe_values[9] = snapshot.counters.sampler_calls;
-    s_observe_values[10] = snapshot.counters.uniform_calls;
+    s_observe_values[6] = snapshot.counters.gl[NT_GFX_GL_glUseProgram];
+    s_observe_values[7] = snapshot.counters.gl[NT_GFX_GL_glBindVertexArray];
+    s_observe_values[8] = snapshot.counters.gl[NT_GFX_GL_glBindTexture];
+    s_observe_values[9] = snapshot.counters.gl[NT_GFX_GL_glBindSampler];
+    s_observe_values[10] = snapshot.counters.gl[NT_GFX_GL_glUniform4fv] + snapshot.counters.gl[NT_GFX_GL_glUniform1i];
     s_observe_values[11] = capture.overflow;
     s_observe_values[12] = capture.count;
     s_observe_values[13] = capture.status;

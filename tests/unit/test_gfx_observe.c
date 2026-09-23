@@ -78,8 +78,6 @@ static void test_availability_is_fixed_per_build_and_backend(void) {
     TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.counters.availability);
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL_UINT32(expected, g_nt_gfx.last_frame.counters.availability);
-    /* The fake issues no GL calls, so backend payload totals stay unavailable. */
-    TEST_ASSERT_FALSE(nt_gfx_upload_totals_read().available);
 }
 
 static void test_loss_aborts_the_tick_and_restore_completes_it(void) {

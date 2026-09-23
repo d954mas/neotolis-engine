@@ -206,11 +206,14 @@ static bool gfx_context_lost(void) {
     return lost;
 }
 
-nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) {
-    nt_gfx_upload_totals_t result = g_nt_gfx_observation.uploads;
-    result.available = (s_gfx.counter_availability & NT_GFX_COUNTERS_BACKEND) != 0;
-    return result;
+#if NT_GFX_CAPTURE_ENABLED
+const char *nt_gfx_gl_call_name(uint32_t call) {
+#define NT_GFX_GL_CALL_NAME_(name) #name,
+    static const char *const names[NT_GFX_GL_COUNT] = {NULL, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_NAME_)};
+#undef NT_GFX_GL_CALL_NAME_
+    return call < NT_GFX_GL_COUNT ? names[call] : NULL;
 }
+#endif
 
 void nt_gfx_observe_context_loss(void) {
     if (g_nt_gfx_observation.tick_open && !g_nt_gfx_observation.tick_aborted) {

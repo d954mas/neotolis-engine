@@ -405,7 +405,7 @@ is UNAVAILABLE. Readers early in a callback, before its draws, read `last_frame`
 A no-render tick reports zero draws; old geometry is never reused. A tick is
 ABORTED only when a loss is observed during it or the context is still lost at
 its end; a tick whose begin_frame restores a lost context and then completes is
-COMPLETE. Work outside ticks shows only in lifetime upload totals.
+COMPLETE.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
@@ -421,18 +421,21 @@ fake cannot claim measured GL calls. `NT_GFX_CAPTURE_ENABLED` is a numeric
 interface definition published by the interface target, so every consumer sees
 the same configuration.
 
-`nt_gfx_upload_totals_read` exposes CPU payload calls/bytes for one gfx init
-lifetime, including work outside ticks; it is available only on GL/WebGL. Upload sites advance these totals and the live tick counters together,
-so per-tick payload fields need no baseline. NULL-data storage and generated
-mips are excluded; non-NULL orphaning counts once. Texture bytes use the actual
-GPU format for each mip/subrectangle. Failed creates retain already-issued work.
+`gl[]` counts every issued GL call by `nt_gfx_gl_call_t`, queries included:
+the backend issues GL only through its `NT_GL*` funnel, which counts, requires
+an open tick and (with capture) records in the same expression that issues the
+call; a grep gate rejects any bare `gl*` call in `engine/graphics/gl`. The
+single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
+and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
+directly (`getExtension`) are counted and recorded at their C call site; the
+JS that Emscripten's GL layer runs behind a C call (lazy uniform location
+lookup, state shadowing) is a documented boundary: counters and capture see the
+C API call. Payload fields count calls with non-NULL CPU data and their bytes,
+in the same funnel; NULL storage and generated mips are excluded, non-NULL
+orphaning counts once, texture bytes use the actual GPU format for each
+mip/subrectangle, and failed creates keep already-issued work. Requests count
+accepted frontend operations; requests minus calls is not a cache-skip count.
 Sequence and context identifiers reset at initialization.
-
-Bind requests count accepted frontend operations; call fields count actual GL
-calls, including temporary program, service VAO and upload texture bindings.
-Requests minus calls is not a cache-skip count. Uniform calls include link-time
-sampler assignments and uniform-block binding assignments. UBO binds are unconditional; attribute counters count pointer
-specifications for static/instance layouts respectively.
 
 Command recording starts disabled. `nt_gfx_desc_t.capture_capacity` reserves one
 event array at init (default zero); enabling capture without capacity asserts.
@@ -475,8 +478,9 @@ the enclosing BEGIN names the frontend operation. Each issued call is recorded
 exactly once, at the call site, by the same statement that issues it.
 `backend.args` follows the GL integer argument order; pointer payload, readback
 output and debug-label arguments are presence bits, gen/delete arguments contain
-the count followed by each name, `glCreate*` records the returned name, and
-indexed offsets are byte offsets. Readback, timer-query and debug-group calls are
+the count followed by each name, a returned value (`glCreate*`, `glGetError`,
+locations, status) follows the arguments, and indexed offsets are byte offsets.
+Output pointers are presence bits; their written values are not recorded. Readback, timer-query and debug-group calls are
 issued calls too and are recorded like any other.
 Float arguments occupy `backend.values` in float argument order. Matrix and vec4
 calls use `uniform` with the location in `name`, float count in `count`, and

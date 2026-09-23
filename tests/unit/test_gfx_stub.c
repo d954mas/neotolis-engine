@@ -110,7 +110,6 @@ static void test_stub_observation_is_unavailable(void) {
     nt_gfx_begin_tick();
     nt_gfx_begin_tick();
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.availability);
-    TEST_ASSERT_FALSE(nt_gfx_upload_totals_read().available);
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL(NT_GFX_FRAME_UNAVAILABLE, g_nt_gfx.last_frame.status);
     TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.last_frame.counters.frame_sequence);

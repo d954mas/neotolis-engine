@@ -247,7 +247,7 @@ relinked executables cause false failures. `build/.check.lock` rejects a second
 check with exit 2; remove it only after confirming the owner is dead.
 
 The default gate checks module composition, EM_JS_DEPS, doc links/spec-index
-coverage, CRT pins and test registration; builds native-debug; runs ctest; and
+coverage, CRT pins, the GL call funnel (`scripts/check_gl_calls.py`) and test registration; builds native-debug; runs ctest; and
 checks changed files with clang-format/clang-tidy. Changed headers trigger full
 tidy. The three atlas benchmark guards run when builder/atlas paths change, or
 always with `--push`/`--full`. Warm checks are much faster than the initial pack

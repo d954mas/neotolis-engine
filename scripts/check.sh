@@ -156,12 +156,13 @@ run_tidy_gate() {
     fi
 }
 
-step "gates (module composition, EM_JS_DEPS, doc links, CRT pins, test registration)"
+step "gates (module composition, EM_JS_DEPS, doc links, CRT pins, GL funnel, test registration)"
 bash scripts/check_no_real_impl_links.sh
 bash scripts/check_link_failure_loud.sh
 bash scripts/check_emjs_deps.sh
 bash scripts/check_doc_links.sh
 bash scripts/check_crt_pins.sh
+python scripts/check_gl_calls.py
 # Registration gate reads the tidy-ci compile DB + CTestTestfiles (devapi ON,
 # so devapi-gated tests are visible) — keep the DB fresh first.
 ensure_tidy_ci

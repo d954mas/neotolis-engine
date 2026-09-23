@@ -30,7 +30,12 @@ void nt_gfx_end_frame(void) {}
 
 void nt_gfx_begin_tick(void) {}
 void nt_gfx_end_tick(void) {}
-nt_gfx_upload_totals_t nt_gfx_upload_totals_read(void) { return (nt_gfx_upload_totals_t){0}; }
+#if NT_GFX_CAPTURE_ENABLED
+const char *nt_gfx_gl_call_name(uint32_t call) {
+    (void)call;
+    return NULL;
+}
+#endif
 void nt_gfx_capture_set_enabled(bool enabled) { (void)enabled; }
 nt_gfx_capture_view_t nt_gfx_capture_read(void) { return (nt_gfx_capture_view_t){0}; }
 

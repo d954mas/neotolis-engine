@@ -104,6 +104,8 @@ void setUp(void) {
     s_pop_count = 0;
     s_available_count = 0;
     s_result_count = 0;
+    /* Backend-only fixture: stands in for the open tick every GL call requires. */
+    g_nt_gfx_observation.tick_open = true;
     nt_gfx_backend_drop_timer_segments();
     nt_gfx_gl_init_context_features();
     nt_gfx_backend_set_gpu_timing_enabled(true);

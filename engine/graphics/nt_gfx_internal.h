@@ -8,7 +8,6 @@
 // #region observation storage and owning-site counters
 typedef struct {
     nt_gfx_backend_kind_t backend; /* set by the backend at init */
-    nt_gfx_upload_totals_t uploads;
     bool tick_open;
     bool tick_aborted;
     bool lifecycle; /* inside nt_gfx_init / nt_gfx_shutdown: the only gfx work allowed outside a tick */
@@ -29,6 +28,9 @@ typedef struct {
     nt_gfx_event_t *events;
     uint32_t capacity;
     nt_gfx_capture_view_t view;
+    nt_gfx_event_t *call; /* issued-call record being filled; NULL when not recording */
+    uint32_t call_ints;
+    uint32_t call_floats;
 } nt_gfx_capture_state_t;
 
 extern nt_gfx_capture_state_t g_nt_gfx_capture;
@@ -45,6 +47,33 @@ static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
     memcpy(&capture->events[capture->view.count++], event, sizeof(*event));
 }
 static inline bool nt_gfx_capture_accepts(void) { return g_nt_gfx_capture.recording && !g_nt_gfx_capture.view.overflow; }
+/* Issued-call records are filled in place: open reserves the next slot, commit publishes it. */
+static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
+    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+    capture->call = NULL;
+    capture->call_ints = 0;
+    capture->call_floats = 0;
+    if (!nt_gfx_capture_accepts()) {
+        return;
+    }
+    if (capture->view.count == capture->capacity) {
+        capture->view.overflow = true;
+        return;
+    }
+    nt_gfx_event_t *event = &capture->events[capture->view.count];
+    memset(event, 0, sizeof(*event));
+    event->context_sequence = capture->context_sequence;
+    event->kind = NT_GFX_EVENT_BACKEND;
+    event->operation = NT_GFX_OP_STATE;
+    event->detail = (uint32_t)call;
+    capture->call = event;
+}
+static inline void nt_gfx_capture_commit_call(void) {
+    if (g_nt_gfx_capture.call != NULL) {
+        g_nt_gfx_capture.view.count++;
+        g_nt_gfx_capture.call = NULL;
+    }
+}
 /* Arguments and record construction disappear entirely in capture-OFF builds. */
 #define NT_GFX_RECORD(event_kind, event_operation, ...)                                                                                                                                                \
     do {                                                                                                                                                                                               \
@@ -108,27 +137,6 @@ static inline void nt_gfx_observe_count(uint32_t *counter) {
     (*counter)++;
 }
 #define NT_GFX_COUNT(field) nt_gfx_observe_count(&g_nt_gfx.counters.field)
-static inline void nt_gfx_observe_payload(uint64_t *calls, uint64_t *bytes, uint64_t size) {
-    NT_ASSERT(*calls != UINT64_MAX && size <= UINT64_MAX - *bytes);
-    (*calls)++;
-    *bytes += size;
-}
-/* Lifetime totals and the live tick counters advance together; begin_tick resets only the latter. */
-static inline void nt_gfx_observe_upload(bool texture, const void *data, uint64_t size) {
-    if (data == NULL) {
-        return;
-    }
-    nt_gfx_upload_totals_t *totals = &g_nt_gfx_observation.uploads;
-    nt_gfx_counters_t *live = &g_nt_gfx.counters;
-    if (texture) {
-        nt_gfx_observe_payload(&totals->texture_calls, &totals->texture_bytes, size);
-        nt_gfx_observe_payload(&live->texture_upload_calls, &live->texture_upload_bytes, size);
-    } else {
-        nt_gfx_observe_payload(&totals->buffer_calls, &totals->buffer_bytes, size);
-        nt_gfx_observe_payload(&live->buffer_upload_calls, &live->buffer_upload_bytes, size);
-    }
-}
-#define NT_GFX_COUNT_UPLOAD(texture, data, size) nt_gfx_observe_upload(texture, data, size)
 // #endregion
 
 /* ---- Render state machine ---- */
