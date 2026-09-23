@@ -608,11 +608,9 @@ static void frame(void) {
             if (s_stats_accum >= 1.0) {
                 float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
                 float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
-                const uint64_t vertices = g_nt_gfx.frame_stats.vertices;
-                const uint64_t indices = g_nt_gfx.frame_stats.indices;
-                const uint64_t instances = g_nt_gfx.frame_stats.instances;
                 nt_log_info("FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%" PRIu64 " verts=%" PRIu64 " tris=%" PRIu64 " items=%u/%u", (double)avg_fps, (double)min_fps, (double)g_nt_app.dt,
-                            (double)s_move_speed, g_nt_gfx.frame_stats.draw_calls, instances, vertices, indices / 3, item_count, s_entity_count);
+                            (double)s_move_speed, g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.instances, g_nt_gfx.frame_stats.vertices, g_nt_gfx.frame_stats.indices / 3, item_count,
+                            s_entity_count);
                 s_stats_accum = 0.0;
                 s_stats_frames = 0;
                 s_stats_max_dt = 0.0F;

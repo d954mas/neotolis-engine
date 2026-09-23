@@ -398,8 +398,8 @@ or shutdown. Copy it by value for caller-owned history. A no-render callback
 still produces a new sequence and zero draws; old geometry is never reused.
 Existing `frame_stats` remains the only live draw/geometry source, reset by
 gfx begin_frame; `nt_gfx_get_frame_draw_calls` retains its uint32 live contract.
-With counters compiled in, existing geometry and instance fields are uint64,
-including multiplication before accumulation. OFF keeps their legacy widths.
+Geometry and instance fields are always uint64, independent of counter options;
+operands widen to uint64 before multiplication and accumulation asserts overflow.
 Vertices/indices are submitted counts, multiplied by instance count for
 instanced calls; instances counts only instances in instanced calls. These are
 not rasterized triangles or vertex-shader invocations.

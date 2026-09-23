@@ -499,15 +499,9 @@ typedef struct {
 typedef struct {
     uint32_t draw_calls;           /* all GPU draw calls */
     uint32_t draw_calls_instanced; /* of those, instanced */
-#if NT_GFX_COUNTERS_ENABLED
     uint64_t vertices;
     uint64_t indices;
-    uint64_t instances;
-#else
-    uint32_t vertices;
-    uint32_t indices;
-    uint32_t instances; /* total objects drawn via instanced calls */
-#endif
+    uint64_t instances; /* total objects drawn via instanced calls */
 } nt_gfx_frame_stats_t;
 
 // #region frame observation

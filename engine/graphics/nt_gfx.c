@@ -2458,13 +2458,9 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls <= UINT32_MAX - (1));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls != UINT32_MAX);
     g_nt_gfx.frame_stats.draw_calls++;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (num_vertices));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - num_vertices);
     g_nt_gfx.frame_stats.vertices += num_vertices;
     nt_gfx_backend_draw(first_vertex, num_vertices);
     NT_GFX_RESULT(NT_GFX_OP_DRAW, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
@@ -2499,21 +2495,13 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     assert_vertex_input_bound();
     assert_instance_attribs_pointed();
 
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls <= UINT32_MAX - (1));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls != UINT32_MAX);
     g_nt_gfx.frame_stats.draw_calls++;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls_instanced <= UINT32_MAX - (1));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls_instanced != UINT32_MAX);
     g_nt_gfx.frame_stats.draw_calls_instanced++;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count));
-#endif
-    g_nt_gfx.frame_stats.vertices += NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.instances <= UINT64_MAX - (instance_count));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (uint64_t)num_vertices * instance_count);
+    g_nt_gfx.frame_stats.vertices += (uint64_t)num_vertices * instance_count;
+    NT_ASSERT(g_nt_gfx.frame_stats.instances <= UINT64_MAX - instance_count);
     g_nt_gfx.frame_stats.instances += instance_count;
     nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
     NT_GFX_RESULT(NT_GFX_OP_DRAW_INSTANCED, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
@@ -2549,17 +2537,11 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();
 
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls <= UINT32_MAX - (1));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls != UINT32_MAX);
     g_nt_gfx.frame_stats.draw_calls++;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (num_vertices));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - num_vertices);
     g_nt_gfx.frame_stats.vertices += num_vertices;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.indices <= UINT64_MAX - (num_indices));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.indices <= UINT64_MAX - num_indices);
     g_nt_gfx.frame_stats.indices += num_indices;
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
     NT_GFX_RESULT(NT_GFX_OP_DRAW_INDEXED, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);
@@ -2596,25 +2578,15 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     assert_indexed_draw_has_index_type();
     assert_instance_attribs_pointed();
 
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls <= UINT32_MAX - (1));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls != UINT32_MAX);
     g_nt_gfx.frame_stats.draw_calls++;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls_instanced <= UINT32_MAX - (1));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.draw_calls_instanced != UINT32_MAX);
     g_nt_gfx.frame_stats.draw_calls_instanced++;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count));
-#endif
-    g_nt_gfx.frame_stats.vertices += NT_GFX_GEOMETRY_COUNT(num_vertices) * instance_count;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.indices <= UINT64_MAX - (NT_GFX_GEOMETRY_COUNT(num_indices) * instance_count));
-#endif
-    g_nt_gfx.frame_stats.indices += NT_GFX_GEOMETRY_COUNT(num_indices) * instance_count;
-#if NT_GFX_COUNTERS_ENABLED
-    NT_ASSERT(g_nt_gfx.frame_stats.instances <= UINT64_MAX - (instance_count));
-#endif
+    NT_ASSERT(g_nt_gfx.frame_stats.vertices <= UINT64_MAX - (uint64_t)num_vertices * instance_count);
+    g_nt_gfx.frame_stats.vertices += (uint64_t)num_vertices * instance_count;
+    NT_ASSERT(g_nt_gfx.frame_stats.indices <= UINT64_MAX - (uint64_t)num_indices * instance_count);
+    g_nt_gfx.frame_stats.indices += (uint64_t)num_indices * instance_count;
+    NT_ASSERT(g_nt_gfx.frame_stats.instances <= UINT64_MAX - instance_count);
     g_nt_gfx.frame_stats.instances += instance_count;
     nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
     NT_GFX_RESULT(NT_GFX_OP_DRAW_INDEXED_INSTANCED, NT_GFX_OBJECT_PIPELINE, s_gfx.bound_pipeline, NT_GFX_REASON_ACCEPTED);

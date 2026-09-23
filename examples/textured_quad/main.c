@@ -369,10 +369,8 @@ static void frame(void) {
         /* One-time log to verify batching */
         static bool s_stats_logged;
         if (!s_stats_logged) {
-            const uint64_t instances = g_nt_gfx.frame_stats.instances;
-            (void)instances;
-            nt_log_info(">> Render stats: %u draw calls, %u instanced, %" PRIu64 " instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced, instances,
-                        item_count);
+            nt_log_info(">> Render stats: %u draw calls, %u instanced, %" PRIu64 " instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
+                        g_nt_gfx.frame_stats.instances, item_count);
             s_stats_logged = true;
         }
     }

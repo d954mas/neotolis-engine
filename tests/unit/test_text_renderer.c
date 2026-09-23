@@ -788,8 +788,8 @@ void test_font_cache_flush_preserves_the_entire_run(void) {
     nt_gfx_end_frame();
 
     TEST_ASSERT_GREATER_THAN_UINT32(generation, nt_font_get_cache_generation(tiny_font));
-    TEST_ASSERT_EQUAL_UINT32(36U, g_nt_gfx.frame_stats.indices);
-    TEST_ASSERT_EQUAL_UINT32(24U, g_nt_gfx.frame_stats.vertices);
+    TEST_ASSERT_EQUAL_UINT64(36U, g_nt_gfx.frame_stats.indices);
+    TEST_ASSERT_EQUAL_UINT64(24U, g_nt_gfx.frame_stats.vertices);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 
     nt_text_renderer_set_underline(true);
@@ -800,8 +800,8 @@ void test_font_cache_flush_preserves_the_entire_run(void) {
     nt_text_renderer_flush();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(48U, g_nt_gfx.frame_stats.indices);
-    TEST_ASSERT_EQUAL_UINT32(32U, g_nt_gfx.frame_stats.vertices);
+    TEST_ASSERT_EQUAL_UINT64(48U, g_nt_gfx.frame_stats.indices);
+    TEST_ASSERT_EQUAL_UINT64(32U, g_nt_gfx.frame_stats.vertices);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
     nt_text_renderer_set_font(s_font);
     nt_font_destroy(tiny_font);
@@ -837,7 +837,7 @@ void test_decoration_only_run_opens_its_pipeline(void) {
     nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(0U);
     TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(material)->program.id, draw.program.id);
     TEST_ASSERT_EQUAL_UINT32(12U, draw.num_indices);
-    TEST_ASSERT_EQUAL_UINT32(8U, g_nt_gfx.frame_stats.vertices); /* glyph + decoration quad */
+    TEST_ASSERT_EQUAL_UINT64(8U, g_nt_gfx.frame_stats.vertices); /* glyph + decoration quad */
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
     nt_text_renderer_set_font(s_font);
     nt_font_destroy(font);
@@ -901,7 +901,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
 
         TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count());
         TEST_ASSERT_EQUAL_UINT32(binds, nt_gfx_fake_bound_texture_count());
-        TEST_ASSERT_EQUAL_UINT32(0U, g_nt_gfx.frame_stats.indices);
+        TEST_ASSERT_EQUAL_UINT64(0U, g_nt_gfx.frame_stats.indices);
         TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
         TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 
@@ -917,8 +917,8 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
         nt_gfx_end_pass();
         nt_gfx_end_frame();
         TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_fake_update_texture_count());
-        TEST_ASSERT_EQUAL_UINT32(30U, g_nt_gfx.frame_stats.indices);
-        TEST_ASSERT_EQUAL_UINT32(20U, g_nt_gfx.frame_stats.vertices);
+        TEST_ASSERT_EQUAL_UINT64(30U, g_nt_gfx.frame_stats.indices);
+        TEST_ASSERT_EQUAL_UINT64(20U, g_nt_gfx.frame_stats.vertices);
         TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
         nt_text_renderer_set_font(s_font);
         nt_font_destroy(font);
@@ -1050,8 +1050,8 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT16(1U, nt_text_renderer_test_pipeline_cache_count());
     TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_gfx_fake_update_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(12U, g_nt_gfx.frame_stats.indices);
-    TEST_ASSERT_EQUAL_UINT32(8U, g_nt_gfx.frame_stats.vertices);
+    TEST_ASSERT_EQUAL_UINT64(12U, g_nt_gfx.frame_stats.indices);
+    TEST_ASSERT_EQUAL_UINT64(8U, g_nt_gfx.frame_stats.vertices);
 }
 
 /* ---- Test 12: TEXT-01 — _draw_n produces byte-identical vertex stream to _draw ---- */

@@ -493,14 +493,11 @@ static void frame(void) {
         float render_avg = s_render_sum / (float)s_dt_count;
         nt_gfx_frame_stats_t stats = g_nt_gfx.frame_stats;
         uint32_t batch_dc = stats.draw_calls - stats.draw_calls_instanced;
-        uint64_t vertices = stats.vertices;
-        uint64_t indices = stats.indices;
-        uint64_t instances = stats.instances;
-        uint64_t tris = indices / 3;
+        uint64_t tris = stats.indices / 3;
         printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f\n"
                "        dc=%u (batch=%u inst=%u)  obj=%" PRIu64 "  verts=%" PRIu64 "  tris=%" PRIu64 "  idx=%" PRIu64 "\n",
                s_shape_count, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)render_avg, (double)s_render_max, (double)(1.0F / avg), stats.draw_calls, batch_dc,
-               stats.draw_calls_instanced, instances, vertices, tris, indices);
+               stats.draw_calls_instanced, stats.instances, stats.vertices, tris, stats.indices);
         s_dt_max = 0.0F;
         s_dt_sum = 0.0F;
         s_dt_count = 0;
