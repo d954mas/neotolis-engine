@@ -725,7 +725,8 @@ typedef enum {
     NT_GFX_GL_CLEARDEPTH,
 } nt_gfx_gl_call_t;
 
-/* Pointer-free records. BEGIN/RESULT delimit nested operations; INITIAL and
+/* Pointer-free records. Each public operation is one BEGIN (request) and one
+ * RESULT (reason; creators add the handle); nested operations sit between. INITIAL and
  * DEFINITION describe inherited or resource state and never represent issued
  * calls; ARGUMENT carries per-element request arguments of the enclosing BEGIN.
  * object is a full typed frontend handle; raw names live only in backend data

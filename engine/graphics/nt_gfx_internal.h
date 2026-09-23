@@ -53,13 +53,40 @@ static inline void nt_gfx_capture_append(const nt_gfx_event_t *event) {
 #define NT_GFX_RECORD(...) ((void)0)
 #endif
 
+/* One public operation = one BEGIN and one END. BEGIN records the request and
+ * keeps op/kind/object in a wrapper-local scope, so operations nested inside the
+ * implementation cannot clobber them; END records the reason the implementation
+ * returned. Capture-OFF builds keep only the reason's evaluation. */
 #if NT_GFX_CAPTURE_ENABLED
-static inline void nt_gfx_capture_result(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object, nt_gfx_event_reason_t reason) {
-    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, operation, event.object_kind = kind; event.object = object; event.reason = reason);
+typedef struct {
+    nt_gfx_operation_t operation;
+    nt_gfx_object_kind_t kind;
+    uint32_t object;
+} nt_gfx_scope_t;
+
+static inline void nt_gfx_capture_result(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_event_reason_t reason) {
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event.object_kind = scope->kind; event.object = object; event.reason = reason);
 }
-#define NT_GFX_RESULT(operation, kind, object, reason) nt_gfx_capture_result(operation, kind, object, reason)
+#define NT_GFX_BEGIN(scope_op, scope_kind, scope_object)                                                                                                                                               \
+    const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event.object_kind = (scope_kind); event.object = (scope_object))
+/* The trailing statements fill the request fields of the BEGIN record. */
+#define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...)                                                                                                                                  \
+    const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event.object_kind = (scope_kind); event.object = (scope_object); __VA_ARGS__)
+#define NT_GFX_END(reason) nt_gfx_capture_result(&nt_gfx_scope, nt_gfx_scope.object, (reason))
+/* Creators end with the handle they produced (zero on failure); the reason is
+ * evaluated first so the implementation has written the handle. */
+#define NT_GFX_END_OBJECT(reason, created)                                                                                                                                                             \
+    do {                                                                                                                                                                                               \
+        const nt_gfx_event_reason_t nt_gfx_reason = (reason);                                                                                                                                          \
+        nt_gfx_capture_result(&nt_gfx_scope, (created), nt_gfx_reason);                                                                                                                                \
+    } while (0)
 #else
-#define NT_GFX_RESULT(...) ((void)0)
+#define NT_GFX_BEGIN(scope_op, scope_kind, scope_object) ((void)0)
+#define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...) ((void)0)
+#define NT_GFX_END(reason) ((void)(reason))
+#define NT_GFX_END_OBJECT(reason, created) ((void)(reason))
 #endif
 
 /* Marks the open tick aborted once; outside a tick a loss is not attributed. */

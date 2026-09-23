@@ -690,7 +690,6 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
 #endif
 
     if (!nt_gfx_gl_ctx_create(&s_init_desc)) {
-        NT_GFX_RESULT(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_BACKEND_FAILURE);
         return false;
     }
 
@@ -708,7 +707,6 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     nt_gfx_gl_cache_ground_state();
 
     nt_gfx_gl_init_context_features();
-    NT_GFX_RESULT(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_ACCEPTED);
     return true;
 }
 
@@ -2623,13 +2621,11 @@ void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_in
 
 /* ---- Context loss recovery ---- */
 
-bool nt_gfx_backend_recreate_all_resources(void) {
-    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, NT_GFX_OP_CONTEXT, event.reason = NT_GFX_REASON_NONE;);
+static nt_gfx_event_reason_t recreate_all_resources(void) {
     /* Destroy old context and create a fresh one. */
     nt_gfx_gl_ctx_destroy();
     if (!nt_gfx_gl_ctx_create(&s_init_desc)) {
-        NT_GFX_RESULT(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_BACKEND_FAILURE);
-        return false;
+        return NT_GFX_REASON_BACKEND_FAILURE;
     }
 #if NT_GFX_CAPTURE_ENABLED
     NT_ASSERT(g_nt_gfx_capture.context_sequence != UINT64_MAX);
@@ -2660,6 +2656,12 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     }
     nt_gfx_gl_cache_ground_state();
     nt_gfx_gl_init_context_features();
-    NT_GFX_RESULT(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0, NT_GFX_REASON_ACCEPTED);
-    return true;
+    return NT_GFX_REASON_ACCEPTED;
+}
+
+bool nt_gfx_backend_recreate_all_resources(void) {
+    NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
+    const nt_gfx_event_reason_t reason = recreate_all_resources();
+    NT_GFX_END(reason);
+    return reason == NT_GFX_REASON_ACCEPTED;
 }

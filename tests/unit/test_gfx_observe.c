@@ -228,6 +228,42 @@ static void test_sampler_cache_hit_defines_nothing(void) {
     TEST_ASSERT_TRUE(cache);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks nesting, pairing and creator handles
+static void test_every_operation_records_one_begin_and_one_result(void) {
+    nt_gfx_capture_set_enabled(true);
+    nt_gfx_begin_tick();
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(NULL).id);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_end_tick();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    nt_gfx_operation_t stack[8] = {0};
+    uint32_t depth = 0;
+    bool target_result = false;
+    bool invalid_buffer = false;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind == NT_GFX_EVENT_BEGIN) {
+            TEST_ASSERT_LESS_THAN_UINT32(8, depth);
+            stack[depth++] = e->operation;
+        } else if (e->kind == NT_GFX_EVENT_RESULT) {
+            TEST_ASSERT_GREATER_THAN_UINT32(0, depth);
+            TEST_ASSERT_EQUAL(stack[--depth], e->operation);
+            target_result |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_RENDER_TARGET && e->object == target.id && e->reason == NT_GFX_REASON_ACCEPTED;
+            invalid_buffer |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == 0 && e->reason == NT_GFX_REASON_INVALID_ARGUMENT;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, depth);
+    TEST_ASSERT_TRUE(target_result);
+    TEST_ASSERT_TRUE(invalid_buffer);
+    nt_gfx_destroy_render_target(target);
+}
+
 static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 24});
     nt_gfx_capture_set_enabled(true);
@@ -385,6 +421,7 @@ int main(void) {
     RUN_TEST(test_restore_frame_completes_under_new_context_sequence);
     RUN_TEST(test_overflow_and_loss_finalize_aborted);
     RUN_TEST(test_sampler_cache_hit_defines_nothing);
+    RUN_TEST(test_every_operation_records_one_begin_and_one_result);
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);

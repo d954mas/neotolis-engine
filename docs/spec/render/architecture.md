@@ -447,7 +447,12 @@ and redirecting the saved view's pointer to the owned array. An empty view has
 a NULL pointer. The finalized view retains its matching tick snapshot by value even after
 later unrecorded ticks overwrite `g_nt_gfx.last_frame`.
 
-BEGIN/RESULT records delimit nested operations. `ARGUMENT` records are request
+Every recorded public operation produces exactly one BEGIN, carrying its
+request arguments, and one RESULT, carrying the outcome reason; a creator's
+RESULT carries the new handle (zero on failure), while its backend slot and
+names are in the DEFINITION record. Operations issued inside another operation
+(render-target attachments, default samplers) nest between its BEGIN and
+RESULT. `ARGUMENT` records are request
 arguments belonging to the enclosing BEGIN (one per texture binding of a texture
 set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
 prove GL success or GPU completion. Metadata distinguishes recording from
