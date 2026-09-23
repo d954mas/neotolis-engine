@@ -2,8 +2,8 @@
 #define NT_GFX_GL_CALLS_H
 
 /* The only way the GL backend issues a GL call. Each NT_GL* form counts the
- * call in g_nt_gfx.counters.gl[] (every build), requires an open tick, and in
- * capture builds records one BACKEND event; then it issues the call.
+ * call in g_nt_gfx.counters.gl[] (every build) and in capture builds records
+ * one BACKEND event; then it issues the call.
  * scripts/check_gl_calls.py rejects any bare gl* call outside this header. */
 
 #include "core/nt_platform.h"
@@ -23,25 +23,24 @@ typedef const struct nt_gl_offset_tag *nt_gl_offset_t;
 static inline nt_gl_offset_t nt_gl_offset(uintptr_t bytes) { return (nt_gl_offset_t)bytes; } // NOLINT(performance-no-int-to-ptr)
 
 // #region counting (every build)
-/* Out of line: inlined at every call site it grew a wasm-release example by ~2%. */
-static inline void nt_gl_count(nt_gfx_gl_call_t call) { nt_gfx_count_gl_call(call); }
+/* A plain increment with a constant index: no call, branch or check per GL call.
+ * No tick check either: every backend path runs under a frontend operation whose
+ * BEGIN requires the tick, or inside nt_gfx_init/shutdown. */
+#define NT_GL_COUNT_(call) ((void)g_nt_gfx.counters.gl[call]++)
 
-static inline void nt_gl_count_payload(uint64_t *calls, uint64_t *bytes, uint64_t size) {
-    NT_ASSERT(*calls != UINT64_MAX && size <= UINT64_MAX - *bytes);
-    (*calls)++;
-    *bytes += size;
-}
-
-/* A payload counts once per call with non-NULL data; NULL storage and orphaning do not. */
+/* A payload counts once per call with non-NULL data; NULL storage and orphaning do not.
+ * `call` is a constant at every call site, so the buffer/texture choice folds away. */
 static inline void nt_gl_count_upload(nt_gfx_gl_call_t call, const void *data, uint64_t bytes) {
     if (data == NULL) {
         return;
     }
     nt_gfx_counters_t *counters = &g_nt_gfx.counters;
     if (call == NT_GFX_GL_glBufferData || call == NT_GFX_GL_glBufferSubData) {
-        nt_gl_count_payload(&counters->buffer_upload_calls, &counters->buffer_upload_bytes, bytes);
+        counters->buffer_upload_calls++;
+        counters->buffer_upload_bytes += bytes;
     } else {
-        nt_gl_count_payload(&counters->texture_upload_calls, &counters->texture_upload_bytes, bytes);
+        counters->texture_upload_calls++;
+        counters->texture_upload_bytes += bytes;
     }
 #if NT_GFX_CAPTURE_ENABLED
     if (g_nt_gfx_capture.call != NULL) {
@@ -53,10 +52,6 @@ static inline void nt_gl_count_upload(nt_gfx_gl_call_t call, const void *data, u
 
 // #region recording (capture builds)
 #if NT_GFX_CAPTURE_ENABLED
-static inline void nt_gl_open(nt_gfx_gl_call_t call) {
-    nt_gl_count(call);
-    nt_gfx_capture_open_call(call);
-}
 static inline void nt_gl_put_unsigned(uint64_t value) {
     nt_gfx_event_t *event = g_nt_gfx_capture.call;
     if (event != NULL) {
@@ -150,14 +145,14 @@ static inline void nt_gl_put_callback(GLDEBUGPROC callback) { nt_gl_put_unsigned
 #define NT_GL_LAST_3(a, b, c) c
 #define NT_GL_LAST_4(a, b, c, d) d
 
-#define NT_GL_OPEN_(call) nt_gl_open(call)
+#define NT_GL_OPEN_(call) (NT_GL_COUNT_(call), nt_gfx_capture_open_call(call))
 #define NT_GL_ARGS_(...) (NT_GL_CAT(NT_GL_EACH_, NT_GL_NARGS(__VA_ARGS__))(__VA_ARGS__))
 #define NT_GL_NAMES_(count, names) nt_gl_put_names((count), (names))
 #define NT_GL_UNIFORM_VALUES_(float_count, location, ...) nt_gl_put_uniform((location), (float_count), NT_GL_CAT(NT_GL_LAST_, NT_GL_NARGS(location, __VA_ARGS__))(location, __VA_ARGS__))
 #define NT_GL_CLOSE_() nt_gl_close()
 #define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLint: nt_gl_close_int, GLuint: nt_gl_close_uint)(result)
 #else
-#define NT_GL_OPEN_(call) nt_gl_count(call)
+#define NT_GL_OPEN_(call) NT_GL_COUNT_(call)
 #define NT_GL_ARGS_(...) ((void)0)
 #define NT_GL_NAMES_(count, names) ((void)0)
 #define NT_GL_UNIFORM_VALUES_(float_count, location, ...) ((void)0)

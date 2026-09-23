@@ -101,11 +101,17 @@ typedef struct {
     uint32_t object;
 } nt_gfx_scope_t;
 
-/* Out of line, like the GL funnel's counter: one copy instead of one per operation. */
-nt_gfx_scope_t nt_gfx_begin_op(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object);
-void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_event_reason_t reason);
-/* Counts one issued GL call; the GL funnel's only counting path. */
-void nt_gfx_count_gl_call(nt_gfx_gl_call_t call);
+static inline nt_gfx_scope_t nt_gfx_begin_op(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object) {
+    nt_gfx_require_tick();
+    return (nt_gfx_scope_t){operation, kind, object};
+}
+
+static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_event_reason_t reason) {
+    if (reason == NT_GFX_REASON_ACCEPTED) {
+        g_nt_gfx.counters.accepted[scope->operation]++;
+    }
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event.object_kind = scope->kind; event.object = object; event.reason = reason);
+}
 
 #define NT_GFX_BEGIN(scope_op, scope_kind, scope_object)                                                                                                                                               \
     const nt_gfx_scope_t nt_gfx_scope = nt_gfx_begin_op((scope_op), (scope_kind), (scope_object));                                                                                                     \

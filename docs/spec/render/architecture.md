@@ -423,9 +423,12 @@ interface definition published by the interface target, so every consumer sees
 the same configuration.
 
 `gl[]` counts every issued GL call by `nt_gfx_gl_call_t`, queries included:
-the backend issues GL only through its `NT_GL*` funnel, which counts, requires
-an open tick and (with capture) records in the same expression that issues the
-call; a grep gate rejects any bare `gl*` call in `engine/graphics/gl`. The
+the backend issues GL only through its `NT_GL*` funnel, which counts with an
+inline constant-index increment and (with capture) records in the same
+expression that issues the call; a grep gate rejects any bare `gl*` call in
+`engine/graphics/gl`. The funnel does no per-call tick check: every backend
+path runs under a frontend operation whose BEGIN requires the tick, or inside
+`nt_gfx_init`/`nt_gfx_shutdown`. The
 single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
 and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
 directly (`getExtension`) are counted and recorded at their C call site; the

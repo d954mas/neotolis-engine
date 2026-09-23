@@ -215,27 +215,6 @@ const char *nt_gfx_gl_call_name(uint32_t call) {
 }
 #endif
 
-nt_gfx_scope_t nt_gfx_begin_op(nt_gfx_operation_t operation, nt_gfx_object_kind_t kind, uint32_t object) {
-    nt_gfx_require_tick();
-    return (nt_gfx_scope_t){operation, kind, object};
-}
-
-void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_event_reason_t reason) {
-    if (reason == NT_GFX_REASON_ACCEPTED) {
-        uint32_t *count = &g_nt_gfx.counters.accepted[scope->operation];
-        NT_ASSERT(*count != UINT32_MAX);
-        (*count)++;
-    }
-    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event.object_kind = scope->kind; event.object = object; event.reason = reason);
-}
-
-void nt_gfx_count_gl_call(nt_gfx_gl_call_t call) {
-    nt_gfx_require_tick();
-    uint32_t *count = &g_nt_gfx.counters.gl[call];
-    NT_ASSERT(*count != UINT32_MAX);
-    (*count)++;
-}
-
 void nt_gfx_observe_context_loss(void) {
     if (g_nt_gfx_observation.tick_open && !g_nt_gfx_observation.tick_aborted) {
         g_nt_gfx_observation.tick_aborted = true;
