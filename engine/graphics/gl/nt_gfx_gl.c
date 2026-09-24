@@ -111,13 +111,6 @@ typedef struct {
     uint8_t sampler_count;
 } nt_gfx_gl_program_t;
 
-typedef struct {
-    GLuint fbo;
-    GLuint depth_rbo;
-    uint16_t width;
-    uint16_t height;
-} nt_gfx_gl_render_target_t;
-
 /* Static attrs and EBO are baked; instance pointers are re-pointed per draw.
  * Keeping only the instance layout avoids ~200 B per vertex-input slot. */
 typedef struct {
@@ -139,7 +132,7 @@ static nt_gfx_gl_vertex_input_t *s_vertex_inputs; /* vertex-input VAOs, indexed 
 static GLuint *s_buffer_gl;                       /* GL buffer names, indexed by slot */
 static GLenum *s_buffer_targets;                  /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
 static GLuint *s_texture_gl;                      /* GL texture names, indexed by slot */
-static nt_gfx_gl_render_target_t *s_render_targets;
+static GLuint *s_render_target_gl;                /* GL framebuffer names, indexed by slot */
 static GLuint s_bound_framebuffer;
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
@@ -305,11 +298,10 @@ void nt_gfx_backend_capture_initial_state(void) {
         }
     }
     for (uint32_t i = 1; i <= s_init_desc.max_render_targets; i++) {
-        if (s_render_targets[i].fbo == 0) {
+        if (s_render_target_gl[i] == 0) {
             continue;
         }
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = i; event->data.backend.args[1] = s_render_targets[i].fbo;
-                      event->data.backend.args[2] = s_render_targets[i].depth_rbo;);
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = i; event->data.backend.args[1] = s_render_target_gl[i];);
     }
 }
 #endif
@@ -632,9 +624,9 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_buffer_gl = (GLuint *)calloc(s_init_desc.max_buffers + 1, sizeof(GLuint));
     s_buffer_targets = (GLenum *)calloc(s_init_desc.max_buffers + 1, sizeof(GLenum));
     s_texture_gl = (GLuint *)calloc(s_init_desc.max_textures + 1, sizeof(GLuint));
-    s_render_targets = (nt_gfx_gl_render_target_t *)calloc(s_init_desc.max_render_targets + 1, sizeof(nt_gfx_gl_render_target_t));
+    s_render_target_gl = (GLuint *)calloc(s_init_desc.max_render_targets + 1, sizeof(GLuint));
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
-    NT_ASSERT(s_programs && s_pipelines && s_vertex_inputs && s_buffer_gl && s_buffer_targets && s_texture_gl && s_render_targets && "gfx backend init: out of memory");
+    NT_ASSERT(s_programs && s_pipelines && s_vertex_inputs && s_buffer_gl && s_buffer_targets && s_texture_gl && s_render_target_gl && "gfx backend init: out of memory");
 
     nt_gfx_gl_cache_ground_state();
 
@@ -660,7 +652,7 @@ void nt_gfx_backend_shutdown(void) {
     free(s_buffer_gl);
     free(s_buffer_targets);
     free(s_texture_gl);
-    free(s_render_targets);
+    free(s_render_target_gl);
 
     s_programs = NULL;
     s_pipelines = NULL;
@@ -668,7 +660,7 @@ void nt_gfx_backend_shutdown(void) {
     s_buffer_gl = NULL;
     s_buffer_targets = NULL;
     s_texture_gl = NULL;
-    s_render_targets = NULL;
+    s_render_target_gl = NULL;
 
     s_bound_framebuffer = 0;
     /* A dead context already reclaimed the name; a GL call here would run
@@ -895,7 +887,7 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend) {
+void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend, uint16_t width, uint16_t height) {
     NT_ASSERT(desc != NULL);
     if (desc == NULL) {
         return;
@@ -904,19 +896,10 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
     GLsizei viewport_h = (GLsizei)g_nt_window.fb_height;
     GLuint fbo = 0;
     if (render_target_backend != 0) {
-        bool valid_backend = render_target_backend <= s_init_desc.max_render_targets && s_render_targets != NULL;
-        NT_ASSERT(valid_backend && "begin_pass: invalid GL render target backend");
-        if (!valid_backend) {
-            return;
-        }
-        const nt_gfx_gl_render_target_t *rt = &s_render_targets[render_target_backend];
-        NT_ASSERT(rt->fbo != 0 && "begin_pass: invalid GL render target");
-        if (rt->fbo == 0) {
-            return;
-        }
-        fbo = rt->fbo;
-        viewport_w = (GLsizei)rt->width;
-        viewport_h = (GLsizei)rt->height;
+        NT_ASSERT(render_target_backend <= s_init_desc.max_render_targets && s_render_target_gl[render_target_backend] != 0 && "begin_pass: requires a live render target");
+        fbo = s_render_target_gl[render_target_backend];
+        viewport_w = (GLsizei)width;
+        viewport_h = (GLsizei)height;
     }
     if (s_bound_framebuffer != fbo) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
@@ -1945,45 +1928,28 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     s_texture_gl[backend_handle] = 0;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, GLuint color, GLuint depth, nt_gfx_gl_render_target_t *out_rt) {
-    NT_ASSERT(desc != NULL && color != 0 && out_rt != NULL);
-    if (desc == NULL || color == 0 || out_rt == NULL) {
-        return false;
-    }
+static const GLenum s_rt_attachment_points[NT_GFX_RT_ATTACHMENTS] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT};
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
+static bool nt_gfx_gl_build_render_target(const GLuint textures[NT_GFX_RT_ATTACHMENTS], GLuint *out_fbo) {
     GLuint restore_fbo = s_bound_framebuffer;
     GLuint fbo = 0;
-    GLuint depth_rbo = 0;
     NT_GL_GEN(glGenFramebuffers, 1, &fbo);
     if (fbo == 0) {
         return false;
     }
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
     s_bound_framebuffer = fbo;
-    NT_GL(glFramebufferTexture2D, GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
-
-    if (desc->depth_storage == NT_RT_DEPTH_BUFFER) {
-        NT_GL_GEN(glGenRenderbuffers, 1, &depth_rbo);
-        if (depth_rbo == 0) {
-            NT_GL_DELETE(glDeleteFramebuffers, 1, &fbo);
-            NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, restore_fbo);
-            s_bound_framebuffer = restore_fbo;
-            return false;
+    for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
+        if (textures[i] != 0) {
+            NT_GL(glFramebufferTexture2D, GL_FRAMEBUFFER, s_rt_attachment_points[i], GL_TEXTURE_2D, textures[i], 0);
         }
-        NT_GL(glBindRenderbuffer, GL_RENDERBUFFER, depth_rbo);
-        nt_gfx_gl_fmt_t depth_fmt = nt_gfx_gl_texture_format(desc->depth_format);
-        NT_GL(glRenderbufferStorage, GL_RENDERBUFFER, depth_fmt.internal, (GLsizei)desc->width, (GLsizei)desc->height);
-        NT_GL(glFramebufferRenderbuffer, GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth_rbo);
-        NT_GL(glBindRenderbuffer, GL_RENDERBUFFER, 0);
-    } else if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
-        if (depth == 0) {
-            NT_GL_DELETE(glDeleteFramebuffers, 1, &fbo);
-            NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, restore_fbo);
-            s_bound_framebuffer = restore_fbo;
-            return false;
-        }
-        NT_GL(glFramebufferTexture2D, GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
+    }
+    /* GL 3.3 core reports a draw/read buffer without an attachment as incomplete. */
+    if (textures[NT_GFX_RT_COLOR] == 0) {
+        const GLenum none = GL_NONE;
+        NT_GL(glDrawBuffers, 1, &none);
+        NT_GL(glReadBuffer, GL_NONE);
     }
 
     GLenum status = NT_GL_RET(glCheckFramebufferStatus, GL_FRAMEBUFFER);
@@ -1991,213 +1957,53 @@ static bool nt_gfx_gl_build_render_target(const nt_render_target_desc_t *desc, G
         if (!nt_gfx_gl_ctx_query_lost()) {
             NT_LOG_ERROR("render target incomplete: GL status 0x%04X", (unsigned)status);
         }
-        if (depth_rbo != 0) {
-            NT_GL_DELETE(glDeleteRenderbuffers, 1, &depth_rbo);
-        }
         NT_GL_DELETE(glDeleteFramebuffers, 1, &fbo);
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, restore_fbo);
         s_bound_framebuffer = restore_fbo;
         return false;
     }
 
-    *out_rt = (nt_gfx_gl_render_target_t){
-        .fbo = fbo,
-        .depth_rbo = depth_rbo,
-        .width = desc->width,
-        .height = desc->height,
-    };
+    *out_fbo = fbo;
     NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, restore_fbo);
     s_bound_framebuffer = restore_fbo;
     return true;
 }
 
-static bool nt_gfx_gl_create_render_target_in_slot(uint32_t slot, const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
-    bool valid_args =
-        slot != 0 && slot <= s_init_desc.max_render_targets && desc != NULL && color_backend != 0 && color_backend <= s_init_desc.max_textures && s_render_targets != NULL && s_texture_gl != NULL;
-    NT_ASSERT(valid_args && "render target: invalid backend create arguments");
-    if (!valid_args) {
-        return false;
+/* Resolves texture backends to GL names; the frontend passes only live backends. */
+static void nt_gfx_gl_render_target_textures(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], GLuint out[NT_GFX_RT_ATTACHMENTS]) {
+    NT_ASSERT(s_texture_gl != NULL && (textures[NT_GFX_RT_COLOR] != 0 || textures[NT_GFX_RT_DEPTH] != 0) && "render target: no attachment");
+    for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
+        NT_ASSERT(textures[i] <= s_init_desc.max_textures && (textures[i] == 0 || s_texture_gl[textures[i]] != 0) && "render target: attachment texture has no live GL name");
+        out[i] = s_texture_gl[textures[i]];
     }
-    GLuint color = s_texture_gl[color_backend];
-    GLuint depth = 0;
-    if (color == 0) {
-        return false;
-    }
-    if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
-        bool valid_depth = depth_texture_backend != 0 && depth_texture_backend <= s_init_desc.max_textures;
-        NT_ASSERT(valid_depth && "render target: invalid depth texture backend");
-        if (!valid_depth || s_texture_gl[depth_texture_backend] == 0) {
-            return false;
-        }
-        depth = s_texture_gl[depth_texture_backend];
-    }
-    return nt_gfx_gl_build_render_target(desc, color, depth, &s_render_targets[slot]);
 }
 
-uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
-    NT_ASSERT(s_render_targets != NULL && "render target backend is not initialized");
-    if (s_render_targets == NULL) {
+uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot) {
+    /* The frontend pool owns slot allocation; the backend table mirrors it. */
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_render_targets && s_render_target_gl[slot] == 0);
+    GLuint names[NT_GFX_RT_ATTACHMENTS];
+    nt_gfx_gl_render_target_textures(textures, names);
+    if (!nt_gfx_gl_build_render_target(names, &s_render_target_gl[slot])) {
         return 0;
     }
-    uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_init_desc.max_render_targets; i++) {
-        if (s_render_targets[i].fbo == 0) {
-            slot = i;
-            break;
-        }
-    }
-    NT_ASSERT(slot != 0 && "render target backend slots exhausted before shared pool");
-    if (slot == 0) {
-        return 0;
-    }
-    if (!nt_gfx_gl_create_render_target_in_slot(slot, desc, color_backend, depth_texture_backend)) {
-        return 0;
-    }
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = slot; event->data.backend.args[1] = s_render_targets[slot].fbo;
-                  event->data.backend.args[2] = s_render_targets[slot].depth_rbo;);
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = slot; event->data.backend.args[1] = s_render_target_gl[slot];);
     return slot;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
     if (backend_handle == 0) {
         return;
     }
-    NT_ASSERT(backend_handle <= s_init_desc.max_render_targets && s_render_targets != NULL && "destroy_render_target: invalid GL backend handle");
-    nt_gfx_gl_render_target_t *rt = &s_render_targets[backend_handle];
-    if (s_bound_framebuffer == rt->fbo) {
+    NT_ASSERT(backend_handle <= s_init_desc.max_render_targets && s_render_target_gl != NULL && "destroy_render_target: invalid GL backend handle");
+    GLuint *fbo = &s_render_target_gl[backend_handle];
+    if (s_bound_framebuffer == *fbo) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
         s_bound_framebuffer = 0;
     }
-    if (rt->depth_rbo != 0) {
-        NT_GL_DELETE(glDeleteRenderbuffers, 1, &rt->depth_rbo);
+    if (*fbo != 0) {
+        NT_GL_DELETE(glDeleteFramebuffers, 1, fbo);
     }
-    if (rt->fbo != 0) {
-        NT_GL_DELETE(glDeleteFramebuffers, 1, &rt->fbo);
-    }
-    memset(rt, 0, sizeof(*rt));
-}
-
-typedef struct {
-    nt_gfx_gl_render_target_t target;
-    GLuint color;
-    GLuint depth;
-} nt_gfx_gl_resize_staging_t;
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static void nt_gfx_gl_discard_resize_staging(nt_gfx_gl_resize_staging_t *staging) {
-    if (staging->target.depth_rbo != 0) {
-        NT_GL_DELETE(glDeleteRenderbuffers, 1, &staging->target.depth_rbo);
-    }
-    if (staging->target.fbo != 0) {
-        NT_GL_DELETE(glDeleteFramebuffers, 1, &staging->target.fbo);
-    }
-    if (staging->depth != 0) {
-        NT_GL_DELETE(glDeleteTextures, 1, &staging->depth);
-    }
-    if (staging->color != 0) {
-        NT_GL_DELETE(glDeleteTextures, 1, &staging->color);
-    }
-    memset(staging, 0, sizeof(*staging));
-}
-
-static bool nt_gfx_gl_stage_render_target_resize(const nt_render_target_desc_t *desc, nt_gfx_gl_resize_staging_t *out) {
-    nt_texture_desc_t color_desc = {
-        .width = desc->width,
-        .height = desc->height,
-        .format = desc->color_format,
-        .min_filter = desc->color_min_filter,
-        .mag_filter = desc->color_mag_filter,
-        .wrap_u = desc->color_wrap_u,
-        .wrap_v = desc->color_wrap_v,
-    };
-    out->color = nt_gfx_gl_create_texture_name(&color_desc);
-    if (out->color == 0) {
-        return false;
-    }
-    if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
-        nt_texture_desc_t depth_desc = {
-            .width = desc->width,
-            .height = desc->height,
-            .format = desc->depth_format,
-            .min_filter = desc->depth_texture_min_filter,
-            .mag_filter = desc->depth_texture_mag_filter,
-            .wrap_u = desc->depth_texture_wrap_u,
-            .wrap_v = desc->depth_texture_wrap_v,
-        };
-        out->depth = nt_gfx_gl_create_texture_name(&depth_desc);
-        if (out->depth == 0) {
-            nt_gfx_gl_discard_resize_staging(out);
-            return false;
-        }
-    }
-    if (!nt_gfx_gl_build_render_target(desc, out->color, out->depth, &out->target)) {
-        nt_gfx_gl_discard_resize_staging(out);
-        return false;
-    }
-    return true;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static void nt_gfx_gl_commit_render_target_resize(uint32_t backend_handle, uint32_t color_backend, uint32_t depth_backend, const nt_render_target_desc_t *desc, nt_gfx_gl_resize_staging_t *staging) {
-    nt_gfx_gl_render_target_t old = s_render_targets[backend_handle];
-    GLuint old_color = s_texture_gl[color_backend];
-    s_texture_gl[color_backend] = staging->color;
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_TEXTURE; event->data.backend.args[0] = color_backend; event->data.backend.args[1] = staging->color;);
-    nt_gfx_gl_forget_texture(old_color);
-    NT_GL_DELETE(glDeleteTextures, 1, &old_color);
-
-    if (desc->depth_storage == NT_RT_DEPTH_TEXTURE) {
-        GLuint old_depth = s_texture_gl[depth_backend];
-        s_texture_gl[depth_backend] = staging->depth;
-        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_TEXTURE; event->data.backend.args[0] = depth_backend; event->data.backend.args[1] = staging->depth;);
-        nt_gfx_gl_forget_texture(old_depth);
-        NT_GL_DELETE(glDeleteTextures, 1, &old_depth);
-    }
-    s_render_targets[backend_handle] = staging->target;
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = backend_handle;
-                  event->data.backend.args[1] = staging->target.fbo; event->data.backend.args[2] = staging->target.depth_rbo;);
-    if (s_bound_framebuffer == old.fbo) {
-        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, staging->target.fbo);
-        s_bound_framebuffer = staging->target.fbo;
-    }
-    if (old.depth_rbo != 0) {
-        NT_GL_DELETE(glDeleteRenderbuffers, 1, &old.depth_rbo);
-    }
-    NT_GL_DELETE(glDeleteFramebuffers, 1, &old.fbo);
-    memset(staging, 0, sizeof(*staging));
-}
-
-static bool nt_gfx_gl_render_target_resize_args_valid(uint32_t backend_handle, const nt_render_target_desc_t *desc, uint32_t color_backend) {
-    return backend_handle != 0 && backend_handle <= s_init_desc.max_render_targets && desc != NULL && color_backend != 0 && color_backend <= s_init_desc.max_textures && s_render_targets != NULL &&
-           s_texture_gl != NULL;
-}
-
-static bool nt_gfx_gl_render_target_resize_depth_valid(const nt_render_target_desc_t *desc, uint32_t depth_backend) {
-    return desc->depth_storage != NT_RT_DEPTH_TEXTURE || (depth_backend != 0 && depth_backend <= s_init_desc.max_textures && s_texture_gl[depth_backend] != 0);
-}
-
-bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
-    bool valid_args = nt_gfx_gl_render_target_resize_args_valid(backend_handle, desc, color_backend);
-    NT_ASSERT(valid_args && "resize_render_target: invalid GL backend arguments");
-    if (!valid_args) {
-        return false;
-    }
-    if (s_render_targets[backend_handle].fbo == 0 || s_texture_gl[color_backend] == 0) {
-        return false;
-    }
-    bool valid_depth = nt_gfx_gl_render_target_resize_depth_valid(desc, depth_texture_backend);
-    NT_ASSERT(valid_depth && "resize_render_target: invalid depth texture backend");
-    if (!valid_depth) {
-        return false;
-    }
-
-    nt_gfx_gl_resize_staging_t staging = {0};
-    if (!nt_gfx_gl_stage_render_target_resize(desc, &staging)) {
-        return false;
-    }
-    nt_gfx_gl_commit_render_target_resize(backend_handle, color_backend, depth_texture_backend, desc, &staging);
-    return true;
+    *fbo = 0;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
@@ -2307,8 +2113,8 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     if (s_texture_gl) {
         memset(s_texture_gl, 0, (s_init_desc.max_textures + 1) * sizeof(GLuint));
     }
-    if (s_render_targets) {
-        memset(s_render_targets, 0, (s_init_desc.max_render_targets + 1) * sizeof(nt_gfx_gl_render_target_t));
+    if (s_render_target_gl) {
+        memset(s_render_target_gl, 0, (s_init_desc.max_render_targets + 1) * sizeof(GLuint));
     }
     nt_gfx_gl_cache_ground_state();
     nt_gfx_gl_init_context_features();

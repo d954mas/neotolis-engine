@@ -119,9 +119,9 @@ rejects the bind with VAO 0. Vertex inputs die with a lost context
 and are not auto-restored: loss itself frees their pool slots, so a handle
 held across a loss goes stale and `nt_gfx_vertex_input_valid` reports false.
 Renderer restore paths recreate them; caches validate on lookup and
-self-heal. This is the rule for baked objects — pipelines and vertex
-inputs, both assembled from other handles with no re-fill path: a context
-loss frees their pool slots outright. Primary resources (buffers, textures,
+self-heal. This is the rule for baked objects — pipelines, vertex
+inputs and render targets, all assembled from other handles with no re-fill
+path: a context loss frees their pool slots outright. Primary resources (buffers, textures,
 shaders, programs) instead survive a loss as husks — pool slot alive,
 backend gone — because per-frame code keeps operating on them through the
 loss window and the restore recipe has their owners destroy the old handles
@@ -284,28 +284,37 @@ pipeline, vertex input, and the logical complete texture set are pass-scoped:
 program and is discarded when that program changes or when the bound pipeline is
 destroyed. Pipeline and vertex-input binds, texture-set application,
 instance-buffer re-pointing, uniform writes and draws outside a pass assert.
-Destroying a texture or a render target inside a pass asserts: pass-scoped draw
-state may still sample it.
+Destroying a texture or a live render target inside a pass asserts: pass-scoped
+draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
 uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
-Render-target color and sampleable depth attachments are exposed as normal
-`nt_texture_t` handles for later sampling. Sampling either attachment while its
-target is the active pass would create a framebuffer feedback loop and asserts
-before any backend bind. Backend FBO/renderbuffer ids stay private to the concrete
-graphics implementation.
+A render target is a thin framebuffer object over optional attachments, color
+and depth. Each attachment is a game-owned texture that the target borrows, as a
+vertex input borrows its buffers, and lifetime follows vertex inputs: a target is
+a baked object, while its textures are primary resources. One texture may serve
+several targets, such as a depth buffer shared by two passes. Sampling an
+attachment while its target is the active pass would create a framebuffer
+feedback loop and asserts before any backend bind. Backend FBO ids stay private
+to the concrete graphics implementation. The descriptor rules, lifetime,
+context-loss behavior and queries are specified in
+[API contracts: Render-target handles](../core/api-contracts.md#render-target-handles).
 
-`nt_render_target_desc_t` explicitly selects the color format and default sampler
-state, plus depth storage (`NONE`, `BUFFER`, or `TEXTURE`) and depth format. The
-supported render-target color formats are `RGBA8` and `RGBA16F`. `NONE`
-requires `NT_TEXTURE_FORMAT_INVALID`; `BUFFER` creates a non-sampleable
-renderbuffer in the requested depth format; `TEXTURE` creates a sampleable
-texture in the requested depth format with its own filter and wrap state. The
-descriptor is retained as the single source for creation, resize, and context
-restore. A backend must not substitute its own attachment format or default
-sampler state.
+There is no renderbuffer storage: without `glInvalidateFramebuffer` a
+renderbuffer costs the same memory as a texture, and its only advantage, MSAA,
+is not supported. A backend must not substitute its own attachment format.
+There is no resize: the target size is the size of textures the game owns, so a
+size change is new textures and new targets.
+
+A depth-only target (a shadow map) has no color attachment. It is
+framebuffer-complete, the pass color clear is a no-op, and
+`nt_gfx_read_pixels` inside such a pass asserts.
+
+Attachments are ordinary textures: `NT_SAMPLER_DEFAULT` selects the sampler of
+their own descriptor, and a binding may override it, for example with a
+comparison sampler for a shadow lookup.
 
 `RGBA16F` is the HDR color path: it carries values above 1.0, so a tone-mapping
 or bright-pass stage has headroom instead of a buffer already clamped at write
@@ -320,11 +329,10 @@ returns invalid — the fallback path a caller needs regardless. The capability
 bit exists so a caller can choose its format without paying for a failed
 attempt.
 
-The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`. A depth
-attachment's own texture state stays `NEAREST` for minification and
-magnification: WebGL 2 texture completeness rejects filtered depth unless
-comparison is enabled, and comparison is not texture state. Wrap state remains
-explicit and may use clamp, repeat, or mirrored repeat.
+The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`.
+Attachment textures, like every texture, keep GL default texture state; the
+sampler object each binding uses decides filtering and wrap. Depth storage
+requires `NEAREST` in its descriptor.
 
 Depth comparison lives on the sampler object (`nt_sampler_desc_t.compare_func`),
 not on the texture, because one depth target is read two ways: through a
@@ -333,7 +341,7 @@ raw-depth debug view. The field is a single tri-state — `NONE`, `LEQUAL`,
 `LESS` — so a zero-filled descriptor is a plain sampler and there is exactly one
 spelling of "no comparison". Sampler state supersedes texture state, so a
 comparison sampler makes `LINEAR` legal on that binding while the attachment
-description is untouched. A comparison sampler is rejected on non-depth storage,
+texture is untouched. A comparison sampler is rejected on non-depth storage,
 where the comparison would make every lookup undefined; a sampler without one
 still cannot filter depth.
 
@@ -419,16 +427,15 @@ the lost state); once the context is back, the same begin_frame restores it and
 sets `g_nt_gfx.context_restored` until the next begin_frame. The game therefore
 sees the restore before its resource step and before it builds anything. The
 restore is one CONTEXT operation: it recreates the context, probes
-capabilities, recreates render targets and ends ACCEPTED. A recreate that fails
-leaves no context, logs one error and stays lost for good. A restore that the
-browser reports lost again when it finishes wipes what it refilled, stays lost
-without an error log and is retried by a later begin_frame. A loss inside an
+capabilities and ends ACCEPTED; it recreates no frontend resource. A recreate
+that fails leaves no context, logs one error and stays lost for good. A restore
+that the browser reports lost again when it finishes stays lost without an
+error log and is retried by a later begin_frame. A loss inside an
 iteration changes no state: operations issued after it are issued but do
 nothing, creates end `CONTEXT_LOST` without an error log, and the next
 begin_frame wipes. Pass calls on a lost context are no-ops, not traps.
 
-A backend call that reports a failure (a create, a render-target resize, a
-readback, a lazy sampler recreate at bind) asks the browser: a loss ends the
+A backend call that reports a failure (a create, a readback, a lazy sampler recreate at bind) asks the browser: a loss ends the
 operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
 failure reason and error log. The backend asks only where the answer prevents a crash or a
 misleading log: before shader and program creation, because Emscripten throws on
@@ -480,8 +487,8 @@ mip/subrectangle, and failed creates keep already-issued work.
 `accepted[]` counts public operations by `nt_gfx_operation_t` whose END result
 was ACCEPTED, in every build: every public operation, readback and GPU timer
 segment calls included, is one BEGIN/END pair, and END is the only place that
-counts it. It counts every operation, nested ones included (render-target
-attachments, default samplers, cascaded destroys). Only frontend cache hits
+counts it. It counts every operation, nested ones included (default samplers,
+cascaded destroys). Only frontend cache hits
 (END result CACHE), rejections and losses are left out; an operation whose
 backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
 (SKIP/INACTIVE) still ends ACCEPTED and counts. A GPU timer poll with no result
@@ -494,10 +501,8 @@ and `last_frame` holds 0 until the first begin_frame.
 A context restore is one CONTEXT operation inside the begin_frame that performs
 it and belongs to the frame that begin_frame opens. A new loss is wiped before
 that frame opens, so a recorded frame's snapshot shows the wiped tables and
-`context_lost` set, and the CONTEXT operation follows it. The render-target
-DEFINITION and BACKEND records of the restore sit between
-its BEGIN and RESULT, including a DEFINITION with `complete=0` for a target
-whose recreation failed. It ends ACCEPTED when the context came back and
+`context_lost` set, and the CONTEXT operation follows it. The BACKEND records of
+the restore sit between its BEGIN and RESULT. It ends ACCEPTED when the context came back and
 CONTEXT_LOST when recreation failed or met a loss. Raw GL names are valid within their
 context segment; a CONTEXT operation in the stream separates segments, and
 frontend handles are the identity across them.
@@ -535,7 +540,7 @@ Every recorded public operation produces exactly one BEGIN, carrying its
 request arguments, and one RESULT, carrying the outcome `result`; a creator's
 RESULT carries the new handle (zero on failure), while its backend slot and
 names are in the DEFINITION record. Operations issued inside another operation
-(render-target attachments, default samplers) nest between its BEGIN and
+(default samplers, cascaded destroys) nest between its BEGIN and
 RESULT. `ARGUMENT` records are request
 arguments belonging to the enclosing BEGIN (one per texture binding of a texture
 set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
@@ -565,17 +570,18 @@ copied values. `backend.bytes` is actual CPU upload payload, zero for NULL stora
 No event borrows upload memory, shader source or caller labels.
 
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
-resource kind and `backend.args[0..1]` as backend slot/raw GL name; render targets
-also supply the depth renderbuffer name at index 2. Frontend resource definitions
+resource kind and `backend.args[0..1]` as backend slot/raw GL name. Frontend resource definitions
 carry the full handle, current backend slot and available dimensions/relationships.
+A render-target definition carries the color and depth texture handles in
+`related[0..1]`, the color format in `format` and the depth format in `usage`,
+zero for an absent attachment, and the size of those textures.
 Shader, program and vertex-input definitions carry result `UNKNOWN`: the frontend
 retains no shader stage or source, program stage pair or vertex-input layout, so
 those fields are absent, not zero. A vertex input created during a recorded frame
 follows its definition with `DEFINITION/ATTRIBUTE` records.
-Resize and restore re-define render targets and their attachment textures with
-the replacement names. Other primary resources survive a loss as husks and get no
-fresh definition; pipelines and vertex inputs that the first detection frees get
-no DESTROY record. Samplers are re-defined when lazily recreated. Definitions
+Restore defines no resource. Primary resources survive a loss as husks and get
+no fresh definition; pipelines, vertex inputs and render targets that the first
+detection frees get no DESTROY record. Samplers are re-defined when lazily recreated. Definitions
 remain meaningful after resource destruction or slot reuse.
 
 The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, bound

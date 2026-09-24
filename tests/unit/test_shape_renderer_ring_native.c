@@ -25,20 +25,13 @@ void setUp(void) {
     nt_gfx_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
+    /* nt_gfx_shutdown releases the attachment textures. */
     s_target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = RT_W,
-        .height = RT_H,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_BUFFER,
-        .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
+        .color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = RT_W, .height = RT_H, .format = NT_TEXTURE_FORMAT_RGBA8}),
+        .depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = RT_W, .height = RT_H, .format = NT_TEXTURE_FORMAT_DEPTH24}),
         .label = "shape_ring_rt",
     });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, s_target.id);
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(s_target));
+    TEST_ASSERT_TRUE(nt_gfx_render_target_valid(s_target));
 
     nt_shape_renderer_init();
     nt_shape_renderer_set_vp(k_identity_vp);

@@ -16,7 +16,7 @@ _Static_assert(sizeof(nt_postfx_blur_vertex_t) == 16, "blur vertex size");
 static const char *s_blur_vs_src = "precision mediump float;\n"
                                    "layout(location = 0) in vec2 a_position;\n"
                                    "layout(location = 3) in vec2 a_uv;\n"
-                                   "out vec2 v_uv;\n"
+                                   "out highp vec2 v_uv;\n"
                                    "void main() {\n"
                                    "    v_uv = a_uv;\n"
                                    "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
@@ -31,7 +31,9 @@ static const char *s_blur_fs_src = "precision mediump float;\n"
                                    "uniform vec4 u_kernel2;\n"
                                    "uniform vec4 u_kernel3;\n"
                                    "uniform vec4 u_kernel4;\n"
-                                   "in vec2 v_uv;\n"
+                                   /* NEAREST taps need exact texel centres, which mediump (fp16 on
+                                      mobile) cannot address past 2048 texels. */
+                                   "in highp vec2 v_uv;\n"
                                    "out vec4 frag_color;\n"
                                    /* Select then mask: i & 3 is provably 0..3, so no arm can constant-fold to
                                       a negative index. NVIDIA inlines kernel_at(0), folds every arm, and
@@ -45,13 +47,13 @@ static const char *s_blur_fs_src = "precision mediump float;\n"
                                    "    return k[i & 3];\n"
                                    "}\n"
                                    "void main() {\n"
-                                   "    vec2 texel = vec2(1.0) / vec2(textureSize(u_source, 0));\n"
-                                   "    vec2 step_uv = u_direction.xy * texel;\n"
+                                   "    highp vec2 texel = vec2(1.0) / vec2(textureSize(u_source, 0));\n"
+                                   "    highp vec2 step_uv = u_direction.xy * texel;\n"
                                    "    vec4 acc = texture(u_source, v_uv) * kernel_at(0);\n"
                                    "    for (int i = 1; i <= 16; i++) {\n"
                                    "        if (i > u_radius) { break; }\n"
                                    "        float w = kernel_at(i);\n"
-                                   "        vec2 d = step_uv * float(i);\n"
+                                   "        highp vec2 d = step_uv * float(i);\n"
                                    "        acc += texture(u_source, v_uv - d) * w;\n"
                                    "        acc += texture(u_source, v_uv + d) * w;\n"
                                    "    }\n"
@@ -65,6 +67,7 @@ static struct {
     nt_pipeline_t pipeline;
     nt_buffer_t triangle_vbo;
     nt_vertex_input_t vertex_input;
+    nt_sampler_t sampler;
     /* Logical life and GPU life are separate: a restore that fails leaves the
      * module active so the next one retries, with the pass skipped meanwhile. */
     bool initialized;
@@ -174,6 +177,9 @@ static bool make_gpu_resources(void) {
         {{3.0F, -1.0F}, {2.0F, 0.0F}},
         {{-1.0F, 3.0F}, {0.0F, 2.0F}},
     };
+    /* Taps land on texel centres (highp UV math, see the FS), so NEAREST reads the same values as LINEAR and stays valid for RGBA32F without float filtering. */
+    s_blur.sampler = nt_gfx_make_sampler(
+        &(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .wrap_u = NT_WRAP_CLAMP_TO_EDGE, .wrap_v = NT_WRAP_CLAMP_TO_EDGE, .label = "postfx_blur_sampler"});
     s_blur.vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_blur_vs_src, .label = "postfx_blur_vs"});
     s_blur.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_blur_fs_src, .label = "postfx_blur_fs"});
     if (s_blur.vs.id == 0 || s_blur.fs.id == 0) {
@@ -215,7 +221,7 @@ static bool make_gpu_resources(void) {
         .vertex_buffer = s_blur.triangle_vbo,
         .label = "postfx_blur_vi",
     });
-    return s_blur.pipeline.id != 0 && s_blur.vertex_input.id != 0;
+    return s_blur.pipeline.id != 0 && s_blur.vertex_input.id != 0 && s_blur.sampler.id != 0;
 }
 
 nt_result_t nt_postfx_blur_init(void) {
@@ -259,7 +265,6 @@ nt_result_t nt_postfx_blur_restore_gpu(void) {
 
 typedef struct {
     nt_texture_t temp_color;
-    nt_texture_t temp_depth;
     nt_texture_t dest_color;
 } blur_pass_targets_t;
 
@@ -276,17 +281,8 @@ static bool validate_scissor_state(void) {
     return disabled;
 }
 
-static bool validate_targets_ready(const nt_postfx_blur_pass_t *pass) {
-    bool temp_ready = nt_gfx_render_target_ready(pass->temp);
-    bool dest_ready = nt_gfx_render_target_ready(pass->dest);
-    NT_ASSERT(temp_ready && "nt_postfx_blur_gaussian: temp target is not ready");
-    NT_ASSERT(dest_ready && "nt_postfx_blur_gaussian: dest target is not ready");
-    return temp_ready && dest_ready;
-}
-
 static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_targets_t *targets) {
     targets->temp_color = nt_gfx_render_target_color(pass->temp);
-    targets->temp_depth = nt_gfx_render_target_depth(pass->temp);
     targets->dest_color = nt_gfx_render_target_color(pass->dest);
     bool source_ready = nt_gfx_texture_ready(pass->source);
     bool colors_valid = targets->temp_color.id != 0 && targets->dest_color.id != 0;
@@ -294,7 +290,7 @@ static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_ta
     bool source_format_valid = nt_texture_format_is_sampled_color(source_format);
     NT_ASSERT(source_ready && "nt_postfx_blur_gaussian: source texture is not ready");
     NT_ASSERT(source_format_valid && "nt_postfx_blur_gaussian: source must use a sampler2D color format");
-    NT_ASSERT(colors_valid && "nt_postfx_blur_gaussian: target color attachment is invalid");
+    NT_ASSERT(colors_valid && "nt_postfx_blur_gaussian: temp or dest target is stale or has no color");
     return source_ready && source_format_valid && colors_valid;
 }
 
@@ -322,10 +318,10 @@ static bool validate_target_sizes(const nt_postfx_blur_pass_t *pass, const blur_
 }
 
 static bool validate_no_aliasing(const nt_postfx_blur_pass_t *pass, const blur_pass_targets_t *targets) {
-    bool source_aliases_temp = pass->source.id == targets->temp_color.id || (targets->temp_depth.id != 0 && pass->source.id == targets->temp_depth.id);
-    bool targets_alias = pass->temp.id == pass->dest.id;
+    bool source_aliases_temp = pass->source.id == targets->temp_color.id;
+    bool targets_alias = pass->temp.id == pass->dest.id || targets->temp_color.id == targets->dest_color.id;
     NT_ASSERT(!source_aliases_temp && "nt_postfx_blur_gaussian: source aliases temp target");
-    NT_ASSERT(!targets_alias && "nt_postfx_blur_gaussian: temp and dest targets alias");
+    NT_ASSERT(!targets_alias && "nt_postfx_blur_gaussian: temp and dest share a target or color texture");
     return !source_aliases_temp && !targets_alias;
 }
 
@@ -350,9 +346,6 @@ static bool build_validated_kernel(const nt_postfx_blur_pass_t *pass, uint32_t *
 
 static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radius, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) {
     if (!validate_module_and_pass(pass)) {
-        return false;
-    }
-    if (!validate_targets_ready(pass)) {
         return false;
     }
     if (!validate_scissor_state()) {
@@ -383,7 +376,7 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(s_blur.pipeline);
     nt_gfx_bind_vertex_input(s_blur.vertex_input);
-    const nt_gfx_texture_binding_t binding = {.name = s_u_source, .texture = source, .sampler = NT_SAMPLER_DEFAULT};
+    const nt_gfx_texture_binding_t binding = {.name = s_u_source, .texture = source, .sampler = s_blur.sampler};
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_set_uniform_vec4(s_u_direction, direction);
     upload_kernel(radius, packed);

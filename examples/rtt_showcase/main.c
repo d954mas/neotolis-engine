@@ -121,12 +121,14 @@ static const nt_ui_label_style_t s_value_style = {
 };
 
 static struct {
+    /* Borrowed by the targets below. */
+    nt_texture_t scene_color;
+    nt_texture_t scene_depth;
+    nt_texture_t temp_color;
+    nt_texture_t blur_color;
     nt_render_target_t scene;
     nt_render_target_t temp;
     nt_render_target_t blur;
-    nt_texture_t scene_color;
-    nt_texture_t scene_depth;
-    nt_texture_t blur_color;
     nt_texture_t white;
     nt_shader_t quad_vs;
     nt_shader_t quad_fs;
@@ -137,17 +139,10 @@ static struct {
     uint16_t rt_width;
     uint16_t rt_height;
     bool large_target;
-    bool handles_stable;
     bool render_resources_ready;
     float sample_zoom;
     float blur_radius;
 } s_demo;
-
-typedef enum {
-    RTT_RESIZE_UNUSABLE,
-    RTT_RESIZE_ROLLED_BACK,
-    RTT_RESIZE_COMMITTED,
-} rtt_resize_result_t;
 
 static void destroy_quad_resources(void) {
     nt_gfx_destroy_vertex_input(s_demo.quad_vi);
@@ -232,98 +227,45 @@ static bool make_quad_resources(void) {
     return s_demo.quad_pipeline.id != 0 && s_demo.quad_vbo.id != 0 && s_demo.quad_vi.id != 0 && s_demo.white.id != 0;
 }
 
-static nt_render_target_t make_target(const char *label, uint16_t width, uint16_t height, nt_render_target_depth_t depth) {
-    return nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = width,
-        .height = height,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_LINEAR,
-        .color_mag_filter = NT_FILTER_LINEAR,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = depth,
-        .depth_format = depth == NT_RT_DEPTH_NONE ? NT_TEXTURE_FORMAT_INVALID : NT_TEXTURE_FORMAT_DEPTH24,
-        .depth_texture_min_filter = NT_FILTER_NEAREST,
-        .depth_texture_mag_filter = NT_FILTER_NEAREST,
-        .depth_texture_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_texture_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .label = label,
-    });
+/* Color is shown LINEAR; raw depth must be read NEAREST, which depth storage requires anyway. */
+static nt_texture_t make_attachment(const char *label, uint16_t width, uint16_t height, nt_texture_format_t format, nt_texture_filter_t filter) {
+    return nt_gfx_make_texture(&(nt_texture_desc_t){.width = width, .height = height, .format = format, .min_filter = filter, .mag_filter = filter, .label = label});
+}
+
+/* Destroying the textures destroys the targets that borrow them. */
+static void destroy_targets(void) {
+    nt_texture_t *textures[] = {&s_demo.scene_color, &s_demo.scene_depth, &s_demo.temp_color, &s_demo.blur_color};
+    for (size_t i = 0; i < sizeof(textures) / sizeof(textures[0]); i++) {
+        if (textures[i]->id != 0) {
+            nt_gfx_destroy_texture(*textures[i]);
+        }
+        *textures[i] = (nt_texture_t){0};
+    }
+    s_demo.scene = NT_RENDER_TARGET_INVALID;
+    s_demo.temp = NT_RENDER_TARGET_INVALID;
+    s_demo.blur = NT_RENDER_TARGET_INVALID;
 }
 
 static bool make_targets(uint16_t width, uint16_t height) {
-    s_demo.scene = make_target("rtt_scene", width, height, NT_RT_DEPTH_TEXTURE);
-    s_demo.temp = make_target("rtt_blur_temp", width, height, NT_RT_DEPTH_NONE);
-    s_demo.blur = make_target("rtt_blur_dest", width, height, NT_RT_DEPTH_NONE);
-    if (s_demo.scene.id == 0 || s_demo.temp.id == 0 || s_demo.blur.id == 0) {
-        if (s_demo.blur.id != 0) {
-            nt_gfx_destroy_render_target(s_demo.blur);
-        }
-        if (s_demo.temp.id != 0) {
-            nt_gfx_destroy_render_target(s_demo.temp);
-        }
-        if (s_demo.scene.id != 0) {
-            nt_gfx_destroy_render_target(s_demo.scene);
-        }
-        s_demo.scene = NT_RENDER_TARGET_INVALID;
-        s_demo.temp = NT_RENDER_TARGET_INVALID;
-        s_demo.blur = NT_RENDER_TARGET_INVALID;
+    s_demo.scene_color = make_attachment("rtt_scene_color", width, height, NT_TEXTURE_FORMAT_RGBA8, NT_FILTER_LINEAR);
+    s_demo.scene_depth = make_attachment("rtt_scene_depth", width, height, NT_TEXTURE_FORMAT_DEPTH24, NT_FILTER_NEAREST);
+    s_demo.temp_color = make_attachment("rtt_blur_temp_color", width, height, NT_TEXTURE_FORMAT_RGBA8, NT_FILTER_LINEAR);
+    s_demo.blur_color = make_attachment("rtt_blur_color", width, height, NT_TEXTURE_FORMAT_RGBA8, NT_FILTER_LINEAR);
+    if (s_demo.scene_color.id == 0 || s_demo.scene_depth.id == 0 || s_demo.temp_color.id == 0 || s_demo.blur_color.id == 0) {
+        destroy_targets();
         return false;
     }
-    s_demo.scene_color = nt_gfx_render_target_color(s_demo.scene);
-    s_demo.scene_depth = nt_gfx_render_target_depth(s_demo.scene);
-    s_demo.blur_color = nt_gfx_render_target_color(s_demo.blur);
-    NT_ASSERT(s_demo.scene.id != 0 && s_demo.temp.id != 0 && s_demo.blur.id != 0);
-    NT_ASSERT(s_demo.scene_color.id != 0 && s_demo.scene_depth.id != 0 && s_demo.blur_color.id != 0);
-    s_demo.rt_width = width;
-    s_demo.rt_height = height;
-    s_demo.handles_stable = true;
+    s_demo.scene = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.scene_color, .depth = s_demo.scene_depth, .label = "rtt_scene"});
+    s_demo.temp = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.temp_color, .label = "rtt_blur_temp"});
+    s_demo.blur = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.blur_color, .label = "rtt_blur_dest"});
+    if (s_demo.scene.id == 0 || s_demo.temp.id == 0 || s_demo.blur.id == 0) {
+        destroy_targets();
+        return false;
+    }
     return true;
 }
 
-static rtt_resize_result_t resize_targets(uint16_t width, uint16_t height) {
-    nt_render_target_t old_scene = s_demo.scene;
-    nt_render_target_t old_temp = s_demo.temp;
-    nt_render_target_t old_blur = s_demo.blur;
-    nt_texture_t old_scene_color = s_demo.scene_color;
-    nt_texture_t old_scene_depth = s_demo.scene_depth;
-    nt_texture_t old_blur_color = s_demo.blur_color;
-
-    bool scene_resized = nt_gfx_resize_render_target(s_demo.scene, width, height);
-    bool temp_resized = scene_resized && nt_gfx_resize_render_target(s_demo.temp, width, height);
-    bool blur_resized = temp_resized && nt_gfx_resize_render_target(s_demo.blur, width, height);
-    if (!blur_resized) {
-        bool rollback_ok = true;
-        if (temp_resized) {
-            rollback_ok = nt_gfx_resize_render_target(s_demo.temp, s_demo.rt_width, s_demo.rt_height) && rollback_ok;
-        }
-        if (scene_resized) {
-            rollback_ok = nt_gfx_resize_render_target(s_demo.scene, s_demo.rt_width, s_demo.rt_height) && rollback_ok;
-        }
-        if (!rollback_ok) {
-            nt_log_error("rtt_showcase: render-target resize rollback failed");
-            return RTT_RESIZE_UNUSABLE;
-        }
-        nt_log_error("rtt_showcase: render-target resize failed; previous size restored");
-        return RTT_RESIZE_ROLLED_BACK;
-    }
-
-    s_demo.scene_color = nt_gfx_render_target_color(s_demo.scene);
-    s_demo.scene_depth = nt_gfx_render_target_depth(s_demo.scene);
-    s_demo.blur_color = nt_gfx_render_target_color(s_demo.blur);
-    s_demo.handles_stable = old_scene.id == s_demo.scene.id && old_temp.id == s_demo.temp.id && old_blur.id == s_demo.blur.id && old_scene_color.id == s_demo.scene_color.id &&
-                            old_scene_depth.id == s_demo.scene_depth.id && old_blur_color.id == s_demo.blur_color.id;
-    NT_ASSERT(s_demo.handles_stable && "render-target resize must preserve target/color/depth handles");
-    s_demo.rt_width = width;
-    s_demo.rt_height = height;
-    nt_log_info("rtt_showcase resized targets to %ux%u, handles stable=%d", (unsigned)width, (unsigned)height, s_demo.handles_stable ? 1 : 0);
-    return RTT_RESIZE_COMMITTED;
-}
-
-static bool render_targets_ready(void) {
-    return nt_gfx_render_target_ready(s_demo.scene) && nt_gfx_render_target_ready(s_demo.temp) && nt_gfx_render_target_ready(s_demo.blur) && nt_gfx_texture_ready(s_demo.scene_color) &&
-           nt_gfx_texture_ready(s_demo.scene_depth) && nt_gfx_texture_ready(s_demo.blur_color);
-}
+static bool targets_valid(void) { return nt_gfx_render_target_valid(s_demo.scene) && nt_gfx_render_target_valid(s_demo.temp) && nt_gfx_render_target_valid(s_demo.blur); }
 
 static void try_bind_ui_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
@@ -500,21 +442,19 @@ static void draw_solid_quad(float x0, float y0, float x1, float y1, const float 
 static void draw_default_frame(void) {
     float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     float frame[4] = {0.08F, 0.10F, 0.13F, 1.0F};
-    float stable[4] = {0.05F, 0.85F, 0.30F, 1.0F};
-    float unstable[4] = {0.95F, 0.10F, 0.05F, 1.0F};
     draw_solid_quad(-0.96F, -0.76F, -0.08F, 0.78F, frame);
     draw_solid_quad(0.08F, -0.76F, 0.96F, 0.78F, frame);
     draw_textured_quad(s_demo.scene_color, -0.92F, -0.62F, -0.12F, 0.70F, 0, white);
     draw_textured_quad(s_demo.blur_color, 0.12F, -0.62F, 0.92F, 0.70F, 0, white);
     draw_textured_quad(s_demo.scene_depth, -0.44F, -0.95F, 0.44F, -0.78F, 1, white);
-    draw_solid_quad(-0.92F, 0.82F, 0.92F, 0.89F, s_demo.handles_stable ? stable : unstable);
 }
 
 static void render_frame(void) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    if (!s_demo.render_resources_ready || !render_targets_ready()) {
+    /* A failed rebuild or a loss leaves the targets invalid until R or a restore remakes them. */
+    if (!s_demo.render_resources_ready || !targets_valid()) {
         return;
     }
 
@@ -570,7 +510,14 @@ static void frame(void) {
         /* The font keeps its sources across a restore -- only its GPU textures
          * died, and nt_font_step rebuilds those itself. Clearing this would make
          * the gate call nt_font_add twice, which asserts on the duplicate. */
-        s_demo.render_resources_ready = restored && render_targets_ready();
+
+        /* Loss freed the targets; their textures are husks that only we can destroy.
+         * Targets stay out of the ready flag: the frame gate checks them, and R rebuilds them. */
+        destroy_targets();
+        if (!make_targets(s_demo.rt_width, s_demo.rt_height)) {
+            nt_log_error("rtt_showcase: render targets were not rebuilt after context restore; press R to retry");
+        }
+        s_demo.render_resources_ready = restored;
         if (!s_demo.render_resources_ready) {
             nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
         }
@@ -584,12 +531,17 @@ static void frame(void) {
     }
 #endif
     if (nt_input_key_is_pressed(NT_KEY_R)) {
-        bool make_large = !s_demo.large_target;
-        rtt_resize_result_t resize_result = make_large ? resize_targets(768, 432) : resize_targets(512, 288);
-        /* Resizing targets cannot repair a failed renderer restore. */
-        s_demo.render_resources_ready = s_demo.render_resources_ready && resize_result != RTT_RESIZE_UNUSABLE;
-        if (resize_result == RTT_RESIZE_COMMITTED) {
-            s_demo.large_target = make_large;
+        /* After a failed rebuild R retries the current size; only live targets toggle it. */
+        const bool large = targets_valid() ? !s_demo.large_target : s_demo.large_target;
+        const uint16_t width = large ? 768 : 512;
+        const uint16_t height = large ? 432 : 288;
+        destroy_targets();
+        if (make_targets(width, height)) {
+            s_demo.large_target = large;
+            s_demo.rt_width = width;
+            s_demo.rt_height = height;
+        } else {
+            nt_log_error("rtt_showcase: render-target rebuild failed; press R to retry");
         }
     }
     nt_resource_step();
@@ -709,6 +661,8 @@ int main(void) {
     if (!make_targets(512, 288)) {
         return 1;
     }
+    s_demo.rt_width = 512;
+    s_demo.rt_height = 288;
     s_demo.render_resources_ready = true;
 
 #ifdef NT_PLATFORM_WEB
@@ -718,9 +672,7 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    nt_gfx_destroy_render_target(s_demo.blur);
-    nt_gfx_destroy_render_target(s_demo.temp);
-    nt_gfx_destroy_render_target(s_demo.scene);
+    destroy_targets();
     destroy_quad_resources();
     nt_ui_destroy_context(s_ui_ctx);
     nt_ui_module_shutdown();

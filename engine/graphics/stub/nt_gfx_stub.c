@@ -93,24 +93,12 @@ void nt_gfx_destroy_texture(nt_texture_t tex) { (void)tex; }
 
 void nt_gfx_destroy_render_target(nt_render_target_t rt) { (void)rt; }
 
-bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height) {
-    (void)rt;
-    (void)width;
-    (void)height;
-    return false;
-}
-
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt) {
     (void)rt;
     return (nt_texture_t){0};
 }
 
-nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt) {
-    (void)rt;
-    return (nt_texture_t){0};
-}
-
-bool nt_gfx_render_target_ready(nt_render_target_t rt) {
+bool nt_gfx_render_target_valid(nt_render_target_t rt) {
     (void)rt;
     return false;
 }

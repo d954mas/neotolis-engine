@@ -427,7 +427,7 @@ async function restoreAndDraw(page: Page, errors: string[]): Promise<void> {
 async function returnNullCreatesWhenLost(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const proto = WebGL2RenderingContext.prototype as unknown as Record<string, (this: WebGL2RenderingContext, ...args: unknown[]) => unknown>;
-    for (const name of ['createShader', 'createProgram', 'createTexture', 'createBuffer', 'createVertexArray', 'createSampler', 'createFramebuffer', 'createRenderbuffer', 'createQuery']) {
+    for (const name of ['createShader', 'createProgram', 'createTexture', 'createBuffer', 'createVertexArray', 'createSampler', 'createFramebuffer', 'createQuery']) {
       const create = proto[name];
       proto[name] = function(...args: unknown[]) {
         return this.isContextLost() ? null : create.apply(this, args);

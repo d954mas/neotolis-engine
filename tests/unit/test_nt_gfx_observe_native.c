@@ -166,60 +166,41 @@ static uint32_t captured_calls(nt_gfx_gl_call_t call) {
     return count;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- inspect the two identity layers before and after resize
-static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 8, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
-    nt_texture_t color = nt_gfx_render_target_color(target);
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- inspect both identity layers of a new attachment
+static void test_capture_publishes_attachment_mappings_and_skip_reasons(void) {
     nt_gfx_capture_request();
     nt_gfx_begin_frame();
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 13, 7));
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 13, .height = 7, .format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
     nt_gfx_set_scissor_enabled(false);
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_FALSE(capture.overflow);
-    /* Inherited definitions precede the resize; fresh ones follow it. */
-    uint32_t resize = 0;
-    while (resize < capture.count && !(capture.events[resize].kind == NT_GFX_EVENT_BEGIN && capture.events[resize].operation == NT_GFX_OP_RESIZE)) {
-        resize++;
-    }
-    TEST_ASSERT_LESS_THAN_UINT32(capture.count, resize);
     uint32_t texture_slot = 0;
-    uint32_t old_name = 0;
-    for (uint32_t i = 0; i < resize; i++) {
-        const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->object_kind == NT_GFX_OBJECT_TEXTURE && event->object == color.id) {
-            texture_slot = event->data.resource.backend;
-        }
-    }
-    TEST_ASSERT_NOT_EQUAL(0, texture_slot);
-    for (uint32_t i = 0; i < resize; i++) {
-        const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_TEXTURE && event->data.backend.args[0] == texture_slot) {
-            old_name = event->data.backend.args[1];
-        }
-    }
-    TEST_ASSERT_NOT_EQUAL(0, old_name);
-    bool dimensions = false;
-    bool mapping = false;
     bool cache = false;
-    for (uint32_t i = resize; i < capture.count; i++) {
+    for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->object_kind == NT_GFX_OBJECT_TEXTURE && event->object == color.id) {
             TEST_ASSERT_EQUAL_UINT32(13, event->data.resource.width);
             TEST_ASSERT_EQUAL_UINT32(7, event->data.resource.height);
-            dimensions = true;
-        }
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_TEXTURE && event->data.backend.args[0] == texture_slot) {
-            TEST_ASSERT_NOT_EQUAL(old_name, event->data.backend.args[1]);
-            TEST_ASSERT_NOT_EQUAL(0, event->data.backend.args[1]);
-            mapping = true;
+            texture_slot = event->data.resource.backend;
         }
         if (event->kind == NT_GFX_EVENT_RESULT && event->operation == NT_GFX_OP_SCISSOR_ENABLE) {
             TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, event->result);
             cache = true;
         }
     }
-    TEST_ASSERT_TRUE(dimensions && mapping && cache);
+    TEST_ASSERT_NOT_EQUAL(0, texture_slot);
+    bool mapping = false;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_TEXTURE && event->data.backend.args[0] == texture_slot) {
+            TEST_ASSERT_NOT_EQUAL(0, event->data.backend.args[1]);
+            mapping = true;
+        }
+    }
+    TEST_ASSERT_TRUE(mapping && cache);
+    nt_gfx_destroy_render_target(target);
 }
 
 static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
@@ -278,35 +259,6 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     TEST_ASSERT_EQUAL_UINT32(3, skips);
     TEST_ASSERT_EQUAL_UINT32(1, pipeline_states);
     TEST_ASSERT_FALSE(capture.overflow);
-}
-
-static uint32_t render_target_depth_names(uint32_t *out_depth, uint32_t capacity) {
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < capture.count; i++) {
-        const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_RENDER_TARGET) {
-            TEST_ASSERT_LESS_THAN_UINT32(capacity, count);
-            out_depth[count++] = event->data.backend.args[2];
-        }
-    }
-    return count;
-}
-
-static void test_render_target_backend_definitions_carry_depth_renderbuffer(void) {
-    const nt_render_target_desc_t desc = {.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8, .depth_storage = NT_RT_DEPTH_BUFFER, .depth_format = NT_TEXTURE_FORMAT_DEPTH24};
-    (void)nt_gfx_make_render_target(&desc);
-    nt_gfx_capture_request();
-    nt_gfx_begin_frame();
-    (void)nt_gfx_make_render_target(&desc);
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(nt_gfx_capture_read().overflow);
-    /* The inherited target's definition, then the created one's. */
-    uint32_t depth[2] = {0};
-    TEST_ASSERT_EQUAL_UINT32(2, render_target_depth_names(depth, 2));
-    TEST_ASSERT_NOT_EQUAL(0, depth[0]);
-    TEST_ASSERT_NOT_EQUAL(0, depth[1]);
-    TEST_ASSERT_NOT_EQUAL(depth[0], depth[1]);
 }
 
 static void test_initial_uniform_records_cover_only_vec4(void) {
@@ -652,9 +604,8 @@ int main(void) {
     nt_window_init();
     UNITY_BEGIN();
 #if NT_GFX_CAPTURE_ENABLED
-    RUN_TEST(test_capture_publishes_resize_mappings_and_skip_reasons);
+    RUN_TEST(test_capture_publishes_attachment_mappings_and_skip_reasons);
     RUN_TEST(test_new_program_defines_sampler_names_and_inactive_uniforms);
-    RUN_TEST(test_render_target_backend_definitions_carry_depth_renderbuffer);
     RUN_TEST(test_initial_uniform_records_cover_only_vec4);
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
     RUN_TEST(test_complete_capture_matches_gl_counters);

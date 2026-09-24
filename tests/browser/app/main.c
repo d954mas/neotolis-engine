@@ -302,12 +302,15 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
         texture =
             nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .data = pixels, .format = NT_TEXTURE_FORMAT_RGBA32F, .min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
     } else {
-        target = nt_gfx_make_render_target(
-            &(nt_render_target_desc_t){.width = 2, .height = 2, .color_format = NT_TEXTURE_FORMAT_RGBA16F, .color_min_filter = NT_FILTER_LINEAR, .color_mag_filter = NT_FILTER_LINEAR});
-        if (target.id == 0) {
+        texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA16F, .min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
+        if (texture.id == 0) {
             return -2;
         }
-        texture = nt_gfx_render_target_color(target);
+        target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = texture});
+        if (target.id == 0) {
+            nt_gfx_destroy_texture(texture);
+            return -2;
+        }
     }
     NT_ASSERT(texture.id != 0);
     const char *vs_source = "void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }";
@@ -324,7 +327,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 1}});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
-    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_probe"), .texture = texture};
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_probe"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_draw(0, 3);
     uint8_t pixel[4] = {0};
@@ -335,11 +338,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
-    if (target.id != 0) {
-        nt_gfx_destroy_render_target(target);
-    } else {
-        nt_gfx_destroy_texture(texture);
-    }
+    nt_gfx_destroy_texture(texture);
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
 /* context_loss.spec.ts calls steps 1-3 right after a synchronous loseContext(): the browser already
@@ -421,9 +420,13 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     if (tex.id == 0 || !nt_gfx_texture_ready(tex)) {
         return 0xFFFFFFFFU;
     }
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = 1, .height = 1, .color_format = NT_TEXTURE_FORMAT_RGBA8, .color_min_filter = NT_FILTER_NEAREST, .color_mag_filter = NT_FILTER_NEAREST, .label = "basis_probe_rt"});
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "basis_probe_color"});
+    if (color.id == 0) {
+        return 0xFFFFFFFFU;
+    }
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color, .label = "basis_probe_rt"});
     if (target.id == 0) {
+        nt_gfx_destroy_texture(color);
         return 0xFFFFFFFFU;
     }
     nt_sampler_t sampler =
@@ -456,7 +459,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_texture(color);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
 static double s_observe_values[40];
@@ -496,7 +499,14 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_texture_t spare = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8});
     nt_gfx_update_texture(spare, 0, 0, 2, 2, pixels);
     nt_gfx_counters_t preparation = g_nt_gfx.counters;
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 2, .height = 2, .color_format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8});
+    if (color.id == 0) {
+        nt_gfx_destroy_texture(texture);
+        nt_gfx_destroy_texture(spare);
+        nt_gfx_destroy_buffer(buffer);
+        return 0;
+    }
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
     nt_shader_t vs =
         nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(
@@ -527,7 +537,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_shader(fs);
-    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_texture(color);
     nt_gfx_destroy_texture(texture);
     nt_gfx_destroy_texture(spare);
     nt_gfx_destroy_buffer(buffer);

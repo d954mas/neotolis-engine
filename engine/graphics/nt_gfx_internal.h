@@ -148,7 +148,8 @@ bool nt_gfx_backend_take_context_loss(void);
 bool nt_gfx_backend_query_context_lost(void);
 
 void nt_gfx_backend_check_timer_disjoint(void);
-void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend);
+/* width/height size the viewport of a render target; the default framebuffer uses the window size. */
+void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend, uint16_t width, uint16_t height);
 void nt_gfx_backend_end_pass(void);
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
@@ -189,8 +190,10 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data);
 
-uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend);
-bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend);
+enum { NT_GFX_RT_COLOR, NT_GFX_RT_DEPTH, NT_GFX_RT_ATTACHMENTS };
+/* Builds an FBO over live texture backends; 0 = absent attachment. Same slot
+ * contract as create_pipeline: returns `slot`, or 0 on failure (no FBO name or incomplete). */
+uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot);
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);
