@@ -84,9 +84,11 @@ static void test_context_restore_resets_the_scissor_mirror(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_set_scissor_enabled_count());
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());

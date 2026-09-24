@@ -166,7 +166,7 @@ survives context loss.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
-`nt_gfx_begin_frame` has detected, or a link the browser reports lost. The second
+`nt_gfx_begin_tick` has synced, or a link the browser reports lost. The second
 is a stage handle that is still live but whose GPU object that loss discarded —
 permanently unready (END reason `UNREADY`), so the owner recreates the stage and
 links again. Both are
@@ -314,7 +314,7 @@ sampler recreation publishes no
 logical set and issues no backend bind. Those failures are
 recoverable, so gfx reports them and skips the following draws of that set instead
 of returning a status the caller would have to branch on. Context loss means loss
-already observed by `nt_gfx_begin_frame`; material transitions do not poll the
+already synced by `nt_gfx_begin_tick`; material transitions do not poll the
 platform.
 
 The sampler class is part of the linked interface:
@@ -396,17 +396,18 @@ backend storage active. WebGL context restore recreates backend objects from the
 retained descriptor, including attachment formats and independent color/depth
 default sampler state; it does not preserve pixels. Consumers must redraw
 offscreen contents after resize or context restore.
-Context loss is detected at `nt_gfx_begin_frame`, which skips the frame; work
-issued after a mid-frame loss is issued but does nothing. While the browser
-reports the context lost, `nt_gfx_begin_frame` skips the frame without
-attempting recreation. A failed recreation is a context-creation failure: it
+Context loss is synced at `nt_gfx_begin_tick`, at the start of the host
+iteration; `nt_gfx_begin_frame` on a lost context does nothing. Work issued
+after a loss inside an iteration is issued but does nothing, and the next
+begin_tick wipes. While the browser reports the context lost, begin_tick does
+not attempt recreation. A failed recreation is a context-creation failure: it
 logs one error, and on the web it leaves no context and no loss listener, so the
-engine stays lost and no later frame recovers it. Backend failures caused by a
-loss are reported as `CONTEXT_LOST` without an error log.
+engine stays lost and no later iteration recovers it. Backend failures caused by
+a loss are reported as `CONTEXT_LOST` without an error log.
 After the context recovers, each render target is recreated once. A failed target
 remains unready; its owner destroys and recreates it, or uses a fallback. A
-restore that meets a new loss is that loss: the frame is skipped, the engine
-stays lost and a later frame restores again.
+restore that meets a new loss is that loss: the engine stays lost and a later
+begin_tick restores again.
 
 Render-target descriptors explicitly separate depth storage from depth format.
 `NONE` has no depth format or attachment, `BUFFER` has a non-sampleable depth

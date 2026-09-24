@@ -117,7 +117,7 @@ void nt_font_measure_invalidate(nt_font_t font);
  * Registers FONT once per resource lifecycle; nt_font_shutdown() does not reset that registration. */
 nt_result_t nt_font_init(const nt_font_desc_t *desc);
 void nt_font_shutdown(void);
-/* Call after gfx begin_frame and outside a pass: recovery replaces GPU textures. */
+/* Call after gfx begin_tick and outside a pass: recovery replaces GPU textures. */
 void nt_font_step(void);
 
 nt_font_t nt_font_create(const nt_font_create_desc_t *desc);

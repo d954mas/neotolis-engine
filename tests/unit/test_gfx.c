@@ -404,7 +404,7 @@ void test_gfx_make_program_context_lost_returns_invalid(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
 
-    /* No begin_frame in between: g_nt_gfx.context_lost is still false, so the
+    /* No begin_tick in between: g_nt_gfx.context_lost is still false, so the
      * failed backend create reports the loss. */
     nt_gfx_fake_set_context_lost(true);
     nt_program_t prog = nt_gfx_make_program(vs, fs);
@@ -423,9 +423,11 @@ void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
     nt_shader_t fs = make_test_fs();
 
     nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame(); /* wipes the backend tables, latches context_lost */
+    nt_gfx_begin_tick(); /* wipes the backend tables, latches context_lost */
+    nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame(); /* recovery completes; the stages stay unready */
+    nt_gfx_begin_tick(); /* recovery completes; the stages stay unready */
+    nt_gfx_begin_frame();
 
     /* Neither loss gate can explain the rejection below. */
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
@@ -493,6 +495,7 @@ void test_gfx_context_loss_keeps_handle_drops_ready(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
 
@@ -847,7 +850,7 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
     apply_texture_set(&binding, 1);
 
-    /* Loss is observed by begin_frame only: a material transition never polls the platform. */
+    /* Loss is observed by begin_tick only: a material transition never polls the platform. */
     nt_gfx_fake_set_context_lost(true);
     apply_texture_set(&binding, 1);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
@@ -858,6 +861,7 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     end_texture_binding_test_pass();
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     /* The loss branch itself drops the set; apply must not be what clears it. */
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
@@ -872,12 +876,15 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
 void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(void) {
     nt_texture_t husk = make_binding_test_texture(1);
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(husk));
     /* The restored frame rejects draws; the skip below has to be the set's doing. */
     nt_gfx_end_frame();
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
 
     nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
@@ -911,10 +918,13 @@ void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
     nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
+    nt_gfx_begin_tick();
 
     nt_texture_t color = make_binding_test_texture(1);
     nt_texture_t depth = make_binding_test_texture_format(NT_TEXTURE_FORMAT_DEPTH24);
@@ -1011,6 +1021,7 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_program_t old = nt_gfx_make_program(vs, fs);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
     TEST_ASSERT_TRUE(nt_gfx_program_valid(old));
@@ -1027,6 +1038,7 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_gfx_destroy_shader(pending_vs);
     nt_gfx_destroy_shader(pending_fs);
 
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     nt_gfx_end_frame();
@@ -1035,6 +1047,21 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(old.id, fresh.id); /* generation moved on */
     TEST_ASSERT_TRUE(nt_gfx_program_ready(fresh));
     TEST_ASSERT_FALSE(nt_gfx_program_valid(old));
+}
+
+/* A background tab loses and restores the context between two iterations; the
+ * boundary must sync it before the next iteration links on the new context. */
+void test_gfx_tick_boundary_syncs_loss_before_creates(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_gfx_fake_lose_and_restore_context();
+
+    nt_gfx_begin_tick();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs).id); /* stages died with the old context */
+    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(fresh));
 }
 
 /* ---- Program: destroying one reclaims the pipelines built on it ---- */
@@ -1125,6 +1152,7 @@ void test_gfx_pipeline_context_lost_returns_invalid(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     nt_gfx_fake_set_context_lost(false);
@@ -2798,9 +2826,11 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
 
     nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame(); /* latches the loss, frees pipeline slots */
+    nt_gfx_begin_tick(); /* latches the loss, frees pipeline slots */
+    nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame(); /* recovery completes */
+    nt_gfx_begin_tick(); /* recovery completes */
+    nt_gfx_begin_frame();
 
     TEST_ASSERT_FALSE(nt_gfx_pipeline_valid(pip));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -2833,9 +2863,11 @@ void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, ubo.id);
 
     nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame(); /* latches the loss, zeroes every backend record */
+    nt_gfx_begin_tick(); /* latches the loss, zeroes every backend record */
+    nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame(); /* restore succeeds; the buffer stays a husk */
+    nt_gfx_begin_tick(); /* restore succeeds; the buffer stays a husk */
+    nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, 0));
@@ -2854,8 +2886,10 @@ void test_gfx_update_texture_on_husk_asserts(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
@@ -2875,8 +2909,10 @@ void test_gfx_update_buffer_on_husk_asserts(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vbo.id);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
@@ -2894,8 +2930,10 @@ void test_gfx_orphan_buffer_on_husk_asserts(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vbo.id);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
@@ -2915,11 +2953,13 @@ void test_gfx_restored_frame_rejects_draws(void) {
         .program = prog,
     });
 
-    /* Lose it, then let begin_frame see the context back: that frame is the
+    /* Lose it, then let begin_tick see the context back: that iteration is the
      * restored one and carries the flag. */
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
 
@@ -2940,7 +2980,8 @@ void test_gfx_restored_frame_rejects_draws(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    /* And the very next frame draws normally. */
+    /* And the very next iteration draws normally. */
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -3031,7 +3072,7 @@ void test_gfx_frame_draw_calls(void) {
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_frame();
-    nt_gfx_end_tick();
+    nt_gfx_begin_tick();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.last_tick));
 
@@ -3189,6 +3230,7 @@ int main(void) {
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);
+    RUN_TEST(test_gfx_tick_boundary_syncs_loss_before_creates);
     RUN_TEST(test_gfx_destroy_program_destroys_its_pipelines);
     RUN_TEST(test_gfx_draw_asserts_when_bound_program_is_destroyed);
     RUN_TEST(test_gfx_make_program_does_not_dedup);

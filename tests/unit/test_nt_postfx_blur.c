@@ -319,9 +319,11 @@ static void test_incomplete_targets_assert_without_draw(void) {
     nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_fail_next_render_target_create();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
 
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(temp));
@@ -422,7 +424,7 @@ static void test_blur_lifecycle_misuse_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(NULL));
 }
 
-/* A second context loss can land between begin_frame's recovery and the restore
+/* A second context loss can land between begin_tick's recovery and the restore
  * call, so the relink inside restore fails. The module has to stay active and
  * rebuild on the next restore instead of going dark for the session. */
 static void test_failed_restore_is_retried_by_the_next_one(void) {
@@ -442,8 +444,10 @@ static void test_failed_restore_is_retried_by_the_next_one(void) {
     /* A pass while the rebuild is still pending skips instead of trapping: the
      * state is recoverable, so it must not crash a game that blurs every frame. */
     nt_gfx_fake_draw_trace_reset(true);
-    nt_gfx_begin_frame(); /* detects the loss the failed relink met */
+    nt_gfx_begin_tick(); /* detects the loss the failed relink met */
+    nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
     nt_gfx_end_frame();
@@ -454,6 +458,7 @@ static void test_failed_restore_is_retried_by_the_next_one(void) {
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_restore_gpu());
 
     nt_gfx_fake_draw_trace_reset(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
     nt_gfx_end_frame();

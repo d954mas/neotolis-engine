@@ -763,20 +763,24 @@ typedef struct {
     nt_gfx_counters_t counters; /* the finalized tick's, even after later unrecorded ticks; tick_sequence 0 while recording */
 } nt_gfx_capture_view_t;
 
-/* The one host tick boundary: nt_gfx_init opens the first tick and every end_tick
- * closes the open one and opens the next, so all gfx work between init and shutdown
- * belongs to a tick; shutdown discards the open one. Requires gfx IDLE. A tick holds any number of gfx frames, whose counters sum. end_tick
- * copies the counters into g_nt_gfx.last_tick, then resets
- * g_nt_gfx.counters. Ticks never advance rendering. */
-void nt_gfx_end_tick(void);
+/* The one host tick boundary, called first in every host iteration before any other
+ * gfx use: nt_gfx_init opens the first tick and every begin_tick closes the open one,
+ * syncs context loss and opens the next, so all gfx work between init and shutdown
+ * belongs to a tick; shutdown discards the open one. Requires gfx IDLE. A tick holds any
+ * number of gfx frames, whose counters sum. begin_tick copies the counters into
+ * g_nt_gfx.last_tick, then resets g_nt_gfx.counters. The loss sync takes the browser's
+ * loss events: a new loss wipes every backend name and sets context_lost; while lost it
+ * restores once the browser reports the context back and sets context_restored until
+ * the next begin_tick. Ticks never advance rendering. */
+void nt_gfx_begin_tick(void);
 #if NT_GFX_CAPTURE_ENABLED
 /* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
 const char *nt_gfx_gl_call_name(uint32_t call);
-/* One-shot: the next tick records, starting at the end_tick that opens it.
+/* One-shot: the next tick records, starting at the begin_tick that opens it.
  * Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);
-/* Metadata by value; immutable event prefix until the end_tick that starts the
- * next requested recording, or shutdown, so read right after end_tick. Copy count records and
+/* Metadata by value; immutable event prefix until the begin_tick that starts the
+ * next requested recording, or shutdown, so read right after begin_tick. Copy count records and
  * metadata to keep. Empty views have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 #endif
@@ -796,7 +800,7 @@ typedef struct {
 /* ---- Global state ---- */
 
 typedef struct {
-    nt_gfx_counters_t counters;  /* live counters of the open tick; reset only by end_tick */
+    nt_gfx_counters_t counters;  /* live counters of the open tick; reset only by begin_tick */
     nt_gfx_counters_t last_tick; /* last closed tick; tick_sequence 0 before the first */
     nt_gfx_gpu_caps_t gpu_caps;
     bool context_lost;
@@ -842,7 +846,8 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 
 /* ---- Frame / Pass ---- */
 
-/* Neither resets counters; only end_tick does. */
+/* Neither resets counters; only begin_tick does. begin_frame on a lost context
+ * does nothing, and the pass and frame calls after it are no-ops. */
 void nt_gfx_begin_frame(void);
 void nt_gfx_end_frame(void);
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
@@ -852,7 +857,7 @@ void nt_gfx_end_pass(void);
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
 /* Links valid stages. Link errors, >16 non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert.
- * Returns invalid while the context is lost / begin_frame has not finished recovery, and for a live stage
+ * Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 /* Creation preserves the currently bound pipeline. */

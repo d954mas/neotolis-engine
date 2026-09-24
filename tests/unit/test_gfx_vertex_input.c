@@ -515,10 +515,13 @@ void test_bind_instance_buffer_asserts_on_stale_buffer(void) {
     nt_buffer_t stale = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
 
     nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame(); /* latches the loss, wipes backend tables */
+    nt_gfx_begin_tick(); /* latches the loss, wipes backend tables */
+    nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame(); /* recovery completes */
+    nt_gfx_begin_tick(); /* recovery completes */
+    nt_gfx_begin_frame();
     nt_gfx_end_frame();
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
@@ -538,9 +541,11 @@ void test_vi_slots_freed_by_context_loss(void) {
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
 
     nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame(); /* latches the loss, frees vertex-input slots */
+    nt_gfx_begin_tick(); /* latches the loss, frees vertex-input slots */
+    nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame(); /* recovery completes */
+    nt_gfx_begin_tick(); /* recovery completes */
+    nt_gfx_begin_frame();
 
     TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});

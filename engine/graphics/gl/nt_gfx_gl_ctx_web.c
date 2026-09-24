@@ -12,7 +12,7 @@
 EM_JS_DEPS(nt_gfx_gl_ctx_web, "$GL,$UTF8ToString")
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
-static bool s_loss_pending; /* set by a lost event until begin_frame takes it */
+static bool s_loss_pending; /* set by a lost event until begin_tick takes it */
 
 static bool on_context_lost(int event_type, const void *reserved, void *user_data) {
     (void)event_type;

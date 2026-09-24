@@ -24,6 +24,8 @@ void game_shutdown(void);
 
 ```text
 platform_step
+nt_gfx_begin_tick     ← closes the previous tick into g_nt_gfx.last_tick, syncs
+                        context loss/restore, opens this tick
 input_begin_frame
     → if pointer pressed && audio suspended → audio_try_resume()
 input_event_apply
@@ -39,15 +41,16 @@ game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
 game_render           ← nt_ui_walk reads scratch pointers; any number of
                         nt_gfx_begin_frame/end_frame pairs
-nt_gfx_end_tick       ← copies counters into g_nt_gfx.last_tick, opens the next tick
 ```
 
 The host owns the gfx tick boundary: `nt_gfx_init` opens the first tick and the
-frame callback calls `nt_gfx_end_tick` once at its end, also when nothing
-renders. Pre-loop loading lands in the first tick; teardown work after the last
-callback lands in a tick that `nt_gfx_shutdown` discards. Code that runs before
-this callback's draws (devapi commands, early stats readers) reads the previous
-tick from `g_nt_gfx.last_tick`. See
+frame callback calls `nt_gfx_begin_tick` once at its start, before any other gfx
+use (the resource and font steps included), also when nothing renders. Context
+loss and restore are synced there, so the whole callback sees one stable
+`context_lost`/`context_restored` state. Pre-loop loading lands in the first
+tick; teardown work after the last callback lands in a tick that
+`nt_gfx_shutdown` discards. Code in the callback (devapi commands, stats
+readers) reads the previous callback's tick from `g_nt_gfx.last_tick`. See
 [frame observation](../render/architecture.md#frame-observation).
 
 `nt_mem_scratch_reset()` MUST run before any scratch allocation in the

@@ -454,14 +454,17 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
     const uint32_t generation = nt_font_get_cache_generation(font);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_NULL(nt_font_lookup_glyph(font, 'A'));
     TEST_ASSERT_EQUAL_UINT16(1U, nt_font_get_stats(font).glyphs_cached);
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     nt_gfx_end_frame();
 
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
     nt_gfx_fake_fail_texture_creates(2U);

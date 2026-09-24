@@ -59,6 +59,7 @@ static void render_pattern(void) {
 
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_tick();
     /* nt_devapi_update advances deferred slots; runs before input poll to match the host loop order. */
     nt_devapi_update();
     nt_input_poll();
@@ -74,7 +75,6 @@ static void frame(void) {
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
-    nt_gfx_end_tick();
 }
 
 int main(void) {

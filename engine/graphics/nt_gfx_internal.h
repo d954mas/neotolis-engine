@@ -141,10 +141,10 @@ typedef enum {
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);
-/* Returns and clears the latch a lost event sets; C flag, no JS. begin_frame
+/* Returns and clears the latch a lost event sets; C flag, no JS. begin_tick
  * alone takes it. */
 bool nt_gfx_backend_take_context_loss(void);
-/* Asks the browser directly (JS): failure paths and begin_frame while a loss
+/* Asks the browser directly (JS): failure paths and begin_tick while a loss
  * is known or a restore just ran. */
 bool nt_gfx_backend_query_context_lost(void);
 

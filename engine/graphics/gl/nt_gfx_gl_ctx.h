@@ -12,7 +12,7 @@
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc);
 void nt_gfx_gl_ctx_destroy(void);
 /* Returns and clears the lost-event latch, without a JS call: a loss and
- * restore between two frames still reach begin_frame. */
+ * restore between two iterations still reach begin_tick. */
 bool nt_gfx_gl_ctx_take_loss(void);
 /* Asks the browser directly; true without a context. Cold paths only. */
 bool nt_gfx_gl_ctx_query_lost(void);

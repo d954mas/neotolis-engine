@@ -281,6 +281,7 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
+    nt_gfx_begin_tick();
     nt_input_poll();
 
 #ifndef NT_PLATFORM_WEB
@@ -562,7 +563,6 @@ static void frame(void) {
 #endif
 
     nt_window_swap_buffers();
-    nt_gfx_end_tick();
 }
 
 /* ---- Main ---- */

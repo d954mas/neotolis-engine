@@ -785,6 +785,7 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
+    nt_gfx_begin_tick();
     nt_input_poll();
     nt_mem_scratch_reset();
 
@@ -902,7 +903,6 @@ static void frame(void) {
 #endif
         nt_gfx_end_frame();
         nt_window_swap_buffers();
-        nt_gfx_end_tick();
         return;
     }
 
@@ -1028,7 +1028,6 @@ static void frame(void) {
 #endif
 
     nt_window_swap_buffers();
-    nt_gfx_end_tick();
 }
 // #endregion
 

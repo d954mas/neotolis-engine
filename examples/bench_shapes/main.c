@@ -470,6 +470,7 @@ static void draw_shapes(void) {
 
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_tick();
     nt_input_poll();
     float dt = g_nt_app.dt;
     nt_accumulator_update(&s_acc, dt);
@@ -597,7 +598,6 @@ static void frame(void) {
         nt_app_quit();
     }
 #endif
-    nt_gfx_end_tick();
 }
 
 int main(void) {

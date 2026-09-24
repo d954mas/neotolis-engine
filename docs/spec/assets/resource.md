@@ -281,18 +281,18 @@ The per-asset pin (the published winner of a pinning slot) is exposed for diagno
 Raw BLOB bytes have no activation to repeat. Invalidation of other asset types
 preserves BLOB owner/alias readiness and resident payloads.
 
-`nt_gfx_begin_frame()` detects a restored context and sets
-`g_nt_gfx.context_restored` for that frame. Detection follows the browser's loss
-events, so a loss and restore between two frames still takes this path
+`nt_gfx_begin_tick()` restores the context and sets
+`g_nt_gfx.context_restored` for that iteration. Detection follows the browser's loss
+events, so a loss and restore between two iterations still takes this path
 ([frame observation](../render/architecture.md#frame-observation)). Resource readiness, resolved runtime
 handles, and render items computed before that call still describe the previous
 GPU context. The game must discard them and skip dependent draws for the restored
-frame.
+iteration.
 
 When `context_restored` is true, the game:
 
 - discards render decisions and draw lists prepared before
-  `nt_gfx_begin_frame()`, and draws nothing for this frame. Geometry draw entry
+  `nt_gfx_begin_tick()`, and draws nothing in this iteration. Geometry draw entry
   points assert; clearing through `nt_gfx_begin_pass` stays legal
 - destroys its own `nt_program_t` handles and sets each handle variable to
   `NT_PROGRAM_INVALID`. Destroying a stale non-zero handle asserts

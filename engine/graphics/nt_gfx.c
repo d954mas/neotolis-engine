@@ -318,26 +318,6 @@ static void capture_initial_state(void) {
 /* The next tick starts at once: gfx work is always inside a tick between init and shutdown. */
 static void open_tick(void) { g_nt_gfx.counters = (nt_gfx_counters_t){.tick_sequence = g_nt_gfx.counters.tick_sequence + 1}; }
 
-void nt_gfx_end_tick(void) {
-    NT_ASSERT(g_nt_gfx.initialized);
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
-    g_nt_gfx.last_tick = g_nt_gfx.counters;
-#if NT_GFX_CAPTURE_ENABLED
-    if (g_nt_gfx_capture.recording) {
-        g_nt_gfx_capture.view.counters = g_nt_gfx.last_tick;
-        g_nt_gfx_capture.recording = false;
-    }
-    open_tick();
-    if (g_nt_gfx_capture.request_pending) {
-        g_nt_gfx_capture.request_pending = false;
-        g_nt_gfx_capture.recording = true;
-        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
-        capture_initial_state();
-    }
-#else
-    open_tick();
-#endif
-}
 // #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -735,57 +715,77 @@ static void wipe_backend_handles(void) {
     nt_gfx_backend_drop_timer_segments();
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- context-loss recovery branches
-static nt_gfx_event_reason_t begin_frame(void) {
-    /* Always consumed: a loss and restore between two frames must still wipe the tables. */
-    const bool new_loss = nt_gfx_backend_take_context_loss();
-    if (new_loss && !g_nt_gfx.context_lost) {
+/* The whole restore is one operation; render-target definitions and backend calls sit inside it. */
+static nt_gfx_event_reason_t restore_context(void) {
+    /* A failed recreate leaves no context, so the query keeps reporting lost for good. */
+    if (!nt_gfx_backend_recreate_all_resources()) {
+        NT_LOG_ERROR("WebGL context restore failed");
+        return NT_GFX_REASON_CONTEXT_LOST;
+    }
+    /* getExtension enables the float color attachments the render targets may need. */
+    g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
+    /* Cleared first so the render-target creates run and backend_failed asks the browser. */
+    g_nt_gfx.context_lost = false;
+    bool render_targets_restored = true;
+    for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
+        if (nt_pool_slot_alive(&s_gfx.render_target_pool, i) && !render_target_recreate_backend(i) && backend_failed(NULL) != NT_GFX_REASON_CONTEXT_LOST) {
+            render_targets_restored = false;
+        }
+    }
+    /* Restoring onto a new loss would publish dead names; stay lost and retry later. */
+    if (nt_gfx_backend_query_context_lost()) {
+        wipe_backend_handles();
+        g_nt_gfx.context_lost = true;
+        return NT_GFX_REASON_CONTEXT_LOST;
+    }
+    s_gfx.scissor_enabled = false;
+    g_nt_gfx.context_restored = true;
+    if (render_targets_restored) {
+        NT_LOG_INFO("WebGL context restored -- render targets restored, game must re-create other resources");
+    } else {
+        NT_LOG_ERROR("WebGL context restored -- one or more render targets failed to restore");
+    }
+    return NT_GFX_REASON_ACCEPTED;
+}
+
+void nt_gfx_begin_tick(void) {
+    NT_ASSERT(g_nt_gfx.initialized);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
+    g_nt_gfx.last_tick = g_nt_gfx.counters;
+#if NT_GFX_CAPTURE_ENABLED
+    if (g_nt_gfx_capture.recording) {
+        g_nt_gfx_capture.view.counters = g_nt_gfx.last_tick;
+        g_nt_gfx_capture.recording = false;
+    }
+#endif
+    g_nt_gfx.context_restored = false;
+    /* Browser loss events are separate tasks, so this sync holds for the whole iteration. The latch
+     * is always taken: a loss and restore between two iterations must still wipe the tables. */
+    if (nt_gfx_backend_take_context_loss() && !g_nt_gfx.context_lost) {
         wipe_backend_handles();
         g_nt_gfx.context_lost = true;
         NT_LOG_ERROR("WebGL context lost");
+    }
+    open_tick();
+#if NT_GFX_CAPTURE_ENABLED
+    /* Opened after the wipe and before the restore: the snapshot shows the tables the tick starts from. */
+    if (g_nt_gfx_capture.request_pending) {
+        g_nt_gfx_capture.request_pending = false;
+        g_nt_gfx_capture.recording = true;
+        g_nt_gfx_capture.view = (nt_gfx_capture_view_t){0};
+        capture_initial_state();
+    }
+#endif
+    if (g_nt_gfx.context_lost && !nt_gfx_backend_query_context_lost()) {
+        NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
+        NT_GFX_END(restore_context());
+    }
+}
+
+static nt_gfx_event_reason_t begin_frame(void) {
+    if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
-
-    if (g_nt_gfx.context_lost) {
-        if (nt_gfx_backend_query_context_lost()) {
-            return NT_GFX_REASON_CONTEXT_LOST;
-        }
-        /* The whole restore is one operation; render-target definitions and backend calls sit inside it. */
-        NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
-        /* A failed recreate leaves no context, so the query keeps reporting lost for good. */
-        if (!nt_gfx_backend_recreate_all_resources()) {
-            NT_GFX_END(NT_GFX_REASON_CONTEXT_LOST);
-            NT_LOG_ERROR("WebGL context restore failed");
-            return NT_GFX_REASON_CONTEXT_LOST;
-        }
-        /* getExtension enables the float color attachments the render targets may need. */
-        g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
-        /* Cleared first so the render-target creates run and backend_failed asks the browser. */
-        g_nt_gfx.context_lost = false;
-        bool render_targets_restored = true;
-        for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
-            if (nt_pool_slot_alive(&s_gfx.render_target_pool, i) && !render_target_recreate_backend(i) && backend_failed(NULL) != NT_GFX_REASON_CONTEXT_LOST) {
-                render_targets_restored = false;
-            }
-        }
-        /* Restoring onto a new loss would publish dead names; stay lost and retry later. */
-        if (nt_gfx_backend_query_context_lost()) {
-            wipe_backend_handles();
-            g_nt_gfx.context_lost = true;
-            NT_GFX_END(NT_GFX_REASON_CONTEXT_LOST);
-            return NT_GFX_REASON_CONTEXT_LOST;
-        }
-        s_gfx.scissor_enabled = false;
-        g_nt_gfx.context_restored = true;
-        NT_GFX_END(NT_GFX_REASON_ACCEPTED);
-        if (render_targets_restored) {
-            NT_LOG_INFO("WebGL context restored -- render targets restored, game must re-create other resources");
-        } else {
-            NT_LOG_ERROR("WebGL context restored -- one or more render targets failed to restore");
-        }
-    }
-
-    /* Normal frame begin */
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
     if (s_gfx.render_state != NT_GFX_STATE_IDLE) {
         NT_LOG_ERROR("begin_frame called outside IDLE state");
@@ -814,7 +814,6 @@ static nt_gfx_event_reason_t end_frame(void) {
     }
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
-    g_nt_gfx.context_restored = false;
     return NT_GFX_REASON_ACCEPTED;
 }
 

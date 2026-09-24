@@ -596,9 +596,11 @@ static void test_begin_pass_asserts_for_invalid_or_incomplete_target(void) {
     nt_gfx_end_frame();
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_fail_next_render_target_create();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F}));
@@ -656,10 +658,12 @@ static void test_context_restore_recreates_backend_from_retained_descriptor(void
     nt_texture_t depth = nt_gfx_render_target_depth(rt);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
 
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
@@ -688,10 +692,12 @@ static void test_context_restore_waits_after_a_restore_that_leaves_the_backend_l
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_fail_next_backend_restore_lost();
     nt_gfx_fake_set_context_lost(false);
     for (int i = 0; i < 4; i++) {
+        nt_gfx_begin_tick();
         nt_gfx_begin_frame();
     }
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
@@ -705,9 +711,11 @@ static void test_context_restore_stays_lost_when_the_recreate_meets_a_loss(void)
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_lose_context_during_next_restore();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
@@ -715,6 +723,7 @@ static void test_context_restore_stays_lost_when_the_recreate_meets_a_loss(void)
 
     /* The restore that met the loss wiped what it made; the next one starts clean. */
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
@@ -731,7 +740,9 @@ static void test_context_restore_waits_while_backend_remains_lost(void) {
     nt_gfx_set_scissor_enabled(true);
     TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
 
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
@@ -740,6 +751,7 @@ static void test_context_restore_waits_while_backend_remains_lost(void) {
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
 
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
@@ -754,11 +766,13 @@ static void test_context_restore_marks_failed_target_not_ready(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
 
     nt_gfx_fake_fail_next_render_target_create();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
 
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
@@ -773,9 +787,11 @@ static void test_resize_does_not_recover_missing_stub_backend(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_fail_next_render_target_create();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
 
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));

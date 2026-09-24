@@ -381,43 +381,49 @@ or a shadow-map system.
 ## Frame observation
 
 All gfx work between `nt_gfx_init` and `nt_gfx_shutdown` happens inside a
-**tick**, so no operation or GL call escapes the counters. `nt_gfx_end_tick` is
-the only boundary: `nt_gfx_init` opens the first tick, and every end_tick closes
+**tick**, so no operation or GL call escapes the counters. `nt_gfx_begin_tick` is
+the only boundary: `nt_gfx_init` opens the first tick, and every begin_tick closes
 the open tick and at once opens the next, so there is no state outside a tick
-and nothing to assert about it. The host calls `nt_gfx_end_tick` once at the end
-of each frame callback, also when nothing renders. Work between init and the
-first end_tick (init itself, pre-loop loading) is the first tick; teardown work
-after the last end_tick lands in a tick that `nt_gfx_shutdown` discards
-unpublished. Ticks are a host contract in every build, independent of simulation
-time; app/gfx never close one implicitly. end_tick requires gfx IDLE. A tick
-holds any number of render frames and passes; their counters sum. The stub is
-stateless: its end_tick is inert and it never publishes counters.
+and nothing to assert about it. The host calls `nt_gfx_begin_tick` once at the
+start of each frame callback, before any other gfx use (resource and font steps
+included), also when nothing renders. Work between init and the first begin_tick
+(init itself, pre-loop loading) is the first tick; teardown work after the last
+callback lands in a tick that `nt_gfx_shutdown` discards unpublished. Ticks are
+a host contract in every build, independent of simulation time; app/gfx never
+close one implicitly. begin_tick requires gfx IDLE. A tick holds any number of
+render frames and passes; their counters sum. The stub is stateless: its
+begin_tick is inert and it never publishes counters.
 
-`g_nt_gfx.counters` holds the live counters of the open tick. `nt_gfx_end_tick`
+`g_nt_gfx.counters` holds the live counters of the open tick. `nt_gfx_begin_tick`
 copies them into `g_nt_gfx.last_tick`, the last closed tick, then resets them
 and advances `tick_sequence`; render frames reset nothing. `last_tick` stays
-unchanged until the next end or shutdown; its `tick_sequence` is 0 before the
-first end. Readers early in a callback, before its draws, read `last_tick`. A
-no-render tick reports zero draws; old geometry is never reused. Counters carry
-no loss status: a tick that met a context loss holds what was accepted before
-and after it.
+unchanged until the next begin_tick or shutdown; its `tick_sequence` is 0 before
+the first one. Code in a callback after its begin_tick reads the previous
+callback's work from `last_tick`. A no-render tick reports zero draws; old
+geometry is never reused. Counters carry no loss status: a tick that met a
+context loss holds what was accepted before and after it.
 
-Context loss is detected at begin_frame. The web context registers a canvas
+Context loss is synced at begin_tick. The web context registers a canvas
 `webglcontextlost` handler that calls `preventDefault` (the browser restores only
-a handled loss, so shells must not) and sets one latch; begin_frame always takes
-the latch, so a loss and restore that both happen between two frames (a
-background tab) still wipe the backend tables. The first detection wipes every
-backend handle, sets `g_nt_gfx.context_lost`, logs one error and skips the
-frame. Operations issued after a mid-frame loss are issued but do nothing; the
-next begin_frame detects it. While `context_lost` is set, each begin_frame asks
-the browser (the only per-frame JS query, and only in the lost state) and skips
-the frame until the context is back. The restore is one CONTEXT operation: it
-recreates the context, probes capabilities, recreates render targets and ends
-ACCEPTED. A recreate that fails leaves no context, logs one error and stays lost
-for good. A restore that the browser reports lost again when it finishes wipes
-what it refilled, stays lost without an error log and is retried by a later
-begin_frame. begin_frame never reports a loss while `context_lost` is clear, so
-pass calls after a skipped frame are no-ops, not traps.
+a handled loss, so shells must not) and sets one latch. Browser lost and restored
+events are separate tasks and never arrive inside a frame callback, so the state
+begin_tick syncs holds for the whole iteration. begin_tick always takes the
+latch, so a loss and restore that both happen between two callbacks (a
+background tab) still wipe the backend tables. A new loss wipes every backend
+handle, sets `g_nt_gfx.context_lost` and logs one error. While `context_lost` is
+set, begin_tick asks the browser (the only per-iteration JS query, and only in
+the lost state); once the context is back, the same begin_tick restores it and
+sets `g_nt_gfx.context_restored` until the next begin_tick. The game therefore
+sees the restore before its resource step and before it builds anything. The
+restore is one CONTEXT operation: it recreates the context, probes
+capabilities, recreates render targets and ends ACCEPTED. A recreate that fails
+leaves no context, logs one error and stays lost for good. A restore that the
+browser reports lost again when it finishes wipes what it refilled, stays lost
+without an error log and is retried by a later begin_tick. A loss inside an
+iteration changes no state: operations issued after it are issued but do
+nothing, creates end `CONTEXT_LOST` without an error log, and the next
+begin_tick wipes. `nt_gfx_begin_frame` on a lost context does nothing, so the
+pass and frame calls after it are no-ops, not traps.
 
 A backend call that reports a failure (a create, a render-target resize, a
 readback, a lazy sampler recreate at bind) asks the browser: a loss ends the
@@ -481,10 +487,13 @@ yet ends `UNREADY`. Texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
 Each initialization restarts the tick sequence: the first tick after init is 1,
-and `last_tick` holds 0 until the first end_tick.
+and `last_tick` holds 0 until the first begin_tick.
 
-A context restore is one CONTEXT operation inside the begin_frame that performs
-it; the render-target DEFINITION and BACKEND records of the restore sit between
+A context restore is one CONTEXT operation inside the begin_tick that performs
+it and belongs to the tick that begin_tick opens. A new loss is wiped before
+that tick opens, so a recorded tick's snapshot shows the wiped tables and
+`context_lost` set, and the CONTEXT operation follows it. The render-target
+DEFINITION and BACKEND records of the restore sit between
 its BEGIN and RESULT, including a DEFINITION with `complete=0` for a target
 whose recreation failed. It ends ACCEPTED when the context came back and
 CONTEXT_LOST when recreation failed or met a loss. Raw GL names are valid within their
@@ -492,10 +501,10 @@ context segment; a CONTEXT operation in the stream separates segments, and
 frontend handles are the identity across them.
 
 Command recording is one-shot: `nt_gfx_capture_request` asks for the next tick
-to be recorded. The end_tick that closes the requesting tick consumes the request
+to be recorded. The begin_tick that closes the requesting tick consumes the request
 and starts recording the tick it opens; without a request no tick records. The
 first tick never records. A request made during a recorded tick replaces that
-capture at the end_tick that finishes it, so read a capture in the following
+capture at the begin_tick that finishes it, so read a capture in the following
 tick before requesting again: readable captures are at most every other tick.
 `nt_gfx_desc_t.capture_capacity` reserves one
 event array at init (default zero); a request without capacity asserts. Capture-OFF
@@ -504,15 +513,15 @@ There is no growth or allocation while recording. Each pointer-free POD event
 is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Other storage
 consists of fixed control state and counter snapshots, with no second event array.
 All record bytes are initialized before publication. A recorded tick starts at
-the end_tick that opens it and first snapshots
+the begin_tick that opens it and first snapshots
 inherited state, including one definition per live resource (plus
 program uniform/sampler and vertex-input attribute records), into the same array.
 Size the capacity for that snapshot plus the tick's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
 `nt_gfx_capture_read` returns metadata by value and an immutable event prefix.
-Read a finished capture right after `nt_gfx_end_tick`: the prefix remains valid
-until the end_tick that starts the next requested recording overwrites it, or
+Read a finished capture right after `nt_gfx_begin_tick`: the prefix remains valid
+until the begin_tick that starts the next requested recording overwrites it, or
 shutdown; unrequested ticks preserve it. Two counts in the same sequence delimit
 an operation interval. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
@@ -529,7 +538,7 @@ RESULT. `ARGUMENT` records are request
 arguments belonging to the enclosing BEGIN (one per texture binding of a texture
 set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
 prove GL success or GPU completion. The view's `counters` are zero (sequence 0)
-while a tick records and become the finalized tick's at its end_tick; `overflow`
+while a tick records and become the finalized tick's at the begin_tick that closes it; `overflow`
 alone reports an incomplete event stream. Overflow stops event appends and never
 truncates counters.
 

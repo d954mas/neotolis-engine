@@ -28,7 +28,7 @@ void nt_gfx_begin_frame(void) {}
 
 void nt_gfx_end_frame(void) {}
 
-void nt_gfx_end_tick(void) {}
+void nt_gfx_begin_tick(void) {}
 #if NT_GFX_CAPTURE_ENABLED
 const char *nt_gfx_gl_call_name(uint32_t call) {
     (void)call;

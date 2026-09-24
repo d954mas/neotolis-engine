@@ -203,6 +203,7 @@ void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
 
     /* Context dies: handles stay valid, GPU objects do not. */
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
     TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
@@ -220,6 +221,7 @@ void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
     TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
     TEST_ASSERT_EQUAL_UINT32(0, ref.program.id);
 
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     nt_gfx_end_frame();
@@ -794,7 +796,7 @@ void test_font_cache_flush_preserves_the_entire_run(void) {
 
     nt_text_renderer_set_underline(true);
     nt_text_renderer_set_strikethrough(true);
-    nt_gfx_end_tick();
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -887,7 +889,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
         s_error_count = 0;
         const uint32_t uploads = nt_gfx_fake_update_texture_count();
         const uint32_t binds = nt_gfx_fake_bound_texture_count();
-        nt_gfx_end_tick();
+        nt_gfx_begin_tick();
         nt_gfx_begin_frame();
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
         nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -912,7 +914,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
         const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'A');
         TEST_ASSERT_NOT_NULL(glyph);
         TEST_ASSERT_FALSE(glyph->is_tofu);
-        nt_gfx_end_tick();
+        nt_gfx_begin_tick();
         nt_gfx_begin_frame();
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
         nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -1017,12 +1019,14 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_glyph_count());
     /* Context dies: handles stay valid, GPU objects do not. */
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(nt_gfx_program_valid(first));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
 
     /* Restore frame: reset the renderer, drop the program, keep the material. */
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
@@ -1044,7 +1048,8 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     nt_font_step();
     nt_text_renderer_set_material(material);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_end_tick();
+    nt_gfx_begin_tick();
+    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_flush();

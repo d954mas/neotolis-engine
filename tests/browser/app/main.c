@@ -261,7 +261,7 @@ static float s_nt_field_css_w;
 static float s_nt_field_css_h;
 static int s_nt_field_visible; /* the field was laid out this frame */
 static int s_nt_hidden_probe;
-static uint64_t s_nt_restore_sequence; /* tick whose begin_frame restored the context */
+static uint64_t s_nt_restore_sequence; /* tick whose begin_tick restored the context */
 static unsigned int s_nt_restore_ticks;
 static nt_ui_input_style_t s_nt_hidden_input_style;
 static nt_ui_label_style_t s_nt_hidden_caption;
@@ -464,7 +464,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
 static double s_observe_values[40];
-/* Requests every other frame: a request consumed at end_tick replaces the capture it
+/* Requests every other frame: a request consumed at begin_tick replaces the capture it
  * just finished, so the unrequested frame between keeps that capture readable. */
 #if NT_GFX_CAPTURE_ENABLED
 static bool s_observe_repeat;
@@ -492,7 +492,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     }
 #endif
     /* Close the tick JS called into, so the probe's work is one tick of its own. */
-    nt_gfx_end_tick();
+    nt_gfx_begin_tick();
     const uint8_t pixels[16] = {64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255};
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
     nt_gfx_update_buffer(buffer, 0, pixels, 16);
@@ -537,7 +537,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_destroy_texture(texture);
     nt_gfx_destroy_texture(spare);
     nt_gfx_destroy_buffer(buffer);
-    nt_gfx_end_tick();
+    nt_gfx_begin_tick();
     const nt_gfx_counters_t counters = g_nt_gfx.last_tick;
     s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
     s_observe_values[3] = nt_gfx_draw_calls(&counters);
@@ -882,6 +882,12 @@ static bool gpu_restore_step(void) {
 
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_tick();
+#if defined(__EMSCRIPTEN__)
+    if (g_nt_gfx.last_tick.tick_sequence == s_nt_restore_sequence) {
+        s_nt_restore_ticks++;
+    }
+#endif
     nt_input_poll();
     nt_mem_scratch_reset();
 
@@ -1048,12 +1054,6 @@ static void frame(void) {
     s_observe_request_now = !s_observe_request_now;
     if (s_observe_repeat && s_observe_request_now) {
         nt_gfx_capture_request();
-    }
-#endif
-    nt_gfx_end_tick();
-#if defined(__EMSCRIPTEN__)
-    if (g_nt_gfx.last_tick.tick_sequence == s_nt_restore_sequence) {
-        s_nt_restore_ticks++;
     }
 #endif
 }
