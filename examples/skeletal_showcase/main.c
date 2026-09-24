@@ -1880,6 +1880,21 @@ static void mount_pack(const char *name) {
 static void frame(void) {
     nt_window_poll();
     nt_gfx_begin_tick();
+    if (g_nt_gfx.context_restored) {
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+        nt_resource_invalidate(NT_ASSET_FONT);
+        nt_resource_invalidate(NT_ASSET_MESH);
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof s_frame_uniforms, .label = "skeletal_frame_uniforms"});
+        restore_mesh_scene();
+        nt_shape_renderer_restore_gpu();
+        (void)nt_sprite_renderer_restore_gpu();
+        (void)nt_text_renderer_restore_gpu();
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+        s_atlas_bound = false;
+    }
 #ifdef NT_DEVAPI_ENABLED
     nt_devapi_update();
 #endif
@@ -1908,27 +1923,6 @@ static void frame(void) {
     };
 
     nt_gfx_begin_frame();
-    if (g_nt_gfx.context_restored) {
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
-        nt_resource_invalidate(NT_ASSET_MESH);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof s_frame_uniforms, .label = "skeletal_frame_uniforms"});
-        restore_mesh_scene();
-        nt_shape_renderer_restore_gpu();
-        (void)nt_sprite_renderer_restore_gpu();
-        (void)nt_text_renderer_restore_gpu();
-        nt_program_ref_drop(&s_sprite_program);
-        nt_program_ref_drop(&s_text_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-        s_atlas_bound = false;
-        s_scene_registry[s_active_scene].update();
-        nt_gfx_end_frame();
-        if (nt_app_render_enabled()) {
-            nt_window_swap_buffers();
-        }
-        return;
-    }
     nt_font_step();
     const bool render_enabled = nt_app_render_enabled();
     if (render_enabled) {

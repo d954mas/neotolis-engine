@@ -2335,10 +2335,6 @@ void nt_gfx_set_uniform_int(nt_hash32_t name, int val) {
 
 /* ---- Draw calls ---- */
 
-/* Pre-frame readiness decisions may describe the lost context: rebuild on the
- * restored frame and submit on the next. Pass clears remain legal. */
-static void assert_draws_allowed_this_frame(void) { NT_ASSERT(!g_nt_gfx.context_restored && "no draws on the restored frame; see docs/spec/assets/resource.md"); }
-
 /* Every draw reads vertex-input state; attribute-less draws bind an empty one. */
 static void assert_vertex_input_bound(void) { NT_ASSERT(s_gfx.bound_vertex_input != 0 && "draw: no vertex input bound -- bind one with nt_gfx_bind_vertex_input"); }
 
@@ -2366,7 +2362,6 @@ static nt_gfx_event_reason_t draw(uint32_t first_vertex, uint32_t num_vertices) 
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
-    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -2399,7 +2394,6 @@ static nt_gfx_event_reason_t draw_instanced(uint32_t first_vertex, uint32_t num_
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
-    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -2433,7 +2427,6 @@ static nt_gfx_event_reason_t draw_indexed(uint32_t first_index, uint32_t num_ind
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
-    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
@@ -2468,7 +2461,6 @@ static nt_gfx_event_reason_t draw_indexed_instanced(uint32_t first_index, uint32
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
-    assert_draws_allowed_this_frame();
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {

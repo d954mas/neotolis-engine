@@ -109,6 +109,28 @@ static void link_program(void) {
 static void frame(void) {
     nt_window_poll();
     nt_gfx_begin_tick();
+    if (g_nt_gfx.context_restored) {
+        nt_resource_invalidate(NT_ASSET_MESH);
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+
+        nt_gfx_destroy_texture(s_fallback_texture);
+        s_fallback_texture = make_fallback_texture();
+        nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
+
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "frame_uniforms",
+        });
+        /* Materials keep their handles and draw again once their programs relink. */
+        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        (void)restore_result;
+        nt_program_ref_drop(&s_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+    }
     nt_input_poll();
 
 #ifndef NT_PLATFORM_WEB
@@ -174,31 +196,6 @@ static void frame(void) {
     bool can_render = mat_info && nt_gfx_program_ready(mat_info->program) && nt_resource_is_ready(s_mesh_handle);
 
     nt_gfx_begin_frame();
-
-    if (g_nt_gfx.context_restored) {
-        can_render = false;
-        nt_resource_invalidate(NT_ASSET_MESH);
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-
-        nt_gfx_destroy_texture(s_fallback_texture);
-        s_fallback_texture = make_fallback_texture();
-        nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
-
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
-        nt_program_ref_drop(&s_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-    }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
 

@@ -875,16 +875,9 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
 /* The husk is second so the first entry proves the whole set is discarded, not just the tail. */
 void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(void) {
     nt_texture_t husk = make_binding_test_texture(1);
-    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_fake_lose_and_restore_context();
     nt_gfx_begin_tick();
-    nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_tick();
-    nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(husk));
-    /* The restored frame rejects draws; the skip below has to be the set's doing. */
-    nt_gfx_end_frame();
-    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
 
     nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
@@ -917,13 +910,7 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
 void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
     nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_tick();
-    nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_tick();
-    nt_gfx_begin_frame();
-    nt_gfx_end_frame();
+    nt_gfx_fake_lose_and_restore_context();
     nt_gfx_begin_tick();
 
     nt_texture_t color = make_binding_test_texture(1);
@@ -2944,46 +2931,16 @@ void test_gfx_orphan_buffer_on_husk_asserts(void) {
 
 /* ---- Per-frame draw call counter ---- */
 
-/* Restore invalidates earlier render decisions, so the restored frame permits clears but rejects draws. */
-void test_gfx_restored_frame_rejects_draws(void) {
-    nt_shader_t vs = make_test_vs();
-    nt_shader_t fs = make_test_fs();
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-    });
-
-    /* Lose it, then let begin_tick see the context back: that iteration is the
-     * restored one and carries the flag. */
-    nt_gfx_fake_set_context_lost(true);
+/* The restore runs before the iteration builds anything, so what it rebuilds draws in the same iteration. */
+void test_gfx_restored_iteration_draws_what_it_rebuilds(void) {
+    nt_gfx_fake_lose_and_restore_context();
     nt_gfx_begin_tick();
-    nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_tick();
-    nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-
-    /* Clearing is still allowed -- the game may want the screen blanked. */
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     nt_pipeline_t rebuilt = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
     });
-    nt_gfx_bind_pipeline(rebuilt);
-    /* Full draw state bound: the ONLY reason these trap is the restored-frame
-     * rule, not a missing vertex input. */
-    bind_test_vertex_input();
-    EXPECT_ASSERT(nt_gfx_draw(0, 0));
-    EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
-
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-
-    /* And the very next iteration draws normally. */
-    nt_gfx_begin_tick();
     nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(rebuilt);
     bind_test_vertex_input();
@@ -2991,8 +2948,6 @@ void test_gfx_restored_frame_rejects_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-
-    (void)pip;
 }
 
 void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
@@ -3357,7 +3312,7 @@ int main(void) {
     RUN_TEST(test_gfx_update_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_orphan_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_bound_pipeline_holds_the_generation);
-    RUN_TEST(test_gfx_restored_frame_rejects_draws);
+    RUN_TEST(test_gfx_restored_iteration_draws_what_it_rebuilds);
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);
     RUN_TEST(test_gfx_uniform_records_hash_and_value);

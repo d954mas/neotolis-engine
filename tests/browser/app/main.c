@@ -888,6 +888,25 @@ static void frame(void) {
         s_nt_restore_ticks++;
     }
 #endif
+    if (g_nt_gfx.context_restored) {
+#if defined(__EMSCRIPTEN__)
+        s_nt_restore_sequence = g_nt_gfx.counters.tick_sequence;
+#endif
+        /* One-shot per restored event; the GPU recreation below may retry. */
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+        nt_resource_invalidate(NT_ASSET_FONT);
+        /* Materials keep their handles and draw again once their programs relink. */
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+        s_atlas_bound = false;
+        /* Font sources survive restore; adding them again asserts on duplicates.
+         * nt_font_step rebuilds textures after the font assets reactivate. */
+        s_gpu_restore_pending = true;
+    }
+    if (s_gpu_restore_pending) {
+        s_gpu_restore_pending = !gpu_restore_step();
+    }
     nt_input_poll();
     nt_mem_scratch_reset();
 
@@ -924,27 +943,6 @@ static void frame(void) {
     uniforms.near_far[1] = 1.0F;
 
     nt_gfx_begin_frame();
-    if (g_nt_gfx.context_restored) {
-#if defined(__EMSCRIPTEN__)
-        s_nt_restore_sequence = g_nt_gfx.counters.tick_sequence;
-#endif
-        /* One-shot per restored event; the GPU recreation below may retry. */
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        nt_program_ref_drop(&s_sprite_program);
-        nt_program_ref_drop(&s_text_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-        s_atlas_bound = false;
-        /* Font sources survive restore; adding them again asserts on duplicates.
-         * nt_font_step rebuilds textures after the font assets reactivate. */
-        s_gpu_restore_pending = true;
-    }
-    if (s_gpu_restore_pending) {
-        s_gpu_restore_pending = !gpu_restore_step();
-    }
-
     nt_font_step();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){

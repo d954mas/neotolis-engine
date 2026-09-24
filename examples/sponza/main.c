@@ -360,6 +360,31 @@ static void load_scene_from_manifest(void) {
 static void frame(void) {
     nt_window_poll();
     nt_gfx_begin_tick();
+    if (g_nt_gfx.context_restored) {
+        nt_resource_invalidate(NT_ASSET_MESH);
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "frame_uniforms",
+        });
+        nt_gfx_destroy_buffer(s_light_ubo);
+        s_light_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_lighting_t),
+            .label = "lighting",
+        });
+        /* Materials keep their handles and draw again once their programs relink. */
+        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        (void)restore_result;
+        drop_programs(); /* GL objects are gone; this frees the pool slots too */
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+    }
     nt_input_poll();
 
 #ifndef NT_PLATFORM_WEB
@@ -544,33 +569,6 @@ static void frame(void) {
     nt_gfx_begin_frame();
 
     /* Restore GPU resources after WebGL context loss */
-    if (g_nt_gfx.context_restored) {
-        item_count = 0;
-        nt_resource_invalidate(NT_ASSET_MESH);
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
-        nt_gfx_destroy_buffer(s_light_ubo);
-        s_light_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_lighting_t),
-            .label = "lighting",
-        });
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
-        drop_programs(); /* GL objects are gone; this frees the pool slots too */
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-    }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .clear_color = {0.529F, 0.808F, 0.922F, 1.0F}, /* sky blue */

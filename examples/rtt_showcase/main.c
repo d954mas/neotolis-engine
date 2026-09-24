@@ -515,41 +515,6 @@ static void render_frame(void) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    if (g_nt_gfx.context_restored) {
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        nt_shape_renderer_restore_gpu();
-        bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
-        destroy_quad_resources();
-        restored = make_quad_resources() && restored;
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "rtt_frame_uniforms",
-        });
-        restored = s_frame_ubo.id != 0 && restored;
-        restored = (nt_sprite_renderer_restore_gpu() == NT_OK) && restored;
-        restored = (nt_text_renderer_restore_gpu() == NT_OK) && restored;
-        nt_program_ref_drop(&s_sprite_program);
-        nt_program_ref_drop(&s_text_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-        s_atlas_bound = false;
-        /* The font keeps its sources across a restore -- only its GPU textures
-         * died, and nt_font_step rebuilds those itself. Clearing this would make
-         * the gate call nt_font_add twice, which asserts on the duplicate. */
-        s_demo.render_resources_ready = restored && render_targets_ready();
-        if (!s_demo.render_resources_ready) {
-            nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
-        }
-        /* Everything decided before begin_frame described the dead context, so
-         * this frame draws nothing -- the next one is built from scratch. */
-        nt_gfx_end_frame();
-        return;
-    }
     if (!s_demo.render_resources_ready || !render_targets_ready()) {
         nt_gfx_end_frame();
         return;
@@ -583,6 +548,36 @@ static void render_frame(void) {
 static void frame(void) {
     nt_window_poll();
     nt_gfx_begin_tick();
+    if (g_nt_gfx.context_restored) {
+        /* Materials keep their handles and draw again once their programs relink. */
+        nt_shape_renderer_restore_gpu();
+        bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
+        destroy_quad_resources();
+        restored = make_quad_resources() && restored;
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+        nt_resource_invalidate(NT_ASSET_FONT);
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "rtt_frame_uniforms",
+        });
+        restored = s_frame_ubo.id != 0 && restored;
+        restored = (nt_sprite_renderer_restore_gpu() == NT_OK) && restored;
+        restored = (nt_text_renderer_restore_gpu() == NT_OK) && restored;
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+        s_atlas_bound = false;
+        /* The font keeps its sources across a restore -- only its GPU textures
+         * died, and nt_font_step rebuilds those itself. Clearing this would make
+         * the gate call nt_font_add twice, which asserts on the duplicate. */
+        s_demo.render_resources_ready = restored && render_targets_ready();
+        if (!s_demo.render_resources_ready) {
+            nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
+        }
+    }
     nt_input_poll();
     nt_mem_scratch_reset();
 
