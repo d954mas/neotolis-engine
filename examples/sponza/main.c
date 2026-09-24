@@ -32,6 +32,7 @@
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include <inttypes.h>
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
@@ -358,6 +359,32 @@ static void load_scene_from_manifest(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_frame();
+    if (g_nt_gfx.context_restored) {
+        nt_resource_invalidate(NT_ASSET_MESH);
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "frame_uniforms",
+        });
+        nt_gfx_destroy_buffer(s_light_ubo);
+        s_light_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_lighting_t),
+            .label = "lighting",
+        });
+        /* Materials keep their handles and draw again once their programs relink. */
+        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        (void)restore_result;
+        drop_programs(); /* GL objects are gone; this frees the pool slots too */
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+    }
     nt_input_poll();
 
 #ifndef NT_PLATFORM_WEB
@@ -539,36 +566,7 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    nt_gfx_begin_frame();
-
     /* Restore GPU resources after WebGL context loss */
-    if (g_nt_gfx.context_restored) {
-        item_count = 0;
-        nt_resource_invalidate(NT_ASSET_MESH);
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
-        nt_gfx_destroy_buffer(s_light_ubo);
-        s_light_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_lighting_t),
-            .label = "lighting",
-        });
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
-        drop_programs(); /* GL objects are gone; this frees the pool slots too */
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-    }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .clear_color = {0.529F, 0.808F, 0.922F, 1.0F}, /* sky blue */
@@ -606,8 +604,9 @@ static void frame(void) {
             if (s_stats_accum >= 1.0) {
                 float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
                 float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
-                nt_log_info("FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%u verts=%u tris=%u items=%u/%u", (double)avg_fps, (double)min_fps, (double)g_nt_app.dt, (double)s_move_speed,
-                            g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.instances, g_nt_gfx.frame_stats.vertices, g_nt_gfx.frame_stats.indices / 3, item_count, s_entity_count);
+                nt_log_info("FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%" PRIu64 " verts=%" PRIu64 " tris=%" PRIu64 " items=%u/%u", (double)avg_fps, (double)min_fps, (double)g_nt_app.dt,
+                            (double)s_move_speed, nt_gfx_draw_calls(&g_nt_gfx.counters), g_nt_gfx.counters.instances, g_nt_gfx.counters.vertices, g_nt_gfx.counters.indices / 3, item_count,
+                            s_entity_count);
                 s_stats_accum = 0.0;
                 s_stats_frames = 0;
                 s_stats_max_dt = 0.0F;
@@ -617,7 +616,6 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 }

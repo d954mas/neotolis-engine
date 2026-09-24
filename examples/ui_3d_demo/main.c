@@ -785,6 +785,33 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
+    nt_gfx_begin_frame();
+    if (g_nt_gfx.context_restored) {
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+        nt_resource_invalidate(NT_ASSET_FONT);
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "frame_uniforms",
+        });
+        /* Materials keep their handles and draw again once their programs relink. */
+        nt_shape_renderer_restore_gpu();
+        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        restore_result = nt_text_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        (void)restore_result;
+        nt_program_ref_drop(&s_sprite_cutoff_program);
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+        s_atlas_bound = false;
+        /* The font keeps its sources across a restore -- only its GPU textures
+         * died, and nt_font_step rebuilds those itself. Clearing this would make
+         * the gate call nt_font_add twice, which asserts on the duplicate. */
+    }
     nt_input_poll();
     nt_mem_scratch_reset();
 
@@ -865,45 +892,9 @@ static void frame(void) {
     uniforms_2d.near_far[0] = -1.0F;
     uniforms_2d.near_far[1] = 1.0F;
 
-    nt_gfx_begin_frame();
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_begin_segment("frame");
 #endif
-    if (g_nt_gfx.context_restored) {
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        nt_shape_renderer_restore_gpu();
-        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        restore_result = nt_text_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
-        nt_program_ref_drop(&s_sprite_cutoff_program);
-        nt_program_ref_drop(&s_sprite_program);
-        nt_program_ref_drop(&s_text_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-        s_atlas_bound = false;
-        /* The font keeps its sources across a restore -- only its GPU textures
-         * died, and nt_font_step rebuilds those itself. Clearing this would make
-         * the gate call nt_font_add twice, which asserts on the duplicate. */
-        /* Everything decided before begin_frame described the dead context, so
-         * this frame draws nothing -- the next one is built from scratch. */
-#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
-        nt_gfx_end_segment();
-#endif
-        nt_gfx_end_frame();
-        nt_window_swap_buffers();
-        return;
-    }
 
     nt_font_step();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.06F, 0.07F, 0.10F, 1.0F}, .clear_depth = 1.0F});
@@ -999,7 +990,6 @@ static void frame(void) {
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_end_segment();
 #endif
-    nt_gfx_end_frame();
 
 #if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
@@ -1018,7 +1008,7 @@ static void frame(void) {
 #else
         .gpu_ms = -1.0F,
 #endif
-        .draw_calls = nt_gfx_get_frame_draw_calls(),
+        .draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters),
         .mem_used = s_mem_used,
         .scratch_hwm = (uint32_t)nt_mem_scratch_high_water_mark(),
         .scratch_used = (uint32_t)nt_mem_scratch_used(),

@@ -233,13 +233,11 @@ static void test_context_restore_reassigns_existing_material_handles(void) {
 
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
-    nt_gfx_end_frame();
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     drop_programs();
     nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-    nt_gfx_end_frame();
     for (uint32_t i = 0; i < TEST_NODE_COUNT; i++) {
         TEST_ASSERT_EQUAL_UINT32(materials[i].id, s_materials[i].id);
         TEST_ASSERT_FALSE(nt_gfx_program_ready(nt_material_get_info(s_materials[i])->program));

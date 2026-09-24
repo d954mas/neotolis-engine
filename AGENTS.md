@@ -19,7 +19,7 @@ Neotolis Engine is a minimalist **C17** game engine for **Web/WASM (WebGL 2)**. 
 ## Engine principles
 
 - **Explicit, code-first, composable:** game owns gameplay, system order, render passes and content organization. Do not hide policy in the engine or replace modules with a monolith. See [principles](docs/spec/core/principles.md).
-- **Keep it simple and small:** avoid speculative abstractions and dependencies. Every byte counts; use only the modules needed.
+- **Keep it simple and small:** avoid speculative abstractions and dependencies. Every byte counts; use only the modules needed. When size and runtime performance conflict on a hot path, performance wins: accept a measured size cost rather than add per-call work (calls, branches, indirection); report both numbers.
 - **Explicit build configuration:** CMake options and presets select features and diagnostics. Do not infer them from Debug/Release, include order, or unrelated options; headers require target-provided configuration.
 - **Prebuilt assets:** source formats and heavy validation belong in the builder. Runtime loads binary packs and enforces its documented safety checks and recoverable contracts.
 - **Platform abstraction:** browser/OS calls go through the owning engine wrapper.

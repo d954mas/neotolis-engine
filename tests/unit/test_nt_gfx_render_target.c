@@ -69,7 +69,6 @@ static void test_active_attachments_cannot_be_sampled(void) {
         .texture = nt_gfx_render_target_color(rt),
         .sampler = NT_SAMPLER_DEFAULT,
     };
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
 
@@ -79,7 +78,6 @@ static void test_active_attachments_cannot_be_sampled(void) {
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_depth_accessor_matches_depth_mode(void) {
@@ -102,7 +100,6 @@ static void test_pass_target_routes_to_backend(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_BUFFER);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = rt,
         .clear_color = {0.1F, 0.2F, 0.3F, 1.0F},
@@ -110,25 +107,21 @@ static void test_pass_target_routes_to_backend(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_pass_target());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_zero_pass_target_routes_to_default_framebuffer(void) {
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = NT_RENDER_TARGET_INVALID,
         .clear_depth = 1.0F,
     });
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_pass_target());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_zero_pass_target_restores_default_after_render_target(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_BUFFER);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = rt,
         .clear_depth = 1.0F,
@@ -142,7 +135,6 @@ static void test_zero_pass_target_restores_default_after_render_target(void) {
     });
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_pass_target());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_resize_preserves_target_and_attachment_handles(void) {
@@ -180,14 +172,12 @@ static void test_resize_failure_keeps_existing_target_ready(void) {
     TEST_ASSERT_EQUAL_UINT32(color.id, nt_gfx_render_target_color(rt).id);
     TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(rt).id);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = rt,
         .clear_depth = 1.0F,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_pass_target());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_resize_does_not_need_generic_texture_replacement(void) {
@@ -222,11 +212,9 @@ static void test_depth_attachment_uses_explicit_texture_descriptor(void) {
 static void test_make_rejects_active_pass(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_make_render_target(&desc));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
 }
@@ -235,11 +223,9 @@ static void test_resize_rejects_active_pass(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_resize_render_target(rt, 128, 96));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_resize_count());
@@ -249,11 +235,9 @@ static void test_destroy_rejects_active_pass(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_render_target(rt));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_destroy_count());
@@ -371,7 +355,6 @@ static void test_make_render_target_rejects_invalid_sampler_modes(void) {
 static void begin_single_sampler_pass(uint8_t sampler_class) {
     const nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_tex"}, &sampler_class, 1);
     const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
 }
@@ -442,7 +425,6 @@ static void test_depth_texture_accepts_linear_comparison_sampler(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_gfx_destroy_render_target(rt);
 }
 
@@ -457,7 +439,6 @@ static void test_color_texture_rejects_comparison_sampler(void) {
     NT_TEST_EXPECT_ASSERT(apply_one_texture(nt_gfx_render_target_color(rt), comparison));
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_gfx_destroy_render_target(rt);
 }
 
@@ -485,7 +466,6 @@ static void test_integer_texture_rejects_comparison_sampler(void) {
     NT_TEST_EXPECT_ASSERT(apply_one_texture(integer, comparison));
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_gfx_destroy_texture(integer);
 }
 
@@ -591,9 +571,7 @@ static void test_begin_pass_asserts_for_invalid_or_incomplete_target(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
-    nt_gfx_begin_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.target = (nt_render_target_t){UINT32_MAX}, .clear_depth = 1.0F}));
-    nt_gfx_end_frame();
 
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
@@ -602,12 +580,13 @@ static void test_begin_pass_asserts_for_invalid_or_incomplete_target(void) {
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F}));
-    nt_gfx_end_frame();
 }
 
 static void test_pass_sequencing_and_capacity_misuse_assert(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(NULL));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
+    nt_gfx_end_pass();
 
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     for (uint32_t i = 0; i < 4; i++) {
@@ -678,31 +657,46 @@ static void test_context_restore_recreates_backend_from_retained_descriptor(void
     /* The recreate desc keeps the zero-init spelling; the GL name creator reads it as one level. */
     TEST_ASSERT_EQUAL_UINT8(0, restored_depth.level_count);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_gpu_caps_probe_count());
-
-    nt_gfx_end_frame();
 }
 
-static void test_context_restore_retries_after_backend_recreate_failure(void) {
+/* A failed web recreate leaves no context; retrying every frame would only fail again. */
+static void test_context_restore_waits_after_a_restore_that_leaves_the_backend_lost(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
+    nt_gfx_fake_fail_next_backend_restore_lost();
+    nt_gfx_fake_set_context_lost(false);
+    for (int i = 0; i < 4; i++) {
+        nt_gfx_begin_frame();
+    }
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
+    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_backend_restore_count());
+}
 
-    nt_gfx_fake_fail_next_backend_restore();
+static void test_context_restore_stays_lost_when_the_recreate_meets_a_loss(void) {
+    nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
+    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_fake_lose_context_during_next_restore();
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_backend_restore_count());
+    TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
+    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
 
+    /* The restore that met the loss wiped what it made; the next one starts clean. */
+    nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_backend_restore_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_gpu_caps_probe_count());
-    nt_gfx_end_frame();
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -728,7 +722,6 @@ static void test_context_restore_waits_while_backend_remains_lost(void) {
     TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_backend_restore_count());
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
-    nt_gfx_end_frame();
 }
 
 static void test_context_restore_marks_failed_target_not_ready(void) {
@@ -746,8 +739,6 @@ static void test_context_restore_marks_failed_target_not_ready(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
-
-    nt_gfx_end_frame();
 }
 
 static void test_resize_does_not_recover_missing_stub_backend(void) {
@@ -763,8 +754,6 @@ static void test_resize_does_not_recover_missing_stub_backend(void) {
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
     TEST_ASSERT_FALSE(nt_gfx_resize_render_target(rt, 128, 96));
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
-
-    nt_gfx_end_frame();
 }
 
 static void test_invalid_handles_return_invalid_attachments(void) {
@@ -870,7 +859,8 @@ int main(void) {
     RUN_TEST(test_pass_sequencing_and_capacity_misuse_assert);
     RUN_TEST(test_resize_preserves_depth_mode_accessor_matrix);
     RUN_TEST(test_context_restore_recreates_backend_from_retained_descriptor);
-    RUN_TEST(test_context_restore_retries_after_backend_recreate_failure);
+    RUN_TEST(test_context_restore_waits_after_a_restore_that_leaves_the_backend_lost);
+    RUN_TEST(test_context_restore_stays_lost_when_the_recreate_meets_a_loss);
     RUN_TEST(test_context_restore_waits_while_backend_remains_lost);
     RUN_TEST(test_context_restore_marks_failed_target_not_ready);
     RUN_TEST(test_resize_does_not_recover_missing_stub_backend);

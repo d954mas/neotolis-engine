@@ -510,37 +510,43 @@ static void draw_default_frame(void) {
     draw_solid_quad(-0.92F, 0.82F, 0.92F, 0.89F, s_demo.handles_stable ? stable : unstable);
 }
 
-static void frame(void) {
-    nt_window_poll();
-    nt_input_poll();
-    nt_mem_scratch_reset();
-
-#ifndef NT_PLATFORM_WEB
-    if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-        nt_app_quit();
-    }
-#endif
-    if (nt_input_key_is_pressed(NT_KEY_R)) {
-        bool make_large = !s_demo.large_target;
-        rtt_resize_result_t resize_result = make_large ? resize_targets(768, 432) : resize_targets(512, 288);
-        /* Resizing targets cannot repair a failed renderer restore. */
-        s_demo.render_resources_ready = s_demo.render_resources_ready && resize_result != RTT_RESIZE_UNUSABLE;
-        if (resize_result == RTT_RESIZE_COMMITTED) {
-            s_demo.large_target = make_large;
-        }
-    }
-    nt_resource_step();
-    link_programs();
-    try_bind_ui_resources();
-
-    nt_gfx_begin_frame();
+static void render_frame(void) {
     if (g_nt_gfx.context_lost) {
-        nt_window_swap_buffers();
         return;
     }
+    if (!s_demo.render_resources_ready || !render_targets_ready()) {
+        return;
+    }
+
+    nt_font_step();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){
+        .target = s_demo.scene,
+        .clear_color = {0.02F, 0.025F, 0.035F, 1.0F},
+        .clear_depth = 1.0F,
+    });
+    draw_scene_contents();
+    nt_gfx_end_pass();
+
+    nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = s_demo.scene_color,
+        .temp = s_demo.temp,
+        .dest = s_demo.blur,
+        .radius = s_demo.blur_radius,
+        .sigma = 0.0F,
+    });
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.015F, 0.018F, 0.025F, 1.0F}, .clear_depth = 1.0F});
+    draw_default_frame();
+    draw_ui_overlay();
+    nt_gfx_end_pass();
+}
+
+static void frame(void) {
+    nt_window_poll();
+    nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
+        /* Materials keep their handles and draw again once their programs relink. */
         nt_shape_renderer_restore_gpu();
         bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
         destroy_quad_resources();
@@ -568,42 +574,29 @@ static void frame(void) {
         if (!s_demo.render_resources_ready) {
             nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
         }
-        /* Everything decided before begin_frame described the dead context, so
-         * this frame draws nothing -- the next one is built from scratch. */
-        nt_gfx_end_frame();
-        nt_window_swap_buffers();
-        return;
     }
-    if (!s_demo.render_resources_ready || !render_targets_ready()) {
-        nt_gfx_end_frame();
-        nt_window_swap_buffers();
-        return;
+    nt_input_poll();
+    nt_mem_scratch_reset();
+
+#ifndef NT_PLATFORM_WEB
+    if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+        nt_app_quit();
     }
+#endif
+    if (nt_input_key_is_pressed(NT_KEY_R)) {
+        bool make_large = !s_demo.large_target;
+        rtt_resize_result_t resize_result = make_large ? resize_targets(768, 432) : resize_targets(512, 288);
+        /* Resizing targets cannot repair a failed renderer restore. */
+        s_demo.render_resources_ready = s_demo.render_resources_ready && resize_result != RTT_RESIZE_UNUSABLE;
+        if (resize_result == RTT_RESIZE_COMMITTED) {
+            s_demo.large_target = make_large;
+        }
+    }
+    nt_resource_step();
+    link_programs();
+    try_bind_ui_resources();
 
-    nt_font_step();
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .target = s_demo.scene,
-        .clear_color = {0.02F, 0.025F, 0.035F, 1.0F},
-        .clear_depth = 1.0F,
-    });
-    draw_scene_contents();
-    nt_gfx_end_pass();
-
-    nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
-        .source = s_demo.scene_color,
-        .temp = s_demo.temp,
-        .dest = s_demo.blur,
-        .radius = s_demo.blur_radius,
-        .sigma = 0.0F,
-    });
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.015F, 0.018F, 0.025F, 1.0F}, .clear_depth = 1.0F});
-    draw_default_frame();
-    draw_ui_overlay();
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-
+    render_frame();
     nt_window_swap_buffers();
 }
 

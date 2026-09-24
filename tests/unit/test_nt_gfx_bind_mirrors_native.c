@@ -45,10 +45,6 @@ static const uint16_t s_tri_indices[3] = {0, 1, 2};
 static const uint16_t s_degenerate_indices[3] = {0, 0, 0};
 
 void setUp(void) {
-    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = 16, .height = 16};
-    nt_window_init();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -63,7 +59,6 @@ void tearDown(void) {
     remove_state_counters();
     disarm_get_error_poison();
     nt_gfx_shutdown();
-    nt_window_shutdown();
 }
 
 static nt_buffer_t make_vbo(const float *data) {
@@ -274,7 +269,6 @@ static void test_vertex_inputs_alternate_under_one_pipeline(void) {
     nt_vertex_input_t vi_full = make_vi(make_vbo(s_full), (nt_buffer_t){0});
     nt_vertex_input_t vi_empty = make_vi(make_vbo(s_empty), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_full);
@@ -293,12 +287,10 @@ static void test_vertex_inputs_alternate_under_one_pipeline(void) {
     nt_gfx_draw(0, 3);
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
-/* Counts REAL glVertexAttribPointer calls via glad-pointer swap, so a
- * reintroduced re-pointing path is caught even if it bypasses the source
- * counters in nt_gfx_gl.c. */
+/* Counts REAL glVertexAttribPointer calls via glad-pointer swap, so a raw GL
+ * call that skips the NT_GL wrapper (and its counter) is still caught. */
 static uint32_t s_real_attrib_pointer_calls;
 static PFNGLVERTEXATTRIBPOINTERPROC s_saved_attrib_pointer;
 static void GLAD_API_PTR counting_vertex_attrib_pointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) {
@@ -321,19 +313,17 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     });
     nt_buffer_t inst_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_full);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
-    nt_gfx_gl_test_reset_counters();
+    const uint32_t attrib_pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
+    const uint32_t vao_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindVertexArray];
     s_real_attrib_pointer_calls = 0;
     s_saved_attrib_pointer = glad_glVertexAttribPointer;
     glad_glVertexAttribPointer = counting_vertex_attrib_pointer;
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_full);
@@ -344,15 +334,14 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_bind_instance_buffer(inst_buf, 0);
     nt_gfx_draw_instanced(0, 3, 1);
     nt_gfx_end_pass();
-    /* Captured before end_frame so teardown binds cannot pollute it. */
-    uint32_t frame_vao_binds = nt_gfx_gl_test_vao_binds();
-    nt_gfx_end_frame();
+    /* Captured before teardown so its binds cannot pollute it. */
+    uint32_t frame_vao_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindVertexArray] - vao_binds;
+    uint32_t frame_attrib_pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer] - attrib_pointers;
     /* Restore before any assert -- a failure longjmps past this line. */
     glad_glVertexAttribPointer = s_saved_attrib_pointer;
     /* The carried-over VAO dedups the first bind; one bind per vertex-input switch. */
     TEST_ASSERT_EQUAL_UINT32(2, frame_vao_binds);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_static_attrib_pointer_calls());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_instance_attrib_pointer_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, frame_attrib_pointers);       /* just the instance re-point */
     TEST_ASSERT_EQUAL_UINT32(1, s_real_attrib_pointer_calls); /* just the instance re-point */
 }
 
@@ -366,7 +355,6 @@ static void test_index_data_ops_do_not_rewire_bound_vertex_input(void) {
     nt_buffer_t ibo_b =
         nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_DYNAMIC, .data = s_tri_indices, .size = sizeof(s_tri_indices), .index_type = NT_INDEX_UINT16});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_a);
@@ -389,7 +377,6 @@ static void test_index_data_ops_do_not_rewire_bound_vertex_input(void) {
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* orphan_buffer keeps the GL buffer name, so the baked VAO attachment stays
@@ -399,7 +386,6 @@ static void test_orphan_under_live_vertex_input_renders(void) {
     nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .data = s_empty, .size = sizeof(s_empty)});
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
@@ -415,7 +401,6 @@ static void test_orphan_under_live_vertex_input_renders(void) {
     nt_gfx_draw(0, 3);
     TEST_ASSERT_UINT8_WITHIN(1, 0, center_red());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* A rejected pipeline bind clears the program selection but must not disturb
@@ -430,7 +415,6 @@ static void test_rejected_pipeline_bind_preserves_vertex_input(void) {
 
     nt_vertex_input_t vi_full = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_full);
@@ -443,7 +427,6 @@ static void test_rejected_pipeline_bind_preserves_vertex_input(void) {
     nt_gfx_draw(0, 3); /* no vertex-input re-bind needed */
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* Creation must restore the previously bound VAO (creation binds its own). */
@@ -451,7 +434,6 @@ static void test_creating_vertex_input_preserves_bound_one(void) {
     nt_pipeline_t pip = make_red_pipeline();
     nt_vertex_input_t vi_full = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_full);
@@ -469,7 +451,6 @@ static void test_creating_vertex_input_preserves_bound_one(void) {
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static const char *s_vertexid_vs_src = "precision mediump float;\n"
@@ -486,7 +467,6 @@ static void test_empty_vertex_input_draws_fullscreen(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
@@ -494,7 +474,6 @@ static void test_empty_vertex_input_draws_fullscreen(void) {
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void GLAD_API_PTR fail_gen_vertex_arrays(GLsizei count, GLuint *arrays) {
@@ -508,7 +487,6 @@ static void test_failed_vao_creation_returns_invalid_and_preserves_binding(void)
     nt_buffer_t full = make_vbo(s_full);
     nt_vertex_input_t vi_full = make_vi(full, (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_full);
@@ -532,7 +510,6 @@ static void test_failed_vao_creation_returns_invalid_and_preserves_binding(void)
     nt_vertex_input_t retry = make_vi(full, (nt_buffer_t){0});
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(retry));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* Reads a sampling unit without leaving the backend's active-unit mirror stale:
@@ -646,7 +623,7 @@ static void test_ground_state_disables_scissor(void) {
     TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
 }
 
-/* The cache survives end_frame, so a frame that repeats the previous one reaches
+/* The cache survives begin_frame, so a frame that repeats the previous one reaches
  * GL with no state calls at all. */
 static void test_identical_second_frame_issues_no_bind_calls(void) {
     static const char *textured_fs = "precision mediump float;\n"
@@ -664,7 +641,6 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
         .sampler = NT_SAMPLER_DEFAULT,
     };
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
@@ -672,11 +648,10 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
-    nt_gfx_gl_test_reset_counters();
-    install_state_counters();
     nt_gfx_begin_frame();
+    const uint32_t sampler_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler];
+    install_state_counters();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
@@ -687,7 +662,6 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     remove_state_counters();
     /* Zero calls only counts if the frame still rendered what the first one did. */
     uint8_t red = center_red();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_UINT8_WITHIN(1, 255, red);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.use_program);
@@ -698,7 +672,7 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.blend_func_separate);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_texture);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_sampler_binds());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler] - sampler_binds);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.viewport);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.clear_color);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.clear_depth);
@@ -711,7 +685,6 @@ static void test_state_change_mid_frame_still_emits(void) {
     nt_pipeline_t pip_b = make_pipeline_ex(s_vs_src, s_fs_src, true, false, true);
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     install_state_counters();
     nt_gfx_bind_pipeline(pip_a);
@@ -724,7 +697,6 @@ static void test_state_change_mid_frame_still_emits(void) {
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);
     GLboolean blend_enabled = glIsEnabled(GL_BLEND);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.depth_mask);
     TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.depth_mask_false);
@@ -743,7 +715,6 @@ static void test_pass_clear_after_depth_write_off(void) {
     nt_pipeline_t no_write_pip = make_pipeline_ex(s_vs_near_src, s_fs_src, true, false, false);
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(near_pip);
     nt_gfx_bind_vertex_input(vi);
@@ -768,7 +739,6 @@ static void test_pass_clear_after_depth_write_off(void) {
     GLboolean depth_write_enabled = GL_TRUE;
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     /* The far quad only survives the LESS test if the clear reset depth to 1.0. */
     TEST_ASSERT_TRUE(read_ok);
@@ -787,15 +757,12 @@ static void test_same_pipeline_across_passes_rebinds_for_free(void) {
     nt_pipeline_t pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     install_state_counters();
     nt_gfx_bind_pipeline(pip);
@@ -803,7 +770,6 @@ static void test_same_pipeline_across_passes_rebinds_for_free(void) {
     remove_state_counters();
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.use_program);
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.bind_vao);
@@ -819,13 +785,11 @@ static void test_ground_state_after_reinit(void) {
     nt_pipeline_t blend_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, true);
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(blend_pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_BLEND));
 
     nt_gfx_shutdown();
@@ -837,11 +801,9 @@ static void test_ground_state_after_reinit(void) {
     /* The fresh cache says the clear color is already {0,0,0,0}, so this pass
      * dedups it: only a real glClearColor in ground state clears away the red
      * the previous lifetime left in GL. */
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     uint8_t cleared_red = center_red();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     TEST_ASSERT_UINT8_WITHIN(1, 0, cleared_red);
 
     nt_pipeline_t opaque_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
@@ -849,7 +811,6 @@ static void test_ground_state_after_reinit(void) {
     nt_vertex_input_t fresh_vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
     install_state_counters();
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(opaque_pip);
     uint32_t disable_blend_after_opaque = s_gl_calls.disable_blend;
@@ -858,7 +819,6 @@ static void test_ground_state_after_reinit(void) {
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     remove_state_counters();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(0, disable_blend_after_opaque);
     TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.enable_blend);
@@ -867,7 +827,6 @@ static void test_ground_state_after_reinit(void) {
 /* The viewport is cached like any other GL state: a repeated rect costs nothing,
  * a real change and a framebuffer resize both reach GL. */
 static void test_viewport_dedup_and_resize(void) {
-    nt_gfx_begin_frame();
     begin_black_pass();
     install_state_counters();
     nt_gfx_set_viewport(0, 0, 8, 8);
@@ -876,16 +835,13 @@ static void test_viewport_dedup_and_resize(void) {
     nt_gfx_set_viewport(0, 0, 4, 4);
     uint32_t after_new_rect = s_gl_calls.viewport;
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     const uint32_t saved_fb_width = g_nt_window.fb_width;
     g_nt_window.fb_width = saved_fb_width + 1;
-    nt_gfx_begin_frame();
     begin_black_pass();
     GLint viewport[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_VIEWPORT, viewport);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     remove_state_counters();
     uint32_t after_resize = s_gl_calls.viewport;
     g_nt_window.fb_width = saved_fb_width;
@@ -900,7 +856,6 @@ static void test_viewport_dedup_and_resize(void) {
 /* Clear color and clear depth are cached per value, so repeating a pass desc is
  * free and changing one of them re-issues only that call. */
 static void test_clear_values_dedup(void) {
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_end_pass();
 
@@ -913,7 +868,6 @@ static void test_clear_values_dedup(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_end_pass();
     remove_state_counters();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(0, color_after_identical_pass);
     TEST_ASSERT_EQUAL_UINT32(0, depth_after_identical_pass);
@@ -927,13 +881,11 @@ static void test_ground_state_viewport_reissued_after_reinit(void) {
     nt_pipeline_t pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, false);
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
@@ -941,12 +893,10 @@ static void test_ground_state_viewport_reissued_after_reinit(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
     install_state_counters();
-    nt_gfx_begin_frame();
     begin_black_pass();
     GLint viewport[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_VIEWPORT, viewport);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     remove_state_counters();
 
     TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.viewport);
@@ -972,7 +922,6 @@ static void test_uniform_write_targets_bound_pipelines_program(void) {
     TEST_ASSERT_TRUE(nt_gfx_program_ready(spare));
     nt_pipeline_t pip_b = make_pipeline_ex(vs_src, fs_src, false, true, false);
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip_a);
     GLint program_a = 0;
@@ -984,7 +933,6 @@ static void test_uniform_write_targets_bound_pipelines_program(void) {
     glGetIntegerv(GL_CURRENT_PROGRAM, &program_b);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_x"), value_b);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_NOT_EQUAL_INT(0, program_a);
     TEST_ASSERT_NOT_EQUAL_INT(program_a, program_b);
@@ -1010,13 +958,11 @@ static void test_recreate_all_resources_grounds_cache(void) {
     nt_pipeline_t blend_pip = make_pipeline_ex(s_vs_src, s_fs_src, false, true, true);
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(blend_pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_BLEND));
 
     TEST_ASSERT_TRUE(nt_gfx_backend_recreate_all_resources());
@@ -1028,12 +974,10 @@ static void test_recreate_all_resources_grounds_cache(void) {
 
     /* After the recreate: it reloads glad and would drop the swapped pointers. */
     install_state_counters();
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(fresh_blend);
     nt_gfx_end_pass();
     remove_state_counters();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.enable_blend);
 }
@@ -1045,7 +989,6 @@ static void test_gl_name_reuse_after_destroying_bound_vertex_input(void) {
     nt_buffer_t vbo = make_vbo(s_full);
     nt_vertex_input_t vi_a = make_vi(vbo, (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_a);
@@ -1054,12 +997,10 @@ static void test_gl_name_reuse_after_destroying_bound_vertex_input(void) {
     nt_gfx_destroy_vertex_input(vi_a); /* destroyed while bound */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_vao());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_vertex_input_t vi_b = make_vi(vbo, (nt_buffer_t){0});
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi_b));
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_b);
@@ -1067,7 +1008,6 @@ static void test_gl_name_reuse_after_destroying_bound_vertex_input(void) {
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static nt_texture_t make_pixel_texture(const uint8_t pixel[4]) { return nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = pixel, .format = NT_TEXTURE_FORMAT_RGBA8}); }
@@ -1123,7 +1063,6 @@ static void test_update_texture_mid_pass_leaves_sampling_slot_bound(void) {
     TEST_ASSERT_NOT_EQUAL_INT(0, name_1);
     TEST_ASSERT_NOT_EQUAL_INT(name_1, name_2);
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     backend_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
     /* A failed create would leave slot 0 untouched and false-pass the next line. */
@@ -1141,7 +1080,6 @@ static void test_update_texture_mid_pass_leaves_sampling_slot_bound(void) {
     backend_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
     remove_state_counters();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_INT(GL_TEXTURE0 + NT_GFX_MAX_TEXTURE_SLOTS, upload_unit);
     TEST_ASSERT_EQUAL_INT(name_2, upload_bound);
@@ -1164,7 +1102,6 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_2.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex_3.id);
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     backend_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
 
@@ -1180,7 +1117,6 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
     backend_bind_texture_unit(tex_1, NT_SAMPLER_DEFAULT, 0);
     remove_state_counters();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, burst_active);
     TEST_ASSERT_EQUAL_UINT32(3, burst_bind);
@@ -1223,13 +1159,11 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     nt_pipeline_t pip_p = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_p});
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip_p);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     GLint old_program = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &old_program);
@@ -1237,10 +1171,8 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     nt_gfx_destroy_program(prog_p); /* cascades into pip_p */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_program());
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     TEST_ASSERT_FALSE(glIsProgram((GLuint)old_program));
     GLint current_program = -1;
     glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
@@ -1250,7 +1182,6 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     nt_pipeline_t pip_q = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_q});
     TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip_q));
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     install_state_counters();
     nt_gfx_bind_pipeline(pip_q);
@@ -1259,7 +1190,6 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     remove_state_counters();
     uint8_t red = center_red();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.use_program);
     TEST_ASSERT_UINT8_WITHIN(1, 255, red);
@@ -1287,8 +1217,7 @@ static void test_same_sampler_on_a_slot_binds_once(void) {
     uint32_t sampler_backend = nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(tex));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, sampler_backend);
 
-    nt_gfx_gl_test_reset_counters();
-    nt_gfx_begin_frame();
+    const uint32_t sampler_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler];
     begin_black_pass();
     backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
@@ -1296,15 +1225,12 @@ static void test_same_sampler_on_a_slot_binds_once(void) {
     begin_black_pass();
     backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
-    nt_gfx_begin_frame();
     begin_black_pass();
     backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_sampler_binds());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler] - sampler_binds);
     TEST_ASSERT_EQUAL_UINT32(sampler_backend, nt_gfx_gl_test_cached_sampler(0));
     TEST_ASSERT_EQUAL_INT((GLint)sampler_backend, sampler_name_on_unit(0));
 }
@@ -1327,15 +1253,13 @@ static void test_override_binds_one_sampler(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, override_backend);
     TEST_ASSERT_NOT_EQUAL_UINT32(default_backend, override_backend);
 
-    nt_gfx_gl_test_reset_counters();
-    nt_gfx_begin_frame();
+    const uint32_t sampler_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler];
     begin_black_pass();
     backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     backend_bind_texture_unit(tex, override, 1);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_gl_test_sampler_binds());
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler] - sampler_binds);
     TEST_ASSERT_EQUAL_UINT32(default_backend, nt_gfx_gl_test_cached_sampler(0));
     TEST_ASSERT_EQUAL_UINT32(override_backend, nt_gfx_gl_test_cached_sampler(1));
     TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_gl_test_cached_sampler(0), nt_gfx_gl_test_cached_sampler(1));
@@ -1361,9 +1285,9 @@ static void test_ground_state_reissues_sampler_bind(void) {
     nt_texture_t fresh = make_pixel_texture(white);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, fresh.id);
 
-    nt_gfx_gl_test_reset_counters();
+    const uint32_t sampler_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler];
     backend_bind_texture_unit(fresh, NT_SAMPLER_DEFAULT, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_gl_test_sampler_binds());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler] - sampler_binds);
     TEST_ASSERT_NOT_EQUAL_INT(0, sampler_name_on_unit(0));
 }
 // #endregion
@@ -1377,7 +1301,6 @@ static void test_vec4_repeat_skips_physical_upload(void) {
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
     nt_hash32_t color = nt_hash32_str("u_color");
     float value[4] = {0};
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
@@ -1399,7 +1322,6 @@ static void test_vec4_repeat_skips_physical_upload(void) {
         TEST_ASSERT_UINT8_WITHIN(1, expected[i], px[i]);
     }
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_vec4_cache_follows_program_lifetime(void) {
@@ -1420,7 +1342,6 @@ static void test_vec4_cache_follows_program_lifetime(void) {
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
     install_state_counters();
     for (uint32_t frame = 0; frame < 2; frame++) {
-        nt_gfx_begin_frame();
         for (uint32_t pass = 0; pass < 2; pass++) {
             begin_black_pass();
             nt_gfx_bind_vertex_input(vi);
@@ -1432,13 +1353,11 @@ static void test_vec4_cache_follows_program_lifetime(void) {
             }
             nt_gfx_end_pass();
         }
-        nt_gfx_end_frame();
     }
     TEST_ASSERT_EQUAL_UINT32(2, s_gl_calls.uniform_vec4);
     nt_gfx_destroy_program(p);
     p = nt_gfx_make_program(vs, fs);
     pipelines[0] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = p});
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pipelines[0]);
     nt_gfx_bind_vertex_input(vi);
@@ -1447,7 +1366,6 @@ static void test_vec4_cache_follows_program_lifetime(void) {
     TEST_ASSERT_EQUAL_UINT32(3, s_gl_calls.uniform_vec4);
     TEST_ASSERT_UINT8_WITHIN(1, 64, center_red());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_vec4_array_entries_and_other_types(void) {
@@ -1459,7 +1377,6 @@ static void test_vec4_array_entries_and_other_types(void) {
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
     const nt_hash32_t names[4] = {nt_hash32_str("u_values[0]"), nt_hash32_str("u_values[1]"), nt_hash32_str("u_values[2]"), nt_hash32_str("u_values[3]")};
     const float values[4][4] = {{0.25F, 0, 0, 1}, {0.5F, 0, 0, 1}, {0.75F, 0, 0, 1}, {1, 0, 0, 1}};
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
@@ -1479,7 +1396,6 @@ static void test_vec4_array_entries_and_other_types(void) {
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_UINT8_WITHIN(1, 191, center_red());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_vec4_cache_compares_bytes_and_last_value(void) {
@@ -1489,7 +1405,6 @@ static void test_vec4_cache_compares_bytes_and_last_value(void) {
     nt_pipeline_t pip = make_pipeline_ex(s_vs_src, fs, false, false, false);
     nt_hash32_t color = nt_hash32_str("u_color");
     float value[4] = {0};
-    nt_gfx_begin_frame();
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     install_state_counters();
@@ -1506,10 +1421,16 @@ static void test_vec4_cache_compares_bytes_and_last_value(void) {
     nt_gfx_set_uniform_vec4(color, value);
     TEST_ASSERT_EQUAL_UINT32(5, s_gl_calls.uniform_vec4);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 int main(void) {
+    /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
+    if (!glfwInit()) {
+        return 1;
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = 16, .height = 16};
+    nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_vec4_repeat_skips_physical_upload);
     RUN_TEST(test_vec4_cache_follows_program_lifetime);
@@ -1544,5 +1465,7 @@ int main(void) {
     RUN_TEST(test_same_sampler_on_a_slot_binds_once);
     RUN_TEST(test_override_binds_one_sampler);
     RUN_TEST(test_ground_state_reissues_sampler_bind);
-    return UNITY_END();
+    int failures = UNITY_END();
+    nt_window_shutdown();
+    return failures;
 }

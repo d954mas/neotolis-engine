@@ -7,6 +7,8 @@ declare global {
       drawn_frames(): number;
       programs_ready(): boolean;
       float_texture_linear(): boolean;
+      loss_window(step: number): number;
+      loss_seen(): boolean;
       field_css(): { x: number; y: number; w: number; h: number };
       hide_probe(mode: number): void;
       basis_ready(): boolean;
@@ -329,3 +331,161 @@ test('vec4 pixel probe detects an omitted initial upload', async ({ page }) => {
   }
   expect(black, 'without the upload GL retains default zero, visibly different from the expected color').toBeGreaterThan(pixels.length / 4 * 0.9);
 });
+
+test('context loss: a loss and restore between two frames still runs the restore path', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text === 'ERROR [gfx] WebGL context lost') return;
+    if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
+  });
+  // A background tab: animation frames stop while the browser loses and restores the context.
+  await page.addInitScript(() => {
+    const held: FrameRequestCallback[] = [];
+    const request = window.requestAnimationFrame.bind(window);
+    const control = { hold: false, release() { this.hold = false; held.splice(0).forEach((callback) => request(callback)); } };
+    (window as unknown as { __ntFrames: typeof control }).__ntFrames = control;
+    window.requestAnimationFrame = (callback) => {
+      if (control.hold) {
+        held.push(callback);
+        return 0;
+      }
+      return request(callback);
+    };
+  });
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.drawn_frames() > 2, null, { timeout: 30_000 });
+  const cycled = await page.evaluate(async () => {
+    const frames = (window as unknown as { __ntFrames: { hold: boolean; release(): void } }).__ntFrames;
+    frames.hold = true;
+    // Let the in-flight frame finish; later requests queue.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const before = window.__nt!.drawn_frames();
+    const canvas = document.querySelector('canvas')!;
+    const loss = canvas.getContext('webgl2')!.getExtension('WEBGL_lose_context');
+    if (!loss) throw new Error('WEBGL_lose_context unavailable');
+    const lost = new Promise((resolve) => canvas.addEventListener('webglcontextlost', resolve, { once: true }));
+    const restored = new Promise((resolve) => canvas.addEventListener('webglcontextrestored', resolve, { once: true }));
+    const within = (promise: Promise<unknown>, stage: string) =>
+      Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(stage + ' event did not arrive')), 5_000))]);
+    loss.loseContext();
+    await within(lost, 'webglcontextlost');
+    // The browser allows a restore only after the lost event's dispatch finishes.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    loss.restoreContext();
+    await within(restored, 'webglcontextrestored');
+    const drawnWhileHeld = window.__nt!.drawn_frames() - before;
+    frames.release();
+    return { drawnWhileHeld, lostNow: canvas.getContext('webgl2')!.isContextLost() };
+  });
+  expect(cycled).toEqual({ drawnWhileHeld: 0, lostNow: false });
+  await page.waitForFunction(() => (window as unknown as { __nt: { restore_frames(): number } }).__nt.restore_frames() > 0 && window.__nt!.programs_ready(), null, { timeout: 15_000 });
+  expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+});
+
+function trackErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text === 'ERROR [gfx] WebGL context lost') return;
+    if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(text)) errors.push(text);
+  });
+  return errors;
+}
+
+// Chrome reports isContextLost() at once but queues webglcontextlost as a task, so every step runs
+// before the engine has heard of the loss.
+async function createInLossWindow(page: Page, steps: number[]): Promise<number[]> {
+  return page.evaluate((list) => {
+    const loss = document.querySelector('canvas')!.getContext('webgl2')!.getExtension('WEBGL_lose_context');
+    if (!loss) throw new Error('WEBGL_lose_context unavailable');
+    window.__ntLossExtension = loss;
+    const stages = window.__nt!.loss_window(0);
+    loss.loseContext();
+    // A step that ran on an already-known loss would pass through the known-loss path instead.
+    if (window.__nt!.loss_seen()) throw new Error('the engine saw the loss before the steps ran');
+    return [stages, ...list.map((step) => window.__nt!.loss_window(step))];
+  }, steps);
+}
+
+async function restoreAndDraw(page: Page, errors: string[]): Promise<void> {
+  await page.waitForFunction(() => document.querySelector('canvas')!.getContext('webgl2')!.isContextLost() && !window.__nt!.programs_ready(), null, { timeout: 10_000 });
+  await page.evaluate(() => window.__ntLossExtension!.restoreContext());
+  // An abort stops the app, so the wait reports the errors that stopped it.
+  await page.waitForFunction(() => window.__nt!.programs_ready() && window.__nt!.basis_ready(), null, { timeout: 30_000 }).catch((error: Error) => {
+    throw new Error(error.message + '\nerrors: ' + JSON.stringify(errors));
+  });
+  const drawn = await page.evaluate(() => window.__nt!.drawn_frames());
+  await page.waitForFunction((n) => window.__nt!.drawn_frames() > n + 2, drawn, { timeout: 30_000 });
+}
+
+// Current Chromium returns live objects from create* on a lost context; browsers that return null make
+// Emscripten throw on a null program and record GL_INVALID_OPERATION for a null generated name.
+async function returnNullCreatesWhenLost(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const proto = WebGL2RenderingContext.prototype as unknown as Record<string, (this: WebGL2RenderingContext, ...args: unknown[]) => unknown>;
+    for (const name of ['createShader', 'createProgram', 'createTexture', 'createBuffer', 'createVertexArray', 'createSampler', 'createFramebuffer', 'createRenderbuffer', 'createQuery']) {
+      const create = proto[name];
+      proto[name] = function(...args: unknown[]) {
+        return this.isContextLost() ? null : create.apply(this, args);
+      };
+    }
+  });
+}
+
+// Emscripten writes query name 0 for a null createQuery, and beginQuery throws a TypeError on it.
+test('context loss: a GPU timer segment first opened before the lost event is skipped (create* returns null)', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = trackErrors(page);
+  await returnNullCreatesWhenLost(page);
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.basis_ready(), null, { timeout: 30_000 });
+  type TimerApi = { gpu_supported(): boolean; gpu_command(operation: number, segment?: number): number };
+  const supported = await page.evaluate(() => (window.__nt as unknown as TimerApi).gpu_supported());
+  test.skip(!supported, 'GPU timer queries unavailable on this browser or build; timer allocation path unverified');
+  const seen = await page.evaluate(() => {
+    const api = window.__nt as unknown as TimerApi;
+    const loss = document.querySelector('canvas')!.getContext('webgl2')!.getExtension('WEBGL_lose_context');
+    if (!loss) throw new Error('WEBGL_lose_context unavailable');
+    window.__ntLossExtension = loss;
+    api.gpu_command(3);
+    loss.loseContext();
+    const known = window.__nt!.loss_seen();
+    api.gpu_command(0, 2);
+    api.gpu_command(1);
+    return known;
+  });
+  expect(seen, 'the segment must be opened before the engine hears of the loss').toBe(false);
+  await restoreAndDraw(page, errors);
+  expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+});
+
+for (const nullCreates of [false, true]) {
+  const variant = nullCreates ? ' (create* returns null)' : '';
+
+  test('context loss: shader and program creates before the lost event report the loss' + variant, async ({ page }) => {
+    test.setTimeout(60_000);
+    const errors = trackErrors(page);
+    if (nullCreates) await returnNullCreatesWhenLost(page);
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
+    expect(await createInLossWindow(page, [1, 2]), 'stages compile live; program and shader report the loss').toEqual([1, 0, 0]);
+    await restoreAndDraw(page, errors);
+    expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+  });
+
+  test('context loss: a texture created before the lost event leaves no error for the restored context' + variant, async ({ page }) => {
+    test.setTimeout(60_000);
+    const errors = trackErrors(page);
+    if (nullCreates) await returnNullCreatesWhenLost(page);
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.basis_ready(), null, { timeout: 30_000 });
+    expect(await createInLossWindow(page, [3]), 'the texture reports the loss').toEqual([1, 0]);
+    // Restore re-uploads every texture; a GL error left from the dead context would trip the first one.
+    await restoreAndDraw(page, errors);
+    expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+  });
+}

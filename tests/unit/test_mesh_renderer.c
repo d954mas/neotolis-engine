@@ -291,14 +291,12 @@ void setUp(void) {
     nt_mesh_renderer_init(&desc);
 
     /* Enter frame/pass so draw calls don't assert */
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 void tearDown(void) {
     nt_log_remove_sink(capture_program_warning, NULL);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_drawable_comp_shutdown();
@@ -1421,11 +1419,9 @@ void test_vertex_input_survives_mesh_slot_reuse(void) {
 /* Exceeding max_mesh_layouts asserts (crash-early over silent eviction). */
 void test_vertex_input_versions_overflow_asserts(void) {
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_mesh_renderer_shutdown();
     nt_mesh_renderer_desc_t small = {.max_instances = 4, .max_pipelines = 8, .max_mesh_layouts = 2};
     TEST_ASSERT_EQUAL_INT(0, (int)nt_mesh_renderer_init(&small));
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     nt_mesh_t mesh = create_test_mesh();
@@ -1510,7 +1506,6 @@ void test_restore_gpu_retries_after_context_loss(void) {
  * restores all four renderers unconditionally would abort. */
 void test_restore_on_inactive_renderer_does_nothing(void) {
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_mesh_renderer_shutdown();
     TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
 
@@ -1519,7 +1514,6 @@ void test_restore_on_inactive_renderer_does_nothing(void) {
     /* The live assertion: init would have set this. The trap on a zeroed desc
      * aborts before ever reaching here, so it cannot be what pins the guard. */
     TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 

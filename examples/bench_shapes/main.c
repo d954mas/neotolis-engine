@@ -6,6 +6,7 @@
 #include "renderers/nt_shape_renderer.h"
 #include "time/nt_time.h"
 #include "window/nt_window.h"
+#include <inttypes.h>
 
 #include "math/nt_math.h"
 
@@ -469,6 +470,7 @@ static void draw_shapes(void) {
 
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_frame();
     nt_input_poll();
     float dt = g_nt_app.dt;
     nt_accumulator_update(&s_acc, dt);
@@ -489,13 +491,14 @@ static void frame(void) {
     if (s_log_timer >= 1.0F) {
         float avg = s_dt_sum / (float)s_dt_count;
         float render_avg = s_render_sum / (float)s_dt_count;
-        nt_gfx_frame_stats_t stats = g_nt_gfx.frame_stats;
-        uint32_t batch_dc = stats.draw_calls - stats.draw_calls_instanced;
-        uint32_t tris = stats.indices / 3;
+        const nt_gfx_counters_t stats = g_nt_gfx.last_frame; /* previous frame; this one has not drawn yet */
+        const uint32_t inst_dc = stats.accepted[NT_GFX_OP_DRAW_INSTANCED] + stats.accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED];
+        uint32_t batch_dc = nt_gfx_draw_calls(&stats) - inst_dc;
+        uint64_t tris = stats.indices / 3;
         printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f\n"
-               "        dc=%u (batch=%u inst=%u)  obj=%u  verts=%u  tris=%u  idx=%u\n",
-               s_shape_count, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)render_avg, (double)s_render_max, (double)(1.0F / avg), stats.draw_calls, batch_dc,
-               stats.draw_calls_instanced, stats.instances, stats.vertices, tris, stats.indices);
+               "        dc=%u (batch=%u inst=%u)  obj=%" PRIu64 "  verts=%" PRIu64 "  tris=%" PRIu64 "  idx=%" PRIu64 "\n",
+               s_shape_count, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)render_avg, (double)s_render_max, (double)(1.0F / avg), nt_gfx_draw_calls(&stats), batch_dc, inst_dc,
+               stats.instances, stats.vertices, tris, stats.indices);
         s_dt_max = 0.0F;
         s_dt_sum = 0.0F;
         s_dt_count = 0;
@@ -566,7 +569,6 @@ static void frame(void) {
     glm_perspective(glm_rad(75.0F), aspect, 0.1F, 50.0F, proj);
     glm_mat4_mul(proj, view, vp);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.05F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
 
     nt_shape_renderer_set_vp((float *)vp);
@@ -586,7 +588,6 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 

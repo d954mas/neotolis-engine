@@ -297,7 +297,6 @@ void setUp(void) {
 
     /* Begin frame/pass so flush's draw_indexed doesn't trip the gfx-stub
      * assert (mirrors test_sprite_renderer setUp). */
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
@@ -306,7 +305,6 @@ void tearDown(void) {
         nt_sprite_renderer_shutdown();
     }
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_material_shutdown();
     nt_atlas_test_reset();

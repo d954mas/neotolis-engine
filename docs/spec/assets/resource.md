@@ -281,26 +281,32 @@ The per-asset pin (the published winner of a pinning slot) is exposed for diagno
 Raw BLOB bytes have no activation to repeat. Invalidation of other asset types
 preserves BLOB owner/alias readiness and resident payloads.
 
-`nt_gfx_begin_frame()` detects a restored context and sets
-`g_nt_gfx.context_restored` for that frame. Resource readiness, resolved runtime
-handles, and render items computed before that call still describe the previous
-GPU context. The game must discard them and skip dependent draws for the restored
-frame.
+`nt_gfx_begin_frame()`, the first gfx call of each host iteration, restores the
+context and sets `g_nt_gfx.context_restored` until the next begin_frame. Detection
+follows the browser's loss events, so a loss and restore between two iterations
+still takes this path
+([frame observation](../render/architecture.md#frame-observation)). The game
+sees the flag before its resource step and before it builds anything for the
+iteration, so no render decision of the iteration describes the dead context.
 
-When `context_restored` is true, the game:
+At the start of the iteration, right after `nt_gfx_begin_frame()` and before
+`nt_resource_step()` and `nt_font_step()`, when `context_restored` is true, the
+game:
 
-- discards render decisions and draw lists prepared before
-  `nt_gfx_begin_frame()`, and draws nothing for this frame. Geometry draw entry
-  points assert; clearing through `nt_gfx_begin_pass` stays legal
 - destroys its own `nt_program_t` handles and sets each handle variable to
   `NT_PROGRAM_INVALID`. Destroying a stale non-zero handle asserts
 - calls the restore entry point of every active renderer, and destroys and
-  recreates its own GPU objects, then calls `nt_resource_invalidate()` for the
-  shader-code asset type and every other file-backed GPU asset type it uses
+  recreates its own GPU objects
+- calls `nt_resource_invalidate()` for the shader-code asset type and every
+  other file-backed GPU asset type it uses
+
+It then runs its resource step and renders the iteration normally. Assets that
+are not ready yet are handled by the normal readiness gates, as during loading.
 
 Program destruction and renderer restoration may occur in either order.
 Destroying a program destroys its pipelines, destroying a pipeline never consults
-its program, and restore entry points discard queued work without flushing.
+its program, and restore entry points discard queued work without flushing:
+work queued before the loss names pipelines and vertex inputs the loss freed.
 
 No step needs pool headroom over the steady state: every rebuild destroys before
 it recreates, whether it is a renderer relinking inside its own restore entry
@@ -346,11 +352,10 @@ existing source asserts on the duplicate. Call `nt_font_step` after
 the old texture handles. An atlas keeps its parsed regions and
 needs its page textures resolved again.
 
-Programs from file-backed stages come back over following frames: the
-shader stages re-activate from `NT_ASSET_SHADER_CODE` through the resource step's
-activation budget, and the frame's `nt_resource_step()` has already run by the
-time `context_restored` is seen. The game links a new program once both stages
-resolve and assigns it with `nt_material_set_program`. Assigning the same handle
+Programs from file-backed stages come back as the resource step re-activates
+their stages from `NT_ASSET_SHADER_CODE` within its activation budget, starting
+with the restored iteration's own step. The game links a new program once both
+stages resolve and assigns it with `nt_material_set_program`. Assigning the same handle
 is a no-op, so each material may be gated on its own program every frame without
 an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
 re-activate on the next step within the activation budget; an evicted pack must

@@ -93,7 +93,6 @@ static void test_context_restore_resets_the_scissor_mirror(void) {
 
     nt_gfx_set_scissor_enabled(true);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_set_scissor_enabled_count());
-    nt_gfx_end_frame();
 }
 
 int main(void) {

@@ -75,7 +75,6 @@ static void test_stub_queries_require_outputs(void) {
 
 static void test_stub_drops_draws_and_state_changes(void) {
     TEST_ASSERT_EQUAL_UINT16(0, nt_gfx_max_meshes());
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(NULL);
     nt_gfx_bind_pipeline((nt_pipeline_t){1});
     nt_gfx_bind_vertex_input((nt_vertex_input_t){1});
@@ -87,10 +86,9 @@ static void test_stub_drops_draws_and_state_changes(void) {
     nt_gfx_draw_indexed(0, 3, 3);
     nt_gfx_draw_indexed_instanced(0, 3, 3, 4);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.frame_stats.vertices);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.vertices);
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
 }
@@ -104,12 +102,30 @@ static void test_stub_packs_pipeline_keys(void) {
     TEST_ASSERT_FALSE(nt_gfx_pipeline_key_equal(&ka, &kb));
 }
 
+/* The stub is stateless: ticks are inert. */
+static void test_stub_observation_is_unavailable(void) {
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_capture_request();
+#endif
+    nt_gfx_begin_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.last_frame.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.frame_sequence);
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT32(0, capture.count);
+    TEST_ASSERT_NULL(capture.events);
+    TEST_ASSERT_EQUAL_UINT64(0, capture.counters.frame_sequence);
+#endif
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_stub_has_no_graphics_resources);
     RUN_TEST(test_stub_returns_empty_queries_without_fabricating_pixels);
     RUN_TEST(test_stub_drops_draws_and_state_changes);
     RUN_TEST(test_stub_packs_pipeline_keys);
+    RUN_TEST(test_stub_observation_is_unavailable);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_stub_timer_requires_name_and_output);
     RUN_TEST(test_stub_queries_require_outputs);

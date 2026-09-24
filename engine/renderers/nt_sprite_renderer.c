@@ -89,7 +89,7 @@ static struct {
     nt_sprite_draw_cmd_t cmds[NT_SPRITE_RENDERER_MAX_DRAW_CMDS];
     uint32_t cmd_count;
 
-    /* Reset per draw_list call; SEPARATE from nt_gfx_get_frame_draw_calls. */
+    /* Reset per draw_list call; SEPARATE from nt_gfx_draw_calls. */
     uint32_t last_draw_list_calls;
 
     /* Material of the most recently opened cmd; reset on flush. */

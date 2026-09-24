@@ -21,16 +21,6 @@ static const float k_identity_vp[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0
 static nt_render_target_t s_target;
 
 void setUp(void) {
-    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    g_nt_window = (nt_window_t){
-        .max_dpr = 1.0F,
-        .resizable = false,
-        .width = RT_W,
-        .height = RT_H,
-    };
-    nt_window_init();
-
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -59,7 +49,6 @@ void tearDown(void) {
     nt_shape_renderer_shutdown();
     nt_gfx_destroy_render_target(s_target);
     nt_gfx_shutdown();
-    nt_window_shutdown();
 }
 
 /* Sample one pixel from a top-left-oriented full-frame readback. */
@@ -77,7 +66,6 @@ static void test_multi_flush_ring_offsets_render_correctly(void) {
     const float green[4] = {0, 1, 0, 1};
     const float blue[4] = {0, 0, 1, 1};
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
 
     /* Flush 1: two instance types -> two ring writes within one flush.
@@ -96,7 +84,6 @@ static void test_multi_flush_ring_offsets_render_correctly(void) {
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame)));
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     assert_pixel(frame, 16, 32, 255, 0, 0); /* left half: red rect (flush 1, write 1) */
     assert_pixel(frame, 48, 32, 0, 255, 0); /* cube center: green (flush 1, write 2 at nonzero offset) */
@@ -110,7 +97,6 @@ static void test_ring_wrap_still_renders(void) {
     const float red[4] = {1, 0, 0, 1};
     const float green[4] = {0, 1, 0, 1};
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
 
     /* Flush count derived from the actual capacity: >= 2 wraps at any
@@ -131,15 +117,28 @@ static void test_ring_wrap_still_renders(void) {
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame)));
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     assert_pixel(frame, 16, 32, 255, 0, 0); /* left half still red */
     assert_pixel(frame, 48, 32, 0, 255, 0); /* post-wrap green rect renders */
 }
 
 int main(void) {
+    /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
+    if (!glfwInit()) {
+        return 1;
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window = (nt_window_t){
+        .max_dpr = 1.0F,
+        .resizable = false,
+        .width = RT_W,
+        .height = RT_H,
+    };
+    nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_multi_flush_ring_offsets_render_correctly);
     RUN_TEST(test_ring_wrap_still_renders);
-    return UNITY_END();
+    int failures = UNITY_END();
+    nt_window_shutdown();
+    return failures;
 }

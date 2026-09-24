@@ -327,7 +327,6 @@ static nt_entity_t make_entity(nt_mesh_t mesh, nt_material_t material, const nt_
 
 static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t mesh, bool skinned, uint8_t out[FRAME_BYTES]) {
     const nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     if (skinned) {
         nt_skinned_mesh_renderer_draw_list(&item, 1);
@@ -336,16 +335,13 @@ static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t 
     }
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void render_skinned_list(const nt_render_item_t *items, uint32_t count, uint8_t out[FRAME_BYTES]) {
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     nt_skinned_mesh_renderer_draw_list(items, count);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static const float *palette_row(uint16_t origin_x, uint16_t origin_y, uint8_t joint, uint8_t row) {
@@ -461,10 +457,6 @@ void setUp(void) {
     char *skin_source = NULL;
     char *reference_source = NULL;
     char *fragment_source = NULL;
-    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = RT_W, .height = RT_H};
-    nt_window_init();
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&(nt_gfx_desc_t){
         .max_shaders = 8,
@@ -569,7 +561,6 @@ void tearDown(void) {
     s_skin_vs = (nt_shader_t){0};
     nt_gfx_shutdown();
     nt_hash_shutdown();
-    nt_window_shutdown();
     s_initialized = false;
 }
 
@@ -661,9 +652,18 @@ static void test_colored_then_none_restores_white_for_both_color_layouts(void) {
 }
 
 int main(void) {
+    /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
+    if (!glfwInit()) {
+        return 1;
+    }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = RT_W, .height = RT_H};
+    nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_palette_frames_and_interpolation_match_cpu_reference);
     RUN_TEST(test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic);
     RUN_TEST(test_colored_then_none_restores_white_for_both_color_layouts);
-    return UNITY_END();
+    int failures = UNITY_END();
+    nt_window_shutdown();
+    return failures;
 }

@@ -309,7 +309,7 @@ test('diagnostics: loss cancels dead queries and restore preserves OFF and repro
   await installTimers(page);
   await ready(page);
   for (const supportedAfterRestore of [false, true]) {
-    const stopped = await page.evaluate((supported) => {
+    const stopped = await page.evaluate(async (supported) => {
       const api = (window as unknown as { __nt: DiagnosticsHooks }).__nt;
       const control = window.__ntTimerControl;
       api.gpu_command(0, 0);
@@ -320,9 +320,12 @@ test('diagnostics: loss cancels dead queries and restore preserves OFF and repro
       if (!extension) throw new Error('WEBGL_lose_context unavailable');
       window.__ntTimerLoss = extension;
       control.supported = supported;
+      // The engine learns of the loss from the lost event; its listener runs before this one.
+      const lost = new Promise((resolve) => gl.canvas.addEventListener('webglcontextlost', resolve, { once: true }));
+      extension.loseContext();
+      await lost;
       control.reset();
       control.extensions.length = 0;
-      extension.loseContext();
       api.gpu_command(2);
       return control.calls;
     }, supportedAfterRestore);

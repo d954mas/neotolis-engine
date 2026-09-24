@@ -13,6 +13,7 @@
 #include "fs/nt_fs.h"
 #endif
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h" /* loss_seen reads the backend loss latch */
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
 #include "input/nt_input.h"
@@ -260,6 +261,8 @@ static float s_nt_field_css_w;
 static float s_nt_field_css_h;
 static int s_nt_field_visible; /* the field was laid out this frame */
 static int s_nt_hidden_probe;
+static uint64_t s_nt_restore_sequence; /* frame whose begin_frame restored the context */
+static unsigned int s_nt_restore_frames;
 static nt_ui_input_style_t s_nt_hidden_input_style;
 static nt_ui_label_style_t s_nt_hidden_caption;
 
@@ -275,6 +278,7 @@ static float s_nt_rich_link_css_h;
 EMSCRIPTEN_KEEPALIVE int nt_test_ready(void) { return s_nt_ready; }
 /* A fresh draw is required in addition to the test's pixel comparison. */
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn_frames; }
+EMSCRIPTEN_KEEPALIVE unsigned int nt_test_restore_frames(void) { return s_nt_restore_frames; }
 /* Both game programs linked and assigned -- false through the whole window
  * between the loss and the relink. */
 EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program)) ? 1 : 0; }
@@ -313,7 +317,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_program_t program = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    nt_gfx_begin_frame();
     if (target.id != 0) {
         nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.25F, 0.5F, 0.75F, 1.0F}});
         nt_gfx_end_pass();
@@ -327,7 +330,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     uint8_t pixel[4] = {0};
     bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
@@ -340,6 +342,33 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     }
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
+/* context_loss.spec.ts calls steps 1-3 right after a synchronous loseContext(): the browser already
+ * reports the loss while its lost event is still queued. Step 0 compiles the stages beforehand. */
+static nt_shader_t s_nt_window_stages[2];
+EMSCRIPTEN_KEEPALIVE uint32_t nt_test_loss_window(int step) {
+    const char *vs_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }";
+    const char *fs_source = "precision mediump float; out vec4 color; void main() { color = vec4(1.0); }";
+    switch (step) {
+    case 0:
+        s_nt_window_stages[0] = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
+        s_nt_window_stages[1] = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
+        return (s_nt_window_stages[0].id != 0 && s_nt_window_stages[1].id != 0) ? 1U : 0U;
+    case 1: {
+        nt_program_t program = nt_gfx_make_program(s_nt_window_stages[0], s_nt_window_stages[1]);
+        nt_gfx_destroy_shader(s_nt_window_stages[0]);
+        nt_gfx_destroy_shader(s_nt_window_stages[1]);
+        return program.id;
+    }
+    case 2:
+        return nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source}).id;
+    default: {
+        const uint8_t pixels[16] = {255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255};
+        return nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels}).id;
+    }
+    }
+}
+/* 0 proves a loss-window step cannot take the known-loss path. */
+EMSCRIPTEN_KEEPALIVE int nt_test_loss_seen(void) { return g_nt_gfx.context_lost ? 1 : 0; }
 /* Basis fixture: basis_fixture.ntpack's 128x128 RGBA texture with a full 8-level chain, left half
  * (200,40,40,255), right half (40,40,200,128). Levels are reached through sampler overrides. */
 #define BASIS_FIXTURE_SIZE 128.0F
@@ -412,7 +441,6 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     /* Centre of texel (0,0) at the requested level (the single texel at level 7). */
     const float texel = 0.5F / (BASIS_FIXTURE_SIZE / (float)(1 << level));
     const float uv[4] = {texel, texel, (float)level, 0.0F};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 1.0F, 1.0F}});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
@@ -423,7 +451,6 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     uint8_t pixel[4] = {0};
     bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
@@ -432,6 +459,118 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_render_target(target);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
+static double s_observe_values[40];
+/* Requests every other frame: a request consumed at begin_frame replaces the capture it
+ * just finished, so the unrequested frame between keeps that capture readable. */
+#if NT_GFX_CAPTURE_ENABLED
+static bool s_observe_repeat;
+static bool s_observe_request_now;
+#endif
+EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) {
+#if NT_GFX_CAPTURE_ENABLED
+    s_observe_repeat = enabled != 0;
+#else
+    (void)enabled;
+#endif
+}
+EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
+    /* JS-supplied index: an out-of-range probe reads as -1 instead of trapping. */
+    if (index < 0 || index >= (int)(sizeof(s_observe_values) / sizeof(s_observe_values[0]))) {
+        return -1.0;
+    }
+    return s_observe_values[index];
+}
+EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
+    memset(s_observe_values, 0, sizeof(s_observe_values));
+#if NT_GFX_CAPTURE_ENABLED
+    if (mode != 0) {
+        nt_gfx_capture_request();
+    }
+#endif
+    /* Close the frame JS called into, so the probe's work is one frame of its own. */
+    nt_gfx_begin_frame();
+    const uint8_t pixels[16] = {64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255, 64, 128, 192, 255};
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+    nt_gfx_update_buffer(buffer, 0, pixels, 16);
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
+    nt_texture_t spare = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_gfx_update_texture(spare, 0, 0, 2, 2, pixels);
+    nt_gfx_counters_t preparation = g_nt_gfx.counters;
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 2, .height = 2, .color_format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_shader_t vs =
+        nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}"});
+    nt_shader_t fs = nt_gfx_make_shader(
+        &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float;uniform sampler2D tex;uniform vec4 tint;out vec4 color;void main(){color=texture(tex,vec2(0.5))*tint;}"});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(vi);
+    const float tint[4] = {1, 1, 1, 1};
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("tex"), .texture = texture};
+    for (uint32_t i = 0; i < 2; i++) {
+        nt_gfx_apply_texture_bindings(&binding, 1);
+        nt_gfx_set_uniform_vec4(nt_hash32_str("tint"), tint);
+    }
+    if (mode == 2) {
+        for (uint32_t i = 0; i < 10000; i++) {
+            nt_gfx_set_scissor_enabled(false);
+        }
+    }
+    nt_gfx_draw(0, 3);
+    uint8_t pixel[4] = {0};
+    bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
+    nt_gfx_end_pass();
+    nt_gfx_destroy_vertex_input(vi);
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_texture(texture);
+    nt_gfx_destroy_texture(spare);
+    nt_gfx_destroy_buffer(buffer);
+    nt_gfx_begin_frame();
+    const nt_gfx_counters_t counters = g_nt_gfx.last_frame;
+    s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
+    s_observe_values[3] = nt_gfx_draw_calls(&counters);
+    s_observe_values[4] = (double)preparation.buffer_upload_bytes;
+    s_observe_values[5] = (double)preparation.texture_upload_bytes;
+    s_observe_values[6] = counters.gl[NT_GFX_GL_glUseProgram];
+    s_observe_values[7] = counters.gl[NT_GFX_GL_glBindVertexArray];
+    s_observe_values[8] = counters.gl[NT_GFX_GL_glBindTexture];
+    s_observe_values[9] = counters.gl[NT_GFX_GL_glBindSampler];
+    s_observe_values[10] = counters.gl[NT_GFX_GL_glUniform4fv] + counters.gl[NT_GFX_GL_glUniform1i];
+    s_observe_values[14] = (double)counters.buffer_upload_bytes;
+    s_observe_values[15] = (double)counters.texture_upload_bytes;
+    s_observe_values[16] = (double)counters.buffer_upload_calls;
+    s_observe_values[17] = (double)counters.texture_upload_calls;
+    const nt_gfx_gl_call_t uploads[] = {NT_GFX_GL_glBufferData, NT_GFX_GL_glBufferSubData, NT_GFX_GL_glTexImage2D, NT_GFX_GL_glTexSubImage2D, NT_GFX_GL_glCompressedTexImage2D};
+    for (uint32_t j = 0; j < 5; j++) {
+        s_observe_values[26 + j] = counters.gl[uploads[j]];
+    }
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    s_observe_values[11] = capture.overflow;
+    s_observe_values[12] = capture.count;
+    s_observe_values[18] = (double)capture.counters.frame_sequence;
+    s_observe_values[19] = (double)counters.frame_sequence;
+    const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_glUseProgram, NT_GFX_GL_glBindVertexArray, NT_GFX_GL_glBindTexture, NT_GFX_GL_glBindSampler, NT_GFX_GL_glUniform4fv, NT_GFX_GL_glUniform1i};
+    for (uint32_t i = 0; i < capture.count; i++) {
+        if (capture.events[i].kind != NT_GFX_EVENT_BACKEND) {
+            continue;
+        }
+        for (uint32_t j = 0; j < 6; j++) {
+            if (capture.events[i].detail == (uint32_t)calls[j]) {
+                s_observe_values[20 + j]++;
+            }
+        }
+    }
+#endif
+    return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8) | ((uint32_t)pixel[2] << 16) | ((uint32_t)pixel[3] << 24)) : 0;
+}
+
 EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
     const char *names[] = {"diagnostics-a", "diagnostics-b", "diagnostics-c"};
     NT_ASSERT(segment >= 0 && segment < 3);
@@ -450,7 +589,6 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
         break;
     case 4:
         nt_gfx_begin_frame();
-        nt_gfx_end_frame();
         break;
     case 5: {
         uint64_t ns = 0;
@@ -547,14 +685,20 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'input_buffer': function() { return UTF8ToString(_nt_test_input_buffer()); },
         'walk_text_cmd_count': function() { return _nt_test_walk_text_cmd_count() >>> 0; },
         'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },
+        'restore_frames': function() { return _nt_test_restore_frames() >>> 0; },
         'programs_ready': function() { return _nt_test_programs_ready() !== 0; },
         'float_texture_linear': function() { return _nt_test_float_texture_linear() !== 0; },
         'diagnostics_config': function() {
             return { 'preset': UTF8ToString(_nt_test_diagnostics_preset()), 'log': _nt_test_diagnostics_config(0),
                 'ui': _nt_test_diagnostics_config(1), 'gpu': _nt_test_diagnostics_config(2), 'metrics': _nt_test_diagnostics_config(3) };
         },
+        'observe_probe': function(mode) { return _nt_test_observe_probe(mode); },
+        'observe_value': function(index) { return _nt_test_observe_value(index); },
+        'observe_record': function(enabled) { _nt_test_observe_record(enabled); },
         'gpu_supported': function() { return _nt_test_gpu_supported() !== 0; },
         'float_probe': function(useTexture) { return _nt_test_float_probe(useTexture); },
+        'loss_window': function(step) { return _nt_test_loss_window(step) >>> 0; },
+        'loss_seen': function() { return _nt_test_loss_seen() !== 0; },
         'basis_ready': function() { return _nt_test_basis_ready() !== 0; },
         'basis_format': function() { return _nt_test_basis_format(); },
         'basis_rgb_format': function() { return _nt_test_basis_rgb_format(); },
@@ -731,6 +875,31 @@ static bool gpu_restore_step(void) {
 
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_frame();
+#if defined(__EMSCRIPTEN__)
+    if (g_nt_gfx.last_frame.frame_sequence == s_nt_restore_sequence) {
+        s_nt_restore_frames++;
+    }
+#endif
+    if (g_nt_gfx.context_restored) {
+#if defined(__EMSCRIPTEN__)
+        s_nt_restore_sequence = g_nt_gfx.counters.frame_sequence;
+#endif
+        /* One-shot per restored event; the GPU recreation below may retry. */
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+        nt_resource_invalidate(NT_ASSET_FONT);
+        /* Materials keep their handles and draw again once their programs relink. */
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+        s_atlas_bound = false;
+        /* Font sources survive restore; adding them again asserts on duplicates.
+         * nt_font_step rebuilds textures after the font assets reactivate. */
+        s_gpu_restore_pending = true;
+    }
+    if (s_gpu_restore_pending) {
+        s_gpu_restore_pending = !gpu_restore_step();
+    }
     nt_input_poll();
     nt_mem_scratch_reset();
 
@@ -765,25 +934,6 @@ static void frame(void) {
     uniforms.resolution[3] = (fb_h > 0.0F) ? (1.0F / fb_h) : 0.0F;
     uniforms.near_far[0] = -1.0F;
     uniforms.near_far[1] = 1.0F;
-
-    nt_gfx_begin_frame();
-    if (g_nt_gfx.context_restored) {
-        /* One-shot per restored event; the GPU recreation below may retry. */
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        nt_program_ref_drop(&s_sprite_program);
-        nt_program_ref_drop(&s_text_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-        s_atlas_bound = false;
-        /* Font sources survive restore; adding them again asserts on duplicates.
-         * nt_font_step rebuilds textures after the font assets reactivate. */
-        s_gpu_restore_pending = true;
-    }
-    if (s_gpu_restore_pending) {
-        s_gpu_restore_pending = !gpu_restore_step();
-    }
 
     nt_font_step();
 
@@ -880,16 +1030,21 @@ static void frame(void) {
 #ifdef __EMSCRIPTEN__
         /* Count frames that actually submitted geometry: reaching the draw path
          * proves nothing if every renderer skipped. */
-        if (nt_gfx_get_frame_draw_calls() > 0U) {
+        if (nt_gfx_draw_calls(&g_nt_gfx.counters) > 0U) {
             s_nt_drawn_frames++;
         }
 #endif
     }
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
+#if defined(__EMSCRIPTEN__) && NT_GFX_CAPTURE_ENABLED
+    s_observe_request_now = !s_observe_request_now;
+    if (s_observe_repeat && s_observe_request_now) {
+        nt_gfx_capture_request();
+    }
+#endif
 }
 // #endregion
 
@@ -912,6 +1067,7 @@ int main(int argc, char *argv[]) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.capture_capacity = 16384;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 

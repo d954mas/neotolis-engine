@@ -306,6 +306,10 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_gfx_stub)
 
     # --- Graphics module tests ---
+    add_executable(test_gfx_observe unit/test_gfx_observe.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_gfx_observe PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log unity nt_meshwire_stub)
+    nt_setup_test_target(test_gfx_observe)
+
     add_executable(test_gfx unit/test_gfx.c)
     target_link_libraries(test_gfx PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire)
     nt_set_warning_flags(test_gfx)
@@ -350,6 +354,11 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_bind_mirrors_native)
     set_tests_properties(test_nt_gfx_bind_mirrors_native PROPERTIES LABELS "native")
+
+    add_executable(test_nt_gfx_observe_native unit/test_nt_gfx_observe_native.c)
+    target_link_libraries(test_nt_gfx_observe_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    nt_setup_test_target(test_nt_gfx_observe_native)
+    set_tests_properties(test_nt_gfx_observe_native PROPERTIES LABELS "native")
 
     add_executable(test_nt_gfx_render_target_native unit/test_nt_gfx_render_target_native.c unit/test_helpers/nt_assert_trap.c)
     target_include_directories(test_nt_gfx_render_target_native PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
@@ -825,7 +834,7 @@ if(NOT EMSCRIPTEN)
         # L2 time/render/frame group via submit(): discovery + forwarding to nt_app L1 +
         # bad_params + render.info + frame.current + yield-after-N-sim-advances + end-to-end step drain.
         # Links nt_app_stub (g_nt_app + nt_app_* the handlers forward to) and nt_gfx_fake
-        # (nt_gfx_get_frame_draw_calls -> 0 for render.info; no font/material chain).
+        # (g_nt_gfx.last_frame draw_calls -> 0 for render.info; no font/material chain).
         if(NT_DEVAPI_GROUP_TIME)
             add_executable(test_devapi_time unit/test_devapi_time.c)
             target_link_libraries(test_devapi_time PRIVATE nt_devapi_time nt_devapi_discovery nt_devapi cjson nt_window_stub nt_app_stub nt_gfx_fake nt_basisu_transcoder_stub nt_core nt_log_stub unity nt_meshwire_stub)

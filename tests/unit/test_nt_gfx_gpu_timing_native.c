@@ -25,7 +25,8 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     return true;
 }
 void nt_gfx_gl_ctx_destroy(void) {}
-bool nt_gfx_gl_ctx_is_lost(void) { return s_fixture_lost; }
+bool nt_gfx_gl_ctx_take_loss(void) { return false; }
+bool nt_gfx_gl_ctx_query_lost(void) { return s_fixture_lost; }
 bool nt_gfx_gl_ctx_enable_timer_query(void) { return s_fixture_supported; }
 bool nt_gfx_gl_ctx_enable_debug_groups(void) { return true; }
 bool nt_gfx_gl_ctx_enable_debug_callback(void) { return false; }
@@ -79,6 +80,7 @@ static void GLAD_API_PTR capture_delete_vao(GLsizei count, const GLuint *names) 
     (void)count;
     (void)names;
 }
+static GLenum GLAD_API_PTR capture_get_error(void) { return GL_NO_ERROR; }
 
 void setUp(void) {
     glad_glGenQueries = capture_gen;
@@ -91,6 +93,7 @@ void setUp(void) {
     glad_glGetQueryObjectui64v = capture_result;
     glad_glGenVertexArrays = capture_gen_vao;
     glad_glDeleteVertexArrays = capture_delete_vao;
+    glad_glGetError = capture_get_error;
     s_fixture_lost = false;
     s_fixture_supported = true;
     s_fixture_available = false;
@@ -126,7 +129,7 @@ static void test_disable_active_balances_query_and_debug_group(void) {
     unsigned int allocated = s_gen_count;
     uint64_t out = 19;
     for (unsigned int i = 0; i < 3; i++) {
-        nt_gfx_backend_begin_frame();
+        nt_gfx_backend_check_timer_disjoint();
         nt_gfx_backend_begin_segment("disabled-new-name");
         nt_gfx_backend_end_segment();
         nt_gfx_backend_set_gpu_timing_enabled(false);

@@ -105,14 +105,16 @@ A reflection query that reports nothing discards the new program before
 publication, so the next frame links again rather than caching half a location
 table. Nothing catches an exception thrown out of reflection: on the web the
 Emscripten GL layer dereferences a null result in two of its own reflection
-helpers, but the flag such a guard would have to test (`isContextLost`) is set a
-task later than the throw, so the guard would rethrow anyway and only ever fire
-for a synchronous `WEBGL_lose_context.loseContext()`.
+helpers. The browser reports a loss through `isContextLost` at once (only the
+lost event is queued), and program creation queries it before the link and
+after a failed one, so the throw needs a loss that lands after a successful
+link and before reflection within one create. The engine accepts that race
+rather than wrap Emscripten's helpers.
 
 A link failure is a developer error and traps (`NT_ASSERT`) rather than
 returning an invalid handle. `nt_gfx_make_program` returns an invalid handle on
-a lost context, including pending engine recovery after the browser has restored
-it, and for a live stage handle whose GPU object an earlier loss discarded --
+a lost context, including a loss the browser reports before its lost event
+arrives and pending engine recovery after the browser has restored it, and for a live stage handle whose GPU object an earlier loss discarded --
 that stage is permanently unready, so the owner recreates it and links again.
 A stale stage handle is a developer error and still traps. Because the builder validates each stage
 separately and never links a pair, the trap is also where mismatched varyings

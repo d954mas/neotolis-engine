@@ -165,13 +165,13 @@ the string must remain valid and unchanged until `nt_gfx_shutdown`. Registration
 survives context loss.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
-loss leaves behind, and for nothing else. The first is the loss itself, including
-the interval after the browser recovers but before `nt_gfx_begin_frame` finishes
-resetting the backend tables: linking waits until that recovery completes, even
-when newly created shader stages are ready. The second is a stage handle that is
-still live but whose GPU object that loss discarded — permanently unready, so the
-owner recreates the stage and links again. Both are recoverable and neither
-asserts. A stale stage handle remains a developer error and traps.
+loss leaves behind, and for nothing else. The first is the loss itself: a loss
+`nt_gfx_begin_frame` has synced, or a link the browser reports lost. The second
+is a stage handle that is still live but whose GPU object that loss discarded —
+permanently unready (END result `UNREADY`), so the owner recreates the stage and
+links again. Both are
+recoverable and neither asserts. A stale stage handle remains a developer error
+and traps.
 
 `nt_material_set_program` is the only setter for the borrowed handle, including assignment
 from or to `NT_PROGRAM_INVALID`. Assigning the same handle is a no-op, so a
@@ -314,7 +314,7 @@ sampler recreation publishes no
 logical set and issues no backend bind. Those failures are
 recoverable, so gfx reports them and skips the following draws of that set instead
 of returning a status the caller would have to branch on. Context loss means loss
-already observed by `nt_gfx_begin_frame`; material transitions do not poll the
+already synced by `nt_gfx_begin_frame`; material transitions do not poll the
 platform.
 
 The sampler class is part of the linked interface:
@@ -396,11 +396,18 @@ backend storage active. WebGL context restore recreates backend objects from the
 retained descriptor, including attachment formats and independent color/depth
 default sampler state; it does not preserve pixels. Consumers must redraw
 offscreen contents after resize or context restore.
-While the backend reports a lost context, `nt_gfx_begin_frame` skips the frame
-without attempting recreation. Recreation starts only after the backend leaves
-the lost state; a failed backend-context recreation is retried on a later frame.
+Context loss is synced at `nt_gfx_begin_frame`, at the start of the host
+iteration; pass calls on a lost context do nothing. Work issued
+after a loss inside an iteration is issued but does nothing, and the next
+begin_frame wipes. While the browser reports the context lost, begin_frame does
+not attempt recreation. A failed recreation is a context-creation failure: it
+logs one error, and on the web it leaves no context and no loss listener, so the
+engine stays lost and no later iteration recovers it. Backend failures caused by
+a loss are reported as `CONTEXT_LOST` without an error log.
 After the context recovers, each render target is recreated once. A failed target
-remains unready; its owner destroys and recreates it, or uses a fallback.
+remains unready; its owner destroys and recreates it, or uses a fallback. A
+restore that meets a new loss is that loss: the engine stays lost and a later
+begin_frame restores again.
 
 Render-target descriptors explicitly separate depth storage from depth format.
 `NONE` has no depth format or attachment, `BUFFER` has a non-sampleable depth

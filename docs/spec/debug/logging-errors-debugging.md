@@ -32,10 +32,14 @@ suppression of prebuilt libraries; it cannot remove their caller-side work.
 
 ## Optional measurements
 
-`NT_UI_TIMING_ENABLED`, `NT_GFX_GPU_TIMING_ENABLED` and
-`NT_RESOURCE_TIMING_ENABLED` are independent CMake options, all OFF by default regardless of build type. Debug presets and
+`NT_UI_TIMING_ENABLED`, `NT_GFX_GPU_TIMING_ENABLED`, `NT_GFX_CAPTURE_ENABLED` and `NT_RESOURCE_TIMING_ENABLED` are independent CMake options, all OFF by default regardless of build type. Debug presets and
 `native-release-test` select ON; production Release presets select OFF.
-UI/GPU interfaces and the `nt_resource` target publish numeric 0/1 values.
+UI/gfx interfaces and the `nt_resource` target publish numeric 0/1 values.
+Gfx counters (always built) and capture are described in [frame observation](../render/architecture.md#frame-observation). The devapi `render.info` command runs early
+in a frame, so its `draw_calls` is the last closed frame's
+(`g_nt_gfx.last_frame`). The `nt_metrics` `draw_calls` channel is whatever the
+host pushes: most example hosts push `nt_gfx_draw_calls(&g_nt_gfx.counters)` after rendering,
+inside the same frame; `examples/devapi_host` draws nothing and pushes 0.
 The resource header does not require the flag; only its implementation checks it.
 No producer depends
 on `NT_METRICS_ENABLED`: the game may consume measurements directly.

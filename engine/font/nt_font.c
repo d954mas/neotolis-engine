@@ -1662,9 +1662,8 @@ void nt_font_step(void) {
     }
 
     // #region Context restore: re-create GPU textures
-    /* Derived from the textures, not latched on the one frame context_restored is
-     * set: the recovery contract asks a game to skip that frame, and a game that
-     * does would otherwise never rebuild and render blank text for good. */
+    /* Derived from the textures, not latched on context_restored, so a rebuild
+     * that fails is retried by every later step until it succeeds. */
     if (!g_nt_gfx.context_lost) {
         for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
             if (!nt_pool_slot_alive(&s_font.pool, i)) {

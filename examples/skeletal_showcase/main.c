@@ -1811,10 +1811,11 @@ static void ordering_draw(void) {
             items[i] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
         }
         stage_viewport(pass, passes);
-        const nt_gfx_frame_stats_t before = g_nt_gfx.frame_stats;
+        const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
+        const uint64_t instances_before = g_nt_gfx.counters.instances;
         nt_skinned_mesh_renderer_draw_list(items, count);
-        s_order_stats.draws[pass] = g_nt_gfx.frame_stats.draw_calls - before.draw_calls;
-        s_order_stats.instances[pass] = g_nt_gfx.frame_stats.instances - before.instances;
+        s_order_stats.draws[pass] = nt_gfx_draw_calls(&g_nt_gfx.counters) - draws_before;
+        s_order_stats.instances[pass] = (uint32_t)(g_nt_gfx.counters.instances - instances_before);
         s_order_stats.expected[pass] = s_order_mode == 0 || (pass == 1 && s_order_mode == 2) ? 1U : count;
     }
 }
@@ -1878,6 +1879,22 @@ static void mount_pack(const char *name) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_frame();
+    if (g_nt_gfx.context_restored) {
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+        nt_resource_invalidate(NT_ASSET_FONT);
+        nt_resource_invalidate(NT_ASSET_MESH);
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof s_frame_uniforms, .label = "skeletal_frame_uniforms"});
+        restore_mesh_scene();
+        nt_shape_renderer_restore_gpu();
+        (void)nt_sprite_renderer_restore_gpu();
+        (void)nt_text_renderer_restore_gpu();
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+        s_atlas_bound = false;
+    }
 #ifdef NT_DEVAPI_ENABLED
     nt_devapi_update();
 #endif
@@ -1905,28 +1922,6 @@ static void frame(void) {
         .near_far = {CAMERA_NEAR * s_fit_scale, CAMERA_FAR * s_fit_scale},
     };
 
-    nt_gfx_begin_frame();
-    if (g_nt_gfx.context_restored) {
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
-        nt_resource_invalidate(NT_ASSET_MESH);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof s_frame_uniforms, .label = "skeletal_frame_uniforms"});
-        restore_mesh_scene();
-        nt_shape_renderer_restore_gpu();
-        (void)nt_sprite_renderer_restore_gpu();
-        (void)nt_text_renderer_restore_gpu();
-        nt_program_ref_drop(&s_sprite_program);
-        nt_program_ref_drop(&s_text_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-        s_atlas_bound = false;
-        s_scene_registry[s_active_scene].update();
-        nt_gfx_end_frame();
-        if (nt_app_render_enabled()) {
-            nt_window_swap_buffers();
-        }
-        return;
-    }
     nt_font_step();
     const bool render_enabled = nt_app_render_enabled();
     if (render_enabled) {
@@ -1980,7 +1975,6 @@ static void frame(void) {
     if (render_enabled) {
         nt_gfx_end_pass();
     }
-    nt_gfx_end_frame();
     if (render_enabled) {
         nt_window_swap_buffers();
     }

@@ -281,6 +281,28 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
+    nt_gfx_begin_frame();
+    if (g_nt_gfx.context_restored) {
+        /* Before this iteration's steps: they re-resolve what is invalidated here. */
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+        nt_resource_invalidate(NT_ASSET_FONT);
+        nt_gfx_destroy_buffer(s_frame_ubo); /* free pool slot before reuse */
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "frame_uniforms",
+        });
+        /* Materials keep their handles and draw again once their programs relink. */
+        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        restore_result = nt_text_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        (void)restore_result;
+        nt_program_ref_drop(&s_sprite_program);
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+    }
     nt_input_poll();
 
 #ifndef NT_PLATFORM_WEB
@@ -405,41 +427,10 @@ static void frame(void) {
     const nt_material_info_t *mat_info = nt_material_get_info(s_sprite_material);
     bool can_render = s_atlas_resolved && mat_info && nt_gfx_program_ready(mat_info->program) && s_bunny_count > 0;
 
-    nt_gfx_begin_frame();
     /* nt_debug_overlay reads frame total via segment named "frame" by convention. */
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_begin_segment("frame");
 #endif
-
-    if (g_nt_gfx.context_restored) {
-        /* WebGL context loss recovery. The program in mat_info and the
-         * s_overlay_font handles captured above are stale (this frame's
-         * nt_resource_step / nt_font_step ran before begin_frame detected
-         * the restore). Invalidate resources
-         * so the next frame's *_step calls re-resolve, recreate game-owned
-         * GPU buffers, and restore both renderers. Skip rendering this
-         * frame — it's safer than driving pipelines with stale handles. */
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-        nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo); /* free pool slot before reuse */
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        restore_result = nt_text_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
-        nt_program_ref_drop(&s_sprite_program);
-        nt_program_ref_drop(&s_text_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-        can_render = false;
-    }
 
     /* Restore may replace font textures; keep it outside the pass. */
     nt_font_step();
@@ -474,10 +465,7 @@ static void frame(void) {
     // #region stats overlay (on-screen HUD)
     /* Top-left corner anchor in world coords (y-up, bottom-left origin).
      * Text renders below the model translation point by line; size is the
-     * em-height in world units, which == pixels here since ortho is 1:1.
-     * Skipped on context_restored frames — the text program was dropped above and
-     * relinks only after a later nt_resource_step republishes the shader code; the
-     * font handles refresh in nt_font_step. */
+     * em-height in world units, which == pixels here since ortho is 1:1. */
     /* Publish demo counters into nt_metrics before the HUD reads them back via format_lines. */
 #if NT_METRICS_ENABLED
     nt_metrics_count("bunnies", (uint64_t)s_bunny_count);
@@ -485,7 +473,7 @@ static void frame(void) {
 #endif
 
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    if (!g_nt_gfx.context_restored && text_info && nt_gfx_program_ready(text_info->program)) {
+    if (text_info && nt_gfx_program_ready(text_info->program)) {
         const float overlay_size = 22.0F;
         mat4 overlay_model;
         glm_mat4_identity(overlay_model);
@@ -520,7 +508,6 @@ static void frame(void) {
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_end_segment();
 #endif
-    nt_gfx_end_frame();
 
 #if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
@@ -539,7 +526,7 @@ static void frame(void) {
 #else
         .gpu_ms = -1.0F,
 #endif
-        .draw_calls = nt_gfx_get_frame_draw_calls(),
+        .draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters),
         .mem_used = s_mem_used,
     };
     nt_metrics_sample(&mf);

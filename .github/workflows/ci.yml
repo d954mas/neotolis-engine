@@ -165,6 +165,18 @@ jobs:
           emcmake cmake --preset wasm-release
           cmake --build --preset wasm-release
 
+      - name: Verify gfx capture producers are absent in WASM release
+        run: |
+          symbols="$("$EMSDK/upstream/bin/llvm-nm" --defined-only build/engine/wasm-release/libnt_gfx.a)"
+          # Positive control: the listing must see ordinary gfx symbols.
+          grep -q "nt_gfx_init" <<< "$symbols"
+          for producer in g_nt_gfx_capture nt_gfx_backend_capture_initial_state nt_gfx_gl_call_name; do
+            if grep -q "$producer" <<< "$symbols"; then
+              echo "wasm-release nt_gfx retains capture producer: $producer"
+              exit 1
+            fi
+          done
+
       - name: Verify optional UI composition in WASM release
         run: |
           emcmake cmake -S tests/submodule -B build/_cmake/ui-composition-wasm-release -G Ninja -DENGINE_ROOT="$PWD" -DCMAKE_BUILD_TYPE=Release -DNT_BUILD_TESTS=OFF -DNT_FONT_EMBOLDEN_ENABLED=OFF -DNT_UI_CLAY_DEBUG_VIEW=OFF -DNT_UI_DEBUG_TOOLS=OFF
@@ -433,7 +445,7 @@ jobs:
       - name: Check diagnostics configuration and runtime matrix
         run: |
           python3 scripts/check_diagnostics_config.py
-          python3 scripts/check_diagnostics_runtime.py
+          xvfb-run python3 scripts/check_diagnostics_runtime.py
 
       - name: Test optional UI features under NDEBUG
         run: |
@@ -575,7 +587,7 @@ jobs:
       # self-launch finds it with no --host-bin. Default presets keep these groups OFF (zero release delta).
       # This raw configure selects OBS's dependencies explicitly: log ring, metrics and introspect.
       - name: Configure devapi host (groups the canonical scenario needs)
-        run: cmake -B build/examples/devapi_host/native-debug -DNT_PRESET_NAME=native-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -G Ninja -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_UI_DEBUG_TOOLS=ON -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_INTROSPECT_WRITE_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON
+        run: cmake -B build/examples/devapi_host/native-debug -DNT_PRESET_NAME=native-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -G Ninja -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_UI_DEBUG_TOOLS=ON -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_INTROSPECT_WRITE_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_GFX_CAPTURE_ENABLED=ON -DNT_GFX_GPU_TIMING_ENABLED=ON
 
       - name: Build devapi_host
         run: cmake --build build/examples/devapi_host/native-debug --target devapi_host
@@ -695,9 +707,10 @@ jobs:
       # CRT-pin centralization + every test source built AND ctest-registered.
       # The registration gate reads this job's compile DB / CTestTestfiles
       # (devapi ON above, so devapi-gated tests are visible).
-      - name: Run CRT-pin and test-registration gates
+      - name: Run CRT-pin, GL-funnel and test-registration gates
         run: |
           bash scripts/check_crt_pins.sh
+          python3 scripts/check_gl_calls.py
           bash scripts/check_tests_registered.sh build/_cmake/native-debug
           python3 -m unittest discover -s scripts/tests -p 'test_*.py'
           bash scripts/tests/test_tidy.sh
@@ -790,7 +803,7 @@ jobs:
       # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
       # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
       - name: Run browser smoke test
-        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts observation.spec.ts
 
       # Each admission row (NT_BASISU_ROWS) activates its own fixture pack in wasm Debug (FULL
       # asserts) and samples the transcoded texels through WebGL; a Release row would add no

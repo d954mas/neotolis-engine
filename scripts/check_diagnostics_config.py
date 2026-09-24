@@ -28,6 +28,7 @@ DEFINES = {
     "NT_UI_CHECKS": 0,
     "NT_UI_TIMING_ENABLED": 0,
     "NT_GFX_GPU_TIMING_ENABLED": 0,
+    "NT_GFX_CAPTURE_ENABLED": 0,
 }
 
 
@@ -93,6 +94,7 @@ class Checks:
             "NT_UI_CHECKS": "ui/nt_ui.h",
             "NT_UI_TIMING_ENABLED": "ui/nt_ui.h",
             "NT_GFX_GPU_TIMING_ENABLED": "graphics/nt_gfx.h",
+            "NT_GFX_CAPTURE_ENABLED": "graphics/nt_gfx.h",
         }
         for define, header in headers.items():
             source = f'#include "{header}"\n'
@@ -139,10 +141,12 @@ class Checks:
         policies = {
             "off": {"NT_ASSERT_MODE": "0", "NT_UI_CHECKS": "ON", "NT_SKELETAL_CHECKS": "ON",
                     "NT_RESOURCE_TIMING_ENABLED": "OFF", "NT_LOG_MIN_LEVEL": "3", "NT_UI_TIMING_ENABLED": "OFF", "NT_GFX_GPU_TIMING_ENABLED": "OFF",
+                    "NT_GFX_CAPTURE_ENABLED": "OFF",
                     "NT_INTROSPECT_ENABLED": "ON", "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                     "NT_METRICS_ENABLED": "OFF", "NT_LOG_RING_ENABLED": "OFF"},
             "on": {"NT_ASSERT_MODE": "2", "NT_UI_CHECKS": "OFF", "NT_SKELETAL_CHECKS": "OFF",
                    "NT_RESOURCE_TIMING_ENABLED": "ON", "NT_LOG_MIN_LEVEL": "1", "NT_UI_TIMING_ENABLED": "ON", "NT_GFX_GPU_TIMING_ENABLED": "ON",
+                   "NT_GFX_CAPTURE_ENABLED": "ON",
                    "NT_INTROSPECT_ENABLED": "OFF", "NT_INTROSPECT_WRITE_ENABLED": "OFF",
                    "NT_METRICS_ENABLED": "ON", "NT_LOG_RING_ENABLED": "ON"},
         }
@@ -175,7 +179,8 @@ class Checks:
                     raise RuntimeError("NONE logger retains formatting/hash/allocation references")
         defaults = {"NT_ASSERT_MODE": "1", "NT_UI_CHECKS": "OFF", "NT_SKELETAL_CHECKS": "OFF", "NT_GFX_NATIVE_GL_DEBUG": "OFF",
                     "NT_LOG_RING_ENABLED": "OFF", "NT_METRICS_ENABLED": "OFF", "NT_INTROSPECT_ENABLED": "OFF",
-                    "NT_INTROSPECT_WRITE_ENABLED": "OFF", "NT_HTTP_CURL": "OFF"}
+                    "NT_INTROSPECT_WRITE_ENABLED": "OFF", "NT_HTTP_CURL": "OFF",
+                    "NT_GFX_CAPTURE_ENABLED": "OFF"}
         for name, project, build_type, settings in (
                 ("defaults-debug", ROOT, "Debug", {}),
                 ("defaults-release-ui", source, "Release", {"NT_UI_DEBUG_TOOLS": "ON", "NT_METRICS_ENABLED": "ON"}),

@@ -229,7 +229,7 @@ void nt_resource_set_blob_policy(nt_hash32_t pack_id, uint8_t policy, uint32_t t
 /* ---- Context loss recovery ---- */
 
 /* Invalidates non-virtual assets of one type for later reactivation. BLOB asserts: raw bytes have no activation to repeat.
- * On context_restored, discard earlier render state and wait for a later resource_step. */
+ * On context_restored, call it before this iteration's resource_step; assets come back as it reactivates them. */
 void nt_resource_invalidate(uint8_t asset_type);
 
 /* ---- Debug: dump loaded pack contents to log ---- */

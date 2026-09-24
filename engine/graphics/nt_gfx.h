@@ -5,6 +5,10 @@
 #error "NT_GFX_GPU_TIMING_ENABLED must be defined by the nt_gfx_interface target"
 #endif
 
+#ifndef NT_GFX_CAPTURE_ENABLED
+#error "NT_GFX_CAPTURE_ENABLED must be defined by the nt_gfx_interface target"
+#endif
+
 #include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
@@ -334,6 +338,7 @@ typedef struct {
      * raise the extra budget near the 64-layout sprite limit. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
+    uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     bool depth;                  /* request depth buffer (default: true) */
     bool stencil;                /* request stencil buffer (default: false) */
     bool antialias;              /* MSAA (default: false) */
@@ -486,15 +491,289 @@ typedef struct {
     float clear_depth;
 } nt_pass_desc_t;
 
-/* ---- Frame statistics ---- */
+// #region frame counters and observation
+/* Public operations (BEGIN/END pairs) and the record-only STATE marker. */
+typedef enum {
+    NT_GFX_OP_PASS,
+    NT_GFX_OP_END_PASS,
+    NT_GFX_OP_CREATE,
+    NT_GFX_OP_DESTROY,
+    NT_GFX_OP_RESIZE,
+    NT_GFX_OP_PIPELINE,
+    NT_GFX_OP_VERTEX_INPUT,
+    NT_GFX_OP_TEXTURE_SET,
+    NT_GFX_OP_TEXTURE,
+    NT_GFX_OP_SAMPLER,
+    NT_GFX_OP_VIEWPORT,
+    NT_GFX_OP_SCISSOR,
+    NT_GFX_OP_SCISSOR_ENABLE,
+    NT_GFX_OP_UNIFORM_MAT4,
+    NT_GFX_OP_UNIFORM_VEC4,
+    NT_GFX_OP_UNIFORM_FLOAT,
+    NT_GFX_OP_UNIFORM_INT,
+    NT_GFX_OP_UNIFORM_BLOCK,
+    NT_GFX_OP_UBO,
+    NT_GFX_OP_BUFFER_UPLOAD,
+    NT_GFX_OP_BUFFER_ORPHAN,
+    NT_GFX_OP_TEXTURE_UPLOAD,
+    NT_GFX_OP_ATTRIBUTE,
+    NT_GFX_OP_ATTRIBUTE_DEFAULT,
+    NT_GFX_OP_INSTANCE_BUFFER,
+    NT_GFX_OP_DRAW,
+    NT_GFX_OP_DRAW_INSTANCED,
+    NT_GFX_OP_DRAW_INDEXED,
+    NT_GFX_OP_DRAW_INDEXED_INSTANCED,
+    NT_GFX_OP_CONTEXT,
+    NT_GFX_OP_STATE,
+    NT_GFX_OP_READ_PIXELS,
+    NT_GFX_OP_SEGMENT_BEGIN,
+    NT_GFX_OP_SEGMENT_END,
+    NT_GFX_OP_SEGMENT_POLL,
+    NT_GFX_OP_GPU_TIMING,
+    NT_GFX_OP_TIMER_DISJOINT,
+    NT_GFX_OP_COUNT
+} nt_gfx_operation_t;
+
+/* Every function the GL backend issues, queries included; the single source of
+ * nt_gfx_gl_call_t, NT_GFX_GL_COUNT and the call names. getExtension is the WebGL
+ * JS method the web context calls directly. */
+#define NT_GFX_GL_CALLS(X)                                                                                                                                                                             \
+    X(getExtension)                                                                                                                                                                                    \
+    X(glActiveTexture)                                                                                                                                                                                 \
+    X(glAttachShader)                                                                                                                                                                                  \
+    X(glBeginQuery)                                                                                                                                                                                    \
+    X(glBindBuffer)                                                                                                                                                                                    \
+    X(glBindBufferBase)                                                                                                                                                                                \
+    X(glBindFramebuffer)                                                                                                                                                                               \
+    X(glBindRenderbuffer)                                                                                                                                                                              \
+    X(glBindSampler)                                                                                                                                                                                   \
+    X(glBindTexture)                                                                                                                                                                                   \
+    X(glBindVertexArray)                                                                                                                                                                               \
+    X(glBlendColor)                                                                                                                                                                                    \
+    X(glBlendEquationSeparate)                                                                                                                                                                         \
+    X(glBlendFuncSeparate)                                                                                                                                                                             \
+    X(glBufferData)                                                                                                                                                                                    \
+    X(glBufferSubData)                                                                                                                                                                                 \
+    X(glCheckFramebufferStatus)                                                                                                                                                                        \
+    X(glClear)                                                                                                                                                                                         \
+    X(glClearColor)                                                                                                                                                                                    \
+    X(glClearDepth)                                                                                                                                                                                    \
+    X(glClearDepthf)                                                                                                                                                                                   \
+    X(glCompileShader)                                                                                                                                                                                 \
+    X(glCompressedTexImage2D)                                                                                                                                                                          \
+    X(glCreateProgram)                                                                                                                                                                                 \
+    X(glCreateShader)                                                                                                                                                                                  \
+    X(glCullFace)                                                                                                                                                                                      \
+    X(glDebugMessageCallback)                                                                                                                                                                          \
+    X(glDebugMessageControl)                                                                                                                                                                           \
+    X(glDeleteBuffers)                                                                                                                                                                                 \
+    X(glDeleteFramebuffers)                                                                                                                                                                            \
+    X(glDeleteProgram)                                                                                                                                                                                 \
+    X(glDeleteQueries)                                                                                                                                                                                 \
+    X(glDeleteRenderbuffers)                                                                                                                                                                           \
+    X(glDeleteSamplers)                                                                                                                                                                                \
+    X(glDeleteShader)                                                                                                                                                                                  \
+    X(glDeleteTextures)                                                                                                                                                                                \
+    X(glDeleteVertexArrays)                                                                                                                                                                            \
+    X(glDepthFunc)                                                                                                                                                                                     \
+    X(glDepthMask)                                                                                                                                                                                     \
+    X(glDisable)                                                                                                                                                                                       \
+    X(glDrawArrays)                                                                                                                                                                                    \
+    X(glDrawArraysInstanced)                                                                                                                                                                           \
+    X(glDrawElements)                                                                                                                                                                                  \
+    X(glDrawElementsInstanced)                                                                                                                                                                         \
+    X(glEnable)                                                                                                                                                                                        \
+    X(glEnableVertexAttribArray)                                                                                                                                                                       \
+    X(glEndQuery)                                                                                                                                                                                      \
+    X(glFramebufferRenderbuffer)                                                                                                                                                                       \
+    X(glFramebufferTexture2D)                                                                                                                                                                          \
+    X(glGenBuffers)                                                                                                                                                                                    \
+    X(glGenFramebuffers)                                                                                                                                                                               \
+    X(glGenQueries)                                                                                                                                                                                    \
+    X(glGenRenderbuffers)                                                                                                                                                                              \
+    X(glGenSamplers)                                                                                                                                                                                   \
+    X(glGenTextures)                                                                                                                                                                                   \
+    X(glGenVertexArrays)                                                                                                                                                                               \
+    X(glGenerateMipmap)                                                                                                                                                                                \
+    X(glGetActiveUniform)                                                                                                                                                                              \
+    X(glGetError)                                                                                                                                                                                      \
+    X(glGetIntegerv)                                                                                                                                                                                   \
+    X(glGetProgramInfoLog)                                                                                                                                                                             \
+    X(glGetProgramiv)                                                                                                                                                                                  \
+    X(glGetQueryObjectui64v)                                                                                                                                                                           \
+    X(glGetQueryObjectuiv)                                                                                                                                                                             \
+    X(glGetShaderInfoLog)                                                                                                                                                                              \
+    X(glGetShaderiv)                                                                                                                                                                                   \
+    X(glGetUniformBlockIndex)                                                                                                                                                                          \
+    X(glGetUniformLocation)                                                                                                                                                                            \
+    X(glLinkProgram)                                                                                                                                                                                   \
+    X(glPixelStorei)                                                                                                                                                                                   \
+    X(glPolygonOffset)                                                                                                                                                                                 \
+    X(glPopDebugGroup)                                                                                                                                                                                 \
+    X(glPushDebugGroup)                                                                                                                                                                                \
+    X(glReadPixels)                                                                                                                                                                                    \
+    X(glRenderbufferStorage)                                                                                                                                                                           \
+    X(glSamplerParameteri)                                                                                                                                                                             \
+    X(glScissor)                                                                                                                                                                                       \
+    X(glShaderSource)                                                                                                                                                                                  \
+    X(glTexImage2D)                                                                                                                                                                                    \
+    X(glTexParameteri)                                                                                                                                                                                 \
+    X(glTexSubImage2D)                                                                                                                                                                                 \
+    X(glUniform1f)                                                                                                                                                                                     \
+    X(glUniform1i)                                                                                                                                                                                     \
+    X(glUniform4fv)                                                                                                                                                                                    \
+    X(glUniformBlockBinding)                                                                                                                                                                           \
+    X(glUniformMatrix4fv)                                                                                                                                                                              \
+    X(glUseProgram)                                                                                                                                                                                    \
+    X(glVertexAttrib4f)                                                                                                                                                                                \
+    X(glVertexAttribDivisor)                                                                                                                                                                           \
+    X(glVertexAttribPointer)                                                                                                                                                                           \
+    X(glViewport)
+
+/* Issued-call detail (NT_GFX_GL_<name>). Integer args follow the GL signature;
+ * pointer arguments become presence bits (payloads, outputs, labels) or object
+ * names (gen/delete: count, then names); a returned value follows the arguments;
+ * payload bytes are separate. Floats use values; no CPU pointers survive. */
+#define NT_GFX_GL_CALL_ENUM_(name) NT_GFX_GL_##name,
+typedef enum { NT_GFX_GL_NONE = 0, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_ENUM_) NT_GFX_GL_COUNT } nt_gfx_gl_call_t;
+#undef NT_GFX_GL_CALL_ENUM_
+
+/* All fields are values. Submitted geometry is not shader/GPU work.
+ * Backends without GL (the test fake) leave gl[] and uploads zero.
+ * Vertices/indices multiply by instance count; instances counts instanced draws only.
+ * accepted[] counts public operations by nt_gfx_operation_t that ended ACCEPTED,
+ * nested ones included (render-target attachments, default samplers, cascaded
+ * destroys); gl[] counts every issued GL call by nt_gfx_gl_call_t; uploads count calls with a
+ * non-NULL payload and their bytes (NULL storage and generated mips excluded). */
+typedef struct {
+    uint64_t frame_sequence;
+    uint64_t vertices;
+    uint64_t indices;
+    uint64_t instances; /* instanced draws only */
+    uint64_t buffer_upload_calls;
+    uint64_t buffer_upload_bytes;
+    uint64_t texture_upload_calls;
+    uint64_t texture_upload_bytes;
+    uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
+    uint32_t gl[NT_GFX_GL_COUNT];
+} nt_gfx_counters_t;
+
+/* Accepted draw calls of every kind. */
+static inline uint32_t nt_gfx_draw_calls(const nt_gfx_counters_t *c) {
+    return c->accepted[NT_GFX_OP_DRAW] + c->accepted[NT_GFX_OP_DRAW_INSTANCED] + c->accepted[NT_GFX_OP_DRAW_INDEXED] + c->accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED];
+}
+
+typedef enum {
+    NT_GFX_EVENT_BEGIN,
+    NT_GFX_EVENT_RESULT,
+    NT_GFX_EVENT_BACKEND,
+    NT_GFX_EVENT_SKIP,
+    NT_GFX_EVENT_INITIAL,
+    NT_GFX_EVENT_DEFINITION,
+    NT_GFX_EVENT_ARGUMENT, /* request argument belonging to the enclosing BEGIN */
+} nt_gfx_event_kind_t;
+
+typedef enum {
+    NT_GFX_OBJECT_NONE,
+    NT_GFX_OBJECT_SHADER,
+    NT_GFX_OBJECT_PROGRAM,
+    NT_GFX_OBJECT_PIPELINE,
+    NT_GFX_OBJECT_VERTEX_INPUT,
+    NT_GFX_OBJECT_BUFFER,
+    NT_GFX_OBJECT_TEXTURE,
+    NT_GFX_OBJECT_SAMPLER,
+    NT_GFX_OBJECT_RENDER_TARGET,
+} nt_gfx_object_kind_t;
+
+typedef enum {
+    NT_GFX_RESULT_NONE,
+    NT_GFX_RESULT_ACCEPTED,
+    NT_GFX_RESULT_CACHE,
+    NT_GFX_RESULT_INACTIVE,
+    NT_GFX_RESULT_CONTEXT_LOST,
+    NT_GFX_RESULT_INVALID_HANDLE,
+    NT_GFX_RESULT_INVALID_ARGUMENT,
+    NT_GFX_RESULT_UNREADY,
+    NT_GFX_RESULT_BACKEND_FAILURE,
+    NT_GFX_RESULT_CAPACITY,
+    NT_GFX_RESULT_UNKNOWN,
+} nt_gfx_result_t;
+
+/* Pointer-free records. Each public operation is one BEGIN (request) and one
+ * RESULT (result; creators add the handle); nested operations sit between. INITIAL and
+ * DEFINITION describe inherited or resource state and never represent issued
+ * calls; ARGUMENT carries per-element request arguments of the enclosing BEGIN.
+ * object is a full typed frontend handle and the cross-context identity; raw names
+ * live only in backend data and are valid within their context segment, which a
+ * CONTEXT operation ends. Unknown inherited values are explicit. */
+typedef struct {
+    nt_gfx_event_kind_t kind;
+    nt_gfx_operation_t operation;
+    nt_gfx_object_kind_t object_kind;
+    uint32_t object;
+    uint32_t detail;
+    nt_gfx_result_t result;
+    union {
+        struct {
+            uint64_t bytes;
+            uint32_t args[12];
+            float values[4];
+        } backend;
+        struct {
+            uint64_t size;
+            uint32_t backend, related[3], type, usage, width, height, format, levels, flags;
+        } resource;
+        struct {
+            uint32_t first, count, vertices, instances, vertex_input;
+        } draw;
+        struct {
+            uint32_t name, count;
+            float values[16];
+        } uniform;
+        struct {
+            uint32_t secondary, name, slot, offset;
+        } binding;
+        struct {
+            uint32_t target;
+            float color[4], depth;
+        } pass;
+        struct {
+            uint32_t buffer, offset, stride, location, type, count, normalized, divisor;
+        } attribute;
+        struct {
+            uint32_t integers[14];
+            float values[6];
+        } state;
+    } data;
+} nt_gfx_event_t;
+
+_Static_assert(sizeof(nt_gfx_event_t) == 104, "capture record layout must remain explicit");
+
+/* detail of INITIAL/STATE records: which layer's inherited state they snapshot. */
+enum {
+    NT_GFX_INITIAL_FRONTEND = 0,
+    NT_GFX_INITIAL_BACKEND = 1,
+};
 
 typedef struct {
-    uint32_t draw_calls;           /* all GPU draw calls */
-    uint32_t draw_calls_instanced; /* of those, instanced */
-    uint32_t vertices;
-    uint32_t indices;
-    uint32_t instances; /* total objects drawn via instanced calls */
-} nt_gfx_frame_stats_t;
+    bool overflow;
+    const nt_gfx_event_t *events;
+    uint32_t count;
+    nt_gfx_counters_t counters; /* the finalized frame's, even after later unrecorded frames; frame_sequence 0 while recording */
+} nt_gfx_capture_view_t;
+
+#if NT_GFX_CAPTURE_ENABLED
+/* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
+const char *nt_gfx_gl_call_name(uint32_t call);
+/* One-shot: the next frame records, starting at the begin_frame that opens it.
+ * Requires nonzero init capacity. The stub is inert. */
+void nt_gfx_capture_request(void);
+/* Metadata by value; immutable event prefix until the begin_frame that starts the
+ * next requested recording, or shutdown, so read right after begin_frame. Copy count records and
+ * metadata to keep. Empty views have events=NULL. */
+nt_gfx_capture_view_t nt_gfx_capture_read(void);
+#endif
+// #endregion
 
 /* ---- GPU format capabilities ---- */
 
@@ -510,7 +789,8 @@ typedef struct {
 /* ---- Global state ---- */
 
 typedef struct {
-    nt_gfx_frame_stats_t frame_stats;
+    nt_gfx_counters_t counters;   /* live counters of the open frame; reset only by begin_frame */
+    nt_gfx_counters_t last_frame; /* last closed frame; frame_sequence 0 before the first */
     nt_gfx_gpu_caps_t gpu_caps;
     bool context_lost;
     bool context_restored;
@@ -555,8 +835,16 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 
 /* ---- Frame / Pass ---- */
 
+/* The one host frame boundary, called first in every host iteration before any other
+ * gfx use: nt_gfx_init opens the first frame and every begin_frame closes the open one,
+ * syncs context loss and opens the next, so all gfx work between init and shutdown
+ * belongs to a frame; shutdown discards the open one. Requires no open pass.
+ * begin_frame copies the counters into g_nt_gfx.last_frame, then resets
+ * g_nt_gfx.counters. The loss sync takes the browser's loss events: a new loss wipes
+ * every backend name and sets context_lost; while lost it restores once the browser
+ * reports the context back and sets context_restored until the next begin_frame. */
 void nt_gfx_begin_frame(void);
-void nt_gfx_end_frame(void);
+/* Passes do not nest; on a lost context both calls are no-ops. */
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_end_pass(void);
 
@@ -564,7 +852,7 @@ void nt_gfx_end_pass(void);
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
 /* Links valid stages. Link errors, >16 non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert.
- * Returns invalid while the context is lost / begin_frame has not finished recovery, and for a live stage
+ * Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
 /* Creation preserves the currently bound pipeline. */
@@ -689,11 +977,6 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 
-/* Convenience getter for g_nt_gfx.frame_stats.draw_calls. Reset by
- * nt_gfx_begin_frame, incremented by every public draw function. Read
- * by nt_debug_overlay; equivalent to reading frame_stats.draw_calls directly. */
-uint32_t nt_gfx_get_frame_draw_calls(void);
-
 /* Reads an (x,y,w,h) sub-rect of the bound default framebuffer into caller-owned `out`:
  * rgba8 (row pitch w*4), TOP-LEFT origin (GL's bottom-left read is y-flipped once here),
  * straight alpha. Returns false on w<=0 || h<=0 or w*h*4 > out_cap (no write past the cap). */
@@ -724,8 +1007,8 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
  * labels. */
 void nt_gfx_begin_segment(const char *name);
 void nt_gfx_end_segment(void);
-/* out_ns is required. Compile OFF or stub: false with zero output.
- * GL timing ON: unsuccessful polls leave output unchanged. */
+/* out_ns is required. Compile OFF or stub: false with zero output, except on a
+ * known loss. Other unsuccessful polls leave output unchanged. */
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 
 /* Requires compiled support; the runtime choice starts enabled and survives context loss.

@@ -25,8 +25,14 @@ void nt_gfx_shutdown(void) { g_nt_gfx = (nt_gfx_t){0}; }
 const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }
 
 void nt_gfx_begin_frame(void) {}
-
-void nt_gfx_end_frame(void) {}
+#if NT_GFX_CAPTURE_ENABLED
+const char *nt_gfx_gl_call_name(uint32_t call) {
+    (void)call;
+    return NULL;
+}
+void nt_gfx_capture_request(void) {}
+nt_gfx_capture_view_t nt_gfx_capture_read(void) { return (nt_gfx_capture_view_t){0}; }
+#endif
 
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 
@@ -232,8 +238,6 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     (void)num_vertices;
     (void)instance_count;
 }
-
-uint32_t nt_gfx_get_frame_draw_calls(void) { return 0; }
 
 // Signature follows the public readback API.
 // NOLINTNEXTLINE(readability-non-const-parameter)

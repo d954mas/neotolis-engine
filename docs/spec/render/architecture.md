@@ -52,7 +52,6 @@ Engine-oriented, not WebGL-mirror and not full WebGPU abstraction:
 
 ```c
 renderer_begin_frame();
-renderer_end_frame();
 
 renderer_begin_pass(&desc);
 renderer_end_pass();
@@ -288,7 +287,8 @@ instance-buffer re-pointing, uniform writes and draws outside a pass assert.
 Destroying a texture or a render target inside a pass asserts: pass-scoped draw
 state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
-state and the backend deduplicates them across passes. The clear forces the depth
+state. The backend deduplicates texture/sampler binds across passes;
+uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 Render-target color and sampleable depth attachments are exposed as normal
@@ -376,6 +376,240 @@ This does not add RGBA32F render-target support to the engine.
 This capability supplies low-level targets and depth textures only. It does not
 define light cameras, PCF, cascades, shadow atlases, material shadow integration,
 or a shadow-map system.
+
+## Frame observation
+
+All gfx work between `nt_gfx_init` and `nt_gfx_shutdown` happens inside a
+**frame**, so no operation or GL call escapes the counters. `nt_gfx_begin_frame`
+is the only boundary: `nt_gfx_init` opens the first frame, and every begin_frame
+closes the open frame and at once opens the next, so there is no state outside
+a frame and nothing to assert about it. The host calls `nt_gfx_begin_frame` once
+at the start of each frame callback, before any other gfx use (resource and
+font steps included), also when nothing renders. Work between init and the
+first begin_frame (init itself, pre-loop loading) is the first frame; teardown
+work after the last callback lands in a frame that `nt_gfx_shutdown` discards
+unpublished. Frames are a host contract in every build, independent of
+simulation time; app/gfx never close one implicitly. begin_frame asserts that
+no pass is open; passes may begin any time after init. A frame holds any number
+of passes; their counters sum. begin_frame also does the per-frame backend
+work: it ages the upload staging buffer and, with GPU timing, checks the timer
+disjoint flag on a live context. The stub is stateless: its begin_frame is inert
+and it never publishes counters.
+
+`g_nt_gfx.counters` holds the live counters of the open frame.
+`nt_gfx_begin_frame` copies them into `g_nt_gfx.last_frame`, the last closed
+frame, then resets them and advances `frame_sequence`; passes reset nothing.
+`last_frame` stays unchanged until the next begin_frame or shutdown; its
+`frame_sequence` is 0 before the first one. Code in a callback after its
+begin_frame reads the previous callback's work from `last_frame`. A no-render
+frame reports zero draws; old geometry is never reused. Counters carry no loss
+status: a frame that met a context loss holds what was accepted before and
+after it.
+
+Context loss is synced at begin_frame. The web context registers a canvas
+`webglcontextlost` handler that calls `preventDefault` (the browser restores only
+a handled loss, so shells must not) and sets one latch. Browser lost and restored
+events are separate tasks and never arrive inside a frame callback, so the state
+begin_frame syncs holds for the whole iteration. begin_frame always takes the
+latch, so a loss and restore that both happen between two callbacks (a
+background tab) still wipe the backend tables. A new loss wipes every backend
+handle, sets `g_nt_gfx.context_lost` and logs one error. While `context_lost` is
+set, begin_frame asks the browser (the only per-iteration JS query, and only in
+the lost state); once the context is back, the same begin_frame restores it and
+sets `g_nt_gfx.context_restored` until the next begin_frame. The game therefore
+sees the restore before its resource step and before it builds anything. The
+restore is one CONTEXT operation: it recreates the context, probes
+capabilities, recreates render targets and ends ACCEPTED. A recreate that fails
+leaves no context, logs one error and stays lost for good. A restore that the
+browser reports lost again when it finishes wipes what it refilled, stays lost
+without an error log and is retried by a later begin_frame. A loss inside an
+iteration changes no state: operations issued after it are issued but do
+nothing, creates end `CONTEXT_LOST` without an error log, and the next
+begin_frame wipes. Pass calls on a lost context are no-ops, not traps.
+
+A backend call that reports a failure (a create, a render-target resize, a
+readback, a lazy sampler recreate at bind) asks the browser: a loss ends the
+operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
+failure reason and error log. The backend asks only where the answer prevents a crash or a
+misleading log: before shader and program creation, because Emscripten throws on
+the null object some browsers return on a lost context; error logs for link,
+uniform reflection, framebuffer completeness and texture creation, which a loss
+suppresses; a GL error pending before a texture upload, which a loss turns from
+an assert into a rolled-back failure; and the vertex array made at context
+setup, whose name 0 asserts only on a live context. A GPU timer query named 0
+leaves its segment unallocated and skipped, because `beginQuery` throws on it. A
+fresh context (init or restore) first drains GL errors: Emscripten keeps a
+recorded error across contexts, so a call that reached the dead context must not
+fail the fresh one's first check.
+
+All counters are built and counted in every build; there is no counter option
+or runtime toggle. Geometry and instance fields are uint64; operands widen before
+multiplication, and uint64 sums cannot overflow within a frame. Draw calls are
+not a separate field: `nt_gfx_draw_calls()` sums the four accepted draw
+operations. Vertices/indices are submitted
+counts, multiplied by instance count for instanced calls; instances counts only
+instances in instanced calls. These are not rasterized triangles or
+vertex-shader invocations.
+
+Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
+upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
+definition published by the interface target, so every consumer sees the same
+configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read` and
+`nt_gfx_gl_call_name` exist only when it is 1.
+
+`gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
+through its `NT_GL*` funnel, queries included. Platform context management
+(context create/destroy, loss events, `isContextLost` queries)
+is not counted. The funnel
+counts with an inline constant-index increment and (with capture) records in the same
+expression that issues the call; a grep gate rejects any bare `gl*` call in
+`engine/graphics/gl`. The funnel does no per-call frame check: a frame is
+always open between init and shutdown. The
+single `NT_GFX_GL_CALLS` table in `nt_gfx.h` defines the enum, `NT_GFX_GL_COUNT`
+and, with capture, `nt_gfx_gl_call_name`. WebGL JS calls the web context makes
+directly (`getExtension` and the `glGetQueryObjectui64v` timer-result bridge) are
+counted and recorded through `NT_GL_ISSUED` at their C call site, in a separate
+statement just before the JS call; the
+JS that Emscripten's GL layer runs behind a C call (lazy uniform location
+lookup, state shadowing) is a documented boundary: counters and capture see the
+C API call. Payload fields count calls with non-NULL CPU data and their bytes,
+in the same funnel; NULL storage and generated mips are excluded, non-NULL
+orphaning counts once, texture bytes use the actual GPU format for each
+mip/subrectangle, and failed creates keep already-issued work.
+
+`accepted[]` counts public operations by `nt_gfx_operation_t` whose END result
+was ACCEPTED, in every build: every public operation, readback and GPU timer
+segment calls included, is one BEGIN/END pair, and END is the only place that
+counts it. It counts every operation, nested ones included (render-target
+attachments, default samplers, cascaded destroys). Only frontend cache hits
+(END result CACHE), rejections and losses are left out; an operation whose
+backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
+(SKIP/INACTIVE) still ends ACCEPTED and counts. A GPU timer poll with no result
+yet ends `UNREADY`. Texture
+sets count per operation, while per-unit binds show in `gl[]`. Accepted
+operations minus GL calls is not a cache-skip count.
+Each initialization restarts the frame sequence: the first frame after init is 1,
+and `last_frame` holds 0 until the first begin_frame.
+
+A context restore is one CONTEXT operation inside the begin_frame that performs
+it and belongs to the frame that begin_frame opens. A new loss is wiped before
+that frame opens, so a recorded frame's snapshot shows the wiped tables and
+`context_lost` set, and the CONTEXT operation follows it. The render-target
+DEFINITION and BACKEND records of the restore sit between
+its BEGIN and RESULT, including a DEFINITION with `complete=0` for a target
+whose recreation failed. It ends ACCEPTED when the context came back and
+CONTEXT_LOST when recreation failed or met a loss. Raw GL names are valid within their
+context segment; a CONTEXT operation in the stream separates segments, and
+frontend handles are the identity across them.
+
+Command recording is one-shot: `nt_gfx_capture_request` asks for the next frame
+to be recorded. The begin_frame that closes the requesting frame consumes the request
+and starts recording the frame it opens; without a request no frame records. The
+first frame never records. A request made during a recorded frame replaces that
+capture at the begin_frame that finishes it, so read a capture in the following
+frame before requesting again: readable captures are at most every other frame.
+`nt_gfx_desc_t.capture_capacity` reserves one
+event array at init (default zero); a request without capacity asserts. Capture-OFF
+builds ignore the field.
+There is no growth or allocation while recording. Each pointer-free POD event
+is 104 bytes, including padding; 16384 records reserve 1.625 MiB. Other storage
+consists of fixed control state and counter snapshots, with no second event array.
+All record bytes are initialized before publication. A recorded frame starts at
+the begin_frame that opens it and first snapshots
+inherited state, including one definition per live resource (plus
+program uniform/sampler and vertex-input attribute records), into the same array.
+Size the capacity for that snapshot plus the frame's commands; a capacity below
+the snapshot overflows before any command is recorded.
+
+`nt_gfx_capture_read` returns metadata by value and an immutable event prefix.
+Read a finished capture right after `nt_gfx_begin_frame`: the prefix remains valid
+until the begin_frame that starts the next requested recording overwrites it, or
+shutdown; unrequested frames preserve it. Two counts in the same sequence delimit
+an operation interval. Keep a capture by copying the metadata and `count` records
+and redirecting the saved view's pointer to the owned array. An empty view has
+a NULL pointer. The finalized view retains its frame's counters (and so its
+`frame_sequence`) by value even after later unrecorded frames overwrite
+`g_nt_gfx.last_frame`.
+
+Every recorded public operation produces exactly one BEGIN, carrying its
+request arguments, and one RESULT, carrying the outcome `result`; a creator's
+RESULT carries the new handle (zero on failure), while its backend slot and
+names are in the DEFINITION record. Operations issued inside another operation
+(render-target attachments, default samplers) nest between its BEGIN and
+RESULT. `ARGUMENT` records are request
+arguments belonging to the enclosing BEGIN (one per texture binding of a texture
+set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
+prove GL success or GPU completion. The view's `counters` are zero (sequence 0)
+while a frame records and become the finalized frame's at the begin_frame that closes it; `overflow`
+alone reports an incomplete event stream. Overflow stops event appends and never
+truncates counters.
+
+The `object_kind` and `object` pair identifies a full frontend handle, including
+its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
+values are named after the issued function (`NT_GFX_GL_glBindVertexArray`), and
+carry raw GL names of one GL context; their operation is always STATE,
+the enclosing BEGIN names the frontend operation. With GPU timing, begin_frame
+runs the timer disjoint check as its own `TIMER_DISJOINT` operation on a live
+context; the query is issued only while a timer query is pending. Each issued call is recorded
+exactly once, at the call site, by the same statement that issues it (an
+`NT_GL_ISSUED` JS bridge: by the statement before the JS call).
+`backend.args` follows the GL integer argument order; pointer payload, readback
+output and debug-label arguments are presence bits, gen/delete arguments contain
+the count followed by each name, a returned value (`glCreate*`, `glGetError`,
+locations, status) follows the arguments, and indexed offsets are byte offsets.
+Output pointers are presence bits; their written values are not recorded. Readback, timer-query and debug-group calls are
+issued calls too and are recorded like any other.
+Float arguments occupy `backend.values` in float argument order. Matrix and vec4
+calls use `uniform` with the location in `name`, float count in `count`, and
+copied values. `backend.bytes` is actual CPU upload payload, zero for NULL storage.
+No event borrows upload memory, shader source or caller labels.
+
+Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
+resource kind and `backend.args[0..1]` as backend slot/raw GL name; render targets
+also supply the depth renderbuffer name at index 2. Frontend resource definitions
+carry the full handle, current backend slot and available dimensions/relationships.
+Shader, program and vertex-input definitions carry result `UNKNOWN`: the frontend
+retains no shader stage or source, program stage pair or vertex-input layout, so
+those fields are absent, not zero. A vertex input created during a recorded frame
+follows its definition with `DEFINITION/ATTRIBUTE` records.
+Resize and restore re-define render targets and their attachment textures with
+the replacement names. Other primary resources survive a loss as husks and get no
+fresh definition; pipelines and vertex inputs that the first detection frees get
+no DESTROY record. Samplers are re-defined when lazily recreated. Definitions
+remain meaningful after resource destruction or slot reuse.
+
+The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, bound
+frontend handles) opens the snapshot. The other frontend INITIAL records and the
+frontend resource definitions follow, then the backend `INITIAL/STATE` record
+(`NT_GFX_INITIAL_BACKEND`, cached GL names and framebuffer size) and the backend's
+own definitions. While the context is known lost, the backend records hold the
+dead names of the lost context.
+Among INITIAL records, `detail` is meaningful only on INITIAL/STATE.
+Program publication and initial state include `INITIAL/SAMPLER` records with
+backend program slot, name hash, location, unit and sampler class in args 0–4.
+`INITIAL/UNIFORM_VEC4` gives program slot/name hash/location in args 0–2 and cached
+vec4 values; `UNKNOWN` means no retained value. These INITIAL records can occur
+inside CREATE when the program first becomes available. Inactive names emit
+SKIP/INACTIVE; cache skips are distinct from invalid requests.
+
+`SKIP` records mark work that was not issued without ending an operation:
+backend cache skips (`SKIP/CACHE`) and inactive uniform or texture-set names
+(`SKIP/INACTIVE`).
+
+Pipeline state records use integers 0–12 for program, depth enable/write/function,
+cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha
+operation and polygon offset enable. Values 0–5 hold blend color, offset factor
+and units. Only the backend defines pipeline state: its `DEFINITION/PIPELINE`
+record uses the program backend slot and backend enums, and the frontend
+pipeline definition carries the program handle in `related[0]`. Backend
+`DEFINITION/PIPELINE` and `DEFINITION/ATTRIBUTE` records carry the pipeline or
+vertex-input backend slot in `detail`; initial state uses the current raw
+program name. Vertex-input creation copies each static/instance attribute with
+its divisor, layout, and known buffer. Inherited layouts and UBO bindings
+unavailable in existing CPU state are explicitly unknown. The initial SCISSOR
+rectangle is UNKNOWN because the frontend mirror is not authoritative after a
+context loss. Capture
+never adds a persistent GL-state mirror or queries GL to reconstruct them.
 
 ## Renderer complexity classes
 

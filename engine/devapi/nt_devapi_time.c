@@ -214,7 +214,8 @@ static bool cmd_render_info(const cJSON *params, cJSON *result, nt_devapi_error 
     (void)err;
     (void)ud;
     devapi_add_bool(result, "enabled", nt_app_render_enabled());
-    devapi_add_number(result, "draw_calls", (double)nt_gfx_get_frame_draw_calls());
+    /* Last closed frame: this command runs early in the next frame, before its draws. */
+    devapi_add_number(result, "draw_calls", (double)nt_gfx_draw_calls(&g_nt_gfx.last_frame));
     return true;
 }
 // #endregion

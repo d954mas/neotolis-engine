@@ -40,7 +40,6 @@ static uint16_t resolve_port(void) {
 /* Draw the known two-tone pattern: full-frame background, then a scissored centered sub-rect in the
    foreground color. glClear honors GL_SCISSOR_TEST, so the second pass only clears the sub-rect. */
 static void render_pattern(void) {
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_bg_color[0], k_bg_color[1], k_bg_color[2], k_bg_color[3]}, .clear_depth = 1.0F});
     nt_gfx_end_pass();
 
@@ -53,12 +52,11 @@ static void render_pattern(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_fg_color[0], k_fg_color[1], k_fg_color[2], k_fg_color[3]}, .clear_depth = 1.0F});
     nt_gfx_end_pass();
     nt_gfx_set_scissor_enabled(false); /* leave scissor off so the next frame's bg clear covers the whole FB. */
-
-    nt_gfx_end_frame();
 }
 
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_frame();
     /* nt_devapi_update advances deferred slots; runs before input poll to match the host loop order. */
     nt_devapi_update();
     nt_input_poll();

@@ -4,6 +4,7 @@
 import argparse
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,13 +43,18 @@ def main():
             ui_debug = "ON" if floor == 1 else "OFF"
             ui_checks = "ON" if floor == 0 else "OFF"
             obs = "ON" if metrics == "ON" else "OFF"
+            capture = gpu
+            if asserts == 1 or (floor >= 2 and metrics == "ON"):
+                capture = "OFF" if gpu == "ON" else "ON"
             if obs == "ON":
                 targets += ("test_devapi_obs",)
             if floor >= 2 and metrics == "ON":
                 targets = ("test_devapi_obs", "test_resource_timing", "test_nt_ui_timing", "test_nt_gfx_gpu_timing_native")
+            targets += ("test_gfx_observe", "test_nt_gfx_observe_native", "test_gfx_stub") if "test_gfx_stub" not in targets else ("test_gfx_observe", "test_nt_gfx_observe_native")
             run(["cmake", "--preset", "native-release-test", "-B", str(build),
                  f"-DNT_PRESET_NAME={name}", f"-DNT_LOG_MIN_LEVEL={floor}",
                  f"-DNT_RESOURCE_TIMING_ENABLED={resource}", f"-DNT_UI_TIMING_ENABLED={ui}", f"-DNT_GFX_GPU_TIMING_ENABLED={gpu}",
+                 f"-DNT_GFX_CAPTURE_ENABLED={capture}",
                  f"-DNT_METRICS_ENABLED={metrics}", f"-DNT_UI_DEBUG_TOOLS={ui_debug}", f"-DNT_UI_CHECKS={ui_checks}",
                  "-DNT_LOG_RING_ENABLED=ON", "-DNT_INTROSPECT_ENABLED=ON",
                  "-DNT_INTROSPECT_WRITE_ENABLED=ON", f"-DNT_DEVAPI_ENABLED={obs}",
@@ -59,7 +65,23 @@ def main():
                           "-R", "^(" + "|".join(targets) + ")$"], args.output / f"{name}-test.log")
             if f"100% tests passed, 0 tests failed out of {len(targets)}" not in output:
                 raise RuntimeError(f"{name}: expected all {len(targets)} registered tests\n{output}")
-            print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, resource={resource}, metrics={metrics}, inspector={ui_debug}, UI checks={ui_checks}, asserts={asserts}; {len(targets)} tests", flush=True)
+            nm = shutil.which("llvm-nm") or shutil.which("nm")
+            if nm:
+                libraries = list((ROOT / "build" / "engine" / name).glob("*nt_gfx.*"))
+                library = next((path for path in libraries if path.suffix in (".a", ".lib")), None)
+                if library is None:
+                    raise RuntimeError(f"{name}: nt_gfx archive not found among {libraries}")
+                symbols = run([nm, "--defined-only", str(library)], args.output / f"{name}-symbols.log")
+                # Extern symbols only: statics and inline helpers may vanish from either build.
+                for producer in ("g_nt_gfx_capture", "nt_gfx_backend_capture_initial_state", "nt_gfx_gl_call_name"):
+                    if capture == "OFF" and producer in symbols:
+                        raise RuntimeError(f"{name}: disabled producer remains: {producer}")
+                    if capture == "ON" and producer not in symbols:
+                        # Positive control: the absence check must be able to see these symbols.
+                        raise RuntimeError(f"{name}: enabled producer {producer} is missing from the symbol listing")
+            else:
+                print(f"UNVERIFIED: {name} producer symbols; install llvm-nm or nm", flush=True)
+            print(f"PASS: floor={floor}, UI={ui}, GPU={gpu}, capture={capture}, resource={resource}, metrics={metrics}, inspector={ui_debug}, UI checks={ui_checks}, asserts={asserts}; {len(targets)} tests", flush=True)
     except (OSError, RuntimeError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

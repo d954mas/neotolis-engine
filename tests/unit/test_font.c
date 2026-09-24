@@ -460,7 +460,6 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    nt_gfx_end_frame();
 
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
@@ -476,7 +475,6 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
     TEST_ASSERT_FALSE(glyph->is_tofu);
     TEST_ASSERT_EQUAL_INT16(500, glyph->advance);
     TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_fake_update_texture_count());
-    nt_gfx_end_frame();
     nt_font_destroy(font);
     free(blob);
 }

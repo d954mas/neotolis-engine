@@ -5,11 +5,113 @@
 #include "hash/nt_hash.h"
 #include "pool/nt_pool.h"
 
+// #region observation storage and owning-site counters
+#if NT_GFX_CAPTURE_ENABLED
+typedef struct {
+    bool request_pending; /* the next frame records */
+    bool recording;
+    nt_gfx_event_t *events;
+    uint32_t capacity;
+    nt_gfx_capture_view_t view;
+    nt_gfx_event_t *call; /* issued-call record being filled; NULL when not recording */
+    uint32_t call_ints;
+    uint32_t call_floats;
+} nt_gfx_capture_state_t;
+
+extern nt_gfx_capture_state_t g_nt_gfx_capture;
+#endif
+
+#if NT_GFX_CAPTURE_ENABLED
+void nt_gfx_backend_capture_initial_state(void);
+/* Zeroes the next record in place; the caller publishes it by advancing count.
+ * NULL when not recording or full; a full array marks overflow. */
+static inline nt_gfx_event_t *nt_gfx_capture_reserve(void) {
+    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+    if (!capture->recording) {
+        return NULL;
+    }
+    if (capture->view.count == capture->capacity) {
+        capture->view.overflow = true;
+        return NULL;
+    }
+    nt_gfx_event_t *event = &capture->events[capture->view.count];
+    memset(event, 0, sizeof(*event));
+    return event;
+}
+/* Issued-call records are filled in place: open reserves the next slot, commit publishes it. */
+static inline void nt_gfx_capture_open_call(nt_gfx_gl_call_t call) {
+    nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
+    capture->call = NULL;
+    nt_gfx_event_t *event = nt_gfx_capture_reserve();
+    if (event == NULL) {
+        return;
+    }
+    capture->call_ints = 0;
+    capture->call_floats = 0;
+    event->kind = NT_GFX_EVENT_BACKEND;
+    event->operation = NT_GFX_OP_STATE;
+    event->detail = (uint32_t)call;
+    capture->call = event;
+}
+static inline void nt_gfx_capture_commit_call(void) {
+    if (g_nt_gfx_capture.call != NULL) {
+        g_nt_gfx_capture.view.count++;
+        g_nt_gfx_capture.call = NULL;
+    }
+}
+/* Arguments and record construction disappear entirely in capture-OFF builds. */
+#define NT_GFX_RECORD(event_kind, event_operation, ...)                                                                                                                                                \
+    do {                                                                                                                                                                                               \
+        nt_gfx_event_t *const event = nt_gfx_capture_reserve();                                                                                                                                        \
+        if (event != NULL) {                                                                                                                                                                           \
+            event->kind = (event_kind);                                                                                                                                                                \
+            event->operation = (event_operation);                                                                                                                                                      \
+            __VA_ARGS__;                                                                                                                                                                               \
+            g_nt_gfx_capture.view.count++;                                                                                                                                                             \
+        }                                                                                                                                                                                              \
+    } while (0)
+#else
+#define NT_GFX_RECORD(...) ((void)0)
+#endif
+
+/* One public operation = one BEGIN and one END, in every build. BEGIN declares
+ * op/kind/object as a wrapper-local scope, so operations
+ * nested inside the implementation cannot clobber them. END counts an ACCEPTED
+ * result in accepted[op]; capture builds also record the request and result. */
+typedef struct {
+    nt_gfx_operation_t operation;
+    nt_gfx_object_kind_t kind;
+    uint32_t object;
+} nt_gfx_scope_t;
+
+static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_result_t result) {
+    if (result == NT_GFX_RESULT_ACCEPTED) {
+        g_nt_gfx.counters.accepted[scope->operation]++;
+    }
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event->object_kind = scope->kind; event->object = object; event->result = result);
+}
+
+#define NT_GFX_BEGIN(scope_op, scope_kind, scope_object)                                                                                                                                               \
+    const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event->object_kind = (scope_kind); event->object = (scope_object))
+/* The trailing statements fill the request fields of the BEGIN record. */
+#define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...)                                                                                                                                  \
+    const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
+    NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event->object_kind = (scope_kind); event->object = (scope_object); __VA_ARGS__)
+#define NT_GFX_END(result) nt_gfx_end_op(&nt_gfx_scope, nt_gfx_scope.object, (result))
+/* Creators end with the handle they produced (zero on failure); the result is
+ * evaluated first so the implementation has written the handle. */
+#define NT_GFX_END_OBJECT(result, created)                                                                                                                                                             \
+    do {                                                                                                                                                                                               \
+        const nt_gfx_result_t nt_gfx_result = (result);                                                                                                                                                \
+        nt_gfx_end_op(&nt_gfx_scope, (created), nt_gfx_result);                                                                                                                                        \
+    } while (0)
+// #endregion
+
 /* ---- Render state machine ---- */
 
 typedef enum {
     NT_GFX_STATE_IDLE = 0,
-    NT_GFX_STATE_FRAME,
     NT_GFX_STATE_PASS,
 } nt_gfx_render_state_t;
 
@@ -38,9 +140,14 @@ typedef enum {
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);
-bool nt_gfx_backend_is_context_lost(void);
+/* Returns and clears the latch a lost event sets; C flag, no JS. begin_frame
+ * alone takes it. */
+bool nt_gfx_backend_take_context_loss(void);
+/* Asks the browser directly (JS): failure paths and begin_frame while a loss
+ * is known or a restore just ran. */
+bool nt_gfx_backend_query_context_lost(void);
 
-void nt_gfx_backend_begin_frame(void);
+void nt_gfx_backend_check_timer_disjoint(void);
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend);
 void nt_gfx_backend_end_pass(void);
 
@@ -150,16 +257,6 @@ void nt_gfx_backend_drop_timer_segments(void);
 // #endregion
 
 #ifdef NT_TEST_ACCESS
-/* GL-backend-only counters (defined in gl/nt_gfx_gl.c; link only from tests
- * using the real GL backend). Static = divisor-0 glVertexAttribPointer calls,
- * issued only at vertex-input creation; instance = divisor-1 calls,
- * legitimately per-draw. Steady-state frames must show static == 0. */
-void nt_gfx_gl_test_reset_counters(void);
-uint32_t nt_gfx_gl_test_static_attrib_pointer_calls(void);
-uint32_t nt_gfx_gl_test_instance_attrib_pointer_calls(void);
-uint32_t nt_gfx_gl_test_vao_binds(void);
-/* glBindSampler calls that reached GL; a deduplicated bind does not count. */
-uint32_t nt_gfx_gl_test_sampler_binds(void);
 /* Raw GL-mirror reads: a test can pin that destroy cleared an entry without
  * depending on the driver recycling the deleted GL name. */
 uint32_t nt_gfx_gl_test_cached_vao(void);

@@ -24,6 +24,8 @@ void game_shutdown(void);
 
 ```text
 platform_step
+nt_gfx_begin_frame    ← closes the previous frame into g_nt_gfx.last_frame, syncs
+                        context loss/restore, opens this frame
 input_begin_frame
     → if pointer pressed && audio suspended → audio_try_resume()
 input_event_apply
@@ -37,8 +39,19 @@ nt_mem_scratch_reset  ← frame scratch arena cleared (see memory.md — memory 
 fixed_update loop
 game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
-game_render           ← nt_ui_walk reads scratch pointers
+game_render           ← nt_ui_walk reads scratch pointers; any number of
+                        gfx passes
 ```
+
+The host owns the gfx frame boundary: `nt_gfx_init` opens the first frame and the
+frame callback calls `nt_gfx_begin_frame` once at its start, before any other gfx
+use (the resource and font steps included), also when nothing renders. Context
+loss and restore are synced there, so the whole callback sees one stable
+`context_lost`/`context_restored` state. Pre-loop loading lands in the first
+frame; teardown work after the last callback lands in a frame that
+`nt_gfx_shutdown` discards. Code in the callback (devapi commands, stats
+readers) reads the previous callback's frame from `g_nt_gfx.last_frame`. See
+[frame observation](../render/architecture.md#frame-observation).
 
 `nt_mem_scratch_reset()` MUST run before any scratch allocation in the
 current frame — typically right after `audio_update`. Allocating then

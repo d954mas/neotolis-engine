@@ -147,11 +147,9 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
 /* The first staged quad resolves the pipeline; set_material alone does not. */
 static void draw_and_flush(void) {
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* ---- nt_program_ref: the async link gate ---- */
@@ -222,7 +220,6 @@ void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
 
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    nt_gfx_end_frame();
     republish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
     republish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
     nt_resource_step();
@@ -342,13 +339,11 @@ void test_text_renderer_rejects_unrelated_second_sampler(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(material);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     NT_TEST_EXPECT_ASSERT(nt_text_renderer_flush());
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* ---- Test 2: UTF-8 decode Cyrillic (TEXT-03) ---- */
@@ -488,11 +483,9 @@ void test_text_material_with_textures_asserts_at_flush(void) {
 
     nt_text_renderer_set_material(textured);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_text_renderer_flush());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* ---- Test 9: Flush resets counts (TEXT-05) ---- */
@@ -541,7 +534,6 @@ void test_flush_stops_after_program_cleared(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(material);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -556,7 +548,6 @@ void test_flush_stops_after_program_cleared(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* A recoverable vertex-input creation failure must not disable text until the
@@ -570,13 +561,11 @@ void test_flush_retries_vertex_input_after_backend_failure(void) {
     nt_gfx_fake_fail_next_vertex_input_create();
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush(); /* without the retry this discards the glyphs */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* Restore contract: failure releases partial GPU resources (resource.md). */
@@ -682,11 +671,9 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     nt_material_set_program(mat, reborn);
 
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_pipeline_create_count());
     /* One entry, not two: destroying the program destroyed the pipeline built on
@@ -705,7 +692,6 @@ void test_a_replaced_program_does_not_redirect_a_staged_batch(void) {
     const nt_gfx_fake_draw_t second_draw = warm_material_program(mat, second);
     nt_material_set_program(mat, first);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -715,7 +701,6 @@ void test_a_replaced_program_does_not_redirect_a_staged_batch(void) {
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
     assert_text_draw(0U, first_draw, 4U);
@@ -735,7 +720,6 @@ void test_overflow_flush_reopens_the_batch_pipeline(void) {
     const nt_gfx_fake_draw_t second_draw = warm_material_program(mat, second);
     nt_material_set_program(mat, first);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
 
@@ -755,7 +739,6 @@ void test_overflow_flush_reopens_the_batch_pipeline(void) {
     nt_text_renderer_flush();
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     /* The B tail must draw. Without reopening it is discarded instead. */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_nonempty_flush_calls());
@@ -780,16 +763,14 @@ void test_font_cache_flush_preserves_the_entire_run(void) {
     nt_text_renderer_set_font(tiny_font);
     const uint32_t generation = nt_font_get_cache_generation(tiny_font);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_GREATER_THAN_UINT32(generation, nt_font_get_cache_generation(tiny_font));
-    TEST_ASSERT_EQUAL_UINT32(36U, g_nt_gfx.frame_stats.indices);
-    TEST_ASSERT_EQUAL_UINT32(24U, g_nt_gfx.frame_stats.vertices);
+    TEST_ASSERT_EQUAL_UINT64(36U, g_nt_gfx.counters.indices);
+    TEST_ASSERT_EQUAL_UINT64(24U, g_nt_gfx.counters.vertices);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 
     nt_text_renderer_set_underline(true);
@@ -799,9 +780,8 @@ void test_font_cache_flush_preserves_the_entire_run(void) {
     nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(48U, g_nt_gfx.frame_stats.indices);
-    TEST_ASSERT_EQUAL_UINT32(32U, g_nt_gfx.frame_stats.vertices);
+    TEST_ASSERT_EQUAL_UINT64(48U, g_nt_gfx.counters.indices);
+    TEST_ASSERT_EQUAL_UINT64(32U, g_nt_gfx.counters.vertices);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
     nt_text_renderer_set_font(s_font);
     nt_font_destroy(tiny_font);
@@ -826,18 +806,16 @@ void test_decoration_only_run_opens_its_pipeline(void) {
     nt_text_renderer_set_underline(true);
     nt_text_renderer_set_strikethrough(true);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(0U);
     TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(material)->program.id, draw.program.id);
     TEST_ASSERT_EQUAL_UINT32(12U, draw.num_indices);
-    TEST_ASSERT_EQUAL_UINT32(8U, g_nt_gfx.frame_stats.vertices); /* glyph + decoration quad */
+    TEST_ASSERT_EQUAL_UINT64(8U, g_nt_gfx.counters.vertices); /* glyph + decoration quad */
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
     nt_text_renderer_set_font(s_font);
     nt_font_destroy(font);
@@ -852,7 +830,6 @@ void test_destroyed_replaced_program_drops_staged_work(void) {
     const nt_gfx_fake_draw_t second_draw = warm_material_program(material, second);
     nt_material_set_program(material, first);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -863,7 +840,6 @@ void test_destroyed_replaced_program_drops_staged_work(void) {
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     assert_text_draw(0U, second_draw, 2U);
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
@@ -897,11 +873,10 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
         nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
         nt_text_renderer_flush();
         nt_gfx_end_pass();
-        nt_gfx_end_frame();
 
         TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count());
         TEST_ASSERT_EQUAL_UINT32(binds, nt_gfx_fake_bound_texture_count());
-        TEST_ASSERT_EQUAL_UINT32(0U, g_nt_gfx.frame_stats.indices);
+        TEST_ASSERT_EQUAL_UINT64(0U, g_nt_gfx.counters.indices);
         TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
         TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 
@@ -915,10 +890,9 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
         nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
         nt_text_renderer_flush();
         nt_gfx_end_pass();
-        nt_gfx_end_frame();
         TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_fake_update_texture_count());
-        TEST_ASSERT_EQUAL_UINT32(30U, g_nt_gfx.frame_stats.indices);
-        TEST_ASSERT_EQUAL_UINT32(20U, g_nt_gfx.frame_stats.vertices);
+        TEST_ASSERT_EQUAL_UINT64(30U, g_nt_gfx.counters.indices);
+        TEST_ASSERT_EQUAL_UINT64(20U, g_nt_gfx.counters.vertices);
         TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
         nt_text_renderer_set_font(s_font);
         nt_font_destroy(font);
@@ -959,11 +933,9 @@ void test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline(void) {
 
     nt_text_renderer_set_material(mat);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_pipeline_create_count());
 }
@@ -975,7 +947,6 @@ void test_flush_discards_glyphs_on_a_destroyed_program(void) {
     const nt_program_t dead = nt_material_get_info(material)->program;
     nt_text_renderer_set_material(material);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     /* The material keeps the handle: recovery destroys programs, not materials. */
@@ -990,7 +961,6 @@ void test_flush_discards_glyphs_on_a_destroyed_program(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* Restore preserves the material and clears staging; a relink rebuilds its pipeline and resumes drawing. */
@@ -1003,11 +973,9 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     nt_gfx_fake_reset();
     nt_text_renderer_set_material(material);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_pipeline_create_count());
 
     nt_text_renderer_draw("C", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -1024,7 +992,6 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
     nt_gfx_destroy_program(first);
-    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT16(0U, nt_text_renderer_test_pipeline_cache_count());
     /* The handle still names a live material -- recovery destroys programs, not
      * materials, which is why ECS components need no re-binding. */
@@ -1042,16 +1009,16 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     nt_text_renderer_set_material(material);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_gfx_begin_frame();
+    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_pipeline_create_count());
     TEST_ASSERT_EQUAL_UINT16(1U, nt_text_renderer_test_pipeline_cache_count());
     TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_gfx_fake_update_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(12U, g_nt_gfx.frame_stats.indices);
-    TEST_ASSERT_EQUAL_UINT32(8U, g_nt_gfx.frame_stats.vertices);
+    TEST_ASSERT_EQUAL_UINT64(12U, g_nt_gfx.counters.indices);
+    TEST_ASSERT_EQUAL_UINT64(8U, g_nt_gfx.counters.vertices);
 }
 
 /* ---- Test 12: TEXT-01 — _draw_n produces byte-identical vertex stream to _draw ---- */

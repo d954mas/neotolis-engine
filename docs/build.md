@@ -85,6 +85,7 @@ is no longer a valid configuration.
 | `NT_RESOURCE_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_UI_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_GFX_GPU_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
+| `NT_GFX_CAPTURE_ENABLED` | OFF | Bounded gfx command capture. Debug/release-test ON; production Release OFF. Recording is opt-in at runtime. Ticks and all gfx counters exist in every build. |
 | `NT_UI_CHECKS` | OFF | Duplicate-key scans in menu/combo lists. Debug/release-test ON; production Release OFF. Independent of inspector and assert mode; ordinary pointer, index and capacity assertions remain active when this flag is OFF. |
 | `NT_UI_DEBUG_TOOLS` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, `NT_INTROSPECT_ENABLED` | OFF | Independent options. Debug/release-test presets select ON; production Release selects OFF. |
@@ -246,7 +247,7 @@ relinked executables cause false failures. `build/.check.lock` rejects a second
 check with exit 2; remove it only after confirming the owner is dead.
 
 The default gate checks module composition, EM_JS_DEPS, doc links/spec-index
-coverage, CRT pins and test registration; builds native-debug; runs ctest; and
+coverage, CRT pins, the GL call funnel (`scripts/check_gl_calls.py`) and test registration; builds native-debug; runs ctest; and
 checks changed files with clang-format/clang-tidy. Changed headers trigger full
 tidy. The three atlas benchmark guards run when builder/atlas paths change, or
 always with `--push`/`--full`. Warm checks are much faster than the initial pack
@@ -275,7 +276,11 @@ Run the scripts serially; they use separate build directories and also run in
 `check.sh --push`. The runtime matrix covers log/rich-parser consumers at every
 log floor with FULL asserts, TRAP positive paths, timing producers ON/OFF,
 metrics independence, UI key checks ON with inspector OFF and OFF with inspector ON,
-and inspector ON with UI timing OFF.
+and inspector ON with UI timing OFF. Gfx observation exercises capture ON and OFF,
+including fake/frontend and inert stub paths.
+`tests/browser/observation.spec.ts` independently intercepts WebGL calls and
+upload payloads, checks uploads before render begin and compares output pixels
+with recording off/on/full.
 
 Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 `NT_SHOWCASE_DIR` to the exact build, distinct `NT_SHOWCASE_PORT`/`NT_DEVAPI_PORT`,

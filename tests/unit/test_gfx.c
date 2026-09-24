@@ -242,11 +242,9 @@ void test_gfx_pipeline_survives_shader_destroy(void) {
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_shader(fs);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_pipeline(pip);
 }
@@ -254,10 +252,8 @@ void test_gfx_pipeline_survives_shader_destroy(void) {
 /* ---- State machine: valid frame cycle ---- */
 
 void test_gfx_state_machine_valid_cycle(void) {
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     /* Reaching here without crash means state machine accepted the sequence */
 }
 
@@ -404,8 +400,8 @@ void test_gfx_make_program_context_lost_returns_invalid(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
 
-    /* No begin_frame in between: g_nt_gfx.context_lost is still false, so this
-     * pins the live backend poll rather than the cached flag. */
+    /* No begin_frame in between: g_nt_gfx.context_lost is still false, so the
+     * failed backend create reports the loss. */
     nt_gfx_fake_set_context_lost(true);
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_gfx_fake_set_context_lost(false);
@@ -429,7 +425,7 @@ void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
 
     /* Neither loss gate can explain the rejection below. */
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    TEST_ASSERT_FALSE(nt_gfx_backend_is_context_lost());
+    TEST_ASSERT_FALSE(nt_gfx_backend_query_context_lost());
     TEST_ASSERT_FALSE(nt_gfx_shader_ready(vs));
     TEST_ASSERT_FALSE(nt_gfx_shader_ready(fs));
 
@@ -446,7 +442,6 @@ void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
     TEST_ASSERT_FALSE(nt_gfx_program_valid(prog));
     /* Rejected before the backend, so no GL program leaked on the way out. */
     TEST_ASSERT_EQUAL_UINT32(links_before, nt_gfx_fake_program_create_count());
-    nt_gfx_end_frame();
 }
 
 void test_gfx_program_link_context_loss_releases_every_slot(void) {
@@ -462,13 +457,14 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
         TEST_FAIL_MESSAGE("Context loss during program link must return invalid without asserting");
     }
     for (uint32_t attempt = 0; attempt < 12; attempt++) {
+        /* Each attempt starts on a live context. */
         nt_gfx_fake_set_context_lost(false);
         nt_gfx_fake_lose_context_on_program_create();
         nt_program_t program = nt_gfx_make_program(vs, fs);
         TEST_ASSERT_EQUAL_UINT32(0, program.id);
         TEST_ASSERT_FALSE(nt_gfx_program_valid(program));
         TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-        TEST_ASSERT_TRUE(nt_gfx_backend_is_context_lost());
+        TEST_ASSERT_TRUE(nt_gfx_backend_query_context_lost());
         TEST_ASSERT_EQUAL_UINT32(attempt + 1, nt_gfx_fake_program_create_count());
     }
 
@@ -606,15 +602,11 @@ static nt_texture_t make_binding_test_texture_format(nt_texture_format_t format)
 static void begin_texture_binding_test_pass(nt_program_t program) {
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
 }
 
-static void end_texture_binding_test_pass(void) {
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-}
+static void end_texture_binding_test_pass(void) { nt_gfx_end_pass(); }
 
 static void apply_texture_set(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
     nt_gfx_apply_texture_bindings(bindings, count);
@@ -648,7 +640,7 @@ void test_gfx_apply_texture_bindings_skips_backend_for_textureless_program(void)
     /* bind_pipeline already applies the empty set, so a samplerless program draws without apply. */
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     apply_texture_set(NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
@@ -787,7 +779,6 @@ void test_gfx_apply_texture_bindings_requires_pass_and_pipeline(void) {
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
     const nt_gfx_texture_binding_t stale_binding = {.name = nt_hash32_str("u_tex"), .texture = stale, .sampler = NT_SAMPLER_DEFAULT};
 
-    nt_gfx_begin_frame();
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1)); /* outside a pass */
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1)); /* no pipeline bound */
@@ -807,7 +798,6 @@ void test_gfx_pipeline_change_preserves_texture_set_only_for_same_program(void) 
     nt_pipeline_t same_program_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = first_program, .depth_test = true});
     nt_pipeline_t second_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = second_program});
     nt_texture_t texture = make_binding_test_texture(1);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(first_pipeline);
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
@@ -817,12 +807,12 @@ void test_gfx_pipeline_change_preserves_texture_set_only_for_same_program(void) 
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_bind_pipeline(second_pipeline);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     end_texture_binding_test_pass();
 }
 
@@ -835,7 +825,7 @@ void test_gfx_draws_require_complete_texture_set_for_bound_program(void) {
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
     EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 0, 0, 1));
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
     end_texture_binding_test_pass();
 }
 
@@ -870,14 +860,9 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
 /* The husk is second so the first entry proves the whole set is discarded, not just the tail. */
 void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(void) {
     nt_texture_t husk = make_binding_test_texture(1);
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_fake_lose_and_restore_context();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(husk));
-    /* The restored frame rejects draws; the skip below has to be the set's doing. */
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
 
     nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
     nt_texture_t live = make_binding_test_texture(2);
@@ -892,7 +877,7 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     apply_texture_set(bindings, 2);
     const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
     const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
-    const uint32_t draw_calls = nt_gfx_get_frame_draw_calls();
+    const uint32_t draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters);
 
     bindings[1].texture = husk;
     nt_gfx_apply_texture_bindings(bindings, 2);
@@ -902,18 +887,15 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
     TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
     /* A reported failure skips the draw instead of drawing the previous set. */
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(draw_calls, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(draw_calls, nt_gfx_draw_calls(&g_nt_gfx.counters));
     end_texture_binding_test_pass();
 }
 
 void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
     nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
-    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_fake_lose_and_restore_context();
     nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame();
-    nt_gfx_end_frame();
 
     nt_texture_t color = make_binding_test_texture(1);
     nt_texture_t depth = make_binding_test_texture_format(NT_TEXTURE_FORMAT_DEPTH24);
@@ -934,13 +916,13 @@ void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
     nt_gfx_draw_instanced(0, 3, 1);
     nt_gfx_draw_indexed(0, 3, 3);
     nt_gfx_draw_indexed_instanced(0, 3, 3, 1);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     apply_texture_set(bindings, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_sampler(1));
     nt_gfx_draw_indexed(0, 3, 3);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     end_texture_binding_test_pass();
 }
 
@@ -948,7 +930,6 @@ void test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy(v
     nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_texture_t texture = make_binding_test_texture(1);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
@@ -972,7 +953,6 @@ void test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy(v
 /* A pass may still sample the texture; lifetime changes belong outside passes. */
 void test_gfx_destroy_texture_inside_pass_asserts(void) {
     nt_texture_t texture = make_binding_test_texture(1);
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_gfx_texture_format(texture)); /* still alive */
@@ -1028,12 +1008,26 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
 
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    nt_gfx_end_frame();
     nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
 
     TEST_ASSERT_NOT_EQUAL_UINT32(old.id, fresh.id); /* generation moved on */
     TEST_ASSERT_TRUE(nt_gfx_program_ready(fresh));
     TEST_ASSERT_FALSE(nt_gfx_program_valid(old));
+}
+
+/* A background tab loses and restores the context between two iterations; the
+ * boundary must sync it before the next iteration links on the new context. */
+void test_gfx_frame_boundary_syncs_loss_before_creates(void) {
+    nt_shader_t vs = make_test_vs();
+    nt_shader_t fs = make_test_fs();
+    nt_gfx_fake_lose_and_restore_context();
+
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs).id); /* stages died with the old context */
+    nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(fresh));
 }
 
 /* ---- Program: destroying one reclaims the pipelines built on it ---- */
@@ -1060,19 +1054,17 @@ void test_gfx_destroy_program_destroys_its_pipelines(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(b.id, reborn.id);
 
     /* A pipeline on a different program is untouched. */
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(untouched);
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     /* The dead ones bind to nothing, so the next draw has no pipeline at all. */
     nt_gfx_bind_pipeline(a);
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* The bind-time check is not enough on its own: the program can die while its
@@ -1083,13 +1075,11 @@ void test_gfx_draw_asserts_when_bound_program_is_destroyed(void) {
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     nt_gfx_destroy_program(prog);
     EXPECT_ASSERT(nt_gfx_draw(0, 3));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void expect_pipeline_blend_assert(nt_blend_state_t blend) {
@@ -2818,7 +2808,6 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     for (uint32_t i = 0; i < 4; i++) {
         nt_gfx_destroy_pipeline(pips[i]);
     }
-    nt_gfx_end_frame();
 }
 
 /* Buffers have no auto-restore path, so a husk means the owner skipped the
@@ -2838,7 +2827,6 @@ void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, 0));
-    nt_gfx_end_frame();
 }
 
 /* Render-target attachments are rejected earlier, so an update reaching a husk
@@ -2861,7 +2849,6 @@ void test_gfx_update_texture_on_husk_asserts(void) {
 
     EXPECT_ASSERT(nt_gfx_update_texture(tex, 0, 0, 4, 4, s_test_pixels_4x4));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_texture_count());
-    nt_gfx_end_frame();
 }
 
 /* A husk write is the same owner bug as a husk bind, so it traps the same way. */
@@ -2881,7 +2868,6 @@ void test_gfx_update_buffer_on_husk_asserts(void) {
 
     const uint8_t data[64] = {0};
     EXPECT_ASSERT(nt_gfx_update_buffer(vbo, 0, data, sizeof(data)));
-    nt_gfx_end_frame();
 }
 
 void test_gfx_orphan_buffer_on_husk_asserts(void) {
@@ -2900,57 +2886,25 @@ void test_gfx_orphan_buffer_on_husk_asserts(void) {
 
     const uint8_t data[64] = {0};
     EXPECT_ASSERT(nt_gfx_orphan_buffer(vbo, data, sizeof(data)));
-    nt_gfx_end_frame();
 }
 
 /* ---- Per-frame draw call counter ---- */
 
-/* Restore invalidates earlier render decisions, so the restored frame permits clears but rejects draws. */
-void test_gfx_restored_frame_rejects_draws(void) {
-    nt_shader_t vs = make_test_vs();
-    nt_shader_t fs = make_test_fs();
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = prog,
-    });
-
-    /* Lose it, then let begin_frame see the context back: that frame is the
-     * restored one and carries the flag. */
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
+/* The restore runs before the iteration builds anything, so what it rebuilds draws in the same iteration. */
+void test_gfx_restored_iteration_draws_what_it_rebuilds(void) {
+    nt_gfx_fake_lose_and_restore_context();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-
-    /* Clearing is still allowed -- the game may want the screen blanked. */
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     nt_pipeline_t rebuilt = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = nt_gfx_make_program(make_test_vs(), make_test_fs()),
     });
-    nt_gfx_bind_pipeline(rebuilt);
-    /* Full draw state bound: the ONLY reason these trap is the restored-frame
-     * rule, not a missing vertex input. */
-    bind_test_vertex_input();
-    EXPECT_ASSERT(nt_gfx_draw(0, 0));
-    EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
-
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-
-    /* And the very next frame draws normally. */
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(rebuilt);
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
-
-    (void)pip;
 }
 
 void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
@@ -2966,22 +2920,20 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
     nt_pipeline_t dead = nt_gfx_make_pipeline(&desc);
     nt_gfx_destroy_pipeline(dead); /* handle keeps its id, generation goes stale */
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     nt_gfx_bind_pipeline(live);
     bind_test_vertex_input();
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_bind_pipeline(dead); /* rejected: stale handle */
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 0, 0));
     EXPECT_ASSERT(nt_gfx_set_uniform_int(nt_hash32_str("u_tex"), 0));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_pipeline(live);
     nt_gfx_destroy_program(prog);
@@ -3002,12 +2954,10 @@ void test_gfx_frame_draw_calls(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
-    /* Counter starts at 0 (setUp called nt_gfx_init which zero-inits g_nt_gfx;
-     * the static counter sits in BSS and is also 0 on the first test call). */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    /* setUp opened a fresh frame, so the counter starts at 0. */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
-    nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
@@ -3015,24 +2965,21 @@ void test_gfx_frame_draw_calls(void) {
 
     /* Fire each of the 4 entry points exactly once. */
     nt_gfx_draw(0, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_draw_indexed(0, 0, 0);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_draw_instanced(0, 0, 0);
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_draw_indexed_instanced(0, 0, 0, 0);
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_get_frame_draw_calls());
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
-    /* Counter persists across end_frame (frame_stats does too; reset is begin_frame's job). */
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_get_frame_draw_calls());
-
-    /* Next begin_frame must reset to 0. */
+    /* Counters persist across passes; only the next frame resets them. */
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
-    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.last_frame));
 
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_shader(vs);
@@ -3045,14 +2992,12 @@ void test_gfx_uniform_records_hash_and_value(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     nt_gfx_fake_reset();
     nt_gfx_set_uniform_int(nt_hash32_str("u_slot"), 3);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_slot").value, nt_gfx_fake_uniform_int_hash_at(0));
@@ -3077,11 +3022,9 @@ void test_gfx_uniform_records_hash_and_value(void) {
 void test_gfx_uniform_without_bound_pipeline_traps(void) {
     const float vec[4] = {1.0F, 2.0F, 3.0F, 4.0F};
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* Bound state is pass-scoped: a bind or uniform write with no pass open has no
@@ -3097,12 +3040,10 @@ void test_gfx_binds_outside_a_pass_trap(void) {
         .vertex_buffer = vbo,
     });
 
-    nt_gfx_begin_frame();
     EXPECT_ASSERT(nt_gfx_bind_pipeline(pip));
     EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi));
     EXPECT_ASSERT(nt_gfx_bind_instance_buffer(vbo, 0));
     EXPECT_ASSERT(nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec));
-    nt_gfx_end_frame();
 }
 
 /* The pass clear touches draw state, so begin_pass discards the bound pipeline
@@ -3111,7 +3052,6 @@ void test_gfx_begin_pass_discards_bound_state(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     bind_test_vertex_input();
@@ -3123,7 +3063,6 @@ void test_gfx_begin_pass_discards_bound_state(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_pipeline());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* Slots are recycled, so only the full handle tells a rebound pipeline apart
@@ -3138,12 +3077,10 @@ void test_gfx_bound_pipeline_holds_the_generation(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(old_pip.id), nt_pool_slot_index(pip.id));
     TEST_ASSERT_NOT_EQUAL_UINT32(old_pip.id, pip.id);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     TEST_ASSERT_EQUAL_UINT32(pip.id, nt_gfx_test_bound_pipeline());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 int main(void) {
@@ -3188,6 +3125,7 @@ int main(void) {
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);
+    RUN_TEST(test_gfx_frame_boundary_syncs_loss_before_creates);
     RUN_TEST(test_gfx_destroy_program_destroys_its_pipelines);
     RUN_TEST(test_gfx_draw_asserts_when_bound_program_is_destroyed);
     RUN_TEST(test_gfx_make_program_does_not_dedup);
@@ -3314,7 +3252,7 @@ int main(void) {
     RUN_TEST(test_gfx_update_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_orphan_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_bound_pipeline_holds_the_generation);
-    RUN_TEST(test_gfx_restored_frame_rejects_draws);
+    RUN_TEST(test_gfx_restored_iteration_draws_what_it_rebuilds);
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);
     RUN_TEST(test_gfx_frame_draw_calls);
     RUN_TEST(test_gfx_uniform_records_hash_and_value);

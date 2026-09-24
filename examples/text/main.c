@@ -218,6 +218,24 @@ static void draw_text_scene(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_frame();
+    if (g_nt_gfx.context_restored) {
+        nt_resource_invalidate(NT_ASSET_FONT);
+
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "frame_uniforms",
+        });
+        /* Materials keep their handles and draw again once their programs relink. */
+        const nt_result_t restore_result = nt_text_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        (void)restore_result;
+        nt_program_ref_drop(&s_text_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+    }
     nt_input_poll();
     float dt = g_nt_app.dt;
 
@@ -301,28 +319,8 @@ static void frame(void) {
      * just on the restore flag. */
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     bool can_render = text_info != NULL && nt_gfx_program_ready(text_info->program);
-    nt_gfx_begin_frame();
 
     /* Restore GPU resources after WebGL context loss */
-    if (g_nt_gfx.context_restored) {
-        can_render = false;
-        nt_resource_invalidate(NT_ASSET_FONT);
-
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        const nt_result_t restore_result = nt_text_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
-        nt_program_ref_drop(&s_text_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-    }
 
     /* Step font system -- resolves pending resources, uploads GPU data */
 #if NT_LOG_MIN_LEVEL == 0
@@ -371,7 +369,6 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 

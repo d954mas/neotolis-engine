@@ -8,8 +8,12 @@
 #include <stdint.h>
 #include <string.h>
 
-void setUp(void) {}
-void tearDown(void) {}
+/* Readback is a gfx operation, so it runs inside a tick. */
+void setUp(void) {
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&desc);
+}
+void tearDown(void) { nt_gfx_shutdown(); }
 
 /* Fake gradient (see test_helpers/nt_gfx_fake.c): at GL row r, col c (bottom-left),
  *   R = r & 0xFF, G = c & 0xFF, B = 0x40, A = 0xFF.

@@ -11,7 +11,11 @@
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc);
 void nt_gfx_gl_ctx_destroy(void);
-bool nt_gfx_gl_ctx_is_lost(void);
+/* Returns and clears the lost-event latch, without a JS call: a loss and
+ * restore between two iterations still reach begin_frame. */
+bool nt_gfx_gl_ctx_take_loss(void);
+/* Asks the browser directly; true without a context. Cold paths only. */
+bool nt_gfx_gl_ctx_query_lost(void);
 
 /* nt_gfx_gl_ctx_detect_gpu_caps is declared in graphics/nt_gfx_internal.h —
  * the test backend also implements it, so the declaration lives at the

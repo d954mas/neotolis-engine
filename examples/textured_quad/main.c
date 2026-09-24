@@ -25,6 +25,7 @@
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include <inttypes.h>
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
@@ -167,6 +168,32 @@ static void print_status(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
+    nt_gfx_begin_frame();
+    if (g_nt_gfx.context_restored) {
+        /* Invalidate all GFX-backed resources so they re-activate from blobs */
+        nt_resource_invalidate(NT_ASSET_MESH);
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+
+        /* Re-register virtual pack resources (invalidate skips virtual packs) */
+        nt_gfx_destroy_texture(s_fallback_texture);
+        s_fallback_texture = make_fallback_texture();
+        nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
+
+        /* Recreate game-owned GPU resources */
+        nt_gfx_destroy_buffer(s_frame_ubo);
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "frame_uniforms",
+        });
+        /* Materials keep their handles and draw again once their programs relink. */
+        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        (void)restore_result;
+        nt_program_ref_drop(&s_cube_program);
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+    }
     nt_input_poll();
 
 #ifndef NT_PLATFORM_WEB
@@ -304,36 +331,7 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    nt_gfx_begin_frame();
-
     /* Restore GPU resources after WebGL context loss */
-    if (g_nt_gfx.context_restored) {
-        can_render = false;
-        /* Invalidate all GFX-backed resources so they re-activate from blobs */
-        nt_resource_invalidate(NT_ASSET_MESH);
-        nt_resource_invalidate(NT_ASSET_TEXTURE);
-
-        /* Re-register virtual pack resources (invalidate skips virtual packs) */
-        nt_gfx_destroy_texture(s_fallback_texture);
-        s_fallback_texture = make_fallback_texture();
-        nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
-
-        /* Recreate game-owned GPU resources */
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
-        /* Materials retain their handles; rendering waits for relinking on a later frame.
-         * Renderer reset and program destruction may run in either order without draws. */
-        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
-        nt_program_ref_drop(&s_cube_program);
-        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
-    }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});
 
@@ -367,14 +365,13 @@ static void frame(void) {
         /* One-time log to verify batching */
         static bool s_stats_logged;
         if (!s_stats_logged) {
-            nt_log_info(">> Render stats: %u draw calls, %u instanced, %u instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
-                        g_nt_gfx.frame_stats.instances, item_count);
+            nt_log_info(">> Render stats: %u draw calls, %u instanced, %" PRIu64 " instances (from %u items)", nt_gfx_draw_calls(&g_nt_gfx.counters),
+                        g_nt_gfx.counters.accepted[NT_GFX_OP_DRAW_INSTANCED] + g_nt_gfx.counters.accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED], g_nt_gfx.counters.instances, item_count);
             s_stats_logged = true;
         }
     }
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 }
