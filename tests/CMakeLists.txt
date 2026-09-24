@@ -73,6 +73,12 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_skeletal_sample PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_skeletal_sample)
 
+    # mix/override kernels and the interruption recipe over them.
+    add_executable(test_skeletal_mix unit/test_skeletal_mix.c unit/test_helpers/skeletal_rig.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_skeletal_mix PRIVATE nt_skeletal nt_hash nt_core nt_log_stub nt_math unity)
+    target_include_directories(test_skeletal_mix PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_skeletal_mix)
+
     add_executable(test_skin unit/test_skin.c unit/test_helpers/skeletal_rig.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_skin PRIVATE nt_skeletal nt_hash nt_core nt_log_stub nt_math unity)
     target_include_directories(test_skin PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")

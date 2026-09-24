@@ -143,3 +143,27 @@ J = 100, T = 4; the tool aborts and prints the mismatch otherwise.
 8. **Decision: keep AoS 40 B as the initial ABI.** Re-run this tool against the
    real kernels in #487 and revisit the layout in #492, where a SIMD mix is the
    deciding measurement rather than this one.
+
+## Engine mix kernel (2026-09-24)
+
+The AoS40 mix stage now calls the public `nt_skeletal_mix`; AoS48 and SoA keep
+the local stand-in. The table gains a `mix/input` column (ns per joint per
+input). Same machine, `native-release` (TRAP, `NT_SKELETAL_CHECKS` OFF), one
+session, no joint weights:
+
+| T | AoS40 stand-in, ns/(joint·input) | `nt_skeletal_mix`, ns/(joint·input) |
+|--:|---------------------------------:|------------------------------------:|
+| 1 | 4.7–5.1 | 5.8–6.4 |
+| 4 | 3.9–4.4 | 3.3–5.6 |
+
+- At T=1 the kernel is ~1.2 ns/joint (~25 %) slower than the in-file stand-in
+  across J and C; at T=4 the difference is inside run-to-run noise.
+- Refuted causes of the T=1 gap (each measured, no change): `fabsf` instead of a
+  ternary in the canonical sign, a select instead of an index search there, a
+  select for the dot-sign branch, and dropping the per-element weight branch and
+  the zero-influence skip.
+- An `NT_ASSERT_MODE=0` build measures the same as TRAP within noise, with and
+  without joint weights (a temporary run gave every input weights of 0.75):
+  T=1 ~6.1, T=4 ~3.4 ns/(joint·input) in both. The per-call checks and the
+  per-element `weight >= 0` check stay below the noise floor (~0.2 ns).
+- The remaining gap is left to #492, which measures SIMD mix and layouts.

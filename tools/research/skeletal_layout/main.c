@@ -1,5 +1,5 @@
-/* AoS40 uses the public FK call and its configured checks; the other layouts
- * use local kernels. Workload, method and measurements: RESULTS.md. */
+/* AoS40 uses the public mix and FK calls and their configured checks; the
+ * other layouts use local kernels. Workload, method and measurements: RESULTS.md. */
 
 #include <math.h>
 #include <stddef.h>
@@ -580,16 +580,11 @@ static void stage_sample_soa(const bench_t *b, uint32_t chars_n, uint16_t joints
 static void stage_mix_aos40(const bench_t *b, const nt_skeletal_skeleton_t *skel, uint32_t chars_n, uint16_t tracks) {
     const uint16_t joints = skel->joint_count;
     for (uint32_t c = 0; c < chars_n; ++c) {
-        nt_skeletal_trs_t *out = &b->mix40[(size_t)c * joints];
-        for (uint16_t j = 0; j < joints; ++j) {
-            mix_acc_t m;
-            mix_begin(&m);
-            for (uint16_t t = 0; t < tracks; ++t) {
-                const nt_skeletal_trs_t *in = &b->trk40[((((size_t)t * chars_n) + c) * joints) + j];
-                mix_add(&m, in->t, in->q, in->s, b->gain[t]);
-            }
-            mix_finish(&m, &skel->rest[j], out[j].t, out[j].q, out[j].s);
+        nt_skeletal_mix_input_t inputs[MAX_TRACKS];
+        for (uint16_t t = 0; t < tracks; ++t) {
+            inputs[t] = (nt_skeletal_mix_input_t){&b->trk40[(((size_t)t * chars_n) + c) * joints], NULL, b->gain[t]};
         }
+        nt_skeletal_mix(inputs, tracks, skel->rest, joints, &b->mix40[(size_t)c * joints]);
     }
 }
 
@@ -856,7 +851,8 @@ static void run_config(const bench_t *b, const rig_t *rig, uint32_t chars_n, uin
         const double s = median5(sample[l]);
         const double m = median5(mix[l]);
         const double f = median5(fk[l]);
-        (void)printf("| %u | %u | %u | %s | %.2f | %.2f | %.2f | %.2f |\n", (unsigned)rig->view.joint_count, (unsigned)chars_n, (unsigned)tracks, layout_name((layout_t)l), s, m, f, s + m + f);
+        (void)printf("| %u | %u | %u | %s | %.2f | %.2f | %.2f | %.2f | %.2f |\n", (unsigned)rig->view.joint_count, (unsigned)chars_n, (unsigned)tracks, layout_name((layout_t)l), s, m,
+                     m / (double)tracks, f, s + m + f);
     }
     (void)fflush(stdout);
 }
@@ -890,8 +886,8 @@ int main(int argc, char **argv) {
     (void)printf("FK cross-layout check: identical within 1e-5 (J=%u, T=%u)\n\n", MAX_JOINTS, MAX_TRACKS);
 
     (void)printf("ns per skeleton joint per frame (C*J joints), median of %d repetitions\n\n", BENCH_REPS);
-    (void)printf("| J | C | T | Layout | sample | mix | FK | total |\n");
-    (void)printf("|--:|--:|--:|:-------|-------:|----:|---:|------:|\n");
+    (void)printf("| J | C | T | Layout | sample | mix | mix/input | FK | total |\n");
+    (void)printf("|--:|--:|--:|:-------|-------:|----:|----------:|---:|------:|\n");
 
     const int j_lo = quick ? 1 : 0;
     const int j_hi = quick ? 2 : 3;
