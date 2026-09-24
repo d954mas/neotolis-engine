@@ -164,11 +164,14 @@ and smooth ones (w dominant everywhere). ns/(joint·input), medians:
 
 - The dot-sign branch mispredicts whenever inputs sit in both hemispheres;
   `copysignf` removes it, 1.8x at T=4 on random data. The kernel ships with it.
-- The T=1 cost is the canonical sign of the first contributor: a kernel
-  without it matches the stand-in. The stand-in's branchy search is faster
+- The T=1 cost was the canonical sign of the first contributor: a kernel
+  without it matched the stand-in. The stand-in's branchy search is faster
   only when its branches predict (smooth data) and slower when they do not
-  (random data); the kernel's compiled search costs the same on both.
-  Rewriting the search (fabsf, selects, an fmaxf tree) did not help.
+  (random data). Rewriting the search (fabsf, selects, an fmaxf tree) did not
+  help; changing the seed rule to "w positive, largest component only for
+  w == 0" did. Same binary, three runs under background load: T=1 random
+  6.3 -> 5.0, smooth 6.3 -> 4.9 (stand-in 9.3 / 3.7); T=4 10-15 % lower in
+  every run, absolute values too noisy to quote.
 - An `NT_ASSERT_MODE=0` build measures the same as TRAP within noise, with and
   without joint weights, so the per-call checks and the per-element
   `weight >= 0` check stay below the noise floor (~0.2 ns).

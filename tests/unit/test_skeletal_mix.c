@@ -110,6 +110,22 @@ void test_an_exactly_orthogonal_pair_takes_the_canonical_sign(void) {
     }
 }
 
+/* A sole input comes out in the seed's hemisphere: w made positive, and for
+ * w == 0 exactly the largest component made positive. */
+void test_the_seed_sign_makes_w_positive_or_else_the_largest_component(void) {
+    nt_skeletal_trs_t a[J];
+    make_pose(a, 0.0F);
+    memcpy(a[0].q, (const float[4]){0.8F, 0.0F, 0.0F, -0.6F}, sizeof(a[0].q));
+    memcpy(a[1].q, (const float[4]){0.0F, 0.6F, -0.8F, 0.0F}, sizeof(a[1].q));
+    const nt_skeletal_mix_input_t input = {a, NULL, 1.0F};
+    nt_skeletal_trs_t out[J];
+    nt_skeletal_mix(&input, 1, g_defaults, J, out);
+    ASSERT_FLOAT_NEAR(-0.8F, out[0].q[0], 1e-6F);
+    ASSERT_FLOAT_NEAR(0.6F, out[0].q[3], 1e-6F);
+    ASSERT_FLOAT_NEAR(-0.6F, out[1].q[1], 1e-6F);
+    ASSERT_FLOAT_NEAR(0.8F, out[1].q[2], 1e-6F);
+}
+
 /* Aligning to rest would average +170 and -170 deg to 0 deg. */
 void test_plus_and_minus_170_degrees_average_to_180(void) {
     nt_skeletal_trs_t a[J];
@@ -509,6 +525,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_negating_any_input_rotation_including_the_first_gives_the_same_mix);
     RUN_TEST(test_an_exactly_orthogonal_pair_takes_the_canonical_sign);
+    RUN_TEST(test_the_seed_sign_makes_w_positive_or_else_the_largest_component);
     RUN_TEST(test_plus_and_minus_170_degrees_average_to_180);
     RUN_TEST(test_zero_total_influence_copies_the_defaults);
     RUN_TEST(test_a_zero_influence_input_reads_nothing_from_its_pose);

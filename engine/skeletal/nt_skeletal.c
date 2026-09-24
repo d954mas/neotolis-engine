@@ -224,6 +224,16 @@ static void nt_skeletal_check_trs(const nt_skeletal_trs_t *v) {
 }
 #endif
 
+/* The sign that makes w positive. Any fixed rule keeps q and -q equivalent;
+ * this one costs a compare instead of a search, and only w == 0 exactly falls
+ * back to the largest-component rule of rig identity. */
+static float nt_skeletal_mix_seed_sign(const float q[4]) {
+    if (q[3] != 0.0F) {
+        return copysignf(1.0F, q[3]);
+    }
+    return nt_skeletal_canonical_sign(q);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count, const nt_skeletal_trs_t *defaults, uint16_t joint_count, nt_skeletal_trs_t *restrict out) {
     NT_ASSERT(inputs != NULL || input_count == 0U);
@@ -265,13 +275,13 @@ void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count
             /* Align against the running sum, not a fixed reference: a
              * dominant-input or rest reference flips sign as gains change.
              * The empty sum is orthogonal to everything, so the first
-             * contributor takes the canonical sign like any exact tie. */
+             * contributor takes the seed sign like any exact tie. */
             const float d = (q[0] * v->q[0]) + (q[1] * v->q[1]) + (q[2] * v->q[2]) + (q[3] * v->q[3]);
             /* The sign of d is data, not control flow: a branch on it
              * mispredicts on inputs from both hemispheres. */
             float wq = copysignf(w, d);
             if (d == 0.0F) {
-                wq = w * nt_skeletal_canonical_sign(v->q);
+                wq = w * nt_skeletal_mix_seed_sign(v->q);
             }
             for (int c = 0; c < 3; ++c) {
                 t[c] += w * v->t[c];

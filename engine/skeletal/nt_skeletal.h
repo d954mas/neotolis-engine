@@ -272,10 +272,10 @@ typedef struct {
  * copies defaults[j]; otherwise T/S = sum (w_t / W) * x_t and the rotation is
  * the normalized sum of w_t * q_t, each q_t sign-aligned against the running
  * sum in supplied order (an exactly orthogonal one, the first included, takes
- * the sign that makes its largest component positive). q and -q give the same
- * result on every input. There is no threshold: any influence above zero
- * counts in full. The result depends on input order for widely separated
- * rotations, so the order is part of the call's meaning.
+ * the sign that makes w positive, or for w == 0 its largest component). q and
+ * -q give the same result on every input. There is no threshold: any
+ * influence above zero counts in full. The result depends on input order for
+ * widely separated rotations, so the order is part of the call's meaning.
  *
  * input_count may be 0 (inputs may then be NULL); out overlaps neither
  * defaults nor any input pose. */
