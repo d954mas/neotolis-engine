@@ -404,7 +404,7 @@ reused. A tick is ABORTED when a loss is detected during it or the context is
 still known lost at its end. Only the frontend marks a loss, and only a newly
 detected one: begin_frame's first detection, a restore that fails or meets a new
 loss, a frontend pre-check that reads a loss the backend reports but the frontend
-does not know yet, and a backend failure the frontend attributes to a loss (a
+does not know yet (including disabling GPU timing), and a backend failure the frontend attributes to a loss (a
 create, a render-target resize or restore, a readback, a lazy sampler recreate).
 A rejection on an already-known loss does not by itself mark the tick. end_tick
 does not probe the backend: a loss in a tick without a probe marks the next tick

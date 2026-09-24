@@ -2711,6 +2711,9 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
+    if (!enabled) {
+        (void)gfx_context_lost(); /* disabling drops dead timer queries on a loss, so the loss is detected here */
+    }
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_REASON_ACCEPTED);
 }
