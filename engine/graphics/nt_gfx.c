@@ -218,7 +218,7 @@ static bool gfx_context_lost(void) {
 /* A backend failure caused by a loss is the recoverable CONTEXT_LOST and logs
  * nothing; only a failure on a live context is an error. The browser is asked
  * because the loss event may still be queued. */
-__attribute__((noinline, cold)) static nt_gfx_event_reason_t backend_failed(const char *what) {
+static nt_gfx_event_reason_t backend_failed(const char *what) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
