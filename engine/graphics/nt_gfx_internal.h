@@ -147,7 +147,7 @@ bool nt_gfx_backend_take_context_loss(void);
  * is known or a restore just ran. */
 bool nt_gfx_backend_query_context_lost(void);
 
-void nt_gfx_backend_begin_frame(void);
+void nt_gfx_backend_check_timer_disjoint(void);
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend);
 void nt_gfx_backend_end_pass(void);
 

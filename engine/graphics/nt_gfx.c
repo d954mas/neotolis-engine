@@ -748,6 +748,7 @@ static nt_gfx_result_t restore_context(void) {
     return NT_GFX_RESULT_ACCEPTED;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 void nt_gfx_begin_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_frame: a pass is still open");
@@ -781,9 +782,13 @@ void nt_gfx_begin_frame(void) {
         NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
         NT_GFX_END(restore_context());
     }
+#if NT_GFX_GPU_TIMING_ENABLED
     if (!g_nt_gfx.context_lost) {
-        nt_gfx_backend_begin_frame();
+        NT_GFX_BEGIN(NT_GFX_OP_TIMER_DISJOINT, NT_GFX_OBJECT_NONE, 0);
+        nt_gfx_backend_check_timer_disjoint();
+        NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
     }
+#endif
 }
 
 /* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,

@@ -152,9 +152,8 @@ static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used every
  *   1. types & state (this region)
  *   2. impl: helpers + begin/end (region "GPU timer segments — begin/end")
  *   3. impl: poll/drop/enable (region "GPU timer segments — poll/lifecycle")
- * Plus a one-line disjoint check inside nt_gfx_backend_begin_frame (cross-cut
- * with frame lifecycle, intentional — disjoint clears on read so it must
- * happen exactly once per frame).
+ * Plus nt_gfx_backend_check_timer_disjoint, which begin_frame runs once per frame:
+ * the disjoint flag clears on read.
  *
  * Ring depth 8 covers WebGL2 driver query latency (typically 1-4 frames, but
  * spikes happen on tab refocus / GPU power state transitions). 4 was
@@ -790,7 +789,7 @@ void nt_gfx_backend_end_segment(void) {}
 #endif
 // #endregion
 
-void nt_gfx_backend_begin_frame(void) {
+void nt_gfx_backend_check_timer_disjoint(void) {
 #if NT_GFX_GPU_TIMING_ENABLED && defined(NT_PLATFORM_WEB)
     if (s_timer_enabled && s_timer_user_enabled) {
         /* A full ring has head == tail too; in_flight owns pending state. */
@@ -821,8 +820,7 @@ bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
     }
     nt_hash32_t name_hash = nt_hash32_str(name);
 
-    /* Disjoint check moved to nt_gfx_backend_begin_frame — runs once per frame
-     * instead of once per poll, avoiding GLE roundtrip in the drain loop. */
+    /* The disjoint flag is checked once per frame at begin_frame, not per poll: a JS roundtrip each. */
 
     int8_t idx = segment_find(name_hash);
     if (idx < 0) {

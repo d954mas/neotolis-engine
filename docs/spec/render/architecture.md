@@ -548,9 +548,9 @@ The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
 values are named after the issued function (`NT_GFX_GL_glBindVertexArray`), and
 carry raw GL names of one GL context; their operation is always STATE,
-the enclosing BEGIN names the frontend operation. The one backend call outside
-an operation is the GPU timer disjoint query that begin_frame issues while a
-timer query is pending. Each issued call is recorded
+the enclosing BEGIN names the frontend operation. With GPU timing, begin_frame
+runs the timer disjoint check as its own `TIMER_DISJOINT` operation on a live
+context; the query is issued only while a timer query is pending. Each issued call is recorded
 exactly once, at the call site, by the same statement that issues it (an
 `NT_GL_ISSUED` JS bridge: by the statement before the JS call).
 `backend.args` follows the GL integer argument order; pointer payload, readback

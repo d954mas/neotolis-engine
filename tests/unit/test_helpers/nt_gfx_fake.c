@@ -356,7 +356,7 @@ bool nt_gfx_backend_take_context_loss(void) {
 
 bool nt_gfx_backend_query_context_lost(void) { return s_fake_context_lost; }
 
-void nt_gfx_backend_begin_frame(void) {}
+void nt_gfx_backend_check_timer_disjoint(void) {}
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend) {
     (void)desc;

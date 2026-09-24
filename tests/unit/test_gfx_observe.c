@@ -627,7 +627,8 @@ static void test_request_during_recorded_frame_replaces_the_capture(void) {
     TEST_ASSERT_EQUAL_UINT64(0, replaced.counters.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(snapshot_records, replaced.count);
     for (uint32_t i = 0; i < replaced.count; i++) {
-        TEST_ASSERT_NOT_EQUAL(NT_GFX_EVENT_BEGIN, replaced.events[i].kind); /* only the inherited-state prefix */
+        /* only the inherited-state prefix and begin_frame's own timer check */
+        TEST_ASSERT_TRUE(replaced.events[i].kind != NT_GFX_EVENT_BEGIN || replaced.events[i].operation == NT_GFX_OP_TIMER_DISJOINT);
     }
 }
 

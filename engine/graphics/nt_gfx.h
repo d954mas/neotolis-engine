@@ -530,6 +530,7 @@ typedef enum {
     NT_GFX_OP_SEGMENT_END,
     NT_GFX_OP_SEGMENT_POLL,
     NT_GFX_OP_GPU_TIMING,
+    NT_GFX_OP_TIMER_DISJOINT,
     NT_GFX_OP_COUNT
 } nt_gfx_operation_t;
 

@@ -129,7 +129,7 @@ static void test_disable_active_balances_query_and_debug_group(void) {
     unsigned int allocated = s_gen_count;
     uint64_t out = 19;
     for (unsigned int i = 0; i < 3; i++) {
-        nt_gfx_backend_begin_frame();
+        nt_gfx_backend_check_timer_disjoint();
         nt_gfx_backend_begin_segment("disabled-new-name");
         nt_gfx_backend_end_segment();
         nt_gfx_backend_set_gpu_timing_enabled(false);
