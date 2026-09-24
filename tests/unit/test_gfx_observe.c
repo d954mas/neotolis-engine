@@ -286,7 +286,6 @@ static void test_failed_restore_stays_lost_with_one_error_log(void) {
 /* A restore that meets a new loss wipes what it refilled and stays lost; the next restore starts clean. */
 static void test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_works(void) {
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
-    nt_sampler_t sampler = nt_gfx_get_texture_default_sampler(nt_gfx_render_target_color(target));
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
@@ -296,7 +295,6 @@ static void test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_work
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(target));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_sampler_backend_id(sampler));
     TEST_ASSERT_EQUAL_UINT32(0, s_error_logs);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
     nt_gfx_end_pass();
@@ -308,7 +306,6 @@ static void test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_work
     TEST_ASSERT_EQUAL_UINT32(0, capture.counters.accepted[NT_GFX_OP_CONTEXT]);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_sampler_backend_id(sampler));
 }
 
 /* A render target whose restore meets a new loss is that loss, not a live failure. */

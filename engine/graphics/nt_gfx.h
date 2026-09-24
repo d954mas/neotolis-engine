@@ -296,12 +296,6 @@ typedef enum {
     NT_COMPARE_LESS,
 } nt_compare_func_t;
 
-typedef enum {
-    NT_RT_DEPTH_NONE = 0,
-    NT_RT_DEPTH_BUFFER,
-    NT_RT_DEPTH_TEXTURE,
-} nt_render_target_depth_t;
-
 /* ---- Vertex layout ---- */
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
@@ -466,21 +460,15 @@ typedef struct {
     const char *label; /* debug name; static storage */
 } nt_sampler_desc_t;
 
+/* Each attachment is a target-owned texture; INVALID format means the attachment
+ * is absent, and at least one must be present. Attachments have no default
+ * sampler: bind them with an explicit one. */
 typedef struct {
     uint16_t width;
     uint16_t height;
-    nt_texture_format_t color_format;
-    nt_texture_filter_t color_min_filter;
-    nt_texture_filter_t color_mag_filter;
-    nt_texture_wrap_t color_wrap_u;
-    nt_texture_wrap_t color_wrap_v;
-    nt_render_target_depth_t depth_storage;
-    nt_texture_format_t depth_format;             /* INVALID for NONE; DEPTH* otherwise */
-    nt_texture_filter_t depth_texture_min_filter; /* TEXTURE only; NEAREST — comparison is sampler state */
-    nt_texture_filter_t depth_texture_mag_filter; /* TEXTURE only; NEAREST — comparison is sampler state */
-    nt_texture_wrap_t depth_texture_wrap_u;       /* TEXTURE only */
-    nt_texture_wrap_t depth_texture_wrap_v;       /* TEXTURE only */
-    const char *label;                            /* debug name; static storage */
+    nt_texture_format_t color_format; /* INVALID, RGBA8 or RGBA16F */
+    nt_texture_format_t depth_format; /* INVALID or DEPTH* */
+    const char *label;                /* debug name; static storage */
 } nt_render_target_desc_t;
 
 typedef struct {
@@ -545,7 +533,6 @@ typedef enum {
     X(glBindBuffer)                                                                                                                                                                                    \
     X(glBindBufferBase)                                                                                                                                                                                \
     X(glBindFramebuffer)                                                                                                                                                                               \
-    X(glBindRenderbuffer)                                                                                                                                                                              \
     X(glBindSampler)                                                                                                                                                                                   \
     X(glBindTexture)                                                                                                                                                                                   \
     X(glBindVertexArray)                                                                                                                                                                               \
@@ -570,7 +557,6 @@ typedef enum {
     X(glDeleteFramebuffers)                                                                                                                                                                            \
     X(glDeleteProgram)                                                                                                                                                                                 \
     X(glDeleteQueries)                                                                                                                                                                                 \
-    X(glDeleteRenderbuffers)                                                                                                                                                                           \
     X(glDeleteSamplers)                                                                                                                                                                                \
     X(glDeleteShader)                                                                                                                                                                                  \
     X(glDeleteTextures)                                                                                                                                                                                \
@@ -580,17 +566,16 @@ typedef enum {
     X(glDisable)                                                                                                                                                                                       \
     X(glDrawArrays)                                                                                                                                                                                    \
     X(glDrawArraysInstanced)                                                                                                                                                                           \
+    X(glDrawBuffers)                                                                                                                                                                                   \
     X(glDrawElements)                                                                                                                                                                                  \
     X(glDrawElementsInstanced)                                                                                                                                                                         \
     X(glEnable)                                                                                                                                                                                        \
     X(glEnableVertexAttribArray)                                                                                                                                                                       \
     X(glEndQuery)                                                                                                                                                                                      \
-    X(glFramebufferRenderbuffer)                                                                                                                                                                       \
     X(glFramebufferTexture2D)                                                                                                                                                                          \
     X(glGenBuffers)                                                                                                                                                                                    \
     X(glGenFramebuffers)                                                                                                                                                                               \
     X(glGenQueries)                                                                                                                                                                                    \
-    X(glGenRenderbuffers)                                                                                                                                                                              \
     X(glGenSamplers)                                                                                                                                                                                   \
     X(glGenTextures)                                                                                                                                                                                   \
     X(glGenVertexArrays)                                                                                                                                                                               \
@@ -611,8 +596,8 @@ typedef enum {
     X(glPolygonOffset)                                                                                                                                                                                 \
     X(glPopDebugGroup)                                                                                                                                                                                 \
     X(glPushDebugGroup)                                                                                                                                                                                \
+    X(glReadBuffer)                                                                                                                                                                                    \
     X(glReadPixels)                                                                                                                                                                                    \
-    X(glRenderbufferStorage)                                                                                                                                                                           \
     X(glSamplerParameteri)                                                                                                                                                                             \
     X(glScissor)                                                                                                                                                                                       \
     X(glShaderSource)                                                                                                                                                                                  \
@@ -864,8 +849,8 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
-/* The descriptor is copied. Attachment textures belong to the target and
- * remain valid until nt_gfx_destroy_render_target(). */
+/* Attachment textures belong to the target and remain valid until
+ * nt_gfx_destroy_render_target(). */
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
 /* ---- Resource destruction ---- */
@@ -896,8 +881,8 @@ void nt_gfx_destroy_render_target(nt_render_target_t rt);
 
 /* Resize preserves logical target and attachment handles; pixels become undefined. */
 bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height);
+/* The attachment textures; INVALID when the target has no such attachment. */
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
-/* Returns invalid unless the target was created with NT_RT_DEPTH_TEXTURE. */
 nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
 /* False after a context restore that could not recreate the target (a runtime GPU
  * failure, same class as creation returning invalid). No automatic retry: the owner
@@ -958,7 +943,7 @@ void nt_gfx_set_scissor_enabled(bool enabled);
 bool nt_gfx_scissor_enabled(void);
 void nt_gfx_set_viewport(int x, int y, int w, int h);
 
-/* Returns NT_SAMPLER_INVALID if texture has no asset-baked default. */
+/* Returns NT_SAMPLER_INVALID for render-target attachments, which have no default. */
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
 /* ---- Uniforms ---- The hash is the identity, as for tags and resources. Hash once

@@ -302,8 +302,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
         texture =
             nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .data = pixels, .format = NT_TEXTURE_FORMAT_RGBA32F, .min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
     } else {
-        target = nt_gfx_make_render_target(
-            &(nt_render_target_desc_t){.width = 2, .height = 2, .color_format = NT_TEXTURE_FORMAT_RGBA16F, .color_min_filter = NT_FILTER_LINEAR, .color_mag_filter = NT_FILTER_LINEAR});
+        target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 2, .height = 2, .color_format = NT_TEXTURE_FORMAT_RGBA16F});
         if (target.id == 0) {
             return -2;
         }
@@ -324,7 +323,9 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 1}});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
-    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_probe"), .texture = texture};
+    /* Render-target attachments have no default sampler. */
+    nt_sampler_t sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_probe"), .texture = texture, .sampler = sampler};
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_draw(0, 3);
     uint8_t pixel[4] = {0};
@@ -421,8 +422,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     if (tex.id == 0 || !nt_gfx_texture_ready(tex)) {
         return 0xFFFFFFFFU;
     }
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = 1, .height = 1, .color_format = NT_TEXTURE_FORMAT_RGBA8, .color_min_filter = NT_FILTER_NEAREST, .color_mag_filter = NT_FILTER_NEAREST, .label = "basis_probe_rt"});
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 1, .height = 1, .color_format = NT_TEXTURE_FORMAT_RGBA8, .label = "basis_probe_rt"});
     if (target.id == 0) {
         return 0xFFFFFFFFU;
     }

@@ -59,7 +59,6 @@ void nt_gfx_fake_fail_next_pipeline_create(void);
 void nt_gfx_fake_fail_next_sampler_create(void);
 uint16_t nt_gfx_fake_last_render_target_width(void);
 uint16_t nt_gfx_fake_last_render_target_height(void);
-nt_render_target_depth_t nt_gfx_fake_last_render_target_depth(void);
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
 uint32_t nt_gfx_fake_last_depth_texture_backend(void);
 uint32_t nt_gfx_fake_update_texture_count(void);

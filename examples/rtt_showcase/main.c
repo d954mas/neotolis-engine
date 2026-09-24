@@ -128,6 +128,9 @@ static struct {
     nt_texture_t scene_depth;
     nt_texture_t blur_color;
     nt_texture_t white;
+    /* Attachments have no default sampler; raw depth must be read NEAREST. */
+    nt_sampler_t color_sampler;
+    nt_sampler_t depth_sampler;
     nt_shader_t quad_vs;
     nt_shader_t quad_fs;
     nt_program_t quad_program;
@@ -229,32 +232,25 @@ static bool make_quad_resources(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "rtt_white",
     });
-    return s_demo.quad_pipeline.id != 0 && s_demo.quad_vbo.id != 0 && s_demo.quad_vi.id != 0 && s_demo.white.id != 0;
+    s_demo.color_sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR, .label = "rtt_color_sampler"});
+    s_demo.depth_sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .label = "rtt_depth_sampler"});
+    return s_demo.color_sampler.id != 0 && s_demo.depth_sampler.id != 0 && s_demo.quad_pipeline.id != 0 && s_demo.quad_vbo.id != 0 && s_demo.quad_vi.id != 0 && s_demo.white.id != 0;
 }
 
-static nt_render_target_t make_target(const char *label, uint16_t width, uint16_t height, nt_render_target_depth_t depth) {
+static nt_render_target_t make_target(const char *label, uint16_t width, uint16_t height, nt_texture_format_t depth_format) {
     return nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = width,
         .height = height,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_LINEAR,
-        .color_mag_filter = NT_FILTER_LINEAR,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = depth,
-        .depth_format = depth == NT_RT_DEPTH_NONE ? NT_TEXTURE_FORMAT_INVALID : NT_TEXTURE_FORMAT_DEPTH24,
-        .depth_texture_min_filter = NT_FILTER_NEAREST,
-        .depth_texture_mag_filter = NT_FILTER_NEAREST,
-        .depth_texture_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_texture_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+        .depth_format = depth_format,
         .label = label,
     });
 }
 
 static bool make_targets(uint16_t width, uint16_t height) {
-    s_demo.scene = make_target("rtt_scene", width, height, NT_RT_DEPTH_TEXTURE);
-    s_demo.temp = make_target("rtt_blur_temp", width, height, NT_RT_DEPTH_NONE);
-    s_demo.blur = make_target("rtt_blur_dest", width, height, NT_RT_DEPTH_NONE);
+    s_demo.scene = make_target("rtt_scene", width, height, NT_TEXTURE_FORMAT_DEPTH24);
+    s_demo.temp = make_target("rtt_blur_temp", width, height, NT_TEXTURE_FORMAT_INVALID);
+    s_demo.blur = make_target("rtt_blur_dest", width, height, NT_TEXTURE_FORMAT_INVALID);
     if (s_demo.scene.id == 0 || s_demo.temp.id == 0 || s_demo.blur.id == 0) {
         if (s_demo.blur.id != 0) {
             nt_gfx_destroy_render_target(s_demo.blur);
@@ -487,7 +483,7 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     nt_gfx_update_buffer(s_demo.quad_vbo, 0, verts, sizeof(verts));
     nt_gfx_bind_pipeline(s_demo.quad_pipeline);
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = texture, .sampler = mode == 1 ? s_demo.depth_sampler : s_demo.color_sampler};
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
     nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);

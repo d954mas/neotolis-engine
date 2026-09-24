@@ -151,11 +151,6 @@ static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w
         .width = rt_w,
         .height = rt_h,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_NONE,
     });
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
 
@@ -403,11 +398,6 @@ void test_resized_render_target_color_caps_max_level(void) {
         .width = 16,
         .height = 16,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_NONE,
     });
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 32, 24));

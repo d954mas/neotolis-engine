@@ -65,6 +65,7 @@ static struct {
     nt_pipeline_t pipeline;
     nt_buffer_t triangle_vbo;
     nt_vertex_input_t vertex_input;
+    nt_sampler_t sampler;
     /* Logical life and GPU life are separate: a restore that fails leaves the
      * module active so the next one retries, with the pass skipped meanwhile. */
     bool initialized;
@@ -174,6 +175,9 @@ static bool make_gpu_resources(void) {
         {{3.0F, -1.0F}, {2.0F, 0.0F}},
         {{-1.0F, 3.0F}, {0.0F, 2.0F}},
     };
+    /* Taps land on texel centres, so NEAREST reads the same values as LINEAR and stays valid for RGBA32F without float filtering. */
+    s_blur.sampler = nt_gfx_make_sampler(
+        &(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .wrap_u = NT_WRAP_CLAMP_TO_EDGE, .wrap_v = NT_WRAP_CLAMP_TO_EDGE, .label = "postfx_blur_sampler"});
     s_blur.vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_blur_vs_src, .label = "postfx_blur_vs"});
     s_blur.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_blur_fs_src, .label = "postfx_blur_fs"});
     if (s_blur.vs.id == 0 || s_blur.fs.id == 0) {
@@ -215,7 +219,7 @@ static bool make_gpu_resources(void) {
         .vertex_buffer = s_blur.triangle_vbo,
         .label = "postfx_blur_vi",
     });
-    return s_blur.pipeline.id != 0 && s_blur.vertex_input.id != 0;
+    return s_blur.pipeline.id != 0 && s_blur.vertex_input.id != 0 && s_blur.sampler.id != 0;
 }
 
 nt_result_t nt_postfx_blur_init(void) {
@@ -383,7 +387,7 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(s_blur.pipeline);
     nt_gfx_bind_vertex_input(s_blur.vertex_input);
-    const nt_gfx_texture_binding_t binding = {.name = s_u_source, .texture = source, .sampler = NT_SAMPLER_DEFAULT};
+    const nt_gfx_texture_binding_t binding = {.name = s_u_source, .texture = source, .sampler = s_blur.sampler};
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_set_uniform_vec4(s_u_direction, direction);
     upload_kernel(radius, packed);

@@ -1126,22 +1126,17 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
 
 /* Resizing a render target deletes the old colour texture, so its GL name must
  * leave the cache: old and new names are both live during the resize, so only
- * the cache probe can see the forget. Depth NONE keeps the colour texture the
+ * the cache probe can see the forget. Without depth, the colour texture is the
  * one the resize touches last. */
 static void test_resize_render_target_forgets_cached_color_name(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_NONE,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, rt.id);
 
-    backend_bind_texture_unit(nt_gfx_render_target_color(rt), NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(nt_gfx_render_target_color(rt), nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST}), 0);
     /* Without this the probe below would pass on a texture that never cached. */
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_texture(0));
 

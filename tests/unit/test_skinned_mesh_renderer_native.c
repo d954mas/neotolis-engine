@@ -504,11 +504,6 @@ void setUp(void) {
         .width = RT_W,
         .height = RT_H,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_BUFFER,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
         .label = "native_skin_target",
     });

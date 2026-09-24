@@ -108,7 +108,6 @@ static uint32_t s_fake_backend_restore_count;
 static uint32_t s_fake_gpu_caps_probe_count;
 static uint16_t s_fake_last_render_target_width;
 static uint16_t s_fake_last_render_target_height;
-static nt_render_target_depth_t s_fake_last_render_target_depth;
 static nt_texture_desc_t s_fake_last_texture_desc;
 static uint32_t s_fake_last_depth_texture_backend;
 static uint32_t s_fake_next_texture_backend;
@@ -189,7 +188,6 @@ uint32_t nt_gfx_fake_backend_restore_count(void) { return s_fake_backend_restore
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void) { return s_fake_gpu_caps_probe_count; }
 uint16_t nt_gfx_fake_last_render_target_width(void) { return s_fake_last_render_target_width; }
 uint16_t nt_gfx_fake_last_render_target_height(void) { return s_fake_last_render_target_height; }
-nt_render_target_depth_t nt_gfx_fake_last_render_target_depth(void) { return s_fake_last_render_target_depth; }
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void) { return s_fake_last_texture_desc; }
 uint32_t nt_gfx_fake_last_depth_texture_backend(void) { return s_fake_last_depth_texture_backend; }
 void nt_gfx_fake_fail_next_render_target_create(void) { s_fake_fail_next_render_target_create = true; }
@@ -256,7 +254,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_gpu_caps_probe_count = 0;
     s_fake_last_render_target_width = 0;
     s_fake_last_render_target_height = 0;
-    s_fake_last_render_target_depth = NT_RT_DEPTH_NONE;
     s_fake_last_texture_desc = (nt_texture_desc_t){0};
     s_fake_last_depth_texture_backend = 0;
     s_fake_last_update_buffer_offset = 0;
@@ -552,19 +549,15 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     s_fake_texture_destroy_count++;
 }
 
-uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
-    NT_ASSERT(desc != NULL);
-    NT_ASSERT(color_backend != 0);
-    (void)color_backend;
-    (void)depth_texture_backend;
+uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint16_t width, uint16_t height) {
+    NT_ASSERT(textures[NT_GFX_RT_COLOR] != 0 || textures[NT_GFX_RT_DEPTH] != 0);
     s_fake_render_target_create_count++;
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }
-    s_fake_last_render_target_depth = desc ? desc->depth_storage : NT_RT_DEPTH_NONE;
-    s_fake_last_render_target_width = desc ? desc->width : 0;
-    s_fake_last_render_target_height = desc ? desc->height : 0;
-    s_fake_last_depth_texture_backend = depth_texture_backend;
+    s_fake_last_render_target_width = width;
+    s_fake_last_render_target_height = height;
+    s_fake_last_depth_texture_backend = textures[NT_GFX_RT_DEPTH];
     if (s_fake_fail_next_render_target_create) {
         s_fake_fail_next_render_target_create = false;
         return 0;
@@ -572,18 +565,16 @@ uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc
     return s_fake_render_target_create_count;
 }
 
-bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const nt_render_target_desc_t *desc, uint32_t color_backend, uint32_t depth_texture_backend) {
-    (void)color_backend;
-    NT_ASSERT(desc != NULL);
+bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const uint32_t textures[NT_GFX_RT_ATTACHMENTS], const nt_texture_desc_t descs[NT_GFX_RT_ATTACHMENTS]) {
     /* A target whose recreate failed keeps handle 0; resize must report failure, not crash. */
     if (backend_handle == 0) {
         return false;
     }
+    const nt_texture_desc_t *size = textures[NT_GFX_RT_COLOR] != 0 ? &descs[NT_GFX_RT_COLOR] : &descs[NT_GFX_RT_DEPTH];
     s_fake_render_target_resize_count++;
-    s_fake_last_render_target_depth = desc ? desc->depth_storage : NT_RT_DEPTH_NONE;
-    s_fake_last_render_target_width = desc ? desc->width : 0;
-    s_fake_last_render_target_height = desc ? desc->height : 0;
-    s_fake_last_depth_texture_backend = depth_texture_backend;
+    s_fake_last_render_target_width = size->width;
+    s_fake_last_render_target_height = size->height;
+    s_fake_last_depth_texture_backend = textures[NT_GFX_RT_DEPTH];
     if (s_fake_fail_next_render_target_resize) {
         s_fake_fail_next_render_target_resize = false;
         return false;

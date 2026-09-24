@@ -280,35 +280,6 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     TEST_ASSERT_FALSE(capture.overflow);
 }
 
-static uint32_t render_target_depth_names(uint32_t *out_depth, uint32_t capacity) {
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < capture.count; i++) {
-        const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_RENDER_TARGET) {
-            TEST_ASSERT_LESS_THAN_UINT32(capacity, count);
-            out_depth[count++] = event->data.backend.args[2];
-        }
-    }
-    return count;
-}
-
-static void test_render_target_backend_definitions_carry_depth_renderbuffer(void) {
-    const nt_render_target_desc_t desc = {.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8, .depth_storage = NT_RT_DEPTH_BUFFER, .depth_format = NT_TEXTURE_FORMAT_DEPTH24};
-    (void)nt_gfx_make_render_target(&desc);
-    nt_gfx_capture_request();
-    nt_gfx_begin_frame();
-    (void)nt_gfx_make_render_target(&desc);
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(nt_gfx_capture_read().overflow);
-    /* The inherited target's definition, then the created one's. */
-    uint32_t depth[2] = {0};
-    TEST_ASSERT_EQUAL_UINT32(2, render_target_depth_names(depth, 2));
-    TEST_ASSERT_NOT_EQUAL(0, depth[0]);
-    TEST_ASSERT_NOT_EQUAL(0, depth[1]);
-    TEST_ASSERT_NOT_EQUAL(depth[0], depth[1]);
-}
-
 static void test_initial_uniform_records_cover_only_vec4(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "uniform mat4 m; uniform float f; void main(){gl_Position=m*vec4(f);}"});
     nt_shader_t fs = nt_gfx_make_shader(
@@ -654,7 +625,6 @@ int main(void) {
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_capture_publishes_resize_mappings_and_skip_reasons);
     RUN_TEST(test_new_program_defines_sampler_names_and_inactive_uniforms);
-    RUN_TEST(test_render_target_backend_definitions_carry_depth_renderbuffer);
     RUN_TEST(test_initial_uniform_records_cover_only_vec4);
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
     RUN_TEST(test_complete_capture_matches_gl_counters);

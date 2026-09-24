@@ -38,16 +38,7 @@ static void test_render_target_resize_without_spare_texture_slots(void) {
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_TEXTURE,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
-        .depth_texture_min_filter = NT_FILTER_NEAREST,
-        .depth_texture_mag_filter = NT_FILTER_NEAREST,
-        .depth_texture_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_texture_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "native_rt_smoke",
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
@@ -79,42 +70,20 @@ static void test_render_target_resize_without_spare_texture_slots(void) {
     nt_gfx_destroy_render_target(target);
 }
 
-static void test_depth_texture_uses_explicit_format_and_wrap(void) {
+static void test_depth_texture_uses_explicit_format(void) {
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_TEXTURE,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH16,
-        .depth_texture_min_filter = NT_FILTER_NEAREST,
-        .depth_texture_mag_filter = NT_FILTER_NEAREST,
-        .depth_texture_wrap_u = NT_WRAP_REPEAT,
-        .depth_texture_wrap_v = NT_WRAP_MIRRORED_REPEAT,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 6, 5));
 
-    const nt_texture_t depth_texture = nt_gfx_render_target_depth(target);
-    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(depth_texture), 0);
-    nt_gfx_backend_bind_sampler(nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(depth_texture)), 0);
+    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(nt_gfx_render_target_depth(target)), 0);
     GLint value = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
     TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT16, value);
-    GLint sampler = 0;
-    glGetIntegerv(GL_SAMPLER_BINDING, &sampler);
-    TEST_ASSERT_NOT_EQUAL_INT(0, sampler);
-    glGetSamplerParameteriv((GLuint)sampler, GL_TEXTURE_MIN_FILTER, &value);
-    TEST_ASSERT_EQUAL_INT(GL_NEAREST, value);
-    glGetSamplerParameteriv((GLuint)sampler, GL_TEXTURE_MAG_FILTER, &value);
-    TEST_ASSERT_EQUAL_INT(GL_NEAREST, value);
-    glGetSamplerParameteriv((GLuint)sampler, GL_TEXTURE_WRAP_S, &value);
-    TEST_ASSERT_EQUAL_INT(GL_REPEAT, value);
-    glGetSamplerParameteriv((GLuint)sampler, GL_TEXTURE_WRAP_T, &value);
-    TEST_ASSERT_EQUAL_INT(GL_MIRRORED_REPEAT, value);
 
     nt_gfx_destroy_render_target(target);
 }
@@ -336,11 +305,6 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_NONE,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vertices.id);
@@ -371,16 +335,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
         .width = 2,
         .height = 1,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_TEXTURE,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
-        .depth_texture_min_filter = NT_FILTER_NEAREST,
-        .depth_texture_mag_filter = NT_FILTER_NEAREST,
-        .depth_texture_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_texture_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "shadow_map_probe",
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, shadow_map.id);
@@ -490,6 +445,116 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_destroy_render_target(shadow_map);
 }
 
+typedef struct {
+    nt_pipeline_t depth_pip;
+    nt_pipeline_t shadow_pip;
+    nt_vertex_input_t depth_vi;
+    nt_vertex_input_t fullscreen_vi;
+    nt_sampler_t comparison;
+} shadow_probe_t;
+
+static shadow_probe_t make_shadow_probe(void) {
+    static const float right_half_quad[18] = {
+        0.0F, -1.0F, 0.6F, 1.0F, -1.0F, 0.6F, 1.0F, 1.0F, 0.6F, 0.0F, -1.0F, 0.6F, 1.0F, 1.0F, 0.6F, 0.0F, 1.0F, 0.6F,
+    };
+    static const fullscreen_vertex_t fullscreen_tri[3] = {
+        {{-1.0F, -1.0F}, {0.0F, 0.0F}},
+        {{3.0F, -1.0F}, {2.0F, 0.0F}},
+        {{-1.0F, 3.0F}, {0.0F, 2.0F}},
+    };
+    const nt_vertex_layout_t depth_layout = {
+        .stride = sizeof(float) * 3,
+        .attr_count = 1,
+        .attrs = {{.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0}},
+    };
+    const nt_vertex_layout_t fullscreen_layout = {
+        .stride = sizeof(fullscreen_vertex_t),
+        .attr_count = 2,
+        .attrs =
+            {
+                {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
+                {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
+            },
+    };
+    nt_buffer_t depth_vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = right_half_quad, .size = sizeof(right_half_quad)});
+    nt_buffer_t fullscreen_vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = fullscreen_tri, .size = sizeof(fullscreen_tri)});
+    return (shadow_probe_t){
+        .depth_pip = make_test_pipeline(s_depth_vs, s_depth_fs, true),
+        .shadow_pip = make_test_pipeline(s_fullscreen_vs, s_shadow_fs, false),
+        .depth_vi = make_test_vertex_input(&depth_layout, depth_vbo),
+        .fullscreen_vi = make_test_vertex_input(&fullscreen_layout, fullscreen_vbo),
+        .comparison = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR, .compare_func = NT_COMPARE_LEQUAL}),
+    };
+}
+
+/* Pass 1 writes depth 0.8 into the right half of the map over a 0.2 clear;
+   pass 2 compares against 0.5 across the drawable and reads back one row. */
+static void render_shadow_ramp(const shadow_probe_t *probe, nt_render_target_t shadow_map, uint8_t row[RAMP_WIDTH * 4]) {
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = shadow_map, .clear_depth = 0.2F});
+    nt_gfx_bind_pipeline(probe->depth_pip);
+    nt_gfx_bind_vertex_input(probe->depth_vi);
+    nt_gfx_draw(0, 6);
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
+    nt_gfx_set_viewport(0, 0, RAMP_WIDTH, (int)g_nt_window.fb_height);
+    nt_gfx_bind_pipeline(probe->shadow_pip);
+    nt_gfx_bind_vertex_input(probe->fullscreen_vi);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_shadow"), .texture = nt_gfx_render_target_depth(shadow_map), .sampler = probe->comparison};
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    nt_gfx_set_uniform_float(nt_hash32_str("u_ref"), 0.5F);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, RAMP_WIDTH * 4));
+    nt_gfx_end_pass();
+}
+
+/* A shadow map needs no colour: GL 3.3 core only completes the FBO with draw
+   and read buffer NONE. Column 19 samples u ~ 0.3, between the two cleared
+   texels of the 4-wide map but across the edge of the 2-wide one, so it tells
+   the resized storage from the original. */
+static void test_depth_only_shadow_map_renders_and_resizes(void) {
+    nt_render_target_t shadow_map = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+        .width = 2,
+        .height = 1,
+        .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
+        .label = "depth_only_shadow_map",
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, shadow_map.id);
+    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(shadow_map));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_color(shadow_map).id);
+    const nt_texture_t depth = nt_gfx_render_target_depth(shadow_map);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, depth.id);
+    TEST_ASSERT_TRUE_MESSAGE(g_nt_window.fb_width >= RAMP_WIDTH, "drawable narrower than the sampled ramp");
+    const shadow_probe_t probe = make_shadow_probe();
+    enum { RAMP_INSIDE_LEFT_HALF = 19 };
+
+    uint8_t row[RAMP_WIDTH * 4] = {0};
+    render_shadow_ramp(&probe, shadow_map, row);
+    TEST_ASSERT_EQUAL_UINT8(0, ramp_at(row, RAMP_NEAR));
+    TEST_ASSERT_EQUAL_UINT8(255, ramp_at(row, RAMP_FAR));
+    TEST_ASSERT_TRUE(ramp_at(row, RAMP_EDGE) > 0 && ramp_at(row, RAMP_EDGE) < 255);
+    TEST_ASSERT_TRUE(ramp_at(row, RAMP_INSIDE_LEFT_HALF) > 0);
+
+    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(shadow_map, 4, 1));
+    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(shadow_map));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_color(shadow_map).id);
+    TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(shadow_map).id);
+    uint16_t width = 0;
+    uint16_t height = 0;
+    TEST_ASSERT_TRUE(nt_gfx_texture_size(depth, &width, &height));
+    TEST_ASSERT_EQUAL_UINT16(4, width);
+
+    memset(row, 0, sizeof(row));
+    render_shadow_ramp(&probe, shadow_map, row);
+    TEST_ASSERT_EQUAL_UINT8(0, ramp_at(row, RAMP_NEAR));
+    TEST_ASSERT_EQUAL_UINT8(0, ramp_at(row, RAMP_INSIDE_LEFT_HALF));
+    TEST_ASSERT_EQUAL_UINT8(255, ramp_at(row, RAMP_FAR));
+    TEST_ASSERT_TRUE(ramp_at(row, RAMP_EDGE) > 0 && ramp_at(row, RAMP_EDGE) < 255);
+
+    nt_gfx_destroy_render_target(shadow_map);
+}
+
 /* An over-range clear must survive the round trip — clamping to white would
    mean the target has no headroom and only the format name changed. */
 static void test_half_float_target_is_complete_and_keeps_values_above_one(void) {
@@ -499,11 +564,6 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA16F,
-        .color_min_filter = NT_FILTER_LINEAR,
-        .color_mag_filter = NT_FILTER_LINEAR,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_NONE,
         .depth_format = NT_TEXTURE_FORMAT_INVALID,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
@@ -565,37 +625,6 @@ static void test_rgba32f_linear_filtering_and_generated_mips(void) {
     nt_gfx_destroy_texture(texture);
 }
 
-static void test_depth_buffer_uses_explicit_format(void) {
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = 4,
-        .height = 4,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_BUFFER,
-        .depth_format = NT_TEXTURE_FORMAT_DEPTH32F,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
-    GLint object_type = 0;
-    GLint renderbuffer = 0;
-    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &object_type);
-    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &renderbuffer);
-    TEST_ASSERT_EQUAL_INT(GL_RENDERBUFFER, object_type);
-    TEST_ASSERT_NOT_EQUAL_INT(0, renderbuffer);
-    glBindRenderbuffer(GL_RENDERBUFFER, (GLuint)renderbuffer);
-    GLint format = 0;
-    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_INTERNAL_FORMAT, &format);
-    TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT32F, format);
-    glBindRenderbuffer(GL_RENDERBUFFER, 0);
-    nt_gfx_end_pass();
-
-    nt_gfx_destroy_render_target(target);
-}
-
 /* The clear runs with the depth mask forced on and leaves it on; the pipeline
  * that wants it off must be re-bound inside the new pass. */
 static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) {
@@ -619,11 +648,6 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_BUFFER,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
@@ -719,11 +743,6 @@ static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_BUFFER,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
@@ -781,11 +800,6 @@ static void test_each_pipeline_binds_its_own_program(void) {
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_BUFFER,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
@@ -843,11 +857,6 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .color_min_filter = NT_FILTER_NEAREST,
-        .color_mag_filter = NT_FILTER_NEAREST,
-        .color_wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .color_wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .depth_storage = NT_RT_DEPTH_BUFFER,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
@@ -1460,14 +1469,14 @@ int main(void) {
     nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_render_target_resize_without_spare_texture_slots);
-    RUN_TEST(test_depth_texture_uses_explicit_format_and_wrap);
+    RUN_TEST(test_depth_texture_uses_explicit_format);
     RUN_TEST(test_custom_blend_state_reaches_gl_unchanged);
     RUN_TEST(test_all_public_blend_enums_reach_gl);
     RUN_TEST(test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_depth_comparison_sampler_blends_comparison_results);
+    RUN_TEST(test_depth_only_shadow_map_renders_and_resizes);
     RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);
     RUN_TEST(test_rgba32f_linear_filtering_and_generated_mips);
-    RUN_TEST(test_depth_buffer_uses_explicit_format);
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
     RUN_TEST(test_global_block_registered_before_link_binds_in_the_program);
     RUN_TEST(test_global_block_registered_after_link_binds_in_that_program);
