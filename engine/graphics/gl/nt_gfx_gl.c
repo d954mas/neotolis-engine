@@ -219,13 +219,6 @@ static struct {
     float clear_depth;
 } s_gl_cache;
 
-/* Cold bounded loops: each unrolled GL funnel call costs code size for no speed. */
-#if defined(__clang__)
-#define NT_GL_COLD_LOOP _Pragma("clang loop unroll(disable)")
-#else
-#define NT_GL_COLD_LOOP
-#endif
-
 // #region capture of authoritative backend mirrors
 #if NT_GFX_CAPTURE_ENABLED
 static void capture_program_definition(uint32_t i) {
@@ -418,7 +411,6 @@ static void nt_gfx_gl_cache_ground_state(void) {
     NT_GL(glPolygonOffset, 0.0F, 0.0F);
     NT_GL(glDisable, GL_SCISSOR_TEST);
     NT_GL(glActiveTexture, GL_TEXTURE0);
-    NT_GL_COLD_LOOP
     for (uint32_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
         NT_GL(glBindSampler, unit, 0);
     }
@@ -611,7 +603,6 @@ static GLenum map_texture_wrap(nt_texture_wrap_t w) {
  * may repeat GL_CONTEXT_LOST forever. Returns whether any error was pending. */
 static bool nt_gfx_gl_drain_errors(void) {
     bool drained = false;
-    NT_GL_COLD_LOOP
     for (int i = 0; i < 16 && NT_GL_RET0(glGetError) != GL_NO_ERROR; i++) {
         drained = true;
     }
