@@ -371,7 +371,8 @@ attachment textures, as a vertex input borrows its buffers.
 `nt_gfx_make_render_target` reads the descriptor only during the call; the
 caller destroys the result with `nt_gfx_destroy_render_target`, which leaves the
 textures alive. The caller creates each attachment texture with
-`nt_gfx_make_texture` (NULL data) and destroys it itself. Destroying a texture
+`nt_gfx_make_texture`, typically with NULL data (a texture with pixels is
+accepted), and destroys it itself. Destroying a texture
 destroys every render target that borrows it, so one depth texture can serve
 several targets and no target outlives its storage. Destroying an invalid or
 stale target handle is a no-op, as for vertex inputs.

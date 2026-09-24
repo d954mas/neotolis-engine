@@ -284,8 +284,9 @@ pipeline, vertex input, and the logical complete texture set are pass-scoped:
 program and is discarded when that program changes or when the bound pipeline is
 destroyed. Pipeline and vertex-input binds, texture-set application,
 instance-buffer re-pointing, uniform writes and draws outside a pass assert.
-Destroying a texture or a render target inside a pass asserts: pass-scoped draw
-state may still sample it.
+Destroying a texture or a live render target inside a pass asserts: pass-scoped
+draw state may still sample it. Destroying an INVALID or stale render target is a
+no-op even inside a pass: the handle check runs first, as for vertex inputs.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
 uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
@@ -293,7 +294,7 @@ mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, colour
 and depth. Each attachment is a game-owned texture made with
-`nt_gfx_make_texture` (NULL data) that the target borrows, as a vertex input
+`nt_gfx_make_texture`, typically with NULL data, that the target borrows, as a vertex input
 borrows its buffers; `nt_gfx_render_target_color` returns the borrowed colour
 texture, INVALID when absent. One texture may serve several targets, such as a
 depth buffer shared by two passes. Sampling an attachment while its target is
