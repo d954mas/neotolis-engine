@@ -141,7 +141,6 @@ static struct {
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
 
     nt_gfx_render_state_t render_state;
-    bool tick_aborted; /* a probe observed context loss during the open tick */
     uint32_t active_render_target;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
@@ -194,27 +193,6 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 nt_gfx_capture_state_t g_nt_gfx_capture;
 #endif
 
-/* The frontend alone marks losses: once per tick, and only for a new detection. */
-static void observe_context_loss(void) {
-    if (!s_gfx.tick_aborted) {
-        s_gfx.tick_aborted = true;
-        NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_CONTEXT, event->reason = NT_GFX_REASON_CONTEXT_LOST);
-    }
-}
-
-/* Success-path probe: reads the backend's event flag, no JS call. An
- * already-known loss rejects work without marking later ticks. */
-static bool gfx_context_lost(void) {
-    if (g_nt_gfx.context_lost) {
-        return true;
-    }
-    const bool lost = nt_gfx_backend_is_context_lost();
-    if (lost) {
-        observe_context_loss();
-    }
-    return lost;
-}
-
 /* A backend failure caused by a loss is the recoverable CONTEXT_LOST and logs
  * nothing; only a failure on a live context is an error. The browser is asked
  * because the loss event may still be queued. */
@@ -223,7 +201,6 @@ static nt_gfx_event_reason_t backend_failed(const char *what) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
     if (nt_gfx_backend_query_context_lost()) {
-        observe_context_loss();
         return NT_GFX_REASON_CONTEXT_LOST;
     }
     if (what != NULL) {
@@ -239,9 +216,7 @@ const char *nt_gfx_gl_call_name(uint32_t call) {
 #undef NT_GFX_GL_CALL_NAME_
     return call < NT_GFX_GL_COUNT ? names[call] : NULL;
 }
-#endif
 
-#if NT_GFX_CAPTURE_ENABLED
 void nt_gfx_capture_request(void) {
     NT_ASSERT(g_nt_gfx_capture.capacity > 0);
     g_nt_gfx_capture.request_pending = true;
@@ -252,9 +227,7 @@ nt_gfx_capture_view_t nt_gfx_capture_read(void) {
     result.events = result.count > 0 ? g_nt_gfx_capture.events : NULL;
     return result;
 }
-#endif
 
-#if NT_GFX_CAPTURE_ENABLED
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one record schema per owned resource kind
 static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) {
     uint32_t slot = nt_pool_slot_index(id);
@@ -338,31 +311,22 @@ static void capture_initial_state(void) {
     for (uint32_t i = 1; i <= s_gfx.sampler_count; i++) {
         capture_resource_definition(NT_GFX_OBJECT_SAMPLER, i);
     }
-    /* Until a restore, backend tables hold dead names, some for pipelines and vertex inputs already freed. */
-    if (!g_nt_gfx.context_lost) {
-        nt_gfx_backend_capture_initial_state();
-    }
+    nt_gfx_backend_capture_initial_state();
 }
 #else
 #define NT_GFX_DEFINE_RESOURCE(kind, id) ((void)0)
 #endif
 
 /* The next tick starts at once: gfx work is always inside a tick between init and shutdown. */
-static void open_tick(void) {
-    s_gfx.tick_aborted = false;
-    g_nt_gfx.counters = (nt_gfx_counters_t){.tick_sequence = g_nt_gfx.counters.tick_sequence + 1};
-}
+static void open_tick(void) { g_nt_gfx.counters = (nt_gfx_counters_t){.tick_sequence = g_nt_gfx.counters.tick_sequence + 1}; }
 
 void nt_gfx_end_tick(void) {
     NT_ASSERT(g_nt_gfx.initialized);
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
-    g_nt_gfx.last_tick = (nt_gfx_tick_snapshot_t){
-        .counters = g_nt_gfx.counters,
-        .status = (s_gfx.tick_aborted || g_nt_gfx.context_lost) ? NT_GFX_TICK_ABORTED : NT_GFX_TICK_COMPLETE,
-    };
+    g_nt_gfx.last_tick = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
     if (g_nt_gfx_capture.recording) {
-        g_nt_gfx_capture.view.snapshot = g_nt_gfx.last_tick;
+        g_nt_gfx_capture.view.counters = g_nt_gfx.last_tick;
         g_nt_gfx_capture.recording = false;
     }
     open_tick();
@@ -446,7 +410,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_shutdown(void) {
-    /* The open tick is discarded without a snapshot; teardown calls must not record into the freed array. */
+    /* The open tick is discarded unpublished; teardown calls must not record into the freed array. */
 #if NT_GFX_CAPTURE_ENABLED
     g_nt_gfx_capture.recording = false;
     free(g_nt_gfx_capture.events);
@@ -717,105 +681,103 @@ static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t
 
 /* ---- Frame / Pass ---- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) — context-loss recovery branches push it just over 25
-static nt_gfx_event_reason_t begin_frame(void) {
-    bool backend_context_lost = nt_gfx_backend_is_context_lost();
-    if (backend_context_lost) {
-        /* A loss reported while one is known needs no second wipe, but must not stay latched. */
-        nt_gfx_backend_ack_context_loss();
+/* Every backend name died with the context. Restore refills render targets,
+ * their attachments and samplers, so a restore that meets a new loss wipes again. */
+static void wipe_backend_handles(void) {
+    for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
+        s_gfx.shader_backends[i] = 0;
     }
-    if (backend_context_lost && !g_nt_gfx.context_lost) {
-        /* First detection: mark the tick once and wipe all backend handles */
-        observe_context_loss();
-        for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
-            s_gfx.shader_backends[i] = 0;
+    for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
+        s_gfx.program_backends[i] = 0;
+    }
+    /* Pipelines and vertex inputs are baked objects with no re-fill path:
+     * loss frees their slots outright, so handles held across a loss go
+     * stale and the weak renderer caches self-heal on their validity
+     * checks. Primary resources stay as husks -- owners destroy them. */
+    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+        if (nt_pool_slot_alive(&s_gfx.pipeline_pool, i)) {
+            nt_pool_free(&s_gfx.pipeline_pool, s_gfx.pipeline_pool.slots[i].id);
         }
-        for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
-            s_gfx.program_backends[i] = 0;
+        s_gfx.pipeline_programs[i] = 0;
+    }
+    for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
+        if (nt_pool_slot_alive(&s_gfx.vertex_input_pool, i)) {
+            nt_pool_free(&s_gfx.vertex_input_pool, s_gfx.vertex_input_pool.slots[i].id);
         }
-        /* Pipelines and vertex inputs are baked objects with no re-fill path:
-         * loss frees their slots outright, so handles held across a loss go
-         * stale and the weak renderer caches self-heal on their validity
-         * checks. Primary resources stay as husks -- owners destroy them. */
-        for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
-            if (nt_pool_slot_alive(&s_gfx.pipeline_pool, i)) {
-                nt_pool_free(&s_gfx.pipeline_pool, s_gfx.pipeline_pool.slots[i].id);
-            }
-            s_gfx.pipeline_programs[i] = 0;
-        }
-        for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
-            if (nt_pool_slot_alive(&s_gfx.vertex_input_pool, i)) {
-                nt_pool_free(&s_gfx.vertex_input_pool, s_gfx.vertex_input_pool.slots[i].id);
-            }
-            memset(&s_gfx.vertex_input_metas[i], 0, sizeof(nt_gfx_vertex_input_meta_t));
-        }
-        for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
-            s_gfx.buffer_backends[i] = 0;
-        }
-        for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
-            s_gfx.texture_backends[i] = 0;
-        }
-        for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
-            s_gfx.render_target_backends[i] = 0;
-            s_gfx.render_target_metas[i].complete = false;
-        }
-        /* Mesh table: keep entries active. nt_resource_invalidate() will
-         * call deactivate_mesh() which returns slots to mesh pool.
-         * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
-        s_gfx.bound_pipeline = 0;
-        s_gfx.active_render_target = 0;
-        discard_texture_set();
-        s_gfx.bound_vertex_input = 0;
-        s_gfx.bound_index_type = NT_INDEX_NONE;
-        /* Sampler cache: zero only the backend ids so material-stored sampler.id slot references
-         * stay valid; the backend is lazily recreated on the next nt_gfx_make_sampler hit or bind_texture. */
-        for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
-            s_gfx.sampler_cache[i].backend = 0;
-        }
-        for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
-            s_gfx.texture_metas[i].default_sampler = NT_SAMPLER_INVALID;
-        }
-        /* Timer-segment GL queries are dead too — let backend re-allocate
-         * on next begin_segment via the lazy-find-or-alloc path. */
-        nt_gfx_backend_drop_timer_segments();
+        memset(&s_gfx.vertex_input_metas[i], 0, sizeof(nt_gfx_vertex_input_meta_t));
+    }
+    for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
+        s_gfx.buffer_backends[i] = 0;
+    }
+    for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+        s_gfx.texture_backends[i] = 0;
+    }
+    for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
+        s_gfx.render_target_backends[i] = 0;
+        s_gfx.render_target_metas[i].complete = false;
+    }
+    /* Mesh table: keep entries active. nt_resource_invalidate() will
+     * call deactivate_mesh() which returns slots to mesh pool.
+     * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
+    s_gfx.bound_pipeline = 0;
+    s_gfx.active_render_target = 0;
+    discard_texture_set();
+    s_gfx.bound_vertex_input = 0;
+    s_gfx.bound_index_type = NT_INDEX_NONE;
+    /* Sampler cache: zero only the backend ids so material-stored sampler.id slot references
+     * stay valid; the backend is lazily recreated on the next nt_gfx_make_sampler hit or bind_texture. */
+    for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
+        s_gfx.sampler_cache[i].backend = 0;
+    }
+    for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+        s_gfx.texture_metas[i].default_sampler = NT_SAMPLER_INVALID;
+    }
+    /* Timer-segment GL queries are dead too — let backend re-allocate
+     * on next begin_segment via the lazy-find-or-alloc path. */
+    nt_gfx_backend_drop_timer_segments();
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- context-loss recovery branches
+static nt_gfx_event_reason_t begin_frame(void) {
+    /* Always consumed: a loss and restore between two frames must still wipe the tables. */
+    const bool new_loss = nt_gfx_backend_take_context_loss();
+    if (new_loss && !g_nt_gfx.context_lost) {
+        wipe_backend_handles();
         g_nt_gfx.context_lost = true;
         NT_LOG_ERROR("WebGL context lost");
-        return NT_GFX_REASON_CONTEXT_LOST; /* Skip frame */
-    }
-
-    if (backend_context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
 
     if (g_nt_gfx.context_lost) {
-        /* The whole restore is one operation; render-target definitions and backend calls sit inside it. */
-        NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
-        /* A failed recreate leaves no context, which stays lost for good; a
-         * successful one can meet a new loss, and restoring onto it would
-         * publish dead objects. */
-        const bool recreated = nt_gfx_backend_recreate_all_resources();
-        if (!recreated || nt_gfx_backend_query_context_lost()) {
-            observe_context_loss();
-            NT_GFX_END(NT_GFX_REASON_CONTEXT_LOST);
-            if (!recreated) {
-                NT_LOG_ERROR("WebGL context restore failed");
-            }
+        if (nt_gfx_backend_query_context_lost()) {
             return NT_GFX_REASON_CONTEXT_LOST;
         }
+        /* The whole restore is one operation; render-target definitions and backend calls sit inside it. */
+        NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
+        /* A failed recreate leaves no context, so the query keeps reporting lost for good. */
+        if (!nt_gfx_backend_recreate_all_resources()) {
+            NT_GFX_END(NT_GFX_REASON_CONTEXT_LOST);
+            NT_LOG_ERROR("WebGL context restore failed");
+            return NT_GFX_REASON_CONTEXT_LOST;
+        }
+        /* getExtension enables the float color attachments the render targets may need. */
         g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
+        /* Cleared first so the render-target creates run and backend_failed asks the browser. */
         g_nt_gfx.context_lost = false;
-        s_gfx.scissor_enabled = false;
         bool render_targets_restored = true;
         for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
-            if (nt_pool_slot_alive(&s_gfx.render_target_pool, i) && !render_target_recreate_backend(i)) {
-                /* A loss here is wiped by the next begin_frame's first detection. */
-                if (backend_failed(NULL) == NT_GFX_REASON_CONTEXT_LOST) {
-                    NT_GFX_END(NT_GFX_REASON_CONTEXT_LOST);
-                    return NT_GFX_REASON_CONTEXT_LOST;
-                }
+            if (nt_pool_slot_alive(&s_gfx.render_target_pool, i) && !render_target_recreate_backend(i) && backend_failed(NULL) != NT_GFX_REASON_CONTEXT_LOST) {
                 render_targets_restored = false;
             }
         }
+        /* Restoring onto a new loss would publish dead names; stay lost and retry later. */
+        if (nt_gfx_backend_query_context_lost()) {
+            wipe_backend_handles();
+            g_nt_gfx.context_lost = true;
+            NT_GFX_END(NT_GFX_REASON_CONTEXT_LOST);
+            return NT_GFX_REASON_CONTEXT_LOST;
+        }
+        s_gfx.scissor_enabled = false;
         g_nt_gfx.context_restored = true;
         NT_GFX_END(NT_GFX_REASON_ACCEPTED);
         if (render_targets_restored) {
@@ -1041,8 +1003,7 @@ static nt_gfx_event_reason_t make_program(nt_shader_t vs, nt_shader_t fs, nt_pro
     NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, vs.id) && "make_program: invalid vertex shader handle");
     NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, fs.id) && "make_program: invalid fragment shader handle");
 
-    /* The browser can recover before begin_frame resets the backend tables. */
-    if (gfx_context_lost()) {
+    if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
 
@@ -1152,10 +1113,9 @@ static nt_gfx_event_reason_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pi
      * -- a lost context, a failed backend allocation -- returns an invalid handle
      * the caller retries on a later frame. */
     NT_ASSERT(desc != NULL);
-    /* Same predicate as make_program: context loss is what zeroes the program
-     * backend, so without this every renderer would trap on the readiness assert
-     * below -- and the browser can recover before begin_frame resets the tables. */
-    if (gfx_context_lost()) {
+    /* Context loss zeroes the program backend, so without this every renderer
+     * would trap on the readiness assert below. */
+    if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
     NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
@@ -1194,7 +1154,7 @@ static nt_gfx_event_reason_t make_vertex_input(const nt_vertex_input_desc_t *des
     /* Same contract as make_pipeline: caller errors trap, only a lost context
      * or a failed backend allocation returns an invalid handle. */
     NT_ASSERT(desc != NULL);
-    if (gfx_context_lost()) {
+    if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
     NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
@@ -1285,7 +1245,7 @@ static nt_gfx_event_reason_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer
     }
     /* Same recoverable contract as the other make_* creators -- without this
      * a lost-frame creation yields a pool-valid buffer with a dead GL name. */
-    if (gfx_context_lost()) {
+    if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
 
@@ -1344,7 +1304,7 @@ static nt_gfx_event_reason_t make_texture(const nt_texture_desc_t *desc, bool re
     if (!desc) {
         return NT_GFX_REASON_INVALID_ARGUMENT;
     }
-    if (gfx_context_lost()) {
+    if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
     nt_texture_desc_t local_desc = *desc;
@@ -1477,7 +1437,7 @@ static nt_gfx_event_reason_t make_render_target(const nt_render_target_desc_t *d
     if (!desc) {
         return NT_GFX_REASON_INVALID_ARGUMENT;
     }
-    if (gfx_context_lost()) {
+    if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
@@ -2711,9 +2671,6 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
-    if (!enabled) {
-        (void)gfx_context_lost(); /* disabling drops dead timer queries on a loss, so the loss is detected here */
-    }
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_REASON_ACCEPTED);
 }
@@ -2840,7 +2797,7 @@ static nt_texture_format_t basis_target_format(const nt_gfx_gpu_caps_t *caps, nt
 static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     /* make_texture would refuse the result anyway; bail before transcoding
      * the whole chain into staging. */
-    if (gfx_context_lost()) {
+    if (g_nt_gfx.context_lost) {
         return 0;
     }
     const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;

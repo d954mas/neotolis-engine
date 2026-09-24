@@ -378,38 +378,3 @@ test('diagnostics: loss cancels dead queries and restore preserves OFF and repro
     }
   }
 });
-
-test('diagnostics: disabling timing marks a new loss once and a known loss not at all', async ({ page }) => {
-  await installTimers(page);
-  await ready(page);
-  test.skip(expected.gpu === 0, 'timing disable has no loss branch without the producer');
-  const fresh = await page.evaluate(async () => {
-    const api = (window as unknown as { __nt: DiagnosticsHooks }).__nt;
-    const canvas = document.querySelector('canvas')!;
-    const extension = canvas.getContext('webgl2')!.getExtension('WEBGL_lose_context');
-    if (!extension) throw new Error('WEBGL_lose_context unavailable');
-    window.__ntTimerLoss = extension;
-    // Resumes inside the lost event's task: no frame runs before the recorded tick closes.
-    const lost = new Promise((resolve) => canvas.addEventListener('webglcontextlost', resolve, { once: true }));
-    extension.loseContext();
-    await lost;
-    api.gpu_command(6);
-    api.gpu_command(2);
-    api.gpu_command(3);
-    api.gpu_command(2);
-    return api.gpu_command(7);
-  });
-  test.skip(fresh === -1, 'capture compiled out');
-  expect(fresh, 'one marker for the newly detected loss').toBe(1);
-  await page.waitForFunction(() => !(window as unknown as { __nt: DiagnosticsHooks }).__nt.programs_ready());
-  const known = await page.evaluate(() => {
-    const api = (window as unknown as { __nt: DiagnosticsHooks }).__nt;
-    api.gpu_command(6);
-    api.gpu_command(3);
-    api.gpu_command(2);
-    return api.gpu_command(7);
-  });
-  expect(known, 'a known loss adds no marker').toBe(0);
-  await page.evaluate(() => window.__ntTimerLoss!.restoreContext());
-  await page.waitForFunction(() => (window as unknown as { __nt: DiagnosticsHooks }).__nt.programs_ready(), null, { timeout: 30_000 });
-});

@@ -25,8 +25,7 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     return true;
 }
 void nt_gfx_gl_ctx_destroy(void) {}
-bool nt_gfx_gl_ctx_is_lost(void) { return s_fixture_lost; }
-void nt_gfx_gl_ctx_ack_loss(void) {}
+bool nt_gfx_gl_ctx_take_loss(void) { return false; }
 bool nt_gfx_gl_ctx_query_lost(void) { return s_fixture_lost; }
 bool nt_gfx_gl_ctx_enable_timer_query(void) { return s_fixture_supported; }
 bool nt_gfx_gl_ctx_enable_debug_groups(void) { return true; }

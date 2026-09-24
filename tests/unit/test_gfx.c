@@ -404,8 +404,8 @@ void test_gfx_make_program_context_lost_returns_invalid(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
 
-    /* No begin_frame in between: g_nt_gfx.context_lost is still false, so this
-     * pins the live backend poll rather than the cached flag. */
+    /* No begin_frame in between: g_nt_gfx.context_lost is still false, so the
+     * failed backend create reports the loss. */
     nt_gfx_fake_set_context_lost(true);
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     nt_gfx_fake_set_context_lost(false);
@@ -429,7 +429,7 @@ void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
 
     /* Neither loss gate can explain the rejection below. */
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    TEST_ASSERT_FALSE(nt_gfx_backend_is_context_lost());
+    TEST_ASSERT_FALSE(nt_gfx_backend_query_context_lost());
     TEST_ASSERT_FALSE(nt_gfx_shader_ready(vs));
     TEST_ASSERT_FALSE(nt_gfx_shader_ready(fs));
 
@@ -462,20 +462,18 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
         TEST_FAIL_MESSAGE("Context loss during program link must return invalid without asserting");
     }
     for (uint32_t attempt = 0; attempt < 12; attempt++) {
-        /* Each attempt starts on a live context whose earlier loss is consumed. */
+        /* Each attempt starts on a live context. */
         nt_gfx_fake_set_context_lost(false);
-        nt_gfx_backend_ack_context_loss();
         nt_gfx_fake_lose_context_on_program_create();
         nt_program_t program = nt_gfx_make_program(vs, fs);
         TEST_ASSERT_EQUAL_UINT32(0, program.id);
         TEST_ASSERT_FALSE(nt_gfx_program_valid(program));
         TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-        TEST_ASSERT_TRUE(nt_gfx_backend_is_context_lost());
+        TEST_ASSERT_TRUE(nt_gfx_backend_query_context_lost());
         TEST_ASSERT_EQUAL_UINT32(attempt + 1, nt_gfx_fake_program_create_count());
     }
 
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_backend_ack_context_loss();
     for (uint32_t i = 0; i < 4; i++) {
         programs[i] = nt_gfx_make_program(vs, fs);
         TEST_ASSERT_TRUE(nt_gfx_program_ready(programs[i]));
@@ -3035,7 +3033,7 @@ void test_gfx_frame_draw_calls(void) {
     nt_gfx_end_frame();
     nt_gfx_end_tick();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.last_tick.counters));
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.last_tick));
 
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_shader(vs);

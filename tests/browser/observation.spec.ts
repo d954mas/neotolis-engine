@@ -6,9 +6,7 @@ type ObserveHooks = {
   observe_probe(mode: number): number;
   observe_value(index: number): number;
   observe_record(enabled: number): void;
-  observe_status(): number;
   restore_ticks(): number;
-  restore_status(): number;
 };
 type CallControl = { active: boolean; calls: Record<string, number>; payloads: Record<string, number>; bytes: Record<string, number> };
 
@@ -81,7 +79,6 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
     const v = run.values;
     expect(run.pixel).toBe(0xffc08040);
     expect(v[1]).toBe(1); // capture compiled in
-    expect(v[2]).toBe(1); // COMPLETE counters, independent of capture overflow.
     expect(v[3]).toBe(1);
     expect(v.slice(4, 6)).toEqual([16, 32]); // Preparation before gfx begin.
     expect(v.slice(14, 18)).toEqual([16, 32, 1, 2]);
@@ -102,30 +99,29 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
     expect(v.slice(26, 31)).toEqual([...buffers, ...textures].map(name => run.calls[name] || 0));
     if (run.mode === 0 && index === 0) {
       // No request yet: nothing was ever recorded.
-      expect(v.slice(11, 14)).toEqual([0, 0, 0]);
+      expect(v.slice(11, 13)).toEqual([0, 0]);
+      expect(v[18]).toBe(0);
     } else if (run.mode === 0) {
       // No request: the mode-1 capture is still the finalized one.
       const recorded = runs[index - 1].values;
-      expect(v.slice(11, 14)).toEqual(recorded.slice(11, 14));
+      expect(v.slice(11, 13)).toEqual(recorded.slice(11, 13));
       expect(v[18]).toBe(recorded[18]);
       expect(v[18]).toBeGreaterThan(0);
     } else if (run.mode === 1) {
       expect(v[18]).toBe(v[19]); // The capture finalized the probe's own tick.
       expect(v[11]).toBe(0);
       expect(v[12]).toBeGreaterThan(0);
-      expect(v[13]).toBe(1);
       expect(v.slice(20, 26)).toEqual(['useProgram', 'bindVertexArray', 'bindTexture', 'bindSampler', 'uniform4fv', 'uniform1i'].map(name => run.calls[name] || 0));
     } else if (run.mode === 2) {
       expect(v[18]).toBe(v[19]);
       expect(v[11]).toBe(1);
-      expect(v[12]).toBe(16384);
-      expect(v[13]).toBe(1); // COMPLETE tick; overflow alone marks the capture incomplete.
+      expect(v[12]).toBe(16384); // overflow alone marks the capture incomplete; counters stay whole
     }
   }
   expect(errors).toEqual([]);
 });
 
-test('gfx observation marks context loss aborted and resumes complete frames', async ({ page }) => {
+test('gfx observation keeps recording across a context loss and restore', async ({ page }) => {
   test.setTimeout(60_000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -140,16 +136,9 @@ test('gfx observation marks context loss aborted and resumes complete frames', a
     hooks.observe_record(1);
     loss.loseContext();
   });
-  await page.waitForFunction(() => (window as unknown as { __nt: ObserveHooks }).__nt.observe_status() === 2); // ABORTED
+  await page.waitForFunction(() => !(window as unknown as { __nt: ObserveHooks }).__nt.programs_ready());
   await page.evaluate(() => (window as unknown as { observationLoss: WEBGL_lose_context }).observationLoss.restoreContext());
-  await page.waitForFunction(() => {
-    const hooks = (window as unknown as { __nt: ObserveHooks }).__nt;
-    return hooks.observe_status() === 1 && hooks.programs_ready();
-  });
-  const restore = await page.evaluate(() => {
-    const hooks = (window as unknown as { __nt: ObserveHooks }).__nt;
-    return { ticks: hooks.restore_ticks(), status: hooks.restore_status() };
-  });
-  expect(restore).toEqual({ ticks: 1, status: 1 }); // The tick whose begin_frame restored is COMPLETE.
+  await page.waitForFunction(() => (window as unknown as { __nt: ObserveHooks }).__nt.programs_ready());
+  expect(await page.evaluate(() => (window as unknown as { __nt: ObserveHooks }).__nt.restore_ticks())).toBe(1);
   expect(errors).toEqual([]);
 });

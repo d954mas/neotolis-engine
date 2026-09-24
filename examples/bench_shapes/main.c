@@ -490,7 +490,7 @@ static void frame(void) {
     if (s_log_timer >= 1.0F) {
         float avg = s_dt_sum / (float)s_dt_count;
         float render_avg = s_render_sum / (float)s_dt_count;
-        const nt_gfx_counters_t stats = g_nt_gfx.last_tick.counters; /* previous tick; this one has not drawn yet */
+        const nt_gfx_counters_t stats = g_nt_gfx.last_tick; /* previous tick; this one has not drawn yet */
         const uint32_t inst_dc = stats.accepted[NT_GFX_OP_DRAW_INSTANCED] + stats.accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED];
         uint32_t batch_dc = nt_gfx_draw_calls(&stats) - inst_dc;
         uint64_t tris = stats.indices / 3;

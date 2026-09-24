@@ -215,7 +215,7 @@ static bool cmd_render_info(const cJSON *params, cJSON *result, nt_devapi_error 
     (void)ud;
     devapi_add_bool(result, "enabled", nt_app_render_enabled());
     /* Last closed tick: this command runs early in the next tick, before its draws. */
-    devapi_add_number(result, "draw_calls", (double)nt_gfx_draw_calls(&g_nt_gfx.last_tick.counters));
+    devapi_add_number(result, "draw_calls", (double)nt_gfx_draw_calls(&g_nt_gfx.last_tick));
     return true;
 }
 // #endregion

@@ -700,7 +700,7 @@ static void test_context_restore_waits_after_a_restore_that_leaves_the_backend_l
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_backend_restore_count());
 }
 
-static void test_context_restore_stays_lost_when_the_recreate_latches_a_loss(void) {
+static void test_context_restore_stays_lost_when_the_recreate_meets_a_loss(void) {
     nt_render_target_desc_t desc = rt_desc(NT_RT_DEPTH_NONE);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
@@ -712,12 +712,9 @@ static void test_context_restore_stays_lost_when_the_recreate_latches_a_loss(voi
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_gpu_caps_probe_count());
 
-    /* The next frame consumes the latched loss; the one after restores. */
+    /* The restore that met the loss wiped what it made; the next one starts clean. */
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame();
-    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
@@ -892,7 +889,7 @@ int main(void) {
     RUN_TEST(test_resize_preserves_depth_mode_accessor_matrix);
     RUN_TEST(test_context_restore_recreates_backend_from_retained_descriptor);
     RUN_TEST(test_context_restore_waits_after_a_restore_that_leaves_the_backend_lost);
-    RUN_TEST(test_context_restore_stays_lost_when_the_recreate_latches_a_loss);
+    RUN_TEST(test_context_restore_stays_lost_when_the_recreate_meets_a_loss);
     RUN_TEST(test_context_restore_waits_while_backend_remains_lost);
     RUN_TEST(test_context_restore_marks_failed_target_not_ready);
     RUN_TEST(test_resize_does_not_recover_missing_stub_backend);

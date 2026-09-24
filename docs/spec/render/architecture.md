@@ -387,65 +387,52 @@ the open tick and at once opens the next, so there is no state outside a tick
 and nothing to assert about it. The host calls `nt_gfx_end_tick` once at the end
 of each frame callback, also when nothing renders. Work between init and the
 first end_tick (init itself, pre-loop loading) is the first tick; teardown work
-after the last end_tick lands in a tick that `nt_gfx_shutdown` discards without
-a snapshot. Ticks are a host contract in every build, independent of simulation
-time; app/gfx never close one implicitly. end_tick requires gfx IDLE: only
-begin_frame marks a context lost, before it leaves IDLE. A tick holds any number of render frames and
-passes; their counters sum. The stub is stateless: its end_tick is inert and it
-never publishes a snapshot.
+after the last end_tick lands in a tick that `nt_gfx_shutdown` discards
+unpublished. Ticks are a host contract in every build, independent of simulation
+time; app/gfx never close one implicitly. end_tick requires gfx IDLE. A tick
+holds any number of render frames and passes; their counters sum. The stub is
+stateless: its end_tick is inert and it never publishes counters.
 
 `g_nt_gfx.counters` holds the live counters of the open tick. `nt_gfx_end_tick`
-copies them and a status into `g_nt_gfx.last_tick`, the last closed tick, then
-resets them and advances `tick_sequence`; render frames reset nothing.
-`last_tick` stays unchanged until the next end or shutdown; before the first
-end its status is UNAVAILABLE. Readers early in a callback, before its draws,
-read `last_tick`. A no-render tick reports zero draws; old geometry is never
-reused. A tick is ABORTED when a loss is detected during it or the context is
-still known lost at its end. Only the frontend marks a loss, and only a newly
-detected one: begin_frame's first detection, a restore that fails or meets a new
-loss, a frontend pre-check that reads a loss the backend reports but the frontend
-does not know yet (including disabling GPU timing), and a backend failure the frontend attributes to a loss (a
-create, a render-target resize or restore, a readback, a lazy sampler recreate).
-A rejection on an already-known loss does not by itself mark the tick. end_tick
-does not probe the backend: a loss in a tick without a probe marks the next tick
-that probes.
-A tick whose begin_frame restores a lost context and then completes is COMPLETE.
+copies them into `g_nt_gfx.last_tick`, the last closed tick, then resets them
+and advances `tick_sequence`; render frames reset nothing. `last_tick` stays
+unchanged until the next end or shutdown; its `tick_sequence` is 0 before the
+first end. Readers early in a callback, before its draws, read `last_tick`. A
+no-render tick reports zero draws; old geometry is never reused. Counters carry
+no loss status: a tick that met a context loss holds what was accepted before
+and after it.
 
-The web context learns of a loss from the canvas `webglcontextlost` and
-`webglcontextrestored` events, which the engine registers on its canvas; the lost
-handler calls `preventDefault` (the browser restores only a handled loss), so
-shells must not. Loss checks on success paths read the flags these events set and
-make no JS call. A loss stays reported until the next begin_frame consumes it, so
-a loss and restore that both happen between two frames (a background tab) still
-wipe the backend tables at that begin_frame and restore at the next one. The
-browser reports a loss at once but queues its event, so a loss whose event has
-not arrived yet is found by asking the browser directly, which latches it like
-the event would. The frontend asks, through the backend's query hook, whenever a
-backend call reports a failure and after every restore's recreate: a create, a
-render-target resize or restore, a readback or a lazy sampler recreate at bind
-that failed on a loss returns `CONTEXT_LOST`, not `BACKEND_FAILURE` or
-`UNREADY`, and logs no error (the sampler's one-shot error log stays unspent).
-The backend asks only where the answer changes what it does: shader and program
-creation, once per create, before the Emscripten calls that throw on the null
-object some browsers return on a lost context; error logs for link, uniform
-reflection, framebuffer completeness and texture creation, which a loss
+Context loss is detected at begin_frame. The web context registers a canvas
+`webglcontextlost` handler that calls `preventDefault` (the browser restores only
+a handled loss, so shells must not) and sets one latch; begin_frame always takes
+the latch, so a loss and restore that both happen between two frames (a
+background tab) still wipe the backend tables. The first detection wipes every
+backend handle, sets `g_nt_gfx.context_lost`, logs one error and skips the
+frame. Operations issued after a mid-frame loss are issued but do nothing; the
+next begin_frame detects it. While `context_lost` is set, each begin_frame asks
+the browser (the only per-frame JS query, and only in the lost state) and skips
+the frame until the context is back. The restore is one CONTEXT operation: it
+recreates the context, probes capabilities, recreates render targets and ends
+ACCEPTED. A recreate that fails leaves no context, logs one error and stays lost
+for good. A restore that the browser reports lost again when it finishes wipes
+what it refilled, stays lost without an error log and is retried by a later
+begin_frame. begin_frame never reports a loss while `context_lost` is clear, so
+pass calls after a skipped frame are no-ops, not traps.
+
+A backend call that reports a failure (a create, a render-target resize, a
+readback, a lazy sampler recreate at bind) asks the browser: a loss ends the
+operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
+failure reason and error log. The backend asks only where the answer prevents a crash or a
+misleading log: before shader and program creation, because Emscripten throws on
+the null object some browsers return on a lost context; error logs for link,
+uniform reflection, framebuffer completeness and texture creation, which a loss
 suppresses; a GL error pending before a texture upload, which a loss turns from
-an assert into a rolled-back failure; a readback after its error drain consumed
-an error, which may have been the loss's only report; the vertex array made at
-context setup, whose name 0 asserts only on a live context; and a GPU timer
-query named 0, which leaves its segment unallocated and skipped, because
-`beginQuery` throws on it. A restore whose recreate fails or that the browser
-then reports lost marks the tick, ends its CONTEXT operation with `CONTEXT_LOST`,
-restores no render target and does not report the context restored; a failed
-recreate is a context-creation failure and logs one error, and the next
-begin_frame consumes a new loss and waits for the browser. A render target whose
-restore fails on a loss ends the CONTEXT operation the same way without an error
-log and skips the frame; the next begin_frame wipes the names that restore
-already made as a first detection. A fresh context (init or restore) first
-drains GL errors: Emscripten keeps a recorded error across contexts, so a call
-that reached the dead context must not fail the fresh one's first check.
-Every error drain stops after 16 errors: WebGL returns `CONTEXT_LOST_WEBGL`
-once, but a native robust context may repeat `GL_CONTEXT_LOST`.
+an assert into a rolled-back failure; and the vertex array made at context
+setup, whose name 0 asserts only on a live context. A GPU timer query named 0
+leaves its segment unallocated and skipped, because `beginQuery` throws on it. A
+fresh context (init or restore) first drains GL errors: Emscripten keeps a
+recorded error across contexts, so a call that reached the dead context must not
+fail the fresh one's first check.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
@@ -464,7 +451,7 @@ configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read` and
 
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
 through its `NT_GL*` funnel, queries included. Platform context management
-(context create/destroy, loss events, `isContextLost` queries on creation and failure paths)
+(context create/destroy, loss events, `isContextLost` queries)
 is not counted. The funnel
 counts with an inline constant-index increment and (with capture) records in the same
 expression that issues the call; a grep gate rejects any bare `gl*` call in
@@ -529,8 +516,8 @@ until the end_tick that starts the next requested recording overwrites it, or
 shutdown; unrequested ticks preserve it. Two counts in the same sequence delimit
 an operation interval. Keep a capture by copying the metadata and `count` records
 and redirecting the saved view's pointer to the owned array. An empty view has
-a NULL pointer. The finalized view retains its matching tick snapshot (and so
-its `tick_sequence`) by value even after later unrecorded ticks overwrite
+a NULL pointer. The finalized view retains its tick's counters (and so its
+`tick_sequence`) by value even after later unrecorded ticks overwrite
 `g_nt_gfx.last_tick`.
 
 Every recorded public operation produces exactly one BEGIN, carrying its
@@ -541,10 +528,10 @@ names are in the DEFINITION record. Operations issued inside another operation
 RESULT. `ARGUMENT` records are request
 arguments belonging to the enclosing BEGIN (one per texture binding of a texture
 set); `DEFINITION` is reserved for resource and inherited state. Issued backend calls do not
-prove GL success or GPU completion. The view's `snapshot.status` is UNAVAILABLE
-while a tick records and becomes the finalized tick's COMPLETE or ABORTED at its
-end_tick; `overflow` alone reports an incomplete event stream, even when
-aborted. Overflow stops event appends and never truncates counters.
+prove GL success or GPU completion. The view's `counters` are zero (sequence 0)
+while a tick records and become the finalized tick's at its end_tick; `overflow`
+alone reports an incomplete event stream. Overflow stops event appends and never
+truncates counters.
 
 The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
@@ -582,9 +569,8 @@ The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, bound
 frontend handles) opens the snapshot. The other frontend INITIAL records and the
 frontend resource definitions follow, then the backend `INITIAL/STATE` record
 (`NT_GFX_INITIAL_BACKEND`, cached GL names and framebuffer size) and the backend's
-own definitions. A snapshot taken while the context is known lost has no backend
-records: until a restore, the backend tables hold dead names, some for pipelines
-and vertex inputs the loss already freed.
+own definitions. While the context is known lost, the backend records hold the
+dead names of the lost context.
 Among INITIAL records, `detail` is meaningful only on INITIAL/STATE.
 Program publication and initial state include `INITIAL/SAMPLER` records with
 backend program slot, name hash, location, unit and sampler class in args 0–4.
@@ -594,9 +580,8 @@ inside CREATE when the program first becomes available. Inactive names emit
 SKIP/INACTIVE; cache skips are distinct from invalid requests.
 
 `SKIP` records mark work that was not issued without ending an operation:
-backend cache skips (`SKIP/CACHE`), inactive uniform or texture-set names
-(`SKIP/INACTIVE`), and the loss marker: one `SKIP/CONTEXT` with reason
-`CONTEXT_LOST` per new loss detection, at most one per tick. A known loss adds none.
+backend cache skips (`SKIP/CACHE`) and inactive uniform or texture-set names
+(`SKIP/INACTIVE`).
 
 Pipeline state records use integers 0–12 for program, depth enable/write/function,
 cull, blend enable, RGB source/destination, alpha source/destination, RGB/alpha

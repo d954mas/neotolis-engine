@@ -113,7 +113,7 @@ static nt_texture_desc_t s_fake_last_texture_desc;
 static uint32_t s_fake_last_depth_texture_backend;
 static uint32_t s_fake_next_texture_backend;
 static bool s_fake_context_lost;
-static bool s_fake_loss_pending; /* a reported loss until begin_frame acknowledges it */
+static bool s_fake_loss_pending; /* the web lost-event latch until begin_frame takes it */
 static uint8_t s_fake_fail_texture_creates;
 static uint32_t s_fake_texture_destroy_count;
 static uint32_t s_fake_last_destroyed_texture;
@@ -211,7 +211,10 @@ void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_cre
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend_restore_lost = true; }
 void nt_gfx_fake_lose_context_during_next_restore(void) { s_fake_lose_context_during_next_restore = true; }
-void nt_gfx_fake_set_context_lost(bool lost) { s_fake_context_lost = lost; }
+void nt_gfx_fake_set_context_lost(bool lost) {
+    s_fake_context_lost = lost;
+    s_fake_loss_pending = lost;
+}
 void nt_gfx_fake_lose_and_restore_context(void) { s_fake_loss_pending = true; }
 uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update_buffer_offset; }
 uint32_t nt_gfx_fake_last_instance_offset(void) { return s_fake_last_instance_offset; }
@@ -345,15 +348,13 @@ void nt_gfx_backend_shutdown(void) {
     s_fake_max_programs = 0;
 }
 
-bool nt_gfx_backend_is_context_lost(void) { return s_fake_loss_pending || s_fake_context_lost; }
-
-/* Like the browser query, a confirmed loss stays reported until begin_frame acknowledges it. */
-bool nt_gfx_backend_query_context_lost(void) {
-    s_fake_loss_pending |= s_fake_context_lost;
-    return nt_gfx_backend_is_context_lost();
+bool nt_gfx_backend_take_context_loss(void) {
+    const bool loss = s_fake_loss_pending;
+    s_fake_loss_pending = false;
+    return loss;
 }
 
-void nt_gfx_backend_ack_context_loss(void) { s_fake_loss_pending = false; }
+bool nt_gfx_backend_query_context_lost(void) { return s_fake_context_lost; }
 
 void nt_gfx_backend_begin_frame(void) {}
 
@@ -408,6 +409,9 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     (void)desc;
+    if (s_fake_context_lost) {
+        return 0; /* GL creates no name on a lost context */
+    }
     return 1;
 }
 
@@ -418,7 +422,11 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     if (s_fake_lose_context_on_program_create) {
         s_fake_lose_context_on_program_create = false;
         s_fake_context_lost = true;
+        s_fake_loss_pending = true;
         return 0;
+    }
+    if (s_fake_context_lost) {
+        return 0; /* GL creates no name on a lost context */
     }
     if (s_fake_fail_next_program_create) {
         s_fake_fail_next_program_create = false;
@@ -441,6 +449,9 @@ void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
 }
 
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot) {
+    if (s_fake_context_lost) {
+        return 0; /* GL creates no name on a lost context */
+    }
     if (s_fake_fail_next_pipeline_create) {
         s_fake_fail_next_pipeline_create = false;
         return 0;
@@ -457,6 +468,9 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     (void)vbo_backend;
     (void)ibo_backend;
     s_fake_vertex_input_create_count++;
+    if (s_fake_context_lost) {
+        return 0; /* GL creates no name on a lost context */
+    }
     if (s_fake_fail_next_vertex_input_create) {
         s_fake_fail_next_vertex_input_create = false;
         return 0;
@@ -487,6 +501,9 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
 }
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
+    if (s_fake_context_lost) {
+        return 0; /* GL creates no name on a lost context */
+    }
     /* Hash at the upload boundary: the only place the GPU-form bytes exist. */
     if (desc->data != NULL && desc->size > 0) {
         uint32_t h = nt_hash32(desc->data, desc->size).value;
@@ -512,6 +529,7 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     if (s_fake_lose_context_on_texture_create) {
         s_fake_lose_context_on_texture_create = false;
         s_fake_context_lost = true;
+        s_fake_loss_pending = true;
     }
     if (s_fake_context_lost) {
         return 0; /* glGenTextures returns no name on a lost context */
@@ -540,6 +558,9 @@ uint32_t nt_gfx_backend_create_render_target(const nt_render_target_desc_t *desc
     (void)color_backend;
     (void)depth_texture_backend;
     s_fake_render_target_create_count++;
+    if (s_fake_context_lost) {
+        return 0; /* GL creates no name on a lost context */
+    }
     s_fake_last_render_target_depth = desc ? desc->depth_storage : NT_RT_DEPTH_NONE;
     s_fake_last_render_target_width = desc ? desc->width : 0;
     s_fake_last_render_target_height = desc ? desc->height : 0;
@@ -614,6 +635,9 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
+    if (s_fake_context_lost) {
+        return 0; /* GL creates no name on a lost context */
+    }
     if (s_fake_fail_next_sampler_create) {
         s_fake_fail_next_sampler_create = false;
         return 0;

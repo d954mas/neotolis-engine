@@ -382,7 +382,6 @@ test('context loss: a loss and restore between two frames still runs the restore
   });
   expect(cycled).toEqual({ drawnWhileHeld: 0, lostNow: false });
   await page.waitForFunction(() => (window as unknown as { __nt: { restore_ticks(): number } }).__nt.restore_ticks() > 0 && window.__nt!.programs_ready(), null, { timeout: 15_000 });
-  expect(await page.evaluate(() => (window as unknown as { __nt: { restore_status(): number } }).__nt.restore_status()), 'the restore tick completes').toBe(1);
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
 });
 

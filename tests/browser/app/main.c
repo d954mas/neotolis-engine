@@ -263,7 +263,6 @@ static int s_nt_field_visible; /* the field was laid out this frame */
 static int s_nt_hidden_probe;
 static uint64_t s_nt_restore_sequence; /* tick whose begin_frame restored the context */
 static unsigned int s_nt_restore_ticks;
-static int s_nt_restore_status;
 static nt_ui_input_style_t s_nt_hidden_input_style;
 static nt_ui_label_style_t s_nt_hidden_caption;
 
@@ -280,7 +279,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_ready(void) { return s_nt_ready; }
 /* A fresh draw is required in addition to the test's pixel comparison. */
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn_frames; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_restore_ticks(void) { return s_nt_restore_ticks; }
-EMSCRIPTEN_KEEPALIVE int nt_test_restore_status(void) { return s_nt_restore_status; }
 /* Both game programs linked and assigned -- false through the whole window
  * between the loss and the relink. */
 EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program)) ? 1 : 0; }
@@ -371,8 +369,8 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_loss_window(int step) {
     }
     }
 }
-/* Pure flag read, no browser query: 0 proves a loss-window step cannot take the known-loss path. */
-EMSCRIPTEN_KEEPALIVE int nt_test_loss_seen(void) { return nt_gfx_backend_is_context_lost() ? 1 : 0; }
+/* 0 proves a loss-window step cannot take the known-loss path. */
+EMSCRIPTEN_KEEPALIVE int nt_test_loss_seen(void) { return g_nt_gfx.context_lost ? 1 : 0; }
 /* Basis fixture: basis_fixture.ntpack's 128x128 RGBA texture with a full 8-level chain, left half
  * (200,40,40,255), right half (40,40,200,128). Levels are reached through sampler overrides. */
 #define BASIS_FIXTURE_SIZE 128.0F
@@ -479,13 +477,6 @@ EMSCRIPTEN_KEEPALIVE void nt_test_observe_record(int enabled) {
     (void)enabled;
 #endif
 }
-EMSCRIPTEN_KEEPALIVE int nt_test_observe_status(void) {
-#if NT_GFX_CAPTURE_ENABLED
-    return (int)nt_gfx_capture_read().snapshot.status;
-#else
-    return (int)NT_GFX_TICK_UNAVAILABLE;
-#endif
-}
 EMSCRIPTEN_KEEPALIVE double nt_test_observe_value(int index) {
     /* JS-supplied index: an out-of-range probe reads as -1 instead of trapping. */
     if (index < 0 || index >= (int)(sizeof(s_observe_values) / sizeof(s_observe_values[0]))) {
@@ -547,32 +538,30 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_destroy_texture(spare);
     nt_gfx_destroy_buffer(buffer);
     nt_gfx_end_tick();
-    nt_gfx_tick_snapshot_t snapshot = g_nt_gfx.last_tick;
+    const nt_gfx_counters_t counters = g_nt_gfx.last_tick;
     s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
-    s_observe_values[2] = snapshot.status;
-    s_observe_values[3] = nt_gfx_draw_calls(&snapshot.counters);
+    s_observe_values[3] = nt_gfx_draw_calls(&counters);
     s_observe_values[4] = (double)preparation.buffer_upload_bytes;
     s_observe_values[5] = (double)preparation.texture_upload_bytes;
-    s_observe_values[6] = snapshot.counters.gl[NT_GFX_GL_glUseProgram];
-    s_observe_values[7] = snapshot.counters.gl[NT_GFX_GL_glBindVertexArray];
-    s_observe_values[8] = snapshot.counters.gl[NT_GFX_GL_glBindTexture];
-    s_observe_values[9] = snapshot.counters.gl[NT_GFX_GL_glBindSampler];
-    s_observe_values[10] = snapshot.counters.gl[NT_GFX_GL_glUniform4fv] + snapshot.counters.gl[NT_GFX_GL_glUniform1i];
-    s_observe_values[14] = (double)snapshot.counters.buffer_upload_bytes;
-    s_observe_values[15] = (double)snapshot.counters.texture_upload_bytes;
-    s_observe_values[16] = (double)snapshot.counters.buffer_upload_calls;
-    s_observe_values[17] = (double)snapshot.counters.texture_upload_calls;
+    s_observe_values[6] = counters.gl[NT_GFX_GL_glUseProgram];
+    s_observe_values[7] = counters.gl[NT_GFX_GL_glBindVertexArray];
+    s_observe_values[8] = counters.gl[NT_GFX_GL_glBindTexture];
+    s_observe_values[9] = counters.gl[NT_GFX_GL_glBindSampler];
+    s_observe_values[10] = counters.gl[NT_GFX_GL_glUniform4fv] + counters.gl[NT_GFX_GL_glUniform1i];
+    s_observe_values[14] = (double)counters.buffer_upload_bytes;
+    s_observe_values[15] = (double)counters.texture_upload_bytes;
+    s_observe_values[16] = (double)counters.buffer_upload_calls;
+    s_observe_values[17] = (double)counters.texture_upload_calls;
     const nt_gfx_gl_call_t uploads[] = {NT_GFX_GL_glBufferData, NT_GFX_GL_glBufferSubData, NT_GFX_GL_glTexImage2D, NT_GFX_GL_glTexSubImage2D, NT_GFX_GL_glCompressedTexImage2D};
     for (uint32_t j = 0; j < 5; j++) {
-        s_observe_values[26 + j] = snapshot.counters.gl[uploads[j]];
+        s_observe_values[26 + j] = counters.gl[uploads[j]];
     }
 #if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     s_observe_values[11] = capture.overflow;
     s_observe_values[12] = capture.count;
-    s_observe_values[13] = capture.snapshot.status;
-    s_observe_values[18] = (double)capture.snapshot.counters.tick_sequence;
-    s_observe_values[19] = (double)snapshot.counters.tick_sequence;
+    s_observe_values[18] = (double)capture.counters.tick_sequence;
+    s_observe_values[19] = (double)counters.tick_sequence;
     const nt_gfx_gl_call_t calls[] = {NT_GFX_GL_glUseProgram, NT_GFX_GL_glBindVertexArray, NT_GFX_GL_glBindTexture, NT_GFX_GL_glBindSampler, NT_GFX_GL_glUniform4fv, NT_GFX_GL_glUniform1i};
     for (uint32_t i = 0; i < capture.count; i++) {
         if (capture.events[i].kind != NT_GFX_EVENT_BACKEND) {
@@ -611,25 +600,6 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
     case 5: {
         uint64_t ns = 0;
         return nt_gfx_poll_segment_time_ns(names[segment], &ns) ? (double)ns : -1.0;
-    }
-    case 6: /* close the open tick and record the next one */
-#if NT_GFX_CAPTURE_ENABLED
-        nt_gfx_capture_request();
-#endif
-        nt_gfx_end_tick();
-        break;
-    case 7: { /* close the recorded tick; its loss markers, -1 without capture */
-        nt_gfx_end_tick();
-#if NT_GFX_CAPTURE_ENABLED
-        const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-        double markers = 0.0;
-        for (uint32_t i = 0; i < capture.count; i++) {
-            markers += capture.events[i].kind == NT_GFX_EVENT_SKIP && capture.events[i].operation == NT_GFX_OP_CONTEXT;
-        }
-        return markers;
-#else
-        return -1.0;
-#endif
     }
     default:
         NT_ASSERT(false);
@@ -723,7 +693,6 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'walk_text_cmd_count': function() { return _nt_test_walk_text_cmd_count() >>> 0; },
         'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },
         'restore_ticks': function() { return _nt_test_restore_ticks() >>> 0; },
-        'restore_status': function() { return _nt_test_restore_status(); },
         'programs_ready': function() { return _nt_test_programs_ready() !== 0; },
         'float_texture_linear': function() { return _nt_test_float_texture_linear() !== 0; },
         'diagnostics_config': function() {
@@ -733,7 +702,6 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'observe_probe': function(mode) { return _nt_test_observe_probe(mode); },
         'observe_value': function(index) { return _nt_test_observe_value(index); },
         'observe_record': function(enabled) { _nt_test_observe_record(enabled); },
-        'observe_status': function() { return _nt_test_observe_status(); },
         'gpu_supported': function() { return _nt_test_gpu_supported() !== 0; },
         'float_probe': function(useTexture) { return _nt_test_float_probe(useTexture); },
         'loss_window': function(step) { return _nt_test_loss_window(step) >>> 0; },
@@ -1084,9 +1052,8 @@ static void frame(void) {
 #endif
     nt_gfx_end_tick();
 #if defined(__EMSCRIPTEN__)
-    if (g_nt_gfx.last_tick.counters.tick_sequence == s_nt_restore_sequence) {
+    if (g_nt_gfx.last_tick.tick_sequence == s_nt_restore_sequence) {
         s_nt_restore_ticks++;
-        s_nt_restore_status = (int)g_nt_gfx.last_tick.status;
     }
 #endif
 }

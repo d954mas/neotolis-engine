@@ -11,13 +11,10 @@
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc);
 void nt_gfx_gl_ctx_destroy(void);
-/* Loss state from the browser's lost/restored events, without a JS call. A
- * loss stays reported until nt_gfx_gl_ctx_ack_loss, so a loss and restore
- * between two frames still reach begin_frame. */
-bool nt_gfx_gl_ctx_is_lost(void);
-void nt_gfx_gl_ctx_ack_loss(void);
-/* Asks the browser directly and latches a loss its event has not reported yet.
- * Only for creation guards and paths where GL already reported a failure. */
+/* Returns and clears the lost-event latch, without a JS call: a loss and
+ * restore between two frames still reach begin_frame. */
+bool nt_gfx_gl_ctx_take_loss(void);
+/* Asks the browser directly; true without a context. Cold paths only. */
 bool nt_gfx_gl_ctx_query_lost(void);
 
 /* nt_gfx_gl_ctx_detect_gpu_caps is declared in graphics/nt_gfx_internal.h —

@@ -654,7 +654,7 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
 
 void nt_gfx_backend_shutdown(void) {
 #if NT_GFX_GPU_TIMING_ENABLED
-    if (s_timer_enabled && !nt_gfx_gl_ctx_is_lost()) {
+    if (s_timer_enabled && !nt_gfx_gl_ctx_query_lost()) {
         nt_gfx_backend_end_segment();
         for (uint8_t i = 0; i < s_segment_count; i++) {
             NT_GL_DELETE(glDeleteQueries, NT_GFX_TIMER_RING, s_segments[i].queries);
@@ -683,7 +683,7 @@ void nt_gfx_backend_shutdown(void) {
     s_bound_framebuffer = 0;
     /* A dead context already reclaimed the name; a GL call here would run
      * without a current context on web. */
-    if (s_ebo_upload_vao != 0 && !nt_gfx_gl_ctx_is_lost()) {
+    if (s_ebo_upload_vao != 0 && !nt_gfx_gl_ctx_query_lost()) {
         NT_GL_DELETE(glDeleteVertexArrays, 1, &s_ebo_upload_vao);
     }
     s_ebo_upload_vao = 0;
@@ -691,11 +691,9 @@ void nt_gfx_backend_shutdown(void) {
     nt_gfx_gl_ctx_destroy();
 }
 
-bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
+bool nt_gfx_backend_take_context_loss(void) { return nt_gfx_gl_ctx_take_loss(); }
 
 bool nt_gfx_backend_query_context_lost(void) { return nt_gfx_gl_ctx_query_lost(); }
-
-void nt_gfx_backend_ack_context_loss(void) { nt_gfx_gl_ctx_ack_loss(); }
 
 /* ---- Frame / Pass ---- */
 
@@ -716,7 +714,6 @@ static int8_t segment_find_or_alloc(nt_hash32_t name_hash) {
     for (uint8_t i = 0; i < NT_GFX_TIMER_RING; i++) {
         if (seg->queries[i] == 0) {
             /* A lost context generates name 0, and beginQuery throws on it; the slot stays free. */
-            (void)nt_gfx_gl_ctx_query_lost();
             return -1;
         }
     }
@@ -878,7 +875,7 @@ void nt_gfx_backend_drop_timer_segments(void) {
 
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
     if (!enabled && s_timer_user_enabled && s_timer_enabled) {
-        if (nt_gfx_gl_ctx_is_lost()) {
+        if (nt_gfx_gl_ctx_query_lost()) {
             nt_gfx_backend_drop_timer_segments();
         } else {
             nt_gfx_backend_end_segment();
@@ -985,12 +982,11 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { gl_set_viewport(x
 bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
     NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
     /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
-    const bool stale = nt_gfx_gl_drain_errors();
+    (void)nt_gfx_gl_drain_errors();
     NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, out_rgba8);
     /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
-       partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage.
-       A drained error may have been the loss's only report, after which a lost read raises none. */
-    return NT_GL_RET0(glGetError) == GL_NO_ERROR && !(stale && nt_gfx_gl_ctx_query_lost());
+       partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
+    return NT_GL_RET0(glGetError) == GL_NO_ERROR;
 }
 
 /* ---- Pipeline bind ---- */
