@@ -1,48 +1,46 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: 23680cc
+# Commit: 380a3c5
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 223 B
-Import               584 B
-Function             120 B
+Import               528 B
+Function             117 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  35 B
-Code               83209 B
-Data                8724 B
-Custom              4547 B
+Code               81060 B
+Data                8551 B
+Custom              4283 B
 ---------------- ----------
-TOTAL              97546 B
+TOTAL              94901 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-18330 B   frame
+17566 B   frame
  7602 B   nt_font_lookup_glyph_offset
- 6062 B   main
- 4971 B   nt_text_renderer_flush
+ 5751 B   main
+ 4970 B   nt_text_renderer_flush
  3002 B   fmt_fp
+ 2987 B   nt_gfx_make_texture
  2624 B   nt_http_request_ex
- 2426 B   printf_core
+ 2424 B   printf_core
  1900 B   find_or_create_pipeline
  1843 B   __rem_pio2f
- 1631 B   nt_gfx_backend_create_texture
  1466 B   nt_gfx_make_vertex_input
  1340 B   emit_glyph_pass
  1310 B   nt_text_renderer_draw
  1099 B   nt_hash32_str
- 1053 B   wipe_backend_handles
  1024 B   nt_input_web_on_blur
-  950 B   nt_gfx_make_texture
   834 B   nt_gfx_gl_cache_ground_state
-  818 B   nt_gfx_update_texture
   809 B   nt_input_web_on_pointer_move
+  808 B   nt_gfx_update_texture
   769 B   nt_input_web_on_pointer_down
   726 B   nt_gfx_make_buffer
   690 B   pop_arg_long_double
@@ -51,11 +49,13 @@ TOTAL              97546 B
   557 B   nt_gfx_activate_shader
   540 B   claim_more_memory
   519 B   __memcpy
-  504 B   emmalloc_memalign
-  491 B   nt_gfx_make_sampler
+  501 B   emmalloc_memalign
+  483 B   find_pack
+  436 B   vsnprintf
+  434 B   nt_resource_request
 
-Total functions: 119
-Total code size: 83012 B
+Total functions: 116
+Total code size: 80869 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              196228 B
-libnt_gfx.a                91574 B
-libnt_gfx_stub.a            6156 B
+libnt_gfx.a                83352 B
+libnt_gfx_stub.a            5990 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -99,7 +99,7 @@ libnt_meshwire_stub.a        722 B
 libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
-libnt_postfx_blur.a         8622 B
+libnt_postfx_blur.a         8720 B
 libnt_render.a              7674 B
 libnt_resource.a          215122 B
 libnt_shape_renderer.a   1144652 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4245730 B
+TOTAL (archives)         4237440 B
 
 ## Data Segments Summary
 
 Segments: 23
-Total data size: 8563 B
+Total data size: 8391 B
