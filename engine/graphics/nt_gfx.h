@@ -491,11 +491,9 @@ typedef struct {
     float clear_depth;
 } nt_pass_desc_t;
 
-// #region tick counters and observation
+// #region frame counters and observation
 /* Public operations (BEGIN/END pairs) and the record-only STATE marker. */
 typedef enum {
-    NT_GFX_OP_RENDER_FRAME,
-    NT_GFX_OP_END_RENDER_FRAME,
     NT_GFX_OP_PASS,
     NT_GFX_OP_END_PASS,
     NT_GFX_OP_CREATE,
@@ -647,7 +645,7 @@ typedef enum { NT_GFX_GL_NONE = 0, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_ENUM_) NT_GFX_
  * destroys); gl[] counts every issued GL call by nt_gfx_gl_call_t; uploads count calls with a
  * non-NULL payload and their bytes (NULL storage and generated mips excluded). */
 typedef struct {
-    uint64_t tick_sequence;
+    uint64_t frame_sequence;
     uint64_t vertices;
     uint64_t indices;
     uint64_t instances; /* instanced draws only */
@@ -760,27 +758,17 @@ typedef struct {
     bool overflow;
     const nt_gfx_event_t *events;
     uint32_t count;
-    nt_gfx_counters_t counters; /* the finalized tick's, even after later unrecorded ticks; tick_sequence 0 while recording */
+    nt_gfx_counters_t counters; /* the finalized frame's, even after later unrecorded frames; frame_sequence 0 while recording */
 } nt_gfx_capture_view_t;
 
-/* The one host tick boundary, called first in every host iteration before any other
- * gfx use: nt_gfx_init opens the first tick and every begin_tick closes the open one,
- * syncs context loss and opens the next, so all gfx work between init and shutdown
- * belongs to a tick; shutdown discards the open one. Requires gfx IDLE. A tick holds any
- * number of gfx frames, whose counters sum. begin_tick copies the counters into
- * g_nt_gfx.last_tick, then resets g_nt_gfx.counters. The loss sync takes the browser's
- * loss events: a new loss wipes every backend name and sets context_lost; while lost it
- * restores once the browser reports the context back and sets context_restored until
- * the next begin_tick. Ticks never advance rendering. */
-void nt_gfx_begin_tick(void);
 #if NT_GFX_CAPTURE_ENABLED
 /* Name of an issued-call detail, e.g. "glBindTexture"; NULL outside the table. */
 const char *nt_gfx_gl_call_name(uint32_t call);
-/* One-shot: the next tick records, starting at the begin_tick that opens it.
+/* One-shot: the next frame records, starting at the begin_frame that opens it.
  * Requires nonzero init capacity. The stub is inert. */
 void nt_gfx_capture_request(void);
-/* Metadata by value; immutable event prefix until the begin_tick that starts the
- * next requested recording, or shutdown, so read right after begin_tick. Copy count records and
+/* Metadata by value; immutable event prefix until the begin_frame that starts the
+ * next requested recording, or shutdown, so read right after begin_frame. Copy count records and
  * metadata to keep. Empty views have events=NULL. */
 nt_gfx_capture_view_t nt_gfx_capture_read(void);
 #endif
@@ -800,8 +788,8 @@ typedef struct {
 /* ---- Global state ---- */
 
 typedef struct {
-    nt_gfx_counters_t counters;  /* live counters of the open tick; reset only by begin_tick */
-    nt_gfx_counters_t last_tick; /* last closed tick; tick_sequence 0 before the first */
+    nt_gfx_counters_t counters;   /* live counters of the open frame; reset only by begin_frame */
+    nt_gfx_counters_t last_frame; /* last closed frame; frame_sequence 0 before the first */
     nt_gfx_gpu_caps_t gpu_caps;
     bool context_lost;
     bool context_restored;
@@ -846,10 +834,16 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 
 /* ---- Frame / Pass ---- */
 
-/* Neither resets counters; only begin_tick does. begin_frame on a lost context
- * does nothing, and the pass and frame calls after it are no-ops. */
+/* The one host frame boundary, called first in every host iteration before any other
+ * gfx use: nt_gfx_init opens the first frame and every begin_frame closes the open one,
+ * syncs context loss and opens the next, so all gfx work between init and shutdown
+ * belongs to a frame; shutdown discards the open one. Requires no open pass.
+ * begin_frame copies the counters into g_nt_gfx.last_frame, then resets
+ * g_nt_gfx.counters. The loss sync takes the browser's loss events: a new loss wipes
+ * every backend name and sets context_lost; while lost it restores once the browser
+ * reports the context back and sets context_restored until the next begin_frame. */
 void nt_gfx_begin_frame(void);
-void nt_gfx_end_frame(void);
+/* Passes do not nest; on a lost context both calls are no-ops. */
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_end_pass(void);
 

@@ -1877,7 +1877,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     const GLenum first_error = NT_GL_RET0(glGetError);
     if (first_error != GL_NO_ERROR) {
         nt_gfx_gl_drain_errors();
-        /* A loss is the caller's recoverable CONTEXT_LOST; its frontend probe marks the tick. */
+        /* A loss is the caller's recoverable CONTEXT_LOST; the frontend reports it without a log. */
         if (!nt_gfx_gl_ctx_query_lost()) {
             NT_LOG_ERROR("texture creation failed: GL error 0x%04X", (unsigned)first_error);
         }

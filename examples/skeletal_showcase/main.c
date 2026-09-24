@@ -1879,7 +1879,7 @@ static void mount_pack(const char *name) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -1922,7 +1922,6 @@ static void frame(void) {
         .near_far = {CAMERA_NEAR * s_fit_scale, CAMERA_FAR * s_fit_scale},
     };
 
-    nt_gfx_begin_frame();
     nt_font_step();
     const bool render_enabled = nt_app_render_enabled();
     if (render_enabled) {
@@ -1976,7 +1975,6 @@ static void frame(void) {
     if (render_enabled) {
         nt_gfx_end_pass();
     }
-    nt_gfx_end_frame();
     if (render_enabled) {
         nt_window_swap_buffers();
     }

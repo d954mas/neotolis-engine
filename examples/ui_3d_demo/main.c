@@ -785,7 +785,7 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -892,7 +892,6 @@ static void frame(void) {
     uniforms_2d.near_far[0] = -1.0F;
     uniforms_2d.near_far[1] = 1.0F;
 
-    nt_gfx_begin_frame();
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_begin_segment("frame");
 #endif
@@ -991,7 +990,6 @@ static void frame(void) {
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_end_segment();
 #endif
-    nt_gfx_end_frame();
 
 #if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);

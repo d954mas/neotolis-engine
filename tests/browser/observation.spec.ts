@@ -6,7 +6,7 @@ type ObserveHooks = {
   observe_probe(mode: number): number;
   observe_value(index: number): number;
   observe_record(enabled: number): void;
-  restore_ticks(): number;
+  restore_frames(): number;
 };
 type CallControl = { active: boolean; calls: Record<string, number>; payloads: Record<string, number>; bytes: Record<string, number> };
 
@@ -57,7 +57,7 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
   const runs = await page.evaluate(() => {
     const hooks = (window as unknown as { __nt: ObserveHooks }).__nt;
     const control = (window as unknown as { observeControl: CallControl }).observeControl;
-    // Mode 0 runs again after mode 1: an unrequested tick must leave that capture untouched.
+    // Mode 0 runs again after mode 1: an unrequested frame must leave that capture untouched.
     return [0, 1, 0, 2].map(mode => {
       control.calls = {};
       control.payloads = {};
@@ -108,7 +108,7 @@ test('gfx observation reconciles issued WebGL calls and preserves pixels on over
       expect(v[18]).toBe(recorded[18]);
       expect(v[18]).toBeGreaterThan(0);
     } else if (run.mode === 1) {
-      expect(v[18]).toBe(v[19]); // The capture finalized the probe's own tick.
+      expect(v[18]).toBe(v[19]); // The capture finalized the probe's own frame.
       expect(v[11]).toBe(0);
       expect(v[12]).toBeGreaterThan(0);
       expect(v.slice(20, 26)).toEqual(['useProgram', 'bindVertexArray', 'bindTexture', 'bindSampler', 'uniform4fv', 'uniform1i'].map(name => run.calls[name] || 0));
@@ -139,6 +139,6 @@ test('gfx observation keeps recording across a context loss and restore', async 
   await page.waitForFunction(() => !(window as unknown as { __nt: ObserveHooks }).__nt.programs_ready());
   await page.evaluate(() => (window as unknown as { observationLoss: WEBGL_lose_context }).observationLoss.restoreContext());
   await page.waitForFunction(() => (window as unknown as { __nt: ObserveHooks }).__nt.programs_ready());
-  expect(await page.evaluate(() => (window as unknown as { __nt: ObserveHooks }).__nt.restore_ticks())).toBe(1);
+  expect(await page.evaluate(() => (window as unknown as { __nt: ObserveHooks }).__nt.restore_frames())).toBe(1);
   expect(errors).toEqual([]);
 });

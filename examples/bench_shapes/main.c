@@ -470,7 +470,7 @@ static void draw_shapes(void) {
 
 static void frame(void) {
     nt_window_poll();
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
     nt_input_poll();
     float dt = g_nt_app.dt;
     nt_accumulator_update(&s_acc, dt);
@@ -491,7 +491,7 @@ static void frame(void) {
     if (s_log_timer >= 1.0F) {
         float avg = s_dt_sum / (float)s_dt_count;
         float render_avg = s_render_sum / (float)s_dt_count;
-        const nt_gfx_counters_t stats = g_nt_gfx.last_tick; /* previous tick; this one has not drawn yet */
+        const nt_gfx_counters_t stats = g_nt_gfx.last_frame; /* previous frame; this one has not drawn yet */
         const uint32_t inst_dc = stats.accepted[NT_GFX_OP_DRAW_INSTANCED] + stats.accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED];
         uint32_t batch_dc = nt_gfx_draw_calls(&stats) - inst_dc;
         uint64_t tris = stats.indices / 3;
@@ -569,7 +569,6 @@ static void frame(void) {
     glm_perspective(glm_rad(75.0F), aspect, 0.1F, 50.0F, proj);
     glm_mat4_mul(proj, view, vp);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.05F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
 
     nt_shape_renderer_set_vp((float *)vp);
@@ -589,7 +588,6 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 

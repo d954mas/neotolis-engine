@@ -281,15 +281,15 @@ The per-asset pin (the published winner of a pinning slot) is exposed for diagno
 Raw BLOB bytes have no activation to repeat. Invalidation of other asset types
 preserves BLOB owner/alias readiness and resident payloads.
 
-`nt_gfx_begin_tick()`, the first gfx call of each host iteration, restores the
-context and sets `g_nt_gfx.context_restored` until the next begin_tick. Detection
+`nt_gfx_begin_frame()`, the first gfx call of each host iteration, restores the
+context and sets `g_nt_gfx.context_restored` until the next begin_frame. Detection
 follows the browser's loss events, so a loss and restore between two iterations
 still takes this path
 ([frame observation](../render/architecture.md#frame-observation)). The game
 sees the flag before its resource step and before it builds anything for the
 iteration, so no render decision of the iteration describes the dead context.
 
-At the start of the iteration, right after `nt_gfx_begin_tick()` and before
+At the start of the iteration, right after `nt_gfx_begin_frame()` and before
 `nt_resource_step()` and `nt_font_step()`, when `context_restored` is true, the
 game:
 
@@ -348,7 +348,7 @@ A font keeps its `nt_font_add` source list of resource handles. Once the context
 is usable, `nt_font_step` recreates non-ready curve and band textures before its
 resource rescan; this does not require source-asset reactivation. Re-adding an
 existing source asserts on the duplicate. Call `nt_font_step` after
-`nt_gfx_begin_tick` and before any render pass: recovery destroys and replaces
+`nt_gfx_begin_frame` and before any render pass: recovery destroys and replaces
 the old texture handles. An atlas keeps its parsed regions and
 needs its page textures resolved again.
 

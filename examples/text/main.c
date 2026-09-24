@@ -218,7 +218,7 @@ static void draw_text_scene(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_FONT);
 
@@ -319,7 +319,6 @@ static void frame(void) {
      * just on the restore flag. */
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     bool can_render = text_info != NULL && nt_gfx_program_ready(text_info->program);
-    nt_gfx_begin_frame();
 
     /* Restore GPU resources after WebGL context loss */
 
@@ -370,7 +369,6 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 

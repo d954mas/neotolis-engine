@@ -254,7 +254,7 @@ static void set_shape_color(void) {
 
 static void frame(void) {
     nt_window_poll();
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
     nt_input_poll();
     float dt = g_nt_app.dt;
 
@@ -353,7 +353,6 @@ static void frame(void) {
 
     float cam_pos[3] = {eye[0], eye[1], eye[2]};
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.05F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
 
     nt_shape_renderer_set_vp((float *)vp);
@@ -365,7 +364,6 @@ static void frame(void) {
 
     nt_shape_renderer_flush();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 }

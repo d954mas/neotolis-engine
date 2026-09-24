@@ -511,12 +511,10 @@ static void draw_default_frame(void) {
 }
 
 static void render_frame(void) {
-    nt_gfx_begin_frame();
     if (g_nt_gfx.context_lost) {
         return;
     }
     if (!s_demo.render_resources_ready || !render_targets_ready()) {
-        nt_gfx_end_frame();
         return;
     }
 
@@ -542,12 +540,11 @@ static void render_frame(void) {
     draw_default_frame();
     draw_ui_overlay();
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void frame(void) {
     nt_window_poll();
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         /* Materials keep their handles and draw again once their programs relink. */
         nt_shape_renderer_restore_gpu();

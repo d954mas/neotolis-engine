@@ -240,7 +240,6 @@ void setUp(void) {
     nt_skinned_mesh_renderer_desc_t desc = nt_skinned_mesh_renderer_desc_defaults();
     desc.max_pipelines = 8;
     TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&desc));
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
 }
@@ -248,7 +247,6 @@ void setUp(void) {
 void tearDown(void) {
     nt_log_remove_sink(capture_program_warning, NULL);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_skinned_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_skin_comp_shutdown();

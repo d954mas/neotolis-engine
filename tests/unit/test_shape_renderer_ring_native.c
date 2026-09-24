@@ -66,7 +66,6 @@ static void test_multi_flush_ring_offsets_render_correctly(void) {
     const float green[4] = {0, 1, 0, 1};
     const float blue[4] = {0, 0, 1, 1};
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
 
     /* Flush 1: two instance types -> two ring writes within one flush.
@@ -85,7 +84,6 @@ static void test_multi_flush_ring_offsets_render_correctly(void) {
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame)));
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     assert_pixel(frame, 16, 32, 255, 0, 0); /* left half: red rect (flush 1, write 1) */
     assert_pixel(frame, 48, 32, 0, 255, 0); /* cube center: green (flush 1, write 2 at nonzero offset) */
@@ -99,7 +97,6 @@ static void test_ring_wrap_still_renders(void) {
     const float red[4] = {1, 0, 0, 1};
     const float green[4] = {0, 1, 0, 1};
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
 
     /* Flush count derived from the actual capacity: >= 2 wraps at any
@@ -120,7 +117,6 @@ static void test_ring_wrap_still_renders(void) {
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame)));
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     assert_pixel(frame, 16, 32, 255, 0, 0); /* left half still red */
     assert_pixel(frame, 48, 32, 0, 255, 0); /* post-wrap green rect renders */

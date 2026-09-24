@@ -54,7 +54,6 @@ static void test_render_target_resize_without_spare_texture_slots(void) {
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 
     uint8_t first_pixels[4U * 4U * 4U] = {0};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = target,
         .clear_color = {0.25F, 0.5F, 0.75F, 1.0F},
@@ -62,14 +61,12 @@ static void test_render_target_resize_without_spare_texture_slots(void) {
     });
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, first_pixels, sizeof(first_pixels)));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     assert_rgba(first_pixels, 16, 64, 128, 191, 255);
 
     TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 7, 5));
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 
     uint8_t resized_pixels[7U * 5U * 4U] = {0};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = target,
         .clear_color = {1.0F, 0.25F, 0.5F, 1.0F},
@@ -77,7 +74,6 @@ static void test_render_target_resize_without_spare_texture_slots(void) {
     });
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 7, 5, resized_pixels, sizeof(resized_pixels)));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     assert_rgba(resized_pixels, 35, 255, 64, 128, 255);
 
     nt_gfx_destroy_render_target(target);
@@ -216,7 +212,6 @@ static void test_custom_blend_state_reaches_gl_unchanged(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
     nt_gfx_bind_pipeline(pipeline);
 
@@ -241,7 +236,6 @@ static void test_custom_blend_state_reaches_gl_unchanged(void) {
     TEST_ASSERT_INT_WITHIN(1, 500, (int)(constant[3] * 1000.0F));
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
@@ -278,7 +272,6 @@ static void test_all_public_blend_enums_reach_gl(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
     for (size_t i = 0; i < sizeof(factor_cases) / sizeof(factor_cases[0]); i++) {
         nt_blend_state_t blend = nt_blend_alpha();
@@ -310,7 +303,6 @@ static void test_all_public_blend_enums_reach_gl(void) {
         nt_gfx_destroy_pipeline(pipeline);
     }
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
@@ -355,14 +347,12 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
 
     uint8_t pixels[4U * 4U * 4U] = {0};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.2F, 0.4F, 0.8F, 0.6F}});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(vertex_input);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     assert_rgba(pixels, 16, 26, 26, 153, 153);
     nt_gfx_destroy_render_target(target);
@@ -447,7 +437,6 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
 
     nt_texture_t depth_tex = nt_gfx_render_target_depth(shadow_map);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = shadow_map, .clear_color = {0, 0, 0, 1}, .clear_depth = 0.2F});
     nt_gfx_bind_pipeline(depth_pip);
     nt_gfx_bind_vertex_input(depth_vi);
@@ -494,7 +483,6 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     TEST_ASSERT_UINT8_WITHIN(2, 51, ramp_at(row, RAMP_NEAR));
     TEST_ASSERT_UINT8_WITHIN(2, 204, ramp_at(row, RAMP_FAR));
@@ -526,12 +514,10 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
     TEST_ASSERT_EQUAL_INT(GL_RGBA16F, internal_format);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {3.5F, 0.25F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     float pixels[4 * 4 * 4] = {0};
     glReadPixels(0, 0, 4, 4, GL_RGBA, GL_FLOAT, pixels);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     /* Unity float asserts are disabled in this build; compare in millis. */
     TEST_ASSERT_INT_WITHIN(10, 3500, (int)(pixels[0] * 1000.0F));
@@ -565,7 +551,6 @@ static void test_rgba32f_linear_filtering_and_generated_mips(void) {
                                                 "}\n",
                                                 false);
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(vi);
@@ -575,7 +560,6 @@ static void test_rgba32f_linear_filtering_and_generated_mips(void) {
     uint8_t pixel[4] = {0};
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     /* Both the bilinear base lookup and the reduced mip must average the four colors. */
     assert_rgba(pixel, 1, 128, 128, 128, 255);
     nt_gfx_destroy_texture(texture);
@@ -595,7 +579,6 @@ static void test_depth_buffer_uses_explicit_format(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
     GLint object_type = 0;
     GLint renderbuffer = 0;
@@ -609,7 +592,6 @@ static void test_depth_buffer_uses_explicit_format(void) {
     TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT32F, format);
     glBindRenderbuffer(GL_RENDERBUFFER, 0);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_render_target(target);
 }
@@ -646,7 +628,6 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 0.25F});
     nt_gfx_bind_pipeline(no_depth_write_pipeline);
     nt_gfx_end_pass();
@@ -661,7 +642,6 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);
     TEST_ASSERT_EQUAL_INT(GL_FALSE, depth_write_enabled);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_render_target(target);
     nt_gfx_destroy_pipeline(no_depth_write_pipeline);
@@ -689,7 +669,6 @@ static void test_global_block_registered_before_link_binds_in_the_program(void) 
     /* Bind a pipeline so the program becomes current, then read the binding
      * GL actually recorded for the block. */
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
 
@@ -703,7 +682,6 @@ static void test_global_block_registered_before_link_binds_in_the_program(void) 
     TEST_ASSERT_EQUAL_INT(3, binding);
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_program(prog);
@@ -750,7 +728,6 @@ static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     /* Value written while A is bound; the draw happens through B without
      * setting it again. */
@@ -765,7 +742,6 @@ static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
     assert_rgba(pixels, 16, 0, 255, 0, 255);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_render_target(target);
     nt_gfx_destroy_pipeline(pip_b);
@@ -815,7 +791,6 @@ static void test_each_pipeline_binds_its_own_program(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
 
     uint8_t pixels[4 * 4 * 4] = {0};
-    nt_gfx_begin_frame();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip_red);
@@ -832,7 +807,6 @@ static void test_each_pipeline_binds_its_own_program(void) {
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
     assert_rgba(pixels, 16, 0, 0, 255, 255);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_render_target(target);
     nt_gfx_destroy_pipeline(pip_blue);
@@ -882,7 +856,6 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
     TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
 
     uint8_t pixels[4 * 4 * 4] = {0};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip_b);
     bind_empty_vertex_input();
@@ -890,7 +863,6 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
     assert_rgba(pixels, 16, 0, 255, 0, 255);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_render_target(target);
     nt_gfx_destroy_pipeline(pip_b);
@@ -918,7 +890,6 @@ static void test_global_block_registered_after_link_binds_in_that_program(void) 
     nt_gfx_register_global_block("Globals", 5);
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
 
@@ -932,7 +903,6 @@ static void test_global_block_registered_after_link_binds_in_that_program(void) 
     TEST_ASSERT_EQUAL_INT(5, binding);
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_program(prog);
@@ -947,7 +917,6 @@ static GLuint bind_uniform_test_program(const char *fragment_source) {
     nt_program_t program = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_TRUE(nt_gfx_program_ready(program));
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     GLint current_program = 0;
@@ -981,7 +950,6 @@ static void test_uniform_cache_addresses_all_sixteen_array_elements(void) {
         assert_uniform_float(program, name, i + 1);
     }
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 #define LONG_UNIFORM_NAME "u_uniform_with_a_name_that_is_longer_than_sixty_four_characters_and_must_not_be_truncated"
@@ -994,7 +962,6 @@ static void test_uniform_cache_preserves_long_names(void) {
     nt_gfx_set_uniform_float(nt_hash32_str(LONG_UNIFORM_NAME), 7.0F);
     assert_uniform_float(program, LONG_UNIFORM_NAME, 7);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_uniform_cache_expands_only_terminal_struct_array_indices(void) {
@@ -1011,7 +978,6 @@ static void test_uniform_cache_expands_only_terminal_struct_array_indices(void) 
     assert_uniform_float(program, "u_lights[0].weights[1]", 3);
     assert_uniform_float(program, "u_lights[1].weights[1]", 5);
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void test_uniform_cache_asserts_when_array_elements_exceed_capacity(void) {
@@ -1275,7 +1241,6 @@ static void test_samplers_read_their_link_time_units_without_uniform_writes(void
     TEST_ASSERT_NOT_EQUAL_INT(unit_a, unit_b);
 
     uint8_t pixel[4] = {0};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     bind_empty_vertex_input();
@@ -1288,7 +1253,6 @@ static void test_samplers_read_their_link_time_units_without_uniform_writes(void
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     assert_rgba(pixel, 1, 255, 255, 0, 255);
 }
@@ -1325,7 +1289,6 @@ static void test_two_draws_on_one_program_bind_at_their_queried_units(void) {
 
     uint8_t first[4] = {0};
     uint8_t second[4] = {0};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     bind_empty_vertex_input();
@@ -1347,7 +1310,6 @@ static void test_two_draws_on_one_program_bind_at_their_queried_units(void) {
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, second, sizeof(second)));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     assert_rgba(first, 1, 255, 255, 0, 255);
     assert_rgba(second, 1, 255, 0, 0, 255);
@@ -1364,14 +1326,12 @@ static void test_set_uniform_int_on_a_sampler_asserts(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = make_sampler_program(vertex_source, fragment_source)});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), 1); /* a plain int still writes */
     NT_TEST_EXPECT_ASSERT(nt_gfx_set_uniform_int(nt_hash32_str("u_a"), 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "apply_texture_bindings"));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 /* Writing the units must leave the bound pipeline's program current. */
@@ -1393,7 +1353,6 @@ static void test_linking_a_program_keeps_the_bound_pipelines_program_current(voi
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
 
     uint8_t pixel[4] = {0};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     bind_empty_vertex_input();
@@ -1406,7 +1365,6 @@ static void test_linking_a_program_keeps_the_bound_pipelines_program_current(voi
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     assert_rgba(pixel, 1, 0, 255, 0, 255);
 }

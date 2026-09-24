@@ -168,7 +168,7 @@ static void print_status(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         /* Invalidate all GFX-backed resources so they re-activate from blobs */
         nt_resource_invalidate(NT_ASSET_MESH);
@@ -331,8 +331,6 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    nt_gfx_begin_frame();
-
     /* Restore GPU resources after WebGL context loss */
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});
@@ -374,7 +372,6 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 }

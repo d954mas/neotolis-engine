@@ -16,13 +16,11 @@ void setUp(void) {
     nt_gfx_fake_reset();
     nt_shape_renderer_init();
     /* Enter frame/pass so flush->draw_indexed doesn't assert */
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 void tearDown(void) {
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_shape_renderer_shutdown();
     nt_gfx_shutdown();
 }
@@ -399,9 +397,7 @@ void test_shape_mesh_batch_indices(void) {
 
 static void restore_shape_between_frames(void) {
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_shape_renderer_restore_gpu();
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
@@ -465,7 +461,6 @@ void test_shape_failed_restore_preserves_settings(void) {
  * program and pipeline slots the game sized for its own materials. */
 void test_shape_restore_on_inactive_renderer_does_nothing(void) {
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_shape_renderer_shutdown();
     const uint32_t programs = nt_gfx_fake_program_create_count();
     const uint32_t pipelines = nt_gfx_fake_pipeline_create_count();
@@ -475,7 +470,6 @@ void test_shape_restore_on_inactive_renderer_does_nothing(void) {
     TEST_ASSERT_FALSE(nt_shape_renderer_test_initialized());
     TEST_ASSERT_EQUAL_UINT32(programs, nt_gfx_fake_program_create_count());
     TEST_ASSERT_EQUAL_UINT32(pipelines, nt_gfx_fake_pipeline_create_count());
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 

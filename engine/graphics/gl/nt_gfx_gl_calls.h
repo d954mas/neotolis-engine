@@ -24,7 +24,7 @@ static inline nt_gl_offset_t nt_gl_offset(uintptr_t bytes) { return (nt_gl_offse
 
 // #region counting (every build)
 /* A plain increment with a constant index: no call, branch or check per GL call.
- * A tick is always open between init and shutdown, so every call lands in one. */
+ * A frame is always open between init and shutdown, so every call lands in one. */
 #define NT_GL_COUNT_(call) ((void)g_nt_gfx.counters.gl[call]++)
 
 /* One count per call with non-NULL data; NULL storage (including NULL orphaning) does not count. */

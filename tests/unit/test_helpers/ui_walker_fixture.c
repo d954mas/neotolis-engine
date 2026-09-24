@@ -67,7 +67,6 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     /* Open a frame/pass so sprite/text renderers can draw_indexed without
      * tripping the stub gfx backend's "no active pass" guard (mirrors the
      * test_nt_sprite_renderer setUp). */
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
@@ -126,7 +125,6 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     }
     /* Texture destruction is pass-forbidden: close the fixture pass first. */
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     if (nt_font_valid(fx->stub_font)) {
         nt_font_destroy(fx->stub_font);
     }

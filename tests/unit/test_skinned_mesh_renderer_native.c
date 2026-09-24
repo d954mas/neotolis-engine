@@ -327,7 +327,6 @@ static nt_entity_t make_entity(nt_mesh_t mesh, nt_material_t material, const nt_
 
 static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t mesh, bool skinned, uint8_t out[FRAME_BYTES]) {
     const nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     if (skinned) {
         nt_skinned_mesh_renderer_draw_list(&item, 1);
@@ -336,16 +335,13 @@ static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t 
     }
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static void render_skinned_list(const nt_render_item_t *items, uint32_t count, uint8_t out[FRAME_BYTES]) {
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
     nt_skinned_mesh_renderer_draw_list(items, count);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 }
 
 static const float *palette_row(uint16_t origin_x, uint16_t origin_y, uint8_t joint, uint8_t row) {

@@ -8,7 +8,7 @@
 // #region observation storage and owning-site counters
 #if NT_GFX_CAPTURE_ENABLED
 typedef struct {
-    bool request_pending; /* the next tick records */
+    bool request_pending; /* the next frame records */
     bool recording;
     nt_gfx_event_t *events;
     uint32_t capacity;
@@ -112,7 +112,6 @@ static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, n
 
 typedef enum {
     NT_GFX_STATE_IDLE = 0,
-    NT_GFX_STATE_FRAME,
     NT_GFX_STATE_PASS,
 } nt_gfx_render_state_t;
 
@@ -141,10 +140,10 @@ typedef enum {
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);
-/* Returns and clears the latch a lost event sets; C flag, no JS. begin_tick
+/* Returns and clears the latch a lost event sets; C flag, no JS. begin_frame
  * alone takes it. */
 bool nt_gfx_backend_take_context_loss(void);
-/* Asks the browser directly (JS): failure paths and begin_tick while a loss
+/* Asks the browser directly (JS): failure paths and begin_frame while a loss
  * is known or a restore just ran. */
 bool nt_gfx_backend_query_context_lost(void);
 

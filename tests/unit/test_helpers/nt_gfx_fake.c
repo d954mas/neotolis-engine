@@ -113,7 +113,7 @@ static nt_texture_desc_t s_fake_last_texture_desc;
 static uint32_t s_fake_last_depth_texture_backend;
 static uint32_t s_fake_next_texture_backend;
 static bool s_fake_context_lost;
-static bool s_fake_loss_pending; /* the web lost-event latch until begin_tick takes it */
+static bool s_fake_loss_pending; /* the web lost-event latch until begin_frame takes it */
 static uint8_t s_fake_fail_texture_creates;
 static uint32_t s_fake_texture_destroy_count;
 static uint32_t s_fake_last_destroyed_texture;

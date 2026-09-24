@@ -167,7 +167,6 @@ static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
 
     memset(s_readback, 0, sizeof(s_readback));
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}});
     nt_gfx_set_viewport(0, 0, vp_w, vp_h);
     nt_gfx_bind_pipeline(pipeline);
@@ -177,7 +176,6 @@ static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w
     nt_gfx_draw(0, 3);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, vp_w, vp_h, s_readback, (uint32_t)sizeof(s_readback)));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_gfx_destroy_render_target(rt);
     nt_gfx_destroy_vertex_input(vi);

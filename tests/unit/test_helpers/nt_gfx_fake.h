@@ -88,14 +88,14 @@ uint32_t nt_gfx_fake_last_destroyed_texture(void);
 void nt_gfx_fake_fail_buffer_creates(uint8_t mask);
 /* A failed web recreate leaves no context: the backend stays lost. */
 void nt_gfx_fake_fail_next_backend_restore_lost(void);
-/* The recreate succeeds but the context is lost again before begin_tick finishes. */
+/* The recreate succeeds but the context is lost again before begin_frame finishes. */
 void nt_gfx_fake_lose_context_during_next_restore(void);
 void nt_gfx_fake_fail_next_render_target_create(void);
 void nt_gfx_fake_fail_next_render_target_resize(void);
 /* Live loss state and the lost-event latch together; the lose_context_on_* knobs
  * set both too. Creates fail on a lost context, as GL's do. */
 void nt_gfx_fake_set_context_lost(bool lost);
-/* The browser lost and restored the context before begin_tick: only the latch is set. */
+/* The browser lost and restored the context before begin_frame: only the latch is set. */
 void nt_gfx_fake_lose_and_restore_context(void);
 uint32_t nt_gfx_fake_last_update_buffer_offset(void);
 uint32_t nt_gfx_fake_last_instance_offset(void);

@@ -381,7 +381,7 @@ test('context loss: a loss and restore between two frames still runs the restore
     return { drawnWhileHeld, lostNow: canvas.getContext('webgl2')!.isContextLost() };
   });
   expect(cycled).toEqual({ drawnWhileHeld: 0, lostNow: false });
-  await page.waitForFunction(() => (window as unknown as { __nt: { restore_ticks(): number } }).__nt.restore_ticks() > 0 && window.__nt!.programs_ready(), null, { timeout: 15_000 });
+  await page.waitForFunction(() => (window as unknown as { __nt: { restore_frames(): number } }).__nt.restore_frames() > 0 && window.__nt!.programs_ready(), null, { timeout: 15_000 });
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
 });
 

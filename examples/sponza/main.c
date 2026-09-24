@@ -359,7 +359,7 @@ static void load_scene_from_manifest(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -566,8 +566,6 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    nt_gfx_begin_frame();
-
     /* Restore GPU resources after WebGL context loss */
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
@@ -618,7 +616,6 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 }

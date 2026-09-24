@@ -34,7 +34,7 @@ static uint8_t *stage_acquire(uint32_t size) {
     return s_stage_buf;
 }
 
-static void stage_frame_tick(void) {
+static void age_stage_buffer(void) {
     if (s_stage_buf != NULL) {
         s_stage_idle++;
         if (s_stage_idle > NT_STAGE_IDLE_FRAMES) {
@@ -315,8 +315,8 @@ static void capture_initial_state(void) {
 #define NT_GFX_DEFINE_RESOURCE(kind, id) ((void)0)
 #endif
 
-/* The next tick starts at once: gfx work is always inside a tick between init and shutdown. */
-static void open_tick(void) { g_nt_gfx.counters = (nt_gfx_counters_t){.tick_sequence = g_nt_gfx.counters.tick_sequence + 1}; }
+/* The next frame starts at once: gfx work is always inside a frame between init and shutdown. */
+static void open_frame(void) { g_nt_gfx.counters = (nt_gfx_counters_t){.frame_sequence = g_nt_gfx.counters.frame_sequence + 1}; }
 
 // #endregion
 
@@ -343,8 +343,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
         NT_ASSERT(g_nt_gfx_capture.events != NULL);
     }
 #endif
-    /* Init work, like everything after it, belongs to the first tick. */
-    open_tick();
+    /* Init work, like everything after it, belongs to the first frame. */
+    open_frame();
 
     nt_pool_init(&s_gfx.shader_pool, desc->max_shaders);
     nt_pool_init(&s_gfx.program_pool, desc->max_programs);
@@ -388,7 +388,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_shutdown(void) {
-    /* The open tick is discarded unpublished; teardown calls must not record into the freed array. */
+    /* The open frame is discarded unpublished; teardown calls must not record into the freed array. */
 #if NT_GFX_CAPTURE_ENABLED
     g_nt_gfx_capture.recording = false;
     free(g_nt_gfx_capture.events);
@@ -748,13 +748,14 @@ static nt_gfx_result_t restore_context(void) {
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-void nt_gfx_begin_tick(void) {
+void nt_gfx_begin_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
-    g_nt_gfx.last_tick = g_nt_gfx.counters;
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_frame: a pass is still open");
+    age_stage_buffer();
+    g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
     if (g_nt_gfx_capture.recording) {
-        g_nt_gfx_capture.view.counters = g_nt_gfx.last_tick;
+        g_nt_gfx_capture.view.counters = g_nt_gfx.last_frame;
         g_nt_gfx_capture.recording = false;
     }
 #endif
@@ -766,9 +767,9 @@ void nt_gfx_begin_tick(void) {
         g_nt_gfx.context_lost = true;
         NT_LOG_ERROR("WebGL context lost");
     }
-    open_tick();
+    open_frame();
 #if NT_GFX_CAPTURE_ENABLED
-    /* Opened after the wipe and before the restore: the snapshot shows the tables the tick starts from. */
+    /* Opened after the wipe and before the restore: the snapshot shows the tables the frame starts from. */
     if (g_nt_gfx_capture.request_pending) {
         g_nt_gfx_capture.request_pending = false;
         g_nt_gfx_capture.recording = true;
@@ -780,46 +781,9 @@ void nt_gfx_begin_tick(void) {
         NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
         NT_GFX_END(restore_context());
     }
-}
-
-static nt_gfx_result_t begin_frame(void) {
-    if (g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
+    if (!g_nt_gfx.context_lost) {
+        nt_gfx_backend_begin_frame();
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
-    if (s_gfx.render_state != NT_GFX_STATE_IDLE) {
-        NT_LOG_ERROR("begin_frame called outside IDLE state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
-    s_gfx.render_state = NT_GFX_STATE_FRAME;
-    nt_gfx_backend_begin_frame();
-    return NT_GFX_RESULT_ACCEPTED;
-}
-
-void nt_gfx_begin_frame(void) {
-    NT_GFX_BEGIN(NT_GFX_OP_RENDER_FRAME, NT_GFX_OBJECT_NONE, 0);
-    NT_GFX_END(begin_frame());
-}
-
-static nt_gfx_result_t end_frame(void) {
-    stage_frame_tick();
-    if (g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
-
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
-    if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
-        NT_LOG_ERROR("end_frame called outside FRAME state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
-
-    s_gfx.render_state = NT_GFX_STATE_IDLE;
-    return NT_GFX_RESULT_ACCEPTED;
-}
-
-void nt_gfx_end_frame(void) {
-    NT_GFX_BEGIN(NT_GFX_OP_END_RENDER_FRAME, NT_GFX_OBJECT_NONE, 0);
-    NT_GFX_END(end_frame());
 }
 
 /* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
@@ -907,9 +871,9 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
         NT_LOG_ERROR("begin_pass: NULL desc");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
-    if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
-        NT_LOG_ERROR("begin_pass called outside FRAME state");
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_pass: a pass is already open");
+    if (s_gfx.render_state != NT_GFX_STATE_IDLE) {
+        NT_LOG_ERROR("begin_pass called inside a pass");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
 
@@ -950,7 +914,7 @@ static nt_gfx_result_t end_pass(void) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
 
-    s_gfx.render_state = NT_GFX_STATE_FRAME;
+    s_gfx.render_state = NT_GFX_STATE_IDLE;
     s_gfx.active_render_target = 0;
     nt_gfx_backend_end_pass();
     return NT_GFX_RESULT_ACCEPTED;

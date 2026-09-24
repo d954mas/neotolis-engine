@@ -281,7 +281,7 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
-    nt_gfx_begin_tick();
+    nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         /* Before this iteration's steps: they re-resolve what is invalidated here. */
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -427,7 +427,6 @@ static void frame(void) {
     const nt_material_info_t *mat_info = nt_material_get_info(s_sprite_material);
     bool can_render = s_atlas_resolved && mat_info && nt_gfx_program_ready(mat_info->program) && s_bunny_count > 0;
 
-    nt_gfx_begin_frame();
     /* nt_debug_overlay reads frame total via segment named "frame" by convention. */
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_begin_segment("frame");
@@ -509,7 +508,6 @@ static void frame(void) {
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_end_segment();
 #endif
-    nt_gfx_end_frame();
 
 #if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
