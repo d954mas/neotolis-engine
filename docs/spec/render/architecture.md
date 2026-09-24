@@ -475,12 +475,12 @@ in the same funnel; NULL storage and generated mips are excluded, non-NULL
 orphaning counts once, texture bytes use the actual GPU format for each
 mip/subrectangle, and failed creates keep already-issued work.
 
-`accepted[]` counts public operations by `nt_gfx_operation_t` whose END reason
+`accepted[]` counts public operations by `nt_gfx_operation_t` whose END result
 was ACCEPTED, in every build: every public operation, readback and GPU timer
 segment calls included, is one BEGIN/END pair, and END is the only place that
 counts it. It counts every operation, nested ones included (render-target
 attachments, default samplers, cascaded destroys). Only frontend cache hits
-(END reason CACHE), rejections and losses are left out; an operation whose
+(END result CACHE), rejections and losses are left out; an operation whose
 backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
 (SKIP/INACTIVE) still ends ACCEPTED and counts. A GPU timer poll with no result
 yet ends `UNREADY`. Texture
@@ -530,7 +530,7 @@ a NULL pointer. The finalized view retains its tick's counters (and so its
 `g_nt_gfx.last_tick`.
 
 Every recorded public operation produces exactly one BEGIN, carrying its
-request arguments, and one RESULT, carrying the outcome reason; a creator's
+request arguments, and one RESULT, carrying the outcome `result`; a creator's
 RESULT carries the new handle (zero on failure), while its backend slot and
 names are in the DEFINITION record. Operations issued inside another operation
 (render-target attachments, default samplers) nest between its BEGIN and
@@ -564,7 +564,7 @@ Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
 resource kind and `backend.args[0..1]` as backend slot/raw GL name; render targets
 also supply the depth renderbuffer name at index 2. Frontend resource definitions
 carry the full handle, current backend slot and available dimensions/relationships.
-Shader, program and vertex-input definitions carry reason `UNKNOWN`: the frontend
+Shader, program and vertex-input definitions carry result `UNKNOWN`: the frontend
 retains no shader stage or source, program stage pair or vertex-input layout, so
 those fields are absent, not zero. A vertex input created during a recorded tick
 follows its definition with `DEFINITION/ATTRIBUTE` records.

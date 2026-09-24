@@ -655,7 +655,7 @@ typedef struct {
     uint64_t buffer_upload_bytes;
     uint64_t texture_upload_calls;
     uint64_t texture_upload_bytes;
-    uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END reason was ACCEPTED */
+    uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
 
@@ -687,21 +687,21 @@ typedef enum {
 } nt_gfx_object_kind_t;
 
 typedef enum {
-    NT_GFX_REASON_NONE,
-    NT_GFX_REASON_ACCEPTED,
-    NT_GFX_REASON_CACHE,
-    NT_GFX_REASON_INACTIVE,
-    NT_GFX_REASON_CONTEXT_LOST,
-    NT_GFX_REASON_INVALID_HANDLE,
-    NT_GFX_REASON_INVALID_ARGUMENT,
-    NT_GFX_REASON_UNREADY,
-    NT_GFX_REASON_BACKEND_FAILURE,
-    NT_GFX_REASON_CAPACITY,
-    NT_GFX_REASON_UNKNOWN,
-} nt_gfx_event_reason_t;
+    NT_GFX_RESULT_NONE,
+    NT_GFX_RESULT_ACCEPTED,
+    NT_GFX_RESULT_CACHE,
+    NT_GFX_RESULT_INACTIVE,
+    NT_GFX_RESULT_CONTEXT_LOST,
+    NT_GFX_RESULT_INVALID_HANDLE,
+    NT_GFX_RESULT_INVALID_ARGUMENT,
+    NT_GFX_RESULT_UNREADY,
+    NT_GFX_RESULT_BACKEND_FAILURE,
+    NT_GFX_RESULT_CAPACITY,
+    NT_GFX_RESULT_UNKNOWN,
+} nt_gfx_result_t;
 
 /* Pointer-free records. Each public operation is one BEGIN (request) and one
- * RESULT (reason; creators add the handle); nested operations sit between. INITIAL and
+ * RESULT (result; creators add the handle); nested operations sit between. INITIAL and
  * DEFINITION describe inherited or resource state and never represent issued
  * calls; ARGUMENT carries per-element request arguments of the enclosing BEGIN.
  * object is a full typed frontend handle and the cross-context identity; raw names
@@ -713,7 +713,7 @@ typedef struct {
     nt_gfx_object_kind_t object_kind;
     uint32_t object;
     uint32_t detail;
-    nt_gfx_event_reason_t reason;
+    nt_gfx_result_t result;
     union {
         struct {
             uint64_t bytes;

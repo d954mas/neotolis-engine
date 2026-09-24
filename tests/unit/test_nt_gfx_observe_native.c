@@ -215,7 +215,7 @@ static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
             mapping = true;
         }
         if (event->kind == NT_GFX_EVENT_RESULT && event->operation == NT_GFX_OP_SCISSOR_ENABLE) {
-            TEST_ASSERT_EQUAL(NT_GFX_REASON_CACHE, event->reason);
+            TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, event->result);
             cache = true;
         }
     }
@@ -258,7 +258,7 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
             }
             units |= 1U << event->data.backend.args[3];
         }
-        if (event->kind == NT_GFX_EVENT_SKIP && event->reason == NT_GFX_REASON_INACTIVE) {
+        if (event->kind == NT_GFX_EVENT_SKIP && event->result == NT_GFX_RESULT_INACTIVE) {
             skips++;
         }
         /* Pipeline state is defined once, by the backend, in its slots and enums. */
@@ -574,7 +574,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
             for (uint32_t i = 0; i < capture.count; i++) {
                 const nt_gfx_event_t *e = &capture.events[i];
                 if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UNIFORM_VEC4 && e->data.backend.args[1] == nt_hash32_str("u_color").value) {
-                    TEST_ASSERT_EQUAL(NT_GFX_REASON_NONE, e->reason);
+                    TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, e->result);
                     TEST_ASSERT_EQUAL_MEMORY(color, e->data.backend.values, sizeof(color));
                     color_known = true;
                 }

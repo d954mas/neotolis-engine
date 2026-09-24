@@ -77,18 +77,18 @@ static inline void nt_gfx_capture_commit_call(void) {
 /* One public operation = one BEGIN and one END, in every build. BEGIN declares
  * op/kind/object as a wrapper-local scope, so operations
  * nested inside the implementation cannot clobber them. END counts an ACCEPTED
- * reason in accepted[op]; capture builds also record the request and result. */
+ * result in accepted[op]; capture builds also record the request and result. */
 typedef struct {
     nt_gfx_operation_t operation;
     nt_gfx_object_kind_t kind;
     uint32_t object;
 } nt_gfx_scope_t;
 
-static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_event_reason_t reason) {
-    if (reason == NT_GFX_REASON_ACCEPTED) {
+static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, nt_gfx_result_t result) {
+    if (result == NT_GFX_RESULT_ACCEPTED) {
         g_nt_gfx.counters.accepted[scope->operation]++;
     }
-    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event->object_kind = scope->kind; event->object = object; event->reason = reason);
+    NT_GFX_RECORD(NT_GFX_EVENT_RESULT, scope->operation, event->object_kind = scope->kind; event->object = object; event->result = result);
 }
 
 #define NT_GFX_BEGIN(scope_op, scope_kind, scope_object)                                                                                                                                               \
@@ -98,13 +98,13 @@ static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, n
 #define NT_GFX_BEGIN_REQUEST(scope_op, scope_kind, scope_object, ...)                                                                                                                                  \
     const nt_gfx_scope_t nt_gfx_scope = {(scope_op), (scope_kind), (scope_object)};                                                                                                                    \
     NT_GFX_RECORD(NT_GFX_EVENT_BEGIN, (scope_op), event->object_kind = (scope_kind); event->object = (scope_object); __VA_ARGS__)
-#define NT_GFX_END(reason) nt_gfx_end_op(&nt_gfx_scope, nt_gfx_scope.object, (reason))
-/* Creators end with the handle they produced (zero on failure); the reason is
+#define NT_GFX_END(result) nt_gfx_end_op(&nt_gfx_scope, nt_gfx_scope.object, (result))
+/* Creators end with the handle they produced (zero on failure); the result is
  * evaluated first so the implementation has written the handle. */
-#define NT_GFX_END_OBJECT(reason, created)                                                                                                                                                             \
+#define NT_GFX_END_OBJECT(result, created)                                                                                                                                                             \
     do {                                                                                                                                                                                               \
-        const nt_gfx_event_reason_t nt_gfx_reason = (reason);                                                                                                                                          \
-        nt_gfx_end_op(&nt_gfx_scope, (created), nt_gfx_reason);                                                                                                                                        \
+        const nt_gfx_result_t nt_gfx_result = (result);                                                                                                                                                \
+        nt_gfx_end_op(&nt_gfx_scope, (created), nt_gfx_result);                                                                                                                                        \
     } while (0)
 // #endregion
 

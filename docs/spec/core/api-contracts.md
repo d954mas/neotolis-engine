@@ -168,7 +168,7 @@ survives context loss.
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
 `nt_gfx_begin_tick` has synced, or a link the browser reports lost. The second
 is a stage handle that is still live but whose GPU object that loss discarded —
-permanently unready (END reason `UNREADY`), so the owner recreates the stage and
+permanently unready (END result `UNREADY`), so the owner recreates the stage and
 links again. Both are
 recoverable and neither asserts. A stale stage handle remains a developer error
 and traps.

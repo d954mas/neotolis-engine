@@ -194,7 +194,7 @@ static void test_resource_operations_keep_published_handles_after_destroy(void) 
     bool destroyed = false;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *e = &capture.events[i];
-        if (e->kind == NT_GFX_EVENT_RESULT && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == buffer.id && e->reason == NT_GFX_REASON_ACCEPTED) {
+        if (e->kind == NT_GFX_EVENT_RESULT && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == buffer.id && e->result == NT_GFX_RESULT_ACCEPTED) {
             created |= e->operation == NT_GFX_OP_CREATE;
             destroyed |= e->operation == NT_GFX_OP_DESTROY;
         }
@@ -203,15 +203,15 @@ static void test_resource_operations_keep_published_handles_after_destroy(void) 
     TEST_ASSERT_TRUE(destroyed);
 }
 
-static uint32_t result_reason(nt_gfx_capture_view_t capture, nt_gfx_operation_t operation, nt_gfx_object_kind_t kind) {
-    uint32_t reason = UINT32_MAX;
+static uint32_t result_of(nt_gfx_capture_view_t capture, nt_gfx_operation_t operation, nt_gfx_object_kind_t kind) {
+    uint32_t result = UINT32_MAX;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *e = &capture.events[i];
         if (e->kind == NT_GFX_EVENT_RESULT && e->operation == operation && e->object_kind == kind) {
-            reason = (uint32_t)e->reason;
+            result = (uint32_t)e->result;
         }
     }
-    return reason;
+    return result;
 }
 
 static void test_render_target_work_on_a_known_loss_ends_context_lost(void) {
@@ -225,8 +225,8 @@ static void test_render_target_work_on_a_known_loss_ends_context_lost(void) {
     nt_gfx_begin_tick();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_FALSE(capture.overflow);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET));
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(capture, NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(capture, NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET));
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
@@ -246,7 +246,7 @@ static void test_rejected_destroys_and_resize_assert_inside_a_recorded_tick(void
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_tick();
-    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, result_reason(nt_gfx_capture_read(), NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE));
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, result_of(nt_gfx_capture_read(), NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE));
 }
 #endif
 
@@ -268,7 +268,7 @@ static void test_restore_is_one_context_operation_after_the_lost_snapshot(void) 
     bool pipeline_defined = false;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *e = &capture.events[i];
-        restores += e->kind == NT_GFX_EVENT_RESULT && e->operation == NT_GFX_OP_CONTEXT && e->reason == NT_GFX_REASON_ACCEPTED;
+        restores += e->kind == NT_GFX_EVENT_RESULT && e->operation == NT_GFX_OP_CONTEXT && e->result == NT_GFX_RESULT_ACCEPTED;
         pipeline_defined |= e->kind == NT_GFX_EVENT_DEFINITION && e->object_kind == NT_GFX_OBJECT_PIPELINE && e->object == pipeline.id;
     }
     TEST_ASSERT_EQUAL_UINT32(1, restores);
@@ -294,7 +294,7 @@ static void test_failed_restore_stays_lost_with_one_error_log(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1 : 0, s_error_logs);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_backend_restore_count());
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(nt_gfx_capture_read(), NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
 }
 
 /* A restore that meets a new loss wipes what it refilled and stays lost; the next restore starts clean. */
@@ -320,7 +320,7 @@ static void test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_work
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_tick();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(capture, NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
     TEST_ASSERT_EQUAL_UINT32(0, capture.counters.accepted[NT_GFX_OP_CONTEXT]);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
@@ -344,7 +344,7 @@ static void test_render_target_restore_meeting_a_loss_ends_context_lost(void) {
 
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_tick();
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(nt_gfx_capture_read(), NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 }
@@ -358,7 +358,7 @@ static void test_resize_failing_on_a_latched_loss_ends_context_lost(void) {
     TEST_ASSERT_FALSE(nt_gfx_resize_render_target(target, 8, 8));
     nt_gfx_begin_tick();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(capture, NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET));
 }
 
 /* The explicit sampler outlives the loss; its backend is recreated lazily at the bind. */
@@ -382,7 +382,7 @@ static void test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost(void)
     nt_gfx_begin_tick();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_FALSE(capture.overflow);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(capture, NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE));
 }
 
 /* A stage whose GPU object died with the context is unready, not a backend failure. */
@@ -393,7 +393,7 @@ static void test_link_with_a_stage_left_unready_by_a_loss_ends_unready(void) {
     record_next_tick();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs).id);
     nt_gfx_begin_tick();
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_UNREADY, result_reason(nt_gfx_capture_read(), NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_UNREADY, result_of(nt_gfx_capture_read(), NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM));
 }
 
 /* Restored render targets are defined inside the CONTEXT operation, a failed one with complete=0. */
@@ -456,7 +456,7 @@ static void test_sampler_cache_hit_defines_nothing(void) {
     for (uint32_t i = start; i < capture.count; i++) {
         const nt_gfx_event_t *e = &capture.events[i];
         TEST_ASSERT_FALSE(e->kind == NT_GFX_EVENT_DEFINITION && e->object_kind == NT_GFX_OBJECT_SAMPLER);
-        cache |= e->kind == NT_GFX_EVENT_RESULT && e->object == sampler.id && e->reason == NT_GFX_REASON_CACHE;
+        cache |= e->kind == NT_GFX_EVENT_RESULT && e->object == sampler.id && e->result == NT_GFX_RESULT_CACHE;
     }
     TEST_ASSERT_TRUE(cache);
 }
@@ -486,8 +486,8 @@ static void test_every_operation_records_one_begin_and_one_result(void) {
         } else if (e->kind == NT_GFX_EVENT_RESULT) {
             TEST_ASSERT_GREATER_THAN_UINT32(0, depth);
             TEST_ASSERT_EQUAL(stack[--depth], e->operation);
-            target_result |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_RENDER_TARGET && e->object == target.id && e->reason == NT_GFX_REASON_ACCEPTED;
-            invalid_buffer |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == 0 && e->reason == NT_GFX_REASON_INVALID_ARGUMENT;
+            target_result |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_RENDER_TARGET && e->object == target.id && e->result == NT_GFX_RESULT_ACCEPTED;
+            invalid_buffer |= e->operation == NT_GFX_OP_CREATE && e->object_kind == NT_GFX_OBJECT_BUFFER && e->object == 0 && e->result == NT_GFX_RESULT_INVALID_ARGUMENT;
         }
     }
     TEST_ASSERT_EQUAL_UINT32(0, depth);
@@ -511,7 +511,7 @@ static void test_accepted_counters_match_recorded_results(void) {
     uint32_t recorded[NT_GFX_OP_COUNT] = {0};
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *e = &capture.events[i];
-        if (e->kind == NT_GFX_EVENT_RESULT && e->reason == NT_GFX_REASON_ACCEPTED) {
+        if (e->kind == NT_GFX_EVENT_RESULT && e->result == NT_GFX_RESULT_ACCEPTED) {
             recorded[e->operation]++;
         }
     }
@@ -535,7 +535,7 @@ static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
             TEST_ASSERT_EQUAL_UINT64(24, e->data.resource.size);
             buffer_found = true;
         }
-        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_SCISSOR && e->reason == NT_GFX_REASON_UNKNOWN) {
+        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_SCISSOR && e->result == NT_GFX_RESULT_UNKNOWN) {
             scissor_unknown = true;
         }
     }
