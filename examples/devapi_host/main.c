@@ -213,7 +213,9 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
+#ifdef NT_DEVAPI_HOST_WEB_CAPTURE
     nt_gfx_begin_frame();
+#endif
     /* nt_devapi_update must run before nt_input_poll so injected rising edges survive the edge-clear. */
     nt_devapi_update();
 #ifndef __EMSCRIPTEN__
