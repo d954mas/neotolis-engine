@@ -205,6 +205,20 @@ static void test_destroy_render_target_tolerates_invalid_and_stale_handles(void)
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_destroy_count());
 }
 
+/* Generations keep a stale handle away from the target that reused its slot. */
+static void test_stale_destroy_leaves_the_target_that_reused_its_slot(void) {
+    nt_texture_t color = make_color();
+    nt_render_target_t a = make_target(color, NO_TEXTURE);
+    uint32_t a_backend = nt_gfx_test_render_target_backend_id(a);
+    nt_gfx_destroy_render_target(a);
+    nt_render_target_t c = make_target(color, NO_TEXTURE);
+    TEST_ASSERT_EQUAL_UINT32(a_backend, nt_gfx_test_render_target_backend_id(c));
+
+    nt_gfx_destroy_render_target(a);
+    TEST_ASSERT_TRUE(nt_gfx_render_target_valid(c));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_destroy_count());
+}
+
 static void test_make_and_destroy_reject_active_pass(void) {
     nt_texture_t color = make_color();
     nt_render_target_t rt = make_target(color, NO_TEXTURE);
@@ -272,6 +286,16 @@ static void test_context_loss_frees_targets_and_leaves_texture_husks(void) {
     nt_gfx_destroy_texture(depth);
     nt_render_target_t remade = make_target(make_color(), make_depth());
     TEST_ASSERT_TRUE(nt_gfx_render_target_valid(remade));
+}
+
+/* While lost, make is a recoverable CONTEXT_LOST, not a husk misuse. */
+static void test_make_over_husk_while_lost_returns_invalid(void) {
+    nt_texture_t color = make_color();
+    lose_context();
+
+    nt_render_target_t rt = make_target(color, NO_TEXTURE);
+    TEST_ASSERT_EQUAL_UINT32(0, rt.id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
 }
 
 /* A failed web recreate leaves no context; retrying every frame would only fail again. */
@@ -626,9 +650,11 @@ int main(void) {
     RUN_TEST(test_shared_depth_texture_serves_two_targets);
     RUN_TEST(test_destroying_a_texture_destroys_only_its_targets);
     RUN_TEST(test_destroy_render_target_tolerates_invalid_and_stale_handles);
+    RUN_TEST(test_stale_destroy_leaves_the_target_that_reused_its_slot);
     RUN_TEST(test_make_and_destroy_reject_active_pass);
     RUN_TEST(test_recreate_at_new_size_without_spare_slots);
     RUN_TEST(test_context_loss_frees_targets_and_leaves_texture_husks);
+    RUN_TEST(test_make_over_husk_while_lost_returns_invalid);
     RUN_TEST(test_context_restore_waits_after_a_restore_that_leaves_the_backend_lost);
     RUN_TEST(test_context_restore_stays_lost_when_the_recreate_meets_a_loss);
     RUN_TEST(test_context_restore_waits_while_backend_remains_lost);

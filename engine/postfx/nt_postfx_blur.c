@@ -319,7 +319,7 @@ static bool validate_target_sizes(const nt_postfx_blur_pass_t *pass, const blur_
 
 static bool validate_no_aliasing(const nt_postfx_blur_pass_t *pass, const blur_pass_targets_t *targets) {
     bool source_aliases_temp = pass->source.id == targets->temp_color.id;
-    bool targets_alias = pass->temp.id == pass->dest.id;
+    bool targets_alias = pass->temp.id == pass->dest.id || targets->temp_color.id == targets->dest_color.id;
     NT_ASSERT(!source_aliases_temp && "nt_postfx_blur_gaussian: source aliases temp target");
     NT_ASSERT(!targets_alias && "nt_postfx_blur_gaussian: temp and dest targets alias");
     return !source_aliases_temp && !targets_alias;

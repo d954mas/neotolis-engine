@@ -939,7 +939,8 @@ void nt_gfx_set_scissor_enabled(bool enabled);
 bool nt_gfx_scissor_enabled(void);
 void nt_gfx_set_viewport(int x, int y, int w, int h);
 
-/* Returns NT_SAMPLER_INVALID for an invalid handle. */
+/* Returns NT_SAMPLER_INVALID for an invalid handle. A husk left by a context
+ * loss keeps its default sampler until its owner destroys it. */
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
 /* ---- Uniforms ---- The hash is the identity, as for tags and resources. Hash once

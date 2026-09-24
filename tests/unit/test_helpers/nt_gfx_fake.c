@@ -540,7 +540,7 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     s_fake_texture_destroy_count++;
 }
 
-uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS]) {
+uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot) {
     NT_ASSERT(textures[NT_GFX_RT_COLOR] != 0 || textures[NT_GFX_RT_DEPTH] != 0);
     s_fake_render_target_create_count++;
     if (s_fake_context_lost) {
@@ -552,7 +552,7 @@ uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_A
         s_fake_fail_next_render_target_create = false;
         return 0;
     }
-    return s_fake_render_target_create_count;
+    return slot;
 }
 
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {

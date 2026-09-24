@@ -191,8 +191,9 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data);
 
 enum { NT_GFX_RT_COLOR, NT_GFX_RT_DEPTH, NT_GFX_RT_ATTACHMENTS };
-/* Builds an FBO over live texture backends; 0 = absent attachment. Returns 0 when incomplete. */
-uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS]);
+/* Builds an FBO over live texture backends; 0 = absent attachment. Same slot
+ * contract as create_pipeline: returns `slot`, or 0 when incomplete. */
+uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot);
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);

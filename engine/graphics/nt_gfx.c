@@ -79,7 +79,7 @@ typedef struct {
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
     /* Sampler NT_SAMPLER_DEFAULT resolves to. Always non-zero for a live
      * texture: make_texture rejects the texture when the sampler cannot be
-     * created. Reset to NT_SAMPLER_INVALID transiently during context-loss recovery. */
+     * created. Survives a context loss: sampler ids stay valid across it. */
     nt_sampler_t default_sampler;
 } nt_gfx_texture_meta_t;
 
@@ -122,7 +122,6 @@ static struct {
     uint32_t *pipeline_programs; /* full program handle each pipeline borrows */
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
-    uint32_t *render_target_backends;
 
     nt_gfx_buffer_meta_t *buffer_metas;   /* minimal buffer metadata for runtime validation */
     nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
@@ -283,7 +282,7 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 event->data.resource.flags = s_gfx.sampler_cache[id - 1].key;
                 break;
             case NT_GFX_OBJECT_RENDER_TARGET:
-                event->data.resource.backend = s_gfx.render_target_backends[slot];
+                event->data.resource.backend = slot;
                 event->data.resource.related[0] = s_gfx.render_target_metas[slot].attachments[NT_GFX_RT_COLOR].id;
                 event->data.resource.related[1] = s_gfx.render_target_metas[slot].attachments[NT_GFX_RT_DEPTH].id;
                 event->data.resource.width = render_target_size_meta(slot)->width;
@@ -367,7 +366,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.pipeline_programs = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
-    s_gfx.render_target_backends = (uint32_t *)calloc(max_render_targets + 1, sizeof(uint32_t));
 
     s_gfx.buffer_metas = (nt_gfx_buffer_meta_t *)calloc(desc->max_buffers + 1, sizeof(nt_gfx_buffer_meta_t));
     s_gfx.vertex_input_metas = (nt_gfx_vertex_input_meta_t *)calloc(desc->max_vertex_inputs + 1, sizeof(nt_gfx_vertex_input_meta_t));
@@ -380,8 +378,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     nt_pool_init(&s_gfx.mesh_pool, desc->max_meshes);
     s_gfx.mesh_table = (nt_gfx_mesh_info_t *)calloc((size_t)desc->max_meshes + 1, sizeof(nt_gfx_mesh_info_t));
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
-    NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.pipeline_programs && s_gfx.buffer_backends && s_gfx.texture_backends && s_gfx.render_target_backends && s_gfx.buffer_metas &&
-              s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && "gfx init: out of memory");
+    NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.pipeline_programs && s_gfx.buffer_backends && s_gfx.texture_backends && s_gfx.buffer_metas && s_gfx.vertex_input_metas &&
+              s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && "gfx init: out of memory");
 
     if (!nt_gfx_backend_init(desc)) {
         NT_LOG_ERROR("backend init failed");
@@ -406,7 +404,7 @@ void nt_gfx_shutdown(void) {
     /* Framebuffers only: the texture loop below releases their attachments. */
     for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
         if (nt_pool_slot_alive(&s_gfx.render_target_pool, i)) {
-            nt_gfx_backend_destroy_render_target(s_gfx.render_target_backends[i]);
+            nt_gfx_backend_destroy_render_target(i);
         }
     }
 
@@ -458,7 +456,6 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.pipeline_programs);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
-    free(s_gfx.render_target_backends);
     free(s_gfx.buffer_metas);
     free(s_gfx.vertex_input_metas);
     free(s_gfx.texture_metas);
@@ -546,7 +543,6 @@ static void wipe_backend_handles(void) {
         if (nt_pool_slot_alive(&s_gfx.render_target_pool, i)) {
             nt_pool_free(&s_gfx.render_target_pool, s_gfx.render_target_pool.slots[i].id);
         }
-        s_gfx.render_target_backends[i] = 0;
         memset(&s_gfx.render_target_metas[i], 0, sizeof(nt_gfx_render_target_meta_t));
     }
     /* Mesh table: keep entries active. nt_resource_invalidate() will
@@ -561,9 +557,6 @@ static void wipe_backend_handles(void) {
      * stay valid; the backend is lazily recreated on the next nt_gfx_make_sampler hit or bind_texture. */
     for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
         s_gfx.sampler_cache[i].backend = 0;
-    }
-    for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
-        s_gfx.texture_metas[i].default_sampler = NT_SAMPLER_INVALID;
     }
     /* Timer-segment GL queries are dead too — let backend re-allocate
      * on next begin_segment via the lazy-find-or-alloc path. */
@@ -683,27 +676,7 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
     return result == NT_GFX_RESULT_ACCEPTED;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool render_target_backend_for_pass(nt_render_target_t target, uint32_t *out_backend) {
-    NT_ASSERT(out_backend != NULL);
-    if (out_backend == NULL) {
-        return false;
-    }
-    *out_backend = 0;
-    if (target.id == 0) {
-        return true;
-    }
-    bool valid = nt_pool_valid(&s_gfx.render_target_pool, target.id);
-    NT_ASSERT(valid && "begin_pass: invalid render target");
-    if (!valid) {
-        NT_LOG_ERROR("begin_pass: invalid render target");
-        return false;
-    }
-    *out_backend = s_gfx.render_target_backends[nt_pool_slot_index(target.id)];
-    NT_ASSERT(*out_backend != 0);
-    return *out_backend != 0;
-}
-
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
@@ -720,14 +693,18 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
 
-    uint32_t render_target_backend;
-    if (!render_target_backend_for_pass(desc->target, &render_target_backend)) {
-        return NT_GFX_RESULT_UNREADY;
-    }
+    uint32_t render_target_backend = 0;
     uint16_t width = 0;
     uint16_t height = 0;
-    if (render_target_backend != 0) {
-        const nt_gfx_texture_meta_t *size = render_target_size_meta(nt_pool_slot_index(desc->target.id));
+    if (desc->target.id != 0) {
+        bool valid = nt_pool_valid(&s_gfx.render_target_pool, desc->target.id);
+        NT_ASSERT(valid && "begin_pass: invalid render target");
+        if (!valid) {
+            NT_LOG_ERROR("begin_pass: invalid render target");
+            return NT_GFX_RESULT_UNREADY;
+        }
+        render_target_backend = nt_pool_slot_index(desc->target.id);
+        const nt_gfx_texture_meta_t *size = render_target_size_meta(render_target_backend);
         width = size->width;
         height = size->height;
     }
@@ -1301,11 +1278,12 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
         return NT_GFX_RESULT_CAPACITY;
     }
     uint32_t slot = nt_pool_slot_index(id);
-    s_gfx.render_target_backends[slot] = nt_gfx_backend_create_render_target(backends);
-    if (s_gfx.render_target_backends[slot] == 0) {
+    uint32_t backend = nt_gfx_backend_create_render_target(backends, slot);
+    if (backend == 0) {
         nt_pool_free(&s_gfx.render_target_pool, id);
         return backend_failed(NULL);
     }
+    NT_ASSERT(backend == slot && "create_render_target: backend must mirror the pool slot");
 
     s_gfx.render_target_metas[slot] = (nt_gfx_render_target_meta_t){.attachments = {desc->color, desc->depth}};
     out->id = id;
@@ -1468,8 +1446,7 @@ static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
     uint32_t slot = nt_pool_slot_index(rt.id);
-    nt_gfx_backend_destroy_render_target(s_gfx.render_target_backends[slot]);
-    s_gfx.render_target_backends[slot] = 0;
+    nt_gfx_backend_destroy_render_target(slot);
     memset(&s_gfx.render_target_metas[slot], 0, sizeof(nt_gfx_render_target_meta_t));
     nt_pool_free(&s_gfx.render_target_pool, rt.id);
     return NT_GFX_RESULT_ACCEPTED;
@@ -1812,7 +1789,7 @@ uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt) {
     if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
         return 0;
     }
-    return s_gfx.render_target_backends[nt_pool_slot_index(rt.id)];
+    return nt_pool_slot_index(rt.id);
 }
 
 void nt_gfx_test_scissor_rect(int out[4]) {
@@ -2448,8 +2425,7 @@ static nt_gfx_result_t update_texture(nt_texture_t tex, uint16_t x, uint16_t y, 
     }
     NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
     NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
-    /* RT-owned textures are rejected above, so a husk here is a primary texture
-     * whose owner skipped the recreate contract -- a programmer error. */
+    /* A husk here is a texture whose owner skipped the recreate contract -- a programmer error. */
     NT_ASSERT(s_gfx.texture_backends[slot] != 0 && "update_texture: texture has no live backend -- recreate it after context restore");
     nt_gfx_backend_update_texture(s_gfx.texture_backends[slot], x, y, w, h, (nt_texture_format_t)stored_format, data);
     return NT_GFX_RESULT_ACCEPTED;

@@ -128,6 +128,22 @@ static void test_feedback_aliases_assert_without_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
+static void test_targets_sharing_one_color_texture_assert_without_draw(void) {
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = nt_gfx_render_target_color(temp)});
+    TEST_ASSERT_NOT_EQUAL_UINT32(temp.id, dest.id);
+
+    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = nt_gfx_render_target_color(source_rt),
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    }));
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
+}
+
 static void test_stale_source_asserts_without_draw(void) {
     nt_render_target_t source_rt = make_blur_target(64, 32);
     nt_render_target_t temp = make_blur_target(64, 32);
@@ -311,6 +327,25 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(temp_color), nt_gfx_fake_bound_texture_at(1));
 }
 
+static void test_blur_binds_its_own_nearest_clamp_sampler(void) {
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
+
+    nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+        .source = nt_gfx_render_target_color(source_rt),
+        .temp = temp,
+        .dest = dest,
+        .radius = 4.0F,
+    });
+
+    /* make_sampler dedupes, so the same desc names the blur's sampler. */
+    nt_sampler_t expected =
+        nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .wrap_u = NT_WRAP_CLAMP_TO_EDGE, .wrap_v = NT_WRAP_CLAMP_TO_EDGE});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_sampler_backend_id(expected));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(expected), nt_gfx_fake_last_sampler(0));
+}
+
 static void test_blur_lifecycle_misuse_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_init());
 
@@ -395,6 +430,7 @@ int main(void) {
     RUN_TEST(test_kernel_derives_sigma_when_zero);
     RUN_TEST(test_invalid_descriptors_assert_without_draw);
     RUN_TEST(test_feedback_aliases_assert_without_draw);
+    RUN_TEST(test_targets_sharing_one_color_texture_assert_without_draw);
     RUN_TEST(test_stale_source_asserts_without_draw);
     RUN_TEST(test_integer_source_asserts_without_draw);
     RUN_TEST(test_compressed_source_blurs);
@@ -404,6 +440,7 @@ int main(void) {
     RUN_TEST(test_mixed_size_targets_assert_without_draw);
     RUN_TEST(test_enabled_scissor_asserts_without_draw);
     RUN_TEST(test_valid_blur_uses_two_passes_and_no_hidden_target_allocation);
+    RUN_TEST(test_blur_binds_its_own_nearest_clamp_sampler);
     RUN_TEST(test_blur_lifecycle_misuse_asserts);
     RUN_TEST(test_failed_restore_is_retried_by_the_next_one);
     RUN_TEST(test_blur_fs_keeps_the_masked_kernel_index);

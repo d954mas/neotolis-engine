@@ -265,6 +265,8 @@ static bool make_targets(uint16_t width, uint16_t height) {
     return true;
 }
 
+static bool targets_valid(void) { return nt_gfx_render_target_valid(s_demo.scene) && nt_gfx_render_target_valid(s_demo.temp) && nt_gfx_render_target_valid(s_demo.blur); }
+
 static void try_bind_ui_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
         uint32_t white_region = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
@@ -452,7 +454,7 @@ static void render_frame(void) {
         return;
     }
     /* A failed resize or restore leaves the targets stale. */
-    if (!s_demo.render_resources_ready || !nt_gfx_render_target_valid(s_demo.scene) || !nt_gfx_render_target_valid(s_demo.temp) || !nt_gfx_render_target_valid(s_demo.blur)) {
+    if (!s_demo.render_resources_ready || !targets_valid()) {
         return;
     }
 
@@ -529,7 +531,8 @@ static void frame(void) {
     }
 #endif
     if (nt_input_key_is_pressed(NT_KEY_R)) {
-        const bool large = !s_demo.large_target;
+        /* After a failed rebuild R retries the current size; only live targets toggle it. */
+        const bool large = targets_valid() ? !s_demo.large_target : s_demo.large_target;
         const uint16_t width = large ? 768 : 512;
         const uint16_t height = large ? 432 : 288;
         destroy_targets();
@@ -538,7 +541,7 @@ static void frame(void) {
             s_demo.rt_width = width;
             s_demo.rt_height = height;
         } else {
-            nt_log_error("rtt_showcase: render-target recreate failed");
+            nt_log_error("rtt_showcase: render-target rebuild failed; press R to retry");
         }
     }
     nt_resource_step();

@@ -303,6 +303,9 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
             nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .data = pixels, .format = NT_TEXTURE_FORMAT_RGBA32F, .min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
     } else {
         texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA16F, .min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
+        if (texture.id == 0) {
+            return -2;
+        }
         target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = texture});
         if (target.id == 0) {
             nt_gfx_destroy_texture(texture);
@@ -418,6 +421,9 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
         return 0xFFFFFFFFU;
     }
     nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "basis_probe_color"});
+    if (color.id == 0) {
+        return 0xFFFFFFFFU;
+    }
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color, .label = "basis_probe_rt"});
     if (target.id == 0) {
         nt_gfx_destroy_texture(color);
@@ -494,6 +500,12 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_update_texture(spare, 0, 0, 2, 2, pixels);
     nt_gfx_counters_t preparation = g_nt_gfx.counters;
     nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8});
+    if (color.id == 0) {
+        nt_gfx_destroy_texture(texture);
+        nt_gfx_destroy_texture(spare);
+        nt_gfx_destroy_buffer(buffer);
+        return 0;
+    }
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
     nt_shader_t vs =
         nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}"});

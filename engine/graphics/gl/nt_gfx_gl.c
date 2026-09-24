@@ -896,16 +896,8 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
     GLsizei viewport_h = (GLsizei)g_nt_window.fb_height;
     GLuint fbo = 0;
     if (render_target_backend != 0) {
-        bool valid_backend = render_target_backend <= s_init_desc.max_render_targets && s_render_target_gl != NULL;
-        NT_ASSERT(valid_backend && "begin_pass: invalid GL render target backend");
-        if (!valid_backend) {
-            return;
-        }
+        NT_ASSERT(render_target_backend <= s_init_desc.max_render_targets && s_render_target_gl[render_target_backend] != 0 && "begin_pass: requires a live render target");
         fbo = s_render_target_gl[render_target_backend];
-        NT_ASSERT(fbo != 0 && "begin_pass: invalid GL render target");
-        if (fbo == 0) {
-            return;
-        }
         viewport_w = (GLsizei)width;
         viewport_h = (GLsizei)height;
     }
@@ -1986,22 +1978,9 @@ static void nt_gfx_gl_render_target_textures(const uint32_t textures[NT_GFX_RT_A
     }
 }
 
-uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS]) {
-    NT_ASSERT(s_render_target_gl != NULL && "render target backend is not initialized");
-    if (s_render_target_gl == NULL) {
-        return 0;
-    }
-    uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_init_desc.max_render_targets; i++) {
-        if (s_render_target_gl[i] == 0) {
-            slot = i;
-            break;
-        }
-    }
-    NT_ASSERT(slot != 0 && "render target backend slots exhausted before shared pool");
-    if (slot == 0) {
-        return 0;
-    }
+uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint32_t slot) {
+    /* The frontend pool owns slot allocation; the backend table mirrors it. */
+    NT_ASSERT(slot > 0 && slot <= s_init_desc.max_render_targets && s_render_target_gl[slot] == 0);
     GLuint names[NT_GFX_RT_ATTACHMENTS];
     nt_gfx_gl_render_target_textures(textures, names);
     if (!nt_gfx_gl_build_render_target(names, &s_render_target_gl[slot])) {
