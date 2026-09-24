@@ -148,22 +148,29 @@ J = 100, T = 4; the tool aborts and prints the mismatch otherwise.
 
 The AoS40 mix stage now calls the public `nt_skeletal_mix`; AoS48 and SoA keep
 the local stand-in. The table gains a `mix/input` column (ns per joint per
-input). Same machine, `native-release` (TRAP, `NT_SKELETAL_CHECKS` OFF), one
-session, no joint weights:
+input).
 
-| T | AoS40 stand-in, ns/(joint·input) | `nt_skeletal_mix`, ns/(joint·input) |
-|--:|---------------------------------:|------------------------------------:|
-| 1 | 4.7–5.1 | 5.8–6.4 |
-| 4 | 3.9–4.4 | 3.3–5.6 |
+A separate A/B run put the stand-in and the kernel in one binary over the same
+data (J=60, C=1000, `-O3`, TRAP, checks off), with two data sets: random unit
+quaternions (inputs land in either hemisphere, the largest component varies)
+and smooth ones (w dominant everywhere). ns/(joint·input), medians:
 
-- At T=1 the kernel is ~1.2 ns/joint (~25 %) slower than the in-file stand-in
-  across J and C; at T=4 the difference is inside run-to-run noise.
-- Refuted causes of the T=1 gap (each measured, no change): `fabsf` instead of a
-  ternary in the canonical sign, a select instead of an index search there, a
-  select for the dot-sign branch, and dropping the per-element weight branch and
-  the zero-influence skip.
+| data | T | stand-in | kernel, branch on dot sign | kernel, `copysignf` |
+|:-----|--:|---------:|---------------------------:|--------------------:|
+| random | 1 | 8.6 | 6.3 | 6.3 |
+| random | 4 | 4.3 | 7.9 | 4.4 |
+| smooth | 1 | 3.6 | 6.3 | 6.3 |
+| smooth | 4 | 3.5 | — | 4.5 |
+
+- The dot-sign branch mispredicts whenever inputs sit in both hemispheres;
+  `copysignf` removes it, 1.8x at T=4 on random data. The kernel ships with it.
+- The T=1 cost is the canonical sign of the first contributor: a kernel
+  without it matches the stand-in. The stand-in's branchy search is faster
+  only when its branches predict (smooth data) and slower when they do not
+  (random data); the kernel's compiled search costs the same on both.
+  Rewriting the search (fabsf, selects, an fmaxf tree) did not help.
 - An `NT_ASSERT_MODE=0` build measures the same as TRAP within noise, with and
-  without joint weights (a temporary run gave every input weights of 0.75):
-  T=1 ~6.1, T=4 ~3.4 ns/(joint·input) in both. The per-call checks and the
-  per-element `weight >= 0` check stay below the noise floor (~0.2 ns).
-- The remaining gap is left to #492, which measures SIMD mix and layouts.
+  without joint weights, so the per-call checks and the per-element
+  `weight >= 0` check stay below the noise floor (~0.2 ns).
+- The earlier AoS40 figures in this file came from a different session; only
+  same-binary comparisons are meaningful at this scale.

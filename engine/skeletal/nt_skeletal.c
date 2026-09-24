@@ -267,10 +267,10 @@ void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count
              * The empty sum is orthogonal to everything, so the first
              * contributor takes the canonical sign like any exact tie. */
             const float d = (q[0] * v->q[0]) + (q[1] * v->q[1]) + (q[2] * v->q[2]) + (q[3] * v->q[3]);
-            float wq = w;
-            if (d < 0.0F) {
-                wq = -w;
-            } else if (d == 0.0F) {
+            /* The sign of d is data, not control flow: a branch on it
+             * mispredicts on inputs from both hemispheres. */
+            float wq = copysignf(w, d);
+            if (d == 0.0F) {
                 wq = w * nt_skeletal_canonical_sign(v->q);
             }
             for (int c = 0; c < 3; ++c) {
