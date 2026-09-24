@@ -1,33 +1,33 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: b585b1e
+# Commit: 23680cc
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 340 B
-Import               612 B
-Function             210 B
+Import               619 B
+Function             211 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
-Elem                  52 B
-Code              228672 B
-Data               17004 B
-Custom              7022 B
+Elem                  54 B
+Code              234126 B
+Data               17121 B
+Custom              7064 B
 ---------------- ----------
-TOTAL             254016 B
+TOTAL             259639 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-50850 B   frame
+50060 B   frame
 18269 B   dispatch_command
 11037 B   nt_shape_renderer_init
-10269 B   declare_slider_control
-10137 B   main
+10275 B   declare_slider_control
+10273 B   main
  8796 B   Clay__ConfigureOpenElementPtr
  7737 B   nt_font_lookup_glyph_offset
  6038 B   Clay__SizeContainersAlongAxis
@@ -40,22 +40,22 @@ TOTAL             254016 B
  2605 B   nt_http_request
  2428 B   printf_core
  2367 B   atlas_on_resolve
+ 2104 B   nt_gfx_make_program
+ 2032 B   nt_gfx_resize_render_target
  1906 B   nt_sprite_renderer_emit_region
  1887 B   Clay__InitializePersistentMemory
  1857 B   emit_text
- 1852 B   nt_gfx_resize_render_target
  1850 B   __rem_pio2f
  1747 B   nt_hash64
  1746 B   nt_sprite_renderer_emit_geometry
- 1724 B   nt_gfx_make_program
+ 1482 B   nt_gfx_gl_create_texture_name
+ 1467 B   nt_gfx_make_vertex_input
+ 1383 B   nt_gfx_bind_pipeline
  1372 B   emit_glyph_pass
  1366 B   ui_hit_test
- 1364 B   nt_ui_image
- 1349 B   nt_ui_measure_text_cb
- 1310 B   nt_shape_renderer_flush
 
-Total functions: 208
-Total code size: 228314 B
+Total functions: 209
+Total code size: 233763 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              196228 B
-libnt_gfx.a                80212 B
-libnt_gfx_stub.a            5238 B
+libnt_gfx.a                91574 B
+libnt_gfx_stub.a            6156 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -105,7 +105,7 @@ libnt_resource.a          215122 B
 libnt_shape_renderer.a   1144652 B
 libnt_skeletal.a            5484 B
 libnt_skeletal_assets.a     7796 B
-libnt_skeletal_gpu.a        2852 B
+libnt_skeletal_gpu.a        2854 B
 libnt_skin_comp.a           2044 B
 libnt_skinned_mesh_renderer.a   11986 B
 libnt_sort.a                 470 B
@@ -114,7 +114,7 @@ libnt_sprite_renderer.a    49806 B
 libnt_text_renderer.a    1243428 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                353772 B
+libnt_ui.a                353866 B
 libnt_ui_rich.a            39964 B
 libnt_ui_rich_fx.a          2756 B
 libnt_ui_stub.a             1324 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4233354 B
+TOTAL (archives)         4245730 B
 
 ## Data Segments Summary
 
-Segments: 38
-Total data size: 16732 B
+Segments: 37
+Total data size: 16856 B

@@ -1,61 +1,61 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: b585b1e
+# Commit: 23680cc
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 206 B
-Import               584 B
-Function             133 B
+Import               591 B
+Function             135 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                83 B
-Elem                  70 B
-Code               76909 B
-Data               10124 B
-Custom              4805 B
+Elem                  72 B
+Code               80664 B
+Data               10247 B
+Custom              4882 B
 ---------------- ----------
-TOTAL              92934 B
+TOTAL              96900 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-23938 B   frame
- 8027 B   main
+24490 B   frame
+ 8204 B   main
  5011 B   nt_gfx_activate_mesh
  3002 B   fmt_fp
  2595 B   nt_http_request
  2425 B   printf_core
  2359 B   atlas_on_resolve
  1845 B   __rem_pio2f
- 1280 B   nt_gfx_backend_create_texture
+ 1589 B   nt_gfx_backend_create_texture
  1099 B   nt_hash32_str
+ 1027 B   wipe_backend_handles
  1024 B   nt_input_web_on_blur
+  934 B   create_texture
   888 B   nt_hash64_str
-  885 B   nt_gfx_make_texture
   809 B   nt_input_web_on_pointer_move
+  769 B   nt_gfx_gl_cache_ground_state
   769 B   nt_input_web_on_pointer_down
-  696 B   nt_gfx_activate_texture
+  695 B   nt_gfx_make_buffer
+  692 B   nt_gfx_activate_texture
   690 B   pop_arg_long_double
+  545 B   nt_gfx_activate_shader
   533 B   claim_more_memory
   519 B   __memcpy
   495 B   emmalloc_memalign
   483 B   find_pack
+  483 B   nt_gfx_make_sampler
   480 B   atlas_try_validate_and_carve_blob
-  477 B   nt_gfx_make_buffer
-  445 B   nt_gfx_make_sampler
+  468 B   nt_gfx_update_buffer
   436 B   nt_log_write
   436 B   vsnprintf
-  434 B   nt_resource_request
-  417 B   nt_gfx_activate_shader
-  405 B   attempt_allocate
-  385 B   sinf
 
-Total functions: 131
-Total code size: 76706 B
+Total functions: 133
+Total code size: 80454 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              196228 B
-libnt_gfx.a                80212 B
-libnt_gfx_stub.a            5238 B
+libnt_gfx.a                91574 B
+libnt_gfx_stub.a            6156 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -105,7 +105,7 @@ libnt_resource.a          215122 B
 libnt_shape_renderer.a   1144652 B
 libnt_skeletal.a            5484 B
 libnt_skeletal_assets.a     7796 B
-libnt_skeletal_gpu.a        2852 B
+libnt_skeletal_gpu.a        2854 B
 libnt_skin_comp.a           2044 B
 libnt_skinned_mesh_renderer.a   11986 B
 libnt_sort.a                 470 B
@@ -114,7 +114,7 @@ libnt_sprite_renderer.a    49806 B
 libnt_text_renderer.a    1243428 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                353772 B
+libnt_ui.a                353866 B
 libnt_ui_rich.a            39964 B
 libnt_ui_rich_fx.a          2756 B
 libnt_ui_stub.a             1324 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4233354 B
+TOTAL (archives)         4245730 B
 
 ## Data Segments Summary
 
 Segments: 24
-Total data size: 9959 B
+Total data size: 10082 B
