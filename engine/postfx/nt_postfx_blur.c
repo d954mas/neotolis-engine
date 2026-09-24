@@ -16,7 +16,7 @@ _Static_assert(sizeof(nt_postfx_blur_vertex_t) == 16, "blur vertex size");
 static const char *s_blur_vs_src = "precision mediump float;\n"
                                    "layout(location = 0) in vec2 a_position;\n"
                                    "layout(location = 3) in vec2 a_uv;\n"
-                                   "out vec2 v_uv;\n"
+                                   "out highp vec2 v_uv;\n"
                                    "void main() {\n"
                                    "    v_uv = a_uv;\n"
                                    "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
@@ -31,7 +31,9 @@ static const char *s_blur_fs_src = "precision mediump float;\n"
                                    "uniform vec4 u_kernel2;\n"
                                    "uniform vec4 u_kernel3;\n"
                                    "uniform vec4 u_kernel4;\n"
-                                   "in vec2 v_uv;\n"
+                                   /* NEAREST taps need exact texel centres, which mediump (fp16 on
+                                      mobile) cannot address past 2048 texels. */
+                                   "in highp vec2 v_uv;\n"
                                    "out vec4 frag_color;\n"
                                    /* Select then mask: i & 3 is provably 0..3, so no arm can constant-fold to
                                       a negative index. NVIDIA inlines kernel_at(0), folds every arm, and
@@ -45,13 +47,13 @@ static const char *s_blur_fs_src = "precision mediump float;\n"
                                    "    return k[i & 3];\n"
                                    "}\n"
                                    "void main() {\n"
-                                   "    vec2 texel = vec2(1.0) / vec2(textureSize(u_source, 0));\n"
-                                   "    vec2 step_uv = u_direction.xy * texel;\n"
+                                   "    highp vec2 texel = vec2(1.0) / vec2(textureSize(u_source, 0));\n"
+                                   "    highp vec2 step_uv = u_direction.xy * texel;\n"
                                    "    vec4 acc = texture(u_source, v_uv) * kernel_at(0);\n"
                                    "    for (int i = 1; i <= 16; i++) {\n"
                                    "        if (i > u_radius) { break; }\n"
                                    "        float w = kernel_at(i);\n"
-                                   "        vec2 d = step_uv * float(i);\n"
+                                   "        highp vec2 d = step_uv * float(i);\n"
                                    "        acc += texture(u_source, v_uv - d) * w;\n"
                                    "        acc += texture(u_source, v_uv + d) * w;\n"
                                    "    }\n"
@@ -175,7 +177,7 @@ static bool make_gpu_resources(void) {
         {{3.0F, -1.0F}, {2.0F, 0.0F}},
         {{-1.0F, 3.0F}, {0.0F, 2.0F}},
     };
-    /* Taps land on texel centres, so NEAREST reads the same values as LINEAR and stays valid for RGBA32F without float filtering. */
+    /* Taps land on texel centres (highp UV math, see the FS), so NEAREST reads the same values as LINEAR and stays valid for RGBA32F without float filtering. */
     s_blur.sampler = nt_gfx_make_sampler(
         &(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .wrap_u = NT_WRAP_CLAMP_TO_EDGE, .wrap_v = NT_WRAP_CLAMP_TO_EDGE, .label = "postfx_blur_sampler"});
     s_blur.vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_blur_vs_src, .label = "postfx_blur_vs"});

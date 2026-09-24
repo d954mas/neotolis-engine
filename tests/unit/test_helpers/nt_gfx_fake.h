@@ -39,7 +39,6 @@ uint32_t nt_gfx_fake_bound_texture_count(void);
 uint32_t nt_gfx_fake_bound_texture_at(uint32_t index);
 uint32_t nt_gfx_fake_bound_texture_slot_at(uint32_t index);
 uint32_t nt_gfx_fake_render_target_create_count(void);
-uint32_t nt_gfx_fake_render_target_resize_count(void);
 uint32_t nt_gfx_fake_render_target_destroy_count(void);
 uint32_t nt_gfx_fake_texture_create_count(void);
 uint32_t nt_gfx_fake_program_create_count(void);
@@ -90,7 +89,6 @@ void nt_gfx_fake_fail_next_backend_restore_lost(void);
 /* The recreate succeeds but the context is lost again before begin_frame finishes. */
 void nt_gfx_fake_lose_context_during_next_restore(void);
 void nt_gfx_fake_fail_next_render_target_create(void);
-void nt_gfx_fake_fail_next_render_target_resize(void);
 /* Live loss state and the lost-event latch together; the lose_context_on_* knobs
  * set both too. Creates fail on a lost context, as GL's do. */
 void nt_gfx_fake_set_context_lost(bool lost);

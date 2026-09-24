@@ -192,9 +192,6 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
 enum { NT_GFX_RT_COLOR, NT_GFX_RT_DEPTH, NT_GFX_RT_ATTACHMENTS };
 /* Builds an FBO over existing texture backends; 0 = absent attachment. */
 uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_ATTACHMENTS], uint16_t width, uint16_t height);
-/* Stages descs[i] storage for each present attachment into the same texture
- * slots; false leaves the target and its textures intact. */
-bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const uint32_t textures[NT_GFX_RT_ATTACHMENTS], const nt_texture_desc_t descs[NT_GFX_RT_ATTACHMENTS]);
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);

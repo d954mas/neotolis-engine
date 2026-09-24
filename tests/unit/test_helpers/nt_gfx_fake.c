@@ -86,7 +86,6 @@ static uint32_t s_fake_bound_textures[NT_GFX_FAKE_HISTORY_CAPACITY];
 static uint32_t s_fake_bound_texture_slots[NT_GFX_FAKE_HISTORY_CAPACITY];
 static uint32_t s_fake_bound_texture_count;
 static uint32_t s_fake_render_target_create_count;
-static uint32_t s_fake_render_target_resize_count;
 static uint32_t s_fake_render_target_destroy_count;
 static uint32_t s_fake_texture_create_count;
 static uint32_t s_fake_program_create_count;
@@ -125,7 +124,6 @@ static bool s_fake_fail_next_sampler_create;
 static bool s_fake_fail_next_backend_restore_lost;
 static bool s_fake_lose_context_during_next_restore;
 static bool s_fake_fail_next_render_target_create;
-static bool s_fake_fail_next_render_target_resize;
 static uint32_t s_fake_last_update_buffer_offset;
 static const void *s_fake_last_update_buffer_data;
 static uint32_t s_fake_last_update_buffer_size;
@@ -157,7 +155,6 @@ uint32_t nt_gfx_fake_bound_texture_count(void) { return s_fake_bound_texture_cou
 uint32_t nt_gfx_fake_bound_texture_at(uint32_t index) { return index < s_fake_bound_texture_count ? s_fake_bound_textures[index] : 0; }
 uint32_t nt_gfx_fake_bound_texture_slot_at(uint32_t index) { return index < s_fake_bound_texture_count ? s_fake_bound_texture_slots[index] : UINT32_MAX; }
 uint32_t nt_gfx_fake_render_target_create_count(void) { return s_fake_render_target_create_count; }
-uint32_t nt_gfx_fake_render_target_resize_count(void) { return s_fake_render_target_resize_count; }
 uint32_t nt_gfx_fake_render_target_destroy_count(void) { return s_fake_render_target_destroy_count; }
 uint32_t nt_gfx_fake_texture_create_count(void) { return s_fake_texture_create_count; }
 uint32_t nt_gfx_fake_program_create_count(void) { return s_fake_program_create_count; }
@@ -191,7 +188,6 @@ uint16_t nt_gfx_fake_last_render_target_height(void) { return s_fake_last_render
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void) { return s_fake_last_texture_desc; }
 uint32_t nt_gfx_fake_last_depth_texture_backend(void) { return s_fake_last_depth_texture_backend; }
 void nt_gfx_fake_fail_next_render_target_create(void) { s_fake_fail_next_render_target_create = true; }
-void nt_gfx_fake_fail_next_render_target_resize(void) { s_fake_fail_next_render_target_resize = true; }
 void nt_gfx_fake_fail_texture_creates(uint8_t mask) {
     NT_ASSERT(mask <= 3);
     s_fake_fail_texture_creates = mask;
@@ -238,7 +234,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_pass_target_count = 0;
     s_fake_bound_texture_count = 0;
     s_fake_render_target_create_count = 0;
-    s_fake_render_target_resize_count = 0;
     s_fake_render_target_destroy_count = 0;
     s_fake_texture_create_count = 0;
     s_fake_program_create_count = 0;
@@ -284,7 +279,6 @@ void nt_gfx_fake_reset(void) {
 #endif
     s_fake_lose_context_during_next_restore = false;
     s_fake_fail_next_render_target_create = false;
-    s_fake_fail_next_render_target_resize = false;
 }
 
 /* Deliberately outside nt_gfx_fake_reset: test_sprite_renderer's capacity-flush test resets the
@@ -563,23 +557,6 @@ uint32_t nt_gfx_backend_create_render_target(const uint32_t textures[NT_GFX_RT_A
         return 0;
     }
     return s_fake_render_target_create_count;
-}
-
-bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const uint32_t textures[NT_GFX_RT_ATTACHMENTS], const nt_texture_desc_t descs[NT_GFX_RT_ATTACHMENTS]) {
-    /* A target whose recreate failed keeps handle 0; resize must report failure, not crash. */
-    if (backend_handle == 0) {
-        return false;
-    }
-    const nt_texture_desc_t *size = textures[NT_GFX_RT_COLOR] != 0 ? &descs[NT_GFX_RT_COLOR] : &descs[NT_GFX_RT_DEPTH];
-    s_fake_render_target_resize_count++;
-    s_fake_last_render_target_width = size->width;
-    s_fake_last_render_target_height = size->height;
-    s_fake_last_depth_texture_backend = textures[NT_GFX_RT_DEPTH];
-    if (s_fake_fail_next_render_target_resize) {
-        s_fake_fail_next_render_target_resize = false;
-        return false;
-    }
-    return true;
 }
 
 void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {

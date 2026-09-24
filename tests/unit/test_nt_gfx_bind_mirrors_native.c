@@ -1124,28 +1124,6 @@ static void test_upload_burst_costs_one_active_texture_switch(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_gl_calls.active_texture);
 }
 
-/* Resizing a render target deletes the old colour texture, so its GL name must
- * leave the cache: old and new names are both live during the resize, so only
- * the cache probe can see the forget. Without depth, the colour texture is the
- * one the resize touches last. */
-static void test_resize_render_target_forgets_cached_color_name(void) {
-    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = 4,
-        .height = 4,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, rt.id);
-
-    backend_bind_texture_unit(nt_gfx_render_target_color(rt), nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST}), 0);
-    /* Without this the probe below would pass on a texture that never cached. */
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_texture(0));
-
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 6, 5));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_texture(0));
-
-    nt_gfx_destroy_render_target(rt);
-}
-
 /* Destruction must release the current GL program even without another bind. */
 static void test_destroy_current_program_then_relink_reissues_use_program(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
@@ -1455,7 +1433,6 @@ int main(void) {
     RUN_TEST(test_gl_name_reuse_after_destroying_bound_texture);
     RUN_TEST(test_update_texture_mid_pass_leaves_sampling_slot_bound);
     RUN_TEST(test_upload_burst_costs_one_active_texture_switch);
-    RUN_TEST(test_resize_render_target_forgets_cached_color_name);
     RUN_TEST(test_destroy_current_program_then_relink_reissues_use_program);
     RUN_TEST(test_same_sampler_on_a_slot_binds_once);
     RUN_TEST(test_override_binds_one_sampler);

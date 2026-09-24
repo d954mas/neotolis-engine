@@ -210,25 +210,21 @@ static void test_render_target_work_on_a_known_loss_ends_context_lost(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     nt_gfx_fake_set_context_lost(true);
     record_next_frame();
-    TEST_ASSERT_FALSE(nt_gfx_resize_render_target(target, 8, 8));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_render_target(&rt_desc).id);
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_FALSE(capture.overflow);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(capture, NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET));
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(capture, NT_GFX_OP_CREATE, NT_GFX_OBJECT_RENDER_TARGET));
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* FULL traps before the rejection returns, so the recorded operation has a BEGIN and no RESULT. */
-static void test_rejected_destroys_and_resize_assert_inside_a_recorded_frame(void) {
+static void test_rejected_destroys_assert_inside_a_recorded_frame(void) {
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
     nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
     record_next_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(nt_gfx_render_target_color(target)));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "owned by a render target"));
-    NT_TEST_EXPECT_ASSERT(nt_gfx_resize_render_target((nt_render_target_t){target.id + 1}, 8, 8));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "invalid handle"));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "inside a pass"));
@@ -328,18 +324,6 @@ static void test_render_target_restore_meeting_a_loss_ends_context_lost(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
-}
-
-static void test_resize_failing_on_a_latched_loss_ends_context_lost(void) {
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
-    record_next_frame();
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_fake_fail_next_render_target_resize();
-    TEST_ASSERT_FALSE(nt_gfx_resize_render_target(target, 8, 8));
-    nt_gfx_begin_frame();
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(capture, NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET));
 }
 
 /* The explicit sampler outlives the loss; its backend is recreated lazily at the bind. */
@@ -520,6 +504,31 @@ static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     TEST_ASSERT_TRUE(scissor_unknown);
 }
 
+static void test_depth_only_render_target_definition_has_no_color_fields(void) {
+    record_next_frame();
+    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 64, .height = 32, .depth_format = NT_TEXTURE_FORMAT_DEPTH16});
+    nt_gfx_begin_frame();
+    const uint32_t depth_id = nt_gfx_render_target_depth(rt).id;
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, depth_id);
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t definitions = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind != NT_GFX_EVENT_DEFINITION || e->object_kind != NT_GFX_OBJECT_RENDER_TARGET || e->object != rt.id) {
+            continue;
+        }
+        TEST_ASSERT_EQUAL_UINT32(0, e->data.resource.related[0]);
+        TEST_ASSERT_EQUAL_UINT32(depth_id, e->data.resource.related[1]);
+        TEST_ASSERT_EQUAL_UINT32(0, e->data.resource.format);
+        TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_FORMAT_DEPTH16, e->data.resource.usage);
+        TEST_ASSERT_EQUAL_UINT32(64, e->data.resource.width);
+        TEST_ASSERT_EQUAL_UINT32(32, e->data.resource.height);
+        definitions++;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, definitions);
+}
+
 static void test_draw_trace_preserves_arguments_and_live_prefix(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
@@ -679,13 +688,12 @@ int main(void) {
     RUN_TEST(test_resource_operations_keep_published_handles_after_destroy);
     RUN_TEST(test_render_target_work_on_a_known_loss_ends_context_lost);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_rejected_destroys_and_resize_assert_inside_a_recorded_frame);
+    RUN_TEST(test_rejected_destroys_assert_inside_a_recorded_frame);
 #endif
     RUN_TEST(test_restore_is_one_context_operation_after_the_lost_snapshot);
     RUN_TEST(test_failed_restore_stays_lost_with_one_error_log);
     RUN_TEST(test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_works);
     RUN_TEST(test_render_target_restore_meeting_a_loss_ends_context_lost);
-    RUN_TEST(test_resize_failing_on_a_latched_loss_ends_context_lost);
     RUN_TEST(test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost);
     RUN_TEST(test_link_with_a_stage_left_unready_by_a_loss_ends_unready);
     RUN_TEST(test_restore_defines_render_targets_inside_the_context_operation);
@@ -693,6 +701,7 @@ int main(void) {
     RUN_TEST(test_every_operation_records_one_begin_and_one_result);
     RUN_TEST(test_accepted_counters_match_recorded_results);
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
+    RUN_TEST(test_depth_only_render_target_definition_has_no_color_fields);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);
     RUN_TEST(test_capture_overflow_does_not_stop_counters);

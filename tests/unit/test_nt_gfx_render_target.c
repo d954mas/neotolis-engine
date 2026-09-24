@@ -119,7 +119,6 @@ static void test_attachment_textures_have_no_default_sampler(void) {
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_texture_default_sampler(color).id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_texture_default_sampler(depth).id);
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 128, 96));
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
@@ -132,10 +131,37 @@ static void test_attachment_textures_have_no_default_sampler(void) {
     const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = color, .sampler = NT_SAMPLER_DEFAULT};
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = color, .sampler = NT_SAMPLER_DEFAULT};
+    NT_TEST_EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    binding.texture = depth;
     NT_TEST_EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+
+    binding.sampler = make_nearest_sampler();
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    binding.texture = color;
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     nt_gfx_end_pass();
+}
+
+/* The attachments already created are rolled back, so the slots serve later targets. */
+static void test_make_rolls_back_attachments_when_backend_target_fails(void) {
+    nt_render_target_desc_t desc = rt_desc(COLOR_DEPTH);
+    nt_gfx_fake_fail_next_render_target_create();
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_render_target(&desc).id);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_create_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_destroy_count());
+
+    /* setUp capacity: 4 targets and 8 textures, exactly four colour+depth targets. */
+    for (int i = 0; i < 4; i++) {
+        nt_render_target_t rt = nt_gfx_make_render_target(&desc);
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, rt.id);
+        TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
+    }
 }
 
 static void test_pass_target_routes_to_backend(void) {
@@ -179,58 +205,6 @@ static void test_zero_pass_target_restores_default_after_render_target(void) {
     nt_gfx_end_pass();
 }
 
-static void test_resize_preserves_target_and_attachment_handles(void) {
-    nt_render_target_desc_t desc = rt_desc(COLOR_DEPTH);
-    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
-    uint32_t rt_id = rt.id;
-    nt_texture_t color = nt_gfx_render_target_color(rt);
-    nt_texture_t depth = nt_gfx_render_target_depth(rt);
-
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, rt.id);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, color.id);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, depth.id);
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 128, 96));
-
-    TEST_ASSERT_EQUAL_UINT32(rt_id, rt.id);
-    TEST_ASSERT_EQUAL_UINT32(color.id, nt_gfx_render_target_color(rt).id);
-    TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(rt).id);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_resize_count());
-    TEST_ASSERT_EQUAL_UINT16(128, nt_gfx_fake_last_render_target_width());
-    TEST_ASSERT_EQUAL_UINT16(96, nt_gfx_fake_last_render_target_height());
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_depth_texture_backend());
-}
-
-static void test_resize_failure_keeps_existing_target_ready(void) {
-    nt_render_target_desc_t desc = rt_desc(COLOR_DEPTH);
-    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
-    nt_texture_t color = nt_gfx_render_target_color(rt);
-    nt_texture_t depth = nt_gfx_render_target_depth(rt);
-
-    nt_gfx_fake_fail_next_render_target_resize();
-    TEST_ASSERT_FALSE(nt_gfx_resize_render_target(rt, 128, 96));
-
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
-    TEST_ASSERT_EQUAL_UINT32(color.id, nt_gfx_render_target_color(rt).id);
-    TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(rt).id);
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .target = rt,
-        .clear_depth = 1.0F,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_pass_target());
-    nt_gfx_end_pass();
-}
-
-static void test_resize_does_not_need_generic_texture_replacement(void) {
-    nt_render_target_desc_t desc = rt_desc(COLOR_DEPTH);
-    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
-
-    nt_gfx_fake_fail_texture_creates(1U);
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 128, 96));
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_resize_count());
-}
-
 static void test_depth_attachment_uses_requested_format(void) {
     nt_render_target_desc_t desc = rt_desc(COLOR_DEPTH);
     desc.depth_format = NT_TEXTURE_FORMAT_DEPTH32F;
@@ -256,18 +230,6 @@ static void test_make_rejects_active_pass(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_create_count());
 }
 
-static void test_resize_rejects_active_pass(void) {
-    nt_render_target_desc_t desc = rt_desc(COLOR_ONLY);
-    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
-    NT_TEST_EXPECT_ASSERT(nt_gfx_resize_render_target(rt, 128, 96));
-    nt_gfx_end_pass();
-
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_resize_count());
-}
-
 static void test_destroy_rejects_active_pass(void) {
     nt_render_target_desc_t desc = rt_desc(COLOR_ONLY);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
@@ -278,19 +240,6 @@ static void test_destroy_rejects_active_pass(void) {
 
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_destroy_count());
-}
-
-static void test_resize_rejects_zero_dimensions_without_recreating_storage(void) {
-    nt_render_target_desc_t desc = rt_desc(COLOR_ONLY);
-    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
-    nt_texture_t color = nt_gfx_render_target_color(rt);
-
-    NT_TEST_EXPECT_ASSERT(nt_gfx_resize_render_target(rt, 0, 96));
-    NT_TEST_EXPECT_ASSERT(nt_gfx_resize_render_target(rt, 128, 0));
-
-    TEST_ASSERT_EQUAL_UINT32(color.id, nt_gfx_render_target_color(rt).id);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_resize_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_create_count());
 }
 
 static void test_update_rejects_render_target_owned_texture(void) {
@@ -558,7 +507,6 @@ static void test_invalid_render_target_lifecycle_arguments_assert(void) {
     nt_render_target_desc_t desc = rt_desc(COLOR_ONLY);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
 
-    NT_TEST_EXPECT_ASSERT(nt_gfx_resize_render_target(NT_RENDER_TARGET_INVALID, 64, 32));
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_render_target(NT_RENDER_TARGET_INVALID));
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(nt_gfx_render_target_color(rt)));
 }
@@ -593,37 +541,6 @@ static void test_pass_sequencing_and_capacity_misuse_assert(void) {
     nt_gfx_desc_t invalid_desc = nt_gfx_desc_defaults();
     invalid_desc.max_render_targets = 0;
     NT_TEST_EXPECT_ASSERT(nt_gfx_init(&invalid_desc));
-}
-
-static void test_resize_passes_only_present_attachments(void) {
-    nt_render_target_desc_t color_desc = rt_desc(COLOR_ONLY);
-    nt_render_target_desc_t depth_desc = rt_desc(DEPTH_ONLY);
-    nt_render_target_t color_only = nt_gfx_make_render_target(&color_desc);
-    nt_render_target_t depth_only = nt_gfx_make_render_target(&depth_desc);
-    nt_texture_t depth = nt_gfx_render_target_depth(depth_only);
-
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(color_only, 48, 24));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_depth(color_only).id);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_depth_texture_backend());
-
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(depth_only, 160, 64));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_color(depth_only).id);
-    TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(depth_only).id);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_depth_texture_backend());
-    TEST_ASSERT_EQUAL_UINT16(160, nt_gfx_fake_last_render_target_width());
-    TEST_ASSERT_EQUAL_UINT16(64, nt_gfx_fake_last_render_target_height());
-    uint16_t width = 0;
-    uint16_t height = 0;
-    TEST_ASSERT_TRUE(nt_gfx_texture_size(depth, &width, &height));
-    TEST_ASSERT_EQUAL_UINT16(160, width);
-    TEST_ASSERT_EQUAL_UINT16(64, height);
-
-    nt_gfx_fake_fail_next_render_target_resize();
-    TEST_ASSERT_FALSE(nt_gfx_resize_render_target(depth_only, 32, 32));
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(depth_only));
-    TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(depth_only).id);
-    TEST_ASSERT_TRUE(nt_gfx_texture_size(depth, &width, &height));
-    TEST_ASSERT_EQUAL_UINT16(160, width);
 }
 
 static void test_context_restore_recreates_attachments_in_place(void) {
@@ -662,7 +579,6 @@ static void test_context_restore_recreates_depth_only_target(void) {
     nt_render_target_desc_t desc = rt_desc(DEPTH_ONLY);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
     nt_texture_t depth = nt_gfx_render_target_depth(rt);
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 96, 48));
 
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
@@ -675,8 +591,8 @@ static void test_context_restore_recreates_depth_only_target(void) {
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(depth));
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_render_target_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_create_count());
-    TEST_ASSERT_EQUAL_UINT16(96, nt_gfx_fake_last_render_target_width());
-    TEST_ASSERT_EQUAL_UINT16(48, nt_gfx_fake_last_render_target_height());
+    TEST_ASSERT_EQUAL_UINT16(desc.width, nt_gfx_fake_last_render_target_width());
+    TEST_ASSERT_EQUAL_UINT16(desc.height, nt_gfx_fake_last_render_target_height());
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_DEPTH24, nt_gfx_fake_last_texture_desc().format);
 }
 
@@ -762,21 +678,6 @@ static void test_context_restore_marks_failed_target_not_ready(void) {
     TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
 }
 
-static void test_resize_does_not_recover_missing_stub_backend(void) {
-    nt_render_target_desc_t desc = rt_desc(COLOR_ONLY);
-    nt_render_target_t rt = nt_gfx_make_render_target(&desc);
-
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame();
-    nt_gfx_fake_fail_next_render_target_create();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame();
-
-    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
-    TEST_ASSERT_FALSE(nt_gfx_resize_render_target(rt, 128, 96));
-    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(rt));
-}
-
 static void test_invalid_handles_return_invalid_attachments(void) {
     nt_render_target_t invalid = NT_RENDER_TARGET_INVALID;
 
@@ -784,7 +685,7 @@ static void test_invalid_handles_return_invalid_attachments(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_depth(invalid).id);
 }
 
-static void test_texture_size_tracks_attachment_resize(void) {
+static void test_texture_size_reports_attachment_size(void) {
     nt_render_target_desc_t desc = rt_desc(COLOR_DEPTH);
     nt_render_target_t rt = nt_gfx_make_render_target(&desc);
     nt_texture_t color = nt_gfx_render_target_color(rt);
@@ -795,10 +696,9 @@ static void test_texture_size_tracks_attachment_resize(void) {
     TEST_ASSERT_TRUE(nt_gfx_texture_size(color, &width, &height));
     TEST_ASSERT_EQUAL_UINT16(64, width);
     TEST_ASSERT_EQUAL_UINT16(32, height);
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 128, 96));
     TEST_ASSERT_TRUE(nt_gfx_texture_size(depth, &width, &height));
-    TEST_ASSERT_EQUAL_UINT16(128, width);
-    TEST_ASSERT_EQUAL_UINT16(96, height);
+    TEST_ASSERT_EQUAL_UINT16(64, width);
+    TEST_ASSERT_EQUAL_UINT16(32, height);
 
     width = 7;
     height = 9;
@@ -850,17 +750,13 @@ int main(void) {
     RUN_TEST(test_attachment_accessors_follow_formats);
     RUN_TEST(test_depth_only_target_owns_one_depth_texture);
     RUN_TEST(test_attachment_textures_have_no_default_sampler);
+    RUN_TEST(test_make_rolls_back_attachments_when_backend_target_fails);
     RUN_TEST(test_pass_target_routes_to_backend);
     RUN_TEST(test_zero_pass_target_routes_to_default_framebuffer);
     RUN_TEST(test_zero_pass_target_restores_default_after_render_target);
-    RUN_TEST(test_resize_preserves_target_and_attachment_handles);
-    RUN_TEST(test_resize_failure_keeps_existing_target_ready);
-    RUN_TEST(test_resize_does_not_need_generic_texture_replacement);
     RUN_TEST(test_depth_attachment_uses_requested_format);
     RUN_TEST(test_make_rejects_active_pass);
-    RUN_TEST(test_resize_rejects_active_pass);
     RUN_TEST(test_destroy_rejects_active_pass);
-    RUN_TEST(test_resize_rejects_zero_dimensions_without_recreating_storage);
     RUN_TEST(test_update_rejects_render_target_owned_texture);
     RUN_TEST(test_make_render_target_rejects_null_and_zero_dimensions);
     RUN_TEST(test_make_render_target_rejects_invalid_formats);
@@ -878,16 +774,14 @@ int main(void) {
     RUN_TEST(test_invalid_render_target_lifecycle_arguments_assert);
     RUN_TEST(test_begin_pass_asserts_for_invalid_or_incomplete_target);
     RUN_TEST(test_pass_sequencing_and_capacity_misuse_assert);
-    RUN_TEST(test_resize_passes_only_present_attachments);
     RUN_TEST(test_context_restore_recreates_attachments_in_place);
     RUN_TEST(test_context_restore_recreates_depth_only_target);
     RUN_TEST(test_context_restore_waits_after_a_restore_that_leaves_the_backend_lost);
     RUN_TEST(test_context_restore_stays_lost_when_the_recreate_meets_a_loss);
     RUN_TEST(test_context_restore_waits_while_backend_remains_lost);
     RUN_TEST(test_context_restore_marks_failed_target_not_ready);
-    RUN_TEST(test_resize_does_not_recover_missing_stub_backend);
     RUN_TEST(test_invalid_handles_return_invalid_attachments);
-    RUN_TEST(test_texture_size_tracks_attachment_resize);
+    RUN_TEST(test_texture_size_reports_attachment_size);
     RUN_TEST(test_texture_format_reports_logical_format);
     RUN_TEST(test_header_does_not_expose_target_bind_state_api);
     return UNITY_END();

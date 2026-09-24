@@ -434,7 +434,6 @@ static void test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets(
     (void)fclose(impl);
     impl_buf[impl_n] = '\0';
     TEST_ASSERT_NULL(strstr(impl_buf, "nt_gfx_make_render_target"));
-    TEST_ASSERT_NULL(strstr(impl_buf, "nt_gfx_resize_render_target"));
 
     FILE *gfx = fopen("engine/graphics/nt_gfx.h", "rb");
     TEST_ASSERT_NOT_NULL(gfx);

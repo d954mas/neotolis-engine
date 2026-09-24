@@ -157,15 +157,18 @@ _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
 
 static void discard_texture_set(void) { s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_NONE; }
 
-/* An absent attachment reads the reserved, zeroed texture slot 0. */
 static const nt_gfx_texture_meta_t *render_target_attachment_meta(uint32_t rt_slot, int attachment) {
     return &s_gfx.texture_metas[nt_pool_slot_index(s_gfx.render_target_metas[rt_slot].attachments[attachment].id)];
 }
 
+static uint32_t render_target_attachment_format(uint32_t rt_slot, int attachment) {
+    return s_gfx.render_target_metas[rt_slot].attachments[attachment].id != 0 ? render_target_attachment_meta(rt_slot, attachment)->format : 0;
+}
+
 /* All attachments share the target size and at least one is present. */
 static const nt_gfx_texture_meta_t *render_target_size_meta(uint32_t rt_slot) {
-    const nt_gfx_texture_meta_t *color = render_target_attachment_meta(rt_slot, NT_GFX_RT_COLOR);
-    return color->width != 0 ? color : render_target_attachment_meta(rt_slot, NT_GFX_RT_DEPTH);
+    const bool has_color = s_gfx.render_target_metas[rt_slot].attachments[NT_GFX_RT_COLOR].id != 0;
+    return render_target_attachment_meta(rt_slot, has_color ? NT_GFX_RT_COLOR : NT_GFX_RT_DEPTH);
 }
 
 /* ---- Global UBO block registration ---- */
@@ -288,8 +291,8 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 event->data.resource.related[1] = s_gfx.render_target_metas[slot].attachments[NT_GFX_RT_DEPTH].id;
                 event->data.resource.width = render_target_size_meta(slot)->width;
                 event->data.resource.height = render_target_size_meta(slot)->height;
-                event->data.resource.format = render_target_attachment_meta(slot, NT_GFX_RT_COLOR)->format;
-                event->data.resource.usage = render_target_attachment_meta(slot, NT_GFX_RT_DEPTH)->format;
+                event->data.resource.format = render_target_attachment_format(slot, NT_GFX_RT_COLOR);
+                event->data.resource.usage = render_target_attachment_format(slot, NT_GFX_RT_DEPTH);
                 event->data.resource.flags = s_gfx.render_target_metas[slot].complete;
                 break;
             case NT_GFX_OBJECT_NONE:
@@ -490,8 +493,8 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }
 
 /* ---- Render target helpers ---- */
 
-/* Sampler objects override texture filtering, so the zero NEAREST/CLAMP state
- * only has to satisfy the depth storage rule. */
+/* The zero NEAREST/CLAMP fields only pass texture validation (depth requires
+ * NEAREST); the GL texture keeps its defaults and the bound sampler filters. */
 static nt_texture_desc_t render_target_attachment_desc(nt_texture_format_t format, uint16_t width, uint16_t height, const char *label) {
     return (nt_texture_desc_t){.width = width, .height = height, .format = format, .label = label};
 }
@@ -540,14 +543,6 @@ static void render_target_destroy_attachments(uint32_t slot) {
     memset(&s_gfx.render_target_metas[slot], 0, sizeof(nt_gfx_render_target_meta_t));
 }
 
-static void render_target_commit_attachment_backend(nt_texture_t tex, uint32_t backend, uint16_t width, uint16_t height) {
-    uint32_t slot = nt_pool_slot_index(tex.id);
-    s_gfx.texture_backends[slot] = backend;
-    s_gfx.texture_metas[slot].width = width;
-    s_gfx.texture_metas[slot].height = height;
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, tex.id);
-}
-
 static bool render_target_recreate_attachment(nt_texture_t tex) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         return false;
@@ -560,7 +555,8 @@ static bool render_target_recreate_attachment(nt_texture_t tex) {
         return false;
     }
     uint32_t old_backend = s_gfx.texture_backends[slot];
-    render_target_commit_attachment_backend(tex, replacement, meta->width, meta->height);
+    s_gfx.texture_backends[slot] = replacement;
+    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_TEXTURE, tex.id);
     nt_gfx_backend_destroy_texture(old_backend);
     return true;
 }
@@ -586,28 +582,6 @@ static bool render_target_recreate_backend(uint32_t slot) {
     s_gfx.render_target_metas[slot].complete = render_target_recreate_objects(slot);
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, s_gfx.render_target_pool.slots[slot].id);
     return s_gfx.render_target_metas[slot].complete;
-}
-
-static bool render_target_resize_backend(uint32_t slot, uint16_t width, uint16_t height) {
-    nt_gfx_render_target_meta_t *meta = &s_gfx.render_target_metas[slot];
-    uint32_t backends[NT_GFX_RT_ATTACHMENTS] = {0};
-    nt_texture_desc_t descs[NT_GFX_RT_ATTACHMENTS] = {0};
-    for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
-        if (meta->attachments[i].id != 0) {
-            backends[i] = s_gfx.texture_backends[nt_pool_slot_index(meta->attachments[i].id)];
-            descs[i] = render_target_attachment_desc((nt_texture_format_t)render_target_attachment_meta(slot, i)->format, width, height, NULL);
-        }
-    }
-    if (!nt_gfx_backend_resize_render_target(s_gfx.render_target_backends[slot], backends, descs)) {
-        return false;
-    }
-    for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
-        if (meta->attachments[i].id != 0) {
-            render_target_commit_attachment_backend(meta->attachments[i], backends[i], width, height);
-        }
-    }
-    meta->complete = true;
-    return true;
 }
 
 /* ---- Frame / Pass ---- */
@@ -1597,43 +1571,6 @@ static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
 void nt_gfx_destroy_render_target(nt_render_target_t rt) {
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_RENDER_TARGET, rt.id);
     NT_GFX_END(destroy_render_target(rt));
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static nt_gfx_result_t resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height) {
-    bool valid = nt_pool_valid(&s_gfx.render_target_pool, rt.id);
-    NT_ASSERT(valid && "resize_render_target: invalid handle");
-    if (!valid) {
-        NT_LOG_ERROR("resize_render_target: invalid handle");
-        return NT_GFX_RESULT_INVALID_HANDLE;
-    }
-    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
-    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("resize_render_target called inside a pass");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
-    NT_ASSERT(width > 0 && height > 0 && "resize_render_target: zero dimension");
-    if (width == 0 || height == 0) {
-        NT_LOG_ERROR("resize_render_target: zero dimension");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
-    /* A known loss zeroed the backend names the resize would reallocate. */
-    if (g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
-    uint32_t slot = nt_pool_slot_index(rt.id);
-    if (!render_target_resize_backend(slot, width, height)) {
-        return backend_failed(NULL);
-    }
-    NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_RENDER_TARGET, rt.id);
-    return NT_GFX_RESULT_ACCEPTED;
-}
-
-bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_RESIZE, NT_GFX_OBJECT_RENDER_TARGET, rt.id, event->data.resource.width = width; event->data.resource.height = height);
-    const nt_gfx_result_t result = resize_render_target(rt, width, height);
-    NT_GFX_END(result);
-    return result == NT_GFX_RESULT_ACCEPTED;
 }
 
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt) {

@@ -33,14 +33,16 @@ void setUp(void) {
 
 void tearDown(void) { nt_gfx_shutdown(); }
 
-static void test_render_target_resize_without_spare_texture_slots(void) {
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+/* setUp leaves room for exactly one colour+depth target, so the new size reuses the freed slots. */
+static void test_render_target_recreate_at_new_size_without_spare_slots(void) {
+    nt_render_target_desc_t desc = {
         .width = 4,
         .height = 4,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
         .label = "native_rt_smoke",
-    });
+    };
+    nt_render_target_t target = nt_gfx_make_render_target(&desc);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 
@@ -54,38 +56,51 @@ static void test_render_target_resize_without_spare_texture_slots(void) {
     nt_gfx_end_pass();
     assert_rgba(first_pixels, 16, 64, 128, 191, 255);
 
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 7, 5));
+    nt_gfx_destroy_render_target(target);
+    desc.width = 7;
+    desc.height = 5;
+    target = nt_gfx_make_render_target(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 
-    uint8_t resized_pixels[7U * 5U * 4U] = {0};
+    uint8_t second_pixels[7U * 5U * 4U] = {0};
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = target,
         .clear_color = {1.0F, 0.25F, 0.5F, 1.0F},
         .clear_depth = 1.0F,
     });
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 7, 5, resized_pixels, sizeof(resized_pixels)));
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 7, 5, second_pixels, sizeof(second_pixels)));
     nt_gfx_end_pass();
-    assert_rgba(resized_pixels, 35, 255, 64, 128, 255);
+    assert_rgba(second_pixels, 35, 255, 64, 128, 255);
 
     nt_gfx_destroy_render_target(target);
 }
 
 static void test_depth_texture_uses_explicit_format(void) {
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = 4,
-        .height = 4,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .depth_format = NT_TEXTURE_FORMAT_DEPTH16,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 6, 5));
+    static const struct {
+        nt_texture_format_t format;
+        GLint internal_format;
+    } cases[] = {
+        {NT_TEXTURE_FORMAT_DEPTH16, GL_DEPTH_COMPONENT16},
+        {NT_TEXTURE_FORMAT_DEPTH24, GL_DEPTH_COMPONENT24},
+        {NT_TEXTURE_FORMAT_DEPTH32F, GL_DEPTH_COMPONENT32F},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+            .width = 4,
+            .height = 4,
+            .color_format = NT_TEXTURE_FORMAT_RGBA8,
+            .depth_format = cases[i].format,
+        });
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
 
-    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(nt_gfx_render_target_depth(target)), 0);
-    GLint value = 0;
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
-    TEST_ASSERT_EQUAL_INT(GL_DEPTH_COMPONENT16, value);
+        nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(nt_gfx_render_target_depth(target)), 0);
+        GLint value = 0;
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
+        TEST_ASSERT_EQUAL_INT(cases[i].internal_format, value);
 
-    nt_gfx_destroy_render_target(target);
+        nt_gfx_destroy_render_target(target);
+    }
 }
 
 /* Depth step written by geometry: the left texel keeps the pass clear, the
@@ -491,6 +506,12 @@ static shadow_probe_t make_shadow_probe(void) {
    pass 2 compares against 0.5 across the drawable and reads back one row. */
 static void render_shadow_ramp(const shadow_probe_t *probe, nt_render_target_t shadow_map, uint8_t row[RAMP_WIDTH * 4]) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = shadow_map, .clear_depth = 0.2F});
+    GLint draw_buffer = -1;
+    GLint read_buffer = -1;
+    glGetIntegerv(GL_DRAW_BUFFER0, &draw_buffer);
+    glGetIntegerv(GL_READ_BUFFER, &read_buffer);
+    TEST_ASSERT_EQUAL_INT(GL_NONE, draw_buffer);
+    TEST_ASSERT_EQUAL_INT(GL_NONE, read_buffer);
     nt_gfx_bind_pipeline(probe->depth_pip);
     nt_gfx_bind_vertex_input(probe->depth_vi);
     nt_gfx_draw(0, 6);
@@ -510,45 +531,41 @@ static void render_shadow_ramp(const shadow_probe_t *probe, nt_render_target_t s
 }
 
 /* A shadow map needs no colour: GL 3.3 core only completes the FBO with draw
-   and read buffer NONE. Column 19 samples u ~ 0.3, between the two cleared
-   texels of the 4-wide map but across the edge of the 2-wide one, so it tells
-   the resized storage from the original. */
-static void test_depth_only_shadow_map_renders_and_resizes(void) {
-    nt_render_target_t shadow_map = nt_gfx_make_render_target(&(nt_render_target_desc_t){
+   and read buffer NONE. */
+static void test_depth_only_shadow_map_renders_and_recreates_at_new_size(void) {
+    nt_render_target_desc_t desc = {
         .width = 2,
         .height = 1,
         .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
         .label = "depth_only_shadow_map",
-    });
+    };
+    nt_render_target_t shadow_map = nt_gfx_make_render_target(&desc);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, shadow_map.id);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(shadow_map));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_color(shadow_map).id);
-    const nt_texture_t depth = nt_gfx_render_target_depth(shadow_map);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, depth.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_render_target_depth(shadow_map).id);
     TEST_ASSERT_TRUE_MESSAGE(g_nt_window.fb_width >= RAMP_WIDTH, "drawable narrower than the sampled ramp");
     const shadow_probe_t probe = make_shadow_probe();
-    enum { RAMP_INSIDE_LEFT_HALF = 19 };
 
     uint8_t row[RAMP_WIDTH * 4] = {0};
     render_shadow_ramp(&probe, shadow_map, row);
     TEST_ASSERT_EQUAL_UINT8(0, ramp_at(row, RAMP_NEAR));
     TEST_ASSERT_EQUAL_UINT8(255, ramp_at(row, RAMP_FAR));
     TEST_ASSERT_TRUE(ramp_at(row, RAMP_EDGE) > 0 && ramp_at(row, RAMP_EDGE) < 255);
-    TEST_ASSERT_TRUE(ramp_at(row, RAMP_INSIDE_LEFT_HALF) > 0);
 
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(shadow_map, 4, 1));
+    nt_gfx_destroy_render_target(shadow_map);
+    desc.width = 4;
+    shadow_map = nt_gfx_make_render_target(&desc);
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(shadow_map));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_render_target_color(shadow_map).id);
-    TEST_ASSERT_EQUAL_UINT32(depth.id, nt_gfx_render_target_depth(shadow_map).id);
-    uint16_t width = 0;
-    uint16_t height = 0;
-    TEST_ASSERT_TRUE(nt_gfx_texture_size(depth, &width, &height));
-    TEST_ASSERT_EQUAL_UINT16(4, width);
+    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(nt_gfx_render_target_depth(shadow_map)), 0);
+    GLint gl_width = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &gl_width);
+    TEST_ASSERT_EQUAL_INT(4, gl_width);
 
     memset(row, 0, sizeof(row));
     render_shadow_ramp(&probe, shadow_map, row);
     TEST_ASSERT_EQUAL_UINT8(0, ramp_at(row, RAMP_NEAR));
-    TEST_ASSERT_EQUAL_UINT8(0, ramp_at(row, RAMP_INSIDE_LEFT_HALF));
     TEST_ASSERT_EQUAL_UINT8(255, ramp_at(row, RAMP_FAR));
     TEST_ASSERT_TRUE(ramp_at(row, RAMP_EDGE) > 0 && ramp_at(row, RAMP_EDGE) < 255);
 
@@ -1468,13 +1485,13 @@ int main(void) {
     };
     nt_window_init();
     UNITY_BEGIN();
-    RUN_TEST(test_render_target_resize_without_spare_texture_slots);
+    RUN_TEST(test_render_target_recreate_at_new_size_without_spare_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format);
     RUN_TEST(test_custom_blend_state_reaches_gl_unchanged);
     RUN_TEST(test_all_public_blend_enums_reach_gl);
     RUN_TEST(test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_depth_comparison_sampler_blends_comparison_results);
-    RUN_TEST(test_depth_only_shadow_map_renders_and_resizes);
+    RUN_TEST(test_depth_only_shadow_map_renders_and_recreates_at_new_size);
     RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);
     RUN_TEST(test_rgba32f_linear_filtering_and_generated_mips);
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);

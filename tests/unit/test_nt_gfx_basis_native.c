@@ -391,16 +391,14 @@ void test_partial_chain_caps_max_level_and_samples_its_last_level(void) {
     nt_gfx_destroy_texture(tex);
 }
 
-/* The resize path builds its descriptor inside the backend, bypassing
- * make_texture; the recreated attachment must still cap at one level. */
-void test_resized_render_target_color_caps_max_level(void) {
+/* Attachments carry the zero level_count spelling; they must still cap at one level. */
+void test_render_target_color_caps_max_level(void) {
     nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = 16,
-        .height = 16,
+        .width = 32,
+        .height = 24,
         .color_format = NT_TEXTURE_FORMAT_RGBA8,
     });
     TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(rt, 32, 24));
     TEST_ASSERT_EQUAL_INT(0, texture_max_level(nt_gfx_render_target_color(rt)));
     nt_gfx_destroy_render_target(rt);
 }
@@ -443,7 +441,7 @@ int main(void) {
 #endif
     RUN_TEST(test_single_level_texture_caps_max_level_and_still_samples);
     RUN_TEST(test_partial_chain_caps_max_level_and_samples_its_last_level);
-    RUN_TEST(test_resized_render_target_color_caps_max_level);
+    RUN_TEST(test_render_target_color_caps_max_level);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

@@ -449,8 +449,8 @@ typedef struct {
 } nt_texture_desc_t;
 
 typedef struct {
-    nt_texture_filter_t min_filter; /* default: NT_FILTER_LINEAR */
-    nt_texture_filter_t mag_filter; /* default: NT_FILTER_LINEAR (NEAREST or LINEAR only) */
+    nt_texture_filter_t min_filter; /* default: NT_FILTER_NEAREST */
+    nt_texture_filter_t mag_filter; /* default: NT_FILTER_NEAREST (NEAREST or LINEAR only) */
     nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
     /* Comparison lives on the sampler, not the texture: one depth target reads
@@ -486,7 +486,6 @@ typedef enum {
     NT_GFX_OP_END_PASS,
     NT_GFX_OP_CREATE,
     NT_GFX_OP_DESTROY,
-    NT_GFX_OP_RESIZE,
     NT_GFX_OP_PIPELINE,
     NT_GFX_OP_VERTEX_INPUT,
     NT_GFX_OP_TEXTURE_SET,
@@ -879,14 +878,12 @@ void nt_gfx_destroy_render_target(nt_render_target_t rt);
  * nt_gfx_shutdown. The shared lifetime is intentional — multiple materials
  * and textures reference the same sampler handle. */
 
-/* Resize preserves logical target and attachment handles; pixels become undefined. */
-bool nt_gfx_resize_render_target(nt_render_target_t rt, uint16_t width, uint16_t height);
 /* The attachment textures; INVALID when the target has no such attachment. */
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
 nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt);
 /* False after a context restore that could not recreate the target (a runtime GPU
  * failure, same class as creation returning invalid). No automatic retry: the owner
- * destroys and recreates it, or falls back. */
+ * destroys it and makes a new one, or falls back. */
 bool nt_gfx_render_target_ready(nt_render_target_t rt);
 bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Reports a live stage backend. Readiness lost to context loss never returns for that handle;

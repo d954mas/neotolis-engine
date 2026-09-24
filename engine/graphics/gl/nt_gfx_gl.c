@@ -2041,64 +2041,6 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
     memset(rt, 0, sizeof(*rt));
 }
 
-static void nt_gfx_gl_delete_textures(GLuint names[NT_GFX_RT_ATTACHMENTS]) {
-    for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
-        if (names[i] != 0) {
-            NT_GL_DELETE(glDeleteTextures, 1, &names[i]);
-        }
-    }
-}
-
-/* New storage is staged in fresh names and swapped into the same texture slots,
- * so a failure leaves the target and its texture handles untouched. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-bool nt_gfx_backend_resize_render_target(uint32_t backend_handle, const uint32_t textures[NT_GFX_RT_ATTACHMENTS], const nt_texture_desc_t descs[NT_GFX_RT_ATTACHMENTS]) {
-    bool valid_args = backend_handle != 0 && backend_handle <= s_init_desc.max_render_targets && s_render_targets != NULL;
-    NT_ASSERT(valid_args && "resize_render_target: invalid GL backend arguments");
-    if (!valid_args) {
-        return false;
-    }
-    GLuint old_names[NT_GFX_RT_ATTACHMENTS];
-    if (s_render_targets[backend_handle].fbo == 0 || !nt_gfx_gl_render_target_textures(textures, old_names)) {
-        return false;
-    }
-
-    GLuint staged[NT_GFX_RT_ATTACHMENTS] = {0};
-    const nt_texture_desc_t *size = textures[NT_GFX_RT_COLOR] != 0 ? &descs[NT_GFX_RT_COLOR] : &descs[NT_GFX_RT_DEPTH];
-    nt_gfx_gl_render_target_t target = {0};
-    for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
-        if (textures[i] != 0) {
-            staged[i] = nt_gfx_gl_create_texture_name(&descs[i]);
-            if (staged[i] == 0) {
-                nt_gfx_gl_delete_textures(staged);
-                return false;
-            }
-        }
-    }
-    if (!nt_gfx_gl_build_render_target(staged, size->width, size->height, &target)) {
-        nt_gfx_gl_delete_textures(staged);
-        return false;
-    }
-
-    nt_gfx_gl_render_target_t old = s_render_targets[backend_handle];
-    for (int i = 0; i < NT_GFX_RT_ATTACHMENTS; i++) {
-        if (textures[i] != 0) {
-            s_texture_gl[textures[i]] = staged[i];
-            NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_TEXTURE; event->data.backend.args[0] = textures[i]; event->data.backend.args[1] = staged[i];);
-            nt_gfx_gl_forget_texture(old_names[i]);
-        }
-    }
-    nt_gfx_gl_delete_textures(old_names);
-    s_render_targets[backend_handle] = target;
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_RENDER_TARGET; event->data.backend.args[0] = backend_handle; event->data.backend.args[1] = target.fbo;);
-    if (s_bound_framebuffer == old.fbo) {
-        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, target.fbo);
-        s_bound_framebuffer = target.fbo;
-    }
-    NT_GL_DELETE(glDeleteFramebuffers, 1, &old.fbo);
-    return true;
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "bind_texture: slot out of range");

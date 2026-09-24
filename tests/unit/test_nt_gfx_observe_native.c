@@ -166,60 +166,41 @@ static uint32_t captured_calls(nt_gfx_gl_call_t call) {
     return count;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- inspect the two identity layers before and after resize
-static void test_capture_publishes_resize_mappings_and_skip_reasons(void) {
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 8, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
-    nt_texture_t color = nt_gfx_render_target_color(target);
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- inspect both identity layers of a new attachment
+static void test_capture_publishes_attachment_mappings_and_skip_reasons(void) {
     nt_gfx_capture_request();
     nt_gfx_begin_frame();
-    TEST_ASSERT_TRUE(nt_gfx_resize_render_target(target, 13, 7));
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 13, .height = 7, .color_format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_texture_t color = nt_gfx_render_target_color(target);
     nt_gfx_set_scissor_enabled(false);
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_FALSE(capture.overflow);
-    /* Inherited definitions precede the resize; fresh ones follow it. */
-    uint32_t resize = 0;
-    while (resize < capture.count && !(capture.events[resize].kind == NT_GFX_EVENT_BEGIN && capture.events[resize].operation == NT_GFX_OP_RESIZE)) {
-        resize++;
-    }
-    TEST_ASSERT_LESS_THAN_UINT32(capture.count, resize);
     uint32_t texture_slot = 0;
-    uint32_t old_name = 0;
-    for (uint32_t i = 0; i < resize; i++) {
-        const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->object_kind == NT_GFX_OBJECT_TEXTURE && event->object == color.id) {
-            texture_slot = event->data.resource.backend;
-        }
-    }
-    TEST_ASSERT_NOT_EQUAL(0, texture_slot);
-    for (uint32_t i = 0; i < resize; i++) {
-        const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_TEXTURE && event->data.backend.args[0] == texture_slot) {
-            old_name = event->data.backend.args[1];
-        }
-    }
-    TEST_ASSERT_NOT_EQUAL(0, old_name);
-    bool dimensions = false;
-    bool mapping = false;
     bool cache = false;
-    for (uint32_t i = resize; i < capture.count; i++) {
+    for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->object_kind == NT_GFX_OBJECT_TEXTURE && event->object == color.id) {
             TEST_ASSERT_EQUAL_UINT32(13, event->data.resource.width);
             TEST_ASSERT_EQUAL_UINT32(7, event->data.resource.height);
-            dimensions = true;
-        }
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_TEXTURE && event->data.backend.args[0] == texture_slot) {
-            TEST_ASSERT_NOT_EQUAL(old_name, event->data.backend.args[1]);
-            TEST_ASSERT_NOT_EQUAL(0, event->data.backend.args[1]);
-            mapping = true;
+            texture_slot = event->data.resource.backend;
         }
         if (event->kind == NT_GFX_EVENT_RESULT && event->operation == NT_GFX_OP_SCISSOR_ENABLE) {
             TEST_ASSERT_EQUAL(NT_GFX_RESULT_CACHE, event->result);
             cache = true;
         }
     }
-    TEST_ASSERT_TRUE(dimensions && mapping && cache);
+    TEST_ASSERT_NOT_EQUAL(0, texture_slot);
+    bool mapping = false;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_TEXTURE && event->data.backend.args[0] == texture_slot) {
+            TEST_ASSERT_NOT_EQUAL(0, event->data.backend.args[1]);
+            mapping = true;
+        }
+    }
+    TEST_ASSERT_TRUE(mapping && cache);
+    nt_gfx_destroy_render_target(target);
 }
 
 static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
@@ -623,7 +604,7 @@ int main(void) {
     nt_window_init();
     UNITY_BEGIN();
 #if NT_GFX_CAPTURE_ENABLED
-    RUN_TEST(test_capture_publishes_resize_mappings_and_skip_reasons);
+    RUN_TEST(test_capture_publishes_attachment_mappings_and_skip_reasons);
     RUN_TEST(test_new_program_defines_sampler_names_and_inactive_uniforms);
     RUN_TEST(test_initial_uniform_records_cover_only_vec4);
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
