@@ -29,7 +29,7 @@ static float sum_weights(const float *weights, uint32_t count) {
     return sum;
 }
 
-/* The game owns the colour texture; the target borrows it. */
+/* The game owns the color texture; the target borrows it. */
 static nt_render_target_t make_blur_target(uint16_t width, uint16_t height) {
     nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = width, .height = height, .format = NT_TEXTURE_FORMAT_RGBA8});
     return nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});

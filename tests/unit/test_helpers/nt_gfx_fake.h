@@ -54,7 +54,7 @@ void nt_gfx_fake_fail_next_program_create(void);
 void nt_gfx_fake_lose_context_on_program_create(void);
 void nt_gfx_fake_fail_next_pipeline_create(void);
 void nt_gfx_fake_fail_next_sampler_create(void);
-/* Viewport size the front-end passed to the last render-target begin_pass. */
+/* Viewport size the front-end passed to the last begin_pass; 0 for the default framebuffer. */
 uint16_t nt_gfx_fake_last_pass_width(void);
 uint16_t nt_gfx_fake_last_pass_height(void);
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);

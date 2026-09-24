@@ -285,45 +285,32 @@ program and is discarded when that program changes or when the bound pipeline is
 destroyed. Pipeline and vertex-input binds, texture-set application,
 instance-buffer re-pointing, uniform writes and draws outside a pass assert.
 Destroying a texture or a live render target inside a pass asserts: pass-scoped
-draw state may still sample it. Destroying an INVALID or stale render target is a
-no-op even inside a pass: the handle check runs first, as for vertex inputs.
+draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
 uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
-A render target is a thin framebuffer object over optional attachments, colour
-and depth. Each attachment is a game-owned texture made with
-`nt_gfx_make_texture`, typically with NULL data, that the target borrows, as a vertex input
-borrows its buffers; `nt_gfx_render_target_color` returns the borrowed colour
-texture, INVALID when absent. One texture may serve several targets, such as a
-depth buffer shared by two passes. Sampling an attachment while its target is
-the active pass would create a framebuffer feedback loop and asserts before any
-backend bind. Backend FBO ids stay private to the concrete graphics
-implementation.
+A render target is a thin framebuffer object over optional attachments, color
+and depth. Each attachment is a game-owned texture that the target borrows, as a
+vertex input borrows its buffers, and lifetime follows vertex inputs: a target is
+a baked object, while its textures are primary resources. One texture may serve
+several targets, such as a depth buffer shared by two passes. Sampling an
+attachment while its target is the active pass would create a framebuffer
+feedback loop and asserts before any backend bind. Backend FBO ids stay private
+to the concrete graphics implementation. The descriptor rules, lifetime,
+context-loss behavior and queries are specified in
+[API contracts: Render-target handles](../core/api-contracts.md#render-target-handles).
 
-`nt_render_target_desc_t` holds the `color` and `depth` textures; an INVALID
-handle means that attachment is absent, and at least one must be present. The
-textures must be live and single-level with one size, which is the target's
-viewport size. The supported colour formats are `RGBA8` and `RGBA16F`; depth
-takes a `DEPTH*` format. There is no renderbuffer storage: without
-`glInvalidateFramebuffer` a renderbuffer costs the same memory as a texture, and
-its only advantage, MSAA, is not supported. A backend must not substitute its
-own attachment format.
+There is no renderbuffer storage: without `glInvalidateFramebuffer` a
+renderbuffer costs the same memory as a texture, and its only advantage, MSAA,
+is not supported. A backend must not substitute its own attachment format.
+There is no resize: the target size is the size of textures the game owns, so a
+size change is new textures and new targets.
 
-Lifetime follows vertex inputs. Destroying a render target leaves its textures
-alive; destroying a texture destroys every target that borrows it, and
-destroying a stale target is a no-op. A context loss frees every target slot
-(`nt_gfx_render_target_valid` turns false) and leaves the textures as husks; the
-game destroys them and makes new textures and targets after restore. There is
-no resize: a size change destroys the textures and makes new ones and new
-targets.
-
-A depth-only target (a shadow map) has no colour attachment, so its framebuffer
-sets draw and read buffer to `GL_NONE`: GL 3.3 core reports a draw buffer
-without an attachment as incomplete. The pass colour clear is then a no-op.
-Calling `nt_gfx_read_pixels` inside such a pass is a caller error: there is no
-colour to read.
+A depth-only target (a shadow map) has no color attachment. It is
+framebuffer-complete, the pass color clear is a no-op, and
+`nt_gfx_read_pixels` inside such a pass asserts.
 
 Attachments are ordinary textures: `NT_SAMPLER_DEFAULT` selects the sampler of
 their own descriptor, and a binding may override it, for example with a
@@ -585,8 +572,8 @@ No event borrows upload memory, shader source or caller labels.
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
 resource kind and `backend.args[0..1]` as backend slot/raw GL name. Frontend resource definitions
 carry the full handle, current backend slot and available dimensions/relationships.
-A render-target definition carries the colour and depth texture handles in
-`related[0..1]`, the colour format in `format` and the depth format in `usage`,
+A render-target definition carries the color and depth texture handles in
+`related[0..1]`, the color format in `format` and the depth format in `usage`,
 zero for an absent attachment, and the size of those textures.
 Shader, program and vertex-input definitions carry result `UNKNOWN`: the frontend
 retains no shader stage or source, program stage pair or vertex-input layout, so

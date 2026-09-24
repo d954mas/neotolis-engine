@@ -377,8 +377,8 @@ destroys every render target that borrows it, so one depth texture can serve
 several targets and no target outlives its storage. Destroying an invalid or
 stale target handle is a no-op, as for vertex inputs.
 
-`nt_gfx_render_target_color` returns the borrowed colour texture, or an invalid
-handle for a stale target or one without colour. `nt_gfx_render_target_valid`
+`nt_gfx_render_target_color` returns the borrowed color texture, or an invalid
+handle for a stale target or one without color. `nt_gfx_render_target_valid`
 reports a live target slot; it is `false` after destruction, the texture
 cascade, or a context loss. `nt_gfx_texture_ready` reports whether a texture
 handle has live backend storage. Both queries return `false` for invalid
@@ -406,17 +406,20 @@ the attachment textures stay as husks. After restore the owner destroys the
 husks and makes new textures and targets. A restore that meets a new loss is
 that loss: the engine stays lost and a later begin_frame restores again.
 
-A render-target descriptor names the colour and depth textures; an invalid
+A render-target descriptor names the color and depth textures; an invalid
 handle means that attachment is absent, and at least one must be present. The
 textures must be live, single-level and of one size, which becomes the target
-size. Colour takes `RGBA8` or `RGBA16F`; depth takes a `DEPTH*` format. The
-descriptor carries no sampler state: an attachment is sampled through its own
-default sampler or the override a binding names.
+size. Color takes `RGBA8` or `RGBA16F`; depth takes a `DEPTH*` format. The
+descriptor carries no sampler state.
 
-An unsupported colour or depth format, a target with no attachment, and an
+An unsupported color or depth format, a target with no attachment, and an
 invalid, husk, multi-level or differently sized attachment texture are
-developer errors and assert, as are exhausted configured target capacity and
-render-target lifecycle calls inside an active pass. `nt_gfx_make_pipeline`
+developer errors and assert, as are exhausted configured target capacity,
+creating a target inside an active pass, and destroying a live target there.
+Destroying an invalid or stale target is a no-op even inside a pass: the handle
+check runs first. A returned invalid target therefore means a lost context, a
+failed backend allocation, or an incomplete framebuffer, such as `RGBA16F`
+without float rendering. `nt_gfx_make_pipeline`
 follows the same split: a
 NULL descriptor, an unready program, and an exhausted pipeline pool assert, so a returned invalid
 pipeline handle means a lost context or a failed backend allocation — the two

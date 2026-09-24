@@ -536,7 +536,7 @@ static void render_shadow_ramp(const shadow_probe_t *probe, const test_target_t 
     nt_gfx_end_pass();
 }
 
-/* A shadow map needs no colour: GL 3.3 core only completes the FBO with draw
+/* A shadow map needs no color: GL 3.3 core only completes the FBO with draw
    and read buffer NONE. */
 static void test_depth_only_shadow_map_renders_and_recreates_at_new_size(void) {
     test_target_t shadow_map = make_test_target(2, 1, NT_TEXTURE_FORMAT_INVALID, NT_TEXTURE_FORMAT_DEPTH24);

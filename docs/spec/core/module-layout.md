@@ -147,9 +147,9 @@ composition-symbol checks that prove the intended variants without LTO remain
 #488 scope.
 
 `nt_postfx_blur` is a gaussian blur helper, not a post-processing graph. It
-borrows ready source, temp, and destination handles for each call; their
-dimensions must match. The helper owns its shader stages, program, pipeline, and
-fullscreen primitive, but it does not allocate, resize, destroy, or retain
+borrows a ready source texture and valid temp and destination targets for each
+call; their dimensions must match. The helper owns its shader stages, program,
+pipeline, and fullscreen primitive, but it does not allocate, destroy, or retain
 caller handles.
 The source uses any `sampler2D` color format — the uncompressed set (`R8`,
 `RG8`, `RGB8`, `RGBA8`, `RGBA16F`, `RGBA32F`) and the block-compressed set
@@ -160,7 +160,7 @@ samples the source `NEAREST` with clamped edges, whatever its default sampler;
 taps land on texel centres. Scissor
 must be disabled for the call. The helper leaves scissor disabled and does not
 restore prior graphics bindings.
-Blur arguments and readiness of caller-supplied GPU handles are preconditions
+Blur arguments, readiness of the source and validity of the targets are preconditions
 and assert when violated, as does a link failure in the helper's program.
 Initialization and restore return `NT_ERR_INIT_FAILED` for shader, buffer, or
 pipeline backend creation failures, including failures with a live context, and

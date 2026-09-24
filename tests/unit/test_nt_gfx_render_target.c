@@ -380,7 +380,7 @@ static void test_pass_sequencing_and_capacity_misuse_assert(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_init(&invalid_desc));
 }
 
-/* A depth-only target has no colour to read. */
+/* A depth-only target has no color to read. */
 static void test_read_pixels_asserts_inside_depth_only_pass(void) {
     nt_render_target_t rt = make_target(NO_TEXTURE, make_depth());
     uint8_t pixel[4];
@@ -503,7 +503,7 @@ static void test_depth_texture_accepts_linear_comparison_sampler(void) {
 }
 
 /* Comparison against non-depth storage is undefined in GL, so the same sampler
- * that is legal on depth storage must be rejected on colour storage. */
+ * that is legal on depth storage must be rejected on color storage. */
 static void test_color_texture_rejects_comparison_sampler(void) {
     nt_texture_t color = make_color();
     nt_sampler_t comparison = make_comparison_sampler();

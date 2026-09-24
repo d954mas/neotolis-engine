@@ -637,7 +637,7 @@ static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uin
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
     NT_ASSERT((s_gfx.active_render_target == 0 || s_gfx.render_target_metas[nt_pool_slot_index(s_gfx.active_render_target)].attachments[NT_GFX_RT_COLOR].id != 0) &&
-              "read_pixels: the active render target has no colour attachment");
+              "read_pixels: the active render target has no color attachment");
     /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
        early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed. */
     if (g_nt_gfx.context_lost) {

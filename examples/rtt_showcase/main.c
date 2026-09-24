@@ -121,7 +121,7 @@ static const nt_ui_label_style_t s_value_style = {
 };
 
 static struct {
-    /* The targets borrow these textures; destroying a texture destroys its targets. */
+    /* Borrowed by the targets below. */
     nt_texture_t scene_color;
     nt_texture_t scene_depth;
     nt_texture_t temp_color;
@@ -227,7 +227,7 @@ static bool make_quad_resources(void) {
     return s_demo.quad_pipeline.id != 0 && s_demo.quad_vbo.id != 0 && s_demo.quad_vi.id != 0 && s_demo.white.id != 0;
 }
 
-/* Colour is shown LINEAR; raw depth must be read NEAREST, which depth storage requires anyway. */
+/* Color is shown LINEAR; raw depth must be read NEAREST, which depth storage requires anyway. */
 static nt_texture_t make_attachment(const char *label, uint16_t width, uint16_t height, nt_texture_format_t format, nt_texture_filter_t filter) {
     return nt_gfx_make_texture(&(nt_texture_desc_t){.width = width, .height = height, .format = format, .min_filter = filter, .mag_filter = filter, .label = label});
 }
@@ -453,7 +453,7 @@ static void render_frame(void) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    /* A failed resize or restore leaves the targets stale. */
+    /* A failed rebuild or a loss leaves the targets invalid until R or a restore remakes them. */
     if (!s_demo.render_resources_ready || !targets_valid()) {
         return;
     }

@@ -375,8 +375,9 @@ through a virtual pack must be destroyed, recreated from game-owned source data,
 and published again with `nt_resource_register()`.
 
 Render targets and their attachment textures are game-owned: a loss frees the
-targets, and the game recreates textures and targets after restore and redraws
-their contents.
+targets and leaves the textures as husks, and after restore the game destroys
+the husks, makes new textures and targets, and redraws their contents; see
+[API contracts: Render-target handles](../core/api-contracts.md#render-target-handles).
 
 ## Pack lifetime (mount / unmount)
 

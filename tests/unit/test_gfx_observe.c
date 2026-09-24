@@ -276,7 +276,6 @@ static void test_failed_restore_stays_lost_with_one_error_log(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
 }
 
-/* A restore that meets a new loss stays lost; the next restore works. */
 static void test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_works(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();

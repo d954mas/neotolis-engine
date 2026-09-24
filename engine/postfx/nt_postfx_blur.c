@@ -290,7 +290,7 @@ static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_ta
     bool source_format_valid = nt_texture_format_is_sampled_color(source_format);
     NT_ASSERT(source_ready && "nt_postfx_blur_gaussian: source texture is not ready");
     NT_ASSERT(source_format_valid && "nt_postfx_blur_gaussian: source must use a sampler2D color format");
-    NT_ASSERT(colors_valid && "nt_postfx_blur_gaussian: target color attachment is invalid");
+    NT_ASSERT(colors_valid && "nt_postfx_blur_gaussian: temp or dest target is stale or has no color");
     return source_ready && source_format_valid && colors_valid;
 }
 
@@ -321,7 +321,7 @@ static bool validate_no_aliasing(const nt_postfx_blur_pass_t *pass, const blur_p
     bool source_aliases_temp = pass->source.id == targets->temp_color.id;
     bool targets_alias = pass->temp.id == pass->dest.id || targets->temp_color.id == targets->dest_color.id;
     NT_ASSERT(!source_aliases_temp && "nt_postfx_blur_gaussian: source aliases temp target");
-    NT_ASSERT(!targets_alias && "nt_postfx_blur_gaussian: temp and dest targets alias");
+    NT_ASSERT(!targets_alias && "nt_postfx_blur_gaussian: temp and dest share a target or color texture");
     return !source_aliases_temp && !targets_alias;
 }
 

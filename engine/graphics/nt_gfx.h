@@ -460,7 +460,7 @@ typedef struct {
     const char *label; /* debug name; static storage */
 } nt_sampler_desc_t;
 
-/* The target borrows live single-level textures of one size; an INVALID handle
+/* The target borrows live single-level textures of one size; an invalid handle
  * means the attachment is absent, and at least one must be present. */
 typedef struct {
     nt_texture_t color; /* INVALID, RGBA8 or RGBA16F */
@@ -845,8 +845,9 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_render_target. The target
- * borrows its textures; INVALID means context loss or an incomplete framebuffer
- * (e.g. RGBA16F without float rendering); caller errors assert. */
+ * borrows its textures; INVALID means context loss, backend allocation failure
+ * or an incomplete framebuffer (e.g. RGBA16F without float rendering); caller
+ * errors assert. */
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
 /* ---- Resource destruction ---- */
@@ -878,7 +879,7 @@ void nt_gfx_destroy_render_target(nt_render_target_t rt);
  * nt_gfx_shutdown. The shared lifetime is intentional — multiple materials
  * and textures reference the same sampler handle. */
 
-/* The borrowed colour texture; INVALID for a stale target or one without colour. */
+/* The borrowed color texture; INVALID for a stale target or one without color. */
 nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
 /* Reports a live render-target slot; false after direct destruction, the
  * destroy_texture cascade, or a context loss (loss frees every render-target
