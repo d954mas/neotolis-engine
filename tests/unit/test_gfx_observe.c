@@ -108,7 +108,7 @@ static void test_loss_during_an_iteration_is_wiped_at_the_next_begin_frame(void)
 static void test_creates_on_a_loss_fail_quietly(void) {
     const nt_buffer_desc_t buffer_desc = {.type = NT_BUFFER_VERTEX, .size = 8};
     const nt_texture_desc_t texture_desc = {.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8};
-    const nt_render_target_desc_t rt_desc = {.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8};
+    const nt_render_target_desc_t rt_desc = {.color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8})};
     const nt_shader_desc_t shader_desc = {.type = NT_SHADER_VERTEX, .source = "void main(){}"};
     nt_gfx_fake_set_context_lost(true);
     s_error_logs = 0;
@@ -205,7 +205,7 @@ static uint32_t result_of(nt_gfx_capture_view_t capture, nt_gfx_operation_t oper
 }
 
 static void test_render_target_work_on_a_known_loss_ends_context_lost(void) {
-    const nt_render_target_desc_t rt_desc = {.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8};
+    const nt_render_target_desc_t rt_desc = {.color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8})};
     nt_render_target_t target = nt_gfx_make_render_target(&rt_desc);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     nt_gfx_fake_set_context_lost(true);
@@ -220,11 +220,8 @@ static void test_render_target_work_on_a_known_loss_ends_context_lost(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* FULL traps before the rejection returns, so the recorded operation has a BEGIN and no RESULT. */
 static void test_rejected_destroys_assert_inside_a_recorded_frame(void) {
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
     nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
     record_next_frame();
-    NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(nt_gfx_render_target_color(target)));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "owned by a render target"));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "inside a pass"));
@@ -279,9 +276,8 @@ static void test_failed_restore_stays_lost_with_one_error_log(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
 }
 
-/* A restore that meets a new loss wipes what it refilled and stays lost; the next restore starts clean. */
+/* A restore that meets a new loss stays lost; the next restore works. */
 static void test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_works(void) {
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
@@ -290,9 +286,8 @@ static void test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_work
     record_next_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
-    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(target));
     TEST_ASSERT_EQUAL_UINT32(0, s_error_logs);
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
 
     nt_gfx_fake_set_context_lost(false);
@@ -301,29 +296,6 @@ static void test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_work
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(capture, NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
     TEST_ASSERT_EQUAL_UINT32(0, capture.counters.accepted[NT_GFX_OP_CONTEXT]);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
-}
-
-/* A render target whose restore meets a new loss is that loss, not a live failure. */
-static void test_render_target_restore_meeting_a_loss_ends_context_lost(void) {
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_fake_lose_context_on_texture_create();
-    s_error_logs = 0;
-    record_next_frame();
-    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
-    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(target));
-    TEST_ASSERT_EQUAL_UINT32(0, s_error_logs);
-
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE));
-    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(target));
 }
 
 /* The explicit sampler outlives the loss; its backend is recreated lazily at the bind. */
@@ -359,48 +331,23 @@ static void test_link_with_a_stage_left_unready_by_a_loss_ends_unready(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_UNREADY, result_of(nt_gfx_capture_read(), NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM));
 }
 
-/* Restored render targets are defined inside the CONTEXT operation, a failed one with complete=0. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk locates the operation and both definitions
-static void test_restore_defines_render_targets_inside_the_context_operation(void) {
-    const nt_render_target_desc_t rt_desc = {.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8};
-    nt_render_target_t failed = nt_gfx_make_render_target(&rt_desc);
-    nt_render_target_t restored = nt_gfx_make_render_target(&rt_desc);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, failed.id);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, restored.id);
+/* Loss frees render targets like vertex inputs, so the restore defines none. */
+static void test_restore_defines_no_render_targets(void) {
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8})});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(nt_gfx_render_target_valid(target));
 
     nt_gfx_fake_set_context_lost(false);
-    nt_gfx_fake_fail_next_render_target_create(); /* recreation walks slots in order: the first target fails */
     record_next_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_FALSE(capture.overflow);
-    uint32_t begin = UINT32_MAX;
-    uint32_t result = UINT32_MAX;
+    TEST_ASSERT_EQUAL_UINT32(1, capture.counters.accepted[NT_GFX_OP_CONTEXT]);
     for (uint32_t i = 0; i < capture.count; i++) {
-        const nt_gfx_event_t *e = &capture.events[i];
-        if (e->operation == NT_GFX_OP_CONTEXT && e->kind == NT_GFX_EVENT_BEGIN) {
-            begin = i;
-        } else if (e->operation == NT_GFX_OP_CONTEXT && e->kind == NT_GFX_EVENT_RESULT) {
-            result = i;
-        }
+        TEST_ASSERT_FALSE(capture.events[i].kind == NT_GFX_EVENT_DEFINITION && capture.events[i].object_kind == NT_GFX_OBJECT_RENDER_TARGET);
     }
-    TEST_ASSERT_LESS_THAN_UINT32(result, begin);
-    int32_t failed_complete = -1;
-    int32_t restored_complete = -1;
-    for (uint32_t i = begin + 1; i < result; i++) {
-        const nt_gfx_event_t *e = &capture.events[i];
-        if (e->kind == NT_GFX_EVENT_DEFINITION && e->object_kind == NT_GFX_OBJECT_RENDER_TARGET) {
-            if (e->object == failed.id) {
-                failed_complete = (int32_t)e->data.resource.flags;
-            } else if (e->object == restored.id) {
-                restored_complete = (int32_t)e->data.resource.flags;
-            }
-        }
-    }
-    TEST_ASSERT_EQUAL_INT32(0, failed_complete);
-    TEST_ASSERT_EQUAL_INT32(1, restored_complete);
 }
 
 static void test_sampler_cache_hit_defines_nothing(void) {
@@ -427,7 +374,7 @@ static void test_sampler_cache_hit_defines_nothing(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks nesting, pairing and creator handles
 static void test_every_operation_records_one_begin_and_one_result(void) {
     record_next_frame();
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 4, .height = 4, .color_format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8})});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, target.id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(NULL).id);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
@@ -504,11 +451,13 @@ static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     TEST_ASSERT_TRUE(scissor_unknown);
 }
 
+/* Size and formats come from the borrowed textures. */
 static void test_depth_only_render_target_definition_has_no_color_fields(void) {
+    nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 64, .height = 32, .format = NT_TEXTURE_FORMAT_DEPTH16});
     record_next_frame();
-    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 64, .height = 32, .depth_format = NT_TEXTURE_FORMAT_DEPTH16});
+    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){.depth = depth});
     nt_gfx_begin_frame();
-    const uint32_t depth_id = nt_gfx_render_target_depth(rt).id;
+    const uint32_t depth_id = depth.id;
     TEST_ASSERT_NOT_EQUAL_UINT32(0, depth_id);
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     TEST_ASSERT_FALSE(capture.overflow);
@@ -693,10 +642,9 @@ int main(void) {
     RUN_TEST(test_restore_is_one_context_operation_after_the_lost_snapshot);
     RUN_TEST(test_failed_restore_stays_lost_with_one_error_log);
     RUN_TEST(test_restore_meeting_a_new_loss_stays_lost_and_the_next_restore_works);
-    RUN_TEST(test_render_target_restore_meeting_a_loss_ends_context_lost);
     RUN_TEST(test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost);
     RUN_TEST(test_link_with_a_stage_left_unready_by_a_loss_ends_unready);
-    RUN_TEST(test_restore_defines_render_targets_inside_the_context_operation);
+    RUN_TEST(test_restore_defines_no_render_targets);
     RUN_TEST(test_sampler_cache_hit_defines_nothing);
     RUN_TEST(test_every_operation_records_one_begin_and_one_result);
     RUN_TEST(test_accepted_counters_match_recorded_results);

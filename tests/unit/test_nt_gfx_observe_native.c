@@ -170,8 +170,8 @@ static uint32_t captured_calls(nt_gfx_gl_call_t call) {
 static void test_capture_publishes_attachment_mappings_and_skip_reasons(void) {
     nt_gfx_capture_request();
     nt_gfx_begin_frame();
-    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.width = 13, .height = 7, .color_format = NT_TEXTURE_FORMAT_RGBA8});
-    nt_texture_t color = nt_gfx_render_target_color(target);
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 13, .height = 7, .format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
     nt_gfx_set_scissor_enabled(false);
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();

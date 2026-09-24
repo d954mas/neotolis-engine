@@ -29,14 +29,10 @@ static float sum_weights(const float *weights, uint32_t count) {
     return sum;
 }
 
-static nt_render_target_desc_t blur_rt_desc(uint16_t width, uint16_t height, const char *label) {
-    return (nt_render_target_desc_t){
-        .width = width,
-        .height = height,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .depth_format = NT_TEXTURE_FORMAT_INVALID,
-        .label = label,
-    };
+/* The game owns the colour texture; the target borrows it. */
+static nt_render_target_t make_blur_target(uint16_t width, uint16_t height) {
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = width, .height = height, .format = NT_TEXTURE_FORMAT_RGBA8});
+    return nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
 }
 
 void setUp(void) {
@@ -94,10 +90,8 @@ static void test_kernel_derives_sigma_when_zero(void) {
 }
 
 static void test_invalid_descriptors_assert_without_draw(void) {
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
     nt_texture_t source = nt_gfx_render_target_color(dest);
 
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(NULL));
@@ -113,12 +107,9 @@ static void test_invalid_descriptors_assert_without_draw(void) {
 }
 
 static void test_feedback_aliases_assert_without_draw(void) {
-    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
     nt_texture_t source = nt_gfx_render_target_color(source_rt);
 
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
@@ -137,32 +128,12 @@ static void test_feedback_aliases_assert_without_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
-static void test_depth_feedback_alias_asserts_without_draw(void) {
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    temp_desc.depth_format = NT_TEXTURE_FORMAT_DEPTH24;
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
-
-    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
-        .source = nt_gfx_render_target_depth(temp),
-        .temp = temp,
-        .dest = dest,
-        .radius = 4.0F,
-    }));
-
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
-}
-
 static void test_stale_source_asserts_without_draw(void) {
-    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
     nt_texture_t stale_source = nt_gfx_render_target_color(source_rt);
-    nt_gfx_destroy_render_target(source_rt);
+    nt_gfx_destroy_texture(stale_source);
 
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = stale_source,
@@ -175,10 +146,8 @@ static void test_stale_source_asserts_without_draw(void) {
 }
 
 static void test_integer_source_asserts_without_draw(void) {
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
     nt_texture_t source = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 64,
         .height = 32,
@@ -203,10 +172,8 @@ static void test_integer_source_asserts_without_draw(void) {
 static void test_compressed_source_blurs(void) {
     static const uint8_t block[16] = {0};
     g_nt_gfx.gpu_caps.has_bc7 = true;
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
     nt_texture_t source = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 64,
         .height = 32,
@@ -229,10 +196,8 @@ static void test_compressed_source_blurs(void) {
 }
 
 static void test_depth_source_asserts_without_draw(void) {
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
     nt_texture_t source = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 64,
         .height = 32,
@@ -253,12 +218,9 @@ static void test_depth_source_asserts_without_draw(void) {
 }
 
 static void test_blur_inside_active_pass_asserts_without_closing_it(void) {
-    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
@@ -271,21 +233,13 @@ static void test_blur_inside_active_pass_asserts_without_closing_it(void) {
     nt_gfx_end_pass();
 }
 
-static void test_incomplete_targets_assert_without_draw(void) {
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+static void test_stale_target_asserts_without_draw(void) {
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
 
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_begin_frame();
-    nt_gfx_fake_fail_next_render_target_create();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_begin_frame();
-
-    TEST_ASSERT_FALSE(nt_gfx_render_target_ready(temp));
+    nt_gfx_destroy_texture(nt_gfx_render_target_color(temp));
+    TEST_ASSERT_FALSE(nt_gfx_render_target_valid(temp));
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = nt_gfx_render_target_color(source_rt),
         .temp = temp,
@@ -297,12 +251,9 @@ static void test_incomplete_targets_assert_without_draw(void) {
 }
 
 static void test_mixed_size_targets_assert_without_draw(void) {
-    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
-    nt_render_target_desc_t temp_desc = blur_rt_desc(32, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t temp = make_blur_target(32, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
 
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = nt_gfx_render_target_color(source_rt),
@@ -315,12 +266,9 @@ static void test_mixed_size_targets_assert_without_draw(void) {
 }
 
 static void test_enabled_scissor_asserts_without_draw(void) {
-    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
 
     nt_gfx_set_scissor(0, 0, 1, 1);
     nt_gfx_set_scissor_enabled(true);
@@ -338,12 +286,9 @@ static void test_enabled_scissor_asserts_without_draw(void) {
 }
 
 static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void) {
-    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
     nt_texture_t source = nt_gfx_render_target_color(source_rt);
     nt_texture_t temp_color = nt_gfx_render_target_color(temp);
     uint32_t creates_before = nt_gfx_fake_render_target_create_count();
@@ -382,13 +327,8 @@ static void test_blur_lifecycle_misuse_asserts(void) {
 static void test_failed_restore_is_retried_by_the_next_one(void) {
     /* setUp already initialized the module. Lose the context during the relink
      * inside restore, which is what a second browser loss does. */
-    nt_render_target_desc_t source_desc = blur_rt_desc(64, 32, "source");
-    nt_render_target_desc_t temp_desc = blur_rt_desc(64, 32, "temp");
-    nt_render_target_desc_t dest_desc = blur_rt_desc(64, 32, "dest");
-    nt_render_target_t source_rt = nt_gfx_make_render_target(&source_desc);
-    nt_render_target_t temp = nt_gfx_make_render_target(&temp_desc);
-    nt_render_target_t dest = nt_gfx_make_render_target(&dest_desc);
-    const nt_postfx_blur_pass_t pass = {.source = nt_gfx_render_target_color(source_rt), .temp = temp, .dest = dest, .radius = 4.0F};
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_postfx_blur_pass_t pass = {.source = nt_gfx_render_target_color(source_rt), .temp = make_blur_target(64, 32), .dest = make_blur_target(64, 32), .radius = 4.0F};
 
     nt_gfx_fake_lose_context_on_program_create();
     TEST_ASSERT_EQUAL_INT(NT_ERR_INIT_FAILED, nt_postfx_blur_restore_gpu());
@@ -405,6 +345,11 @@ static void test_failed_restore_is_retried_by_the_next_one(void) {
     /* Still active, only its GPU objects are gone: the next restore rebuilds
      * rather than asserting on a module that shut itself down. */
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_restore_gpu());
+    TEST_ASSERT_FALSE(nt_gfx_render_target_valid(pass.temp));
+    source_rt = make_blur_target(64, 32);
+    pass.source = nt_gfx_render_target_color(source_rt);
+    pass.temp = make_blur_target(64, 32);
+    pass.dest = make_blur_target(64, 32);
 
     nt_gfx_fake_draw_trace_reset(true);
     nt_gfx_begin_frame();
@@ -450,13 +395,12 @@ int main(void) {
     RUN_TEST(test_kernel_derives_sigma_when_zero);
     RUN_TEST(test_invalid_descriptors_assert_without_draw);
     RUN_TEST(test_feedback_aliases_assert_without_draw);
-    RUN_TEST(test_depth_feedback_alias_asserts_without_draw);
     RUN_TEST(test_stale_source_asserts_without_draw);
     RUN_TEST(test_integer_source_asserts_without_draw);
     RUN_TEST(test_compressed_source_blurs);
     RUN_TEST(test_depth_source_asserts_without_draw);
     RUN_TEST(test_blur_inside_active_pass_asserts_without_closing_it);
-    RUN_TEST(test_incomplete_targets_assert_without_draw);
+    RUN_TEST(test_stale_target_asserts_without_draw);
     RUN_TEST(test_mixed_size_targets_assert_without_draw);
     RUN_TEST(test_enabled_scissor_asserts_without_draw);
     RUN_TEST(test_valid_blur_uses_two_passes_and_no_hidden_target_allocation);

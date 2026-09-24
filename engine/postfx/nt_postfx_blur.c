@@ -265,7 +265,6 @@ nt_result_t nt_postfx_blur_restore_gpu(void) {
 
 typedef struct {
     nt_texture_t temp_color;
-    nt_texture_t temp_depth;
     nt_texture_t dest_color;
 } blur_pass_targets_t;
 
@@ -282,17 +281,8 @@ static bool validate_scissor_state(void) {
     return disabled;
 }
 
-static bool validate_targets_ready(const nt_postfx_blur_pass_t *pass) {
-    bool temp_ready = nt_gfx_render_target_ready(pass->temp);
-    bool dest_ready = nt_gfx_render_target_ready(pass->dest);
-    NT_ASSERT(temp_ready && "nt_postfx_blur_gaussian: temp target is not ready");
-    NT_ASSERT(dest_ready && "nt_postfx_blur_gaussian: dest target is not ready");
-    return temp_ready && dest_ready;
-}
-
 static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_targets_t *targets) {
     targets->temp_color = nt_gfx_render_target_color(pass->temp);
-    targets->temp_depth = nt_gfx_render_target_depth(pass->temp);
     targets->dest_color = nt_gfx_render_target_color(pass->dest);
     bool source_ready = nt_gfx_texture_ready(pass->source);
     bool colors_valid = targets->temp_color.id != 0 && targets->dest_color.id != 0;
@@ -328,7 +318,7 @@ static bool validate_target_sizes(const nt_postfx_blur_pass_t *pass, const blur_
 }
 
 static bool validate_no_aliasing(const nt_postfx_blur_pass_t *pass, const blur_pass_targets_t *targets) {
-    bool source_aliases_temp = pass->source.id == targets->temp_color.id || (targets->temp_depth.id != 0 && pass->source.id == targets->temp_depth.id);
+    bool source_aliases_temp = pass->source.id == targets->temp_color.id;
     bool targets_alias = pass->temp.id == pass->dest.id;
     NT_ASSERT(!source_aliases_temp && "nt_postfx_blur_gaussian: source aliases temp target");
     NT_ASSERT(!targets_alias && "nt_postfx_blur_gaussian: temp and dest targets alias");
@@ -356,9 +346,6 @@ static bool build_validated_kernel(const nt_postfx_blur_pass_t *pass, uint32_t *
 
 static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radius, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) {
     if (!validate_module_and_pass(pass)) {
-        return false;
-    }
-    if (!validate_targets_ready(pass)) {
         return false;
     }
     if (!validate_scissor_state()) {

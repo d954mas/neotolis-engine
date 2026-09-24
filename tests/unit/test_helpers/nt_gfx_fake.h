@@ -52,13 +52,14 @@ uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index);
 void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]);
 void nt_gfx_fake_fail_next_program_create(void);
 void nt_gfx_fake_lose_context_on_program_create(void);
-/* The next texture create meets a live loss, as a restore's render-target recreate can. */
-void nt_gfx_fake_lose_context_on_texture_create(void);
 void nt_gfx_fake_fail_next_pipeline_create(void);
 void nt_gfx_fake_fail_next_sampler_create(void);
-uint16_t nt_gfx_fake_last_render_target_width(void);
-uint16_t nt_gfx_fake_last_render_target_height(void);
+/* Viewport size the front-end passed to the last render-target begin_pass. */
+uint16_t nt_gfx_fake_last_pass_width(void);
+uint16_t nt_gfx_fake_last_pass_height(void);
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
+/* Texture backends passed to the last render-target create; 0 = absent. */
+uint32_t nt_gfx_fake_last_color_texture_backend(void);
 uint32_t nt_gfx_fake_last_depth_texture_backend(void);
 uint32_t nt_gfx_fake_update_texture_count(void);
 typedef struct {

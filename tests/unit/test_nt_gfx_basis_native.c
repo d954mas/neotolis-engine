@@ -147,12 +147,9 @@ static const char *s_sample_fs = "precision highp float;\n"
 /* Draws the texture over `vp_w x vp_h` of a `rt_w x rt_h` colour target and
  * reads the viewport back. Straight alpha survives: no blending is enabled. */
 static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w, uint16_t rt_h, int vp_w, int vp_h) {
-    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = rt_w,
-        .height = rt_h,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-    });
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = rt_w, .height = rt_h, .format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
+    TEST_ASSERT_TRUE(nt_gfx_render_target_valid(rt));
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_fullscreen_vs});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_sample_fs});
@@ -172,7 +169,7 @@ static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, vp_w, vp_h, s_readback, (uint32_t)sizeof(s_readback)));
     nt_gfx_end_pass();
 
-    nt_gfx_destroy_render_target(rt);
+    nt_gfx_destroy_texture(color);
     nt_gfx_destroy_vertex_input(vi);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(prog);
@@ -391,16 +388,13 @@ void test_partial_chain_caps_max_level_and_samples_its_last_level(void) {
     nt_gfx_destroy_texture(tex);
 }
 
-/* Attachments carry the zero level_count spelling; they must still cap at one level. */
+/* Attachment textures usually carry the zero level_count spelling; they must still cap at one level. */
 void test_render_target_color_caps_max_level(void) {
-    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = 32,
-        .height = 24,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-    });
-    TEST_ASSERT_TRUE(nt_gfx_render_target_ready(rt));
-    TEST_ASSERT_EQUAL_INT(0, texture_max_level(nt_gfx_render_target_color(rt)));
-    nt_gfx_destroy_render_target(rt);
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 32, .height = 24, .format = NT_TEXTURE_FORMAT_RGBA8});
+    nt_render_target_t rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
+    TEST_ASSERT_TRUE(nt_gfx_render_target_valid(rt));
+    TEST_ASSERT_EQUAL_INT(0, texture_max_level(color));
+    nt_gfx_destroy_texture(color);
 }
 
 // #endregion

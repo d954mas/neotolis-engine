@@ -121,16 +121,15 @@ static const nt_ui_label_style_t s_value_style = {
 };
 
 static struct {
+    /* The targets borrow these textures; destroying a texture destroys its targets. */
+    nt_texture_t scene_color;
+    nt_texture_t scene_depth;
+    nt_texture_t temp_color;
+    nt_texture_t blur_color;
     nt_render_target_t scene;
     nt_render_target_t temp;
     nt_render_target_t blur;
-    nt_texture_t scene_color;
-    nt_texture_t scene_depth;
-    nt_texture_t blur_color;
     nt_texture_t white;
-    /* Attachments have no default sampler; raw depth must be read NEAREST. */
-    nt_sampler_t color_sampler;
-    nt_sampler_t depth_sampler;
     nt_shader_t quad_vs;
     nt_shader_t quad_fs;
     nt_program_t quad_program;
@@ -225,57 +224,45 @@ static bool make_quad_resources(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "rtt_white",
     });
-    s_demo.color_sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR, .label = "rtt_color_sampler"});
-    s_demo.depth_sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .label = "rtt_depth_sampler"});
-    return s_demo.color_sampler.id != 0 && s_demo.depth_sampler.id != 0 && s_demo.quad_pipeline.id != 0 && s_demo.quad_vbo.id != 0 && s_demo.quad_vi.id != 0 && s_demo.white.id != 0;
+    return s_demo.quad_pipeline.id != 0 && s_demo.quad_vbo.id != 0 && s_demo.quad_vi.id != 0 && s_demo.white.id != 0;
 }
 
-static nt_render_target_t make_target(const char *label, uint16_t width, uint16_t height, nt_texture_format_t depth_format) {
-    return nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = width,
-        .height = height,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .depth_format = depth_format,
-        .label = label,
-    });
+/* Colour is shown LINEAR; raw depth must be read NEAREST, which depth storage requires anyway. */
+static nt_texture_t make_attachment(const char *label, uint16_t width, uint16_t height, nt_texture_format_t format, nt_texture_filter_t filter) {
+    return nt_gfx_make_texture(&(nt_texture_desc_t){.width = width, .height = height, .format = format, .min_filter = filter, .mag_filter = filter, .label = label});
 }
 
+/* Destroying the textures destroys the targets that borrow them. */
 static void destroy_targets(void) {
-    if (s_demo.blur.id != 0) {
-        nt_gfx_destroy_render_target(s_demo.blur);
-    }
-    if (s_demo.temp.id != 0) {
-        nt_gfx_destroy_render_target(s_demo.temp);
-    }
-    if (s_demo.scene.id != 0) {
-        nt_gfx_destroy_render_target(s_demo.scene);
+    nt_texture_t *textures[] = {&s_demo.scene_color, &s_demo.scene_depth, &s_demo.temp_color, &s_demo.blur_color};
+    for (size_t i = 0; i < sizeof(textures) / sizeof(textures[0]); i++) {
+        if (textures[i]->id != 0) {
+            nt_gfx_destroy_texture(*textures[i]);
+        }
+        *textures[i] = (nt_texture_t){0};
     }
     s_demo.scene = NT_RENDER_TARGET_INVALID;
     s_demo.temp = NT_RENDER_TARGET_INVALID;
     s_demo.blur = NT_RENDER_TARGET_INVALID;
 }
 
-/* A size change makes new targets, so the attachment handles are fetched again. */
 static bool make_targets(uint16_t width, uint16_t height) {
-    s_demo.scene = make_target("rtt_scene", width, height, NT_TEXTURE_FORMAT_DEPTH24);
-    s_demo.temp = make_target("rtt_blur_temp", width, height, NT_TEXTURE_FORMAT_INVALID);
-    s_demo.blur = make_target("rtt_blur_dest", width, height, NT_TEXTURE_FORMAT_INVALID);
+    s_demo.scene_color = make_attachment("rtt_scene_color", width, height, NT_TEXTURE_FORMAT_RGBA8, NT_FILTER_LINEAR);
+    s_demo.scene_depth = make_attachment("rtt_scene_depth", width, height, NT_TEXTURE_FORMAT_DEPTH24, NT_FILTER_NEAREST);
+    s_demo.temp_color = make_attachment("rtt_blur_temp_color", width, height, NT_TEXTURE_FORMAT_RGBA8, NT_FILTER_LINEAR);
+    s_demo.blur_color = make_attachment("rtt_blur_color", width, height, NT_TEXTURE_FORMAT_RGBA8, NT_FILTER_LINEAR);
+    if (s_demo.scene_color.id == 0 || s_demo.scene_depth.id == 0 || s_demo.temp_color.id == 0 || s_demo.blur_color.id == 0) {
+        destroy_targets();
+        return false;
+    }
+    s_demo.scene = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.scene_color, .depth = s_demo.scene_depth, .label = "rtt_scene"});
+    s_demo.temp = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.temp_color, .label = "rtt_blur_temp"});
+    s_demo.blur = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.blur_color, .label = "rtt_blur_dest"});
     if (s_demo.scene.id == 0 || s_demo.temp.id == 0 || s_demo.blur.id == 0) {
         destroy_targets();
         return false;
     }
-    s_demo.scene_color = nt_gfx_render_target_color(s_demo.scene);
-    s_demo.scene_depth = nt_gfx_render_target_depth(s_demo.scene);
-    s_demo.blur_color = nt_gfx_render_target_color(s_demo.blur);
-    NT_ASSERT(s_demo.scene_color.id != 0 && s_demo.scene_depth.id != 0 && s_demo.blur_color.id != 0);
-    s_demo.rt_width = width;
-    s_demo.rt_height = height;
     return true;
-}
-
-static bool render_targets_ready(void) {
-    return nt_gfx_render_target_ready(s_demo.scene) && nt_gfx_render_target_ready(s_demo.temp) && nt_gfx_render_target_ready(s_demo.blur) && nt_gfx_texture_ready(s_demo.scene_color) &&
-           nt_gfx_texture_ready(s_demo.scene_depth) && nt_gfx_texture_ready(s_demo.blur_color);
 }
 
 static void try_bind_ui_resources(void) {
@@ -440,7 +427,7 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     nt_gfx_update_buffer(s_demo.quad_vbo, 0, verts, sizeof(verts));
     nt_gfx_bind_pipeline(s_demo.quad_pipeline);
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
-    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = texture, .sampler = mode == 1 ? s_demo.depth_sampler : s_demo.color_sampler};
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
     nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);
@@ -464,7 +451,8 @@ static void render_frame(void) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    if (!s_demo.render_resources_ready || !render_targets_ready()) {
+    /* A failed resize or restore leaves the targets stale. */
+    if (!s_demo.render_resources_ready || !nt_gfx_render_target_valid(s_demo.scene) || !nt_gfx_render_target_valid(s_demo.temp) || !nt_gfx_render_target_valid(s_demo.blur)) {
         return;
     }
 
@@ -520,7 +508,10 @@ static void frame(void) {
         /* The font keeps its sources across a restore -- only its GPU textures
          * died, and nt_font_step rebuilds those itself. Clearing this would make
          * the gate call nt_font_add twice, which asserts on the duplicate. */
-        s_demo.render_resources_ready = restored && render_targets_ready();
+        /* Loss freed the targets; their textures are husks that only we can destroy. */
+        destroy_targets();
+        restored = make_targets(s_demo.rt_width, s_demo.rt_height) && restored;
+        s_demo.render_resources_ready = restored;
         if (!s_demo.render_resources_ready) {
             nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
         }
@@ -534,10 +525,15 @@ static void frame(void) {
     }
 #endif
     if (nt_input_key_is_pressed(NT_KEY_R)) {
-        s_demo.large_target = !s_demo.large_target;
+        const bool large = !s_demo.large_target;
+        const uint16_t width = large ? 768 : 512;
+        const uint16_t height = large ? 432 : 288;
         destroy_targets();
-        bool made = s_demo.large_target ? make_targets(768, 432) : make_targets(512, 288);
-        if (!made) {
+        if (make_targets(width, height)) {
+            s_demo.large_target = large;
+            s_demo.rt_width = width;
+            s_demo.rt_height = height;
+        } else {
             nt_log_error("rtt_showcase: render-target recreate failed");
         }
     }
@@ -658,6 +654,8 @@ int main(void) {
     if (!make_targets(512, 288)) {
         return 1;
     }
+    s_demo.rt_width = 512;
+    s_demo.rt_height = 288;
     s_demo.render_resources_ready = true;
 
 #ifdef NT_PLATFORM_WEB

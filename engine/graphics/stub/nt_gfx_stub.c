@@ -98,12 +98,7 @@ nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt) {
     return (nt_texture_t){0};
 }
 
-nt_texture_t nt_gfx_render_target_depth(nt_render_target_t rt) {
-    (void)rt;
-    return (nt_texture_t){0};
-}
-
-bool nt_gfx_render_target_ready(nt_render_target_t rt) {
+bool nt_gfx_render_target_valid(nt_render_target_t rt) {
     (void)rt;
     return false;
 }

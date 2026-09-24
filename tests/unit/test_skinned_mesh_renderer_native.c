@@ -500,11 +500,10 @@ void setUp(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, s_skin_program.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, s_reference_program.id);
 
+    /* nt_gfx_shutdown releases the attachment textures. */
     s_target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
-        .width = RT_W,
-        .height = RT_H,
-        .color_format = NT_TEXTURE_FORMAT_RGBA8,
-        .depth_format = NT_TEXTURE_FORMAT_DEPTH24,
+        .color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = RT_W, .height = RT_H, .format = NT_TEXTURE_FORMAT_RGBA8}),
+        .depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = RT_W, .height = RT_H, .format = NT_TEXTURE_FORMAT_DEPTH24}),
         .label = "native_skin_target",
     });
     s_palette = nt_gfx_make_texture(&(nt_texture_desc_t){
