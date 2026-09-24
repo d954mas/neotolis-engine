@@ -269,10 +269,12 @@ measures `max(1, width >> L)` by `max(1, height >> L)` and occupies
 excludes `gen_mipmaps`, which is the other way to fill a chain. Creation is one
 shot: the handle is published only after the last declared level uploaded and
 the default sampler was acquired. A failed upload or sampler creation leaves no
-texture and no pool slot. Filter and wrap state lives only on sampler objects:
-every sampling bind carries one (the texture's default or a material override),
-the texture object itself keeps GL defaults, and the backend asserts on a bind
-without a sampler.
+texture and no pool slot. Render-target attachments are the exception: they
+have no default sampler, and binding one with `NT_SAMPLER_DEFAULT` asserts.
+Filter and wrap state lives only on sampler objects: every sampling bind
+carries one (the texture's default, a material override, or the explicit
+sampler an attachment binding names), the texture object itself keeps GL
+defaults, and the backend asserts on a bind without a sampler.
 
 `GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
 every published texture is complete for every minification filter. Descriptors the
@@ -387,12 +389,12 @@ outputs. Invalid handles write zero to both outputs and return `false`.
 compressed format an activator picked for a Basis asset — or
 `NT_TEXTURE_FORMAT_INVALID` for an invalid handle.
 
-`nt_gfx_resize_render_target` preserves the logical render-target handle and
-owned attachment texture handles, but reimages backend storage. Pixel contents
-are undefined after a successful resize; failed resize leaves the previous
-backend storage active. WebGL context restore recreates backend objects from the
-attachment textures' size and format; it does not preserve pixels. Consumers must redraw
-offscreen contents after resize or context restore.
+Render targets have no resize. A size change is `nt_gfx_destroy_render_target`
+followed by `nt_gfx_make_render_target` at the new size: the target and
+attachment handles change, so the owner fetches the attachment textures again.
+WebGL context restore recreates backend objects from the attachment textures'
+size and format; it does not preserve pixels. Consumers must redraw offscreen
+contents after a new target or a context restore.
 Context loss is synced at `nt_gfx_begin_frame`, at the start of the host
 iteration; pass calls on a lost context do nothing. Work issued
 after a loss inside an iteration is issued but does nothing, and the next
@@ -402,25 +404,23 @@ logs one error, and on the web it leaves no context and no loss listener, so the
 engine stays lost and no later iteration recovers it. Backend failures caused by
 a loss are reported as `CONTEXT_LOST` without an error log.
 After the context recovers, each render target is recreated once. A failed target
-remains unready; its owner destroys and recreates it, or uses a fallback. A
+remains unready; its owner destroys it and makes a new one, or uses a fallback. A
 restore that meets a new loss is that loss: the engine stays lost and a later
 begin_frame restores again.
 
-Render-target descriptors explicitly separate depth storage from depth format.
-`NONE` has no depth format or attachment, `BUFFER` has a non-sampleable depth
-attachment, and `TEXTURE` has a sampleable `nt_texture_t`. Returned attachment
-texture metadata uses the real storage format; color formats are never used as
-placeholders for depth. The backend receives the complete descriptor and does not
-choose attachment formats or sampler defaults.
+A render-target descriptor names one format per attachment:
+`NT_TEXTURE_FORMAT_INVALID` in `color_format` or `depth_format` means that
+attachment is absent, and at least one must be present. Colour takes `RGBA8` or
+`RGBA16F`; depth takes a `DEPTH*` format. Each present attachment is an owned,
+sampleable `nt_texture_t` of exactly that format, and the backend never chooses
+an attachment format. The descriptor carries no sampler state: filtering and
+depth comparison are chosen by the sampler each binding names.
 
-Invalid render-target descriptors include mismatched color/depth format classes,
-a missing or extraneous depth format for the selected storage, invalid sampler
-values, and non-`NEAREST` depth filtering — comparison is sampler state and
-never reaches this descriptor. These cases, exhausted configured target
-capacity, stale handles, direct mutation of owned attachments, and
-render-target lifecycle calls inside an active pass are developer errors and
-assert. `nt_gfx_make_pipeline` follows the same split: a NULL descriptor, an
-unready program, and an exhausted pipeline pool assert, so a returned invalid
+An unsupported colour or depth format and a target with no attachment are
+developer errors and assert, as are exhausted configured target capacity, stale
+handles, direct mutation of owned attachments, and render-target lifecycle
+calls inside an active pass. `nt_gfx_make_pipeline` follows the same split: a
+NULL descriptor, an unready program, and an exhausted pipeline pool assert, so a returned invalid
 pipeline handle means a lost context or a failed backend allocation — the two
 recoverable outcomes, both retried on a later frame.
 `nt_gfx_make_vertex_input` applies the same contract to the layout checks: an
@@ -434,7 +434,7 @@ and label are borrowed only for the call. Creating a pipeline or a vertex input
 preserves both current bindings (the bound pipeline and the bound vertex
 input); the caller does not need to rebind after creating another object.
 Allocation failures from public GPU-resource operations, framebuffer
-completeness, resize, and context restore remain runtime failures reported
+completeness, and context restore remain runtime failures reported
 through invalid handles, `false`, or readiness queries. Mandatory backend
 setup objects are internal invariants: failure to create the GL service EBO
 upload VAO with a live context asserts.

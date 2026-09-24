@@ -304,13 +304,15 @@ must be present. The supported colour formats are `RGBA8` and `RGBA16F`; depth
 takes a `DEPTH*` format. There is no renderbuffer storage: without
 `glInvalidateFramebuffer` a renderbuffer costs the same memory as a texture, and
 its only advantage, MSAA, is not supported. The attachment textures are the
-single source for resize and context restore — their size and format are the
-target's. A backend must not substitute its own attachment format.
+single source for context restore — their size and format are the target's.
+There is no resize: a size change destroys the target and makes a new one, and
+the new target has new attachment handles. A backend must not substitute its own attachment format.
 
 A depth-only target (a shadow map) has no colour attachment, so its framebuffer
 sets draw and read buffer to `GL_NONE`: GL 3.3 core reports a draw buffer
-without an attachment as incomplete. The pass colour clear is then a no-op, and
-`nt_gfx_read_pixels` inside such a pass has no colour to read and fails.
+without an attachment as incomplete. The pass colour clear is then a no-op.
+Calling `nt_gfx_read_pixels` inside such a pass is a caller error: there is no
+colour to read.
 
 Attachments have no default sampler: one target is read as colour, as raw depth
 or through a comparison, so the binding names its sampler explicitly.
@@ -331,9 +333,10 @@ bit exists so a caller can choose its format without paying for a failed
 attempt.
 
 The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`.
-Attachment textures keep `NEAREST`/`CLAMP_TO_EDGE` texture state: WebGL 2
-texture completeness rejects filtered depth unless comparison is enabled, and
-the binding's sampler object overrides texture state anyway.
+Attachment textures, like every texture, keep GL default texture state; the
+sampler object each binding names decides filtering and wrap. The zero
+`NEAREST`/`CLAMP_TO_EDGE` fields of the internal attachment descriptor only pass
+texture validation, which requires `NEAREST` for depth storage.
 
 Depth comparison lives on the sampler object (`nt_sampler_desc_t.compare_func`),
 not on the texture, because one depth target is read two ways: through a
@@ -437,8 +440,7 @@ iteration changes no state: operations issued after it are issued but do
 nothing, creates end `CONTEXT_LOST` without an error log, and the next
 begin_frame wipes. Pass calls on a lost context are no-ops, not traps.
 
-A backend call that reports a failure (a create, a render-target resize, a
-readback, a lazy sampler recreate at bind) asks the browser: a loss ends the
+A backend call that reports a failure (a create, a readback, a lazy sampler recreate at bind) asks the browser: a loss ends the
 operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
 failure reason and error log. The backend asks only where the answer prevents a crash or a
 misleading log: before shader and program creation, because Emscripten throws on
@@ -584,8 +586,8 @@ Shader, program and vertex-input definitions carry result `UNKNOWN`: the fronten
 retains no shader stage or source, program stage pair or vertex-input layout, so
 those fields are absent, not zero. A vertex input created during a recorded frame
 follows its definition with `DEFINITION/ATTRIBUTE` records.
-Resize and restore re-define render targets and their attachment textures with
-the replacement names. Other primary resources survive a loss as husks and get no
+Restore re-defines render targets and their attachment textures with the
+replacement names. Other primary resources survive a loss as husks and get no
 fresh definition; pipelines and vertex inputs that the first detection frees get
 no DESTROY record. Samplers are re-defined when lazily recreated. Definitions
 remain meaningful after resource destruction or slot reuse.
