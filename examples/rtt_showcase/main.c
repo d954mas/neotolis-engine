@@ -508,9 +508,13 @@ static void frame(void) {
         /* The font keeps its sources across a restore -- only its GPU textures
          * died, and nt_font_step rebuilds those itself. Clearing this would make
          * the gate call nt_font_add twice, which asserts on the duplicate. */
-        /* Loss freed the targets; their textures are husks that only we can destroy. */
+
+        /* Loss freed the targets; their textures are husks that only we can destroy.
+         * Targets stay out of the ready flag: the frame gate checks them, and R rebuilds them. */
         destroy_targets();
-        restored = make_targets(s_demo.rt_width, s_demo.rt_height) && restored;
+        if (!make_targets(s_demo.rt_width, s_demo.rt_height)) {
+            nt_log_error("rtt_showcase: render targets were not rebuilt after context restore; press R to retry");
+        }
         s_demo.render_resources_ready = restored;
         if (!s_demo.render_resources_ready) {
             nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
