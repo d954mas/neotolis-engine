@@ -161,10 +161,6 @@ static const nt_gfx_texture_meta_t *render_target_attachment_meta(uint32_t rt_sl
     return &s_gfx.texture_metas[nt_pool_slot_index(s_gfx.render_target_metas[rt_slot].attachments[attachment].id)];
 }
 
-static uint32_t render_target_attachment_format(uint32_t rt_slot, int attachment) {
-    return s_gfx.render_target_metas[rt_slot].attachments[attachment].id != 0 ? render_target_attachment_meta(rt_slot, attachment)->format : 0;
-}
-
 /* All attachments share the target size and at least one is present. */
 static const nt_gfx_texture_meta_t *render_target_size_meta(uint32_t rt_slot) {
     const bool has_color = s_gfx.render_target_metas[rt_slot].attachments[NT_GFX_RT_COLOR].id != 0;
@@ -237,6 +233,10 @@ nt_gfx_capture_view_t nt_gfx_capture_read(void) {
     nt_gfx_capture_view_t result = g_nt_gfx_capture.view;
     result.events = result.count > 0 ? g_nt_gfx_capture.events : NULL;
     return result;
+}
+
+static uint32_t render_target_attachment_format(uint32_t rt_slot, int attachment) {
+    return s_gfx.render_target_metas[rt_slot].attachments[attachment].id != 0 ? render_target_attachment_meta(rt_slot, attachment)->format : 0;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one record schema per owned resource kind
