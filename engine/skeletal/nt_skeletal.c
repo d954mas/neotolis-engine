@@ -1,5 +1,6 @@
 #include "skeletal/nt_skeletal.h"
 
+#include <float.h>
 #include <string.h>
 
 #include "core/nt_builtins.h"
@@ -219,8 +220,7 @@ static void nt_skeletal_check_trs(const nt_skeletal_trs_t *v) {
         NT_ASSERT(nt_skeletal_finite((double)v->t[c]));
         NT_ASSERT(nt_skeletal_finite((double)v->s[c]));
     }
-    const float len2 = (v->q[0] * v->q[0]) + (v->q[1] * v->q[1]) + (v->q[2] * v->q[2]) + (v->q[3] * v->q[3]);
-    NT_ASSERT((len2 - 1.0F) < 1e-3F && (1.0F - len2) < 1e-3F);
+    NT_ASSERT(fabsf((v->q[0] * v->q[0]) + (v->q[1] * v->q[1]) + (v->q[2] * v->q[2]) + (v->q[3] * v->q[3]) - 1.0F) < 1e-3F);
 }
 #endif
 
@@ -242,12 +242,9 @@ void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count
     NT_ASSERT(nt_skeletal_poses_disjoint(out, defaults, joint_count));
     for (uint32_t i = 0; i < input_count; ++i) {
         NT_ASSERT(inputs[i].pose != NULL);
-        /* Also rejects NaN; infinity is left to the numerical checks. */
-        NT_ASSERT(inputs[i].gain >= 0.0F);
+        /* Also rejects NaN and infinity. */
+        NT_ASSERT(inputs[i].gain >= 0.0F && inputs[i].gain <= FLT_MAX);
         NT_ASSERT(nt_skeletal_poses_disjoint(out, inputs[i].pose, joint_count));
-#if NT_SKELETAL_CHECKS
-        NT_ASSERT(nt_skeletal_finite((double)inputs[i].gain));
-#endif
     }
 
     for (uint16_t j = 0; j < joint_count; ++j) {
@@ -297,14 +294,22 @@ void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count
             out[j] = defaults[j];
             continue;
         }
-        /* Every aligned addend has dot >= 0 with the sum, so the sum never
-         * shrinks and is nonzero once any influence is. */
         const float inv_w = 1.0F / w_sum;
-        const float inv_len = 1.0F / sqrtf((q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]));
         for (int c = 0; c < 3; ++c) {
             out[j].t[c] = t[c] * inv_w;
             out[j].s[c] = s[c] * inv_w;
         }
+        float len2 = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
+        /* Every aligned addend has dot >= 0 with the sum, so |sum| / W lies in
+         * [1/sqrt(T), 1]. A tiny or huge total squares out of float range;
+         * rescaling only then keeps the 1/W off the common path's latency. */
+        if (!(len2 > 1e-30F && len2 < 1e30F)) {
+            for (int c = 0; c < 4; ++c) {
+                q[c] *= inv_w;
+            }
+            len2 = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
+        }
+        const float inv_len = 1.0F / sqrtf(len2);
         for (int c = 0; c < 4; ++c) {
             out[j].q[c] = q[c] * inv_len;
         }

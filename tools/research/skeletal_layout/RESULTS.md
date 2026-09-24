@@ -147,20 +147,27 @@ J = 100, T = 4; the tool aborts and prints the mismatch otherwise.
 ## Engine mix kernel (2026-09-24)
 
 The AoS40 mix stage now calls the public `nt_skeletal_mix`; AoS48 and SoA keep
-the local stand-in. The table gains a `mix/input` column (ns per joint per
-input).
+the local stand-in, so from here on the mix column compares kernels as well as
+layouts, and conclusion 2 can no longer be re-checked with this tool as is.
+Checked builds (`NT_SKELETAL_CHECKS=ON`) also validate every contributing pose
+in the AoS40 mix, as conclusion 7 notes for FK; compare `native-release` only.
+The table gains a `mix/input` column: mix / T, an average that includes the
+per-joint fixed cost (seed sign, normalization, stores).
 
 A separate A/B run put the stand-in and the kernel in one binary over the same
 data (J=60, C=1000, `-O3`, TRAP, checks off), with two data sets: random unit
 quaternions (inputs land in either hemisphere, the largest component varies)
 and smooth ones (w dominant everywhere). ns/(joint·input), medians:
 
-| data | T | stand-in | kernel, branch on dot sign | kernel, `copysignf` |
-|:-----|--:|---------:|---------------------------:|--------------------:|
-| random | 1 | 8.6 | 6.3 | 6.3 |
-| random | 4 | 4.3 | 7.9 | 4.4 |
-| smooth | 1 | 3.6 | 6.3 | 6.3 |
-| smooth | 4 | 3.5 | — | 4.5 |
+| data | T | stand-in | kernel, branch on dot sign | + `copysignf` | + seed sign of w (shipped) |
+|:-----|--:|---------:|---------------------------:|--------------:|---------------------------:|
+| random | 1 | 8.6 | 6.3 | 6.3 | 5.0 |
+| random | 4 | 4.3 | 7.9 | 4.4 | 10–15 % below the previous column |
+| smooth | 1 | 3.6 | 6.3 | 6.3 | 4.9 |
+| smooth | 4 | 3.5 | not measured | 4.5 | 10–15 % below the previous column |
+
+The shipped column comes from runs under background load, compared within
+one binary; the A/B harness was a scratch tool and is not committed.
 
 - The dot-sign branch mispredicts whenever inputs sit in both hemispheres;
   `copysignf` removes it, 1.8x at T=4 on random data. The kernel ships with it.

@@ -1,5 +1,6 @@
 /* System and engine headers before Unity: <stdnoreturn.h> and the Windows SDK
  * clash over __declspec(noreturn) in the other order. */
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -48,6 +49,26 @@ static void negate_q(nt_skeletal_trs_t *p) {
     for (int j = 0; j < J; ++j) {
         for (int c = 0; c < 4; ++c) {
             p[j].q[c] = -p[j].q[c];
+        }
+    }
+}
+
+/* actual == sum / |sum|: the closed-form result a test derives by hand. */
+static void assert_normalized(const float sum[4], const float actual[4]) {
+    const float len = sqrtf((sum[0] * sum[0]) + (sum[1] * sum[1]) + (sum[2] * sum[2]) + (sum[3] * sum[3]));
+    for (int c = 0; c < 4; ++c) {
+        ASSERT_FLOAT_NEAR(sum[c] / len, actual[c], 1e-6F);
+    }
+}
+
+static void fill_nan(nt_skeletal_trs_t *p) {
+    for (int j = 0; j < J; ++j) {
+        for (int c = 0; c < 3; ++c) {
+            p[j].t[c] = NAN;
+            p[j].s[c] = NAN;
+        }
+        for (int c = 0; c < 4; ++c) {
+            p[j].q[c] = NAN;
         }
     }
 }
@@ -126,6 +147,59 @@ void test_the_seed_sign_makes_w_positive_or_else_the_largest_component(void) {
     ASSERT_FLOAT_NEAR(0.8F, out[1].q[2], 1e-6F);
 }
 
+/* Rotations weigh by influence like T/S do: 0 and 90 deg about y at gains 1
+ * and 3 give normalize(q0 + 3 q90), and a joint weight scales the gain. */
+void test_rotations_weigh_by_gain_times_joint_weight(void) {
+    nt_skeletal_trs_t a[J];
+    nt_skeletal_trs_t b[J];
+    make_pose(a, 0.0F);
+    make_pose(b, 0.0F);
+    for (int j = 0; j < J; ++j) {
+        quat_axis_angle(a[j].q, 0.0F, 1.0F, 0.0F, 0.0F);
+        quat_axis_angle(b[j].q, 0.0F, 1.0F, 0.0F, 90.0F);
+    }
+    const float weights[J] = {1.0F, 0.5F, 1.0F, 1.0F};
+    const nt_skeletal_mix_input_t inputs[2] = {{a, NULL, 1.0F}, {b, weights, 3.0F}};
+    nt_skeletal_trs_t out[J];
+    nt_skeletal_mix(inputs, 2, g_defaults, J, out);
+    for (int j = 0; j < 2; ++j) {
+        const float w = 3.0F * weights[j];
+        const float sum[4] = {0.0F, w * b[j].q[1], 0.0F, a[j].q[3] + (w * b[j].q[3])};
+        assert_normalized(sum, out[j].q);
+    }
+}
+
+/* Three turns about y, 0, 170 and -100 deg, at equal gains. Against the
+ * running sum the third flips (dot < 0); against the first input it would
+ * not (dot = cos 50 deg). Reversed, the seed and the flip land elsewhere and
+ * the average is a different rotation: order is part of the result. */
+void test_alignment_follows_the_running_sum_in_supplied_order(void) {
+    nt_skeletal_trs_t p[3][J];
+    const float degrees[3] = {0.0F, 170.0F, -100.0F};
+    for (int i = 0; i < 3; ++i) {
+        make_pose(p[i], 0.0F);
+        quat_axis_angle(p[i][0].q, 0.0F, 1.0F, 0.0F, degrees[i]);
+    }
+    const float *q0 = p[0][0].q;
+    const float *q1 = p[1][0].q;
+    const float *q2 = p[2][0].q;
+    nt_skeletal_trs_t out[J];
+
+    const nt_skeletal_mix_input_t forward[3] = {{p[0], NULL, 1.0F}, {p[1], NULL, 1.0F}, {p[2], NULL, 1.0F}};
+    nt_skeletal_mix(forward, 3, g_defaults, J, out);
+    const float fwd[4] = {0.0F, q0[1] + q1[1] - q2[1], 0.0F, q0[3] + q1[3] - q2[3]};
+    assert_normalized(fwd, out[0].q);
+
+    /* Seed q2 (w > 0), q1 flips against it, q0 then agrees with the sum. */
+    const nt_skeletal_mix_input_t reverse[3] = {{p[2], NULL, 1.0F}, {p[1], NULL, 1.0F}, {p[0], NULL, 1.0F}};
+    nt_skeletal_mix(reverse, 3, g_defaults, J, out);
+    const float rev[4] = {0.0F, q2[1] - q1[1] + q0[1], 0.0F, q2[3] - q1[3] + q0[3]};
+    assert_normalized(rev, out[0].q);
+    const float fwd_len = sqrtf((fwd[1] * fwd[1]) + (fwd[3] * fwd[3]));
+    const float rev_len = sqrtf((rev[1] * rev[1]) + (rev[3] * rev[3]));
+    TEST_ASSERT_TRUE(fabsf(((fwd[1] * rev[1]) + (fwd[3] * rev[3])) / (fwd_len * rev_len)) < 0.99F);
+}
+
 /* Aligning to rest would average +170 and -170 deg to 0 deg. */
 void test_plus_and_minus_170_degrees_average_to_180(void) {
     nt_skeletal_trs_t a[J];
@@ -162,21 +236,17 @@ void test_a_zero_influence_input_reads_nothing_from_its_pose(void) {
     nt_skeletal_trs_t a[J];
     nt_skeletal_trs_t garbage[J];
     make_pose(a, 1.0F);
-    for (int j = 0; j < J; ++j) {
-        for (int c = 0; c < 3; ++c) {
-            garbage[j].t[c] = NAN;
-            garbage[j].s[c] = NAN;
-        }
-        for (int c = 0; c < 4; ++c) {
-            garbage[j].q[c] = NAN;
-        }
-    }
+    fill_nan(garbage);
+    const float zeros[J] = {0.0F, 0.0F, 0.0F, 0.0F};
     const nt_skeletal_mix_input_t alone = {a, NULL, 1.0F};
-    const nt_skeletal_mix_input_t inputs[2] = {{garbage, NULL, 0.0F}, {a, NULL, 1.0F}};
+    const nt_skeletal_mix_input_t by_gain[2] = {{garbage, NULL, 0.0F}, {a, NULL, 1.0F}};
+    const nt_skeletal_mix_input_t by_weight[2] = {{garbage, zeros, 1.0F}, {a, NULL, 1.0F}};
     nt_skeletal_trs_t expected[J];
     nt_skeletal_trs_t out[J];
     nt_skeletal_mix(&alone, 1, g_defaults, J, expected);
-    nt_skeletal_mix(inputs, 2, g_defaults, J, out);
+    nt_skeletal_mix(by_gain, 2, g_defaults, J, out);
+    ASSERT_POSE_BITS(expected, out, J);
+    nt_skeletal_mix(by_weight, 2, g_defaults, J, out);
     ASSERT_POSE_BITS(expected, out, J);
 }
 
@@ -200,20 +270,25 @@ void test_zero_weights_on_one_input_leave_the_others_normalized(void) {
     }
 }
 
-/* No threshold: fading toward rest is an explicit rest input or an override. */
-void test_a_sole_tiny_gain_contributes_fully(void) {
+/* No threshold: fading toward rest is an explicit rest input or an override.
+ * 1e-30 and 1e30 would square out of float range without the 1/W scale
+ * before normalization. */
+void test_a_sole_tiny_or_huge_influence_contributes_fully(void) {
     nt_skeletal_trs_t a[J];
     make_pose(a, 2.0F);
-    const nt_skeletal_mix_input_t input = {a, NULL, 0.0001F};
-    nt_skeletal_trs_t out[J];
-    nt_skeletal_mix(&input, 1, g_defaults, J, out);
-    for (int j = 0; j < J; ++j) {
-        for (int c = 0; c < 3; ++c) {
-            ASSERT_FLOAT_NEAR(a[j].t[c], out[j].t[c], 1e-5F);
-            ASSERT_FLOAT_NEAR(a[j].s[c], out[j].s[c], 1e-6F);
-        }
-        for (int c = 0; c < 4; ++c) {
-            ASSERT_FLOAT_NEAR(a[j].q[c], out[j].q[c], 1e-6F);
+    const float gains[3] = {0.0001F, 1e-30F, 1e30F};
+    for (int g = 0; g < 3; ++g) {
+        const nt_skeletal_mix_input_t input = {a, NULL, gains[g]};
+        nt_skeletal_trs_t out[J];
+        nt_skeletal_mix(&input, 1, g_defaults, J, out);
+        for (int j = 0; j < J; ++j) {
+            for (int c = 0; c < 3; ++c) {
+                ASSERT_FLOAT_NEAR(a[j].t[c], out[j].t[c], 1e-5F);
+                ASSERT_FLOAT_NEAR(a[j].s[c], out[j].s[c], 1e-6F);
+            }
+            for (int c = 0; c < 4; ++c) {
+                ASSERT_FLOAT_NEAR(a[j].q[c], out[j].q[c], 1e-6F);
+            }
         }
     }
 }
@@ -237,6 +312,23 @@ void test_asymmetric_parent_child_weights_keep_the_chain_attached(void) {
             ASSERT_FLOAT_NEAR(rig.rest[j].t[c], out[j].t[c], 1e-5F);
             ASSERT_FLOAT_NEAR(rig.rest[j].s[c], out[j].s[c], 1e-6F);
         }
+    }
+
+    /* Joints 3 (weight 3) and 4 (weight 0.2) are posed differently in rest
+     * and bind; the sum seeds on rest with w made positive and aligns bind. */
+    const int posed[2] = {3, 4};
+    for (int k = 0; k < 2; ++k) {
+        const int j = posed[k];
+        const float *r = rig.rest[j].q;
+        const float *b = rig.bind[j].q;
+        const float seed = (r[3] < 0.0F) ? -1.0F : 1.0F;
+        const float d = seed * ((r[0] * b[0]) + (r[1] * b[1]) + (r[2] * b[2]) + (r[3] * b[3]));
+        const float wb = (d < 0.0F) ? -weights[j] : weights[j];
+        float sum[4];
+        for (int c = 0; c < 4; ++c) {
+            sum[c] = (seed * r[c]) + (wb * b[c]);
+        }
+        assert_normalized(sum, out[j].q);
     }
 
     nt_skeletal_mat34_t model[SKELETAL_RIG_JOINT_COUNT];
@@ -290,12 +382,7 @@ void test_override_strength_ignores_the_gains_inside_the_base(void) {
     make_pose(walk, 0.0F);
     make_pose(run, 4.0F);
     make_pose(aim, 8.0F);
-    for (int j = 0; j < J; ++j) {
-        memset(walk[j].t, 0, sizeof(walk[j].t));
-        memset(run[j].t, 0, sizeof(run[j].t));
-        aim[j].t[0] = 10.0F;
-    }
-    const float mask[J] = {0.0F, 0.5F, 1.0F, 1.0F};
+    const float mask[J] = {0.0F, 0.5F, 1.0F, 0.25F};
 
     for (int step = 0; step <= 4; ++step) {
         const float c = 0.25F * (float)step;
@@ -305,10 +392,55 @@ void test_override_strength_ignores_the_gains_inside_the_base(void) {
         nt_skeletal_mix(inputs, 2, g_defaults, J, base);
         nt_skeletal_override(base, aim, mask, 0.8F, J, out);
         ASSERT_POSE_BITS(&base[0], &out[0], 1);
-        ASSERT_FLOAT_NEAR(4.0F, out[1].t[0], 1e-5F);
-        ASSERT_FLOAT_NEAR(8.0F, out[2].t[0], 1e-5F);
-        ASSERT_FLOAT_NEAR(8.0F, out[3].t[0], 1e-5F);
+        for (int j = 1; j < J; ++j) {
+            const float a = 0.8F * mask[j];
+            for (int k = 0; k < 3; ++k) {
+                ASSERT_FLOAT_NEAR(base[j].t[k] + (a * (aim[j].t[k] - base[j].t[k])), out[j].t[k], 1e-5F);
+            }
+        }
     }
+}
+
+/* Between the endpoints Q takes the short way (top given as -q) and S lerps. */
+void test_override_blends_rotation_the_short_way_and_lerps_scale(void) {
+    nt_skeletal_trs_t base[J];
+    nt_skeletal_trs_t top[J];
+    nt_skeletal_trs_t out[J];
+    make_pose(base, 0.0F);
+    make_pose(top, 6.0F);
+    quat_axis_angle(base[1].q, 0.0F, 1.0F, 0.0F, 0.0F);
+    quat_axis_angle(top[1].q, 0.0F, 1.0F, 0.0F, 90.0F);
+    for (int c = 0; c < 4; ++c) {
+        top[1].q[c] = -top[1].q[c];
+    }
+    top[1].s[0] = 3.0F;
+    const float mask[J] = {0.0F, 0.5F, 0.0F, 0.0F};
+    nt_skeletal_override(base, top, mask, 1.0F, J, out);
+
+    const float sum[4] = {0.0F, 0.5F * -top[1].q[1], 0.0F, (0.5F * base[1].q[3]) + (0.5F * -top[1].q[3])};
+    assert_normalized(sum, out[1].q);
+    for (int c = 0; c < 3; ++c) {
+        ASSERT_FLOAT_NEAR(0.5F * (base[1].s[c] + top[1].s[c]), out[1].s[c], 1e-6F);
+    }
+}
+
+/* A joint the mask leaves out reads nothing from top, so a partial layer
+ * need not pose the joints it does not own. */
+void test_override_reads_nothing_from_top_where_the_mask_is_zero(void) {
+    nt_skeletal_trs_t base[J];
+    nt_skeletal_trs_t top[J];
+    nt_skeletal_trs_t out[J];
+    make_pose(base, 0.0F);
+    make_pose(top, 6.0F);
+    nt_skeletal_trs_t garbage[J];
+    fill_nan(garbage);
+    top[0] = garbage[0];
+    top[2] = garbage[2];
+    top[3] = garbage[3];
+    const float mask[J] = {0.0F, 1.0F, 0.0F, 0.0F};
+    nt_skeletal_override(base, top, mask, 0.6F, J, out);
+    ASSERT_POSE_BITS(&base[0], &out[0], 1);
+    ASSERT_POSE_BITS(&base[2], &out[2], 2);
 }
 
 void test_override_endpoints_copy_exactly(void) {
@@ -393,7 +525,6 @@ void test_interruption_recipe_is_continuous_at_the_handoff_and_reuses_one_snapsh
     h->tracks[CLIP_RUN].flags |= NT_SKELETAL_TRACK_OCCUPIED;
     h->tracks[CLIP_WAVE].flags |= NT_SKELETAL_TRACK_OCCUPIED;
     const double dt = 1.0 / 60.0;
-    const nt_skeletal_trs_t *const snapshot_at_start = h->snapshot;
 
     /* A walk -> run crossfade halfway through when the jump arrives. */
     const nt_skeletal_mix_input_t loco[2] = {{h->sampled[CLIP_WALK], NULL, 0.5F}, {h->sampled[CLIP_RUN], NULL, 0.5F}};
@@ -423,6 +554,10 @@ void test_interruption_recipe_is_continuous_at_the_handoff_and_reuses_one_snapsh
     // #endregion
 
     // #region ramp toward the jump, then a second interruption -> roll
+    /* From here the snapshot is frozen and the display moves only by the
+     * ramp; the wave keeps its own coefficient 2 / (1 + 2) on its joints. */
+    nt_skeletal_trs_t frozen[J];
+    memcpy(frozen, h->snapshot, sizeof(frozen));
     float a = 0.0F;
     for (int frame = 0; frame < 2; ++frame) {
         a += 0.25F;
@@ -430,6 +565,12 @@ void test_interruption_recipe_is_continuous_at_the_handoff_and_reuses_one_snapsh
         hero_sample(h);
         nt_skeletal_override(h->snapshot, h->sampled[CLIP_JUMP], NULL, a, J, h->signal);
         hero_compose(h);
+        ASSERT_POSE_BITS(frozen, h->snapshot, J);
+        for (int k = 0; k < 3; ++k) {
+            ASSERT_FLOAT_NEAR(frozen[2].t[k] + (a * (h->sampled[CLIP_JUMP][2].t[k] - frozen[2].t[k])), h->signal[2].t[k], 1e-5F);
+            ASSERT_FLOAT_NEAR((h->signal[1].t[k] + (2.0F * h->sampled[CLIP_WAVE][1].t[k])) / 3.0F, h->final[1].t[k], 1e-5F);
+            ASSERT_FLOAT_NEAR(h->signal[0].t[k], h->final[0].t[k], 1e-5F);
+        }
     }
 
     nt_skeletal_tracks_advance(h->tracks, CLIP_COUNT, dt);
@@ -449,11 +590,13 @@ void test_interruption_recipe_is_continuous_at_the_handoff_and_reuses_one_snapsh
     ASSERT_POSE_BITS(expected_final, h->final, J);
     // #endregion
 
-    /* The wave track kept its own clock through both interruptions, and the
-     * whole recipe ran in the one snapshot the hero was created with. */
+    /* The wave track kept its own clock and coefficient through both
+     * interruptions. Memory stays constant by construction: hero_t is the
+     * whole state, and the second interruption overwrote the one snapshot. */
     ASSERT_FLOAT_NEAR(5.0F * (float)dt, (float)wave_time, 1e-6F);
-    TEST_ASSERT_EQUAL_PTR(snapshot_at_start, h->snapshot);
-    TEST_ASSERT_TRUE(fabsf(h->final[1].t[0] - h->signal[1].t[0]) > 1e-3F);
+    for (int k = 0; k < 3; ++k) {
+        ASSERT_FLOAT_NEAR((h->signal[1].t[k] + (2.0F * h->sampled[CLIP_WAVE][1].t[k])) / 3.0F, h->final[1].t[k], 1e-5F);
+    }
 }
 // #endregion
 
@@ -461,14 +604,44 @@ void test_interruption_recipe_is_continuous_at_the_handoff_and_reuses_one_snapsh
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 #define ASSERT_TRAPPED_ON(fragment) TEST_ASSERT_TRUE_MESSAGE(strstr(nt_test_assert_last_expr, (fragment)) != NULL, "a different NT_ASSERT fired: " fragment)
 
-void test_mix_traps_on_a_negative_gain(void) {
+void test_mix_traps_on_a_negative_nan_or_infinite_gain(void) {
     nt_skeletal_trs_t a[J];
     nt_skeletal_trs_t out[J];
     make_pose(a, 0.0F);
-    const nt_skeletal_mix_input_t input = {a, NULL, -0.5F};
-    NT_TEST_EXPECT_ASSERT(nt_skeletal_mix(&input, 1, g_defaults, J, out));
-    ASSERT_TRAPPED_ON("inputs[i].gain >= 0.0F");
+    const float bad[3] = {-0.5F, NAN, INFINITY};
+    for (int i = 0; i < 3; ++i) {
+        const nt_skeletal_mix_input_t input = {a, NULL, bad[i]};
+        NT_TEST_EXPECT_ASSERT(nt_skeletal_mix(&input, 1, g_defaults, J, out));
+        ASSERT_TRAPPED_ON("inputs[i].gain >= 0.0F && inputs[i].gain <= FLT_MAX");
+    }
 }
+
+void test_mix_traps_on_null_inputs_or_pose(void) {
+    nt_skeletal_trs_t out[J];
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_mix(NULL, 1, g_defaults, J, out));
+    ASSERT_TRAPPED_ON("inputs != NULL || input_count == 0U");
+    const nt_skeletal_mix_input_t input = {NULL, NULL, 1.0F};
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_mix(&input, 1, g_defaults, J, out));
+    ASSERT_TRAPPED_ON("inputs[i].pose != NULL");
+}
+
+#if NT_SKELETAL_CHECKS
+/* Values the range compares let through: an infinite weight and a pose that
+ * is not a unit rotation on a contributing input. */
+void test_mix_checks_trap_on_an_infinite_weight_or_a_non_unit_rotation(void) {
+    nt_skeletal_trs_t a[J];
+    nt_skeletal_trs_t out[J];
+    make_pose(a, 0.0F);
+    const float weights[J] = {1.0F, INFINITY, 1.0F, 1.0F};
+    const nt_skeletal_mix_input_t weighted = {a, weights, 1.0F};
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_mix(&weighted, 1, g_defaults, J, out));
+    ASSERT_TRAPPED_ON("nt_skeletal_finite((double)in->weights[j])");
+    a[2].q[0] = 2.0F;
+    const nt_skeletal_mix_input_t plain = {a, NULL, 1.0F};
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_mix(&plain, 1, g_defaults, J, out));
+    ASSERT_TRAPPED_ON("- 1.0F) < 1e-3F");
+}
+#endif
 
 void test_mix_traps_on_a_negative_or_nan_weight(void) {
     nt_skeletal_trs_t a[J];
@@ -503,6 +676,9 @@ void test_override_traps_on_alpha_or_mask_out_of_range(void) {
     ASSERT_TRAPPED_ON("alpha >= 0.0F && alpha <= 1.0F");
     NT_TEST_EXPECT_ASSERT(nt_skeletal_override(base, top, NULL, NAN, J, out));
     ASSERT_TRAPPED_ON("alpha >= 0.0F && alpha <= 1.0F");
+    const float nan_mask[J] = {0.0F, NAN, 1.0F, 0.0F};
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_override(base, top, nan_mask, 1.0F, J, out));
+    ASSERT_TRAPPED_ON("mask[j] >= 0.0F && mask[j] <= 1.0F");
     const float mask[J] = {0.0F, 1.0F, 1.01F, 0.0F};
     NT_TEST_EXPECT_ASSERT(nt_skeletal_override(base, top, mask, 1.0F, J, out));
     ASSERT_TRAPPED_ON("mask[j] >= 0.0F && mask[j] <= 1.0F");
@@ -526,19 +702,27 @@ int main(void) {
     RUN_TEST(test_negating_any_input_rotation_including_the_first_gives_the_same_mix);
     RUN_TEST(test_an_exactly_orthogonal_pair_takes_the_canonical_sign);
     RUN_TEST(test_the_seed_sign_makes_w_positive_or_else_the_largest_component);
+    RUN_TEST(test_rotations_weigh_by_gain_times_joint_weight);
+    RUN_TEST(test_alignment_follows_the_running_sum_in_supplied_order);
     RUN_TEST(test_plus_and_minus_170_degrees_average_to_180);
     RUN_TEST(test_zero_total_influence_copies_the_defaults);
     RUN_TEST(test_a_zero_influence_input_reads_nothing_from_its_pose);
     RUN_TEST(test_zero_weights_on_one_input_leave_the_others_normalized);
-    RUN_TEST(test_a_sole_tiny_gain_contributes_fully);
+    RUN_TEST(test_a_sole_tiny_or_huge_influence_contributes_fully);
     RUN_TEST(test_asymmetric_parent_child_weights_keep_the_chain_attached);
     RUN_TEST(test_partial_weights_give_fixed_coefficients_through_a_crossfade);
     RUN_TEST(test_override_strength_ignores_the_gains_inside_the_base);
     RUN_TEST(test_override_endpoints_copy_exactly);
     RUN_TEST(test_override_in_place_matches_a_separate_output);
+    RUN_TEST(test_override_blends_rotation_the_short_way_and_lerps_scale);
+    RUN_TEST(test_override_reads_nothing_from_top_where_the_mask_is_zero);
     RUN_TEST(test_interruption_recipe_is_continuous_at_the_handoff_and_reuses_one_snapshot);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_mix_traps_on_a_negative_gain);
+    RUN_TEST(test_mix_traps_on_a_negative_nan_or_infinite_gain);
+    RUN_TEST(test_mix_traps_on_null_inputs_or_pose);
+#if NT_SKELETAL_CHECKS
+    RUN_TEST(test_mix_checks_trap_on_an_infinite_weight_or_a_non_unit_rotation);
+#endif
     RUN_TEST(test_mix_traps_on_a_negative_or_nan_weight);
     RUN_TEST(test_mix_traps_when_the_output_overlaps_an_input);
     RUN_TEST(test_override_traps_on_alpha_or_mask_out_of_range);
