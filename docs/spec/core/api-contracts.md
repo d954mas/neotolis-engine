@@ -269,16 +269,13 @@ measures `max(1, width >> L)` by `max(1, height >> L)` and occupies
 excludes `gen_mipmaps`, which is the other way to fill a chain. Creation is one
 shot: the handle is published only after the last declared level uploaded and
 the default sampler was acquired. A failed upload or sampler creation leaves no
-texture and no pool slot. Render-target attachments are the exception: they
-have no default sampler, and binding one with `NT_SAMPLER_DEFAULT` asserts.
-Filter and wrap state lives only on sampler objects: every sampling bind
-carries one (the texture's default, a material override, or the explicit
-sampler an attachment binding names), the texture object itself keeps GL
-defaults, and the backend asserts on a bind without a sampler.
+texture and no pool slot. Filter and wrap state lives only on sampler objects:
+every sampling bind carries one (the texture's default or an override), the
+texture object itself keeps GL defaults, and the backend asserts on a bind
+without a sampler.
 
 `GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
-every published texture is complete for every minification filter. Descriptors the
-engine builds for render-target attachments ship `level_count == 0`. A
+every published texture is complete for every minification filter. A
 `glGenerateMipmap` that fails fails the creation: no texture is published. A
 mipmap filter over a single-level texture is therefore legal in both the descriptor and
 a sampler override; it samples level 0. `nt_gfx_update_texture` on a compressed
@@ -369,32 +366,32 @@ rejection.
 
 ### Render-target handles
 
-`nt_render_target_t` is a logical graphics handle. `nt_gfx_make_render_target`
-reads the descriptor only during the call. Each present attachment (colour,
-depth, or both) is a module-owned `nt_texture_t` value. They remain valid until
-`nt_gfx_destroy_render_target(rt)`.
+`nt_render_target_t` is a caller-owned framebuffer object that borrows its
+attachment textures, as a vertex input borrows its buffers.
+`nt_gfx_make_render_target` reads the descriptor only during the call; the
+caller destroys the result with `nt_gfx_destroy_render_target`, which leaves the
+textures alive. The caller creates each attachment texture with
+`nt_gfx_make_texture` (NULL data) and destroys it itself. Destroying a texture
+destroys every render target that borrows it, so one depth texture can serve
+several targets and no target outlives its storage. Destroying an invalid or
+stale target handle is a no-op, as for vertex inputs.
 
-Destroying a render target invalidates the target handle and its owned
-attachment texture handles. Callers do not destroy those textures directly.
-Accessors such as `nt_gfx_render_target_color` and
-`nt_gfx_render_target_depth` return invalid texture handles when the target is
-invalid or the requested attachment does not exist. `nt_gfx_render_target_ready`
-reports whether a valid target currently has live backend storage.
-`nt_gfx_texture_ready` provides the same live-backend check for a texture handle.
-Both readiness queries return `false` for invalid handles, so callers can also
-use them after a failed resource-creation call.
+`nt_gfx_render_target_color` returns the borrowed colour texture, or an invalid
+handle for a stale target or one without colour. `nt_gfx_render_target_valid`
+reports a live target slot; it is `false` after destruction, the texture
+cascade, or a context loss. `nt_gfx_texture_ready` reports whether a texture
+handle has live backend storage. Both queries return `false` for invalid
+handles, so callers can also use them after a failed resource-creation call.
 `nt_gfx_texture_size` writes a texture's logical dimensions to its two required
 outputs. Invalid handles write zero to both outputs and return `false`.
 `nt_gfx_texture_format` returns the actual storage format — including the
 compressed format an activator picked for a Basis asset — or
 `NT_TEXTURE_FORMAT_INVALID` for an invalid handle.
 
-Render targets have no resize. A size change is `nt_gfx_destroy_render_target`
-followed by `nt_gfx_make_render_target` at the new size: the target and
-attachment handles change, so the owner fetches the attachment textures again.
-WebGL context restore recreates backend objects from the attachment textures'
-size and format; it does not preserve pixels. Consumers must redraw offscreen
-contents after a new target or a context restore.
+Render targets have no resize. A size change destroys the attachment textures,
+which destroys their targets, and makes new textures and targets at the new
+size. The engine never recreates a target and never preserves pixels: consumers
+redraw offscreen contents after making a target.
 Context loss is synced at `nt_gfx_begin_frame`, at the start of the host
 iteration; pass calls on a lost context do nothing. Work issued
 after a loss inside an iteration is issued but does nothing, and the next
@@ -403,23 +400,23 @@ not attempt recreation. A failed recreation is a context-creation failure: it
 logs one error, and on the web it leaves no context and no loss listener, so the
 engine stays lost and no later iteration recovers it. Backend failures caused by
 a loss are reported as `CONTEXT_LOST` without an error log.
-After the context recovers, each render target is recreated once. A failed target
-remains unready; its owner destroys it and makes a new one, or uses a fallback. A
-restore that meets a new loss is that loss: the engine stays lost and a later
-begin_frame restores again.
+A loss frees every render-target slot, as it frees pipelines and vertex inputs;
+the attachment textures stay as husks. After restore the owner destroys the
+husks and makes new textures and targets. A restore that meets a new loss is
+that loss: the engine stays lost and a later begin_frame restores again.
 
-A render-target descriptor names one format per attachment:
-`NT_TEXTURE_FORMAT_INVALID` in `color_format` or `depth_format` means that
-attachment is absent, and at least one must be present. Colour takes `RGBA8` or
-`RGBA16F`; depth takes a `DEPTH*` format. Each present attachment is an owned,
-sampleable `nt_texture_t` of exactly that format, and the backend never chooses
-an attachment format. The descriptor carries no sampler state: filtering and
-depth comparison are chosen by the sampler each binding names.
+A render-target descriptor names the colour and depth textures; an invalid
+handle means that attachment is absent, and at least one must be present. The
+textures must be live, single-level and of one size, which becomes the target
+size. Colour takes `RGBA8` or `RGBA16F`; depth takes a `DEPTH*` format. The
+descriptor carries no sampler state: an attachment is sampled through its own
+default sampler or the override a binding names.
 
-An unsupported colour or depth format and a target with no attachment are
-developer errors and assert, as are exhausted configured target capacity, stale
-handles, direct mutation of owned attachments, and render-target lifecycle
-calls inside an active pass. `nt_gfx_make_pipeline` follows the same split: a
+An unsupported colour or depth format, a target with no attachment, and an
+invalid, husk, multi-level or differently sized attachment texture are
+developer errors and assert, as are exhausted configured target capacity and
+render-target lifecycle calls inside an active pass. `nt_gfx_make_pipeline`
+follows the same split: a
 NULL descriptor, an unready program, and an exhausted pipeline pool assert, so a returned invalid
 pipeline handle means a lost context or a failed backend allocation — the two
 recoverable outcomes, both retried on a later frame.
@@ -439,9 +436,10 @@ through invalid handles, `false`, or readiness queries. Mandatory backend
 setup objects are internal invariants: failure to create the GL service EBO
 upload VAO with a live context asserts.
 
-`nt_gfx_begin_pass` asserts on invalid sequencing and on a non-ready target.
-Callers check readiness before beginning work that depends on restored GPU
-storage; there is no non-asserting pass-begin variant.
+`nt_gfx_begin_pass` asserts on invalid sequencing and on an invalid or stale
+target. Callers check `nt_gfx_render_target_valid` before a pass on a target
+that a loss or a cascade may have freed; there is no non-asserting pass-begin
+variant.
 
 ## Hot Path Rule
 

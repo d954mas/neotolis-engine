@@ -374,8 +374,9 @@ availability.
 through a virtual pack must be destroyed, recreated from game-owned source data,
 and published again with `nt_resource_register()`.
 
-Render targets are recreated by `nt_gfx` from retained descriptors, but their
-pixel contents must be redrawn.
+Render targets and their attachment textures are game-owned: a loss frees the
+targets, and the game recreates textures and targets after restore and redraws
+their contents.
 
 ## Pack lifetime (mount / unmount)
 
