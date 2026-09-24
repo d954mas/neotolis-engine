@@ -27,20 +27,26 @@ static inline nt_gl_offset_t nt_gl_offset(uintptr_t bytes) { return (nt_gl_offse
  * A tick is always open between init and shutdown, so every call lands in one. */
 #define NT_GL_COUNT_(call) ((void)g_nt_gfx.counters.gl[call]++)
 
-/* One count per call with non-NULL data; NULL storage (including NULL orphaning) does not count.
- * `call` is a constant at every call site, so the buffer/texture choice folds away. */
-static inline void nt_gl_count_upload(nt_gfx_gl_call_t call, const void *data, uint64_t bytes) {
+/* One count per call with non-NULL data; NULL storage (including NULL orphaning) does not count. */
+static inline void nt_gl_count_buffer_upload(const void *data, uint64_t bytes) {
     if (data == NULL) {
         return;
     }
-    nt_gfx_counters_t *counters = &g_nt_gfx.counters;
-    if (call == NT_GFX_GL_glBufferData || call == NT_GFX_GL_glBufferSubData) {
-        counters->buffer_upload_calls++;
-        counters->buffer_upload_bytes += bytes;
-    } else {
-        counters->texture_upload_calls++;
-        counters->texture_upload_bytes += bytes;
+    g_nt_gfx.counters.buffer_upload_calls++;
+    g_nt_gfx.counters.buffer_upload_bytes += bytes;
+#if NT_GFX_CAPTURE_ENABLED
+    if (g_nt_gfx_capture.call != NULL) {
+        g_nt_gfx_capture.call->data.backend.bytes = bytes;
     }
+#endif
+}
+
+static inline void nt_gl_count_texture_upload(const void *data, uint64_t bytes) {
+    if (data == NULL) {
+        return;
+    }
+    g_nt_gfx.counters.texture_upload_calls++;
+    g_nt_gfx.counters.texture_upload_bytes += bytes;
 #if NT_GFX_CAPTURE_ENABLED
     if (g_nt_gfx_capture.call != NULL) {
         g_nt_gfx_capture.call->data.backend.bytes = bytes;
@@ -166,7 +172,8 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
  *   NT_GL(glFn, args...)                      any call; integers, floats, pointers by type
  *   NT_GL0(glFn)                              argument-less call
  *   NT_GL_RET(glFn, args...) / NT_GL_RET0     value-returning call; the result is recorded after the args
- *   NT_GL_UPLOAD(data, bytes, glFn, args...)  counts and records a CPU payload of `bytes` when data is non-NULL
+ *   NT_GL_BUFFER_UPLOAD / NT_GL_TEXTURE_UPLOAD(data, bytes, glFn, args...)
+ *                                             count and record a CPU payload of `bytes` when data is non-NULL
  *   NT_GL_GEN / NT_GL_DELETE(glFn, n, names)  records the count followed by each object name
  *   NT_GL_UNIFORM(glFn, floats, location, ...) copies a vec4/mat4 value array into the record
  *   NT_GL_ISSUED(name, args...)               counts and records a call issued elsewhere (WebGL JS) */
@@ -174,7 +181,8 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
 #define NT_GL0(fn) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_CLOSE_(), fn())
 #define NT_GL_RET(fn, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_RESULT_(fn(__VA_ARGS__)))
 #define NT_GL_RET0(fn) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_CLOSE_RESULT_(fn()))
-#define NT_GL_UPLOAD(data, bytes, fn, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), nt_gl_count_upload(NT_GFX_GL_##fn, (data), (bytes)), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_(), fn(__VA_ARGS__))
+#define NT_GL_BUFFER_UPLOAD(data, bytes, fn, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), nt_gl_count_buffer_upload((data), (bytes)), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_(), fn(__VA_ARGS__))
+#define NT_GL_TEXTURE_UPLOAD(data, bytes, fn, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), nt_gl_count_texture_upload((data), (bytes)), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_(), fn(__VA_ARGS__))
 /* The count and every name must fit backend.args[12]; counts are constants at every site. */
 #define NT_GL_NAMES_FIT_(count)                                                                                                                                                                        \
     ((void)sizeof(struct {                                                                                                                                                                             \

@@ -27,7 +27,7 @@ void nt_gfx_backend_capture_initial_state(void);
  * NULL when not recording or full; a full array marks overflow. */
 static inline nt_gfx_event_t *nt_gfx_capture_reserve(void) {
     nt_gfx_capture_state_t *capture = &g_nt_gfx_capture;
-    if (!capture->recording || capture->view.overflow) {
+    if (!capture->recording) {
         return NULL;
     }
     if (capture->view.count == capture->capacity) {

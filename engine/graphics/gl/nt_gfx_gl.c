@@ -177,7 +177,6 @@ static nt_gfx_segment_state_t s_segments[NT_GFX_TIMER_MAX_SEGMENTS];
 static uint8_t s_segment_count;
 static int8_t s_active_segment = -1; /* index in s_segments while a query is open, -1 otherwise */
 static bool s_timer_warned;          /* one-shot ring-full warning; reset on re-enable */
-_Static_assert(NT_GFX_TIMER_RING < 12, "query ring names must fit the backend record after its count");
 // #endregion
 
 #endif
@@ -372,16 +371,13 @@ uint32_t nt_gfx_gl_test_cached_sampler(uint32_t slot) {
 #endif
 // #endregion
 
-/* s_gl_cache.vao bookkeeping stays at the call sites. */
-static void gl_bind_vao(GLuint vao) { NT_GL(glBindVertexArray, vao); }
-
 /* The service VAO prevents EBO data operations from rewriting a draw VAO.
  * Detaching on exit lets deletion release the uploaded buffer's storage. */
-static void ebo_upload_begin(void) { gl_bind_vao(s_ebo_upload_vao); }
+static void ebo_upload_begin(void) { NT_GL(glBindVertexArray, s_ebo_upload_vao); }
 
 static void ebo_upload_end(void) {
     NT_GL(glBindBuffer, GL_ELEMENT_ARRAY_BUFFER, 0);
-    gl_bind_vao(s_gl_cache.vao);
+    NT_GL(glBindVertexArray, s_gl_cache.vao);
 }
 
 static void gl_set_viewport(int x, int y, int w, int h) {
@@ -397,7 +393,7 @@ static void gl_set_viewport(int x, int y, int w, int h) {
  * restore reuses it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 static void nt_gfx_gl_cache_ground_state(void) {
-    gl_bind_vao(0);
+    NT_GL(glBindVertexArray, 0);
     NT_GL(glUseProgram, 0);
     NT_GL(glDisable, GL_DEPTH_TEST);
     NT_GL(glDepthMask, GL_TRUE);
@@ -599,20 +595,15 @@ static GLenum map_texture_wrap(nt_texture_wrap_t w) {
 
 /* ==== Backend interface implementation ==== */
 
-/* Bounded: WebGL returns CONTEXT_LOST_WEBGL once, but a native robust context
- * may repeat GL_CONTEXT_LOST forever. Returns whether any error was pending. */
-static bool nt_gfx_gl_drain_errors(void) {
-    bool drained = false;
-    for (int i = 0; i < 16 && NT_GL_RET0(glGetError) != GL_NO_ERROR; i++) {
-        drained = true;
+static void nt_gfx_gl_drain_errors(void) {
+    while (NT_GL_RET0(glGetError) != GL_NO_ERROR) {
     }
-    return drained;
 }
 
 static void nt_gfx_gl_init_context_features(void) {
     /* Emscripten keeps a recorded error across contexts: calls that reached the
      * dead context must not fail the fresh one's first error check. */
-    (void)nt_gfx_gl_drain_errors();
+    nt_gfx_gl_drain_errors();
 #if NT_GFX_GPU_TIMING_ENABLED
     s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
     s_debug_groups_enabled = nt_gfx_gl_ctx_enable_debug_groups();
@@ -982,7 +973,7 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { gl_set_viewport(x
 bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
     NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
     /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
-    (void)nt_gfx_gl_drain_errors();
+    nt_gfx_gl_drain_errors();
     NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, out_rgba8);
     /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
        partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
@@ -1527,7 +1518,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     if (vao == 0) {
         return 0;
     }
-    gl_bind_vao(vao);
+    NT_GL(glBindVertexArray, vao);
     if (vbo_backend != 0 && vbo_backend <= s_init_desc.max_buffers) {
         /* Buffer bound before the pointer calls -- satisfies the WebGL "no
          * pointer without a bound ARRAY_BUFFER" rule at creation time. */
@@ -1546,7 +1537,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
         NT_GL(glEnableVertexAttribArray, loc);
         NT_GL(glVertexAttribDivisor, loc, 1); /* pointers deferred to bind_instance_buffer */
     }
-    gl_bind_vao(s_gl_cache.vao);
+    NT_GL(glBindVertexArray, s_gl_cache.vao);
 
     s_vertex_inputs[slot].vao = vao;
     uint8_t inst_count = desc->instance_layout.attr_count;
@@ -1584,7 +1575,7 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_vertex_inputs && s_vertex_inputs[backend_handle].vao != 0 && "bind_vertex_input: requires a live vertex input");
     GLuint vao = s_vertex_inputs[backend_handle].vao;
     if (s_gl_cache.vao != vao) {
-        gl_bind_vao(vao);
+        NT_GL(glBindVertexArray, vao);
         s_gl_cache.vao = vao;
     } else {
         NT_GFX_RECORD(NT_GFX_EVENT_SKIP, NT_GFX_OP_VERTEX_INPUT, event->reason = NT_GFX_REASON_CACHE; event->detail = NT_GFX_GL_glBindVertexArray; event->data.backend.args[0] = vao;);
@@ -1619,7 +1610,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
         ebo_upload_begin();
     }
     NT_GL(glBindBuffer, target, buf);
-    NT_GL_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
+    NT_GL_BUFFER_UPLOAD(desc->data, desc->size, glBufferData, target, (GLsizeiptr)desc->size, desc->data, usage);
     if (unhook_vao) {
         ebo_upload_end();
     }
@@ -1667,7 +1658,7 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
         ebo_upload_begin();
     }
     NT_GL(glBindBuffer, target, buf);
-    NT_GL_UPLOAD(data, size, glBufferSubData, target, (GLintptr)offset, (GLsizeiptr)size, data);
+    NT_GL_BUFFER_UPLOAD(data, size, glBufferSubData, target, (GLintptr)offset, (GLsizeiptr)size, data);
     if (unhook_vao) {
         ebo_upload_end();
     }
@@ -1689,7 +1680,7 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
      * contents and reclaim the old block once the GPU finishes consuming it,
      * avoiding the pipeline stall that glBufferSubData can introduce when
      * rewriting a buffer that's still in flight. */
-    NT_GL_UPLOAD(data, size, glBufferData, target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
+    NT_GL_BUFFER_UPLOAD(data, size, glBufferData, target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
     if (unhook_vao) {
         ebo_upload_end();
     }
@@ -1828,10 +1819,6 @@ static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
         return false;
     }
     NT_ASSERT(pending_error == GL_NO_ERROR && "pending GL error before texture upload");
-    if (pending_error != GL_NO_ERROR) {
-        NT_LOG_ERROR("pending GL error before texture upload: 0x%04X", (unsigned)pending_error);
-        return false;
-    }
     nt_gfx_gl_bind_texture_for_upload(tex);
     return true;
 }
@@ -1867,9 +1854,9 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
         const uint32_t level_h = nt_texture_level_extent(desc->height, level);
         const uint64_t level_bytes = nt_texture_level_bytes(desc->format, level_w, level_h);
         if (gl.compressed) {
-            NT_GL_UPLOAD(level_data, level_bytes, glCompressedTexImage2D, GL_TEXTURE_2D, (GLint)level, gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, (GLsizei)level_bytes, level_data);
+            NT_GL_TEXTURE_UPLOAD(level_data, level_bytes, glCompressedTexImage2D, GL_TEXTURE_2D, (GLint)level, gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, (GLsizei)level_bytes, level_data);
         } else {
-            NT_GL_UPLOAD(level_data, level_bytes, glTexImage2D, GL_TEXTURE_2D, (GLint)level, (GLint)gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, gl.format, gl.type, level_data);
+            NT_GL_TEXTURE_UPLOAD(level_data, level_bytes, glTexImage2D, GL_TEXTURE_2D, (GLint)level, (GLint)gl.internal, (GLsizei)level_w, (GLsizei)level_h, 0, gl.format, gl.type, level_data);
         }
         if (level_data != NULL) {
             level_data += level_bytes;
@@ -1889,7 +1876,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
 
     const GLenum first_error = NT_GL_RET0(glGetError);
     if (first_error != GL_NO_ERROR) {
-        (void)nt_gfx_gl_drain_errors();
+        nt_gfx_gl_drain_errors();
         /* A loss is the caller's recoverable CONTEXT_LOST; its frontend probe marks the tick. */
         if (!nt_gfx_gl_ctx_query_lost()) {
             NT_LOG_ERROR("texture creation failed: GL error 0x%04X", (unsigned)first_error);
@@ -1940,7 +1927,7 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
         NT_GL(glPixelStorei, GL_UNPACK_ALIGNMENT, 1);
     }
 
-    NT_GL_UPLOAD(data, nt_texture_level_bytes(format, w, h), glTexSubImage2D, GL_TEXTURE_2D, 0, (GLint)x, (GLint)y, (GLsizei)w, (GLsizei)h, gl.format, gl.type, data);
+    NT_GL_TEXTURE_UPLOAD(data, nt_texture_level_bytes(format, w, h), glTexSubImage2D, GL_TEXTURE_2D, 0, (GLint)x, (GLint)y, (GLsizei)w, (GLsizei)h, gl.format, gl.type, data);
 
     if (!gl.align4) {
         NT_GL(glPixelStorei, GL_UNPACK_ALIGNMENT, 4);
@@ -2146,7 +2133,6 @@ static bool nt_gfx_gl_stage_render_target_resize(const nt_render_target_desc_t *
             return false;
         }
     }
-    // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
     if (!nt_gfx_gl_build_render_target(desc, out->color, out->depth, &out->target)) {
         nt_gfx_gl_discard_resize_staging(out);
         return false;

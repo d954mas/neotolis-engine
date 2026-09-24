@@ -735,7 +735,7 @@ typedef struct {
             uint32_t secondary, name, slot, offset;
         } binding;
         struct {
-            uint32_t target, width, height;
+            uint32_t target;
             float color[4], depth;
         } pass;
         struct {
@@ -1007,8 +1007,8 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
  * labels. */
 void nt_gfx_begin_segment(const char *name);
 void nt_gfx_end_segment(void);
-/* out_ns is required. Compile OFF or stub: false with zero output.
- * GL timing ON: unsuccessful polls leave output unchanged. */
+/* out_ns is required. Compile OFF or stub: false with zero output, except on a
+ * known loss. Other unsuccessful polls leave output unchanged. */
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 
 /* Requires compiled support; the runtime choice starts enabled and survives context loss.

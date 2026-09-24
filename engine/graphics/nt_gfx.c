@@ -161,8 +161,8 @@ static void discard_texture_set(void) { s_gfx.texture_set_state = NT_GFX_TEXTURE
 /* ---- Global UBO block registration ---- */
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UNIFORM_BLOCK, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = name != NULL ? nt_hash32_str(name).value : 0; event->data.binding.slot = binding_slot);
     NT_ASSERT(name != NULL);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UNIFORM_BLOCK, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = nt_hash32_str(name).value; event->data.binding.slot = binding_slot);
     NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
     /* Borrowed until nt_gfx_shutdown; use a string literal or equally long-lived immutable storage. */
     s_global_blocks[s_global_block_count].name = name;
@@ -188,11 +188,6 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 /* ---- Lifecycle ---- */
 
-// #region frame observation
-#if NT_GFX_CAPTURE_ENABLED
-nt_gfx_capture_state_t g_nt_gfx_capture;
-#endif
-
 /* A backend failure caused by a loss is the recoverable CONTEXT_LOST and logs
  * nothing; only a failure on a live context is an error. The browser is asked
  * because the loss event may still be queued. */
@@ -209,7 +204,10 @@ static nt_gfx_event_reason_t backend_failed(const char *what) {
     return NT_GFX_REASON_BACKEND_FAILURE;
 }
 
+// #region frame observation
 #if NT_GFX_CAPTURE_ENABLED
+nt_gfx_capture_state_t g_nt_gfx_capture;
+
 const char *nt_gfx_gl_call_name(uint32_t call) {
 #define NT_GFX_GL_CALL_NAME_(name) #name,
     static const char *const names[NT_GFX_GL_COUNT] = {NULL, NT_GFX_GL_CALLS(NT_GFX_GL_CALL_NAME_)};
@@ -1013,7 +1011,7 @@ static nt_gfx_event_reason_t make_program(nt_shader_t vs, nt_shader_t fs, nt_pro
      * permanently unready, so this is recoverable state and not a caller error.
      * The owner recreates the stages and links again. */
     if (vs_backend == 0 || fs_backend == 0) {
-        return NT_GFX_REASON_BACKEND_FAILURE;
+        return NT_GFX_REASON_UNREADY;
     }
 
     /* Before the link, not after: the GL backend's program table has the same
@@ -2626,7 +2624,6 @@ void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, ui
 }
 
 static nt_gfx_event_reason_t begin_segment(const char *name) {
-    NT_ASSERT(name != NULL);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
@@ -2635,7 +2632,8 @@ static nt_gfx_event_reason_t begin_segment(const char *name) {
 }
 
 void nt_gfx_begin_segment(const char *name) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_BEGIN, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = name != NULL ? nt_hash32_str(name).value : 0);
+    NT_ASSERT(name != NULL);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_BEGIN, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = nt_hash32_str(name).value);
     NT_GFX_END(begin_segment(name));
 }
 
@@ -2653,17 +2651,15 @@ void nt_gfx_end_segment(void) {
 }
 
 static nt_gfx_event_reason_t poll_segment_time_ns(const char *name, uint64_t *out_ns) {
-    NT_ASSERT(name != NULL && out_ns != NULL);
-#if NT_GFX_GPU_TIMING_ENABLED
     if (g_nt_gfx.context_lost) {
         return NT_GFX_REASON_CONTEXT_LOST;
     }
-#endif
     return nt_gfx_backend_poll_segment_time_ns(name, out_ns) ? NT_GFX_REASON_ACCEPTED : NT_GFX_REASON_UNREADY;
 }
 
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_POLL, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = name != NULL ? nt_hash32_str(name).value : 0);
+    NT_ASSERT(name != NULL && out_ns != NULL);
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SEGMENT_POLL, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = nt_hash32_str(name).value);
     const nt_gfx_event_reason_t reason = poll_segment_time_ns(name, out_ns);
     NT_GFX_END(reason);
     return reason == NT_GFX_REASON_ACCEPTED;

@@ -392,6 +392,21 @@ static void test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost(void)
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_CONTEXT_LOST, result_reason(capture, NT_GFX_OP_TEXTURE_SET, NT_GFX_OBJECT_PIPELINE));
 }
 
+/* A stage whose GPU object died with the context is unready, not a backend failure. */
+static void test_link_with_a_stage_left_unready_by_a_loss_ends_unready(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
+    record_next_tick();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_program(vs, fs).id);
+    nt_gfx_end_tick();
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_REASON_UNREADY, result_reason(nt_gfx_capture_read(), NT_GFX_OP_CREATE, NT_GFX_OBJECT_PROGRAM));
+}
+
 /* Restored render targets are defined inside the CONTEXT operation, a failed one with complete=0. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk locates the operation and both definitions
 static void test_restore_defines_render_targets_inside_the_context_operation(void) {
@@ -718,6 +733,7 @@ int main(void) {
     RUN_TEST(test_render_target_restore_meeting_a_loss_ends_context_lost);
     RUN_TEST(test_resize_failing_on_a_latched_loss_ends_context_lost);
     RUN_TEST(test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost);
+    RUN_TEST(test_link_with_a_stage_left_unready_by_a_loss_ends_unready);
     RUN_TEST(test_restore_defines_render_targets_inside_the_context_operation);
     RUN_TEST(test_sampler_cache_hit_defines_nothing);
     RUN_TEST(test_every_operation_records_one_begin_and_one_result);
