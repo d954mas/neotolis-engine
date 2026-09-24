@@ -368,10 +368,8 @@ rejection.
 ### Render-target handles
 
 `nt_render_target_t` is a logical graphics handle. `nt_gfx_make_render_target`
-copies the descriptor into `nt_gfx`; the caller may release or mutate its source
-descriptor after the call returns. The color attachment, and the depth attachment
-when the target was created with sampleable depth, are module-owned
-`nt_texture_t` values. They remain valid until
+reads the descriptor only during the call. Each present attachment (colour,
+depth, or both) is a module-owned `nt_texture_t` value. They remain valid until
 `nt_gfx_destroy_render_target(rt)`.
 
 Destroying a render target invalidates the target handle and its owned
@@ -393,8 +391,7 @@ compressed format an activator picked for a Basis asset — or
 owned attachment texture handles, but reimages backend storage. Pixel contents
 are undefined after a successful resize; failed resize leaves the previous
 backend storage active. WebGL context restore recreates backend objects from the
-retained descriptor, including attachment formats and independent color/depth
-default sampler state; it does not preserve pixels. Consumers must redraw
+attachment textures' size and format; it does not preserve pixels. Consumers must redraw
 offscreen contents after resize or context restore.
 Context loss is synced at `nt_gfx_begin_frame`, at the start of the host
 iteration; pass calls on a lost context do nothing. Work issued

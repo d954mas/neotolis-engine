@@ -291,21 +291,31 @@ state. The backend deduplicates texture/sampler binds across passes;
 uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
-Render-target color and sampleable depth attachments are exposed as normal
-`nt_texture_t` handles for later sampling. Sampling either attachment while its
-target is the active pass would create a framebuffer feedback loop and asserts
-before any backend bind. Backend FBO/renderbuffer ids stay private to the concrete
-graphics implementation.
+A render target is a set of optional attachments, colour and depth, each a
+texture the target owns and exposes as a normal `nt_texture_t` handle
+(`nt_gfx_render_target_color` / `_depth`, INVALID when absent). Sampling an
+attachment while its target is the active pass would create a framebuffer
+feedback loop and asserts before any backend bind. Backend FBO ids stay private
+to the concrete graphics implementation.
 
-`nt_render_target_desc_t` explicitly selects the color format and default sampler
-state, plus depth storage (`NONE`, `BUFFER`, or `TEXTURE`) and depth format. The
-supported render-target color formats are `RGBA8` and `RGBA16F`. `NONE`
-requires `NT_TEXTURE_FORMAT_INVALID`; `BUFFER` creates a non-sampleable
-renderbuffer in the requested depth format; `TEXTURE` creates a sampleable
-texture in the requested depth format with its own filter and wrap state. The
-descriptor is retained as the single source for creation, resize, and context
-restore. A backend must not substitute its own attachment format or default
-sampler state.
+`nt_render_target_desc_t` holds the size, `color_format` and `depth_format`;
+`NT_TEXTURE_FORMAT_INVALID` means that attachment is absent, and at least one
+must be present. The supported colour formats are `RGBA8` and `RGBA16F`; depth
+takes a `DEPTH*` format. There is no renderbuffer storage: without
+`glInvalidateFramebuffer` a renderbuffer costs the same memory as a texture, and
+its only advantage, MSAA, is not supported. The attachment textures are the
+single source for resize and context restore — their size and format are the
+target's. A backend must not substitute its own attachment format.
+
+A depth-only target (a shadow map) has no colour attachment, so its framebuffer
+sets draw and read buffer to `GL_NONE`: GL 3.3 core reports a draw buffer
+without an attachment as incomplete. The pass colour clear is then a no-op, and
+`nt_gfx_read_pixels` inside such a pass has no colour to read and fails.
+
+Attachments have no default sampler: one target is read as colour, as raw depth
+or through a comparison, so the binding names its sampler explicitly.
+`nt_gfx_get_texture_default_sampler` returns INVALID for an attachment, and
+binding one with `NT_SAMPLER_DEFAULT` asserts.
 
 `RGBA16F` is the HDR color path: it carries values above 1.0, so a tone-mapping
 or bright-pass stage has headroom instead of a buffer already clamped at write
@@ -320,11 +330,10 @@ returns invalid — the fallback path a caller needs regardless. The capability
 bit exists so a caller can choose its format without paying for a failed
 attempt.
 
-The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`. A depth
-attachment's own texture state stays `NEAREST` for minification and
-magnification: WebGL 2 texture completeness rejects filtered depth unless
-comparison is enabled, and comparison is not texture state. Wrap state remains
-explicit and may use clamp, repeat, or mirrored repeat.
+The supported depth formats are `DEPTH16`, `DEPTH24`, and `DEPTH32F`.
+Attachment textures keep `NEAREST`/`CLAMP_TO_EDGE` texture state: WebGL 2
+texture completeness rejects filtered depth unless comparison is enabled, and
+the binding's sampler object overrides texture state anyway.
 
 Depth comparison lives on the sampler object (`nt_sampler_desc_t.compare_func`),
 not on the texture, because one depth target is read two ways: through a
@@ -333,13 +342,14 @@ raw-depth debug view. The field is a single tri-state — `NONE`, `LEQUAL`,
 `LESS` — so a zero-filled descriptor is a plain sampler and there is exactly one
 spelling of "no comparison". Sampler state supersedes texture state, so a
 comparison sampler makes `LINEAR` legal on that binding while the attachment
-description is untouched. A comparison sampler is rejected on non-depth storage,
+texture is untouched. A comparison sampler is rejected on non-depth storage,
 where the comparison would make every lookup undefined; a sampler without one
 still cannot filter depth.
 
 A texture and the sampler it is read through form one semantic binding, so the
 sampler is validated against that texture and not against whatever the unit held;
-`NT_SAMPLER_DEFAULT` selects the texture's own default. A comparison sampler is
+`NT_SAMPLER_DEFAULT` selects the texture's own default, which render-target
+attachments do not have. A comparison sampler is
 therefore rejected against a non-depth texture in the same call, and a unit never
 holds a texture without its sampler.
 
@@ -565,9 +575,11 @@ copied values. `backend.bytes` is actual CPU upload payload, zero for NULL stora
 No event borrows upload memory, shader source or caller labels.
 
 Resource `DEFINITION/STATE` records with `object_kind=NONE` use `detail` as the
-resource kind and `backend.args[0..1]` as backend slot/raw GL name; render targets
-also supply the depth renderbuffer name at index 2. Frontend resource definitions
+resource kind and `backend.args[0..1]` as backend slot/raw GL name. Frontend resource definitions
 carry the full handle, current backend slot and available dimensions/relationships.
+A render-target definition carries the colour and depth attachment handles in
+`related[0..1]`, the colour format in `format` and the depth format in `usage`,
+zero for an absent attachment.
 Shader, program and vertex-input definitions carry result `UNKNOWN`: the frontend
 retains no shader stage or source, program stage pair or vertex-input layout, so
 those fields are absent, not zero. A vertex input created during a recorded frame
