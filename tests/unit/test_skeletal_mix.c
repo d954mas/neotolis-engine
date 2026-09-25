@@ -228,58 +228,39 @@ void test_plus_and_minus_170_degrees_average_to_180(void) {
     ASSERT_FLOAT_NEAR(0.0F, out[2].q[3], 1e-6F);
 }
 
-void test_zero_total_influence_copies_the_defaults(void) {
+/* W == 0 copies the defaults. A gain-0 track keeps its clock but the game need
+ * not sample it: a zero influence, by gain or by joint weight, reads nothing
+ * from its pose, and the other inputs normalize among themselves. */
+void test_zero_influences_read_nothing_and_a_zero_total_copies_the_defaults(void) {
     nt_skeletal_trs_t a[J];
-    make_pose(a, 1.0F);
+    nt_skeletal_trs_t b[J];
+    nt_skeletal_trs_t garbage[J];
+    make_pose(a, 0.0F);
+    make_pose(b, 5.0F);
+    fill_nan(garbage);
     const float zeros[J] = {0.0F, 0.0F, 0.0F, 0.0F};
-    const nt_skeletal_mix_input_t inputs[2] = {{a, NULL, 0.0F}, {a, zeros, 1.0F}};
+    nt_skeletal_trs_t expected[J];
     nt_skeletal_trs_t out[J];
 
-    nt_skeletal_mix(inputs, 2, g_defaults, J, out);
+    const nt_skeletal_mix_input_t none[2] = {{garbage, NULL, 0.0F}, {garbage, zeros, 1.0F}};
+    nt_skeletal_mix(none, 2, g_defaults, J, out);
     ASSERT_POSE_BITS(g_defaults, out, J);
-
     memset(out, 0, sizeof(out));
     nt_skeletal_mix(NULL, 0, g_defaults, J, out);
     ASSERT_POSE_BITS(g_defaults, out, J);
-}
 
-/* A gain-0 track keeps its clock but the game need not sample it: whatever
- * its buffer holds, stale or garbage, never reaches the result. */
-void test_a_zero_influence_input_reads_nothing_from_its_pose(void) {
-    nt_skeletal_trs_t a[J];
-    nt_skeletal_trs_t garbage[J];
-    make_pose(a, 1.0F);
-    fill_nan(garbage);
-    const float zeros[J] = {0.0F, 0.0F, 0.0F, 0.0F};
-    const nt_skeletal_mix_input_t alone = {a, NULL, 1.0F};
-    const nt_skeletal_mix_input_t by_gain[2] = {{garbage, NULL, 0.0F}, {a, NULL, 1.0F}};
-    const nt_skeletal_mix_input_t by_weight[2] = {{garbage, zeros, 1.0F}, {a, NULL, 1.0F}};
-    nt_skeletal_trs_t expected[J];
-    nt_skeletal_trs_t out[J];
+    const nt_skeletal_mix_input_t alone = {b, NULL, 1.0F};
+    const nt_skeletal_mix_input_t with_zeros[3] = {{garbage, NULL, 0.0F}, {b, NULL, 1.0F}, {garbage, zeros, 1.0F}};
     nt_skeletal_mix(&alone, 1, g_defaults, J, expected);
-    nt_skeletal_mix(by_gain, 2, g_defaults, J, out);
+    nt_skeletal_mix(with_zeros, 3, g_defaults, J, out);
     ASSERT_POSE_BITS(expected, out, J);
-    nt_skeletal_mix(by_weight, 2, g_defaults, J, out);
-    ASSERT_POSE_BITS(expected, out, J);
-}
 
-void test_zero_weights_on_one_input_leave_the_others_normalized(void) {
-    nt_skeletal_trs_t a[J];
-    nt_skeletal_trs_t b[J];
-    make_pose(a, 0.0F);
-    make_pose(b, 5.0F);
     const float weights[J] = {1.0F, 0.0F, 1.0F, 1.0F};
-    const nt_skeletal_mix_input_t inputs[2] = {{a, weights, 1.0F}, {b, NULL, 0.5F}};
-    nt_skeletal_trs_t out[J];
-    nt_skeletal_mix(inputs, 2, g_defaults, J, out);
-
+    const nt_skeletal_mix_input_t partial[2] = {{a, weights, 1.0F}, {b, NULL, 0.5F}};
+    nt_skeletal_mix(partial, 2, g_defaults, J, out);
+    assert_joint_near(&b[1], &out[1]);
     for (int c = 0; c < 3; ++c) {
-        ASSERT_FLOAT_NEAR(b[1].t[c], out[1].t[c], 1e-5F);
-        ASSERT_FLOAT_NEAR(b[1].s[c], out[1].s[c], 1e-6F);
         ASSERT_FLOAT_NEAR((a[0].t[c] + (0.5F * b[0].t[c])) / 1.5F, out[0].t[c], 1e-5F);
-    }
-    for (int c = 0; c < 4; ++c) {
-        ASSERT_FLOAT_NEAR(b[1].q[c], out[1].q[c], 1e-6F);
     }
 }
 
@@ -671,7 +652,7 @@ void test_mix_checks_trap_on_an_infinite_weight_or_a_non_unit_rotation(void) {
     a[2].q[0] = 2.0F;
     const nt_skeletal_mix_input_t plain = {a, NULL, 1.0F};
     NT_TEST_EXPECT_ASSERT(nt_skeletal_mix(&plain, 1, g_defaults, J, out));
-    ASSERT_TRAPPED_ON("- 1.0F) < 1e-3F");
+    ASSERT_TRAPPED_ON("fabsf((v->q[0]");
     make_pose(a, 0.0F);
     a[1].s[2] = INFINITY;
     NT_TEST_EXPECT_ASSERT(nt_skeletal_mix(&plain, 1, g_defaults, J, out));
@@ -686,7 +667,7 @@ void test_override_checks_trap_on_a_blended_joint_that_is_not_a_unit_rotation(vo
     make_pose(top, 1.0F);
     base[1].q[3] = 3.0F;
     NT_TEST_EXPECT_ASSERT(nt_skeletal_override(base, top, NULL, 0.5F, J, out));
-    ASSERT_TRAPPED_ON("- 1.0F) < 1e-3F");
+    ASSERT_TRAPPED_ON("fabsf((v->q[0]");
     make_pose(base, 0.0F);
     top[2].t[0] = NAN;
     NT_TEST_EXPECT_ASSERT(nt_skeletal_override(base, top, NULL, 0.5F, J, out));
@@ -756,9 +737,7 @@ int main(void) {
     RUN_TEST(test_rotations_weigh_by_gain_times_joint_weight);
     RUN_TEST(test_alignment_follows_the_running_sum_in_supplied_order);
     RUN_TEST(test_plus_and_minus_170_degrees_average_to_180);
-    RUN_TEST(test_zero_total_influence_copies_the_defaults);
-    RUN_TEST(test_a_zero_influence_input_reads_nothing_from_its_pose);
-    RUN_TEST(test_zero_weights_on_one_input_leave_the_others_normalized);
+    RUN_TEST(test_zero_influences_read_nothing_and_a_zero_total_copies_the_defaults);
     RUN_TEST(test_a_tiny_or_huge_gain_contributes_fully_and_by_ratio);
     RUN_TEST(test_a_fading_partial_input_still_poses_the_joints_it_owns);
     RUN_TEST(test_asymmetric_parent_child_weights_keep_the_chain_attached);
