@@ -227,8 +227,9 @@ A per-element material override and an `nt_ui_image_custom` block never receive
 the base block, and the sprite renderer still asserts on every other
 custom-attr emit that lacks `set_custom_attrs`. The debug inspector walk drops
 the block while it swaps in `inspector_sprite_material`. The inspector highlight
-and hit-zone overlays stage no block: wherever they draw with a custom-attr base
-material (2D, or 3D without `inspector_sprite_material`), the renderer asserts.
+and hit-zone overlays apply the same rule to each pass. If a pass draws with the
+base material, it stages the block before every quad. If it draws with
+`inspector_sprite_material`, it stages none.
 
 ## Interaction model
 

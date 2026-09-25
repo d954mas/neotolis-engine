@@ -254,7 +254,7 @@ const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, v
 
 /* All four setters required per-context before first walk. */
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);
-/* Base material for RECTANGLE, BORDER, plain/slice9 IMAGE and inline rich images. A custom-attr
+/* Base material for RECTANGLE, BORDER, plain/slice9 IMAGE, inline rich images and debug overlays. A custom-attr
  * material (attr_map_count > 0) needs base_custom_bytes == attr_map_count*16 (asserted here): the
  * walker stages a copy of that block before every base emit and gives the bytes no meaning.
  * A plain material passes NULL, 0. */
