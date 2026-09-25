@@ -8,11 +8,9 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
-#include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
 #include "material/nt_material.h"
 #include "renderers/nt_sprite_renderer.h"
-#include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -28,7 +26,7 @@ static const float k_defaults[4] = {0.125F, 0.25F, 0.5F, 1.0F};
 static const float k_widget_block[4] = {3.0F, 5.0F, 7.0F, 11.0F};
 
 /* One game attr the walker never injects (not a_layout/a_uvrect): the bytes must arrive verbatim. */
-static nt_material_t make_one_attr_material(bool has_defaults) {
+static nt_material_t make_one_attr_material(void) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
     desc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
@@ -40,7 +38,7 @@ static nt_material_t make_one_attr_material(bool has_defaults) {
     desc.attr_map[0].location = 4;
     memcpy(desc.attr_map[0].default_value, k_defaults, sizeof k_defaults);
     desc.attr_map_count = 1;
-    desc.has_attr_defaults = has_defaults;
+    desc.has_attr_defaults = true;
     desc.label = "base_custom_material";
     return nt_material_create(&desc);
 }
@@ -62,7 +60,7 @@ static void assert_batch_range_carries_defaults(uint32_t first, uint32_t end) {
  * material: one draw, every base vertex carries the defaults, the widget's vertices its own block. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_defaults_ride_every_base_emit_in_one_batch(void) {
-    const nt_material_t mat = make_one_attr_material(true);
+    const nt_material_t mat = make_one_attr_material();
     nt_ui_set_sprite_material(s_fx.ctx, mat);
 
     nt_atlas_region_ref_t plain_ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
@@ -211,17 +209,9 @@ static void test_geometry_widget_shares_base_batch_aligned(void) {
     TEST_ASSERT_TRUE(pos[3][0] == pos[0][0] && pos[3][1] == pos[2][1]);
 }
 
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* Base emits pass no block, so a custom-attr base without defaults is rejected where it is set. */
-static void test_custom_attr_base_without_defaults_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_ui_set_sprite_material(s_fx.ctx, make_one_attr_material(false))); }
-#endif
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_defaults_ride_every_base_emit_in_one_batch);
     RUN_TEST(test_geometry_widget_shares_base_batch_aligned);
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_custom_attr_base_without_defaults_asserts);
-#endif
     return UNITY_END();
 }

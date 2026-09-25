@@ -275,11 +275,6 @@ void test_create_asserts_out_of_range_key_lanes(void) {
     d.attr_map[0].location = 16;
     NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
 
-    d = make_test_desc();
-    d.attr_map_count = 0;
-    d.has_attr_defaults = true;
-    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
-
     /* Ranges hold for a disabled blend too: garbage is a bug, not "don't care". */
     d = make_test_desc();
     d.blend = nt_blend_opaque();

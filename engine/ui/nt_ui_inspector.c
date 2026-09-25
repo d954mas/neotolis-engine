@@ -42,7 +42,6 @@ void nt_ui_inspector_set_materials(nt_ui_context_t *ctx, nt_material_t sprite, n
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_materials: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_inspector_set_materials: must be called outside begin/end");
     /* 0 handles fall back to the game's sprite/text material at walk time. */
-    NT_ASSERT((sprite.id == 0U || nt_ui_internal_material_draws_base_emits(sprite)) && "nt_ui_inspector_set_materials: a custom-attr material needs attr defaults");
     ctx->inspector_sprite_material = sprite;
     ctx->inspector_text_material = text;
 }

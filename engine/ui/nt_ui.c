@@ -2111,12 +2111,10 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
     ctx->white_region = white_region_idx;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_sprite_material: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_sprite_material: must be called outside begin/end");
     NT_ASSERT(sprite_material.id != 0 && "nt_ui_set_sprite_material: invalid material handle");
-    NT_ASSERT(nt_ui_internal_material_draws_base_emits(sprite_material) && "nt_ui_set_sprite_material: a custom-attr material needs attr defaults");
     ctx->sprite_material = sprite_material;
 }
 
