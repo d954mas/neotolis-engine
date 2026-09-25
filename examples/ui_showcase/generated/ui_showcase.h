@@ -17,6 +17,7 @@
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG ((nt_hash64_t){0x96ED6312E7B10087ULL}) /* assets/shaders/sprite.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT ((nt_hash64_t){0x75A9EEA4D1472026ULL}) /* assets/shaders/sprite.vert */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT ((nt_hash64_t){0x54AB053A2ADAE2D0ULL}) /* assets/shaders/sprite_radial.vert */
+#define ASSET_SHADER_ASSETS_SHADERS_UI_BASE_FRAG ((nt_hash64_t){0xB494CA99DC82D5C8ULL}) /* assets/shaders/ui_base.frag */
 
 /* --- FONT --- */
 #define ASSET_FONT_UI_SHOWCASE_FONT ((nt_hash64_t){0xA3FFF9B020E5CAD5ULL}) /* ui_showcase/font */
@@ -67,6 +68,7 @@ static inline void ui_showcase_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/sprite.frag");
     (void)nt_hash64_str("assets/shaders/sprite.vert");
     (void)nt_hash64_str("assets/shaders/sprite_radial.vert");
+    (void)nt_hash64_str("assets/shaders/ui_base.frag");
     (void)nt_hash64_str("ui_showcase/font");
     (void)nt_hash64_str("ui_showcase/font_rich_b");
     (void)nt_hash64_str("ui_showcase/font_rich_bi");

@@ -488,7 +488,7 @@ static void test_multi_ctx_tree_storage_isolated(void) {
     nt_ui_context_t *ctx_b = nt_ui_create_context(s_arena_b, sizeof s_arena_b, &desc);
     TEST_ASSERT_NOT_NULL(ctx_b);
     nt_ui_set_atlas_white_region(ctx_b, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
-    nt_ui_set_sprite_material(ctx_b, s_fx.sprite_material, NULL, 0);
+    nt_ui_set_sprite_material(ctx_b, s_fx.sprite_material);
     nt_ui_set_text_material(ctx_b, s_fx.text_material);
     nt_ui_set_font(ctx_b, 0U, s_fx.stub_font);
 

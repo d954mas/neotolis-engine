@@ -785,19 +785,11 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 // #endregion
 
 // #region helper_emit_screen_rect
-/* The renderer consumes a staged block per emit, so this precedes every emit on ctx->sprite_material. */
-static inline void stage_base_custom_attrs(const nt_ui_context_t *ctx) {
-    if (ctx->base_custom_bytes != 0U) {
-        nt_sprite_renderer_set_custom_attrs(ctx->base_custom_attrs, ctx->base_custom_bytes);
-    }
-}
-
 /* Unit square (0,0..1,1) onto the Clay bbox: origin at the bbox's bottom-left in layout, scaled by its size. */
-static inline void emit_screen_rect(const nt_ui_context_t *ctx, float x, float y, float w, float h, uint32_t color_packed, const float world_mat4[16]) {
+static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float world_mat4[16]) {
     float m[16];
     nt_ui_sprite_mat4(world_mat4, x, y + h, w, h, m);
-    stage_base_custom_attrs(ctx);
-    nt_sprite_renderer_emit_region(ctx->atlas, ctx->white_region, m, 0.0F, 0.0F, color_packed, 0U);
+    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U, NULL, 0U);
 }
 // #endregion
 
@@ -832,7 +824,7 @@ static inline void clamp_radii_css3(float w, float h, float *tl, float *tr, floa
 
 // #region helper_emit_rounded_rect
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_rounded_rect(const nt_ui_context_t *ctx, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed, const float world_mat4[16]) {
+static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed, const float world_mat4[16]) {
     float tl = cr.topLeft;
     float tr = cr.topRight;
     float bl = cr.bottomLeft;
@@ -842,7 +834,7 @@ static void emit_rounded_rect(const nt_ui_context_t *ctx, float x, float y, floa
     const float half_h = h * 0.5F;
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_screen_rect(ctx, x, y, w, h, color_packed, world_mat4);
+        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed, world_mat4);
         return;
     }
 
@@ -917,14 +909,13 @@ static void emit_rounded_rect(const nt_ui_context_t *ctx, float x, float y, floa
     }
 
     /* Vertices are in Clay layout-space; world_mat4 maps layout → world directly. */
-    stage_base_custom_attrs(ctx);
-    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, vi, indices, ii, world_mat4, color_packed);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0U);
 }
 // #endregion
 
 // #region helper_emit_border
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_square_border(const nt_ui_context_t *ctx, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, const float world_mat4[16]) {
+static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, const float world_mat4[16]) {
     // #region axis-aligned-fast-path
     const float top = (float)widths.top;
     const float bot = (float)widths.bottom;
@@ -935,16 +926,16 @@ static void emit_square_border(const nt_ui_context_t *ctx, Clay_BoundingBox bb, 
     const bool axis_aligned = (world_mat4[1] == 0.0F && world_mat4[4] == 0.0F);
     if (axis_aligned) {
         if (widths.top) {
-            emit_screen_rect(ctx, bb.x, bb.y, bb.width, top, col, world_mat4);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col, world_mat4);
         }
         if (widths.bottom) {
-            emit_screen_rect(ctx, bb.x, bb.y + bb.height - bot, bb.width, bot, col, world_mat4);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col, world_mat4);
         }
         if (widths.left) {
-            emit_screen_rect(ctx, bb.x, bb.y + top, lft, bb.height - top - bot, col, world_mat4);
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col, world_mat4);
         }
         if (widths.right) {
-            emit_screen_rect(ctx, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col, world_mat4);
+            emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col, world_mat4);
         }
         return;
     }
@@ -1043,8 +1034,7 @@ static void emit_square_border(const nt_ui_context_t *ctx, Clay_BoundingBox bb, 
         return;
     }
     /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
-    stage_base_custom_attrs(ctx);
-    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, vi, indices, ii, world_mat4, col);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, col, NULL, 0U);
     // #endregion
 }
 
@@ -1077,7 +1067,8 @@ static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radi
 
 /* Caller (emit_border) clamps radii and guarantees at least one is non-zero. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_rounded_border(const nt_ui_context_t *ctx, Clay_BoundingBox bb, Clay_BorderWidth widths, float tl, float tr, float bl, float br, uint32_t color_packed, const float world_mat4[16]) {
+static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, float tl, float tr, float bl, float br, uint32_t color_packed,
+                                const float world_mat4[16]) {
     const float x = bb.x;
     const float y = bb.y;
     const float w = bb.width;
@@ -1113,8 +1104,7 @@ static void emit_rounded_border(const nt_ui_context_t *ctx, Clay_BoundingBox bb,
     }
 
     /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
-    stage_base_custom_attrs(ctx);
-    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, vi, indices, ii, world_mat4, color_packed);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0U);
 }
 
 static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16]) {
@@ -1135,16 +1125,16 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     clamp_radii_css3(bb.width, bb.height, &tl, &tr, &bl, &br);
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_square_border(ctx, bb, b->width, col, world_mat4);
+        emit_square_border(ctx->atlas, ctx->white_region, bb, b->width, col, world_mat4);
         return;
     }
-    emit_rounded_border(ctx, bb, b->width, tl, tr, bl, br, col, world_mat4);
+    emit_rounded_border(ctx->atlas, ctx->white_region, bb, b->width, tl, tr, bl, br, col, world_mat4);
 }
 // #endregion
 
 // #region helper_emit_image
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16], const float *blk, uint8_t blk_bytes) {
+static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16], const float *custom, uint8_t custom_bytes) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
@@ -1194,15 +1184,11 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16], 
         origin_x = p->origin_x;
         origin_y = p->origin_y;
     }
-    /* Staged past the early-outs: a block with no emit would satisfy the next emit's stride check. */
-    if (blk_bytes != 0U) {
-        nt_sprite_renderer_set_custom_attrs(blk, blk_bytes);
-    }
     if (sliced) {
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, s9, p->slice9_scale, col, p->flip_bits);
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, s9, p->slice9_scale, col, p->flip_bits, custom, custom_bytes);
         return;
     }
-    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
+    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits, custom, custom_bytes);
 }
 
 /* Float-offset (i*4) of attr `name_hash` in the block, or -1 if absent.
@@ -1280,8 +1266,8 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
  *
  * INVARIANT (load-bearing): the fs's gl_VertexID&3 corner derivation requires each
  * quad's base vertex index to be a multiple of 4. The align call enforces it, so the
- * quad may share a batch with base emits of any vertex count; it emits EXACTLY 4 verts. */
-static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16], const float *blk, uint8_t blk_bytes) {
+ * quad may share a batch with emits of any vertex count; it emits EXACTLY 4 verts. */
+static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16], const float *custom, uint8_t custom_bytes) {
     const Clay_BoundingBox bb = c->boundingBox;
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
         return;
@@ -1291,8 +1277,7 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
     nt_sprite_renderer_align_next_vertex_to_4();
-    nt_sprite_renderer_set_custom_attrs(blk, blk_bytes);
-    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col);
+    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col, custom, custom_bytes);
 }
 // #endregion
 
@@ -1708,7 +1693,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         uint32_t col = nt_color_pack_clay(r->backgroundColor);
         col = apply_opacity(col, ws->accum_opacity);
-        emit_rounded_rect(ctx, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col, world_mat4);
+        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
@@ -1765,12 +1750,10 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         }
         /* One generic custom-attr branch (no per-widget identity): custom_bytes>0 → bake
          * the widget block (a_layout/a_uvrect injected by name) and dispatch by geom_mode. */
-        float custom_blk[16];
-        const float *blk = NULL;
+        float blk[16];
         uint8_t blk_bytes = 0U;
         if (ip != NULL && ip->custom != NULL) {
-            blk_bytes = (uint8_t)(build_custom_block(ip, ip->custom, &c->boundingBox, custom_blk) * sizeof(float));
-            blk = custom_blk;
+            blk_bytes = (uint8_t)(build_custom_block(ip, ip->custom, &c->boundingBox, blk) * sizeof(float));
             if (ip->custom->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
                 const Clay_Color rt = local.renderData.image.backgroundColor;
                 const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
@@ -1779,10 +1762,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 return;
             }
             /* REGION mode: emit_image rasterizes the textured region (origin/flip/slice9
-             * honored), baking the block across all verts. */
-        } else if (ctx->base_custom_bytes != 0U && img_mat.id == ctx->sprite_material.id) {
-            blk = ctx->base_custom_attrs;
-            blk_bytes = ctx->base_custom_bytes;
+             * honored), baking the widget block across all verts. */
         }
         emit_image(&local, world_mat4, blk, blk_bytes);
         return;
@@ -1953,12 +1933,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
      * Restored at exit-flush. After the early-outs, the path to exit has no further returns. */
     const nt_material_t saved_sprite_mat = ctx->sprite_material;
     const nt_material_t saved_text_mat = ctx->text_material;
-    const uint8_t saved_base_custom_bytes = ctx->base_custom_bytes;
     if (mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR) {
         if (ctx->inspector_sprite_material.id != 0) {
-            /* The base block belongs to the game's material; the overlay material is plain. */
             ctx->sprite_material = ctx->inspector_sprite_material;
-            ctx->base_custom_bytes = 0U;
         }
         if (ctx->inspector_text_material.id != 0) {
             ctx->text_material = ctx->inspector_text_material;
@@ -2102,7 +2079,6 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     /* Restore the game's materials swapped in for the inspector pass. */
     ctx->sprite_material = saved_sprite_mat;
     ctx->text_material = saved_text_mat;
-    ctx->base_custom_bytes = saved_base_custom_bytes;
     /* Inspector strings backed by module-level rings are now consumed; release ownership. */
     if (should_release_inspector_strings(ctx, mode)) {
         nt_ui_internal_inspector_strings_release(ctx);
@@ -2135,21 +2111,11 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
     ctx->white_region = white_region_idx;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material, const float *base_custom_attrs, uint8_t base_custom_bytes) {
+void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_sprite_material: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_sprite_material: must be called outside begin/end");
     NT_ASSERT(sprite_material.id != 0 && "nt_ui_set_sprite_material: invalid material handle");
-    const nt_material_info_t *mi = nt_material_get_info(sprite_material);
-    NT_ASSERT(mi != NULL && "nt_ui_set_sprite_material: material is not live");
-    NT_ASSERT(base_custom_bytes == (uint32_t)mi->attr_map_count * 16U && "nt_ui_set_sprite_material: base_custom_bytes must equal the material's attr_map stride");
-    NT_ASSERT(base_custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui_set_sprite_material: base_custom_bytes exceeds NT_SPRITE_CUSTOM_STRIDE_MAX");
-    NT_ASSERT((base_custom_attrs != NULL) == (base_custom_bytes != 0U) && "nt_ui_set_sprite_material: base_custom_attrs must be non-NULL exactly when base_custom_bytes > 0");
     ctx->sprite_material = sprite_material;
-    ctx->base_custom_bytes = base_custom_bytes;
-    if (base_custom_bytes != 0U) {
-        memcpy(ctx->base_custom_attrs, base_custom_attrs, base_custom_bytes);
-    }
 }
 
 void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material) {

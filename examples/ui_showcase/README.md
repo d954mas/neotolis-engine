@@ -55,7 +55,11 @@ lighten and writes the index on click).
     (desaturate / dim / hide / tint) on a textured radial-image, and a **dense
     batched grid** that proves N radials sharing one material stay one draw call;
     see the **Radial controls** + **Radial visual-QA protocol** below.
-13. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
+13. **Base Material** - one custom-attr base material (`ui_base.frag`) for the whole
+    UI: plain emits bake its attr defaults, so rounded panels, icons and SDF radials
+    share one batch. The checkbox swaps back to a plain base + a separate radial
+    material; the `draw calls` readout shows the difference.
+14. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
     block (`nt_ui_rich_text` + `nt_ui_rich_text_markup`), authored **two ways**:
     the code-first push/pop builder AND the runtime `<markup>` parser. Demos
     **real** bold / italic / bold-italic faces (DejaVu R/B/I/BI baked into the
@@ -65,21 +69,21 @@ lighten and writes the index on click).
     off the game clock), and an **interactive link** that brightens + grows on
     hover and flips to a green "Accepted" latch on click; see the **Rich Text
     controls** + **Rich Text visual-QA protocol** below.
-14. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
+15. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
     a short list (icon gutter), a long scrolling list (more than `max_visible_rows`)
     that flips up near the window bottom, and a custom swatch-trigger combo
     (`nt_ui_combo_preview_begin`/`end`).
-15. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
+16. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
     never block clicks on the targets underneath).
-16. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
+17. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
     `submenu_begin`/`separator`/`item_begin`/`end`) on a right-click / long-press: a
     rich row (icon + `Ctrl+N` shortcut), a checkmark-toggle row, a disabled item, a
     nested **submenu**, and a custom `activatable=false` row whose inner button owns
     the click. Mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
-17. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
+18. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
     tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
     list, which uses the one-call `labels[]` wrapper with a LEFT accent).
-18. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+19. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Controls
 

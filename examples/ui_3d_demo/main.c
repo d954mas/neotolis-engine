@@ -1133,7 +1133,7 @@ int main(int argc, char *argv[]) {
         .label = "ui_3d_demo_text_3d",
     });
 
-    nt_ui_set_sprite_material(s_ctx, s_sprite_material, NULL, 0);
+    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
     /* UI labels use the depth-writing text material so they sort with the panels (overlapping world
      * panels). The HUD/stats keep s_text_material (depth_write=false) — they're a flat screen overlay. */
     nt_ui_set_text_material(s_ctx, s_text_material_3d);

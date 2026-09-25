@@ -65,6 +65,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
         NT_ASSERT(desc->attr_map[i].location < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
     }
+    NT_ASSERT((!desc->has_attr_defaults || desc->attr_map_count > 0) && "has_attr_defaults needs an attr_map");
 
     uint32_t id = nt_pool_alloc(&s_mat.pool);
     if (id == 0) {
@@ -109,7 +110,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
         info->attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
         info->attr_map_locations[i] = desc->attr_map[i].location;
+        memcpy(info->attr_map_defaults[i], desc->attr_map[i].default_value, sizeof(float) * 4);
     }
+    info->has_attr_defaults = desc->has_attr_defaults;
 
     /* Entity params */
     NT_ASSERT(desc->entity_param_count <= NT_MAX_PER_ENTITY_PARAMS);

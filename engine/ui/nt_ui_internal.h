@@ -12,7 +12,6 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
-#include "renderers/nt_sprite_renderer.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
@@ -347,7 +346,6 @@ struct nt_ui_context {
     /* The no-nest guard: true only between nt_ui_rich_begin and its terminal/end. Separate from
      * pending_rich so a completed session releases the lock while probes can still read the state. */
     bool rich_session_open;
-    uint8_t base_custom_bytes; /* size of base_custom_attrs; 0 = plain sprite_material */
 
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
@@ -473,9 +471,6 @@ struct nt_ui_context {
 #endif /* NT_UI_DEBUG_TOOLS */
 
     Clay_Arena clay_arena;
-
-    /* Game-owned block staged before each emit on sprite_material. */
-    float base_custom_attrs[NT_SPRITE_CUSTOM_STRIDE_MAX / sizeof(float)];
 };
 
 typedef struct nt_ui_inspector_element_view {
@@ -580,28 +575,16 @@ uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float
 
 void nt_ui_internal_project_layout_to_world(const float m[16], float vy, float vh, float x, float y, float *out_x, float *out_y);
 
-/* White-region target of one overlay pass. A custom-attr material needs a block on every emit, so an
- * overlay drawn with ctx->sprite_material carries the game's base block; any other material carries none. */
-typedef struct {
-    nt_resource_t atlas;
-    uint32_t region;
-    const float *block;
-    uint8_t block_bytes; /* 0 = no block */
-} nt_ui_overlay_pen_t;
+void nt_ui_internal_emit_filled_quad(nt_resource_t atlas, uint32_t region, const float v[4][2], uint32_t color);
 
-/* Binds smat and returns the pen for the overlay emits that follow. */
-nt_ui_overlay_pen_t nt_ui_internal_overlay_bind(const nt_ui_context_t *ctx, nt_material_t smat);
-
-void nt_ui_internal_emit_filled_quad(const nt_ui_overlay_pen_t *pen, const float v[4][2], uint32_t color);
-
-void nt_ui_internal_emit_outline(const nt_ui_overlay_pen_t *pen, const float c[4][2], float thickness, uint32_t color);
+void nt_ui_internal_emit_outline(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, uint32_t color);
 
 /* 3D-ctx variants: corners stay in the element's Clay-layout space and `model` (the recorded world
  * mat4) maps them into the scene. Caller binds the perspective view_proj so the debug overlay lands
  * on the element in 3D. The 2D-ctx helpers above pre-project to screen and emit under identity. */
-void nt_ui_internal_emit_filled_quad_m(const nt_ui_overlay_pen_t *pen, const float v[4][2], const float model[16], uint32_t color);
+void nt_ui_internal_emit_filled_quad_m(nt_resource_t atlas, uint32_t region, const float v[4][2], const float model[16], uint32_t color);
 
-void nt_ui_internal_emit_outline_m(const nt_ui_overlay_pen_t *pen, const float c[4][2], float thickness, const float model[16], uint32_t color);
+void nt_ui_internal_emit_outline_m(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, const float model[16], uint32_t color);
 
 /* (x,y) top-left, (wp,hp) size in logical layout pixels. Caller wraps in scissor_enabled(true/false). */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);

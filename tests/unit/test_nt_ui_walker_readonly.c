@@ -119,7 +119,7 @@ static void test_walk_without_end_asserts(void) {
     nt_ui_context_t *fresh = nt_ui_create_context(fresh_arena, sizeof fresh_arena, &desc);
     TEST_ASSERT_NOT_NULL(fresh);
     nt_ui_set_atlas_white_region(fresh, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
-    nt_ui_set_sprite_material(fresh, s_fx.sprite_material, NULL, 0);
+    nt_ui_set_sprite_material(fresh, s_fx.sprite_material);
     nt_ui_set_text_material(fresh, s_fx.text_material);
     nt_ui_set_custom_handler(fresh, NULL, NULL);
 

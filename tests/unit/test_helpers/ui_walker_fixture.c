@@ -102,7 +102,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
         nt_ui_set_atlas_white_region(fx->ctx, fx->atlas.handle, fx->atlas.white_region_idx);
     }
     if ((bind & UI_WALKER_FX_BIND_SPRITE_MATERIAL) != 0U) {
-        nt_ui_set_sprite_material(fx->ctx, fx->sprite_material, NULL, 0);
+        nt_ui_set_sprite_material(fx->ctx, fx->sprite_material);
     }
     if ((bind & UI_WALKER_FX_BIND_TEXT_MATERIAL) != 0U) {
         nt_ui_set_text_material(fx->ctx, fx->text_material);

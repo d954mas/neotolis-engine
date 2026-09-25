@@ -510,63 +510,53 @@ static void test_inline_image_defaults_material_from_ctx(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one IMAGE atom emitted via the ctx default material");
 }
 
-static const float k_rich_base_block[4] = {0.125F, 0.25F, 0.5F, 1.0F};
-
-static nt_material_t make_rich_custom_material(void) {
+static nt_material_t make_rich_custom_material(float first_default) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
     desc.program = nt_material_get_info(s_fx.sprite_material)->program;
     desc.textures[0].name = "u_texture";
     desc.texture_count = 1;
-    desc.attr_map[0].stream_name = "a_game";
-    desc.attr_map[0].location = 4;
+    desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "a_game", .location = 4, .default_value = {first_default, 0.25F, 0.5F, 1.0F}};
     desc.attr_map_count = 1;
-    desc.label = "rich_base_custom_material";
+    desc.has_attr_defaults = true;
+    desc.label = "rich_custom_material";
     return nt_material_create(&desc);
 }
 
-static void assert_inline_image_carries_rich_base_block(void) {
+static void assert_inline_image_carries(float first_default) {
+    const float want[4] = {first_default, 0.25F, 0.5F, 1.0F};
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx));
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     for (uint32_t v = 0; v < 4U; v++) {
         float got[4] = {0};
         nt_sprite_renderer_test_last_emit_radial(v, got, 4);
-        TEST_ASSERT_EQUAL_MEMORY(k_rich_base_block, got, sizeof k_rich_base_block);
+        TEST_ASSERT_EQUAL_MEMORY(want, got, sizeof want);
     }
 }
 
-/* A custom-attr ctx base material: the inline image inherits it and carries the game's base block. */
-static void test_inline_image_carries_ctx_base_block(void) {
-    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(), k_rich_base_block, sizeof k_rich_base_block);
+/* A custom-attr ctx base material: the inline image inherits it and bakes its attr defaults. */
+static void test_inline_image_bakes_ctx_material_defaults(void) {
+    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(0.125F));
     frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
-    assert_inline_image_carries_rich_base_block();
+    assert_inline_image_carries(0.125F);
 }
 
-/* A style image_material that names the base handle explicitly gets the block too. */
-static void test_inline_image_explicit_base_material_carries_block(void) {
-    const nt_material_t mat = make_rich_custom_material();
-    nt_ui_set_sprite_material(s_fx.ctx, mat, k_rich_base_block, sizeof k_rich_base_block);
-    frame_text_image_text(mat, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
-    assert_inline_image_carries_rich_base_block();
+/* A style image_material with its own defaults bakes those, not the ctx base's. */
+static void test_inline_image_bakes_style_material_defaults(void) {
+    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(0.125F));
+    frame_text_image_text(make_rich_custom_material(0.75F), NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
+    assert_inline_image_carries(0.75F);
 }
 
 /* The default resolves per walk: a base swapped between two walks of one frame is the one drawn. */
 static void test_inline_image_default_follows_base_swap_between_walks(void) {
-    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(), k_rich_base_block, sizeof k_rich_base_block);
+    nt_ui_set_sprite_material(s_fx.ctx, s_fx.sprite_material);
     frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
-    nt_ui_set_sprite_material(s_fx.ctx, s_fx.sprite_material, NULL, 0);
+    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(0.375F));
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx));
+    assert_inline_image_carries(0.375F);
 }
-
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* Only the ctx base material has a block: another custom-attr image material is rejected. */
-static void test_inline_image_other_custom_material_asserts(void) {
-    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(), k_rich_base_block, sizeof k_rich_base_block);
-    NT_TEST_EXPECT_ASSERT(frame_text_image_text(make_rich_custom_material(), NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU));
-}
-#endif
 
 /* (6) the inline image's composed <color> reaches the standard u8 sprite tint: a run with
  * <color> r=255 g=128 b=0 a=255 emits that per-vertex color on the region quad (the walker
@@ -2617,12 +2607,9 @@ int main(void) {
     RUN_TEST(test_over_cap_layers_hard_guard);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_defaults_material_from_ctx);
-    RUN_TEST(test_inline_image_carries_ctx_base_block);
-    RUN_TEST(test_inline_image_explicit_base_material_carries_block);
+    RUN_TEST(test_inline_image_bakes_ctx_material_defaults);
+    RUN_TEST(test_inline_image_bakes_style_material_defaults);
     RUN_TEST(test_inline_image_default_follows_base_swap_between_walks);
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_inline_image_other_custom_material_asserts);
-#endif
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_two_inline_images_coalesce);
     RUN_TEST(test_inline_images_not_in_image_command_count);

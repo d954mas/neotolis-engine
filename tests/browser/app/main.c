@@ -816,7 +816,7 @@ static void composition_object_draw(void *user_data, float x, float y, float w, 
     const float positions[4][2] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
     nt_sprite_renderer_set_material(s_sprite_material);
-    nt_sprite_renderer_emit_geometry(s_atlas_handle, s_atlas_white_region, positions, 4U, indices, 6U, world_mat4, nt_color_pack(color));
+    nt_sprite_renderer_emit_geometry(s_atlas_handle, s_atlas_white_region, positions, 4U, indices, 6U, world_mat4, nt_color_pack(color), NULL, 0U);
 }
 
 static void render_rich_composition(nt_ui_context_t *ctx) {
@@ -1171,7 +1171,7 @@ int main(int argc, char *argv[]) {
         .label = "browser_smoke_text",
     });
 
-    nt_ui_set_sprite_material(s_ctx, s_sprite_material, NULL, 0);
+    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
     nt_ui_set_text_material(s_ctx, s_text_material);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){

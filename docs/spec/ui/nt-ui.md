@@ -209,47 +209,20 @@ Both modes use the same `tree_baked[layout_idx]` + per-id mirror
 `hit_generation[slot]` rejects stale ids). Opacity is a separate
 `float` accumulator on the same struct.
 
-### Base sprite material
+### Custom-attr base material
 
-`nt_ui_set_sprite_material(ctx, material, base_custom_attrs, base_custom_bytes)`
-sets the base material: RECTANGLE, BORDER and IMAGE emits, rich-text inline
-images, and the debug overlays draw with it unless something else names
-another material. A plain material passes `NULL, 0`, and each base emit then
-pays one branch. A custom-attr material (`attr_map_count > 0`) needs a
-per-vertex block on every emit, so the game supplies one:
-`base_custom_bytes` must equal `attr_map_count * 16`, asserted once at set time.
-The context keeps a copy. The engine gives the bytes no meaning: which values
-mean "plain sprite" is the game's shader contract.
+The base sprite material may declare an `attr_map` if it also declares attr
+defaults ([Attr defaults](../render/material.md#attr-defaults)). Every emit
+without its own block bakes them: RECTANGLE, BORDER, IMAGE, rich-text inline
+images and the debug overlays. An `nt_ui_image_custom` block replaces them for
+its own emit. Custom widgets on the base handle then batch with plain panels and
+icons instead of flushing at every boundary. The same holds for any IMAGE
+override or rich `image_material` whose material has defaults.
 
-The rule is handle equality. Every emit whose material resolves to the base
-handle carries the base block: an IMAGE with no override, or with an override
-equal to that handle, and a rich block whose `image_material` is unset or is
-that handle. An override with any other handle never gets the block, so a
-different custom-attr material there must bring its own. An `nt_ui_image_custom`
-block always replaces the base block for its own emit.
-
-`nt_ui_image_custom` widgets of both modes may share the base material and
-then batch with plain panels and icons instead of flushing at every boundary.
-A GEOMETRY-mode quad must start at a multiple of four vertices
-([geom_mode](radial-widgets.md#geom_mode-region-vs-geometry)). The walker calls
-`nt_sprite_renderer_align_next_vertex_to_4` before it, which pads the batch
-with up to 3 unreferenced vertices.
-
-A custom-attr base moves all base UI to the extended vertex stride: 20 bytes
-plus 16 per attr, so 36 with one attr and 84 with four. Its batches cap at the
-sprite renderer's `custom_max_vertices`, not `max_vertices`, and one rounded
-BORDER emits up to 56 vertices, so a custom-attr base needs
-`custom_max_vertices >= 56`. A rounded panel drawn as a GEOMETRY-mode
-`nt_ui_image_custom` quad costs 4 vertices; a Clay `cornerRadius` fan costs up
-to 29.
-
-The debug inspector walk drops the block while it swaps in
-`inspector_sprite_material`, which must be plain (asserted by
-`nt_ui_inspector_set_materials`). The inspector highlight and hit-zone overlays
-follow the same handle rule: drawn with the base material, they stage the
-block before every quad; drawn with the inspector material, they stage none.
-Calling `nt_ui_set_sprite_material` from a CUSTOM handler is unsupported: an
-inspector walk restores the material it swapped out when it ends.
+A custom-attr base moves all base UI to the extended vertex stride (20 bytes
+plus 16 per attr). Its batches cap at the sprite renderer's
+`custom_max_vertices`, and one rounded BORDER emits up to 56 vertices, so a
+custom-attr base needs `custom_max_vertices >= 56`.
 
 ## Interaction model
 
