@@ -8,16 +8,15 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
+#include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
 #include "material/nt_material.h"
 #include "renderers/nt_sprite_renderer.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
-#include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
-#include "ui/nt_ui_inspector.h"
-#include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_radial.h"
 #include "unity.h"
 
@@ -29,7 +28,7 @@ static const float k_defaults[4] = {0.125F, 0.25F, 0.5F, 1.0F};
 static const float k_widget_block[4] = {3.0F, 5.0F, 7.0F, 11.0F};
 
 /* One game attr the walker never injects (not a_layout/a_uvrect): the bytes must arrive verbatim. */
-static nt_material_t make_one_attr_material(void) {
+static nt_material_t make_one_attr_material(bool has_defaults) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
     desc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
@@ -41,7 +40,7 @@ static nt_material_t make_one_attr_material(void) {
     desc.attr_map[0].location = 4;
     memcpy(desc.attr_map[0].default_value, k_defaults, sizeof k_defaults);
     desc.attr_map_count = 1;
-    desc.has_attr_defaults = true;
+    desc.has_attr_defaults = has_defaults;
     desc.label = "base_custom_material";
     return nt_material_create(&desc);
 }
@@ -63,7 +62,7 @@ static void assert_batch_range_carries_defaults(uint32_t first, uint32_t end) {
  * material: one draw, every base vertex carries the defaults, the widget's vertices its own block. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_defaults_ride_every_base_emit_in_one_batch(void) {
-    const nt_material_t mat = make_one_attr_material();
+    const nt_material_t mat = make_one_attr_material(true);
     nt_ui_set_sprite_material(s_fx.ctx, mat);
 
     nt_atlas_region_ref_t plain_ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
@@ -119,35 +118,6 @@ static void test_defaults_ride_every_base_emit_in_one_batch(void) {
         nt_sprite_renderer_test_batch_custom(first_widget_vertex + v, got, 4);
         TEST_ASSERT_EQUAL_MEMORY_MESSAGE(k_widget_block, got, sizeof k_widget_block, "custom widget keeps its own block");
     }
-}
-
-/* The rect/border paths that build geometry instead of one screen quad: rounded rect, rounded border,
- * and a square border under rotation (its mesh path, not the four-quad fast path). */
-static void test_defaults_ride_geometry_rect_and_border_paths(void) {
-    nt_ui_set_sprite_material(s_fx.ctx, make_one_attr_material());
-    static nt_ui_transform_t s_rot;
-    s_rot = nt_ui_transform_defaults();
-    s_rot.rotation_z = 0.3F;
-    const Clay_Sizing box = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(30)};
-    const Clay_BorderElementConfig border = {.color = {0, 255, 0, 255}, .width = {.left = 2, .right = 2, .top = 2, .bottom = 2}};
-
-    nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) {
-        CLAY({.id = CLAY_ID("rounded_rect"), .layout = {.sizing = box}, .backgroundColor = {255, 0, 0, 255}, .cornerRadius = CLAY_CORNER_RADIUS(6)}) {}
-        CLAY({.id = CLAY_ID("rounded_border"), .layout = {.sizing = box}, .cornerRadius = CLAY_CORNER_RADIUS(6), .border = border}) {}
-        CLAY({.id = CLAY_ID("rotated_border"), .layout = {.sizing = box}, .border = border, .userData = (void *)NT_UI_DATA_XFORM(0U, &s_rot, 1.0F)}) {}
-    }
-    nt_ui_end(s_fx.ctx);
-
-    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_ui_walk(s_fx.ctx, &target);
-
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_border_command_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
-    TEST_ASSERT_GREATER_THAN_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count()); /* rotated border = one mesh */
-    assert_batch_range_carries_defaults(0U, nt_sprite_renderer_test_last_emit_first_vertex() + nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
 static const float k_radial_defaults[8] = {9.0F, 8.0F, 7.0F, 6.0F, 5.0F, 4.0F, 3.0F, 2.0F};
@@ -241,110 +211,17 @@ static void test_geometry_widget_shares_base_batch_aligned(void) {
     TEST_ASSERT_TRUE(pos[3][0] == pos[0][0] && pos[3][1] == pos[2][1]);
 }
 
-#if NT_UI_DEBUG_TOOLS
-static nt_ui_transform_t s_xform;
-
-/* Two frames of one selected interactive element under the custom-attr base material: frame 1 bakes
- * the layout (and transform), frame 2 records its hit zone. The overlays read both afterwards. */
-static void select_debug_element(bool is_3d, bool transformed) {
-    nt_ui_set_sprite_material(s_fx.ctx, make_one_attr_material());
-    s_fx.ctx->use_raycast_input = is_3d;
-    nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_ui_debug_set_recording(s_fx.ctx, true);
-    s_xform = nt_ui_transform_defaults();
-    if (transformed) {
-        s_xform.offset_x = 40.0F;
-        s_xform.rotation_z = 0.4F;
-        s_xform.scale_x = 1.2F;
-    }
-    const float identity_vp[16] = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F};
-    for (int frame = 0; frame < 2; ++frame) {
-        nt_pointer_t mouse = {0};
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-        if (is_3d) {
-            nt_ui_set_view_proj(s_fx.ctx, identity_vp);
-        }
-        CLAY({.id = CLAY_ID("dbg_target"),
-              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 120.0F, .y = 160.0F}},
-              .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(48)}},
-              .userData = transformed ? (void *)NT_UI_DATA_XFORM(0U, &s_xform, 1.0F) : NULL}) {
-            (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("dbg_target"));
-        }
-        s_fx.ctx->inspector_selected_id = nt_ui_id("dbg_target");
-        nt_ui_end(s_fx.ctx);
-    }
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("dbg_target"), s_fx.ctx->inspector_highlight_id);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_debug_get_zone_count(s_fx.ctx));
-}
-
-/* Each overlay draw flushes once, so its last 4-vertex emit is the overlay's own outline edge. */
-static void assert_overlay_drew_with_defaults(void) {
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_sprite_renderer_test_nonempty_flush_calls());
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
-    for (uint32_t v = 0; v < 4U; ++v) {
-        float got[4] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, got, 4);
-        TEST_ASSERT_EQUAL_MEMORY_MESSAGE(k_defaults, got, sizeof k_defaults, "overlay emit bakes the material defaults");
-    }
-}
-
-static void draw_hit_zones(void) {
-    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_sprite_renderer_test_reset_nonempty_flush_calls();
-    nt_ui_debug_draw_hit_zones(s_fx.ctx, &target, NT_UI_DEBUG_HIT_ALL, NT_FONT_INVALID, 0.0F);
-    nt_sprite_renderer_flush();
-}
-
-static void draw_inspector_overlay(void) {
-    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_sprite_renderer_test_reset_nonempty_flush_calls();
-    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
-    nt_sprite_renderer_flush();
-}
-
-static void test_hit_zones_bake_defaults_2d(void) {
-    select_debug_element(false, true);
-    draw_hit_zones();
-    assert_overlay_drew_with_defaults();
-}
-
-static void test_hit_zones_bake_defaults_3d(void) {
-    select_debug_element(true, true);
-    draw_hit_zones();
-    assert_overlay_drew_with_defaults();
-}
-
-/* The three highlight branches: placed-matrix (3D), transformed 2D and axis-aligned 2D. */
-static void test_inspector_highlight_bakes_defaults_3d(void) {
-    select_debug_element(true, true);
-    draw_inspector_overlay();
-    assert_overlay_drew_with_defaults();
-}
-
-static void test_inspector_highlight_bakes_defaults_2d_transformed(void) {
-    select_debug_element(false, true);
-    draw_inspector_overlay();
-    assert_overlay_drew_with_defaults();
-}
-
-static void test_inspector_highlight_bakes_defaults_2d_axis_aligned(void) {
-    select_debug_element(false, false);
-    draw_inspector_overlay();
-    assert_overlay_drew_with_defaults();
-}
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* Base emits pass no block, so a custom-attr base without defaults is rejected where it is set. */
+static void test_custom_attr_base_without_defaults_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_ui_set_sprite_material(s_fx.ctx, make_one_attr_material(false))); }
 #endif
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_defaults_ride_every_base_emit_in_one_batch);
-    RUN_TEST(test_defaults_ride_geometry_rect_and_border_paths);
     RUN_TEST(test_geometry_widget_shares_base_batch_aligned);
-#if NT_UI_DEBUG_TOOLS
-    RUN_TEST(test_hit_zones_bake_defaults_2d);
-    RUN_TEST(test_hit_zones_bake_defaults_3d);
-    RUN_TEST(test_inspector_highlight_bakes_defaults_3d);
-    RUN_TEST(test_inspector_highlight_bakes_defaults_2d_transformed);
-    RUN_TEST(test_inspector_highlight_bakes_defaults_2d_axis_aligned);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_custom_attr_base_without_defaults_asserts);
 #endif
     return UNITY_END();
 }

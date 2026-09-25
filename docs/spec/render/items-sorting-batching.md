@@ -195,8 +195,10 @@ Each non-ECS emit takes an optional block (`custom`, `custom_bytes`) baked into
 all its vertices, like color. The source per emit is: the emit's block, else the
 material's attr defaults ([Attr defaults](material.md#attr-defaults)), else an
 assert. So plain widgets and custom widgets can share one custom-attr material
-and one batch. The ECS `draw_list` path takes plain materials only: it switches
-materials without a flush, so one staging batch must keep one vertex stride.
+and one batch. One staging batch keeps one vertex stride: opening a command
+whose material changes the stride flushes the pending emits first, so immediate
+emits and `draw_list` runs of plain and custom-attr materials mix freely. ECS
+emits pass no block, so a custom-attr material there needs attr defaults.
 
 A shader that derives a quad corner from `gl_VertexID & 3` needs each quad to
 start at a multiple of four vertices. `nt_sprite_renderer_align_next_vertex_to_4`

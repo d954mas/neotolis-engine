@@ -1550,15 +1550,46 @@ void test_sprite_renderer_custom_attr_emit_without_block_or_defaults_asserts(voi
     NT_TEST_EXPECT_ASSERT(emit_test_quad(NULL, 0));
 }
 
-/* draw_list switches materials without a flush, so a custom stride must never enter it. */
-void test_sprite_renderer_draw_list_asserts_on_custom_attr_material(void) {
+/* A custom block of the wrong size would desync the upload stride from the pipeline's. */
+void test_sprite_renderer_custom_block_size_mismatch_asserts(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xADULL);
+    const float big[8] = {0};
+    nt_sprite_renderer_set_material(create_defaults_test_material(1.0F));
+    NT_TEST_EXPECT_ASSERT(emit_test_quad(big, (uint8_t)sizeof(big)));
+    nt_sprite_renderer_set_material(create_test_material());
+    NT_TEST_EXPECT_ASSERT(emit_test_quad(big, 16));
+}
+
+/* ECS emits pass no block, so a custom-attr material with defaults bakes them there too. */
+void test_sprite_renderer_draw_list_bakes_material_defaults(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
     s_atlas_res = register_test_atlas(0xABULL);
-    const nt_material_t mat = create_defaults_test_material(1.0F);
+    const nt_material_t mat = create_defaults_test_material(7.0F);
     nt_entity_t entity = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
     nt_render_item_t item = {.entity = entity.id, .batch_key = sprite_batch_key(entity, mat)};
-    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_draw_list(&item, 1));
+    nt_sprite_renderer_draw_list(&item, 1);
+    const float want[4] = {7.0F, 2.0F, 3.0F, 4.0F};
+    assert_last_emit_custom(want);
+}
+
+/* Immediate custom-attr emits left unflushed, then a plain draw_list: the stride change flushes
+ * them as their own batch instead of the plain vertices overwriting them at the base stride. */
+void test_sprite_renderer_stride_change_flushes_pending_batch(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xAEULL);
+    nt_sprite_renderer_set_material(create_defaults_test_material(1.0F));
+    emit_test_quad(NULL, 0);
+    const nt_material_t plain = create_test_material();
+    nt_entity_t entity = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, plain);
+    nt_render_item_t item = {.entity = entity.id, .batch_key = sprite_batch_key(entity, plain)};
+    nt_sprite_renderer_test_reset_nonempty_flush_calls();
+    nt_sprite_renderer_draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_nonempty_flush_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_last_emit_first_vertex());
 }
 
 /* With no room for the padding the quad flushes instead and starts the next batch at vertex 0. */
@@ -1574,6 +1605,7 @@ void test_sprite_renderer_align_without_room_starts_quad_at_zero(void) {
 
     nt_sprite_renderer_test_reset_nonempty_flush_calls();
     nt_sprite_renderer_align_next_vertex_to_4();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(17, nt_sprite_renderer_test_vertex_count(), "no padding past the cap");
     emit_test_quad(NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_nonempty_flush_calls());
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_last_emit_first_vertex());
@@ -2244,7 +2276,9 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_per_vertex);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_material_defaults);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_without_block_or_defaults_asserts);
-    RUN_TEST(test_sprite_renderer_draw_list_asserts_on_custom_attr_material);
+    RUN_TEST(test_sprite_renderer_custom_block_size_mismatch_asserts);
+    RUN_TEST(test_sprite_renderer_draw_list_bakes_material_defaults);
+    RUN_TEST(test_sprite_renderer_stride_change_flushes_pending_batch);
     RUN_TEST(test_sprite_renderer_align_without_room_starts_quad_at_zero);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_intrinsic_scale_emit_positions_and_uvs);

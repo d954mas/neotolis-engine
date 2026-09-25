@@ -212,7 +212,8 @@ Both modes use the same `tree_baked[layout_idx]` + per-id mirror
 ### Custom-attr base material
 
 The base sprite material may declare an `attr_map` if it also declares attr
-defaults ([Attr defaults](../render/material.md#attr-defaults)). Every emit
+defaults ([Attr defaults](../render/material.md#attr-defaults));
+`nt_ui_set_sprite_material` and `nt_ui_inspector_set_materials` assert it. Every emit
 without its own block bakes them: RECTANGLE, BORDER, IMAGE, rich-text inline
 images and the debug overlays. An `nt_ui_image_custom` block replaces them for
 its own emit. Custom widgets on the base handle then batch with plain panels and
@@ -221,8 +222,9 @@ override or rich `image_material` whose material has defaults.
 
 A custom-attr base moves all base UI to the extended vertex stride (20 bytes
 plus 16 per attr). Its batches cap at the sprite renderer's
-`custom_max_vertices`, and one rounded BORDER emits up to 56 vertices, so a
-custom-attr base needs `custom_max_vertices >= 56`.
+`custom_max_vertices`, and one rounded BORDER emits up to
+`8 × (NT_UI_CORNER_SEGMENTS + 1)` vertices (56 today), so a custom-attr base
+needs `custom_max_vertices` at least that.
 
 ## Interaction model
 

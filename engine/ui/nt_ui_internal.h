@@ -12,6 +12,7 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
+#include "material/nt_material.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
@@ -572,6 +573,12 @@ const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *
  * order, not camera distance). Scope: recorded debug_zones only (interactive widgets) — non-interactive
  * elements are tree-selectable, not scene-hover-pickable. 0 = none. */
 uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py);
+
+/* UI base emits pass no custom block, so a custom-attr material needs attr defaults. Assert-only. */
+static inline bool nt_ui_internal_material_draws_base_emits(nt_material_t m) {
+    const nt_material_info_t *mi = nt_material_get_info(m);
+    return mi != NULL && (mi->attr_map_count == 0U || mi->has_attr_defaults);
+}
 
 void nt_ui_internal_project_layout_to_world(const float m[16], float vy, float vh, float x, float y, float *out_x, float *out_y);
 

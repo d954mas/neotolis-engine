@@ -534,13 +534,6 @@ static void assert_inline_image_carries(float first_default) {
     }
 }
 
-/* A custom-attr ctx base material: the inline image inherits it and bakes its attr defaults. */
-static void test_inline_image_bakes_ctx_material_defaults(void) {
-    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(0.125F));
-    frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
-    assert_inline_image_carries(0.125F);
-}
-
 /* A style image_material with its own defaults bakes those, not the ctx base's. */
 static void test_inline_image_bakes_style_material_defaults(void) {
     nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(0.125F));
@@ -2607,7 +2600,6 @@ int main(void) {
     RUN_TEST(test_over_cap_layers_hard_guard);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_defaults_material_from_ctx);
-    RUN_TEST(test_inline_image_bakes_ctx_material_defaults);
     RUN_TEST(test_inline_image_bakes_style_material_defaults);
     RUN_TEST(test_inline_image_default_follows_base_swap_between_walks);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);

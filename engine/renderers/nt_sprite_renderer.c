@@ -79,7 +79,7 @@ static struct {
     uint8_t cur_material_custom_bytes;
     /* The bound material's attr defaults, baked by an emit without its own block;
      * NULL when it declares none. Points into the material pool (slots never move). */
-    const float *cur_attr_defaults;
+    const uint8_t *cur_attr_defaults;
 
     /* Recorded per-state draw commands. Last entry is the "currently open"
      * cmd that emit_one writes into; closed by close_current_cmd() before a
@@ -182,7 +182,7 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     /* Custom flush indexes into indices[] too, so cmv must not exceed the base
      * caps. */
     NT_ASSERT(d.custom_max_vertices <= d.max_vertices && "sprite custom_max_vertices must not exceed max_vertices");
-    NT_ASSERT(d.custom_max_vertices >= 16U && "sprite custom_max_vertices must be >= 16 (largest fixed single emit: slice9 = 16 verts)");
+    NT_ASSERT(d.custom_max_vertices >= 16U && "sprite custom_max_vertices must be >= 16 (slice9 = 16 verts; a custom-attr nt_ui base needs its largest emit)");
 
     memset(&s_sprite, 0, sizeof(s_sprite));
     s_sprite.max_pipelines = d.max_pipelines;
@@ -384,7 +384,9 @@ static void close_current_cmd(void) {
  * at the current staging index_count. Caller must close the previous cmd via
  * close_current_cmd() before opening a new one. */
 static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_material_t mat) {
-    if (s_sprite.cmd_count >= NT_SPRITE_RENDERER_MAX_DRAW_CMDS) {
+    /* One staging batch has one vertex stride: a draw_list run after custom-attr emits lands here unflushed. */
+    const uint32_t stride = (uint32_t)NT_SPRITE_BASE_STRIDE + ((uint32_t)mi->attr_map_count * 16U);
+    if (s_sprite.cmd_count >= NT_SPRITE_RENDERER_MAX_DRAW_CMDS || (s_sprite.vertex_count > 0 && stride != s_sprite.cur_stride)) {
         nt_sprite_renderer_flush();
     }
     NT_ASSERT(s_sprite.cmd_count < NT_SPRITE_RENDERER_MAX_DRAW_CMDS && "sprite draw-cmd queue full; raise NT_SPRITE_RENDERER_MAX_DRAW_CMDS");
@@ -398,10 +400,10 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     /* Set here (not in set_material) so the ECS draw_list path, which calls
      * open_cmd directly, is covered too. */
     s_sprite.cur_material_custom_bytes = (uint8_t)(mi->attr_map_count * 16);
-    s_sprite.cur_attr_defaults = mi->has_attr_defaults ? mi->attr_map_defaults[0] : NULL;
+    s_sprite.cur_attr_defaults = mi->has_attr_defaults ? (const uint8_t *)mi->attr_map_defaults : NULL;
     /* The whole batch opened here uploads at this stride (set per-flush, not
      * per-emit, so the plain fast path stays a constant 20). */
-    s_sprite.cur_stride = (uint32_t)NT_SPRITE_BASE_STRIDE + s_sprite.cur_material_custom_bytes;
+    s_sprite.cur_stride = stride;
     c->tex_count = mi->tex_count;
     /* Slot 0 is the atlas page by contract: ensure_current_cmd_page_texture substitutes
      * into it before any index is staged, so resolving the material's value is dead work. */
@@ -474,12 +476,12 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 #endif
 
 /* Whole FLOAT4 lanes: a constant-size copy inlines, a variable-size one is a libc call per vertex. */
-NT_SPRITE_NOINLINE static void bake_custom_lanes(uint32_t base, uint32_t count, const float *src) {
+NT_SPRITE_NOINLINE static void bake_custom_lanes(uint32_t base, uint32_t count, const uint8_t *src) {
     const uint32_t lanes = s_sprite.cur_material_custom_bytes / 16U;
     for (uint32_t i = 0; i < count; i++) {
         uint8_t *dst = s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
         for (uint32_t l = 0; l < lanes; ++l) {
-            memcpy(dst + ((size_t)l * 16U), src + ((size_t)l * 4U), 16U);
+            memcpy(dst + ((size_t)l * 16U), src + ((size_t)l * 16U), 16U);
         }
     }
 }
@@ -493,7 +495,7 @@ static inline void bake_custom_attrs(uint32_t base, uint32_t count, const float 
     if (s_sprite.cur_material_custom_bytes == 0) {
         return;
     }
-    const float *src = (custom_bytes != 0U) ? custom : s_sprite.cur_attr_defaults;
+    const uint8_t *src = (custom_bytes != 0U) ? (const uint8_t *)custom : s_sprite.cur_attr_defaults;
     NT_ASSERT(src != NULL && "custom-attr material: pass a custom block or give the material attr defaults");
     NT_ASSERT(base + count <= s_sprite.custom_max_vertices && "custom-attr bake out of range at extended stride");
     bake_custom_lanes(base, count, src);
@@ -1118,8 +1120,6 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
             run_start = run_end;
             continue;
         }
-        /* Runs switch cmds without a flush, so one staging batch must keep one stride. */
-        NT_ASSERT(mat_info->attr_map_count == 0 && "ECS sprite path draws plain materials only (attr_map_count == 0)");
 
         /* Each batch_key boundary opens a fresh cmd. */
         if (mat->id != memo_mat) {
@@ -1237,22 +1237,19 @@ void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *
     }
 }
 
-void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count) {
-    NT_ASSERT(out != NULL);
-    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_radial: index out of range");
-    NT_ASSERT((uint32_t)float_count * sizeof(float) <= NT_SPRITE_CUSTOM_STRIDE_MAX && "last_emit_radial: float_count exceeds custom stride");
-    /* Custom block sits at +20 within each vertex's cur_stride slot in staging
-     * (flush leaves cur_stride + staging data intact for readback). */
-    const uint8_t *src = s_sprite.staging + ((size_t)(s_sprite.last_emit_first_vertex + v_idx) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
-    memcpy(out, src, (size_t)float_count * sizeof(float));
-}
-
 void nt_sprite_renderer_test_batch_custom(uint32_t vertex, float *out, uint8_t float_count) {
     NT_ASSERT(out != NULL);
     NT_ASSERT(vertex < s_sprite.last_emit_first_vertex + s_sprite.last_emit_vertex_count && "batch_custom: index out of range");
     NT_ASSERT((uint32_t)float_count * sizeof(float) <= NT_SPRITE_CUSTOM_STRIDE_MAX && "batch_custom: float_count exceeds custom stride");
+    /* Custom block sits at +20 within each vertex's cur_stride slot in staging
+     * (flush leaves cur_stride + staging data intact for readback). */
     const uint8_t *src = s_sprite.staging + ((size_t)vertex * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
     memcpy(out, src, (size_t)float_count * sizeof(float));
+}
+
+void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count) {
+    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_radial: index out of range");
+    nt_sprite_renderer_test_batch_custom(s_sprite.last_emit_first_vertex + v_idx, out, float_count);
 }
 
 uint32_t nt_sprite_renderer_test_last_emit_first_vertex(void) { return s_sprite.last_emit_first_vertex; }
