@@ -1275,11 +1275,8 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
 /* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel.
  *
  * INVARIANT (load-bearing): the fs's gl_VertexID&3 corner derivation requires each
- * quad's base vertex index to be a multiple of 4. This holds because GEOMETRY-mode
- * widgets use a DISTINCT material — flushed on material change, which resets the
- * staging vertex_count to 0 — and emit EXACTLY 4 verts per widget. Emitting
- * non-4-vertex geometry into that material, or sharing it with other geometry,
- * would break the corner derivation. */
+ * quad's base vertex index to be a multiple of 4. The align call enforces it, so the
+ * quad may share a batch with base emits of any vertex count; it emits EXACTLY 4 verts. */
 static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
     const Clay_BoundingBox bb = c->boundingBox;
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
@@ -1289,6 +1286,7 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_align_next_vertex_to_4();
     nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col);
 }
 // #endregion
@@ -2130,7 +2128,7 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material, const void *base_custom_attrs, uint32_t base_custom_bytes) {
+void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material, const float *base_custom_attrs, uint8_t base_custom_bytes) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_sprite_material: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_sprite_material: must be called outside begin/end");
     NT_ASSERT(sprite_material.id != 0 && "nt_ui_set_sprite_material: invalid material handle");
@@ -2140,9 +2138,11 @@ void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_materi
     NT_ASSERT(base_custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui_set_sprite_material: base_custom_bytes exceeds NT_SPRITE_CUSTOM_STRIDE_MAX");
     NT_ASSERT((base_custom_attrs != NULL) == (base_custom_bytes != 0U) && "nt_ui_set_sprite_material: base_custom_attrs must be non-NULL exactly when base_custom_bytes > 0");
     ctx->sprite_material = sprite_material;
-    ctx->base_custom_bytes = (uint8_t)base_custom_bytes;
-    if (base_custom_bytes != 0U) {
-        memcpy(ctx->base_custom_attrs, base_custom_attrs, base_custom_bytes);
+    /* Hard bound: with asserts OFF a bad size stages nothing rather than overrun the copy. */
+    const bool fits = base_custom_attrs != NULL && base_custom_bytes <= sizeof ctx->base_custom_attrs;
+    ctx->base_custom_bytes = fits ? base_custom_bytes : 0U;
+    if (ctx->base_custom_bytes != 0U) {
+        memcpy(ctx->base_custom_attrs, base_custom_attrs, ctx->base_custom_bytes);
     }
 }
 

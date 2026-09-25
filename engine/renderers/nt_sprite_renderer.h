@@ -120,8 +120,9 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
 /* Set the custom per-vertex attr block baked into every vertex of the next emit
  * (like color — uniform across the widget's verts). When the bound material declares
  * custom attrs (attr_map_count > 0), EACH emit must be preceded by this call with
- * bytes == attr_map_count*16 (asserted; wrong size desyncs the upload stride). Plain
- * materials ignore it. bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX. Consumed (cleared) per emit. */
+ * bytes == attr_map_count*16 (asserted; wrong size desyncs the upload stride); a plain
+ * material asserts on any block. bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX. Call after set_material:
+ * a bind drops an unconsumed block, and every emit consumes it, even one that draws nothing. */
 void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes);
 
 /* Emit one atlas region at one mat4 transform.
@@ -187,6 +188,11 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
  * Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
                                       const float *world_matrix, uint32_t color_packed);
+
+/* Pad staging with up to 3 unreferenced vertices so the next emit's first vertex is a multiple
+ * of 4: the contract of a shader that derives a quad corner from gl_VertexID & 3. The batch does
+ * not break. Caller MUST have called set_material first. */
+void nt_sprite_renderer_align_next_vertex_to_4(void);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

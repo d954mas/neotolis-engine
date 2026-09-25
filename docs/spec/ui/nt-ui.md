@@ -212,24 +212,39 @@ Both modes use the same `tree_baked[layout_idx]` + per-id mirror
 ### Base sprite material
 
 `nt_ui_set_sprite_material(ctx, material, base_custom_attrs, base_custom_bytes)`
-sets the material of every base emit: RECTANGLE, BORDER, plain and slice9
-IMAGE, and rich-text inline images whose block leaves `image_material` unset.
-A plain material passes `NULL, 0`. A custom-attr material (`attr_map_count > 0`)
-needs a per-vertex block on every emit, so the game supplies one:
+sets the base material: RECTANGLE, BORDER and IMAGE emits, rich-text inline
+images, and the debug overlays draw with it unless something else names
+another material. A plain material passes `NULL, 0`, and each base emit then
+pays one branch. A custom-attr material (`attr_map_count > 0`) needs a
+per-vertex block on every emit, so the game supplies one:
 `base_custom_bytes` must equal `attr_map_count * 16`, asserted once at set time.
-The context keeps a copy, and the walker stages it before each base emit on
-that material; the plain path pays one branch per emit. The engine gives the
-bytes no meaning: which values mean "plain sprite" is the game's shader
-contract. Custom-attr widgets (`nt_ui_image_custom`) on the same material then
-batch with plain panels and icons instead of flushing at every boundary.
+The context keeps a copy. The engine gives the bytes no meaning: which values
+mean "plain sprite" is the game's shader contract.
 
-A per-element material override and an `nt_ui_image_custom` block never receive
-the base block, and the sprite renderer still asserts on every other
-custom-attr emit that lacks `set_custom_attrs`. The debug inspector walk drops
-the block while it swaps in `inspector_sprite_material`. The inspector highlight
-and hit-zone overlays apply the same rule to each pass. If a pass draws with the
-base material, it stages the block before every quad. If it draws with
-`inspector_sprite_material`, it stages none.
+The rule is handle equality. Every emit whose material resolves to the base
+handle carries the base block: an IMAGE with no override, or with an override
+equal to that handle, and a rich block whose `image_material` is unset or is
+that handle. An override with any other handle never gets the block, so a
+different custom-attr material there must bring its own. An `nt_ui_image_custom`
+block always replaces the base block for its own emit.
+
+`nt_ui_image_custom` widgets of both modes may share the base material and
+then batch with plain panels and icons instead of flushing at every boundary.
+A GEOMETRY-mode quad must start at a multiple of four vertices
+([geom_mode](radial-widgets.md#geom_mode-region-vs-geometry)). The walker calls
+`nt_sprite_renderer_align_next_vertex_to_4` before it, which pads the batch
+with up to 3 unreferenced vertices.
+
+A custom-attr base moves all base UI to the extended vertex stride, so its
+batches cap at the sprite renderer's `custom_max_vertices`, not `max_vertices`.
+
+The debug inspector walk drops the block while it swaps in
+`inspector_sprite_material`, which must be plain (asserted by
+`nt_ui_inspector_set_materials`). The inspector highlight and hit-zone overlays
+follow the same handle rule: drawn with the base material, they stage the
+block before every quad; drawn with the inspector material, they stage none.
+Calling `nt_ui_set_sprite_material` from a CUSTOM handler is unsupported: an
+inspector walk restores the material it swapped out when it ends.
 
 ## Interaction model
 

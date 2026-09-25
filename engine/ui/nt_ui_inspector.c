@@ -10,6 +10,7 @@
 
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
+#include "material/nt_material.h"
 #include "math/nt_math.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
@@ -41,7 +42,10 @@ void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_met
 void nt_ui_inspector_set_materials(nt_ui_context_t *ctx, nt_material_t sprite, nt_material_t text) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_materials: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_inspector_set_materials: must be called outside begin/end");
-    /* 0 handles fall back to the game's sprite/text material at walk time. */
+    /* 0 handles fall back to the game's sprite/text material at walk time. The inspector passes
+     * stage no custom-attr block, so their own sprite material must be plain. */
+    NT_ASSERT((sprite.id == 0U || (nt_material_get_info(sprite) != NULL && nt_material_get_info(sprite)->attr_map_count == 0U)) &&
+              "nt_ui_inspector_set_materials: sprite material must be plain (attr_map_count == 0)");
     ctx->inspector_sprite_material = sprite;
     ctx->inspector_text_material = text;
 }

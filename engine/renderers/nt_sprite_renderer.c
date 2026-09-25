@@ -513,6 +513,9 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
      * make_pipeline polls the lost context and hands back an invalid pipeline. */
     NT_ASSERT(mat_info != NULL && mat_info->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
 
+    /* A block is staged after the bind for the next emit, so a bind drops any unconsumed one. */
+    s_sprite.cur_custom_bytes = 0;
+
     /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
     if (mat.id == s_sprite.current_mat.id && mat_info->program.id == s_sprite.current_program.id && s_sprite.cmd_count > 0) {
         return;
@@ -520,13 +523,6 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
 
     if (s_sprite.cmd_count > 0) {
         nt_sprite_renderer_flush();
-    }
-
-    /* Plain material clears any stale custom-attr block so it can't leak into a
-     * plain emit; a custom-attr material's block is supplied by the caller via
-     * set_custom_attrs after this bind. */
-    if (mat_info->attr_map_count == 0) {
-        s_sprite.cur_custom_bytes = 0;
     }
 
     /* An invalid pipeline still opens a cmd; flush drops it. find_or_create_pipeline
@@ -551,10 +547,13 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
                                                 float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
     NT_ASSERT(r != NULL && positions != NULL && uvs != NULL && idx != NULL);
     NT_ASSERT(m != NULL);
+    /* Every emit consumes the staged block, including one that draws nothing. */
     if (r->vertex_count == 0U) {
+        s_sprite.cur_custom_bytes = 0;
         return; /* tombstone — silent no-op (matches old emit_one behaviour) */
     }
     if (!ensure_current_cmd_page_texture(page_tex)) {
+        s_sprite.cur_custom_bytes = 0;
         return;
     }
 
@@ -928,9 +927,25 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
     if (h.region->vertex_count == 0U) {
+        s_sprite.cur_custom_bytes = 0;
         return; /* tombstone or out-of-range */
     }
     emit_region_resolved(h.region, h.positions, h.uvs, h.indices, nt_resource_get(h.page_resource), h.ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits);
+}
+// #endregion
+
+// #region align
+void nt_sprite_renderer_align_next_vertex_to_4(void) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_align_next_vertex_to_4: call nt_sprite_renderer_set_material first");
+    const uint32_t pad = (4U - (s_sprite.vertex_count & 3U)) & 3U;
+    const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
+    /* No room: a quad emit then flushes first and starts at vertex 0 anyway. */
+    if (pad == 0U || s_sprite.vertex_count + pad > vcap) {
+        return;
+    }
+    memset(s_sprite.staging + ((size_t)s_sprite.vertex_count * s_sprite.cur_stride), 0, (size_t)pad * s_sprite.cur_stride);
+    s_sprite.vertex_count += pad;
 }
 // #endregion
 
@@ -950,10 +965,12 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
     if (h.region->vertex_count == 0U) {
+        s_sprite.cur_custom_bytes = 0;
         return; /* tombstone */
     }
     const uint32_t page_tex = nt_resource_get(h.page_resource);
     if (!ensure_current_cmd_page_texture(page_tex)) {
+        s_sprite.cur_custom_bytes = 0;
         return;
     }
 
@@ -1045,6 +1062,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     nt_atlas_region_handles_t rh;
     nt_atlas_get_region_handles(atlas, region_index, &rh);
     if (rh.region->vertex_count == 0U) {
+        s_sprite.cur_custom_bytes = 0;
         return; /* tombstone */
     }
 
@@ -1052,6 +1070,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 
     const uint32_t page_tex = nt_resource_get(rh.page_resource);
     if (!ensure_current_cmd_page_texture(page_tex)) {
+        s_sprite.cur_custom_bytes = 0;
         return;
     }
 

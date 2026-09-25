@@ -347,15 +347,13 @@ struct nt_ui_context {
     /* The no-nest guard: true only between nt_ui_rich_begin and its terminal/end. Separate from
      * pending_rich so a completed session releases the lock while probes can still read the state. */
     bool rich_session_open;
+    uint8_t base_custom_bytes; /* size of base_custom_attrs; 0 = plain sprite_material */
 
     /* nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
     uint32_t white_region;
     nt_material_t sprite_material;
     nt_material_t text_material;
-    /* Game-owned block staged before each base emit; 0 bytes = plain sprite_material. */
-    float base_custom_attrs[NT_SPRITE_CUSTOM_STRIDE_MAX / sizeof(float)];
-    uint8_t base_custom_bytes;
     nt_ui_custom_handler_t custom_fn;
     void *custom_user;
 
@@ -475,6 +473,9 @@ struct nt_ui_context {
 #endif /* NT_UI_DEBUG_TOOLS */
 
     Clay_Arena clay_arena;
+
+    /* Game-owned block staged before each emit on sprite_material. */
+    float base_custom_attrs[NT_SPRITE_CUSTOM_STRIDE_MAX / sizeof(float)];
 };
 
 typedef struct nt_ui_inspector_element_view {

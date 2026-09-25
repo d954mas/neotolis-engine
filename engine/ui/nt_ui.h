@@ -254,11 +254,12 @@ const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, v
 
 /* All four setters required per-context before first walk. */
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);
-/* Base material for RECTANGLE, BORDER, plain/slice9 IMAGE, inline rich images and debug overlays. A custom-attr
- * material (attr_map_count > 0) needs base_custom_bytes == attr_map_count*16 (asserted here): the
- * walker stages a copy of that block before every base emit and gives the bytes no meaning.
- * A plain material passes NULL, 0. */
-void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material, const void *base_custom_attrs, uint32_t base_custom_bytes);
+/* Base material for RECTANGLE, BORDER, IMAGE, inline rich images and debug overlays. A custom-attr
+ * material (attr_map_count > 0) needs base_custom_bytes == attr_map_count*16 (asserted here): every
+ * emit on this handle carries a copy of the block, and the engine gives the bytes no meaning.
+ * A plain material passes NULL, 0. Not from a CUSTOM handler: a debug inspector walk restores the
+ * material it swapped out when it ends. */
+void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material, const float *base_custom_attrs, uint8_t base_custom_bytes);
 void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material);
 /* NULL fn silently skips CUSTOM commands. userdata may be NULL. Non-NULL userdata
  * is stored by reference and passed to each CUSTOM call until the handler is
