@@ -191,6 +191,27 @@ What each step bought, in the order taken:
   no gain; an unconditional 1/W prescale of the rotation sum, +0.65 ns at T=1.
 
 TRAP against `NT_ASSERT_MODE=0` showed no visible difference with and without
-joint weights (unpinned runs). All numbers are native x86-64 (i9-14900HX);
-wasm/V8 is not measured, only its code inspected (`f32.copysign`, `f32.sqrt`,
-no libm imports).
+joint weights (unpinned runs). The numbers above are native x86-64
+(i9-14900HX).
+
+## wasm / V8 (2026-09-25)
+
+The tool built with emcc 4.0.19 (`-O3`, TRAP, checks off, with and without
+`-msimd128`, sources passed directly to emcc; CMake builds the tool natively
+only) and run in node 24.15, pinned to one core at high priority, two runs
+each. Unpinned runs scattered up to 2x and are discarded. AoS 40 B, J=60,
+C=1000, ns/joint:
+
+| T | build | sample | mix | mix/input | FK |
+|--:|:------|-------:|----:|----------:|---:|
+| 1 | scalar | 5.03–5.09 | 5.41–5.47 | 5.41–5.47 | 8.32–8.49 |
+| 1 | simd128 | 4.82–4.89 | 5.44–5.46 | 5.44–5.46 | 8.45–8.79 |
+| 2 | scalar | 9.89–10.20 | 9.12–9.15 | 4.56–4.58 | 8.62–8.68 |
+| 2 | simd128 | 9.70–9.75 | 9.07–9.16 | 4.53–4.58 | 8.40–8.75 |
+| 4 | scalar | 20.35–21.56 | 16.94–17.20 | 4.24–4.30 | 8.44–8.77 |
+| 4 | simd128 | 19.28–19.70 | 16.71–17.13 | 4.18–4.28 | 8.34–8.57 |
+
+mix in V8 costs about 1.3x native (4.1 / 3.2 ns pinned native at T=1 / 4).
+`-msimd128` changes nothing measurable: the autovectorizer leaves the mix
+loop scalar, so wasm SIMD gains need the hand-written kernels of #492, not a
+flag.
