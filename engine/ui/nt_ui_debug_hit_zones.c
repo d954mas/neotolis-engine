@@ -89,7 +89,7 @@ const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *
 /* `model` maps the quad corners into render space (identity = corners already there). */
 void nt_ui_internal_emit_filled_quad_m(nt_resource_t atlas, uint32_t region, const float v[4][2], const float model[16], uint32_t color) {
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(atlas, region, v, 4U, indices, 6U, model, color);
+    nt_sprite_renderer_emit_geometry(atlas, region, v, 4U, indices, 6U, model, color, NULL, 0U);
 }
 
 /* 4 inset quads; inset direction = unit perpendicular toward centroid. Inset runs in the corners'

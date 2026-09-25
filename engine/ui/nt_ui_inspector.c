@@ -104,7 +104,7 @@ static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, flo
         {x, y_top - h},
     };
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(atlas, region, verts, 4U, indices, 6U, NT_MATH_MAT4_IDENTITY, color);
+    nt_sprite_renderer_emit_geometry(atlas, region, verts, 4U, indices, 6U, NT_MATH_MAT4_IDENTITY, color, NULL, 0U);
 }
 
 static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float t, uint32_t color) {

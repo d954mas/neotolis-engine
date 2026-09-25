@@ -97,7 +97,7 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(img->custom_bytes > 0 && img->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui_image_custom: custom_bytes in (0, NT_SPRITE_CUSTOM_STRIDE_MAX]");
     NT_ASSERT(img->custom_attrs != NULL && "nt_ui_image_custom: custom_attrs must be non-NULL when custom_bytes > 0");
     NT_ASSERT(isfinite(img->slice9_scale) && img->slice9_scale > 0.0F && "nt_ui_image_custom: slice9_scale must be finite > 0");
-    /* The block must fill exactly one FLOAT4 per declared material attr — set_custom_attrs asserts the same. */
+    /* The block must fill exactly one FLOAT4 per declared material attr — the sprite emit asserts the same. */
     const nt_material_info_t *mi = nt_material_get_info(img->material);
     /* Declaration path -- no GL here, so this asks about assignment, not liveness. */
     NT_ASSERT(mi != NULL && mi->program.id != 0 && "nt_ui_image_custom: material must have a program");

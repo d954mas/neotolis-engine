@@ -404,12 +404,15 @@ struct tab_state {
     menu_params_t menu;
     /* Tabs tab: the begin/end-core demo strip's game-owned active index. */
     int tabs_demo_active;
+    /* Base Material tab: draw the whole UI with the one SDF+sprite base material. */
+    bool base_sdf;
     /* Rich Text tab state (game-owned effect clock + link latches; see rich_params_t). */
     rich_params_t rich;
 };
 
 static struct tab_state s_state = {
     .cb_value = true,
+    .base_sdf = true,
     .cb_locked = true, /* demos a locked-ON feature; disabled so it stays fixed. */
     .radio_sel = 1,
     .toggle_value = false,
@@ -539,10 +542,12 @@ static nt_material_t s_text_material;
 static nt_material_t s_radial_material;
 static nt_material_t s_radial_image_material[4];     /* indexed by nt_ui_radial_reveal_mode_t */
 static nt_material_t s_radial_image_packed_material; /* radial-image on the SHARED atlas (packed sub-region proof) */
+static nt_material_t s_base_material;                /* Base Material tab: sprites + flat radials, one batch */
 static nt_program_ref_t s_sprite_program;
 static nt_program_ref_t s_text_program;
 static nt_program_ref_t s_radial_program;
 static nt_program_ref_t s_radial_image_program; /* shared by all five radial-image materials */
+static nt_program_ref_t s_base_program;
 
 /* Links each pair once both its stages are ready. The programs are ours:
  * materials only borrow the handles, and context loss forces a relink. */
@@ -562,10 +567,13 @@ static void link_programs(void) {
         }
         nt_material_set_program(s_radial_image_packed_material, s_radial_image_program.program);
     }
+    if (nt_program_ref_update(&s_base_program)) {
+        nt_material_set_program(s_base_material, s_base_program.program);
+    }
 }
 static nt_atlas_region_ref_t s_radial_art_ref;
 /* Rich-text inline-image by-name refs into the MAIN ui_showcase atlas (heart/gold). Inline images ride
- * the standard u8 sprite path now -- no bespoke material; the rich base uses s_sprite_material. */
+ * the u8 sprite path on the ctx sprite material (no dedicated material). */
 static nt_atlas_region_ref_t s_rich_heart_ref;
 static nt_atlas_region_ref_t s_rich_gold_ref;
 /* Rich-text font family (variant slots R/B/I/BI -> real DejaVu faces). Index = NT_UI_RICH_VARIANT_*
@@ -617,6 +625,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_events(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_rich(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_deco(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st);
@@ -650,6 +659,8 @@ static const showcase_entry_t g_tabs[] = {
     {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
     {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
     {"Radial", "SDF radial feedback: cooldown wedge + hold-to-confirm + four-mode image reveal + a batched dense grid.", "examples/ui_showcase/main.c:render_radial", render_radial, NULL},
+    {"Base Material", "One custom-attr base material for the whole UI: plain emits bake its attr defaults, so panels, icons and SDF radials share one batch.",
+     "examples/ui_showcase/main.c:render_base_material", render_base_material, NULL},
     {"Rich Text", "Styled multi-run text + inline icons + bold/italic + wave/typewriter effects + a clickable link, via BOTH the code-first builder AND the runtime markup parser.",
      "examples/ui_showcase/main.c:render_rich", render_rich, NULL},
     {"Dropdown", "Combobox on popup-core: a short list + a long scrolling list with edge-flip near the bottom.", "examples/ui_showcase/main.c:render_dropdown", render_dropdown, NULL},
@@ -2182,8 +2193,8 @@ static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float 
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
     /* Emit THROUGH world_mat4 (byte-identical to emit_custom_geometry) so the bar lands under the
      * UI transform incl. the Y-flip. */
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, world_mat4, track_col);
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, world_mat4, value_col);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, world_mat4, track_col, NULL, 0U);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, world_mat4, value_col, NULL, 0U);
 }
 
 /* SPINNING ICON: a white quad rotated about its own center (the icon texture was intentionally
@@ -2213,7 +2224,7 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
         pos[i][1] = cy + (dx[i] * sn) + (dy[i] * cs);
     }
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color));
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color), NULL, 0U);
 }
 
 /* Perspective cube remapped into the box's NDC sub-rect (no glViewport/scissor touch); the walker's
@@ -2533,6 +2544,43 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     }
 
     nt_ui_rich_end(ctx);
+}
+
+/* The frame loop makes s_base_material the ctx base while this tab shows with base_sdf on, so the
+ * whole UI -- nav, panels, icons -- bakes its attr defaults and the radials below join that batch. */
+static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[96];
+    static const Clay_ElementDeclaration check_row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(44)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    static const Clay_ElementDeclaration row = {
+        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    static const Clay_ElementDeclaration cell = {.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(64)}}};
+    (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/base_sdf"), "One base material (off: plain base + a radial material)", &st->base_sdf, g_current->check,
+                         &check_row, true);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Panels, icons and radials interleaved -- one batch when they share the base:", g_current->caption);
+
+    nt_ui_radial_style_t rs = nt_ui_radial_style_defaults();
+    rs.material = st->base_sdf ? s_base_material : s_radial_material;
+    /* Custom images require a program assignment; skip declaration until it links. */
+    const nt_material_info_t *rs_info = nt_material_get_info(rs.material);
+    if (!rs_info || !nt_gfx_program_ready(rs_info->program)) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "materials not ready", g_current->caption);
+        return;
+    }
+    rs.inner_radius_norm = 0.5F;
+    const float c = st->radial.cooldown;
+    CLAY(row) {
+        for (int i = 0; i < 4; ++i) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(72)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .backgroundColor = {60, 70, 90, 255},
+                  .cornerRadius = CLAY_CORNER_RADIUS(12)}) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
+            }
+            rs.color_packed = showcase_hue_abgr((float)i / 4.0F);
+            nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, c, RADIAL_TAU, &rs, &cell);
+        }
+    }
+    (void)snprintf(buf, sizeof buf, "draw calls: %u", nt_ui_get_last_walk_draw_calls(ctx));
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo aggregates two fronts + a readout
@@ -3649,6 +3697,7 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_program_ref_drop(&s_radial_program);
         nt_program_ref_drop(&s_radial_image_program);
+        nt_program_ref_drop(&s_base_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         /* Force a style re-init so memoized atlas region indices refresh after GL restore. */
         s_atlas_bound = false;
@@ -3782,6 +3831,10 @@ static void frame(void) {
 
         ensure_ids();
 
+        const nt_material_info_t *base_info = nt_material_get_info(s_base_material);
+        const bool base_on = g_tabs[s_active_tab].render == render_base_material && s_state.base_sdf && base_info && nt_gfx_program_ready(base_info->program);
+        nt_ui_set_sprite_material(s_ctx, base_on ? s_base_material : s_sprite_material);
+
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
@@ -3909,8 +3962,8 @@ int main(int argc, char *argv[]) {
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_atlas_init();
 
-    /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region = 8. */
-    nt_material_init(&(nt_material_desc_t){.max_materials = 8});
+    /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region + UI base = 9. */
+    nt_material_init(&(nt_material_desc_t){.max_materials = 9});
     /* base showcase font + 4 rich-text family faces (R/B/I/BI) = 5. */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});
 
@@ -3962,6 +4015,8 @@ int main(int argc, char *argv[]) {
     s_radial_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_image_program.vs = s_radial_program.vs; /* shares the radial vertex stage */
     s_radial_image_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
+    s_base_program.vs = s_radial_program.vs;
+    s_base_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_BASE_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_art_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART, NT_ASSET_ATLAS);
     s_radial_art_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0, NT_ASSET_TEXTURE);
     s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);
@@ -4004,8 +4059,24 @@ int main(int argc, char *argv[]) {
         .label = "ui_showcase_radial",
     });
 
+    /* The radial's attr layout plus the atlas texture. Plain emits bake the defaults: a_layout = 0
+     * is the shader's "plain sprite" (a radial always carries its bbox size there). */
+    s_base_material = nt_material_create(&(nt_material_create_desc_t){
+        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
+        .texture_count = 1,
+        .blend = nt_blend_alpha_premultiplied(),
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .attr_map[0] = {.stream_name = "a_radial", .location = 4, .default_value = {0.0F, 0.0F, 0.0F, 0.0F}},
+        .attr_map[1] = {.stream_name = "a_layout", .location = 7, .default_value = {0.0F, 0.0F, 0.0F, 0.0F}},
+        .attr_map_count = 2,
+        .has_attr_defaults = true,
+        .label = "ui_showcase_base",
+    });
+
     /* One radial-image material per reveal mode: u_reveal_mode (mode + dim_factor) is baked at
-     * creation. The TINT is per-widget now (a_tint @ loc 5), so the TINT material serves every
+     * creation. The TINT is per-widget (a_tint @ loc 5), so the TINT material serves every
      * tint color from one batch. attr_map declares all four custom attrs (a_radial + a_tint +
      * a_uvrect @ loc 6 + a_layout @ loc 7; the walker fills a_uvrect + a_layout by name). */
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
@@ -4101,10 +4172,12 @@ int main(int argc, char *argv[]) {
         nt_material_destroy(s_radial_image_material[m]);
     }
     nt_material_destroy(s_radial_image_packed_material);
+    nt_material_destroy(s_base_material);
     nt_program_ref_drop(&s_sprite_program);
     nt_program_ref_drop(&s_text_program);
     nt_program_ref_drop(&s_radial_program);
     nt_program_ref_drop(&s_radial_image_program);
+    nt_program_ref_drop(&s_base_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();

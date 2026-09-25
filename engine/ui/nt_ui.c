@@ -789,7 +789,7 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float world_mat4[16]) {
     float m[16];
     nt_ui_sprite_mat4(world_mat4, x, y + h, w, h, m);
-    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
+    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U, NULL, 0U);
 }
 // #endregion
 
@@ -909,7 +909,7 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
     }
 
     /* Vertices are in Clay layout-space; world_mat4 maps layout → world directly. */
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0U);
 }
 // #endregion
 
@@ -1034,7 +1034,7 @@ static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_
         return;
     }
     /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, col);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, col, NULL, 0U);
     // #endregion
 }
 
@@ -1104,7 +1104,7 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
     }
 
     /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0U);
 }
 
 static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16]) {
@@ -1134,7 +1134,7 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 
 // #region helper_emit_image
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) {
+static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16], const float *custom, uint8_t custom_bytes) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
@@ -1185,10 +1185,10 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
         origin_y = p->origin_y;
     }
     if (sliced) {
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, s9, p->slice9_scale, col, p->flip_bits);
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, s9, p->slice9_scale, col, p->flip_bits, custom, custom_bytes);
         return;
     }
-    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
+    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits, custom, custom_bytes);
 }
 
 /* Float-offset (i*4) of attr `name_hash` in the block, or -1 if absent.
@@ -1264,13 +1264,10 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
 
 /* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel.
  *
- * INVARIANT (load-bearing): the fs's gl_VertexID&3 corner derivation requires each
- * quad's base vertex index to be a multiple of 4. This holds because GEOMETRY-mode
- * widgets use a DISTINCT material — flushed on material change, which resets the
- * staging vertex_count to 0 — and emit EXACTLY 4 verts per widget. Emitting
- * non-4-vertex geometry into that material, or sharing it with other geometry,
- * would break the corner derivation. */
-static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
+ * INVARIANT (load-bearing): the vertex shader's gl_VertexID&3 corner derivation requires each
+ * quad's base vertex index to be a multiple of 4. The align call enforces it, so the
+ * quad may share a batch with emits of any vertex count; it emits EXACTLY 4 verts. */
+static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16], const float *custom, uint8_t custom_bytes) {
     const Clay_BoundingBox bb = c->boundingBox;
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
         return;
@@ -1279,7 +1276,8 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col);
+    nt_sprite_renderer_align_next_vertex_to_4();
+    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col, custom, custom_bytes);
 }
 // #endregion
 
@@ -1752,21 +1750,21 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         }
         /* One generic custom-attr branch (no per-widget identity): custom_bytes>0 → bake
          * the widget block (a_layout/a_uvrect injected by name) and dispatch by geom_mode. */
+        float blk[16];
+        uint8_t blk_bytes = 0U;
         if (ip != NULL && ip->custom != NULL) {
-            float blk[16];
-            const uint8_t fcount = build_custom_block(ip, ip->custom, &c->boundingBox, blk);
-            nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
+            blk_bytes = (uint8_t)(build_custom_block(ip, ip->custom, &c->boundingBox, blk) * sizeof(float));
             if (ip->custom->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
                 const Clay_Color rt = local.renderData.image.backgroundColor;
                 const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
                 const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
-                emit_custom_geometry(ctx, &local, rcol, world_mat4);
+                emit_custom_geometry(ctx, &local, rcol, world_mat4, blk, blk_bytes);
                 return;
             }
             /* REGION mode: emit_image rasterizes the textured region (origin/flip/slice9
-             * honored), baking the bound block across all verts. */
+             * honored), baking the widget block across all verts. */
         }
-        emit_image(&local, world_mat4);
+        emit_image(&local, world_mat4, blk, blk_bytes);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {

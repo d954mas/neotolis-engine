@@ -451,7 +451,7 @@ static void test_emit_more_than_four_fonts_no_drop(void) {
 /* ===== Inline IMAGE emit ===== */
 
 /* Build [text][image][text] on one wide line, declare the rich-text widget, walk once.
- * The image rides the plain u8 sprite path (composed <color> packed to the sprite tint). */
+ * The image's composed <color> is packed to the u8 sprite tint. */
 static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign, uint32_t tint_abgr) {
     /* Fresh frame: free the per-call rich scratch. pending_rich is released by the terminal
      * nt_ui_rich_text and re-zeroed by nt_ui_begin, so no manual clear is needed here. */
@@ -508,6 +508,47 @@ static void test_inline_image_defaults_material_from_ctx(void) {
     frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU); /* image_material left unset */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "unset image_material -> image emits via the ctx->sprite_material default");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one IMAGE atom emitted via the ctx default material");
+}
+
+static nt_material_t make_rich_custom_material(float first_default) {
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof desc);
+    desc.program = nt_material_get_info(s_fx.sprite_material)->program;
+    desc.textures[0].name = "u_texture";
+    desc.texture_count = 1;
+    desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "a_game", .location = 4, .default_value = {first_default, 0.25F, 0.5F, 1.0F}};
+    desc.attr_map_count = 1;
+    desc.has_attr_defaults = true;
+    desc.label = "rich_custom_material";
+    return nt_material_create(&desc);
+}
+
+static void assert_inline_image_carries(float first_default) {
+    const float want[4] = {first_default, 0.25F, 0.5F, 1.0F};
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    for (uint32_t v = 0; v < 4U; v++) {
+        float got[4] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, got, 4);
+        TEST_ASSERT_EQUAL_MEMORY(want, got, sizeof want);
+    }
+}
+
+/* A style image_material with its own defaults bakes those, not the ctx base's. */
+static void test_inline_image_bakes_style_material_defaults(void) {
+    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(0.125F));
+    frame_text_image_text(make_rich_custom_material(0.75F), NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
+    assert_inline_image_carries(0.75F);
+}
+
+/* The default resolves per walk: a base swapped between two walks of one frame is the one drawn. */
+static void test_inline_image_default_follows_base_swap_between_walks(void) {
+    nt_ui_set_sprite_material(s_fx.ctx, s_fx.sprite_material);
+    frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
+    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(0.375F));
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    assert_inline_image_carries(0.375F);
 }
 
 /* (6) the inline image's composed <color> reaches the standard u8 sprite tint: a run with
@@ -2559,6 +2600,8 @@ int main(void) {
     RUN_TEST(test_over_cap_layers_hard_guard);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_defaults_material_from_ctx);
+    RUN_TEST(test_inline_image_bakes_style_material_defaults);
+    RUN_TEST(test_inline_image_default_follows_base_swap_between_walks);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_two_inline_images_coalesce);
     RUN_TEST(test_inline_images_not_in_image_command_count);

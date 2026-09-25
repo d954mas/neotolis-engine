@@ -93,7 +93,9 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/sprite_radial.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/radial_image.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 7 (sprite + slug_text + radial vs/fs + radial_image fs)\n");
+    /* Base Material tab: plain sprites + flat radials from one material (radial VS). */
+    nt_builder_add_shader(ctx, "assets/shaders/ui_base.frag", NT_BUILD_SHADER_FRAGMENT);
+    (void)printf("  Shaders added: 8 (sprite + slug_text + radial vs/fs + radial_image fs + ui_base fs)\n");
     // #endregion
 
     // #region atlas: widget art + slice9 panels + white pixel

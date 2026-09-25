@@ -188,6 +188,24 @@ does not keep a separate static-quad fast path unless measurements show a clear
 win on the target workload; this keeps the sprite batching code small and makes
 draw splitting depend only on capacity and state changes.
 
+### Sprite custom-attr block
+
+A material with an `attr_map` extends the sprite vertex by one FLOAT4 per attr.
+Each non-ECS emit takes an optional block (`custom`, `custom_bytes`) baked into
+all its vertices, like color. The source per emit is: the emit's block, else the
+material's attr defaults ([Attr defaults](material.md#attr-defaults)), else an
+assert. So plain and custom-attr emits can share one custom-attr material and
+one batch. One staging batch keeps one vertex stride: opening a command
+whose material changes the stride flushes the pending emits first, so immediate
+emits and `draw_list` runs of plain and custom-attr materials mix freely. ECS
+emits pass no block, so a custom-attr material there needs attr defaults.
+
+A shader that derives a quad corner from `gl_VertexID & 3` needs each quad to
+start at a multiple of four vertices. `nt_sprite_renderer_align_next_vertex_to_4`
+pads the staging with up to 3 unreferenced vertices instead of flushing, so such
+a quad shares the batch with emits of any vertex count. When the padding does
+not fit, the next emit flushes and starts at vertex 0 anyway.
+
 ## UI draw ordering (nt_ui walker)
 
 The UI walker has **three independent ordering axes** — do not conflate them:

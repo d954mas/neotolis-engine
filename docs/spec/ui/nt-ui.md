@@ -209,6 +209,21 @@ Both modes use the same `tree_baked[layout_idx]` + per-id mirror
 `hit_generation[slot]` rejects stale ids). Opacity is a separate
 `float` accumulator on the same struct.
 
+### Custom-attr base material
+
+The base sprite material may declare an `attr_map` if it also declares attr
+defaults ([Attr defaults](../render/material.md#attr-defaults)). Every emit
+without its own block bakes them: RECTANGLE, BORDER, IMAGE, rich-text inline
+images and the debug overlays. An `nt_ui_image_custom` block replaces them for
+its own emit. Custom widgets on the base handle then batch with plain panels and
+icons instead of flushing at every boundary.
+
+A custom-attr base moves all base UI to the extended vertex stride
+([Sprite custom-attr block](../render/items-sorting-batching.md#sprite-custom-attr-block)).
+Its batches cap at the sprite renderer's `custom_max_vertices`. The largest base
+emit, a rounded BORDER, stages 56 vertices, so a custom-attr base needs
+`custom_max_vertices` ≥ 56.
+
 ## Interaction model
 
 Game ids interact via `nt_ui_query_interaction`

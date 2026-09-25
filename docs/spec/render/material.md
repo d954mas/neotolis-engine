@@ -129,6 +129,15 @@ Per-entity variation (e.g. per-character color, dissolve progress) goes through 
 
 Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame, so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
 
+## Attr defaults
+
+`has_attr_defaults` opts a material into per-attr defaults:
+`attr_map[i].default_value` is the vec4 a sprite emit without its own custom
+block bakes for attr *i* ([Sprite custom-attr block](items-sorting-batching.md#sprite-custom-attr-block)).
+Zero-init means no defaults. What the values mean is the shader's contract. Defaults are values: they
+never enter pipeline or vertex-input keys. Only the sprite renderer reads them;
+mesh renderers ignore them.
+
 ## Texture resolve
 
 A material stores the declared `nt_resource_t` for each texture slot and never a

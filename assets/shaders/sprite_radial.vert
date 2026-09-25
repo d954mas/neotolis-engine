@@ -11,13 +11,13 @@ precision highp int;
 layout(location = 0) in vec3 a_position;
 layout(location = 2) in vec4 a_color;
 layout(location = 3) in vec2 a_texcoord;
-// loc 4 (a_radial): x=angle_start y=angle_end z=inner_radius_norm w=0. Both materials.
+// loc 4 (a_radial): x=angle_start y=angle_end z=inner_radius_norm w=0. All materials on this VS.
 layout(location = 4) in vec4 a_radial;
 // loc 5 (a_tint): rgb=reveal tint, w=tint_strength, 0..1. radial_image only.
 layout(location = 5) in vec4 a_tint;
 // loc 6 (a_uvrect): region min/max atlas UV {u0,v0,u1,v1}. radial_image only.
 layout(location = 6) in vec4 a_uvrect;
-// loc 7 (a_layout): walker-injected x=aspect (w/h), yz=bbox px size, w=0. Both materials.
+// loc 7 (a_layout): walker-injected x=aspect (w/h), yz=bbox px size, w=0. All materials on this VS.
 layout(location = 7) in vec4 a_layout;
 
 out vec2 v_texcoord;
@@ -38,8 +38,8 @@ void main() {
     v_layout = a_layout;
     // The widget emits a 4-corner quad TL/TR/BR/BL; derive the [-1,1] local coord
     // from gl_VertexID so the flat-radial path needs no extra per-vertex coord attr.
-    // The 16-bit quad indices cycle 0..3 per widget, so gl_VertexID & 3 is the corner
-    // within each batched quad.
+    // A GEOMETRY-mode quad starts at a multiple of 4 vertices (the walker aligns it), so
+    // gl_VertexID & 3 is its corner. REGION-mode users ignore v_local.
     int corner = gl_VertexID & 3;
     // 0:TL(-1,-1) 1:TR(+1,-1) 2:BR(+1,+1) 3:BL(-1,+1)
     float lx = (corner == 1 || corner == 2) ? 1.0 : -1.0;

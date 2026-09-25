@@ -109,7 +109,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
         info->attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
         info->attr_map_locations[i] = desc->attr_map[i].location;
+        memcpy(info->attr_map_defaults[i], desc->attr_map[i].default_value, sizeof(float) * 4);
     }
+    info->has_attr_defaults = desc->has_attr_defaults;
 
     /* Entity params */
     NT_ASSERT(desc->entity_param_count <= NT_MAX_PER_ENTITY_PARAMS);
