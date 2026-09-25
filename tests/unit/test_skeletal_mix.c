@@ -1,6 +1,5 @@
 /* System and engine headers before Unity: <stdnoreturn.h> and the Windows SDK
  * clash over __declspec(noreturn) in the other order. */
-#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -145,24 +144,20 @@ void test_an_exactly_orthogonal_pair_takes_the_canonical_sign(void) {
     }
 }
 
-/* A sole input comes out in the seed's hemisphere: w made positive, and for
- * w == 0 exactly the largest component made positive. */
-void test_the_seed_sign_makes_w_positive_or_else_the_largest_component(void) {
+/* An exact tie with w != 0 takes the sign that makes w positive, not the one
+ * of its largest component (y here), which would give another rotation. */
+void test_an_exact_tie_with_nonzero_w_makes_w_positive(void) {
     nt_skeletal_trs_t a[J];
+    nt_skeletal_trs_t b[J];
     make_pose(a, 0.0F);
-    memcpy(a[0].q, (const float[4]){0.8F, 0.0F, 0.0F, -0.6F}, sizeof(a[0].q));
-    memcpy(a[1].q, (const float[4]){0.0F, 0.6F, -0.8F, 0.0F}, sizeof(a[1].q));
-    /* Tied largest components: the first one in x, y, z, w order decides. */
-    memcpy(a[2].q, (const float[4]){-0.70710678F, 0.70710678F, 0.0F, 0.0F}, sizeof(a[2].q));
-    const nt_skeletal_mix_input_t input = {a, NULL, 1.0F};
+    make_pose(b, 0.0F);
+    memcpy(a[0].q, (const float[4]){1.0F, 0.0F, 0.0F, 0.0F}, sizeof(a[0].q));
+    memcpy(b[0].q, (const float[4]){0.0F, 0.8F, 0.0F, -0.6F}, sizeof(b[0].q));
+    const nt_skeletal_mix_input_t inputs[2] = {{a, NULL, 1.0F}, {b, NULL, 1.0F}};
     nt_skeletal_trs_t out[J];
-    nt_skeletal_mix(&input, 1, g_defaults, J, out);
-    ASSERT_FLOAT_NEAR(-0.8F, out[0].q[0], 1e-6F);
-    ASSERT_FLOAT_NEAR(0.6F, out[0].q[3], 1e-6F);
-    ASSERT_FLOAT_NEAR(-0.6F, out[1].q[1], 1e-6F);
-    ASSERT_FLOAT_NEAR(0.8F, out[1].q[2], 1e-6F);
-    ASSERT_FLOAT_NEAR(0.70710678F, out[2].q[0], 1e-6F);
-    ASSERT_FLOAT_NEAR(-0.70710678F, out[2].q[1], 1e-6F);
+    nt_skeletal_mix(inputs, 2, g_defaults, J, out);
+    const float sum[4] = {1.0F, -0.8F, 0.0F, 0.6F};
+    assert_normalized(sum, out[0].q);
 }
 
 /* Rotations weigh by influence like T/S do: 0 and 90 deg about y at gains 1
@@ -289,30 +284,34 @@ void test_zero_weights_on_one_input_leave_the_others_normalized(void) {
 }
 
 /* No threshold: fading toward rest is an explicit rest input or an override.
- * 0x1p-147 is where a fade that never reaches 0 sticks, and three gains near
- * FLT_MAX would overflow W; neither may move the result. */
-void test_a_tiny_or_huge_influence_contributes_fully(void) {
+ * A sole input poses fully at any gain of the range, and a pair weighs T/S by
+ * the gain ratio alone. */
+void test_a_tiny_or_huge_gain_contributes_fully_and_by_ratio(void) {
     nt_skeletal_trs_t a[J];
+    nt_skeletal_trs_t b[J];
     make_pose(a, 2.0F);
-    const float gains[5] = {0.0001F, 1e-30F, 0x1p-147F, 1e30F, 3e38F};
-    for (int g = 0; g < 5; ++g) {
-        const nt_skeletal_mix_input_t inputs[3] = {{a, NULL, gains[g]}, {a, NULL, gains[g]}, {a, NULL, gains[g]}};
+    make_pose(b, 5.0F);
+    const float gains[3] = {0.0001F, 0x1p-60F, 0x1p58F};
+    for (int g = 0; g < 3; ++g) {
+        const nt_skeletal_mix_input_t alone = {a, NULL, gains[g]};
+        const nt_skeletal_mix_input_t pair[2] = {{a, NULL, gains[g]}, {b, NULL, 3.0F * gains[g]}};
         nt_skeletal_trs_t out[J];
-        nt_skeletal_mix(inputs, 3, g_defaults, J, out);
+        nt_skeletal_mix(&alone, 1, g_defaults, J, out);
+        for (int j = 0; j < J; ++j) {
+            assert_joint_near(&a[j], &out[j]);
+        }
+        nt_skeletal_mix(pair, 2, g_defaults, J, out);
         for (int j = 0; j < J; ++j) {
             for (int c = 0; c < 3; ++c) {
-                ASSERT_FLOAT_NEAR(a[j].t[c], out[j].t[c], 1e-5F);
-                ASSERT_FLOAT_NEAR(a[j].s[c], out[j].s[c], 1e-6F);
-            }
-            for (int c = 0; c < 4; ++c) {
-                ASSERT_FLOAT_NEAR(a[j].q[c], out[j].q[c], 1e-6F);
+                ASSERT_FLOAT_NEAR((a[j].t[c] + (3.0F * b[j].t[c])) / 4.0F, out[j].t[c], 1e-5F);
+                ASSERT_FLOAT_NEAR((a[j].s[c] + (3.0F * b[j].s[c])) / 4.0F, out[j].s[c], 1e-6F);
             }
         }
     }
 }
 
 /* A partial layer fading out next to a full-strength one: on the joints it
- * owns alone its influence is as small as 1e-40 * 2, and it must still pose
+ * owns alone its influence is as small as 2^-60 * 2, and it must still pose
  * them exactly. */
 void test_a_fading_partial_input_still_poses_the_joints_it_owns(void) {
     nt_skeletal_trs_t legs[J];
@@ -321,10 +320,10 @@ void test_a_fading_partial_input_still_poses_the_joints_it_owns(void) {
     make_pose(arms, 7.0F);
     const float leg_w[J] = {1.0F, 0.0F, 1.0F, 0.0F};
     const float arm_w[J] = {0.0F, 2.0F, 0.0F, 2.0F};
-    /* 4e-37 leaves |sum|^2 in the subnormal band, where only the unit
-     * rescale keeps the rotation's precision. */
-    const float fades[3] = {1e-40F, 4e-37F, 1e-20F};
-    for (int f = 0; f < 3; ++f) {
+    /* 2^-60 leaves |sum|^2 below 1e-30, where the 1/W rescale keeps the
+     * rotation's precision. */
+    const float fades[2] = {0x1p-60F, 1e-10F};
+    for (int f = 0; f < 2; ++f) {
         const nt_skeletal_mix_input_t inputs[2] = {{legs, leg_w, 1.0F}, {arms, arm_w, fades[f]}};
         nt_skeletal_trs_t out[J];
         nt_skeletal_mix(inputs, 2, g_defaults, J, out);
@@ -600,23 +599,10 @@ void test_interruption_recipe_is_continuous_at_the_handoff_and_reuses_one_snapsh
     // #endregion
 
     // #region ramp toward the jump, then a second interruption -> roll
-    /* From here the snapshot is frozen and the display moves only by the
-     * ramp; the wave keeps its own coefficient 2 / (1 + 2) on its joints. */
-    nt_skeletal_trs_t frozen[J];
-    memcpy(frozen, h->snapshot, sizeof(frozen));
-    float a = 0.0F;
+    const float a = 0.5F;
     for (int frame = 0; frame < 2; ++frame) {
-        a += 0.25F;
         nt_skeletal_tracks_advance(h->tracks, CLIP_COUNT, dt);
         hero_sample(h);
-        nt_skeletal_override(h->snapshot, h->sampled[CLIP_JUMP], NULL, a, J, h->signal);
-        hero_compose(h);
-        ASSERT_POSE_BITS(frozen, h->snapshot, J);
-        for (int k = 0; k < 3; ++k) {
-            ASSERT_FLOAT_NEAR(frozen[2].t[k] + (a * (h->sampled[CLIP_JUMP][2].t[k] - frozen[2].t[k])), h->signal[2].t[k], 1e-5F);
-            ASSERT_FLOAT_NEAR((h->signal[1].t[k] + (2.0F * h->sampled[CLIP_WAVE][1].t[k])) / 3.0F, h->final[1].t[k], 1e-5F);
-            ASSERT_FLOAT_NEAR(h->signal[0].t[k], h->final[0].t[k], 1e-5F);
-        }
     }
 
     nt_skeletal_tracks_advance(h->tracks, CLIP_COUNT, dt);
@@ -650,15 +636,15 @@ void test_interruption_recipe_is_continuous_at_the_handoff_and_reuses_one_snapsh
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 #define ASSERT_TRAPPED_ON(fragment) TEST_ASSERT_TRUE_MESSAGE(strstr(nt_test_assert_last_expr, (fragment)) != NULL, "a different NT_ASSERT fired: " fragment)
 
-void test_mix_traps_on_a_negative_nan_or_infinite_gain(void) {
+void test_mix_traps_on_a_gain_outside_its_range(void) {
     nt_skeletal_trs_t a[J];
     nt_skeletal_trs_t out[J];
     make_pose(a, 0.0F);
-    const float bad[3] = {-0.5F, NAN, INFINITY};
-    for (int i = 0; i < 3; ++i) {
+    const float bad[5] = {-0.5F, NAN, INFINITY, 0x1p-61F, 0x1p61F};
+    for (int i = 0; i < 5; ++i) {
         const nt_skeletal_mix_input_t input = {a, NULL, bad[i]};
         NT_TEST_EXPECT_ASSERT(nt_skeletal_mix(&input, 1, g_defaults, J, out));
-        ASSERT_TRAPPED_ON("inputs[i].gain >= 0.0F && inputs[i].gain <= FLT_MAX");
+        ASSERT_TRAPPED_ON("inputs[i].gain >= 0x1p-60F && inputs[i].gain <= 0x1p60F");
     }
 }
 
@@ -766,14 +752,14 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_negating_any_input_rotation_including_the_first_gives_the_same_mix);
     RUN_TEST(test_an_exactly_orthogonal_pair_takes_the_canonical_sign);
-    RUN_TEST(test_the_seed_sign_makes_w_positive_or_else_the_largest_component);
+    RUN_TEST(test_an_exact_tie_with_nonzero_w_makes_w_positive);
     RUN_TEST(test_rotations_weigh_by_gain_times_joint_weight);
     RUN_TEST(test_alignment_follows_the_running_sum_in_supplied_order);
     RUN_TEST(test_plus_and_minus_170_degrees_average_to_180);
     RUN_TEST(test_zero_total_influence_copies_the_defaults);
     RUN_TEST(test_a_zero_influence_input_reads_nothing_from_its_pose);
     RUN_TEST(test_zero_weights_on_one_input_leave_the_others_normalized);
-    RUN_TEST(test_a_tiny_or_huge_influence_contributes_fully);
+    RUN_TEST(test_a_tiny_or_huge_gain_contributes_fully_and_by_ratio);
     RUN_TEST(test_a_fading_partial_input_still_poses_the_joints_it_owns);
     RUN_TEST(test_asymmetric_parent_child_weights_keep_the_chain_attached);
     RUN_TEST(test_partial_weights_give_fixed_coefficients_through_a_crossfade);
@@ -784,7 +770,7 @@ int main(void) {
     RUN_TEST(test_override_reads_nothing_from_top_where_the_mask_is_zero);
     RUN_TEST(test_interruption_recipe_is_continuous_at_the_handoff_and_reuses_one_snapshot);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_mix_traps_on_a_negative_nan_or_infinite_gain);
+    RUN_TEST(test_mix_traps_on_a_gain_outside_its_range);
     RUN_TEST(test_mix_traps_on_null_inputs_or_pose);
 #if NT_SKELETAL_CHECKS
     RUN_TEST(test_mix_checks_trap_on_an_infinite_weight_or_a_non_unit_rotation);

@@ -180,11 +180,10 @@ What each step bought, in the order taken:
   6.3 -> ~5.0 on both data sets. The four-way search ran on every joint.
 - First contributor skips the dot product it would take against the empty sum:
   ~0.6 ns/joint at T=1 (pinned), included in "shipped".
-- Exact gain scaling for gains outside [2^-60, 2^60] (fixes NaN / quantized
-  poses from a fade that never reaches 0): a multiply in the inner loop cost
-  +0.9 ns at T=1; the shipped form inlines the joint loop twice so the common
-  call passes a literal 1 and pays only the per-call min/max, ~0.1–0.2 ns
-  against a variant without any range handling.
+- Gains outside [2^-60, 2^60] are asserted, not rescaled: a fade ends at 0.
+  The exact power-of-two scaling tried before cost +0.9 ns at T=1 as an
+  inner-loop multiply, and its "inline twice, pass a literal 1" form was not
+  what clang emitted in `native-release` (one out-of-line copy, one call).
 - Override nlerp sign by `copysignf` (also used by `nt_skeletal_sample`):
   random 7.8 -> 4.5, smooth unchanged.
 - Rejected: one division per joint (`1/(W·|A|)` split into both factors),

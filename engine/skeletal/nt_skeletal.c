@@ -1,6 +1,5 @@
 #include "skeletal/nt_skeletal.h"
 
-#include <float.h>
 #include <string.h>
 
 #include "core/nt_builtins.h"
@@ -235,11 +234,20 @@ static float nt_skeletal_mix_seed_sign(const float q[4]) {
     return nt_skeletal_canonical_sign(q);
 }
 
-/* The per-joint loop of nt_skeletal_mix, inlined twice so the common call
- * passes a literal 1 and pays no multiply for the gain scale. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static inline void nt_skeletal_mix_joints(const nt_skeletal_mix_input_t *inputs, uint32_t input_count, const nt_skeletal_trs_t *defaults, uint16_t joint_count, nt_skeletal_trs_t *restrict out,
-                                          float g_scale) {
+void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count, const nt_skeletal_trs_t *defaults, uint16_t joint_count, nt_skeletal_trs_t *restrict out) {
+    NT_ASSERT(inputs != NULL || input_count == 0U);
+    NT_ASSERT(defaults != NULL);
+    NT_ASSERT(out != NULL);
+    NT_ASSERT(nt_skeletal_poses_disjoint(out, defaults, joint_count));
+    for (uint32_t i = 0; i < input_count; ++i) {
+        NT_ASSERT(inputs[i].pose != NULL);
+        /* Also rejects NaN and infinity. A fade that never reaches 0 sticks
+         * at a subnormal, where w * x quantizes and 1/W overflows. */
+        NT_ASSERT(inputs[i].gain == 0.0F || (inputs[i].gain >= 0x1p-60F && inputs[i].gain <= 0x1p60F));
+        NT_ASSERT(nt_skeletal_poses_disjoint(out, inputs[i].pose, joint_count));
+    }
+
     for (uint16_t j = 0; j < joint_count; ++j) {
         float t[3] = {0.0F, 0.0F, 0.0F};
         float q[4] = {0.0F, 0.0F, 0.0F, 0.0F};
@@ -247,7 +255,7 @@ static inline void nt_skeletal_mix_joints(const nt_skeletal_mix_input_t *inputs,
         float w_sum = 0.0F;
         for (uint32_t i = 0; i < input_count; ++i) {
             const nt_skeletal_mix_input_t *in = &inputs[i];
-            float w = in->gain * g_scale;
+            float w = in->gain;
             if (in->weights != NULL) {
                 NT_ASSERT(in->weights[j] >= 0.0F);
 #if NT_SKELETAL_CHECKS
@@ -307,43 +315,6 @@ static inline void nt_skeletal_mix_joints(const nt_skeletal_mix_input_t *inputs,
             out[j].q[c] = q[c] * inv_len;
         }
     }
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count, const nt_skeletal_trs_t *defaults, uint16_t joint_count, nt_skeletal_trs_t *restrict out) {
-    NT_ASSERT(inputs != NULL || input_count == 0U);
-    NT_ASSERT(defaults != NULL);
-    NT_ASSERT(out != NULL);
-    NT_ASSERT(nt_skeletal_poses_disjoint(out, defaults, joint_count));
-    float g_max = 0.0F;
-    float g_min = FLT_MAX;
-    for (uint32_t i = 0; i < input_count; ++i) {
-        NT_ASSERT(inputs[i].pose != NULL);
-        /* Also rejects NaN and infinity. */
-        NT_ASSERT(inputs[i].gain >= 0.0F && inputs[i].gain <= FLT_MAX);
-        NT_ASSERT(nt_skeletal_poses_disjoint(out, inputs[i].pose, joint_count));
-        g_max = (inputs[i].gain > g_max) ? inputs[i].gain : g_max;
-        g_min = (inputs[i].gain > 0.0F && inputs[i].gain < g_min) ? inputs[i].gain : g_min;
-    }
-    /* The mix depends only on gain ratios, so a power-of-two scale is exact
-     * and leaves normal-range results bit for bit. It is needed only when a
-     * gain would leave float range in a product or a sum: a fade that never
-     * reaches 0 (gain *= 0.9 sticks at a subnormal) would quantize w * x and
-     * overflow 1/W, and gains near FLT_MAX would overflow W. The scale puts
-     * the largest gain near 2^50, which keeps every other gain normal. */
-    if (g_min < 0x1p-60F || g_max > 0x1p60F) {
-        uint32_t bits = 0;
-        memcpy(&bits, &g_max, sizeof(bits));
-        const int32_t e = (int32_t)(bits >> 23U);
-        int32_t scale_e = 127 + 50 - (((e == 0) ? 1 : e) - 127);
-        scale_e = (scale_e > 254) ? 254 : scale_e;
-        const uint32_t scale_bits = (uint32_t)scale_e << 23U;
-        float g_scale = 1.0F;
-        memcpy(&g_scale, &scale_bits, sizeof(g_scale));
-        nt_skeletal_mix_joints(inputs, input_count, defaults, joint_count, out, g_scale);
-        return;
-    }
-    nt_skeletal_mix_joints(inputs, input_count, defaults, joint_count, out, 1.0F);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
