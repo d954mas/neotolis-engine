@@ -466,17 +466,9 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 // #endregion
 
 // #region custom_attrs
-/* One out-of-line copy for every emit kind: inlined at each call site it grows the wasm by ~3 KB. */
-#if defined(__GNUC__) || defined(__clang__)
-#define NT_SPRITE_NOINLINE __attribute__((noinline))
-#elif defined(_MSC_VER)
-#define NT_SPRITE_NOINLINE __declspec(noinline)
-#else
-#define NT_SPRITE_NOINLINE
-#endif
-
-/* Whole FLOAT4 lanes: a constant-size copy inlines, a variable-size one is a libc call per vertex. */
-NT_SPRITE_NOINLINE static void bake_custom_lanes(uint32_t base, uint32_t count, const uint8_t *src) {
+/* Whole FLOAT4 lanes: a constant-size copy inlines, a variable-size one is a libc call per vertex.
+ * Out of line: inlining it at every emit kind costs ~3 KB of wasm and measured no faster. */
+static NT_NOINLINE void bake_custom_lanes(uint32_t base, uint32_t count, const uint8_t *src) {
     const uint32_t lanes = s_sprite.cur_material_custom_bytes / 16U;
     for (uint32_t i = 0; i < count; i++) {
         uint8_t *dst = s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
@@ -535,17 +527,9 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
 
 // #region emit_region_resolved
 /* always_inline keeps the ECS hot path's inlined shape. */
-#if defined(__GNUC__) || defined(__clang__)
-#define NT_SPRITE_EMIT_INLINE static inline __attribute__((always_inline))
-#elif defined(_MSC_VER)
-#define NT_SPRITE_EMIT_INLINE static inline __forceinline
-#else
-#define NT_SPRITE_EMIT_INLINE static inline
-#endif
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, const float (*positions)[2], const nt_atlas_uv_t *uvs, const uint16_t *idx, uint32_t page_tex, float ipu, const float *m,
-                                                float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits, const float *custom, uint8_t custom_bytes) {
+static NT_ALWAYS_INLINE void emit_region_resolved(const nt_texture_region_t *r, const float (*positions)[2], const nt_atlas_uv_t *uvs, const uint16_t *idx, uint32_t page_tex, float ipu,
+                                                  const float *m, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits, const float *custom, uint8_t custom_bytes) {
     NT_ASSERT(r != NULL && positions != NULL && uvs != NULL && idx != NULL);
     NT_ASSERT(m != NULL);
     if (r->vertex_count == 0U) {

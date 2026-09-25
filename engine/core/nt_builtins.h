@@ -36,4 +36,16 @@ static inline uint32_t nt_ctz32(uint32_t v) {
 #define nt_ctz32(v) ((uint32_t)__builtin_ctz(v))
 #endif
 
+/* Inline control overrides the optimizer: use only with a measured speed or size win at that site. */
+#if defined(__GNUC__) || defined(__clang__)
+#define NT_ALWAYS_INLINE inline __attribute__((always_inline))
+#define NT_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define NT_ALWAYS_INLINE __forceinline
+#define NT_NOINLINE __declspec(noinline)
+#else
+#define NT_ALWAYS_INLINE inline
+#define NT_NOINLINE
+#endif
+
 #endif /* NT_BUILTINS_H */
