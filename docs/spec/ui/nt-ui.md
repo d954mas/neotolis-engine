@@ -235,8 +235,13 @@ A GEOMETRY-mode quad must start at a multiple of four vertices
 `nt_sprite_renderer_align_next_vertex_to_4` before it, which pads the batch
 with up to 3 unreferenced vertices.
 
-A custom-attr base moves all base UI to the extended vertex stride, so its
-batches cap at the sprite renderer's `custom_max_vertices`, not `max_vertices`.
+A custom-attr base moves all base UI to the extended vertex stride: 20 bytes
+plus 16 per attr, so 36 with one attr and 84 with four. Its batches cap at the
+sprite renderer's `custom_max_vertices`, not `max_vertices`, and one rounded
+BORDER emits up to 56 vertices, so a custom-attr base needs
+`custom_max_vertices >= 56`. A rounded panel drawn as a GEOMETRY-mode
+`nt_ui_image_custom` quad costs 4 vertices; a Clay `cornerRadius` fan costs up
+to 29.
 
 The debug inspector walk drops the block while it swaps in
 `inspector_sprite_material`, which must be plain (asserted by

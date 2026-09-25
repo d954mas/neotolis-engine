@@ -1144,7 +1144,7 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 
 // #region helper_emit_image
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) {
+static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16], const float *blk, uint8_t blk_bytes) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
@@ -1193,6 +1193,10 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     if (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         origin_x = p->origin_x;
         origin_y = p->origin_y;
+    }
+    /* Staged past the early-outs: a block with no emit would satisfy the next emit's stride check. */
+    if (blk_bytes != 0U) {
+        nt_sprite_renderer_set_custom_attrs(blk, blk_bytes);
     }
     if (sliced) {
         nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, s9, p->slice9_scale, col, p->flip_bits);
@@ -1277,7 +1281,7 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
  * INVARIANT (load-bearing): the fs's gl_VertexID&3 corner derivation requires each
  * quad's base vertex index to be a multiple of 4. The align call enforces it, so the
  * quad may share a batch with base emits of any vertex count; it emits EXACTLY 4 verts. */
-static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
+static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16], const float *blk, uint8_t blk_bytes) {
     const Clay_BoundingBox bb = c->boundingBox;
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
         return;
@@ -1287,6 +1291,7 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
     nt_sprite_renderer_align_next_vertex_to_4();
+    nt_sprite_renderer_set_custom_attrs(blk, blk_bytes);
     nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col);
 }
 // #endregion
@@ -1760,23 +1765,26 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         }
         /* One generic custom-attr branch (no per-widget identity): custom_bytes>0 → bake
          * the widget block (a_layout/a_uvrect injected by name) and dispatch by geom_mode. */
+        float custom_blk[16];
+        const float *blk = NULL;
+        uint8_t blk_bytes = 0U;
         if (ip != NULL && ip->custom != NULL) {
-            float blk[16];
-            const uint8_t fcount = build_custom_block(ip, ip->custom, &c->boundingBox, blk);
-            nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
+            blk_bytes = (uint8_t)(build_custom_block(ip, ip->custom, &c->boundingBox, custom_blk) * sizeof(float));
+            blk = custom_blk;
             if (ip->custom->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
                 const Clay_Color rt = local.renderData.image.backgroundColor;
                 const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
                 const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
-                emit_custom_geometry(ctx, &local, rcol, world_mat4);
+                emit_custom_geometry(ctx, &local, rcol, world_mat4, blk, blk_bytes);
                 return;
             }
             /* REGION mode: emit_image rasterizes the textured region (origin/flip/slice9
-             * honored), baking the bound block across all verts. */
+             * honored), baking the block across all verts. */
         } else if (ctx->base_custom_bytes != 0U && img_mat.id == ctx->sprite_material.id) {
-            nt_sprite_renderer_set_custom_attrs(ctx->base_custom_attrs, ctx->base_custom_bytes);
+            blk = ctx->base_custom_attrs;
+            blk_bytes = ctx->base_custom_bytes;
         }
-        emit_image(&local, world_mat4);
+        emit_image(&local, world_mat4, blk, blk_bytes);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
@@ -2138,11 +2146,9 @@ void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_materi
     NT_ASSERT(base_custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui_set_sprite_material: base_custom_bytes exceeds NT_SPRITE_CUSTOM_STRIDE_MAX");
     NT_ASSERT((base_custom_attrs != NULL) == (base_custom_bytes != 0U) && "nt_ui_set_sprite_material: base_custom_attrs must be non-NULL exactly when base_custom_bytes > 0");
     ctx->sprite_material = sprite_material;
-    /* Hard bound: with asserts OFF a bad size stages nothing rather than overrun the copy. */
-    const bool fits = base_custom_attrs != NULL && base_custom_bytes <= sizeof ctx->base_custom_attrs;
-    ctx->base_custom_bytes = fits ? base_custom_bytes : 0U;
-    if (ctx->base_custom_bytes != 0U) {
-        memcpy(ctx->base_custom_attrs, base_custom_attrs, ctx->base_custom_bytes);
+    ctx->base_custom_bytes = base_custom_bytes;
+    if (base_custom_bytes != 0U) {
+        memcpy(ctx->base_custom_attrs, base_custom_attrs, base_custom_bytes);
     }
 }
 

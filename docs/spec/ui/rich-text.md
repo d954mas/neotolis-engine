@@ -166,7 +166,7 @@ sprite path, `attr_map_count == 0`, or the ctx base material with its game
 base block — see [Base sprite material](nt-ui.md#base-sprite-material))
 textures the region, and the self-emit folds
 the parent opacity into the tint alpha exactly like rich TEXT — there is **no**
-bespoke material, float4 `a_tint`, or custom-attr block. The single composed
+rich-specific material, float4 `a_tint`, or per-image custom-attr block. The single composed
 tint is invisible at u8 on an 8-bit display, so the earlier lossless-float4 path
 gave no benefit and was dropped. `set_material` is bound **once per band** (the
 `bound` guard), so **all** of a band's inline images **coalesce into one sprite

@@ -188,6 +188,18 @@ does not keep a separate static-quad fast path unless measurements show a clear
 win on the target workload; this keeps the sprite batching code small and makes
 draw splitting depend only on capacity and state changes.
 
+A shader that derives a quad corner from `gl_VertexID & 3` needs each quad to
+start at a multiple of four vertices. `nt_sprite_renderer_align_next_vertex_to_4`
+pads the staging with up to 3 unreferenced vertices instead of flushing, so such
+a quad shares the batch with emits of any vertex count. The padding is uploaded
+and counts in the draw's vertex range. When the padding does not fit, the next
+emit flushes and starts at vertex 0 anyway.
+
+`nt_sprite_renderer_set_custom_attrs` stages the custom-attr block for the next
+emit only. A material bind drops a staged block, and every emit consumes it, even
+one that draws nothing, so an emit that forgot its block trips the material
+stride assert instead of reusing a stale one.
+
 ## UI draw ordering (nt_ui walker)
 
 The UI walker has **three independent ordering axes** — do not conflate them:

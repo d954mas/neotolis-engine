@@ -467,6 +467,26 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 // #endregion
 
 // #region custom_attrs
+/* One out-of-line copy for every emit kind: inlined at each call site it grows the wasm by ~3 KB. */
+#if defined(__GNUC__) || defined(__clang__)
+#define NT_SPRITE_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define NT_SPRITE_NOINLINE __declspec(noinline)
+#else
+#define NT_SPRITE_NOINLINE
+#endif
+
+/* Whole FLOAT4 lanes: a constant-size copy inlines, a variable-size one is a libc call per vertex. */
+NT_SPRITE_NOINLINE static void bake_custom_lanes(uint32_t base, uint32_t count) {
+    const uint32_t lanes = s_sprite.cur_custom_bytes / 16U;
+    for (uint32_t i = 0; i < count; i++) {
+        uint8_t *dst = s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
+        for (uint32_t l = 0; l < lanes; ++l) {
+            memcpy(dst + ((size_t)l * 16U), s_sprite.cur_custom_attrs + ((size_t)l * 16U), 16U);
+        }
+    }
+}
+
 /* Bake the current per-widget custom attr block into staging for the vertex
  * range [base, base+count) — identical for every vertex of the emit (the value
  * is per-widget, supplied by the caller, like color). The block sits CONTIGUOUS
@@ -481,10 +501,7 @@ static inline void bake_custom_attrs(uint32_t base, uint32_t count) {
         return;
     }
     NT_ASSERT(base + count <= s_sprite.custom_max_vertices && "custom-attr bake out of range at extended stride");
-    for (uint32_t i = 0; i < count; i++) {
-        uint8_t *dst = s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
-        memcpy(dst, s_sprite.cur_custom_attrs, s_sprite.cur_custom_bytes);
-    }
+    bake_custom_lanes(base, count);
     /* Each emit CONSUMES its block: the next emit that forgets set_custom_attrs
      * then trips the material-stride assert instead of silently reusing this one. */
     s_sprite.cur_custom_bytes = 0;

@@ -276,8 +276,22 @@ static void test_geometry_widget_shares_base_batch_aligned(void) {
 }
 
 static void test_plain_setter_takes_no_block(void) {
+    nt_ui_set_sprite_material(s_fx.ctx, make_one_attr_material(), k_base_block, sizeof k_base_block);
     nt_ui_set_sprite_material(s_fx.ctx, s_fx.sprite_material, NULL, 0U);
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->base_custom_bytes);
+}
+
+/* The ctx keeps a copy: the game's array may be a temporary. */
+static void test_setter_copies_the_block(void) {
+    float block[4];
+    memcpy(block, k_base_block, sizeof block);
+    const nt_material_t mat = make_one_attr_material();
+    nt_ui_set_sprite_material(s_fx.ctx, mat, block, sizeof block);
+    memset(block, 0, sizeof block);
+    inject_image(s_fx.atlas.handle, NT_MATERIAL_INVALID, NULL);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    assert_whole_batch_carries_base_block();
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
@@ -310,6 +324,37 @@ static void test_unconsumed_block_does_not_outlive_a_bind(void) {
     const float quad[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_emit_geometry(s_fx.atlas.handle, s_fx.atlas.white_region_idx, quad, 4, idx, 6, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU));
+}
+
+static nt_ui_image_payload_t s_payloads[2];
+
+/* A custom widget that draws nothing, then a blockless override on the same material: no rebind
+ * between them, so the second emit must assert instead of baking the first widget's block. */
+static void expect_blockless_override_asserts_after(nt_resource_t first_atlas, Clay_BoundingBox first_bb, const nt_ui_image_custom_block_t *first_custom) {
+    nt_ui_set_sprite_material(s_fx.ctx, make_one_attr_material(), k_base_block, sizeof k_base_block);
+    const nt_material_t other = make_one_attr_material();
+    memset(s_cmds, 0, sizeof s_cmds);
+    s_payloads[0] = (nt_ui_image_payload_t){.atlas = first_atlas, .region_index = s_fx.atlas.white_region_idx, .slice9_scale = 1.0F, .material = other, .custom = first_custom};
+    s_payloads[1] = (nt_ui_image_payload_t){.atlas = s_fx.atlas.handle, .region_index = s_fx.atlas.white_region_idx, .slice9_scale = 1.0F, .material = other};
+    for (uint32_t i = 0; i < 2U; ++i) {
+        s_cmds[i].commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
+        s_cmds[i].boundingBox = (Clay_BoundingBox){.x = 10, .y = 10, .width = 32, .height = 32};
+        s_cmds[i].renderData.image.imageData = &s_payloads[i];
+    }
+    s_cmds[0].boundingBox = first_bb;
+    ui_walker_fixture_inject_cmds(&s_fx, s_cmds, 2, MAX_TEST_CMDS);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+}
+
+static void test_block_of_undrawn_region_widget_does_not_leak(void) {
+    static const nt_ui_image_custom_block_t blk = {.custom_attrs = {3.0F, 5.0F, 7.0F, 11.0F}, .custom_bytes = 16, .geom_mode = NT_UI_IMAGE_GEOM_REGION};
+    expect_blockless_override_asserts_after((nt_resource_t){.id = 0xDEADBEEFU}, (Clay_BoundingBox){.x = 10, .y = 10, .width = 32, .height = 32}, &blk);
+}
+
+static void test_block_of_empty_geometry_widget_does_not_leak(void) {
+    static const nt_ui_image_custom_block_t blk = {.custom_attrs = {3.0F, 5.0F, 7.0F, 11.0F}, .custom_bytes = 16, .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY};
+    expect_blockless_override_asserts_after(s_fx.atlas.handle, (Clay_BoundingBox){.x = 10, .y = 10, .width = 0, .height = 32}, &blk);
 }
 #endif
 
@@ -424,6 +469,20 @@ static void test_plain_inspector_material_stages_no_block_3d(void) {
     TEST_ASSERT_EQUAL_UINT8(sizeof k_base_block, s_fx.ctx->base_custom_bytes);
 }
 
+/* The inspector walk draws its panel on the plain inspector material without the block, then hands
+ * the game's material and block back to the next game walk. */
+static void test_inspector_walk_swaps_the_block_out_and_back(void) {
+    select_debug_element(false, false);
+    nt_ui_inspector_set_materials(s_fx.ctx, s_fx.sprite_material, s_fx.text_material);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    nt_ui_debug_inspector_walk(s_fx.ctx, &target);
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx), "the inspector walk draws on the swapped material");
+    nt_sprite_renderer_flush();
+    nt_ui_walk(s_fx.ctx, &target);
+    assert_whole_batch_carries_base_block();
+}
+
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* The inspector passes stage no block, so their own material must be plain. */
 static void test_custom_inspector_material_asserts(void) { NT_TEST_EXPECT_ASSERT(nt_ui_inspector_set_materials(s_fx.ctx, make_one_attr_material(), s_fx.text_material)); }
@@ -437,10 +496,13 @@ int main(void) {
     RUN_TEST(test_override_equal_to_base_gets_block);
     RUN_TEST(test_geometry_widget_shares_base_batch_aligned);
     RUN_TEST(test_plain_setter_takes_no_block);
+    RUN_TEST(test_setter_copies_the_block);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_set_asserts_on_stride_mismatch);
     RUN_TEST(test_other_custom_override_without_block_asserts);
     RUN_TEST(test_unconsumed_block_does_not_outlive_a_bind);
+    RUN_TEST(test_block_of_undrawn_region_widget_does_not_leak);
+    RUN_TEST(test_block_of_empty_geometry_widget_does_not_leak);
 #endif
 #if NT_UI_DEBUG_TOOLS
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
@@ -452,6 +514,7 @@ int main(void) {
     RUN_TEST(test_inspector_highlight_carries_base_block_2d_axis_aligned);
     RUN_TEST(test_inspector_highlight_carries_base_block_3d);
     RUN_TEST(test_plain_inspector_material_stages_no_block_3d);
+    RUN_TEST(test_inspector_walk_swaps_the_block_out_and_back);
 #endif
     return UNITY_END();
 }

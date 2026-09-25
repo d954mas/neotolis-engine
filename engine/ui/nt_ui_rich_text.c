@@ -2050,8 +2050,8 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
  * The scroll scissor is GL-live during self-emit, so images clip to the panel automatically; fx.scale>1
  * over-draws like OBJECT atoms (acceptable). Opacity is folded into the tint here -- no walker fold in self-emit. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- early-out guards + per-atom resolve/fx/model build in one linear pass
-static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer, bool stage_base) {
-    /* Material validity is a band-invariant -> the caller checks st->image_material once before the layer
+static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer, nt_material_t image_mat, bool stage_base) {
+    /* Material validity is a band-invariant -> the caller checks image_mat once before the layer
      * loop (id != 0, plain or the ctx base material); reaching here means it passed. */
     bool bound = false; /* per-call: each layer is its own drained batch -> rebind once per layer */
     for (uint32_t i = 0; i < st->solved_count; i++) {
@@ -2095,7 +2095,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
         float m[16];
         nt_ui_sprite_mat4(frame->world_mat4, cx, cy, sx_f, sy_f, m);
         if (!bound) {
-            nt_sprite_renderer_set_material(st->image_material); /* bind ONCE: all images coalesce into one batch */
+            nt_sprite_renderer_set_material(image_mat); /* bind ONCE: all images coalesce into one batch */
             bound = true;
         }
         if (stage_base) {
@@ -2211,20 +2211,6 @@ static uint32_t rich_gather_layers(const nt_ui_rich_state_t *st, uint8_t out[NT_
     return count;
 }
 
-/* Resolve block materials in place: the style overrides; an unset (id==0) field falls back to the ctx
- * default (text -> ctx->text_material, image -> ctx->sprite_material). st is per-call scratch, never reused. */
-static void rich_resolve_materials(nt_ui_rich_state_t *st, const nt_ui_context_t *ctx) {
-    if (ctx == NULL) {
-        return;
-    }
-    if (st->text_material.id == 0U) {
-        st->text_material = ctx->text_material;
-    }
-    if (st->image_material.id == 0U) {
-        st->image_material = ctx->sprite_material;
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- material resolve/validate + per-band kind ordering in one pass
 static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     nt_ui_rich_state_t *st = (nt_ui_rich_state_t *)data;
@@ -2241,8 +2227,11 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     st->image_emit_count = 0;
 #endif
 
-    rich_resolve_materials(st, frame->ctx);           /* style override, else ctx default (resolved in place) */
-    nt_text_renderer_set_material(st->text_material); /* resolved text material: style override or ctx default */
+    /* The style overrides; an unset (id==0) field falls back to the ctx default. Resolved per walk, never
+     * stored: the game may swap the ctx materials between two walks of one declared frame. */
+    const nt_ui_context_t *ctx = frame->ctx;
+    nt_text_renderer_set_material(st->text_material.id != 0U ? st->text_material : ctx->text_material);
+    const nt_material_t image_mat = st->image_material.id != 0U ? st->image_material : ctx->sprite_material;
 
     /* Inline-image material is a BAND-INVARIANT: validate the RESOLVED material ONCE here, not per-band
      * (rich_emit_images runs up to NT_UI_RICH_MAX_LAYERS times/frame). id==0 -> neither style nor ctx
@@ -2251,9 +2240,9 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
      * for the fail-early dev signal. */
     bool emit_images = false;
     bool stage_base = false; /* custom-attr ctx base material: its base block rides every image */
-    if (st->image_material.id != 0U) {
-        const nt_material_info_t *mi = nt_material_get_info(st->image_material);
-        stage_base = frame->ctx != NULL && st->image_material.id == frame->ctx->sprite_material.id && frame->ctx->base_custom_bytes != 0U;
+    if (image_mat.id != 0U) {
+        const nt_material_info_t *mi = nt_material_get_info(image_mat);
+        stage_base = image_mat.id == ctx->sprite_material.id && ctx->base_custom_bytes != 0U;
         NT_ASSERT(mi != NULL && (mi->attr_map_count == 0U || stage_base) && "rich inline-image material must be plain (attr_map_count==0) or the ctx base material with its base block");
         emit_images = (mi != NULL && (mi->attr_map_count == 0U || stage_base));
     }
@@ -2270,7 +2259,7 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
         rich_emit_text_layer(st, frame, box_x, box_y, L);
         nt_text_renderer_flush(); /* text behind: land it before the band's images */
         if (emit_images) {
-            rich_emit_images(st, frame, box_x, box_y, L, stage_base);
+            rich_emit_images(st, frame, box_x, box_y, L, image_mat, stage_base);
         }
         nt_sprite_renderer_flush(); /* images behind: drain them BEFORE the objects' opaque draw_fns */
         rich_emit_objects(st, frame, box_x, box_y, L);
