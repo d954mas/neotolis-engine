@@ -203,6 +203,9 @@ void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *
 /* Read back the custom per-vertex attr block of the v_idx-th vertex of the last
  * emit, from the byte-staging path. float_count floats written. */
 void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
+/* Same readback by batch vertex index: 0 .. last_emit_first_vertex + last_emit_vertex_count - 1. */
+void nt_sprite_renderer_test_batch_custom(uint32_t vertex, float *out, uint8_t float_count);
+uint32_t nt_sprite_renderer_test_last_emit_first_vertex(void);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void);
 /* Draw commands staged but not yet flushed. */

@@ -4048,7 +4048,7 @@ int main(int argc, char *argv[]) {
         .label = "ui_showcase_radial_img_packed",
     });
 
-    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
+    nt_ui_set_sprite_material(s_ctx, s_sprite_material, NULL, 0);
     nt_ui_set_text_material(s_ctx, s_text_material);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){

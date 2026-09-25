@@ -12,6 +12,7 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
+#include "renderers/nt_sprite_renderer.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
@@ -352,6 +353,9 @@ struct nt_ui_context {
     uint32_t white_region;
     nt_material_t sprite_material;
     nt_material_t text_material;
+    /* Game-owned block staged before each base emit; 0 bytes = plain sprite_material. */
+    float base_custom_attrs[NT_SPRITE_CUSTOM_STRIDE_MAX / sizeof(float)];
+    uint8_t base_custom_bytes;
     nt_ui_custom_handler_t custom_fn;
     void *custom_user;
 

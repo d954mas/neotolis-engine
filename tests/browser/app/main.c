@@ -1171,7 +1171,7 @@ int main(int argc, char *argv[]) {
         .label = "browser_smoke_text",
     });
 
-    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
+    nt_ui_set_sprite_material(s_ctx, s_sprite_material, NULL, 0);
     nt_ui_set_text_material(s_ctx, s_text_material);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){

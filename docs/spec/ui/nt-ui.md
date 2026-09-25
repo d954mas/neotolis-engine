@@ -209,6 +209,27 @@ Both modes use the same `tree_baked[layout_idx]` + per-id mirror
 `hit_generation[slot]` rejects stale ids). Opacity is a separate
 `float` accumulator on the same struct.
 
+### Base sprite material
+
+`nt_ui_set_sprite_material(ctx, material, base_custom_attrs, base_custom_bytes)`
+sets the material of every base emit: RECTANGLE, BORDER, plain and slice9
+IMAGE, and rich-text inline images whose block leaves `image_material` unset.
+A plain material passes `NULL, 0`. A custom-attr material (`attr_map_count > 0`)
+needs a per-vertex block on every emit, so the game supplies one:
+`base_custom_bytes` must equal `attr_map_count * 16`, asserted once at set time.
+The context keeps a copy, and the walker stages it before each base emit on
+that material; the plain path pays one branch per emit. The engine gives the
+bytes no meaning: which values mean "plain sprite" is the game's shader
+contract. Custom-attr widgets (`nt_ui_image_custom`) on the same material then
+batch with plain panels and icons instead of flushing at every boundary.
+
+A per-element material override and an `nt_ui_image_custom` block never receive
+the base block, and the sprite renderer still asserts on every other
+custom-attr emit that lacks `set_custom_attrs`. The debug inspector walk drops
+the block while it swaps in `inspector_sprite_material`. The inspector highlight
+and hit-zone overlays stage no block: wherever they draw with a custom-attr base
+material (2D, or 3D without `inspector_sprite_material`), the renderer asserts.
+
 ## Interaction model
 
 Game ids interact via `nt_ui_query_interaction`

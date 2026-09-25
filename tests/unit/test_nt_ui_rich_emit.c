@@ -510,6 +510,31 @@ static void test_inline_image_defaults_material_from_ctx(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one IMAGE atom emitted via the ctx default material");
 }
 
+/* A custom-attr ctx base material: the inline image inherits it and carries the game's base block. */
+static void test_inline_image_carries_ctx_base_block(void) {
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof desc);
+    desc.program = nt_material_get_info(s_fx.sprite_material)->program;
+    desc.textures[0].name = "u_texture";
+    desc.texture_count = 1;
+    desc.attr_map[0].stream_name = "a_game";
+    desc.attr_map[0].location = 4;
+    desc.attr_map_count = 1;
+    desc.label = "rich_base_custom_material";
+    const nt_material_t mat = nt_material_create(&desc);
+    const float block[4] = {0.125F, 0.25F, 0.5F, 1.0F};
+    nt_ui_set_sprite_material(s_fx.ctx, mat, block, sizeof block);
+
+    frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    for (uint32_t v = 0; v < 4U; v++) {
+        float got[4] = {0};
+        nt_sprite_renderer_test_last_emit_radial(v, got, 4);
+        TEST_ASSERT_EQUAL_MEMORY(block, got, sizeof block);
+    }
+}
+
 /* (6) the inline image's composed <color> reaches the standard u8 sprite tint: a run with
  * <color> r=255 g=128 b=0 a=255 emits that per-vertex color on the region quad (the walker
  * packs the run tint into backgroundColor -> a_color, not a float4 custom block). */
@@ -2559,6 +2584,7 @@ int main(void) {
     RUN_TEST(test_over_cap_layers_hard_guard);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_defaults_material_from_ctx);
+    RUN_TEST(test_inline_image_carries_ctx_base_block);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_two_inline_images_coalesce);
     RUN_TEST(test_inline_images_not_in_image_command_count);

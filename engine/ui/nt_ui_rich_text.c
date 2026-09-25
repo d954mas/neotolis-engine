@@ -2050,9 +2050,9 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
  * The scroll scissor is GL-live during self-emit, so images clip to the panel automatically; fx.scale>1
  * over-draws like OBJECT atoms (acceptable). Opacity is folded into the tint here -- no walker fold in self-emit. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- early-out guards + per-atom resolve/fx/model build in one linear pass
-static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
+static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer, bool stage_base) {
     /* Material validity is a band-invariant -> the caller checks st->image_material once before the layer
-     * loop (id != 0, attr_map_count == 0); reaching here means it passed. */
+     * loop (id != 0, plain or the ctx base material); reaching here means it passed. */
     bool bound = false; /* per-call: each layer is its own drained batch -> rebind once per layer */
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
@@ -2097,6 +2097,9 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
         if (!bound) {
             nt_sprite_renderer_set_material(st->image_material); /* bind ONCE: all images coalesce into one batch */
             bound = true;
+        }
+        if (stage_base) {
+            nt_sprite_renderer_set_custom_attrs(frame->ctx->base_custom_attrs, frame->ctx->base_custom_bytes);
         }
         nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, nt_color_pack(fx.color), 0U);
 #ifdef NT_TEST_ACCESS
@@ -2222,6 +2225,7 @@ static void rich_resolve_materials(nt_ui_rich_state_t *st, const nt_ui_context_t
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- material resolve/validate + per-band kind ordering in one pass
 static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     nt_ui_rich_state_t *st = (nt_ui_rich_state_t *)data;
     NT_ASSERT(st != NULL && "rich emit: NULL state");
@@ -2242,14 +2246,16 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
 
     /* Inline-image material is a BAND-INVARIANT: validate the RESOLVED material ONCE here, not per-band
      * (rich_emit_images runs up to NT_UI_RICH_MAX_LAYERS times/frame). id==0 -> neither style nor ctx
-     * gave a sprite material, so skip images. The plain u8 sprite path requires attr_map_count==0
-     * (emit_region bakes no custom-attr block); a NULL/custom-attr material is a HARD guard (survives
-     * NT_ASSERT OFF), keeping the assert for the fail-early dev signal. */
+     * gave a sprite material, so skip images. A custom-attr material needs a block per emit, and only the
+     * ctx base material has one; any other is a HARD guard (survives NT_ASSERT OFF), keeping the assert
+     * for the fail-early dev signal. */
     bool emit_images = false;
+    bool stage_base = false; /* custom-attr ctx base material: its base block rides every image */
     if (st->image_material.id != 0U) {
         const nt_material_info_t *mi = nt_material_get_info(st->image_material);
-        NT_ASSERT(mi != NULL && mi->attr_map_count == 0U && "rich inline-image material must be the plain u8 sprite path (attr_map_count==0)");
-        emit_images = (mi != NULL && mi->attr_map_count == 0U);
+        stage_base = frame->ctx != NULL && st->image_material.id == frame->ctx->sprite_material.id && frame->ctx->base_custom_bytes != 0U;
+        NT_ASSERT(mi != NULL && (mi->attr_map_count == 0U || stage_base) && "rich inline-image material must be plain (attr_map_count==0) or the ctx base material with its base block");
+        emit_images = (mi != NULL && (mi->attr_map_count == 0U || stage_base));
     }
 
     /* Cross-renderer z is flush order (painter-order, depth off): emit ascending by layer and drain after
@@ -2264,7 +2270,7 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
         rich_emit_text_layer(st, frame, box_x, box_y, L);
         nt_text_renderer_flush(); /* text behind: land it before the band's images */
         if (emit_images) {
-            rich_emit_images(st, frame, box_x, box_y, L);
+            rich_emit_images(st, frame, box_x, box_y, L, stage_base);
         }
         nt_sprite_renderer_flush(); /* images behind: drain them BEFORE the objects' opaque draw_fns */
         rich_emit_objects(st, frame, box_x, box_y, L);

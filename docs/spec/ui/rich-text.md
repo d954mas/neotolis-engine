@@ -162,7 +162,9 @@ block's CUSTOM self-emit (`rich_emit_images`) via
 `nt_sprite_renderer_emit_region`, positioned at the solver's solved `(x, y)`.
 The composed tint (the run's `<color>` × any per-atom effect tint) is packed to
 the standard **u8** sprite tint, the block's **image material** (the plain u8
-sprite path, `attr_map_count == 0`) textures the region, and the self-emit folds
+sprite path, `attr_map_count == 0`, or the ctx base material with its game
+base block — see [Base sprite material](nt-ui.md#base-sprite-material))
+textures the region, and the self-emit folds
 the parent opacity into the tint alpha exactly like rich TEXT — there is **no**
 bespoke material, float4 `a_tint`, or custom-attr block. The single composed
 tint is invisible at u8 on an 8-bit display, so the earlier lossless-float4 path

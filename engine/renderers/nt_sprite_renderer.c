@@ -1235,6 +1235,16 @@ void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_
     memcpy(out, src, (size_t)float_count * sizeof(float));
 }
 
+void nt_sprite_renderer_test_batch_custom(uint32_t vertex, float *out, uint8_t float_count) {
+    NT_ASSERT(out != NULL);
+    NT_ASSERT(vertex < s_sprite.last_emit_first_vertex + s_sprite.last_emit_vertex_count && "batch_custom: index out of range");
+    NT_ASSERT((uint32_t)float_count * sizeof(float) <= NT_SPRITE_CUSTOM_STRIDE_MAX && "batch_custom: float_count exceeds custom stride");
+    const uint8_t *src = s_sprite.staging + ((size_t)vertex * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
+    memcpy(out, src, (size_t)float_count * sizeof(float));
+}
+
+uint32_t nt_sprite_renderer_test_last_emit_first_vertex(void) { return s_sprite.last_emit_first_vertex; }
+
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }
 uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void) { return s_sprite.vi_count; }
 

@@ -175,7 +175,7 @@ static void test_context_timing_is_independent(void) {
     s_other_ctx = nt_ui_create_context(s_other_arena, sizeof s_other_arena, &desc);
     TEST_ASSERT_NOT_NULL(s_other_ctx);
     nt_ui_set_atlas_white_region(s_other_ctx, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
-    nt_ui_set_sprite_material(s_other_ctx, s_fx.sprite_material);
+    nt_ui_set_sprite_material(s_other_ctx, s_fx.sprite_material, NULL, 0);
     nt_ui_set_text_material(s_other_ctx, s_fx.text_material);
     assert_timings(s_other_ctx, 0, 0);
 

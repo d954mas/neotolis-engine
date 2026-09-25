@@ -1423,6 +1423,7 @@ if(NOT EMSCRIPTEN)
         test_ui_tabbar
         test_ui_tooltip
         test_ui_radial
+        test_nt_ui_base_custom_attrs
         test_nt_ui_clay_debug_view
         test_nt_ui_rich_build
         test_nt_ui_rich_custom
