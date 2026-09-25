@@ -57,7 +57,7 @@ typedef struct {
     uint32_t max_indices;         /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_INDICES */
     uint32_t custom_max_vertices; /* custom-attr staging cap; sizes the custom/interleave
                                    * heap so plain-sprite games don't carry a big custom
-                                   * buffer. A custom-attr nt_ui base stages all base UI
+                                   * buffer. Every batch of a custom-attr material stages
                                    * under it. Default 4096. */
 } nt_sprite_renderer_desc_t;
 

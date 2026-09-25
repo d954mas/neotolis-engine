@@ -17,73 +17,76 @@ The left tab list itself **dogfoods the reusable `nt_ui_tabbar`** widget (the ga
 owns the active-tab index; the widget draws the accent bar + selected fill + hover
 lighten and writes the index on click).
 
-## Tabs (19 entries)
+## Tabs (20 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
-2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
+2. **Decoration** - type specimen: R/B/I/BI styles, inline faces, synthetic-weight ramp,
+   outline + shadow ramps, underline/strike, via both runtime `<markup>` and `nt_ui_label`
+   style fields.
+3. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
    scale / per-state art swap (blue idle / green hover / red press) / no-pad
    touch-target / icon button / disabled.
-3. **Buttons: Transform** - a single button wrapped in a live rotation / scale /
+4. **Buttons: Transform** - a single button wrapped in a live rotation / scale /
    offset transform driven by a properties panel; the click counter proves the
    transform-aware (inverse-affine) hit-test still clicks while it is rotated,
    scaled, and offset.
-4. **Images & Slice9** - slice9 panels at several sizes (corners stay crisp) +
+5. **Images & Slice9** - slice9 panels at several sizes (corners stay crisp) +
    a live insets/size properties panel.
-5. **Toggles & Radios** - checkbox + exclusive radio group + sliding toggle +
+6. **Toggles & Radios** - checkbox + exclusive radio group + sliding toggle +
    a **tristate "select all"** (`nt_ui_checkbox_tri`) whose parent reflects the
    children (all on / all off / indeterminate MIXED dash); see the **New-widget
    controls** + **Visual-QA protocol** below.
-6. **Sliders & Progress** - float + int sliders + a **vertical** volume/mixer
+7. **Sliders & Progress** - float + int sliders + a **vertical** volume/mixer
    slider (`NT_UI_SLIDER_VERTICAL`, BOTTOM_UP fill) + a progress bar with a live
    value / auto-animate properties panel.
-7. **Scroll** - four independent (non-nested) scroll containers in a 2x2 grid:
+8. **Scroll** - four independent (non-nested) scroll containers in a 2x2 grid:
    vertical AUTO_HIDE bar / vertical ALWAYS bar / horizontal-only / both axes (XY).
-8. **Virtual List** - two `nt_ui_vlist` clippers over a **10,000-row** dataset
+9. **Virtual List** - two `nt_ui_vlist` clippers over a **10,000-row** dataset
    (a vertical column + a horizontal strip); each owns ONE scroll / ONE Clay clip
    and renders only the visible window, so cost ~ the visible count, not 10k. A
    header readout shows the live window vs the total; see the **Visual-QA
    protocol** below.
-9. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
-10. **Input** - plain / numeric-filtered / password-masked / Cyrillic text fields
+10. **Modals** - confirm modal + nested depth-2 modal + a live transition panel.
+11. **Input** - plain / numeric-filtered / password-masked / Cyrillic text fields
     (`nt_ui_input_text`); see the **Input controls** table below.
-11. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
+12. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
     `hold_progress` drives a fill bar and confirms on `long_pressed`, plus a
     double-click target with a readout; see the **Interaction-events controls** below.
-12. **Radial** - SDF radial feedback (`nt_ui_radial` + `nt_ui_radial_image`): a
+13. **Radial** - SDF radial feedback (`nt_ui_radial` + `nt_ui_radial_image`): a
     looping **cooldown** wedge, a **hold-to-confirm** wedge driven by the events
     `hold_progress`, ring + oval shape variants, the **four reveal modes**
     (desaturate / dim / hide / tint) on a textured radial-image, and a **dense
     batched grid** that proves N radials sharing one material stay one draw call;
     see the **Radial controls** + **Radial visual-QA protocol** below.
-13. **Base Material** - one custom-attr base material (`ui_base.frag`) for the whole
+14. **Base Material** - one custom-attr base material (`ui_base.frag`) for the whole
     UI: plain emits bake its attr defaults, so rounded panels, icons and SDF radials
     share one batch. The checkbox swaps back to a plain base + a separate radial
     material; the `draw calls` readout shows the difference.
-14. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
+15. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
     block (`nt_ui_rich_text` + `nt_ui_rich_text_markup`), authored **two ways**:
     the code-first push/pop builder AND the runtime `<markup>` parser. Demos
     **real** bold / italic / bold-italic faces (DejaVu R/B/I/BI baked into the
     pack), per-run **scale** (a big title + a smaller reward word), **all five**
     stock effects in a gallery (`wave` `shake` `rainbow` `pulse` `fade_in`),
-    inline icons (lossless per-image tint), a **typewriter** (`fade_in` stagger
+    inline icons (per-image u8 tint), a **typewriter** (`fade_in` stagger
     off the game clock), and an **interactive link** that brightens + grows on
     hover and flips to a green "Accepted" latch on click; see the **Rich Text
     controls** + **Rich Text visual-QA protocol** below.
-15. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
+16. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
     a short list (icon gutter), a long scrolling list (more than `max_visible_rows`)
     that flips up near the window bottom, and a custom swatch-trigger combo
     (`nt_ui_combo_preview_begin`/`end`).
-16. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
+17. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
     never block clicks on the targets underneath).
-17. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
+18. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
     `submenu_begin`/`separator`/`item_begin`/`end`) on a right-click / long-press: a
     rich row (icon + `Ctrl+N` shortcut), a checkmark-toggle row, a disabled item, a
     nested **submenu**, and a custom `activatable=false` row whose inner button owns
     the click. Mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
-18. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
+19. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
     tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
     list, which uses the one-call `labels[]` wrapper with a LEFT accent).
-19. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+20. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Controls
 
@@ -233,7 +236,7 @@ the code-first builder, once via the runtime markup parser — to prove byte-ide
 | **Real faces** | DejaVu **R / B / I / BI** are baked and bound to the four variant slots, so `<b>` = real bold, `<i>` = real oblique, `<b><i>` = real bold-italic — no synth-shear, no faux-bold |
 | **Scale** | a big `<scale=1.6>` **DRAKE** title word + a smaller `<scale=0.85>` "100 gold" show visible per-run size variation |
 | **Effects gallery** | all five stock effects appear, one per labelled word — `wave` `shake` `rainbow` `pulse` `fade_in` — each animating off the same game `time` clock |
-| **Inline icons** | the gold + heart icons sit baseline-aligned (`valign=middle`) beside the text; the run's `<color>` rides the **lossless** per-image `a_tint` |
+| **Inline icons** | the gold + heart icons sit baseline-aligned (`valign=middle`) beside the text; the run's `<color>` rides the u8 sprite tint |
 | **Typewriter** | the third line uses `fade_in` to stagger each glyph's reveal off the clock; it loops every ~4 s so the reveal replays |
 | **Link** | hovering `[Accept quest]` **brightens (cyan) and scales up**; clicking flips it to a green **`[OK Accepted]`** for ~1.2 s, ticks the click counter, and latches the id (Model-D reaction). Both fronts react identically (the markup string is rebuilt each frame with the same link look) |
 
@@ -253,7 +256,7 @@ Build + run the native showcase, open the **Rich Text** tab, and confirm:
    `fade_in` (staggered reveal). The layout does NOT re-flow (effects are visual-only).
 4. **Inline-icon baseline alignment** — the gold + heart icons sit on the text baseline
    (`valign=middle`), neither floating above the cap height nor clipping below the descenders;
-   the gold icon carries its lossless tint.
+   the gold icon carries its tint.
 5. **Typewriter reveal** — the third block reveals glyph-by-glyph and replays on the ~4 s loop;
    no glyph pops in at full alpha out of order.
 6. **Link hover + click (the headline interaction)** — hovering `[Accept quest]` makes it

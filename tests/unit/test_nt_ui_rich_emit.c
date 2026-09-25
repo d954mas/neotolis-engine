@@ -451,7 +451,7 @@ static void test_emit_more_than_four_fonts_no_drop(void) {
 /* ===== Inline IMAGE emit ===== */
 
 /* Build [text][image][text] on one wide line, declare the rich-text widget, walk once.
- * The image rides the plain u8 sprite path (composed <color> packed to the sprite tint). */
+ * The image's composed <color> is packed to the u8 sprite tint. */
 static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign, uint32_t tint_abgr) {
     /* Fresh frame: free the per-call rich scratch. pending_rich is released by the terminal
      * nt_ui_rich_text and re-zeroed by nt_ui_begin, so no manual clear is needed here. */

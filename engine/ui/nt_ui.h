@@ -254,7 +254,7 @@ const nt_ui_element_data_t *nt_ui_make_element_data_xform(nt_ui_layer_t layer, v
 
 /* All four setters required per-context before first walk. */
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);
-/* A custom-attr sprite material must declare attr defaults (asserted); spec "Custom-attr base material". */
+/* A custom-attr sprite material must declare attr defaults (asserted); see nt-ui spec "Custom-attr base material". */
 void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material);
 void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material);
 /* NULL fn silently skips CUSTOM commands. userdata may be NULL. Non-NULL userdata

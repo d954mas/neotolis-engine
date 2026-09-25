@@ -38,8 +38,8 @@ void main() {
     v_layout = a_layout;
     // The widget emits a 4-corner quad TL/TR/BR/BL; derive the [-1,1] local coord
     // from gl_VertexID so the flat-radial path needs no extra per-vertex coord attr.
-    // Each quad starts at a multiple of 4 vertices (the walker aligns it), so
-    // gl_VertexID & 3 is the corner within each batched quad.
+    // A GEOMETRY-mode quad starts at a multiple of 4 vertices (the walker aligns it), so
+    // gl_VertexID & 3 is its corner. REGION-mode users ignore v_local.
     int corner = gl_VertexID & 3;
     // 0:TL(-1,-1) 1:TR(+1,-1) 2:BR(+1,+1) 3:BL(-1,+1)
     float lx = (corner == 1 || corner == 2) ? 1.0 : -1.0;

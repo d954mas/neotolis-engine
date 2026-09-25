@@ -1264,7 +1264,7 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
 
 /* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel.
  *
- * INVARIANT (load-bearing): the fs's gl_VertexID&3 corner derivation requires each
+ * INVARIANT (load-bearing): the vertex shader's gl_VertexID&3 corner derivation requires each
  * quad's base vertex index to be a multiple of 4. The align call enforces it, so the
  * quad may share a batch with emits of any vertex count; it emits EXACTLY 4 verts. */
 static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16], const float *custom, uint8_t custom_bytes) {

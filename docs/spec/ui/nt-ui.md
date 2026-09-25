@@ -217,14 +217,13 @@ defaults ([Attr defaults](../render/material.md#attr-defaults));
 without its own block bakes them: RECTANGLE, BORDER, IMAGE, rich-text inline
 images and the debug overlays. An `nt_ui_image_custom` block replaces them for
 its own emit. Custom widgets on the base handle then batch with plain panels and
-icons instead of flushing at every boundary. The same holds for any IMAGE
-override or rich `image_material` whose material has defaults.
+icons instead of flushing at every boundary.
 
-A custom-attr base moves all base UI to the extended vertex stride (20 bytes
-plus 16 per attr). Its batches cap at the sprite renderer's
-`custom_max_vertices`, and one rounded BORDER emits up to
-`8 × (NT_UI_CORNER_SEGMENTS + 1)` vertices (56 at the default 6 segments), so a custom-attr base
-needs `custom_max_vertices` at least that.
+A custom-attr base moves all base UI to the extended vertex stride
+([Sprite custom-attr block](../render/items-sorting-batching.md#sprite-custom-attr-block)).
+Its batches cap at the sprite renderer's `custom_max_vertices`. The largest base
+emit, a rounded BORDER, stages 56 vertices, so a custom-attr base needs
+`custom_max_vertices` ≥ 56.
 
 ## Interaction model
 

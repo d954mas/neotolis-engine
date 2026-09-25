@@ -573,7 +573,7 @@ static void link_programs(void) {
 }
 static nt_atlas_region_ref_t s_radial_art_ref;
 /* Rich-text inline-image by-name refs into the MAIN ui_showcase atlas (heart/gold). Inline images ride
- * the standard u8 sprite path now -- no bespoke material; the rich base uses s_sprite_material. */
+ * the u8 sprite path on the ctx sprite material (no dedicated material). */
 static nt_atlas_region_ref_t s_rich_heart_ref;
 static nt_atlas_region_ref_t s_rich_gold_ref;
 /* Rich-text font family (variant slots R/B/I/BI -> real DejaVu faces). Index = NT_UI_RICH_VARIANT_*
@@ -4076,7 +4076,7 @@ int main(int argc, char *argv[]) {
     });
 
     /* One radial-image material per reveal mode: u_reveal_mode (mode + dim_factor) is baked at
-     * creation. The TINT is per-widget now (a_tint @ loc 5), so the TINT material serves every
+     * creation. The TINT is per-widget (a_tint @ loc 5), so the TINT material serves every
      * tint color from one batch. attr_map declares all four custom attrs (a_radial + a_tint +
      * a_uvrect @ loc 6 + a_layout @ loc 7; the walker fills a_uvrect + a_layout by name). */
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};

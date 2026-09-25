@@ -70,8 +70,8 @@ static struct {
     uint32_t custom_max_vertices; /* custom flush caps here (custom verts are bigger) */
     uint32_t vertex_count;
     uint32_t index_count;
-    /* Byte stride of the current batch = 20 + cur_material_custom_bytes. Set per-flush
-     * in open_cmd, so the plain path stays a constant 20. */
+    /* Byte stride of the current batch = 20 + cur_material_custom_bytes. Set in open_cmd,
+     * which flushes on a stride change, so the plain path stays a constant 20. */
     uint32_t cur_stride;
     /* Custom byte count the bound material's attr_map declares (attr_map_count *
      * 16, one FLOAT4 per attr — matches build_sprite_layout). bake asserts an
