@@ -23,6 +23,7 @@
 #define powf(x, y) __builtin_powf(x, y)
 #define fminf(x, y) __builtin_fminf(x, y)
 #define fmaxf(x, y) __builtin_fmaxf(x, y)
+#define copysignf(x, y) __builtin_copysignf(x, y)
 
 /* Count trailing zeros (lowest set bit position). UB if v == 0. */
 #if defined(_MSC_VER) && !defined(__clang__)

@@ -143,3 +143,75 @@ J = 100, T = 4; the tool aborts and prints the mismatch otherwise.
 8. **Decision: keep AoS 40 B as the initial ABI.** Re-run this tool against the
    real kernels in #487 and revisit the layout in #492, where a SIMD mix is the
    deciding measurement rather than this one.
+
+## Engine mix kernel (2026-09-24/25)
+
+The AoS40 mix stage now calls the public `nt_skeletal_mix`; AoS48 and SoA keep
+the local stand-in, so from here on the mix column compares kernels as well as
+layouts, and conclusion 2 can no longer be re-checked with this tool as is.
+Checked builds (`NT_SKELETAL_CHECKS=ON`) also validate every contributing pose
+in the AoS40 mix, as conclusion 7 notes for FK; compare `native-release` only.
+The table gains a `mix/input` column: mix / T, an average that includes the
+per-joint fixed cost (seed sign, normalization, stores).
+
+Kernel decisions were taken on a separate A/B harness (not committed): every
+variant compiled into one binary (clang -O3, TRAP, checks off), J=60, C=1000,
+interleaved, 11 repetitions, median with the 3rd–9th values in brackets. Two
+data sets: random unit quaternions (hemispheres and largest component vary)
+and smooth ones (w dominant). Early runs (2026-09-24) were unpinned under
+background load and only ranked variants; the final run (2026-09-25) pinned
+the thread to one core at high priority. ns/(joint·input):
+
+| data | case | kernel before review round 2 | shipped |
+|:-----|:-----|------------------------------:|--------:|
+| random | mix T=1 | 4.65 [4.59–4.77] | 4.11 [4.03–4.25] |
+| random | mix T=2 | 3.73 [3.69–3.80] | 3.35 [3.28–3.42] |
+| random | mix T=4 | 3.36 [3.27–3.39] | 3.22 [3.12–3.25] |
+| smooth | mix T=1 | 4.39 [4.32–4.53] | 3.81 [3.78–4.01] |
+| smooth | mix T=4 | 3.31 [3.25–3.52] | 3.18 [3.15–3.25] |
+| random | override, mask 0.5 | 7.78 [7.67–8.26] | 4.46 [4.30–7.34] |
+| smooth | override, mask 0.5 | 4.25 [4.21–4.53] | 4.35 [4.23–4.60] |
+
+What each step bought, in the order taken:
+
+- Dot-sign alignment by `copysignf` instead of a branch (unpinned): random T=4
+  7.9 -> 4.4. The branch mispredicts whenever inputs sit in both hemispheres.
+- Seed sign = sign of w, largest component only at w == 0 (unpinned): T=1
+  6.3 -> ~5.0 on both data sets. The four-way search ran on every joint.
+- First contributor skips the dot product it would take against the empty sum:
+  ~0.6 ns/joint at T=1 (pinned), included in "shipped".
+- Gains outside [2^-60, 2^60] are asserted, not rescaled: a fade ends at 0.
+  The exact power-of-two scaling tried before cost +0.9 ns at T=1 as an
+  inner-loop multiply, and its "inline twice, pass a literal 1" form was not
+  what clang emitted in `native-release` (one out-of-line copy, one call).
+- Override nlerp sign by `copysignf` (also used by `nt_skeletal_sample`):
+  random 7.8 -> 4.5, smooth unchanged.
+- Rejected: one division per joint (`1/(W·|A|)` split into both factors),
+  +1 ns at T=1; rewriting the seed search with fabsf, selects or an fmaxf tree,
+  no gain; an unconditional 1/W prescale of the rotation sum, +0.65 ns at T=1.
+
+TRAP against `NT_ASSERT_MODE=0` showed no visible difference with and without
+joint weights (unpinned runs). The numbers above are native x86-64
+(i9-14900HX).
+
+## wasm / V8 (2026-09-25)
+
+The tool built with emcc 4.0.19 (`-O3`, TRAP, checks off, with and without
+`-msimd128`, sources passed directly to emcc; CMake builds the tool natively
+only) and run in node 24.15, pinned to one core at high priority, two runs
+each. Unpinned runs scattered up to 2x and are discarded. AoS 40 B, J=60,
+C=1000, ns/joint:
+
+| T | build | sample | mix | mix/input | FK |
+|--:|:------|-------:|----:|----------:|---:|
+| 1 | scalar | 5.03–5.09 | 5.41–5.47 | 5.41–5.47 | 8.32–8.49 |
+| 1 | simd128 | 4.82–4.89 | 5.44–5.46 | 5.44–5.46 | 8.45–8.79 |
+| 2 | scalar | 9.89–10.20 | 9.12–9.15 | 4.56–4.58 | 8.62–8.68 |
+| 2 | simd128 | 9.70–9.75 | 9.07–9.16 | 4.53–4.58 | 8.40–8.75 |
+| 4 | scalar | 20.35–21.56 | 16.94–17.20 | 4.24–4.30 | 8.44–8.77 |
+| 4 | simd128 | 19.28–19.70 | 16.71–17.13 | 4.18–4.28 | 8.34–8.57 |
+
+mix in V8 costs about 1.3x native (4.1 / 3.2 ns pinned native at T=1 / 4).
+`-msimd128` changes nothing measurable: the autovectorizer leaves the mix
+loop scalar, so wasm SIMD gains need the hand-written kernels of #492, not a
+flag.

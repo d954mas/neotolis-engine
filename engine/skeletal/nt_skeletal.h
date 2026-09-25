@@ -250,6 +250,39 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, nt_skeletal
 void nt_skeletal_clip_view(const uint8_t *payload, nt_skeletal_clip_t *out);
 // #endregion
 
+// #region composition
+/*
+ * Stateless kernels over local poses of joint_count entries; the game chains
+ * them in any order. Per-joint factors are float arrays of joint_count
+ * entries, or NULL for 1. Ranges are always asserted; NT_SKELETAL_CHECKS adds
+ * finite weights, finite T/S and unit quaternions of the blended poses.
+ */
+
+/* One input of nt_skeletal_mix. Its influence on joint j is
+ * gain * weights[j]; a zero influence reads nothing from the pose. */
+typedef struct {
+    const nt_skeletal_trs_t *pose; /* joint_count entries */
+    const float *weights;          /* joint_count entries >= 0, or NULL for 1 */
+    float gain;                    /* 0 or in [2^-60, 2^60] */
+} nt_skeletal_mix_input_t;
+
+/* Normalized N-way mix. Per joint with influences w_t and W = sum w_t: W == 0
+ * copies defaults[j]; otherwise T/S = sum (w_t / W) * x_t and the rotation is
+ * the normalized sum of w_t * q_t, each sign-aligned against the running sum
+ * in supplied order, so input order is part of the result. Any non-zero
+ * influence counts in full and is a normal float; T/S sums stay in float
+ * range. input_count may be 0 (inputs may then be NULL); out overlaps neither
+ * defaults nor any input pose. */
+void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count, const nt_skeletal_trs_t *defaults, uint16_t joint_count, nt_skeletal_trs_t *restrict out);
+
+/* out[j] = base[j] blended toward top[j] by a = alpha * mask[j]: T/S lerp, Q
+ * shortest-path normalized lerp. a == 0 copies base and a == 1 copies top bit
+ * for bit, so a joint the mask leaves out keeps base exactly. alpha and
+ * mask[j] are in [0, 1]. out may be base itself; any other overlap of out with base or top is
+ * a precondition violation. */
+void nt_skeletal_override(const nt_skeletal_trs_t *base, const nt_skeletal_trs_t *top, const float *mask, float alpha, uint16_t joint_count, nt_skeletal_trs_t *out);
+// #endregion
+
 // #region tracks
 /* Playback state of one clip assignment, owned by the game in a fixed-capacity
  * array. The engine has no player object: assign, release and crossfade ramps

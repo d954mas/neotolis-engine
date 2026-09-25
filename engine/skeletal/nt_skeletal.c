@@ -96,6 +96,21 @@ static uint32_t nt_skeletal_grid_index(double time, double inv_step, uint32_t sa
     return i;
 }
 
+/* q and -q are the same rotation: the sign that makes the largest component
+ * positive, ties broken by the first maximum in x,y,z,w order. */
+static float nt_skeletal_canonical_sign(const float q[4]) {
+    int best = 0;
+    float best_abs = (q[0] < 0.0F) ? -q[0] : q[0];
+    for (int c = 1; c < 4; ++c) {
+        const float a = (q[c] < 0.0F) ? -q[c] : q[c];
+        if (a > best_abs) {
+            best_abs = a;
+            best = c;
+        }
+    }
+    return (q[best] < 0.0F) ? -1.0F : 1.0F;
+}
+
 static void nt_skeletal_lerp3(const float *a, const float *b, float u, float *out) {
     for (int c = 0; c < 3; ++c) {
         out[c] = (a[c] * (1.0F - u)) + (b[c] * u);
@@ -103,15 +118,16 @@ static void nt_skeletal_lerp3(const float *a, const float *b, float u, float *ou
 }
 
 /* Shortest-path normalized lerp: q and -q are the same rotation, so a pair
- * pointing into opposite hemispheres takes the near way round. */
+ * pointing into opposite hemispheres takes the near way round. The sign of d
+ * is data, not control flow: a branch on it mispredicts on mixed hemispheres. */
 static void nt_skeletal_nlerp(const float *a, const float *b, float u, float *out) {
     const float d = (a[0] * b[0]) + (a[1] * b[1]) + (a[2] * b[2]) + (a[3] * b[3]);
-    const float sign = (d < 0.0F) ? -1.0F : 1.0F;
+    const float bu = copysignf(u, d);
 
     float q[4];
     float len2 = 0.0F;
     for (int c = 0; c < 4; ++c) {
-        q[c] = (a[c] * (1.0F - u)) + (b[c] * sign * u);
+        q[c] = (a[c] * (1.0F - u)) + (b[c] * bu);
         len2 += q[c] * q[c];
     }
 
@@ -186,6 +202,151 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, nt_skeletal
     for (uint16_t k = 0; k < clip->n_s; ++k) {
         NT_ASSERT(clip->s_joint[k] < clip->joint_count);
         nt_skeletal_lerp3(a + s_off + ((size_t)3U * k), b + s_off + ((size_t)3U * k), u, out[clip->s_joint[k]].s);
+    }
+}
+// #endregion
+
+// #region composition
+#if NT_ASSERT_MODE != NT_ASSERT_OFF
+static bool nt_skeletal_poses_disjoint(const nt_skeletal_trs_t *a, const nt_skeletal_trs_t *b, uint16_t joint_count) {
+    return (uintptr_t)(a + joint_count) <= (uintptr_t)b || (uintptr_t)(b + joint_count) <= (uintptr_t)a;
+}
+#endif
+
+#if NT_SKELETAL_CHECKS
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void nt_skeletal_check_trs(const nt_skeletal_trs_t *v) {
+    for (int c = 0; c < 3; ++c) {
+        NT_ASSERT(nt_skeletal_finite((double)v->t[c]));
+        NT_ASSERT(nt_skeletal_finite((double)v->s[c]));
+    }
+    NT_ASSERT(fabsf((v->q[0] * v->q[0]) + (v->q[1] * v->q[1]) + (v->q[2] * v->q[2]) + (v->q[3] * v->q[3]) - 1.0F) < 1e-3F);
+}
+#endif
+
+/* The sign that makes w positive. Any fixed rule keeps q and -q equivalent;
+ * this one costs a compare instead of a search, and only w == 0 exactly falls
+ * back to the largest-component rule of rig identity. */
+static float nt_skeletal_mix_seed_sign(const float q[4]) {
+    if (q[3] != 0.0F) {
+        return copysignf(1.0F, q[3]);
+    }
+    return nt_skeletal_canonical_sign(q);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count, const nt_skeletal_trs_t *defaults, uint16_t joint_count, nt_skeletal_trs_t *restrict out) {
+    NT_ASSERT(inputs != NULL || input_count == 0U);
+    NT_ASSERT(defaults != NULL);
+    NT_ASSERT(out != NULL);
+    NT_ASSERT(nt_skeletal_poses_disjoint(out, defaults, joint_count));
+    for (uint32_t i = 0; i < input_count; ++i) {
+        NT_ASSERT(inputs[i].pose != NULL);
+        /* Also rejects NaN and infinity. A fade that never reaches 0 sticks
+         * at a subnormal, where w * x quantizes and 1/W overflows. */
+        NT_ASSERT(inputs[i].gain == 0.0F || (inputs[i].gain >= 0x1p-60F && inputs[i].gain <= 0x1p60F));
+        NT_ASSERT(nt_skeletal_poses_disjoint(out, inputs[i].pose, joint_count));
+    }
+
+    for (uint16_t j = 0; j < joint_count; ++j) {
+        float t[3] = {0.0F, 0.0F, 0.0F};
+        float q[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+        float s[3] = {0.0F, 0.0F, 0.0F};
+        float w_sum = 0.0F;
+        for (uint32_t i = 0; i < input_count; ++i) {
+            const nt_skeletal_mix_input_t *in = &inputs[i];
+            float w = in->gain;
+            if (in->weights != NULL) {
+                NT_ASSERT(in->weights[j] >= 0.0F);
+#if NT_SKELETAL_CHECKS
+                NT_ASSERT(nt_skeletal_finite((double)in->weights[j]));
+#endif
+                w *= in->weights[j];
+            }
+            if (w == 0.0F) {
+                continue;
+            }
+            const nt_skeletal_trs_t *v = &in->pose[j];
+#if NT_SKELETAL_CHECKS
+            nt_skeletal_check_trs(v);
+#endif
+            /* Align against the running sum, not a fixed reference: a
+             * dominant-input or rest reference flips sign as gains change.
+             * The empty sum is orthogonal to everything, so the first
+             * contributor takes the seed sign like any exact tie. */
+            const float d = (w_sum == 0.0F) ? 0.0F : (q[0] * v->q[0]) + (q[1] * v->q[1]) + (q[2] * v->q[2]) + (q[3] * v->q[3]);
+            /* The sign of d is data, not control flow: a branch on it
+             * mispredicts on inputs from both hemispheres. */
+            float wq = copysignf(w, d);
+            if (d == 0.0F) {
+                wq = w * nt_skeletal_mix_seed_sign(v->q);
+            }
+            for (int c = 0; c < 3; ++c) {
+                t[c] += w * v->t[c];
+                s[c] += w * v->s[c];
+            }
+            for (int c = 0; c < 4; ++c) {
+                q[c] += wq * v->q[c];
+            }
+            w_sum += w;
+        }
+
+        if (w_sum == 0.0F) {
+            out[j] = defaults[j];
+            continue;
+        }
+        const float inv_w = 1.0F / w_sum;
+        for (int c = 0; c < 3; ++c) {
+            out[j].t[c] = t[c] * inv_w;
+            out[j].s[c] = s[c] * inv_w;
+        }
+        float len2 = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
+        /* Every aligned addend has dot >= 0 with the sum, so |sum| / W lies in
+         * [1/sqrt(T), 1]. A tiny or huge total squares out of float range;
+         * rescaling only then keeps the 1/W off the common path's latency. */
+        if (!(len2 > 1e-30F && len2 < 1e30F)) {
+            for (int c = 0; c < 4; ++c) {
+                q[c] *= inv_w;
+            }
+            len2 = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
+        }
+        const float inv_len = 1.0F / sqrtf(len2);
+        for (int c = 0; c < 4; ++c) {
+            out[j].q[c] = q[c] * inv_len;
+        }
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_skeletal_override(const nt_skeletal_trs_t *base, const nt_skeletal_trs_t *top, const float *mask, float alpha, uint16_t joint_count, nt_skeletal_trs_t *out) {
+    NT_ASSERT(base != NULL);
+    NT_ASSERT(top != NULL);
+    NT_ASSERT(out != NULL);
+    NT_ASSERT(alpha >= 0.0F && alpha <= 1.0F);
+    NT_ASSERT(out == base || nt_skeletal_poses_disjoint(out, base, joint_count));
+    NT_ASSERT(nt_skeletal_poses_disjoint(out, top, joint_count));
+
+    for (uint16_t j = 0; j < joint_count; ++j) {
+        float a = alpha;
+        if (mask != NULL) {
+            NT_ASSERT(mask[j] >= 0.0F && mask[j] <= 1.0F);
+            a *= mask[j];
+        }
+        if (a == 0.0F) {
+            out[j] = base[j];
+            continue;
+        }
+        if (a == 1.0F) {
+            out[j] = top[j];
+            continue;
+        }
+#if NT_SKELETAL_CHECKS
+        nt_skeletal_check_trs(&base[j]);
+        nt_skeletal_check_trs(&top[j]);
+#endif
+        nt_skeletal_lerp3(base[j].t, top[j].t, a, out[j].t);
+        nt_skeletal_nlerp(base[j].q, top[j].q, a, out[j].q);
+        nt_skeletal_lerp3(base[j].s, top[j].s, a, out[j].s);
     }
 }
 // #endregion
@@ -270,25 +431,6 @@ static uint32_t nt_skeletal_put_f32(uint8_t *bytes, uint32_t offset, float v) {
     return nt_skeletal_put_u32(bytes, offset, bits);
 }
 
-/* q and -q are the same rotation: keep the sign that makes the largest
- * component positive, ties broken by the first maximum in x,y,z,w order. */
-static void nt_skeletal_canonical_quat(const float q[4], float out[4]) {
-    int best = 0;
-    float best_abs = (q[0] < 0.0F) ? -q[0] : q[0];
-    for (int c = 1; c < 4; ++c) {
-        const float a = (q[c] < 0.0F) ? -q[c] : q[c];
-        if (a > best_abs) {
-            best_abs = a;
-            best = c;
-        }
-    }
-
-    const float sign = (q[best] < 0.0F) ? -1.0F : 1.0F;
-    for (int c = 0; c < 4; ++c) {
-        out[c] = q[c] * sign;
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_hash64_t nt_skeletal_rig_compat_id(const nt_skeletal_skeleton_t *skel, void *scratch, uint32_t scratch_size) {
     NT_ASSERT(skel != NULL);
@@ -317,10 +459,9 @@ nt_hash64_t nt_skeletal_rig_compat_id(const nt_skeletal_skeleton_t *skel, void *
         for (int c = 0; c < 3; ++c) {
             offset = nt_skeletal_put_f32(bytes, offset, rest->t[c]);
         }
-        float q[4];
-        nt_skeletal_canonical_quat(rest->q, q);
+        const float sign = nt_skeletal_canonical_sign(rest->q);
         for (int c = 0; c < 4; ++c) {
-            offset = nt_skeletal_put_f32(bytes, offset, q[c]);
+            offset = nt_skeletal_put_f32(bytes, offset, rest->q[c] * sign);
         }
         for (int c = 0; c < 3; ++c) {
             offset = nt_skeletal_put_f32(bytes, offset, rest->s[c]);
