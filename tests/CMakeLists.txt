@@ -600,8 +600,8 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_resource PRIVATE nt_resource nt_http nt_fs nt_log_stub unity)
     target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    # Only test that drives REAL nt_fs/nt_http + nt_time_sleep TTL paths; flaky under
-    # parallel ctest (CPU contention skews the sub-ms timing), clean serially. Run alone.
+    # Only test that drives REAL nt_fs/nt_http + nt_time_sleep TTL paths on real time;
+    # run alone so CPU contention stays far from its blob TTL.
     set_tests_properties(test_resource PROPERTIES RUN_SERIAL TRUE)
 
     foreach(slot_capacity IN ITEMS 65537 65535)

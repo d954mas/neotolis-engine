@@ -41,6 +41,12 @@ static void test_assert_trap(const char *expr, const char *file, int line) {
         nt_assert_handler = NULL;                                                                                                                                                                      \
     } while (0)
 
+/* AUTO blob TTL for the eviction tests. A step longer than the TTL evicts a
+ * blob in the step that reloaded it, before resolve pins it, so the TTL must
+ * dwarf one step on a slow runner; the sleep then clears it. */
+#define TEST_BLOB_TTL_MS 50U
+#define TEST_PAST_BLOB_TTL_S 0.06
+
 /* ---- Test blob builder ---- */
 
 static uint32_t test_activate(const uint8_t *data, uint32_t size) {
@@ -1745,9 +1751,9 @@ void test_blob_pin_eviction_skip_and_timer_freeze(void) {
     TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
 
     /* (1) Apply AUTO pressure; TTL expires while referenced -> NOT evicted, timer refreshed, logged once */
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1); /* TTL = 1ms */
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
     uint32_t access_before = nt_resource_test_pack_blob_last_access(0);
-    nt_time_sleep(0.005); /* 5ms, well past 1ms TTL */
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));     /* held as KEEP */
     TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_evict_skip_logged(0)); /* one-shot fired */
@@ -1762,7 +1768,7 @@ void test_blob_pin_eviction_skip_and_timer_freeze(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
 
     /* (3) Fresh full TTL grace after ref->0, then eviction resumes and the one-shot re-arms */
-    nt_time_sleep(0.005);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));     /* evicted now */
     TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_evict_skip_logged(0)); /* re-armed */
@@ -1791,11 +1797,11 @@ void test_blob_pin_auto_as_keep_one_shot_log(void) {
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 55);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1);
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
 
     /* Many steps past TTL: blob stays resident and the flag is set once and never toggles.
      * The skip log is gated by `if (!blob_evict_skip_logged)`, so a stable flag == single emission. */
-    nt_time_sleep(0.005);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     for (int i = 0; i < 20; i++) {
         nt_resource_step();
         TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
@@ -1908,8 +1914,8 @@ static void check_blob_pin_unmount_severs_provider_synchronously(bool aliases) {
     EXPECT_ASSERT(nt_resource_register_type(NT_ASSET_MESH, &without_pin));
     TEST_ASSERT_EQUAL_PTR(provider, nt_resource_peek_user_data(h));
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1);
-    nt_time_sleep(0.005);
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_resource_test_pack_blob_pins(0));
@@ -1944,7 +1950,7 @@ void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
 
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate, .deactivate = fake_deactivate, .behavior_flags = NT_RESOURCE_BEHAVIOR_PIN_BLOB});
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1); /* TTL = 1ms */
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
 
     const char *path = "build/test_pin_unpub.ntpack";
     write_test_pack_file(path, rid.value, NT_ASSET_MESH);
@@ -1953,7 +1959,7 @@ void test_blob_pin_unpublishable_when_blob_evicted_before_pin(void) {
 
     /* No consumer yet -> blob_pins stays 0; TTL expiry evicts the blob before
      * any pin is established. */
-    nt_time_sleep(0.005);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_test_pack_blob_pins(0));
@@ -2136,7 +2142,7 @@ void test_invalidate_triggers_redownload_on_evicted_blob(void) {
 
     write_test_pack_file("build/test_inv_redl.ntpack", rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1); /* TTL = 1ms */
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_redl.ntpack"));
 
     nt_resource_step(); /* load, parse, activate */
@@ -2147,9 +2153,9 @@ void test_invalidate_triggers_redownload_on_evicted_blob(void) {
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
 
-    /* Wait for blob TTL to expire (1ms) then step to trigger eviction */
-    nt_time_sleep(0.005); /* 5ms, well past 1ms TTL */
-    nt_resource_step();   /* should evict blob (TTL expired) */
+    /* Wait for blob TTL to expire then step to trigger eviction */
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
+    nt_resource_step(); /* should evict blob (TTL expired) */
 
     /* Now invalidate -- since blob is evicted, should trigger re-download */
     nt_resource_invalidate(NT_ASSET_MESH);
@@ -2189,8 +2195,8 @@ void test_evicted_empty_pack_reloads_without_reparse(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, path));
     nt_resource_step();
     TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
-    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1);
-    nt_time_sleep(0.005);
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step();
     TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
 
@@ -2498,8 +2504,8 @@ void test_parse_after_eviction_rejected_until_remount(void) {
             TEST_ASSERT_EQUAL_UINT32(sizeof(payload), meta_size);
         }
 
-        nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1);
-        nt_time_sleep(0.005);
+        nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
+        nt_time_sleep(TEST_PAST_BLOB_TTL_S);
         nt_resource_step();
         TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
 
@@ -2751,7 +2757,7 @@ static void check_aux_publish_falls_back_to_best_usable_winner(bool aliases, uin
     nt_hash32_t pid_a = nt_hash32_str("aux_publish_pack_a");
     write_pack("build/test_aux_publish_a.ntpack", rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 10));
-    nt_resource_set_blob_policy(pid_a, NT_BLOB_AUTO, 1);
+    nt_resource_set_blob_policy(pid_a, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid_a, "build/test_aux_publish_a.ntpack"));
     nt_resource_step();
     uint32_t handle_a = nt_resource_get(h);
@@ -2769,7 +2775,7 @@ static void check_aux_publish_falls_back_to_best_usable_winner(bool aliases, uin
     TEST_ASSERT_EQUAL_UINT32(3, s_activate_call_count);
     TEST_ASSERT_EQUAL_UINT32(pinned ? 1U : 0U, nt_resource_test_pack_blob_pins(2));
 
-    nt_time_sleep(0.005);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step(); /* evict pack A while pack C is still published */
     TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(1));
 
@@ -2832,7 +2838,7 @@ static void check_aux_publish_waits_for_reload_when_no_usable_fallback_exists(bo
     nt_hash32_t pid_b = nt_hash32_str("aux_reload_pack_b");
     write_pack("build/test_aux_reload_b.ntpack", rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 0));
-    nt_resource_set_blob_policy(pid_b, NT_BLOB_AUTO, 1);
+    nt_resource_set_blob_policy(pid_b, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid_b, "build/test_aux_reload_b.ntpack"));
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
@@ -2850,7 +2856,7 @@ static void check_aux_publish_waits_for_reload_when_no_usable_fallback_exists(bo
     TEST_ASSERT_TRUE(nt_resource_is_ready(h));
     TEST_ASSERT_NOT_EQUAL(handle_b, handle_a);
 
-    nt_time_sleep(0.005);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step(); /* evict fallback B while A is published */
     TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
 
@@ -3591,8 +3597,8 @@ static void test_aux_type_cannot_gain_pin_after_blob_eviction(void) {
     uint32_t runtime_handle = nt_resource_get(resource);
     const void *aux = nt_resource_peek_user_data(resource);
     TEST_ASSERT_NOT_NULL(aux);
-    nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, 1);
-    nt_time_sleep(0.005);
+    nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, TEST_BLOB_TTL_MS);
+    nt_time_sleep(TEST_PAST_BLOB_TTL_S);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
     uint32_t epoch = nt_resource_publication_epoch();
