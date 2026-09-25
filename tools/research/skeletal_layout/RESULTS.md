@@ -144,7 +144,7 @@ J = 100, T = 4; the tool aborts and prints the mismatch otherwise.
    real kernels in #487 and revisit the layout in #492, where a SIMD mix is the
    deciding measurement rather than this one.
 
-## Engine mix kernel (2026-09-24)
+## Engine mix kernel (2026-09-24/25)
 
 The AoS40 mix stage now calls the public `nt_skeletal_mix`; AoS48 and SoA keep
 the local stand-in, so from here on the mix column compares kernels as well as
@@ -154,33 +154,44 @@ in the AoS40 mix, as conclusion 7 notes for FK; compare `native-release` only.
 The table gains a `mix/input` column: mix / T, an average that includes the
 per-joint fixed cost (seed sign, normalization, stores).
 
-A separate A/B run put the stand-in and the kernel in one binary over the same
-data (J=60, C=1000, `-O3`, TRAP, checks off), with two data sets: random unit
-quaternions (inputs land in either hemisphere, the largest component varies)
-and smooth ones (w dominant everywhere). ns/(joint·input), medians:
+Kernel decisions were taken on a separate A/B harness (not committed): every
+variant compiled into one binary (clang -O3, TRAP, checks off), J=60, C=1000,
+interleaved, 11 repetitions, median with the 3rd–9th values in brackets. Two
+data sets: random unit quaternions (hemispheres and largest component vary)
+and smooth ones (w dominant). Early runs (2026-09-24) were unpinned under
+background load and only ranked variants; the final run (2026-09-25) pinned
+the thread to one core at high priority. ns/(joint·input):
 
-| data | T | stand-in | kernel, branch on dot sign | + `copysignf` | + seed sign of w (shipped) |
-|:-----|--:|---------:|---------------------------:|--------------:|---------------------------:|
-| random | 1 | 8.6 | 6.3 | 6.3 | 5.0 |
-| random | 4 | 4.3 | 7.9 | 4.4 | 10–15 % below the previous column |
-| smooth | 1 | 3.6 | 6.3 | 6.3 | 4.9 |
-| smooth | 4 | 3.5 | not measured | 4.5 | 10–15 % below the previous column |
+| data | case | kernel before review round 2 | shipped |
+|:-----|:-----|------------------------------:|--------:|
+| random | mix T=1 | 4.65 [4.59–4.77] | 4.11 [4.03–4.25] |
+| random | mix T=2 | 3.73 [3.69–3.80] | 3.35 [3.28–3.42] |
+| random | mix T=4 | 3.36 [3.27–3.39] | 3.22 [3.12–3.25] |
+| smooth | mix T=1 | 4.39 [4.32–4.53] | 3.81 [3.78–4.01] |
+| smooth | mix T=4 | 3.31 [3.25–3.52] | 3.18 [3.15–3.25] |
+| random | override, mask 0.5 | 7.78 [7.67–8.26] | 4.46 [4.30–7.34] |
+| smooth | override, mask 0.5 | 4.25 [4.21–4.53] | 4.35 [4.23–4.60] |
 
-The shipped column comes from runs under background load, compared within
-one binary; the A/B harness was a scratch tool and is not committed.
+What each step bought, in the order taken:
 
-- The dot-sign branch mispredicts whenever inputs sit in both hemispheres;
-  `copysignf` removes it, 1.8x at T=4 on random data. The kernel ships with it.
-- The T=1 cost was the canonical sign of the first contributor: a kernel
-  without it matched the stand-in. The stand-in's branchy search is faster
-  only when its branches predict (smooth data) and slower when they do not
-  (random data). Rewriting the search (fabsf, selects, an fmaxf tree) did not
-  help; changing the seed rule to "w positive, largest component only for
-  w == 0" did. Same binary, three runs under background load: T=1 random
-  6.3 -> 5.0, smooth 6.3 -> 4.9 (stand-in 9.3 / 3.7); T=4 10-15 % lower in
-  every run, absolute values too noisy to quote.
-- An `NT_ASSERT_MODE=0` build measures the same as TRAP within noise, with and
-  without joint weights, so the per-call checks and the per-element
-  `weight >= 0` check stay below the noise floor (~0.2 ns).
-- The earlier AoS40 figures in this file came from a different session; only
-  same-binary comparisons are meaningful at this scale.
+- Dot-sign alignment by `copysignf` instead of a branch (unpinned): random T=4
+  7.9 -> 4.4. The branch mispredicts whenever inputs sit in both hemispheres.
+- Seed sign = sign of w, largest component only at w == 0 (unpinned): T=1
+  6.3 -> ~5.0 on both data sets. The four-way search ran on every joint.
+- First contributor skips the dot product it would take against the empty sum:
+  ~0.6 ns/joint at T=1 (pinned), included in "shipped".
+- Exact gain scaling for gains outside [2^-60, 2^60] (fixes NaN / quantized
+  poses from a fade that never reaches 0): a multiply in the inner loop cost
+  +0.9 ns at T=1; the shipped form inlines the joint loop twice so the common
+  call passes a literal 1 and pays only the per-call min/max, ~0.1–0.2 ns
+  against a variant without any range handling.
+- Override nlerp sign by `copysignf` (also used by `nt_skeletal_sample`):
+  random 7.8 -> 4.5, smooth unchanged.
+- Rejected: one division per joint (`1/(W·|A|)` split into both factors),
+  +1 ns at T=1; rewriting the seed search with fabsf, selects or an fmaxf tree,
+  no gain; an unconditional 1/W prescale of the rotation sum, +0.65 ns at T=1.
+
+TRAP against `NT_ASSERT_MODE=0` showed no visible difference with and without
+joint weights (unpinned runs). All numbers are native x86-64 (i9-14900HX);
+wasm/V8 is not measured, only its code inspected (`f32.copysign`, `f32.sqrt`,
+no libm imports).

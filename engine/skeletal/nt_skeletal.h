@@ -278,8 +278,11 @@ typedef struct {
  * influence above zero counts in full. The result depends on input order for
  * widely separated rotations, so the order is part of the call's meaning.
  *
- * input_count may be 0 (inputs may then be NULL); out overlaps neither
- * defaults nor any input pose or weights array. */
+ * Gains may span the whole finite range, subnormals included: the kernel
+ * rescales them exactly by a power of two when they leave [2^-60, 2^60].
+ * Joint weights times the largest gain and the T/S sums must stay in float
+ * range. input_count may be 0 (inputs may then be NULL); out overlaps
+ * neither defaults nor any input pose or weights array. */
 void nt_skeletal_mix(const nt_skeletal_mix_input_t *inputs, uint32_t input_count, const nt_skeletal_trs_t *defaults, uint16_t joint_count, nt_skeletal_trs_t *restrict out);
 
 /* out[j] = base[j] blended toward top[j] by a = alpha * mask[j]: T/S lerp, Q
