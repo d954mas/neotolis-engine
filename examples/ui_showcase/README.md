@@ -17,7 +17,7 @@ The left tab list itself **dogfoods the reusable `nt_ui_tabbar`** widget (the ga
 owns the active-tab index; the widget draws the accent bar + selected fill + hover
 lighten and writes the index on click).
 
-## Tabs (18 entries)
+## Tabs (19 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
 2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated

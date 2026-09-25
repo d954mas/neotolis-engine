@@ -86,7 +86,7 @@ static void route_a_handler(const nt_ui_custom_frame_t *frame, void *userdata) {
     rc->calls++;
 
     /* Bind the radial material (different fs + extended layout than the base
-     * ctx->sprite_material), set the per-widget block, emit a quad. */
+     * ctx->sprite_material), emit a quad with the per-widget block. */
     nt_sprite_renderer_set_material(rc->radial_mat);
 
     const float positions[4][2] = {{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}};

@@ -223,7 +223,7 @@ override or rich `image_material` whose material has defaults.
 A custom-attr base moves all base UI to the extended vertex stride (20 bytes
 plus 16 per attr). Its batches cap at the sprite renderer's
 `custom_max_vertices`, and one rounded BORDER emits up to
-`8 × (NT_UI_CORNER_SEGMENTS + 1)` vertices (56 today), so a custom-attr base
+`8 × (NT_UI_CORNER_SEGMENTS + 1)` vertices (56 at the default 6 segments), so a custom-attr base
 needs `custom_max_vertices` at least that.
 
 ## Interaction model

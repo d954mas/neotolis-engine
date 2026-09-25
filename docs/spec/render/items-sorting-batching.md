@@ -194,8 +194,8 @@ A material with an `attr_map` extends the sprite vertex by one FLOAT4 per attr.
 Each non-ECS emit takes an optional block (`custom`, `custom_bytes`) baked into
 all its vertices, like color. The source per emit is: the emit's block, else the
 material's attr defaults ([Attr defaults](material.md#attr-defaults)), else an
-assert. So plain widgets and custom widgets can share one custom-attr material
-and one batch. One staging batch keeps one vertex stride: opening a command
+assert. So plain and custom-attr emits can share one custom-attr material and
+one batch. One staging batch keeps one vertex stride: opening a command
 whose material changes the stride flushes the pending emits first, so immediate
 emits and `draw_list` runs of plain and custom-attr materials mix freely. ECS
 emits pass no block, so a custom-attr material there needs attr defaults.

@@ -70,7 +70,7 @@ is present:
 ## The four walls (what this path does NOT do)
 
 The custom-attr block is **uniform across a widget's verts** — it behaves like
-the per-emit color, set once and baked into every vertex. This gives four hard
+the per-emit color, passed with each emit and baked into every vertex. This gives four hard
 boundaries:
 
 1. **No per-vertex data.** A composite widget (segmented bar, sparkline, minimap

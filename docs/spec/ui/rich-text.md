@@ -163,11 +163,12 @@ block's CUSTOM self-emit (`rich_emit_images`) via
 The composed tint (the run's `<color>` × any per-atom effect tint) is packed to
 the standard **u8** sprite tint, the block's **image material** (plain, or a
 custom-attr material with attr defaults — the emit passes no block) textures the
-region, and the self-emit folds
-the parent opacity into the tint alpha exactly like rich TEXT — there is **no**
-rich-specific material, float4 `a_tint`, or per-image custom-attr block. The single composed
-tint is invisible at u8 on an 8-bit display, so the earlier lossless-float4 path
-gave no benefit and was dropped. `set_material` is bound **once per band** (the
+region, and the self-emit folds the parent opacity into the tint alpha exactly
+like rich TEXT — there is **no** engine-provided rich material, float4 `a_tint`,
+or per-image custom-attr block. The composed tint is invisible at u8 on an 8-bit
+display, so a float4 tint would add nothing. An unset style text or image
+material resolves to the ctx default at each walk, not at declaration, so a base
+swapped between two walks of one frame is the one drawn. `set_material` is bound **once per band** (the
 `bound` guard), so **all** of a band's inline images **coalesce into one sprite
 batch** — no per-image flush. Because the sprite renderer emits while the active
 **scroll scissor is GL-live** during the walk, the images are clipped to the

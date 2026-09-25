@@ -1541,7 +1541,7 @@ void test_sprite_renderer_custom_attr_emit_bakes_material_defaults(void) {
     assert_last_emit_custom(defaults_b);
 }
 
-/* A material that declares no defaults keeps the missing-block assert. */
+/* A custom-attr material without defaults asserts on an emit without a block. */
 void test_sprite_renderer_custom_attr_emit_without_block_or_defaults_asserts(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));

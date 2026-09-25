@@ -2546,7 +2546,6 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_end(ctx);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo aggregates two fronts + a readout
 /* The frame loop makes s_base_material the ctx base while this tab shows with base_sdf on, so the
  * whole UI -- nav, panels, icons -- bakes its attr defaults and the radials below join that batch. */
 static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st) {
@@ -2584,6 +2583,7 @@ static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo aggregates two fronts + a readout
 static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[128];
     rich_ensure_setup();
@@ -3962,7 +3962,7 @@ int main(int argc, char *argv[]) {
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_atlas_init();
 
-    /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region = 8. */
+    /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region + UI base = 9. */
     nt_material_init(&(nt_material_desc_t){.max_materials = 9});
     /* base showcase font + 4 rich-text family faces (R/B/I/BI) = 5. */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});

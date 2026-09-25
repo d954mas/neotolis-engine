@@ -182,7 +182,7 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     /* Custom flush indexes into indices[] too, so cmv must not exceed the base
      * caps. */
     NT_ASSERT(d.custom_max_vertices <= d.max_vertices && "sprite custom_max_vertices must not exceed max_vertices");
-    NT_ASSERT(d.custom_max_vertices >= 16U && "sprite custom_max_vertices must be >= 16 (slice9 = 16 verts; a custom-attr nt_ui base needs its largest emit)");
+    NT_ASSERT(d.custom_max_vertices >= 16U && "sprite custom_max_vertices must be >= 16 (largest fixed single emit: slice9 = 16 verts)");
 
     memset(&s_sprite, 0, sizeof(s_sprite));
     s_sprite.max_pipelines = d.max_pipelines;
@@ -384,7 +384,7 @@ static void close_current_cmd(void) {
  * at the current staging index_count. Caller must close the previous cmd via
  * close_current_cmd() before opening a new one. */
 static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_material_t mat) {
-    /* One staging batch has one vertex stride: a draw_list run after custom-attr emits lands here unflushed. */
+    /* One staging batch has one vertex stride; draw_list opens cmds without set_material's flush. */
     const uint32_t stride = (uint32_t)NT_SPRITE_BASE_STRIDE + ((uint32_t)mi->attr_map_count * 16U);
     if (s_sprite.cmd_count >= NT_SPRITE_RENDERER_MAX_DRAW_CMDS || (s_sprite.vertex_count > 0 && stride != s_sprite.cur_stride)) {
         nt_sprite_renderer_flush();

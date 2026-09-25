@@ -1,7 +1,7 @@
 precision highp float;
 
 // One UI base material for plain sprites AND flat SDF radials, so both share one batch.
-// Plain emits bake the material's attr defaults: a_layout = 0, so v_layout.y (bbox px
+// Requires the material's a_layout default = 0: plain emits bake it, so v_layout.y (bbox px
 // width, walker-injected for custom widgets) is 0 and the texel path runs.
 #include "common/radial_sdf.glsl"
 

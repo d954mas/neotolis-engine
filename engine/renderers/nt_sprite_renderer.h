@@ -57,8 +57,8 @@ typedef struct {
     uint32_t max_indices;         /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_INDICES */
     uint32_t custom_max_vertices; /* custom-attr staging cap; sizes the custom/interleave
                                    * heap so plain-sprite games don't carry a big custom
-                                   * buffer. Radials/custom-attr widgets are few — kept
-                                   * far below max_vertices. Default 4096. */
+                                   * buffer. A custom-attr nt_ui base stages all base UI
+                                   * under it. Default 4096. */
 } nt_sprite_renderer_desc_t;
 
 static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
@@ -187,9 +187,9 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
                                       const float *world_matrix, uint32_t color_packed, const float *custom, uint8_t custom_bytes);
 
-/* Pad staging with up to 3 unreferenced vertices so the next emit's first vertex is a multiple
- * of 4: the contract of a shader that derives a quad corner from gl_VertexID & 3. The batch does
- * not break. Caller MUST have called set_material first. */
+/* Pad staging with up to 3 unreferenced vertices so the next quad starts at a multiple of 4, for a
+ * shader that derives the corner from gl_VertexID & 3. Without room that quad flushes and starts
+ * at vertex 0. Caller MUST have called set_material first. */
 void nt_sprite_renderer_align_next_vertex_to_4(void);
 
 // #region test_access

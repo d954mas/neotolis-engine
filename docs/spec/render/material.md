@@ -134,8 +134,7 @@ Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at run
 `has_attr_defaults` opts a material into per-attr defaults:
 `attr_map[i].default_value` is the vec4 a sprite emit without its own custom
 block bakes for attr *i* ([Sprite custom-attr block](items-sorting-batching.md#sprite-custom-attr-block)).
-Zero-init means no defaults, and such a material asserts on an emit without a
-block. What the values mean is the shader's contract. Defaults are values: they
+Zero-init means no defaults. What the values mean is the shader's contract. Defaults are values: they
 never enter pipeline or vertex-input keys. Only the sprite renderer reads them;
 mesh renderers ignore them.
 
