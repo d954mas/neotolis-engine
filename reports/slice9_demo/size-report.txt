@@ -1,38 +1,38 @@
 # Size Report: slice9_demo (wasm-analysis-paired)
-# Commit: f6c6db1
+# Commit: c7b5019
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 307 B
+Type                 309 B
 Import               535 B
-Function             176 B
+Function             177 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                  55 B
-Code              198047 B
+Code              197557 B
 Data               11300 B
-Custom              5917 B
+Custom              5937 B
 ---------------- ----------
-TOTAL             216447 B
+TOTAL             215980 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
 52619 B   frame
-18260 B   dispatch_command
+17642 B   dispatch_command
  9431 B   main
  8787 B   Clay__ConfigureOpenElementPtr
  7736 B   nt_font_lookup_glyph_offset
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
  3990 B   Clay__MeasureTextCached
+ 3365 B   nt_sprite_renderer_set_material
  3353 B   Clay__CloseElement
- 3307 B   nt_sprite_renderer_set_material
  3095 B   nt_ui_label
  3002 B   fmt_fp
  2996 B   nt_gfx_make_texture
@@ -40,11 +40,11 @@ TOTAL             216447 B
  2426 B   printf_core
  2367 B   atlas_on_resolve
  2293 B   nt_program_ref_update
- 1906 B   nt_sprite_renderer_emit_region
  1887 B   Clay__InitializePersistentMemory
+ 1875 B   nt_sprite_renderer_emit_region
  1845 B   __rem_pio2f
  1747 B   nt_hash64
- 1746 B   nt_sprite_renderer_emit_geometry
+ 1552 B   nt_sprite_renderer_emit_geometry
  1466 B   nt_gfx_make_vertex_input
  1383 B   nt_gfx_bind_pipeline
  1372 B   emit_glyph_pass
@@ -52,10 +52,10 @@ TOTAL             216447 B
  1310 B   nt_gfx_apply_texture_bindings
  1166 B   nt_text_renderer_draw_n
  1119 B   nt_input_web_on_blur
- 1099 B   nt_hash32_str
+ 1103 B   nt_material_create
 
-Total functions: 174
-Total code size: 197753 B
+Total functions: 175
+Total code size: 197261 B
 
 ## Built Engine Archives
 
@@ -88,7 +88,7 @@ libnt_introspect.a           908 B
 libnt_log.a                11916 B
 libnt_log_ring.a             696 B
 libnt_log_stub.a             746 B
-libnt_material.a            4460 B
+libnt_material.a            4508 B
 libnt_material_comp.a       2104 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2028 B
@@ -110,19 +110,19 @@ libnt_skin_comp.a           2044 B
 libnt_skinned_mesh_renderer.a   11986 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8864 B
-libnt_sprite_renderer.a    49806 B
+libnt_sprite_renderer.a    48424 B
 libnt_text_renderer.a    1243428 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                353866 B
-libnt_ui_rich.a            39964 B
+libnt_ui.a                353934 B
+libnt_ui_rich.a            39884 B
 libnt_ui_rich_fx.a          2756 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4239420 B
+TOTAL (archives)         4238074 B
 
 ## Data Segments Summary
 
