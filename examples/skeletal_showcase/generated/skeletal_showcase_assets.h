@@ -8,10 +8,17 @@
 /* --- MESH --- */
 #define ASSET_MESH_SKELETAL_SHOWCASE_CESIUMMAN_MESH ((nt_hash64_t){0xE60E33DC3DD3965FULL}) /* skeletal_showcase/cesiumman.mesh */
 #define ASSET_MESH_SKELETAL_SHOWCASE_FOX_MESH ((nt_hash64_t){0xAF72CC79187B59D2ULL}) /* skeletal_showcase/fox.mesh */
+#define ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_ARM_LEFT_MESH ((nt_hash64_t){0xBA4A45FF24BA6F37ULL}) /* skeletal_showcase/kaykit/arm_left.mesh */
+#define ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_ARM_RIGHT_MESH ((nt_hash64_t){0xDEF00D87172D59FBULL}) /* skeletal_showcase/kaykit/arm_right.mesh */
+#define ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_BODY_MESH ((nt_hash64_t){0xA551F1AF96F5A446ULL}) /* skeletal_showcase/kaykit/body.mesh */
+#define ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_HEAD_MESH ((nt_hash64_t){0x840EDED2785BC330ULL}) /* skeletal_showcase/kaykit/head.mesh */
+#define ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_LEG_LEFT_MESH ((nt_hash64_t){0xD33808EC4F81E135ULL}) /* skeletal_showcase/kaykit/leg_left.mesh */
+#define ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_LEG_RIGHT_MESH ((nt_hash64_t){0x9DF2A7448B7B06B9ULL}) /* skeletal_showcase/kaykit/leg_right.mesh */
 
 /* --- TEXTURE --- */
 #define ASSET_TEXTURE_SKELETAL_SHOWCASE_CESIUMMAN_TEXTURE ((nt_hash64_t){0xA25488F991E7DB9FULL}) /* skeletal_showcase/cesiumman.texture */
 #define ASSET_TEXTURE_SKELETAL_SHOWCASE_FOX_TEXTURE ((nt_hash64_t){0x8756094D602640AFULL}) /* skeletal_showcase/fox.texture */
+#define ASSET_TEXTURE_SKELETAL_SHOWCASE_KAYKIT_TEXTURE ((nt_hash64_t){0xDD88C95FA9433343ULL}) /* skeletal_showcase/kaykit.texture */
 #define ASSET_TEXTURE_SKELETAL_SHOWCASE_TINT_TEXTURE ((nt_hash64_t){0xADFD7062B73081D1ULL}) /* skeletal_showcase/tint.texture */
 #define ASSET_TEXTURE_SKELETAL_SHOWCASE_WHITE_TEXTURE ((nt_hash64_t){0x20A6950FDA55BD5FULL}) /* skeletal_showcase/white.texture */
 #define ASSET_TEXTURE_SKELETAL_SHOWCASE_UI_TEX0 ((nt_hash64_t){0x7CA2C6FD03D37F1AULL}) /* skeletal_showcase_ui/tex0 */
@@ -42,16 +49,23 @@
 /* --- SKELETON --- */
 #define ASSET_SKELETON_SKELETAL_SHOWCASE_CESIUMMAN_NSKL ((nt_hash64_t){0x80C0C6469394DAC7ULL}) /* skeletal_showcase/cesiumman.nskl */
 #define ASSET_SKELETON_SKELETAL_SHOWCASE_FOX_NSKL ((nt_hash64_t){0x5ECF020813BA2FC6ULL}) /* skeletal_showcase/fox.nskl */
+#define ASSET_SKELETON_SKELETAL_SHOWCASE_KAYKIT_NSKL ((nt_hash64_t){0x75A72D69198F1DBEULL}) /* skeletal_showcase/kaykit.nskl */
 
 /* --- SKIN_BINDING --- */
 #define ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_CESIUMMAN_NSKN ((nt_hash64_t){0x5B791ADC7059049CULL}) /* skeletal_showcase/cesiumman.nskn */
 #define ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_FOX_NSKN ((nt_hash64_t){0xC0CD48D1A0A26281ULL}) /* skeletal_showcase/fox.nskn */
+#define ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_KAYKIT_NSKN ((nt_hash64_t){0x0622615F4B30D8C2ULL}) /* skeletal_showcase/kaykit.nskn */
 
 /* --- CLIP --- */
 #define ASSET_CLIP_SKELETAL_SHOWCASE_CESIUMMAN_NANM ((nt_hash64_t){0x1FF45D523F1BE5C3ULL}) /* skeletal_showcase/cesiumman.nanm */
 #define ASSET_CLIP_SKELETAL_SHOWCASE_FOX_RUN_NANM ((nt_hash64_t){0x6B32754A517465D0ULL}) /* skeletal_showcase/fox/run.nanm */
 #define ASSET_CLIP_SKELETAL_SHOWCASE_FOX_SURVEY_NANM ((nt_hash64_t){0x49712E760C0B1C57ULL}) /* skeletal_showcase/fox/survey.nanm */
 #define ASSET_CLIP_SKELETAL_SHOWCASE_FOX_WALK_NANM ((nt_hash64_t){0x662B2E245C8FCAC7ULL}) /* skeletal_showcase/fox/walk.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_IDLE_NANM ((nt_hash64_t){0x41ACB05F33082E0AULL}) /* skeletal_showcase/kaykit/idle.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_JUMP_NANM ((nt_hash64_t){0x8D4FB543761A2C13ULL}) /* skeletal_showcase/kaykit/jump.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_PUNCH_NANM ((nt_hash64_t){0x59E5A05CE9FAA8C9ULL}) /* skeletal_showcase/kaykit/punch.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_RUN_NANM ((nt_hash64_t){0x5217E775B9374C6EULL}) /* skeletal_showcase/kaykit/run.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_WALK_NANM ((nt_hash64_t){0x34068DB6B5A7697EULL}) /* skeletal_showcase/kaykit/walk.nanm */
 
 #if NT_HASH_LABELS
 static inline void skeletal_showcase_assets_register_labels(void) {
@@ -75,6 +89,20 @@ static inline void skeletal_showcase_assets_register_labels(void) {
     (void)nt_hash64_str("skeletal_showcase/fox/run.nanm");
     (void)nt_hash64_str("skeletal_showcase/fox/survey.nanm");
     (void)nt_hash64_str("skeletal_showcase/fox/walk.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit.nskl");
+    (void)nt_hash64_str("skeletal_showcase/kaykit.nskn");
+    (void)nt_hash64_str("skeletal_showcase/kaykit.texture");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/arm_left.mesh");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/arm_right.mesh");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/body.mesh");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/head.mesh");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/idle.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/jump.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/leg_left.mesh");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/leg_right.mesh");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/punch.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/run.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/walk.nanm");
     (void)nt_hash64_str("skeletal_showcase/tint.texture");
     (void)nt_hash64_str("skeletal_showcase/white.texture");
     (void)nt_hash64_str("skeletal_showcase_ui");
