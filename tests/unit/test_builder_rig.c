@@ -1182,7 +1182,7 @@ void test_skin_binding_reach_covers_a_second_node_of_the_skin(void) {
 // #endregion
 
 // #region Khronos sample assets
-/* The two rigs examples/skeletal_showcase/raw ships, imported end to end. The
+/* The imported rigs examples/skeletal_showcase/raw ships, imported end to end. The
  * fixture pins every rule; these pin that the rules hold on glTF nobody here
  * authored -- CesiumMan's two matrix wrappers above the joints, Fox's 24-entry
  * palette. Every importer diagnostic precedes an NT_BUILD_ASSERT, so a call
@@ -1199,9 +1199,10 @@ typedef struct {
 
 /* The two ids are pinned from a run of this importer, so any change to the
  * rest bits, the joint order or the id schema shows up as a mismatch here. */
-static const khronos_rig_t k_khronos[2] = {
+static const khronos_rig_t k_khronos[] = {
     {"examples/skeletal_showcase/raw/Fox.glb", 25, 24, false, {"root", NULL}, 0xC0AE326CC534D680ULL},
     {"examples/skeletal_showcase/raw/CesiumMan.glb", 21, 19, true, {"Z_UP", "Armature"}, 0x881DB664F6FDE289ULL},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", 41, 41, true, {"root", "hips"}, 0xBCBA9BB7CCF7501AULL},
 };
 
 /* Palette entry p of the rig is the joint named like the node the glTF skin
@@ -1231,6 +1232,16 @@ static void khronos_check_rest(const khronos_rig_t *asset, const nt_builder_rig_
             TEST_ASSERT_EQUAL_HEX32(0x00000000U, f32_bits(root->q[c]));
         }
         TEST_ASSERT_EQUAL_HEX32(0x3F800000U, f32_bits(root->q[3]));
+        return;
+    }
+    if (asset == &k_khronos[2]) {
+        const nt_skeletal_trs_t *root = &rig->skeleton.rest[0];
+        for (int c = 0; c < 3; c++) {
+            TEST_ASSERT_TRUE(isfinite(root->t[c]));
+            TEST_ASSERT_EQUAL_HEX32(0x3F800000U, f32_bits(root->s[c]));
+            TEST_ASSERT_TRUE(fabsf(root->q[c]) < 1e-6F);
+        }
+        TEST_ASSERT_TRUE(fabsf(root->q[3] - 1.0F) < 1e-6F);
         return;
     }
     static const uint32_t k_z_up_q[4] = {0xBF3504F3U, 0x00000000U, 0x00000000U, 0x3F3504F3U};
@@ -1419,6 +1430,8 @@ static void khronos_import_case(const khronos_rig_t *asset) {
 void test_fox_imports_rig_binding_and_skinned_mesh(void) { khronos_import_case(&k_khronos[0]); }
 
 void test_cesiumman_imports_rig_binding_and_skinned_mesh(void) { khronos_import_case(&k_khronos[1]); }
+
+void test_kaykit_imports_rig_binding_and_skinned_mesh(void) { khronos_import_case(&k_khronos[2]); }
 // #endregion
 
 int main(void) {
@@ -1479,5 +1492,6 @@ int main(void) {
     RUN_TEST(test_skin_binding_reach_covers_a_second_node_of_the_skin);
     RUN_TEST(test_fox_imports_rig_binding_and_skinned_mesh);
     RUN_TEST(test_cesiumman_imports_rig_binding_and_skinned_mesh);
+    RUN_TEST(test_kaykit_imports_rig_binding_and_skinned_mesh);
     return UNITY_END();
 }

@@ -90,6 +90,12 @@
 #define CAMERA_NEAR 0.05F
 #define CAMERA_FAR 50.0F
 #define CAMERA_PITCH_LIMIT 1.25F
+#define MIX_TRACK_COUNT 4U
+#define MIX_CLIP_COUNT 5U
+#define MIX_MESH_COUNT 6U
+#define MIX_CHARACTER_COUNT 4U
+#define MIX_ENTITY_COUNT (MIX_MESH_COUNT * MIX_CHARACTER_COUNT)
+#define SHOWCASE_ENTITY_COUNT (SKELETAL_SHOWCASE_MAX_INSTANCES + 2U + MIX_ENTITY_COUNT)
 
 typedef enum {
     RIG_HUMANOID = 0,
@@ -111,6 +117,7 @@ static const struct {
     {"Humanoid motion", {0}}, /* id 0: the code-authored s_humanoid_clip */
 };
 #define CLIP_COUNT ((int)(sizeof s_clips / sizeof s_clips[0]))
+#define SKELETAL_ASSET_COUNT ((uint32_t)((2 * (RIG_COUNT - 1)) + CLIP_COUNT) + 2U + MIX_CLIP_COUNT)
 
 static const char *const s_joint_names[HUMANOID_JOINT_COUNT] = {
     "pelvis",        "spine",      "chest",      "neck",      "head",      "left_clavicle", "left_upper_arm", "left_forearm", "left_hand",  "right_clavicle", "right_upper_arm",
@@ -173,11 +180,68 @@ typedef struct {
     bool clip_combo_open;
 } skinned_scene_state_t;
 
+typedef enum {
+    MIX_MODE_CROSSFADE = 0,
+    MIX_MODE_BLEND_SPACE,
+    MIX_MODE_PARTIAL_BODY,
+    MIX_MODE_OVERRIDE,
+    MIX_MODE_INTERRUPTION,
+    MIX_MODE_COUNT,
+} mixing_mode_t;
+
+typedef enum {
+    MIX_CLIP_IDLE = 0,
+    MIX_CLIP_WALK,
+    MIX_CLIP_RUN,
+    MIX_CLIP_JUMP,
+    MIX_CLIP_PUNCH,
+} mixing_clip_t;
+
+typedef struct {
+    nt_skeletal_track_t track;
+    mixing_clip_t clip;
+    float gain;
+} mixing_slot_t;
+
+typedef struct {
+    const nt_skeletal_skeleton_t *skel;
+    const nt_skin_binding_t *skin;
+    const nt_skeletal_clip_t *clips[MIX_CLIP_COUNT];
+    mixing_slot_t slots[MIX_TRACK_COUNT];
+    nt_skeletal_trs_t final_pose[SKELETAL_SHOWCASE_MAX_JOINTS];
+    nt_skeletal_trs_t snapshot[SKELETAL_SHOWCASE_MAX_JOINTS];
+    nt_skeletal_mat34_t *draw_model[MIX_CHARACTER_COUNT];
+    float upper[SKELETAL_SHOWCASE_MAX_JOINTS];
+    float lower[SKELETAL_SHOWCASE_MAX_JOINTS];
+    float weighted[SKELETAL_SHOWCASE_MAX_JOINTS];
+    float blend;
+    float base_gain_scale;
+    float transition_duration;
+    float transition_elapsed;
+    float phase;
+    float repeat_elapsed;
+    float root_radius;
+    uint32_t handoff_count;
+    uint32_t draw_count;
+    int pending_target;
+    mixing_clip_t interruption_target;
+    mixing_mode_t mode;
+    bool paused;
+    bool show_sources;
+    bool three_cycles;
+    bool strict_partial;
+    bool using_snapshot;
+    bool repeating;
+    bool mode_combo_open;
+} mixing_scene_state_t;
+
 static skeletal_pose_scene_state_t s_skeleton_scene;
 static skinned_scene_state_t s_skinned_scene;
+static mixing_scene_state_t s_mixing_scene;
 static bool s_cpu_reference;
 static bool s_show_bones;
 static nt_entity_t s_mesh_entities[2];
+static nt_entity_t s_mix_entities[MIX_CHARACTER_COUNT][MIX_MESH_COUNT];
 static nt_entity_t s_order_entities[SKELETAL_SHOWCASE_MAX_INSTANCES];
 static nt_skeletal_track_t s_order_tracks[SKELETAL_SHOWCASE_MAX_INSTANCES];
 static int s_order_count = 17;
@@ -198,6 +262,12 @@ static nt_material_t s_skin_material[RIG_COUNT + 1];
 static nt_material_t s_static_material[RIG_COUNT + 1];
 static nt_program_ref_t s_skin_program;
 static nt_program_ref_t s_static_program;
+static nt_resource_t s_mix_rig_resource;
+static nt_resource_t s_mix_skin_resource;
+static nt_resource_t s_mix_clip_resource[MIX_CLIP_COUNT];
+static nt_resource_t s_mix_mesh_resource[MIX_MESH_COUNT];
+static nt_resource_t s_mix_texture_resource;
+static nt_material_t s_mix_material;
 
 typedef struct {
     uint8_t *data;   /* owned decoded MESH, independent of pack and GPU lifetime */
@@ -297,6 +367,11 @@ static void ordering_update(void);
 static void ordering_cancel_input(void);
 static void ordering_declare_controls(void);
 static void ordering_draw(void);
+static void mixing_reset(void);
+static void mixing_update(void);
+static void mixing_cancel_input(void);
+static void mixing_declare_controls(void);
+static void mixing_draw(void);
 
 static const skeletal_scene_desc_t s_scene_registry[] = {
     {
@@ -328,6 +403,16 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
         .cancel_input = ordering_cancel_input,
         .declare_controls = ordering_declare_controls,
         .draw = ordering_draw,
+    },
+    {
+        .title = "Mixing & Crossfades",
+        .description = "Compose caller-owned tracks into crossfades, blend spaces, partial poses, overrides, and interruption-safe transitions.",
+        .source = "Source: examples/skeletal_showcase/main.c",
+        .reset = mixing_reset,
+        .update = mixing_update,
+        .cancel_input = mixing_cancel_input,
+        .declare_controls = mixing_declare_controls,
+        .draw = mixing_draw,
     },
 };
 #define SKELETAL_SCENE_COUNT ((int)(sizeof s_scene_registry / sizeof s_scene_registry[0]))
@@ -611,11 +696,25 @@ static const nt_skeletal_clip_t *player_clip_view(int clip) {
 }
 
 /* Views are borrowed: refetched once per frame after resource_step, before the UI and the scenes read them. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void refresh_views(void) {
     character_player_t *p = &s_skinned_scene.player;
     s_skeleton_scene.view = rig_view(s_skeleton_scene.rig_source);
     p->skel = rig_view(p->rig);
     p->clip_view = p->clip >= 0 ? player_clip_view(p->clip) : NULL;
+    s_mixing_scene.skel = nt_resource_is_ready(s_mix_rig_resource) ? nt_skeletal_assets_skeleton(s_mix_rig_resource) : NULL;
+    s_mixing_scene.skin = nt_resource_is_ready(s_mix_skin_resource) ? nt_skeletal_assets_skin_binding(s_mix_skin_resource) : NULL;
+    for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
+        s_mixing_scene.clips[i] = nt_resource_is_ready(s_mix_clip_resource[i]) ? nt_skeletal_assets_clip(s_mix_clip_resource[i]) : NULL;
+    }
+    if (s_mixing_scene.skel != NULL && s_mixing_scene.skin != NULL) {
+        NT_ASSERT(s_mixing_scene.skin->rig_compat_id.value == s_mixing_scene.skel->rig_compat_id.value && "mixing: skin pairs with KayKit rig");
+        for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
+            if (s_mixing_scene.clips[i] != NULL) {
+                NT_ASSERT(s_mixing_scene.clips[i]->rig_compat_id.value == s_mixing_scene.skel->rig_compat_id.value && "mixing: clip pairs with KayKit rig");
+            }
+        }
+    }
 }
 
 // #region playback
@@ -716,6 +815,354 @@ static void skinned_update(void) {
         s_camera_yaw = 0.9F;
     }
 }
+// #endregion
+
+// #region mixing
+static const char *const s_mixing_mode_names[MIX_MODE_COUNT] = {"Crossfade", "Blend space", "Partial body", "Override", "Interruption"};
+static const char *const s_mixing_clip_names[MIX_CLIP_COUNT] = {"Idle", "Walk", "Run", "Jump", "Punch"};
+
+static bool mixing_ready(void) {
+    if (s_mixing_scene.skel == NULL || s_mixing_scene.skin == NULL) {
+        return false;
+    }
+    for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
+        if (s_mixing_scene.clips[i] == NULL) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void mixing_release_slot(uint32_t slot) {
+    NT_ASSERT(slot < MIX_TRACK_COUNT);
+    memset(&s_mixing_scene.slots[slot], 0, sizeof s_mixing_scene.slots[slot]);
+}
+
+static void mixing_assign_slot(uint32_t slot, mixing_clip_t clip, bool looping) {
+    NT_ASSERT(slot < MIX_TRACK_COUNT);
+    NT_ASSERT((s_mixing_scene.slots[slot].track.flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U && "mixing: track slot overflow");
+    const nt_skeletal_clip_t *view = s_mixing_scene.clips[clip];
+    NT_ASSERT(view != NULL);
+    s_mixing_scene.slots[slot] = (mixing_slot_t){
+        .track = {.duration = view->duration, .speed = 1.0F, .flags = NT_SKELETAL_TRACK_OCCUPIED | (looping ? NT_SKELETAL_TRACK_LOOPING : 0U)},
+        .clip = clip,
+    };
+}
+
+static void mixing_release_tracks(void) {
+    for (uint32_t i = 0; i < MIX_TRACK_COUNT; ++i) {
+        mixing_release_slot(i);
+    }
+}
+
+static void mixing_pair(mixing_clip_t source, mixing_clip_t target) {
+    mixing_release_tracks();
+    mixing_assign_slot(0, source, source != MIX_CLIP_JUMP);
+    mixing_assign_slot(1, target, target != MIX_CLIP_JUMP);
+    s_mixing_scene.transition_elapsed = 0.0F;
+    s_mixing_scene.using_snapshot = false;
+}
+
+static void mixing_configure_mode(void) {
+    if (!mixing_ready()) {
+        return;
+    }
+    mixing_release_tracks();
+    s_mixing_scene.transition_elapsed = 0.0F;
+    s_mixing_scene.phase = 0.17F;
+    s_mixing_scene.using_snapshot = false;
+    s_mixing_scene.pending_target = -1;
+    switch (s_mixing_scene.mode) {
+    case MIX_MODE_CROSSFADE:
+        mixing_pair(MIX_CLIP_RUN, MIX_CLIP_JUMP);
+        break;
+    case MIX_MODE_BLEND_SPACE:
+        mixing_assign_slot(0, MIX_CLIP_IDLE, true);
+        mixing_assign_slot(1, MIX_CLIP_WALK, true);
+        mixing_assign_slot(2, MIX_CLIP_RUN, true);
+        break;
+    case MIX_MODE_PARTIAL_BODY:
+    case MIX_MODE_OVERRIDE:
+        mixing_assign_slot(0, MIX_CLIP_IDLE, true);
+        mixing_assign_slot(1, MIX_CLIP_RUN, true);
+        mixing_assign_slot(2, MIX_CLIP_PUNCH, true);
+        s_mixing_scene.transition_elapsed = s_mixing_scene.transition_duration * 0.55F;
+        break;
+    case MIX_MODE_INTERRUPTION:
+        mixing_assign_slot(0, MIX_CLIP_IDLE, true);
+        mixing_assign_slot(1, MIX_CLIP_RUN, true);
+        mixing_assign_slot(2, MIX_CLIP_PUNCH, true);
+        s_mixing_scene.transition_elapsed = s_mixing_scene.transition_duration * 0.35F;
+        s_mixing_scene.interruption_target = MIX_CLIP_RUN;
+        break;
+    default:
+        NT_ASSERT(false && "mixing: invalid mode");
+    }
+}
+
+static void mixing_init_factors(void) {
+    NT_ASSERT(s_mixing_scene.skel != NULL);
+    const uint32_t spine_id = nt_hash32_str("spine").value;
+    uint16_t spine = s_mixing_scene.skel->joint_count;
+    for (uint16_t j = 0; j < s_mixing_scene.skel->joint_count; ++j) {
+        if (s_mixing_scene.skel->joint_id[j] == spine_id) {
+            spine = j;
+            break;
+        }
+    }
+    NT_ASSERT(spine < s_mixing_scene.skel->joint_count && "mixing: KayKit spine joint missing");
+    const uint16_t upper_end = s_mixing_scene.skel->subtree_end[spine];
+    s_mixing_scene.root_radius = 0.0F;
+    for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
+        s_mixing_scene.root_radius = fmaxf(s_mixing_scene.root_radius, s_mixing_scene.clips[i]->r_root);
+    }
+    for (uint16_t j = 0; j < s_mixing_scene.skel->joint_count; ++j) {
+        const bool upper = j >= spine && j < upper_end;
+        s_mixing_scene.upper[j] = upper ? 1.0F : 0.0F;
+        s_mixing_scene.lower[j] = upper ? 0.0F : 1.0F;
+        s_mixing_scene.weighted[j] = upper ? 3.0F : 0.25F;
+    }
+}
+
+static float mixing_alpha(void) {
+    if (s_mixing_scene.transition_duration <= 0.0F) {
+        return 1.0F;
+    }
+    return fminf(s_mixing_scene.transition_elapsed / s_mixing_scene.transition_duration, 1.0F);
+}
+
+static void mixing_sample_slots(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT]) {
+    const uint16_t joints = s_mixing_scene.skel->joint_count;
+    for (uint32_t i = 0; i < MIX_TRACK_COUNT; ++i) {
+        if ((s_mixing_scene.slots[i].track.flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U) {
+            poses[i] = NULL;
+            continue;
+        }
+        poses[i] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, joints);
+        nt_skeletal_sample(s_mixing_scene.clips[s_mixing_scene.slots[i].clip], s_mixing_scene.slots[i].track.time, poses[i]);
+    }
+}
+
+static void mixing_two(const nt_skeletal_trs_t *a, const nt_skeletal_trs_t *b, float alpha, nt_skeletal_trs_t *out) {
+    const nt_skeletal_mix_input_t inputs[2] = {{.pose = a, .gain = 1.0F - alpha}, {.pose = b, .gain = alpha}};
+    nt_skeletal_mix(inputs, 2, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, out);
+}
+
+static void mixing_finish_transition(void) {
+    if ((s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U || mixing_alpha() < 1.0F) {
+        return;
+    }
+    s_mixing_scene.slots[0] = s_mixing_scene.slots[1];
+    mixing_release_slot(1);
+    s_mixing_scene.using_snapshot = false;
+}
+
+static void mixing_request_interruption(mixing_clip_t target) {
+    const mixing_slot_t *live = (s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U ? &s_mixing_scene.slots[1] : &s_mixing_scene.slots[0];
+    if (live->clip == target) {
+        return;
+    }
+    s_mixing_scene.pending_target = (int)target;
+}
+
+static void mixing_compose_locomotion(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT], nt_skeletal_trs_t *out) {
+    const float alpha = mixing_alpha();
+    if ((s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U) {
+        s_mixing_scene.slots[0].gain = 1.0F;
+        memcpy(out, poses[0], s_mixing_scene.skel->joint_count * sizeof *out);
+    } else if (s_mixing_scene.using_snapshot) {
+        s_mixing_scene.slots[1].gain = alpha;
+        nt_skeletal_override(s_mixing_scene.snapshot, poses[1], NULL, alpha, s_mixing_scene.skel->joint_count, out);
+    } else {
+        s_mixing_scene.slots[0].gain = 1.0F - alpha;
+        s_mixing_scene.slots[1].gain = alpha;
+        mixing_two(poses[0], poses[1], alpha, out);
+    }
+}
+
+static void mixing_process_interruption(nt_skeletal_trs_t *signal) {
+    if (s_mixing_scene.pending_target < 0) {
+        return;
+    }
+    const mixing_clip_t target = (mixing_clip_t)s_mixing_scene.pending_target;
+    memcpy(s_mixing_scene.snapshot, signal, s_mixing_scene.skel->joint_count * sizeof *signal);
+    mixing_release_slot(0);
+    mixing_release_slot(1);
+    mixing_assign_slot(1, target, target != MIX_CLIP_JUMP);
+    s_mixing_scene.using_snapshot = true;
+    s_mixing_scene.interruption_target = target;
+    s_mixing_scene.transition_elapsed = 0.0F;
+    s_mixing_scene.pending_target = -1;
+    ++s_mixing_scene.handoff_count;
+}
+
+static void mixing_blend_gains(float blend, bool three_cycles, float gains[3]) {
+    NT_ASSERT(blend >= 0.0F && blend <= 1.0F);
+    const float x = 2.0F * blend;
+    gains[0] = 0.0F;
+    gains[1] = 1.0F - blend;
+    gains[2] = blend;
+    if (three_cycles) {
+        gains[0] = fmaxf(1.0F - x, 0.0F);
+        gains[1] = 1.0F - fabsf(x - 1.0F);
+        gains[2] = fmaxf(x - 1.0F, 0.0F);
+    }
+}
+
+static void mixing_advance_tracks(double dt) {
+    nt_skeletal_track_t tracks[MIX_TRACK_COUNT];
+    for (uint32_t i = 0; i < MIX_TRACK_COUNT; ++i) {
+        s_mixing_scene.slots[i].track.speed = s_mixing_scene.paused ? 0.0F : 1.0F;
+        tracks[i] = s_mixing_scene.slots[i].track;
+    }
+    nt_skeletal_tracks_advance(tracks, MIX_TRACK_COUNT, dt);
+    for (uint32_t i = 0; i < MIX_TRACK_COUNT; ++i) {
+        s_mixing_scene.slots[i].track = tracks[i];
+    }
+}
+
+static void mixing_update_blend_space(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT]) {
+    float gains[3];
+    mixing_blend_gains(s_mixing_scene.blend, s_mixing_scene.three_cycles, gains);
+    double duration = 0.0;
+    for (uint32_t i = 0; i < 3; ++i) {
+        s_mixing_scene.slots[i].gain = gains[i];
+        duration += (double)gains[i] * s_mixing_scene.slots[i].track.duration;
+    }
+    if (!s_mixing_scene.paused) {
+        s_mixing_scene.phase = fmodf(s_mixing_scene.phase + (g_nt_app.dt / (float)duration), 1.0F);
+    }
+    for (uint32_t i = 0; i < 3; ++i) {
+        s_mixing_scene.slots[i].track.time = (double)s_mixing_scene.phase * s_mixing_scene.slots[i].track.duration;
+        nt_skeletal_sample(s_mixing_scene.clips[s_mixing_scene.slots[i].clip], s_mixing_scene.slots[i].track.time, poses[i]);
+    }
+    const nt_skeletal_mix_input_t inputs[3] = {{.pose = poses[0], .gain = gains[0]}, {.pose = poses[1], .gain = gains[1]}, {.pose = poses[2], .gain = gains[2]}};
+    nt_skeletal_mix(inputs, 3, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
+}
+
+static void mixing_prepare_models(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT]) {
+    const uint16_t joints = s_mixing_scene.skel->joint_count;
+    s_mixing_scene.draw_count = s_mixing_scene.show_sources ? MIX_CHARACTER_COUNT : 1U;
+    for (uint32_t i = 0; i < s_mixing_scene.draw_count; ++i) {
+        s_mixing_scene.draw_model[i] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_mat34_t, joints);
+        const nt_skeletal_trs_t *pose = i == 0 ? s_mixing_scene.final_pose : poses[i - 1U];
+        if (pose == NULL && i == 1U && s_mixing_scene.using_snapshot) {
+            pose = s_mixing_scene.snapshot;
+        }
+        if (pose == NULL) {
+            pose = s_mixing_scene.skel->rest;
+        }
+        nt_skeletal_fk(s_mixing_scene.skel, pose, s_mixing_scene.draw_model[i], 0, joints);
+    }
+}
+
+static void mixing_reset(void) {
+    const mixing_mode_t mode = s_mixing_scene.mode;
+    const bool show_sources = s_mixing_scene.show_sources;
+    memset(&s_mixing_scene, 0, sizeof s_mixing_scene);
+    s_mixing_scene.mode = mode;
+    s_mixing_scene.show_sources = show_sources;
+    s_mixing_scene.blend = 0.5F;
+    s_mixing_scene.base_gain_scale = 1.0F;
+    s_mixing_scene.transition_duration = 1.0F;
+    s_mixing_scene.three_cycles = true;
+    s_mixing_scene.pending_target = -1;
+    refresh_views();
+    if (mixing_ready()) {
+        mixing_init_factors();
+        mixing_configure_mode();
+    }
+}
+
+static void mixing_set_mode(mixing_mode_t mode) {
+    NT_ASSERT(mode < MIX_MODE_COUNT);
+    s_mixing_scene.mode = mode;
+    mixing_reset();
+    mixing_cancel_input();
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void mixing_update(void) {
+    if (!mixing_ready()) {
+        return;
+    }
+    if ((s_mixing_scene.slots[0].track.flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U && !s_mixing_scene.using_snapshot) {
+        mixing_init_factors();
+        mixing_configure_mode();
+    }
+    const double dt = s_mixing_scene.paused ? 0.0 : (double)g_nt_app.dt;
+    if (s_mixing_scene.mode != MIX_MODE_BLEND_SPACE) {
+        mixing_advance_tracks(dt);
+        s_mixing_scene.transition_elapsed += (float)dt;
+    }
+    nt_skeletal_trs_t *poses[MIX_TRACK_COUNT];
+    mixing_sample_slots(poses);
+    nt_skeletal_trs_t *signal = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
+    switch (s_mixing_scene.mode) {
+    case MIX_MODE_CROSSFADE:
+        mixing_compose_locomotion(poses, s_mixing_scene.final_pose);
+        mixing_finish_transition();
+        break;
+    case MIX_MODE_BLEND_SPACE:
+        mixing_update_blend_space(poses);
+        break;
+    case MIX_MODE_PARTIAL_BODY: {
+        mixing_compose_locomotion(poses, signal);
+        s_mixing_scene.slots[2].gain = 1.0F;
+        const nt_skeletal_mix_input_t inputs[2] = {
+            {.pose = signal, .weights = s_mixing_scene.strict_partial ? s_mixing_scene.lower : NULL, .gain = 1.0F},
+            {.pose = poses[2], .weights = s_mixing_scene.strict_partial ? s_mixing_scene.upper : s_mixing_scene.weighted, .gain = 1.0F},
+        };
+        nt_skeletal_mix(inputs, 2, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
+        break;
+    }
+    case MIX_MODE_OVERRIDE: {
+        const float alpha = mixing_alpha();
+        s_mixing_scene.slots[0].gain = (1.0F - alpha) * s_mixing_scene.base_gain_scale;
+        s_mixing_scene.slots[1].gain = alpha * s_mixing_scene.base_gain_scale;
+        s_mixing_scene.slots[2].gain = 0.8F;
+        const nt_skeletal_mix_input_t inputs[2] = {
+            {.pose = poses[0], .gain = s_mixing_scene.slots[0].gain},
+            {.pose = poses[1], .gain = s_mixing_scene.slots[1].gain},
+        };
+        nt_skeletal_mix(inputs, 2, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
+        nt_skeletal_override(s_mixing_scene.final_pose, poses[2], s_mixing_scene.upper, 0.8F, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
+        break;
+    }
+    case MIX_MODE_INTERRUPTION: {
+        mixing_compose_locomotion(poses, signal);
+        s_mixing_scene.slots[2].gain = 1.0F;
+        mixing_process_interruption(signal);
+        if (s_mixing_scene.using_snapshot && s_mixing_scene.transition_elapsed == 0.0F) {
+            memcpy(signal, s_mixing_scene.snapshot, s_mixing_scene.skel->joint_count * sizeof *signal);
+        }
+        const nt_skeletal_mix_input_t inputs[2] = {{.pose = signal, .weights = s_mixing_scene.lower, .gain = 1.0F}, {.pose = poses[2], .weights = s_mixing_scene.upper, .gain = 1.0F}};
+        nt_skeletal_mix(inputs, 2, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
+        mixing_finish_transition();
+        if (s_mixing_scene.repeating && !s_mixing_scene.paused) {
+            s_mixing_scene.repeat_elapsed += g_nt_app.dt;
+            if (s_mixing_scene.repeat_elapsed >= 0.3F) {
+                const mixing_clip_t next = s_mixing_scene.interruption_target == MIX_CLIP_RUN ? MIX_CLIP_JUMP : MIX_CLIP_RUN;
+                mixing_request_interruption(next);
+                s_mixing_scene.repeat_elapsed = 0.0F;
+            }
+        }
+        break;
+    }
+    default:
+        NT_ASSERT(false && "mixing: invalid mode");
+    }
+    mixing_prepare_models(poses);
+    if (s_fit_pending) {
+        const float center[3] = {0.0F, 0.8F, 0.0F};
+        set_camera_fit(center, 0.72F);
+        s_camera_yaw = 0.35F;
+        s_camera_pitch = 0.18F;
+        s_fit_pending = false;
+    }
+}
+
+static void mixing_cancel_input(void) { s_mixing_scene.mode_combo_open = false; }
 // #endregion
 
 // #region ordering
@@ -1017,17 +1464,17 @@ static nt_material_t make_mesh_material(nt_resource_t texture, bool skinned) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void init_mesh_scene(void) {
-    nt_result_t result = nt_entity_init(&(nt_entity_desc_t){.max_entities = SKELETAL_SHOWCASE_MAX_INSTANCES + 2});
+    nt_result_t result = nt_entity_init(&(nt_entity_desc_t){.max_entities = SHOWCASE_ENTITY_COUNT});
     NT_ASSERT(result == NT_OK);
-    result = nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = SKELETAL_SHOWCASE_MAX_INSTANCES + 2});
+    result = nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = SHOWCASE_ENTITY_COUNT});
     NT_ASSERT(result == NT_OK);
-    result = nt_mesh_comp_init(&(nt_mesh_comp_desc_t){.capacity = SKELETAL_SHOWCASE_MAX_INSTANCES + 2});
+    result = nt_mesh_comp_init(&(nt_mesh_comp_desc_t){.capacity = SHOWCASE_ENTITY_COUNT});
     NT_ASSERT(result == NT_OK);
-    result = nt_material_comp_init(&(nt_material_comp_desc_t){.capacity = SKELETAL_SHOWCASE_MAX_INSTANCES + 2});
+    result = nt_material_comp_init(&(nt_material_comp_desc_t){.capacity = SHOWCASE_ENTITY_COUNT});
     NT_ASSERT(result == NT_OK);
-    result = nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = SKELETAL_SHOWCASE_MAX_INSTANCES + 2});
+    result = nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = SHOWCASE_ENTITY_COUNT});
     NT_ASSERT(result == NT_OK);
-    result = nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = SKELETAL_SHOWCASE_MAX_INSTANCES + 2});
+    result = nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = SHOWCASE_ENTITY_COUNT});
     NT_ASSERT(result == NT_OK);
     result = nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 3 * SKELETAL_SHOWCASE_MAX_PALETTE, .height = SKELETAL_SHOWCASE_MAX_INSTANCES});
     NT_ASSERT(result == NT_OK);
@@ -1037,13 +1484,16 @@ static void init_mesh_scene(void) {
     /* The instance ring has room for both ordering passes, so a frame wraps it at most once. */
     result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 2 * SKELETAL_SHOWCASE_MAX_INSTANCES, .max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
-    for (uint32_t i = 0; i < SKELETAL_SHOWCASE_MAX_INSTANCES + 2U; ++i) {
+    for (uint32_t i = 0; i < SHOWCASE_ENTITY_COUNT; ++i) {
         const nt_entity_t e = nt_entity_create();
         if (i < 2) {
             s_mesh_entities[i] = e;
-        } else {
+        } else if (i < SKELETAL_SHOWCASE_MAX_INSTANCES + 2U) {
             const uint32_t index = i - 2U;
             s_order_entities[index] = e;
+        } else {
+            const uint32_t index = i - (SKELETAL_SHOWCASE_MAX_INSTANCES + 2U);
+            s_mix_entities[index / MIX_MESH_COUNT][index % MIX_MESH_COUNT] = e;
         }
         bool added = nt_transform_comp_add(e);
         NT_ASSERT(added);
@@ -1055,7 +1505,7 @@ static void init_mesh_scene(void) {
         NT_ASSERT(added);
         added = nt_skin_comp_add(e);
         NT_ASSERT(added);
-        if (i >= 2) {
+        if (i >= 2 && i < SKELETAL_SHOWCASE_MAX_INSTANCES + 2U) {
             const uint32_t index = i - 2U;
             const uint32_t row = index / 16U;
             nt_transform_comp_set_position(e, (float)(index % 16U) * 5.0F, 0, (float)row * 5.0F);
@@ -1071,10 +1521,20 @@ static void init_mesh_scene(void) {
     s_texture_resource[RIG_FOX] = nt_resource_request(ASSET_TEXTURE_SKELETAL_SHOWCASE_FOX_TEXTURE, NT_ASSET_TEXTURE);
     s_texture_resource[RIG_CESIUMMAN] = nt_resource_request(ASSET_TEXTURE_SKELETAL_SHOWCASE_CESIUMMAN_TEXTURE, NT_ASSET_TEXTURE);
     s_texture_resource[RIG_COUNT] = nt_resource_request(ASSET_TEXTURE_SKELETAL_SHOWCASE_TINT_TEXTURE, NT_ASSET_TEXTURE);
+    const nt_hash64_t mix_mesh_ids[MIX_MESH_COUNT] = {
+        ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_ARM_LEFT_MESH, ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_ARM_RIGHT_MESH, ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_BODY_MESH,
+        ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_HEAD_MESH,     ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_LEG_LEFT_MESH,  ASSET_MESH_SKELETAL_SHOWCASE_KAYKIT_LEG_RIGHT_MESH,
+    };
+    for (uint32_t i = 0; i < MIX_MESH_COUNT; ++i) {
+        s_mix_mesh_resource[i] = nt_resource_request(mix_mesh_ids[i], NT_ASSET_MESH);
+    }
+    s_mix_skin_resource = nt_resource_request(ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_KAYKIT_NSKN, NT_ASSET_SKIN_BINDING);
+    s_mix_texture_resource = nt_resource_request(ASSET_TEXTURE_SKELETAL_SHOWCASE_KAYKIT_TEXTURE, NT_ASSET_TEXTURE);
     for (uint32_t i = 0; i <= RIG_COUNT; ++i) {
         s_skin_material[i] = make_mesh_material(s_texture_resource[i], true);
         s_static_material[i] = make_mesh_material(s_texture_resource[i], false);
     }
+    s_mix_material = make_mesh_material(s_mix_texture_resource, true);
     s_skin_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SKINNED_VERT, NT_ASSET_SHADER_CODE);
     s_skin_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
     s_static_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
@@ -1127,6 +1587,7 @@ static void shutdown_mesh_scene(void) {
         nt_material_destroy(s_skin_material[i]);
         nt_material_destroy(s_static_material[i]);
     }
+    nt_material_destroy(s_mix_material);
     nt_program_ref_drop(&s_skin_program);
     nt_program_ref_drop(&s_static_program);
     nt_skin_comp_shutdown();
@@ -1145,6 +1606,7 @@ static void link_programs(void) {
         for (uint32_t i = 0; i <= RIG_COUNT; ++i) {
             nt_material_set_program(s_skin_material[i], s_skin_program.program);
         }
+        nt_material_set_program(s_mix_material, s_skin_program.program);
     }
     if (nt_program_ref_update(&s_static_program)) {
         for (uint32_t i = 0; i <= RIG_COUNT; ++i) {
@@ -1541,6 +2003,104 @@ static void ordering_declare_controls(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void mixing_declare_controls(void) {
+    char text[160];
+    const bool enabled = !s_skip_scene_interaction_this_frame;
+    const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}}};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Mode", label_style(13.0F, (Clay_Color){120, 205, 255, 255}));
+        if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("mixing/mode"), s_mixing_mode_names[s_mixing_scene.mode], &s_joint_combo_style, &s_mixing_scene.mode_combo_open)) {
+            for (uint32_t i = 0; i < MIX_MODE_COUNT; ++i) {
+                if (nt_ui_combo_selectable(s_ui, i, s_mixing_mode_names[i], i == (uint32_t)s_mixing_scene.mode) && i != (uint32_t)s_mixing_scene.mode) {
+                    mixing_set_mode((mixing_mode_t)i);
+                }
+            }
+            nt_ui_combo_end(s_ui);
+        }
+        CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
+            if (text_button_fixed(nt_ui_id("mixing/play"), s_mixing_scene.paused ? "Play" : "Pause", !s_mixing_scene.paused, 76.0F, 32.0F)) {
+                s_mixing_scene.paused = !s_mixing_scene.paused;
+            }
+            if (text_button_fixed(nt_ui_id("mixing/reset"), "Reset demo", false, 102.0F, 32.0F)) {
+                mixing_reset();
+            }
+        }
+        (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/sources"), "Show sources", &s_mixing_scene.show_sources, &s_checkbox_style, &row, enabled);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), s_mixing_scene.show_sources ? "Sources: on" : "Sources: off", label_style(11.0F, (Clay_Color){160, 180, 205, 255}));
+        (void)snprintf(text, sizeof text, "Transition %.2f s", (double)s_mixing_scene.transition_duration);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+        (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/duration"), NULL, &s_mixing_scene.transition_duration, 0.0F, 2.0F, 0.05F, &s_slider_style,
+                                 &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
+        switch (s_mixing_scene.mode) {
+        case MIX_MODE_CROSSFADE:
+            CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
+                if (text_button_fixed(nt_ui_id("mixing/run_jump"), "Run -> Jump", false, 106.0F, 32.0F) && mixing_ready()) {
+                    mixing_pair(MIX_CLIP_RUN, MIX_CLIP_JUMP);
+                }
+                if (text_button_fixed(nt_ui_id("mixing/idle_run"), "Idle -> Run", false, 100.0F, 32.0F) && mixing_ready()) {
+                    mixing_pair(MIX_CLIP_IDLE, MIX_CLIP_RUN);
+                }
+            }
+            break;
+        case MIX_MODE_BLEND_SPACE:
+            (void)snprintf(text, sizeof text, "Speed %.2f", (double)s_mixing_scene.blend);
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/blend"), NULL, &s_mixing_scene.blend, 0.0F, 1.0F, 0.01F, &s_slider_style,
+                                     &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
+            (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/three_cycles"), "Idle / walk / run", &s_mixing_scene.three_cycles, &s_checkbox_style, &row, enabled);
+            break;
+        case MIX_MODE_PARTIAL_BODY:
+            (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/strict"), "Strict upper-body isolation", &s_mixing_scene.strict_partial, &s_checkbox_style, &row, enabled);
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), s_mixing_scene.strict_partial ? "Lower 0 / upper 1 action" : "Action weight: lower 0.25 / upper 3",
+                        label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            break;
+        case MIX_MODE_OVERRIDE:
+            (void)snprintf(text, sizeof text, "Base gain scale %.2f", (double)s_mixing_scene.base_gain_scale);
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/base_gain"), NULL, &s_mixing_scene.base_gain_scale, 0.25F, 2.0F, 0.05F, &s_slider_style,
+                                     &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Upper-body override alpha: 0.80", label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            break;
+        case MIX_MODE_INTERRUPTION:
+            CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
+                if (text_button_fixed(nt_ui_id("mixing/to_idle"), "Idle", false, 62.0F, 32.0F)) {
+                    mixing_request_interruption(MIX_CLIP_IDLE);
+                }
+                if (text_button_fixed(nt_ui_id("mixing/to_run"), "Run", false, 62.0F, 32.0F)) {
+                    mixing_request_interruption(MIX_CLIP_RUN);
+                }
+                if (text_button_fixed(nt_ui_id("mixing/to_jump"), "Jump", false, 62.0F, 32.0F)) {
+                    mixing_request_interruption(MIX_CLIP_JUMP);
+                }
+            }
+            (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/repeat"), "Interrupt every 0.3 s", &s_mixing_scene.repeating, &s_checkbox_style, &row, enabled);
+            (void)snprintf(text, sizeof text, "%s source; handoffs %u", s_mixing_scene.using_snapshot ? "Frozen snapshot" : "Live", s_mixing_scene.handoff_count);
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            break;
+        default:
+            break;
+        }
+        uint32_t occupied = 0;
+        for (uint32_t i = 0; i < MIX_TRACK_COUNT; ++i) {
+            if ((s_mixing_scene.slots[i].track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U) {
+                ++occupied;
+            }
+        }
+        (void)snprintf(text, sizeof text, "alpha %.2f | slots %u/%u", (double)mixing_alpha(), occupied, MIX_TRACK_COUNT);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){240, 246, 255, 255}));
+        (void)snprintf(text, sizeof text, "snapshot %zu B | scene state %zu B", sizeof s_mixing_scene.snapshot, sizeof s_mixing_scene);
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(11.0F, (Clay_Color){160, 180, 205, 255}));
+        for (uint32_t i = 0; i < MIX_TRACK_COUNT; ++i) {
+            if ((s_mixing_scene.slots[i].track.flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U) {
+                continue;
+            }
+            (void)snprintf(text, sizeof text, "%s t=%.2f g=%.2f", s_mixing_clip_names[s_mixing_scene.slots[i].clip], s_mixing_scene.slots[i].track.time, (double)s_mixing_scene.slots[i].gain);
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(11.0F, (Clay_Color){160, 180, 205, 255}));
+        }
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_ui(const nt_ui_scale_t *scale) {
     nt_ui_begin(s_ui, scale->logical_w, scale->logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
     nt_ui_set_viewport(s_ui, nt_ui_viewport_from_scale(scale));
@@ -1560,6 +2120,9 @@ static void declare_ui(const nt_ui_scale_t *scale) {
                         }
                         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pass 2: one tint material", label_style(13, (Clay_Color){145, 215, 255, 255}));
                     }
+                }
+                if (scene->draw == mixing_draw && s_mixing_scene.show_sources) {
+                    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Preview: result center | source left | target right | action front", label_style(12.0F, (Clay_Color){145, 215, 255, 255}));
                 }
                 CLAY({.id = CLAY_ID(STAGE_ID), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
             }
@@ -1774,6 +2337,61 @@ static void skinned_draw(void) {
     }
 }
 
+static bool mixing_sphere_visible(const float center[3], float radius) {
+    const float *m = s_frame_uniforms.view_proj;
+    const float planes[6][4] = {
+        {m[3] + m[0], m[7] + m[4], m[11] + m[8], m[15] + m[12]}, {m[3] - m[0], m[7] - m[4], m[11] - m[8], m[15] - m[12]},  {m[3] + m[1], m[7] + m[5], m[11] + m[9], m[15] + m[13]},
+        {m[3] - m[1], m[7] - m[5], m[11] - m[9], m[15] - m[13]}, {m[3] + m[2], m[7] + m[6], m[11] + m[10], m[15] + m[14]}, {m[3] - m[2], m[7] - m[6], m[11] - m[10], m[15] - m[14]},
+    };
+    for (uint32_t i = 0; i < 6; ++i) {
+        const float length = sqrtf((planes[i][0] * planes[i][0]) + (planes[i][1] * planes[i][1]) + (planes[i][2] * planes[i][2]));
+        const float distance = (planes[i][0] * center[0]) + (planes[i][1] * center[1]) + (planes[i][2] * center[2]) + planes[i][3];
+        if (distance < -radius * length) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void mixing_draw(void) {
+    if (!mixing_ready() || s_mixing_scene.draw_model[0] == NULL || g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F || !nt_resource_is_ready(s_mix_texture_resource) ||
+        !nt_gfx_program_ready(s_skin_program.program)) {
+        return;
+    }
+    for (uint32_t mesh = 0; mesh < MIX_MESH_COUNT; ++mesh) {
+        if (!nt_resource_is_ready(s_mix_mesh_resource[mesh])) {
+            return;
+        }
+    }
+    draw_ground(s_fit_scale);
+    static const float positions[MIX_CHARACTER_COUNT][3] = {{0.0F, 0.0F, 0.0F}, {-2.2F, 0.0F, 0.0F}, {2.2F, 0.0F, 0.0F}, {0.0F, 0.0F, 2.2F}};
+    const float radius = s_mixing_scene.skin->any_pose_radius + s_mixing_scene.root_radius;
+    nt_render_item_t items[MIX_ENTITY_COUNT];
+    uint32_t ready = 0;
+    nt_skeletal_gpu_begin_frame();
+    for (uint32_t character = 0; character < s_mixing_scene.draw_count; ++character) {
+        if (!mixing_sphere_visible(positions[character], radius)) {
+            continue;
+        }
+        const nt_entity_t binding_entity = s_mix_entities[character][0];
+        nt_skeletal_mat34_t *palette = nt_skeletal_gpu_reserve(s_mixing_scene.skin->palette_count, nt_skin_comp_handle(binding_entity));
+        nt_skin_palette_build(s_mixing_scene.skin, s_mixing_scene.draw_model[character], s_mixing_scene.skel->joint_count, palette, s_mixing_scene.skin->palette_count);
+        for (uint32_t mesh = 0; mesh < MIX_MESH_COUNT; ++mesh) {
+            const nt_entity_t e = s_mix_entities[character][mesh];
+            nt_transform_comp_set_position(e, positions[character][0], positions[character][1], positions[character][2]);
+            *nt_mesh_comp_handle(e) = (nt_mesh_t){nt_resource_get(s_mix_mesh_resource[mesh])};
+            *nt_material_comp_handle(e) = s_mix_material;
+            if (mesh > 0) {
+                *nt_skin_comp_handle(e) = *nt_skin_comp_handle(binding_entity);
+            }
+            items[ready++] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(s_mix_material, *nt_mesh_comp_handle(e))};
+        }
+    }
+    nt_transform_comp_update();
+    nt_skeletal_gpu_flush();
+    nt_skinned_mesh_renderer_draw_list(items, ready);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void ordering_draw(void) {
     if (g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F || !nt_resource_is_ready(s_texture_resource[RIG_HUMANOID]) || !nt_resource_is_ready(s_texture_resource[RIG_COUNT]) ||
@@ -1854,7 +2472,9 @@ static void switch_scene(int next_scene) {
 
 static void reset_active_scene(void) {
     s_scene_registry[s_active_scene].reset();
-    reset_camera();
+    if (s_scene_registry[s_active_scene].draw != mixing_draw) {
+        reset_camera();
+    }
     cancel_scene_input();
     cancel_active_scene_input();
     s_skip_scene_interaction_this_frame = true;
@@ -1993,7 +2613,7 @@ int main(int argc, char *argv[]) {
     nt_input_init();
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.depth = true;
-    gfx_desc.max_meshes = 8;
+    gfx_desc.max_meshes = 16;
     gfx_desc.max_vertex_inputs = 112;
     gfx_desc.max_shaders = 32;
     gfx_desc.max_programs = 16;
@@ -2013,7 +2633,7 @@ int main(int argc, char *argv[]) {
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_mesh, .deactivate = nt_gfx_deactivate_mesh, .on_post_resolve = on_mesh_published});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     /* Capacity counts every skeletal asset of the mounted packs: an NSKL and an NSKN per imported rig plus the clips. */
-    nt_skeletal_assets_init((uint32_t)((2 * (RIG_COUNT - 1)) + CLIP_COUNT - 1));
+    nt_skeletal_assets_init(SKELETAL_ASSET_COUNT);
     nt_resource_register_type(NT_ASSET_SKELETON, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_skeleton, .deactivate = nt_skeletal_assets_deactivate_skeleton});
     nt_resource_register_type(NT_ASSET_SKIN_BINDING, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_skin_binding, .deactivate = nt_skeletal_assets_deactivate_skin_binding});
     nt_resource_register_type(NT_ASSET_CLIP, &(nt_resource_type_desc_t){.activate = nt_skeletal_assets_activate_clip, .deactivate = nt_skeletal_assets_deactivate_clip});
@@ -2042,10 +2662,18 @@ int main(int argc, char *argv[]) {
     s_font_resource = nt_resource_request(ASSET_FONT_SKELETAL_SHOWCASE_FONT, NT_ASSET_FONT);
     s_rig_resource[RIG_FOX] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_FOX_NSKL, NT_ASSET_SKELETON);
     s_rig_resource[RIG_CESIUMMAN] = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_CESIUMMAN_NSKL, NT_ASSET_SKELETON);
+    s_mix_rig_resource = nt_resource_request(ASSET_SKELETON_SKELETAL_SHOWCASE_KAYKIT_NSKL, NT_ASSET_SKELETON);
     for (int i = 0; i < CLIP_COUNT; ++i) {
         if (s_clips[i].id.value != 0) {
             s_clip_resource[i] = nt_resource_request(s_clips[i].id, NT_ASSET_CLIP);
         }
+    }
+    const nt_hash64_t mix_clip_ids[MIX_CLIP_COUNT] = {
+        ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_IDLE_NANM, ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_WALK_NANM,  ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_RUN_NANM,
+        ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_JUMP_NANM, ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_PUNCH_NANM,
+    };
+    for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
+        s_mix_clip_resource[i] = nt_resource_request(mix_clip_ids[i], NT_ASSET_CLIP);
     }
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .textures = {{.name = "u_texture", .resource = s_atlas_texture}}, .texture_count = 1, .blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_sprite"});
@@ -2087,6 +2715,7 @@ int main(int argc, char *argv[]) {
     init_ui_styles();
     s_skinned_scene.player.rig = RIG_FOX;
     skinned_reset();
+    mixing_reset();
     switch_scene(0);
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
