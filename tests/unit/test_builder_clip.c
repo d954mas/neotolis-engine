@@ -903,6 +903,7 @@ typedef struct {
     uint32_t sample_count;
     float sample_fps;
     bool snapped;         /* the source is not a whole number of frames at sample_fps */
+    bool expect_sparse_q; /* the source leaves at least one joint rotation in base */
     float max_lin, max_t; /* ceilings above the measured errors */
     float min_lin, min_t; /* floors below them, non-zero where the grid visibly misses the source */
 } khronos_clip_t;
@@ -910,19 +911,19 @@ typedef struct {
 /* Frame counts from the input accessors; the ceilings sit above the measured
  * errors (Frobenius distance 2 sqrt(2) sin(theta / 2)). */
 static const khronos_clip_t k_khronos[] = {
-    {"examples/skeletal_showcase/raw/Fox.glb", "Survey", 83, 24, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* 82 frames, 2e-6 / 4.5e-5 cm */
-    {"examples/skeletal_showcase/raw/Fox.glb", "Walk", 18, 24, false, 0.02F, 0.5F, 0.0F, 0.0F},   /* 17 frames, 0.0064 (0.26 deg) / 0.061 cm */
+    {"examples/skeletal_showcase/raw/Fox.glb", "Survey", 83, 24, false, true, 0.02F, 0.5F, 0.0F, 0.0F}, /* 82 frames, 2e-6 / 4.5e-5 cm */
+    {"examples/skeletal_showcase/raw/Fox.glb", "Walk", 18, 24, false, true, 0.02F, 0.5F, 0.0F, 0.0F},   /* 17 frames, 0.0064 (0.26 deg) / 0.061 cm */
     /* Run: 27.8 frames, snaps to 28 with a warning; keys 20.8..27.8 sit 0.2 frames
      * from the nearest grid sample, off every sub-sample: 0.117 (4.7 deg) / 1.78 cm.
      * Both worst times land on a key (frame n + 0.8), which only the authored
      * key times of the dense set reach: the quarter sub-samples would stop at n + 0.75. */
-    {"examples/skeletal_showcase/raw/Fox.glb", "Run", 29, 24, true, 0.2F, 2.5F, 0.1F, 1.5F},
-    {"examples/skeletal_showcase/raw/CesiumMan.glb", NULL, 49, 24, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* unnamed, 48 frames, first key at 1/24 s (holds before it) */
-    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Idle", 33, 30, false, 0.02F, 0.5F, -1.0F, -1.0F},
-    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Walking_A", 33, 30, false, 0.02F, 0.5F, 0.0F, 0.0F},
-    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Running_A", 25, 30, false, 0.02F, 0.5F, 0.0F, 0.0F},
-    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Jump_Full_Short", 36, 30, false, 0.02F, 0.5F, 0.0F, 0.0F},
-    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Unarmed_Melee_Attack_Punch_A", 45, 30, false, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/Fox.glb", "Run", 29, 24, true, true, 0.2F, 2.5F, 0.1F, 1.5F},
+    {"examples/skeletal_showcase/raw/CesiumMan.glb", NULL, 49, 24, false, true, 0.02F, 0.5F, 0.0F, 0.0F}, /* unnamed, 48 frames, first key at 1/24 s (holds before it) */
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Idle", 33, 30, false, false, 0.02F, 0.5F, -1.0F, -1.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Walking_A", 33, 30, false, false, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Running_A", 25, 30, false, false, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Jump_Full_Short", 36, 30, false, false, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Unarmed_Melee_Attack_Punch_A", 45, 30, false, false, 0.02F, 0.5F, 0.0F, 0.0F},
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -967,8 +968,11 @@ void test_showcase_clips_export_at_authored_fps(void) {
         }
         TEST_ASSERT_TRUE(view.r_joints > 0.0F && view.s_max >= 1.0F);
         TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, view.rig_compat_id.value);
-        /* Both skins leave some joints unanimated, and every rotation moves. */
+        /* The imported clips all rotate; the original fixtures also retain sparse rows. */
         TEST_ASSERT_TRUE(view.n_q > 0);
+        if (asset->expect_sparse_q) {
+            TEST_ASSERT_TRUE(view.n_q < view.joint_count);
+        }
         free(payload);
         nt_builder_free_rig(&rig);
         nt_builder_free_glb_scene(&scene);

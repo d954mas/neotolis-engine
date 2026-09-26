@@ -117,7 +117,7 @@ static const struct {
     {"Humanoid motion", {0}}, /* id 0: the code-authored s_humanoid_clip */
 };
 #define CLIP_COUNT ((int)(sizeof s_clips / sizeof s_clips[0]))
-#define SKELETAL_ASSET_COUNT ((uint32_t)((2 * (RIG_COUNT - 1)) + CLIP_COUNT) + 2U + MIX_CLIP_COUNT)
+#define SKELETAL_ASSET_COUNT ((uint32_t)((2 * (RIG_COUNT - 1)) + CLIP_COUNT - 1) + 2U + MIX_CLIP_COUNT)
 
 static const char *const s_joint_names[HUMANOID_JOINT_COUNT] = {
     "pelvis",        "spine",      "chest",      "neck",      "head",      "left_clavicle", "left_upper_arm", "left_forearm", "left_hand",  "right_clavicle", "right_upper_arm",
@@ -1034,6 +1034,7 @@ static void mixing_update_blend_space(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT])
     }
     for (uint32_t i = 0; i < 3; ++i) {
         s_mixing_scene.slots[i].track.time = (double)s_mixing_scene.phase * s_mixing_scene.slots[i].track.duration;
+        poses[i] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
         nt_skeletal_sample(s_mixing_scene.clips[s_mixing_scene.slots[i].clip], s_mixing_scene.slots[i].track.time, poses[i]);
     }
     const nt_skeletal_mix_input_t inputs[3] = {{.pose = poses[0], .gain = gains[0]}, {.pose = poses[1], .gain = gains[1]}, {.pose = poses[2], .gain = gains[2]}};
@@ -1044,14 +1045,15 @@ static void mixing_prepare_models(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT]) {
     const uint16_t joints = s_mixing_scene.skel->joint_count;
     s_mixing_scene.draw_count = s_mixing_scene.show_sources ? MIX_CHARACTER_COUNT : 1U;
     for (uint32_t i = 0; i < s_mixing_scene.draw_count; ++i) {
-        s_mixing_scene.draw_model[i] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_mat34_t, joints);
         const nt_skeletal_trs_t *pose = i == 0 ? s_mixing_scene.final_pose : poses[i - 1U];
-        if (pose == NULL && i == 1U && s_mixing_scene.using_snapshot) {
+        if (i == 1U && s_mixing_scene.using_snapshot) {
             pose = s_mixing_scene.snapshot;
         }
         if (pose == NULL) {
-            pose = s_mixing_scene.skel->rest;
+            s_mixing_scene.draw_model[i] = NULL;
+            continue;
         }
+        s_mixing_scene.draw_model[i] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_mat34_t, joints);
         nt_skeletal_fk(s_mixing_scene.skel, pose, s_mixing_scene.draw_model[i], 0, joints);
     }
 }
@@ -1095,18 +1097,25 @@ static void mixing_update(void) {
         mixing_advance_tracks(dt);
         s_mixing_scene.transition_elapsed += (float)dt;
     }
-    nt_skeletal_trs_t *poses[MIX_TRACK_COUNT];
-    mixing_sample_slots(poses);
-    nt_skeletal_trs_t *signal = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
+    nt_skeletal_trs_t *poses[MIX_TRACK_COUNT] = {0};
+    if (s_mixing_scene.mode != MIX_MODE_BLEND_SPACE) {
+        mixing_sample_slots(poses);
+    }
     switch (s_mixing_scene.mode) {
     case MIX_MODE_CROSSFADE:
         mixing_compose_locomotion(poses, s_mixing_scene.final_pose);
+        const bool crossfade_finished = (s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U && mixing_alpha() >= 1.0F;
         mixing_finish_transition();
+        if (crossfade_finished) {
+            poses[0] = poses[1];
+            poses[1] = NULL;
+        }
         break;
     case MIX_MODE_BLEND_SPACE:
         mixing_update_blend_space(poses);
         break;
     case MIX_MODE_PARTIAL_BODY: {
+        nt_skeletal_trs_t *signal = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
         mixing_compose_locomotion(poses, signal);
         s_mixing_scene.slots[2].gain = 1.0F;
         const nt_skeletal_mix_input_t inputs[2] = {
@@ -1130,15 +1139,26 @@ static void mixing_update(void) {
         break;
     }
     case MIX_MODE_INTERRUPTION: {
+        nt_skeletal_trs_t *signal = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
         mixing_compose_locomotion(poses, signal);
         s_mixing_scene.slots[2].gain = 1.0F;
+        const bool interrupted = s_mixing_scene.pending_target >= 0;
         mixing_process_interruption(signal);
-        if (s_mixing_scene.using_snapshot && s_mixing_scene.transition_elapsed == 0.0F) {
-            memcpy(signal, s_mixing_scene.snapshot, s_mixing_scene.skel->joint_count * sizeof *signal);
+        if (interrupted) {
+            if (poses[1] == NULL) {
+                poses[1] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
+            }
+            nt_skeletal_sample(s_mixing_scene.clips[s_mixing_scene.slots[1].clip], s_mixing_scene.slots[1].track.time, poses[1]);
+            mixing_compose_locomotion(poses, signal);
         }
         const nt_skeletal_mix_input_t inputs[2] = {{.pose = signal, .weights = s_mixing_scene.lower, .gain = 1.0F}, {.pose = poses[2], .weights = s_mixing_scene.upper, .gain = 1.0F}};
         nt_skeletal_mix(inputs, 2, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
+        const bool transition_finished = (s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U && mixing_alpha() >= 1.0F;
         mixing_finish_transition();
+        if (transition_finished) {
+            poses[0] = poses[1];
+            poses[1] = NULL;
+        }
         if (s_mixing_scene.repeating && !s_mixing_scene.paused) {
             s_mixing_scene.repeat_elapsed += g_nt_app.dt;
             if (s_mixing_scene.repeat_elapsed >= 0.3F) {
@@ -2048,6 +2068,8 @@ static void mixing_declare_controls(void) {
             (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/blend"), NULL, &s_mixing_scene.blend, 0.0F, 1.0F, 0.01F, &s_slider_style,
                                      &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
             (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/three_cycles"), "Idle / walk / run", &s_mixing_scene.three_cycles, &s_checkbox_style, &row, enabled);
+            (void)snprintf(text, sizeof text, "phase %.8f", (double)s_mixing_scene.phase);
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
             break;
         case MIX_MODE_PARTIAL_BODY:
             (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/strict"), "Strict upper-body isolation", &s_mixing_scene.strict_partial, &s_checkbox_style, &row, enabled);
@@ -2122,7 +2144,7 @@ static void declare_ui(const nt_ui_scale_t *scale) {
                     }
                 }
                 if (scene->draw == mixing_draw && s_mixing_scene.show_sources) {
-                    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Preview: result center | source left | target right | action front", label_style(12.0F, (Clay_Color){145, 215, 255, 255}));
+                    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Active previews: result center | source left | target right | action front", label_style(12.0F, (Clay_Color){145, 215, 255, 255}));
                 }
                 CLAY({.id = CLAY_ID(STAGE_ID), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
             }
@@ -2353,6 +2375,12 @@ static bool mixing_sphere_visible(const float center[3], float radius) {
     return true;
 }
 
+static float mixing_culling_radius(void) {
+    /* The packed MESH has four normalized UINT8 weight lanes, each within 1/255 of its source weight. */
+    const float weight_margin = s_mixing_scene.skin->any_pose_radius * (4.0F / 255.0F);
+    return s_mixing_scene.skin->any_pose_radius + s_mixing_scene.root_radius + weight_margin;
+}
+
 static void mixing_draw(void) {
     if (!mixing_ready() || s_mixing_scene.draw_model[0] == NULL || g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F || !nt_resource_is_ready(s_mix_texture_resource) ||
         !nt_gfx_program_ready(s_skin_program.program)) {
@@ -2365,24 +2393,31 @@ static void mixing_draw(void) {
     }
     draw_ground(s_fit_scale);
     static const float positions[MIX_CHARACTER_COUNT][3] = {{0.0F, 0.0F, 0.0F}, {-2.2F, 0.0F, 0.0F}, {2.2F, 0.0F, 0.0F}, {0.0F, 0.0F, 2.2F}};
-    const float radius = s_mixing_scene.skin->any_pose_radius + s_mixing_scene.root_radius;
+    const float radius = mixing_culling_radius();
     nt_render_item_t items[MIX_ENTITY_COUNT];
+    bool visible[MIX_CHARACTER_COUNT] = {false};
     uint32_t ready = 0;
     nt_skeletal_gpu_begin_frame();
     for (uint32_t character = 0; character < s_mixing_scene.draw_count; ++character) {
-        if (!mixing_sphere_visible(positions[character], radius)) {
+        if (s_mixing_scene.draw_model[character] == NULL || !mixing_sphere_visible(positions[character], radius)) {
             continue;
         }
+        visible[character] = true;
         const nt_entity_t binding_entity = s_mix_entities[character][0];
         nt_skeletal_mat34_t *palette = nt_skeletal_gpu_reserve(s_mixing_scene.skin->palette_count, nt_skin_comp_handle(binding_entity));
         nt_skin_palette_build(s_mixing_scene.skin, s_mixing_scene.draw_model[character], s_mixing_scene.skel->joint_count, palette, s_mixing_scene.skin->palette_count);
-        for (uint32_t mesh = 0; mesh < MIX_MESH_COUNT; ++mesh) {
+    }
+    for (uint32_t mesh = 0; mesh < MIX_MESH_COUNT; ++mesh) {
+        for (uint32_t character = 0; character < s_mixing_scene.draw_count; ++character) {
+            if (!visible[character]) {
+                continue;
+            }
             const nt_entity_t e = s_mix_entities[character][mesh];
             nt_transform_comp_set_position(e, positions[character][0], positions[character][1], positions[character][2]);
             *nt_mesh_comp_handle(e) = (nt_mesh_t){nt_resource_get(s_mix_mesh_resource[mesh])};
             *nt_material_comp_handle(e) = s_mix_material;
             if (mesh > 0) {
-                *nt_skin_comp_handle(e) = *nt_skin_comp_handle(binding_entity);
+                *nt_skin_comp_handle(e) = *nt_skin_comp_handle(s_mix_entities[character][0]);
             }
             items[ready++] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(s_mix_material, *nt_mesh_comp_handle(e))};
         }
@@ -2472,9 +2507,7 @@ static void switch_scene(int next_scene) {
 
 static void reset_active_scene(void) {
     s_scene_registry[s_active_scene].reset();
-    if (s_scene_registry[s_active_scene].draw != mixing_draw) {
-        reset_camera();
-    }
+    reset_camera();
     cancel_scene_input();
     cancel_active_scene_input();
     s_skip_scene_interaction_this_frame = true;

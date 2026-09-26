@@ -3,6 +3,7 @@
 import argparse
 import base64
 import json
+import math
 import re
 from pathlib import Path
 
@@ -70,8 +71,15 @@ def run(client, output, backend="native"):
         memory = next((text for text in texts if text.startswith("snapshot ")), None)
         if alpha is None or memory is None:
             raise AssertionError(f"{mode}: missing alpha/ownership telemetry")
+        phase = next((text for text in texts if text.startswith("phase ")), None)
+        if mode == "Blend space" and phase is None:
+            raise AssertionError("Blend space: missing normalized phase telemetry")
+        if phase is not None:
+            phase_value = float(phase.removeprefix("phase "))
+            if not math.isfinite(phase_value) or not 0.0 <= phase_value < 1.0:
+                raise AssertionError(f"Blend space: invalid normalized phase: {phase}")
         captures[mode] = _capture(client, output, mode.lower().replace(" ", "_"))
-        telemetry[mode] = {"alpha": alpha, "memory": memory}
+        telemetry[mode] = {"alpha": alpha, "memory": memory, "phase": phase}
 
     _select_mode(client, "Interruption")
     client.ui_click("mixing/reset")
@@ -80,16 +88,25 @@ def run(client, output, backend="native"):
     client.wait_frames(2)
     client.ui_click("mixing/to_jump")
     client.wait_frames(2)
-    handoff_zero = next(text for text in _texts(client) if text.endswith("source; handoffs 1"))
+    handoff_texts = _texts(client)
+    handoff_zero = next(text for text in handoff_texts if text.endswith("source; handoffs 1"))
+    handoff_alpha = next(text for text in handoff_texts if text.startswith("alpha "))
+    handoff_memory = next(text for text in handoff_texts if text.startswith("snapshot "))
+    if not handoff_alpha.startswith("alpha 0.00 |"):
+        raise AssertionError(f"Handoff did not start at alpha zero: {handoff_alpha}")
     client.ui_click("mixing/play")
     client.wait_frames(2)
     client.ui_click("mixing/repeat")
     for _ in range(3):
         client.wait_frames(15)
-    repeated = next(text for text in _texts(client) if "source; handoffs" in text)
+    repeated_texts = _texts(client)
+    repeated = next(text for text in repeated_texts if "source; handoffs" in text)
+    repeated_memory = next(text for text in repeated_texts if text.startswith("snapshot "))
     count = int(re.search(r"handoffs (\d+)", repeated).group(1))
     if count < 2:
         raise AssertionError(f"Repeat did not interrupt an active transition: {repeated}")
+    if repeated_memory != handoff_memory:
+        raise AssertionError(f"Interruption memory changed: {handoff_memory} -> {repeated_memory}")
     captures["Interruption repeated"] = _capture(client, output, "interruption_repeated")
 
     report = {
@@ -98,7 +115,9 @@ def run(client, output, backend="native"):
         "captures": captures,
         "telemetry": telemetry,
         "handoff_zero": handoff_zero,
+        "handoff_alpha": handoff_alpha,
         "repeated": repeated,
+        "memory": handoff_memory,
     }
     (output / "result.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report

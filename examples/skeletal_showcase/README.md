@@ -47,9 +47,11 @@ attribution.
 Each glb is parsed once; its rig is imported with the default selection (skin 0,
 no cut) and fed to both builder contexts. The skinned mesh is primitive 0 of the
 mesh of the node that instantiates skin 0, exported with `POSITION`, `JOINTS`
-and `WEIGHTS`, float32 `TEXCOORD_0` and, for CesiumMan only, `NORMAL` (the Fox primitive has none).
-Base-color textures come from each primitive material and ship as RAW with mipmaps.
-Both CPU and GPU use the same textured unlit shading; normals are not used. Every clip is sampled at 24 fps, and the builder prints
+and `WEIGHTS`, float32 `TEXCOORD_0` and, for CesiumMan and KayKit, `NORMAL`
+(the Fox primitive has none). Base-color textures come from each primitive
+material and ship as RAW with mipmaps. Both CPU and GPU use the same textured
+unlit shading; normals are not used. The Khronos clips are sampled at 24 fps
+and KayKit at 30 fps; the builder prints
 one report line per clip:
 
 ```
@@ -231,7 +233,7 @@ The five modes expose distinct composition rules:
 
 - Crossfade mixes source and target with gains `(1-a, a)` and includes
   run-to-jump and idle-to-run recipes.
-- Blend space keeps idle/walk/run on one normalized phase. The two-cycle mode
+- Blend space keeps idle/walk/run on one displayed normalized phase. The two-cycle mode
   uses `(1-v, v)`; the three-cycle mode uses adjacent triangular weights.
 - Partial body compares a flat weighted mix (`0.25` below the spine, `3` on
   the spine subtree) with strict locomotion/action isolation.
@@ -243,17 +245,19 @@ The five modes expose distinct composition rules:
   for another target every `0.3 s`, while the independent arm action keeps its
   own clock.
 
-Show sources draws result, source, target and action with one palette per
-visible character and six render items per character. The caption above the
-stage maps their positions. Mode changes and Reset demo preserve the camera;
+Show sources draws the result and active source, target and action slots with
+one palette per visible character and six render items per character. The
+caption above the stage maps their positions. Mode changes and Reset demo preserve the camera;
 switching top-level scenes still uses the shell's normal refit.
 
-The culling sphere is `skin.any_pose_radius + max(clip.r_root)`. It is valid for
-this committed derivative because `prepare_kaykit_mixing.mjs` preserves root
-translation and rotations while removing authored non-root translations and
-scale channels; `raw/README.md` records the source, hashes and exact edit. A
-different asset that changes non-root translation or local scale cannot reuse
-this bound without a game-supplied radius or disabled culling.
+The culling sphere starts with `skin.any_pose_radius + max(clip.r_root)`. The
+scene adds `4/255 * any_pose_radius` because its packed MESH has four normalized
+UINT8 weight lanes. The base formula is valid for this committed derivative
+because `prepare_kaykit_mixing.mjs` preserves root translation and rotations
+while removing authored non-root translations and scale channels;
+`raw/README.md` records the source, hashes and exact edit. A different asset
+that changes non-root translation or local scale cannot reuse this bound
+without a game-supplied radius or disabled culling.
 
 ## Shell
 
