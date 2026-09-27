@@ -129,6 +129,35 @@ test('radial image uses source coordinates through atlas D4 and explicit flips',
     const center = new Uint8Array(5 * 5 * 4);
     gl.readPixels(30, 30, 5, 5, gl.RGBA, gl.UNSIGNED_BYTE, center);
     if (center.some((value, index) => index % 4 === 3 && value !== 0)) failures.push('zero sweep left visible pixels');
+
+    const rectangular = new DataView(new ArrayBuffer(4 * stride));
+    const sourceCorners: Array<[number, number]> = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    for (let i = 0; i < 4; i++) {
+      const [sourceX, sourceY] = sourceCorners[i];
+      const base = i * stride;
+      rectangular.setFloat32(base, 2 * sourceX - 1, true);
+      rectangular.setFloat32(base + 4, (1 - 2 * sourceY) * 0.5, true);
+      rectangular.setUint16(base + 12, Math.round(sourceX * 65535), true);
+      rectangular.setUint16(base + 14, Math.round(sourceY * 65535), true);
+      for (let c = 0; c < 4; c++) rectangular.setUint8(base + 16 + c, 255);
+      rectangular.setFloat32(base + 24, Math.PI / 4, true);
+      rectangular.setFloat32(base + 52, 2, true);
+      rectangular.setFloat32(base + 56, sourceX, true);
+      rectangular.setFloat32(base + 60, sourceY, true);
+    }
+    gl.bufferData(gl.ARRAY_BUFFER, rectangular.buffer, gl.STREAM_DRAW);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+    if (alpha(45, 26) < 220 || alpha(38, 20) > 20) failures.push('rectangular angular sweep is not in layout-pixel space');
+
+    for (let i = 0; i < 4; i++) {
+      rectangular.setFloat32(i * stride + 24, Math.PI * 2, true);
+      rectangular.setFloat32(i * stride + 28, 0.6, true);
+    }
+    gl.bufferData(gl.ARRAY_BUFFER, rectangular.buffer, gl.STREAM_DRAW);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+    if (alpha(45, 26) > 20 || alpha(60, 32) < 220) failures.push('rectangular ring does not use oval radius');
     return { failures, error: gl.getError() };
   }, { vertex: shaderSource('sprite_radial.vert'), fragment: shaderSource('radial_image.frag') });
 

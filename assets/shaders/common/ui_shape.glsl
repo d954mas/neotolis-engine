@@ -111,11 +111,11 @@ vec4 nt_ui_shape_radial(vec2 local, vec4 layout_data, vec4 radial, vec4 fill, ve
     if (radial.x == radial.y) {
         return vec4(0.0);
     }
-    vec2 normalized = 2.0 * local / layout_data.xy - 1.0;
-    vec2 p = normalized * vec2(1.0, layout_data.x / layout_data.y);
-    float radial_coverage = nt_ui_radial_coverage(p, radial.xyz);
+    vec2 ellipse_p = 2.0 * local / layout_data.xy - 1.0;
+    vec2 angle_p = local - 0.5 * layout_data.xy;
+    float radial_coverage = nt_ui_radial_coverage(ellipse_p, angle_p, radial.xyz);
 
-    // The radial field can exceed a tall bbox; AA padding must not enlarge it.
+    // AA padding must not enlarge the original bbox.
     float rect_distance = nt_ui_shape_box_distance(local, layout_data.xy, vec4(0.0));
     float rect_aa = max(fwidth(rect_distance), 1e-6);
     float rect_coverage = clamp(0.5 - rect_distance / rect_aa, 0.0, 1.0);

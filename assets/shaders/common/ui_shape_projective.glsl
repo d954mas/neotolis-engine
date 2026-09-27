@@ -83,7 +83,9 @@ vec4 nt_ui_shape_projective_shape(vec3 h, vec3 hx, vec3 hy, vec2 size, vec4 radi
     float rect_coverage = min(nt_ui_shape_projective_interval(x, q, 0.0, size.x), nt_ui_shape_projective_interval(y, q, 0.0, size.y));
     if (mode == 2) {
         vec3 px = 2.0 * x / size.x - q;
-        vec3 py = (2.0 * y / size.y - q) * (size.x / size.y);
+        vec3 py = 2.0 * y / size.y - q;
+        vec3 angle_x = x - 0.5 * size.x * q;
+        vec3 angle_y = y - 0.5 * size.y * q;
         vec3 radius = nt_ui_shape_projective_length(px, py);
         float outer = nt_ui_shape_projective_coverage(radius - q);
         float ring = radial.z > 0.0 ? nt_ui_shape_projective_coverage(radial.z * q - radius) : 1.0;
@@ -96,9 +98,9 @@ vec4 nt_ui_shape_projective_shape(vec3 h, vec3 hx, vec3 hy, vec2 size, vec4 radi
             else {
                 vec2 first = vec2(cos(radial.x), sin(radial.x));
                 vec2 last = vec2(cos(radial.y), sin(radial.y));
-                float lead = nt_ui_shape_projective_coverage(first.y * px - first.x * py);
-                float trail = nt_ui_shape_projective_coverage(last.x * py - last.y * px);
-                wedge = sweep <= 0.5 * tau ? min(lead, trail) : max(lead, trail);
+                float lead = nt_ui_shape_projective_coverage(first.y * angle_x - first.x * angle_y);
+                float trail = nt_ui_shape_projective_coverage(last.x * angle_y - last.y * angle_x);
+                wedge = abs(sweep - 0.5 * tau) < 1e-4 ? lead : sweep < 0.5 * tau ? lead * trail : lead + trail - lead * trail;
             }
         }
         return nt_ui_shape_projective_gradient(h, size, gradient, fill, endpoint) * min(outer * ring * wedge, rect_coverage);

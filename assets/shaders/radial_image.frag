@@ -32,8 +32,7 @@ void main() {
     float inner = v_radial.z;
     float aspect = v_aspect; // walker-injected bbox w/h
 
-    // aspect = w/h re-rounds the angle on a non-square bbox so 0 stays +X.
-    vec2 p = v_local_uv * vec2(1.0, aspect);
+    vec2 p = v_local_uv;
     float r = length(p);
 
     // Pixel-space coverage: a 1px box-filter so the
@@ -45,7 +44,7 @@ void main() {
     // Wrap-aware angular wedge: lead/trail gate both sides so a wedge crossing 0 is
     // admitted once; arc-perpendicular distance r*angle in pixels feeds the same
     // box-filter, so the swept/un-swept boundary is anti-aliased, not a hard step.
-    float ang = atan(p.y, p.x); // aspect-corrected space (matches r) so the wedge aligns with the oval
+    float ang = atan(p.y, p.x * aspect); // angles use local layout pixels; the ring uses the oval radius
     float sweep = mod(ang - angle_start, TAU);
     float total = mod(angle_end - angle_start, TAU);
     bool full_turn = abs(angle_end - angle_start) >= TAU - 1e-4; // A full turn works for either angle order.
