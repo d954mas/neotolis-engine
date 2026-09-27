@@ -19,6 +19,16 @@ static bool s_export_gpu_cases;
 
 static nt_material_t make_shape_material(nt_program_t program) {
     return nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = {.stride = 84,
+                          .attr_count = 7,
+                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
+                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52},
+                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 68}}},
+        .vertex_defaults = (const float[21]){0},
         .program = program,
         .textures = {{.name = "u_texture"}},
         .texture_count = 1,
@@ -27,7 +37,6 @@ static nt_material_t make_shape_material(nt_program_t program) {
                      {.stream_name = "a_shape_paint", .location = 6},
                      {.stream_name = "a_shape_border", .location = 7}},
         .attr_map_count = 4,
-        .has_attr_defaults = true,
     });
 }
 

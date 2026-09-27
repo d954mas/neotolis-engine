@@ -118,13 +118,11 @@ void nt_sprite_renderer_flush(void);
  * Numeric params remain mutable and are read at flush. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
-/* Set the custom per-vertex attr block baked into every vertex of the next emit
- * (like color — uniform across the widget's verts). When the bound material declares
- * custom attrs (attr_map_count > 0), bytes must equal attr_map_count*16 (asserted).
- * Each emit consumes its block, including skipped emits. An omitted block uses opt-in defaults;
- * without defaults each emit requires this call. Plain materials require no block.
- * bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX. */
-void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes);
+/* Every emit accepts one complete tail block, copied during the call to each vertex.
+ * attrs/bytes must be NULL/0 or exactly material.vertex_layout.stride - 20 bytes.
+ * NULL/0 uses the material defaults' tail; no defaults with a nonempty tail asserts.
+ * Plain stride20 requires NULL/0. Prefix position/UV/color always come from emit arguments.
+ * An override never changes later emits or the material. */
 
 /* Emit one atlas region at one mat4 transform.
  *
@@ -139,7 +137,8 @@ void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes);
  *
  * Caller MUST have called set_material first so a cmd is open. Capacity
  * overflow is handled internally (auto flush + reopen, state preserved). */
-void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
+void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits, const void *attrs,
+                                    uint16_t bytes);
 
 /* Emit a 9-quad slice9 image. Same vertex format, local space and pipeline as
  * emit_region: the grid is built Y-up around the pivot and flip_bits mirror it
@@ -165,7 +164,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  * Emits 16 vertices + 54 indices (4x4 shared grid). Staging overflow handled
  * internally. Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float w, float h, float origin_x, float origin_y, const uint16_t src_lrtb[4],
-                                    float slice9_scale, uint32_t color_packed, uint8_t flip_bits);
+                                    float slice9_scale, uint32_t color_packed, uint8_t flip_bits, const void *attrs, uint16_t bytes);
 
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a
@@ -191,7 +190,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
  * Capacity overflow handled internally (snapshot + flush + reopen).
  * Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
-                                      const float *world_matrix, uint32_t color_packed);
+                                      const float *world_matrix, uint32_t color_packed, const void *attrs, uint16_t bytes);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

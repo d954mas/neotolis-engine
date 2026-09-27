@@ -293,32 +293,6 @@ void test_create_stores_attr_map(void) {
     TEST_ASSERT_EQUAL_UINT8(0, info->attr_map_locations[0]);
 }
 
-void test_attr_defaults_are_copied_and_opt_in(void) {
-    nt_material_create_desc_t desc = make_test_desc();
-    desc.has_attr_defaults = true;
-    desc.attr_map_count = NT_MATERIAL_MAX_ATTR_MAP;
-    for (uint8_t i = 0; i < desc.attr_map_count; ++i) {
-        desc.attr_map[i].stream_name = "custom";
-        desc.attr_map[i].location = i;
-        for (uint8_t lane = 0; lane < 4; ++lane) {
-            desc.attr_map[i].default_value[lane] = (float)((i * 4U) + lane + 1U);
-        }
-    }
-    nt_material_t mat = nt_material_create(&desc);
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    TEST_ASSERT_TRUE(info->has_attr_defaults);
-    for (uint8_t i = 0; i < desc.attr_map_count; ++i) {
-        TEST_ASSERT_EQUAL_MEMORY(desc.attr_map[i].default_value, info->attr_map_defaults[i], sizeof(float[4]));
-    }
-    desc.attr_map[0].default_value[0] = -10.0F;
-    TEST_ASSERT_TRUE(info->attr_map_defaults[0][0] == 1.0F);
-    nt_material_destroy(mat);
-
-    desc.has_attr_defaults = false;
-    mat = nt_material_create(&desc);
-    TEST_ASSERT_FALSE(nt_material_get_info(mat)->has_attr_defaults);
-}
-
 /* ---- Test 8: texture names hashed ---- */
 
 void test_create_hashes_texture_names(void) {
@@ -618,6 +592,97 @@ void test_set_program_on_a_destroyed_material_asserts(void) {
     TEST_PASS();
 }
 
+void test_vertex_layout_and_defaults_are_copied(void) {
+    uint8_t defaults[148];
+    for (uint32_t i = 0; i < sizeof(defaults); ++i) {
+        defaults[i] = (uint8_t)i;
+    }
+    nt_material_create_desc_t desc = make_test_desc();
+    desc.vertex_layout = (nt_vertex_layout_t){
+        .stride = sizeof(defaults),
+        .attr_count = 2,
+        .attrs = {{.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 144}, {.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0}},
+    };
+    desc.vertex_defaults = defaults;
+    nt_material_t mat = nt_material_create(&desc);
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    TEST_ASSERT_TRUE(info->has_vertex_defaults);
+    TEST_ASSERT_EQUAL_UINT16(148, info->vertex_layout.stride);
+    TEST_ASSERT_EQUAL_UINT8(0, info->vertex_layout.attrs[0].location);
+    TEST_ASSERT_EQUAL_UINT8(9, info->vertex_layout.attrs[1].location);
+    TEST_ASSERT_EQUAL_MEMORY(defaults, info->vertex_defaults, sizeof(defaults));
+    defaults[147] = 0;
+    desc.vertex_layout.attrs[1].count = 4;
+    TEST_ASSERT_EQUAL_UINT8(147, info->vertex_defaults[147]);
+    TEST_ASSERT_EQUAL_UINT8(2, info->vertex_layout.attrs[0].count);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_vertex_layout_rejects_invalid_physical_descriptors(void) {
+    const nt_vertex_layout_t valid = {.stride = 20, .attr_count = 1, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}};
+    for (uint32_t variant = 0; variant < 12; ++variant) {
+        nt_material_create_desc_t desc = {.vertex_layout = valid};
+        switch (variant) {
+        case 0:
+            desc.vertex_layout.attr_count = 17;
+            break;
+        case 1:
+            desc.vertex_layout.stride = 256;
+            break;
+        case 2:
+            desc.vertex_layout.stride = 0;
+            break;
+        case 3:
+            desc.vertex_layout.attr_count = 0;
+            break;
+        case 4:
+            desc.vertex_layout.attrs[0].location = 16;
+            break;
+        case 5:
+            desc.vertex_layout.attrs[0].count = 0;
+            break;
+        case 6:
+            desc.vertex_layout.attrs[0].count = 5;
+            break;
+        case 7:
+            desc.vertex_layout.attrs[0].type = (nt_vertex_type_t)99;
+            break;
+        case 8:
+            desc.vertex_layout.attrs[0].normalized = true;
+            break;
+        case 9:
+            desc.vertex_layout.attrs[0].offset = 2;
+            break;
+        case 10:
+            desc.vertex_layout.attrs[0].offset = 12;
+            break;
+        default:
+            desc.vertex_layout.attrs[1] = desc.vertex_layout.attrs[0];
+            desc.vertex_layout.attr_count = 2;
+            break;
+        }
+        NT_TEST_EXPECT_ASSERT(nt_material_create(&desc));
+    }
+    const uint8_t defaults[1] = {0};
+    const nt_material_create_desc_t no_layout = {.vertex_defaults = defaults};
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&no_layout));
+}
+
+void test_full_layout_accepts_aliases_and_independent_semantic_map(void) {
+    const nt_material_create_desc_t desc = {
+        .vertex_layout = {.stride = 255,
+                          .attr_count = 2,
+                          .attrs = {{.location = 5, .type = NT_VERTEX_UINT8, .count = 4, .offset = 251}, {.location = 7, .type = NT_VERTEX_UINT8, .count = 2, .offset = 252}}},
+        .attr_map = {{.stream_name = "mesh_position", .location = 0}},
+        .attr_map_count = 1,
+    };
+    const nt_material_info_t *info = nt_material_get_info(nt_material_create(&desc));
+    TEST_ASSERT_EQUAL_UINT8(2, info->vertex_layout.attr_count);
+    TEST_ASSERT_EQUAL_UINT16(255, info->vertex_layout.stride);
+    TEST_ASSERT_FALSE(info->has_vertex_defaults);
+    TEST_ASSERT_EQUAL_UINT8(1, info->attr_map_count);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -625,6 +690,9 @@ int main(void) {
 
     /* Init / shutdown */
     RUN_TEST(test_init_shutdown);
+    RUN_TEST(test_vertex_layout_rejects_invalid_physical_descriptors);
+    RUN_TEST(test_full_layout_accepts_aliases_and_independent_semantic_map);
+    RUN_TEST(test_vertex_layout_and_defaults_are_copied);
 
     /* Create / query */
     RUN_TEST(test_create_basic);
@@ -641,7 +709,6 @@ int main(void) {
     RUN_TEST(test_create_asserts_out_of_range_key_lanes);
     RUN_TEST(test_blend_reserved_byte_is_canonicalized);
     RUN_TEST(test_create_stores_attr_map);
-    RUN_TEST(test_attr_defaults_are_copied_and_opt_in);
     RUN_TEST(test_create_hashes_texture_names);
     RUN_TEST(test_create_hashes_param_names);
     RUN_TEST(test_create_asserts_null_texture_name);

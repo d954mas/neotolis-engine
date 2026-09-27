@@ -790,7 +790,7 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float world_mat4[16]) {
     float m[16];
     nt_ui_sprite_mat4(world_mat4, x, y + h, w, h, m);
-    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
+    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U, NULL, 0);
 }
 // #endregion
 
@@ -910,7 +910,7 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
     }
 
     /* Vertices are in Clay layout-space; world_mat4 maps layout → world directly. */
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0);
 }
 // #endregion
 
@@ -1035,7 +1035,7 @@ static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_
         return;
     }
     /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, col);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, col, NULL, 0);
     // #endregion
 }
 
@@ -1105,7 +1105,7 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
     }
 
     /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0);
 }
 
 static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16]) {
@@ -1134,7 +1134,7 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 // #endregion
 
 // #region helper_emit_image
-static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float out[16]);
+static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, uint8_t out[64]);
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) {
@@ -1158,11 +1158,9 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     if (r->vertex_count == 0U) {
         return;
     }
-    if (p->custom != NULL) {
-        float block[16];
-        const uint8_t count = build_custom_block(p, p->custom, &bb, block);
-        nt_sprite_renderer_set_custom_attrs(block, (uint8_t)(count * sizeof(float)));
-    }
+    uint8_t block[64];
+    const uint16_t custom_bytes = p->custom != NULL ? build_custom_block(p, p->custom, &bb, block) : 0U;
+    const void *custom = custom_bytes != 0U ? block : NULL;
 
     /* The flag or a non-zero lrtb selects the override; the flag with zeros turns a baked
      * nine-patch back into a plain quad (nt_ui_fill's CROP reveal relies on that). */
@@ -1193,26 +1191,36 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
         origin_y = p->origin_y;
     }
     if (sliced) {
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, s9, p->slice9_scale, col, p->flip_bits);
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, m, bb.width, bb.height, origin_x, origin_y, s9, p->slice9_scale, col, p->flip_bits, custom, custom_bytes);
         return;
     }
-    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits);
+    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits, custom, custom_bytes);
 }
 
-/* Float-offset (i*4) of attr `name_hash` in the block, or -1 if absent.
- * Linear scan: attr_map_count <= 8. */
-static int custom_attr_float_offset(const nt_material_info_t *mi, uint32_t name_hash) {
+/* Resolve semantic name to full physical layout before converting to a tail offset. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static int custom_attr_byte_offset(const nt_material_info_t *mi, uint32_t name_hash) {
     for (uint8_t ai = 0; ai < mi->attr_map_count; ++ai) {
-        if (mi->attr_map_hashes[ai] == name_hash) {
-            return (int)ai * 4;
+        if (mi->attr_map_hashes[ai] != name_hash) {
+            continue;
         }
+        for (uint8_t vi = 0; vi < mi->vertex_layout.attr_count; ++vi) {
+            const nt_vertex_attr_t *attr = &mi->vertex_layout.attrs[vi];
+            if (attr->location != mi->attr_map_locations[ai]) {
+                continue;
+            }
+            NT_ASSERT(attr->offset >= 20U && (uint32_t)attr->offset + sizeof(float[4]) <= mi->vertex_layout.stride);
+            NT_ASSERT(attr->type == NT_VERTEX_FLOAT && attr->count == 4U && !attr->normalized);
+            return (int)attr->offset - 20;
+        }
+        NT_ASSERT(false && "UI semantic has no physical vertex field");
     }
     return -1;
 }
 
 /* Write a_uvrect = region min/max atlas UV (0..1) at `off` so a custom-attr fs
  * can re-center over any rectangular packed sub-region. */
-static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out, int off) {
+static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, uint8_t *out, int off) {
     nt_atlas_region_handles_t rh;
     nt_atlas_get_region_handles(atlas, region_index, &rh);
     float u0 = 1.0F;
@@ -1227,19 +1235,16 @@ static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out
         u1 = (u > u1) ? u : u1;
         v1 = (v > v1) ? v : v1;
     }
-    out[off] = u0;
-    out[off + 1] = v0;
-    out[off + 2] = u1;
-    out[off + 3] = v1;
+    const float rect[4] = {u0, v0, u1, v1};
+    memcpy(out + off, rect, sizeof(rect));
 }
 
 /* Copy the widget's custom_attrs verbatim, then the walker fills a_layout/a_uvrect
- * by attr_map offset (attr_map = single source of truth, no magic slots). Radial widgets fade via
+ * by name and physical vertex offset. Radial widgets fade via
  * color_packed/a_color (the walker's backgroundColor fold), never via a_tint -- a_tint.w is a reveal
- * strength, not alpha. Returns float count. */
-static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float out[16]) {
+ * strength, not alpha. Returns byte count. */
+static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, uint8_t out[64]) {
     NT_ASSERT(blk->custom_bytes > 0 && blk->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
-    const uint8_t fcount = (uint8_t)(blk->custom_bytes / sizeof(float));
     memcpy(out, blk->custom_attrs, blk->custom_bytes);
 
     const nt_material_info_t *mi = nt_material_get_info(p->material);
@@ -1256,18 +1261,16 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
     /* a_layout = {aspect = w/h, bbox_width_px, bbox_height_px, 0}. Bbox-derived at emit
      * so the shape stays correct under GROW/FIT/PERCENT/null-decl, not just FIXED w/h.
      * px size opens rounded/outline/shadow/blur effects to wrappers. */
-    const int lo = custom_attr_float_offset(mi, s_hash_layout);
+    const int lo = custom_attr_byte_offset(mi, s_hash_layout);
     if (lo >= 0) {
-        out[lo] = (bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F;
-        out[lo + 1] = bb->width;
-        out[lo + 2] = bb->height;
-        out[lo + 3] = 0.0F;
+        const float layout[4] = {(bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F, bb->width, bb->height, 0.0F};
+        memcpy(out + lo, layout, sizeof(layout));
     }
-    const int uo = custom_attr_float_offset(mi, s_hash_uvrect);
+    const int uo = custom_attr_byte_offset(mi, s_hash_uvrect);
     if (uo >= 0) {
         inject_uvrect(p->atlas, p->region_index, out, uo);
     }
-    return fcount;
+    return blk->custom_bytes;
 }
 
 /* Sprite geometry aligns custom quads so gl_VertexID & 3 also works in mixed batches. */
@@ -1277,14 +1280,13 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
         return;
     }
     const nt_ui_image_payload_t *payload = c->renderData.image.imageData;
-    float block[16];
+    uint8_t block[64];
     const uint8_t count = build_custom_block(payload, payload->custom, &bb, block);
-    nt_sprite_renderer_set_custom_attrs(block, (uint8_t)(count * sizeof(float)));
     /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col);
+    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col, block, count);
 }
 // #endregion
 
@@ -1906,8 +1908,7 @@ static void emit_shape_quad(const nt_ui_context_t *ctx, Clay_BoundingBox bb, con
     }
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
     prep_sprite_dispatch_mat(material, bind);
-    nt_sprite_renderer_set_custom_attrs(attrs, 64U);
-    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, vertices, 4, indices, 6, world, color);
+    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, vertices, 4, indices, 6, world, color, attrs, 64U);
 }
 
 /* Normal binary32 ranges preserve all 24 payload bits and two control bits without signed zero. */

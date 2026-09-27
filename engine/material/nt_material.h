@@ -49,7 +49,6 @@ typedef struct {
 typedef struct {
     const char *stream_name;
     uint8_t location;
-    float default_value[4]; /* copied at create only when has_attr_defaults is true */
 } nt_material_attr_desc_t;
 
 typedef struct {
@@ -67,7 +66,8 @@ typedef struct {
     uint8_t param_count;
     nt_material_attr_desc_t attr_map[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_count;
-    bool has_attr_defaults; /* sprite emits without a custom block use the declared defaults */
+    nt_vertex_layout_t vertex_layout; /* Full physical layout, copied and canonicalized at create. */
+    const void *vertex_defaults;      /* NULL, or stride bytes copied at create; never retained. */
     nt_material_entity_param_desc_t entity_params[NT_MAX_PER_ENTITY_PARAMS];
     uint8_t entity_param_count;
     nt_blend_state_t blend;
@@ -111,9 +111,10 @@ typedef struct {
     uint8_t param_count;
     uint32_t attr_map_hashes[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_locations[NT_MATERIAL_MAX_ATTR_MAP];
-    float attr_map_defaults[NT_MATERIAL_MAX_ATTR_MAP][4]; /* immutable copied values */
     uint8_t attr_map_count;
-    bool has_attr_defaults;
+    nt_vertex_layout_t vertex_layout;
+    uint8_t vertex_defaults[256]; /* Immutable full vertex; only stride bytes are meaningful. */
+    bool has_vertex_defaults;
     uint32_t entity_param_hashes[NT_MAX_PER_ENTITY_PARAMS];
     uint8_t entity_param_count;
     nt_blend_state_t blend;

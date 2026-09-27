@@ -66,6 +66,25 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         NT_ASSERT(desc->attr_map[i].location < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
     }
 
+    const nt_vertex_layout_t *layout = &desc->vertex_layout;
+    NT_ASSERT(layout->attr_count <= NT_GFX_MAX_VERTEX_ATTRS);
+    NT_ASSERT(layout->stride <= 255U && "WebGL2 caps vertex stride at 255 bytes");
+    NT_ASSERT((layout->attr_count == 0U) == (layout->stride == 0U));
+    NT_ASSERT(layout->attr_count != 0U || desc->vertex_defaults == NULL);
+    for (uint8_t i = 0; i < layout->attr_count; ++i) {
+        const nt_vertex_attr_t *attr = &layout->attrs[i];
+        const uint32_t size = nt_vertex_type_size(attr->type);
+        NT_ASSERT(attr->location < NT_GFX_MAX_VERTEX_ATTRS);
+        NT_ASSERT(attr->count >= 1U && attr->count <= 4U && size != 0U);
+        NT_ASSERT(!(attr->normalized && (attr->type == NT_VERTEX_FLOAT || attr->type == NT_VERTEX_HALF)));
+        NT_ASSERT(attr->offset % size == 0U && layout->stride % size == 0U);
+        NT_ASSERT((uint32_t)attr->offset + size * attr->count <= layout->stride);
+        for (uint8_t j = 0; j < i; ++j) {
+            NT_ASSERT(layout->attrs[j].location != attr->location);
+        }
+        (void)size;
+    }
+
     uint32_t id = nt_pool_alloc(&s_mat.pool);
     if (id == 0) {
         NT_LOG_ERROR("pool full -- increase max_materials");
@@ -79,6 +98,26 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     memset(info, 0, sizeof(*info));
 
     info->program = desc->program;
+
+    info->vertex_layout.stride = layout->stride;
+    info->vertex_layout.attr_count = layout->attr_count;
+    for (uint8_t i = 0; i < layout->attr_count; ++i) {
+        const nt_vertex_attr_t *src = &layout->attrs[i];
+        uint8_t dest = 0;
+        for (uint8_t j = 0; j < layout->attr_count; ++j) {
+            dest += layout->attrs[j].location < src->location ? 1U : 0U;
+        }
+        nt_vertex_attr_t *dst = &info->vertex_layout.attrs[dest];
+        dst->location = src->location;
+        dst->type = src->type;
+        dst->count = src->count;
+        dst->normalized = src->normalized;
+        dst->offset = src->offset;
+    }
+    info->has_vertex_defaults = desc->vertex_defaults != NULL;
+    if (info->has_vertex_defaults) {
+        memcpy(info->vertex_defaults, desc->vertex_defaults, layout->stride);
+    }
 
     /* Textures */
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
@@ -106,13 +145,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
 
     /* Attr map */
     info->attr_map_count = desc->attr_map_count;
-    info->has_attr_defaults = desc->has_attr_defaults;
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
         info->attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
         info->attr_map_locations[i] = desc->attr_map[i].location;
-        if (desc->has_attr_defaults) {
-            memcpy(info->attr_map_defaults[i], desc->attr_map[i].default_value, sizeof(float[4]));
-        }
     }
 
     /* Entity params */

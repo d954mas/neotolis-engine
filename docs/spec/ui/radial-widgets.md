@@ -34,17 +34,20 @@ radials still collapses to one `set_material` and one draw.
 
 ## Name-bound injection vocabulary
 
-The per-vertex custom block is **untyped**. The bound material's `attr_map` is
-the single source of truth for what the floats mean. The widget supplies its
-data block with zero placeholders where walker-derived attrs sit; the walker
-scans the `attr_map` and fills any attr it recognizes **by name**:
+The per-vertex custom block is a byte record. The material's full
+`vertex_layout` declares its storage; `attr_map` maps semantic names to locations.
+The walker resolves name -> location -> physical attribute, checks FLOAT4,
+non-normalized storage wholly inside the tail, then subtracts20 from the full
+offset. Neither physical array order nor semantic map order defines bytes.
 
-- `a_layout` vec4 = `{aspect = bbox w/h, bbox_width_px, bbox_height_px, 0}`
-- `a_uvrect` vec4 = `{u0, v0, u1, v1}` = the region's min/max atlas UV
+- `a_layout` vec4 = `{aspect = bbox w/h, bbox_width_px, bbox_height_px, 0}`.
+- `a_uvrect` vec4 = `{u0, v0, u1, v1}` = region min/max atlas UV.
 
-The block float-offset of attr *i* is `i*4` (attr_map declaration order; each
-attr is one FLOAT4). Everything the walker does not recognize by name is baked
-verbatim from the widget's block.
+Injection happens after Clay layout and atlas resolution. Other bytes copy
+verbatim. A missing semantic skips injection; a present semantic without a valid
+physical field asserts. Optional `attr_names` is a NULL-terminated set of expected
+names, in any order and possibly a subset. It checks name presence only, never
+payload layout compatibility. The UI custom record has capacity64 bytes.
 
 **To add a new injected value:** pick a new attr name, fill it in the walker,
 and name it in a material's `attr_map`. No payload struct change and no public
@@ -75,7 +78,7 @@ boundaries:
 
 1. **No per-vertex data.** A composite widget (segmented bar, sparkline, minimap
    blips) is N separate emit calls, not one call with a vertex stream.
-2. **16-float cap.** Four FLOAT4 attrs at `NT_SPRITE_CUSTOM_STRIDE_MAX` (64 B).
+2. **64-byte UI cap.** Typed fields and padding occupy the same byte record.
 3. **Time / animation is not a walker injection.** A widget that needs a time-driven
    shader writes the current time into `custom_attrs` itself each frame — no shipped
    widget does this (the demo animates via `color_packed`); the walker injects only layout.

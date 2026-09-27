@@ -18,20 +18,22 @@ const nt_ui_widget_def_t NT_UI_IMAGE_DEF = {
     ._reserved = 0U,
 };
 
-/* Evaluated only inside NT_ASSERT: the material's attr_map must list exactly `names`
- * in the same order — the verbatim data attrs (a_radial/a_tint/...) bake at those offsets. */
-static bool nt_ui_image_attr_order_ok(const nt_material_info_t *mi, const char *const *names) {
+/* Names describe expected semantics, never offsets or declaration order. */
+static bool nt_ui_image_attr_names_ok(const nt_material_info_t *mi, const char *const *names) {
     if (names == NULL) {
         return true;
     }
-    uint8_t n = 0;
-    while (names[n] != NULL) {
-        if (n >= mi->attr_map_count || mi->attr_map_hashes[n] != nt_hash32_str(names[n]).value) {
+    for (uint32_t i = 0; names[i] != NULL; ++i) {
+        const uint32_t hash = nt_hash32_str(names[i]).value;
+        bool found = false;
+        for (uint8_t j = 0; j < mi->attr_map_count; ++j) {
+            found = found || mi->attr_map_hashes[j] == hash;
+        }
+        if (!found) {
             return false;
         }
-        ++n;
     }
-    return n == mi->attr_map_count;
+    return true;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -99,12 +101,12 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(img->custom_bytes > 0 && img->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui_image_custom: custom_bytes in (0, NT_SPRITE_CUSTOM_STRIDE_MAX]");
     NT_ASSERT(img->custom_attrs != NULL && "nt_ui_image_custom: custom_attrs must be non-NULL when custom_bytes > 0");
     NT_ASSERT(isfinite(img->slice9_scale) && img->slice9_scale > 0.0F && "nt_ui_image_custom: slice9_scale must be finite > 0");
-    /* The block must fill exactly one FLOAT4 per declared material attr — set_custom_attrs asserts the same. */
+    NT_ASSERT(img->custom_bytes <= sizeof(((nt_ui_image_custom_block_t *)0)->custom_attrs));
     const nt_material_info_t *mi = nt_material_get_info(img->material);
     /* Declaration path -- no GL here, so this asks about assignment, not liveness. */
     NT_ASSERT(mi != NULL && mi->program.id != 0 && "nt_ui_image_custom: material must have a program");
-    NT_ASSERT((uint32_t)mi->attr_map_count * 16U == (uint32_t)img->custom_bytes && "nt_ui_image_custom: custom_bytes must equal material attr_map_count*16");
-    NT_ASSERT(nt_ui_image_attr_order_ok(mi, img->attr_names) && "nt_ui_image_custom: material attr_map names/order must match img->attr_names (data attrs bake at fixed offsets)");
+    NT_ASSERT(mi->vertex_layout.stride >= 20U && (uint32_t)mi->vertex_layout.stride - 20U == img->custom_bytes && "nt_ui_image_custom: custom_bytes must equal material vertex stride minus 20");
+    NT_ASSERT(nt_ui_image_attr_names_ok(mi, img->attr_names) && "nt_ui_image_custom: attr_names contains an unknown material semantic");
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_image_custom: decl->id must be 0 (id auto-assigned by Clay)");
         NT_ASSERT(decl->image.imageData == NULL && "nt_ui_image_custom: decl->image.imageData must be NULL (atlas+region controls image)");

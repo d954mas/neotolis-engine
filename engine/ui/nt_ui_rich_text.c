@@ -2052,7 +2052,7 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- early-out guards + per-atom resolve/fx/model build in one linear pass
 static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
     /* Material validity is a band-invariant -> the caller checks st->image_material once before the layer
-     * loop (id != 0, attr_map_count == 0); reaching here means it passed. */
+     * loop (id != 0, vertex_layout.stride == 20); reaching here means it passed. */
     bool bound = false; /* per-call: each layer is its own drained batch -> rebind once per layer */
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
@@ -2098,7 +2098,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
             nt_sprite_renderer_set_material(st->image_material); /* bind ONCE: all images coalesce into one batch */
             bound = true;
         }
-        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, nt_color_pack(fx.color), 0U);
+        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, nt_color_pack(fx.color), 0U, NULL, 0);
 #ifdef NT_TEST_ACCESS
         st->image_emit_count++;
 #endif
@@ -2242,14 +2242,14 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
 
     /* Inline-image material is a BAND-INVARIANT: validate the RESOLVED material ONCE here, not per-band
      * (rich_emit_images runs up to NT_UI_RICH_MAX_LAYERS times/frame). id==0 -> neither style nor ctx
-     * gave a sprite material, so skip images. The plain u8 sprite path requires attr_map_count==0
+     * gave a sprite material, so skip images. The plain u8 sprite path requires vertex_layout.stride==20
      * (emit_region bakes no custom-attr block); a NULL/custom-attr material is a HARD guard (survives
      * NT_ASSERT OFF), keeping the assert for the fail-early dev signal. */
     bool emit_images = false;
     if (st->image_material.id != 0U) {
         const nt_material_info_t *mi = nt_material_get_info(st->image_material);
-        NT_ASSERT(mi != NULL && mi->attr_map_count == 0U && "rich inline-image material must be the plain u8 sprite path (attr_map_count==0)");
-        emit_images = (mi != NULL && mi->attr_map_count == 0U);
+        NT_ASSERT(mi != NULL && mi->vertex_layout.stride == 20U && "rich inline-image material must be the plain u8 sprite path (vertex_layout.stride==20)");
+        emit_images = (mi != NULL && mi->vertex_layout.stride == 20U);
     }
 
     /* Cross-renderer z is flush order (painter-order, depth off): emit ascending by layer and drain after

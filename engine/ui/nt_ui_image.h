@@ -37,15 +37,15 @@ static inline nt_ui_image_style_t nt_ui_image_style_defaults(void) { return (nt_
 void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
 
 /* Generic custom-attr atlas-region emit (radial/radial_image/SDF). Injection is name-bound:
- * the material attr_map names the floats; the walker fills a_layout/a_uvrect by name, bakes
- * the rest verbatim. Contract: material ready, custom_bytes == attr_map_count*16 (asserted)
+ * the material attr_map maps names to full vertex_layout locations; the walker injects FLOAT4
+ * a_layout/a_uvrect and copies all other bytes. Contract: custom_bytes == vertex_layout.stride-20
  * <= NT_SPRITE_CUSTOM_STRIDE_MAX. data/decl may be NULL.
  * spec: docs/spec/ui/radial-widgets.md */
 typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;
     nt_material_t material;
-    const float *custom_attrs;
+    const void *custom_attrs;
     uint8_t custom_bytes;
     uint8_t geom_mode; /* NT_UI_IMAGE_GEOM_REGION | NT_UI_IMAGE_GEOM_GEOMETRY */
     uint8_t flip_bits;
@@ -55,8 +55,8 @@ typedef struct {
     float origin_y;
     float slice9_scale;    /* MUST be finite > 0 */
     uint32_t color_packed; /* 0xAABBGGRR; tint/opacity */
-    /* OPTIONAL: expected attr names in block order, NULL-terminated. Debug-asserts the
-     * material's attr_map matches so verbatim data attrs can't bake at wrong offsets. NULL = skip. */
+    /* Optional NULL-terminated set of expected semantic names; each must be in attr_map.
+     * Order and completeness do not describe payload storage. NULL skips this name check. */
     const char *const *attr_names;
 } nt_ui_image_custom_t;
 

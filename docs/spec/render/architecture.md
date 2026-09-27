@@ -248,17 +248,19 @@ what varies: per stream a presence bit and the mapped location (mesh streams ×
 material attr_map — attr_map entries matching no stream do not split; a
 material mapping none of the streams derives an empty layout and takes the
 attribute-less gl_VertexID path) plus the color mode that selects the instance
-layout. The sprite renderer packs the attr_map count and every location the same
-way. Handles are revalidated on lookup because buffer destruction can invalidate
+layout. The sprite renderer hashes the complete canonical material vertex layout: stride,
+attribute count and each location/type/count/normalization/offset. Names, defaults,
+inactive entries and C padding do not enter identity. Handles are revalidated on lookup because buffer destruction can invalidate
 cached versions. Exhausting a mesh's version row asserts, naming the knob —
 silent eviction would hide VAO re-creation thrash as an invisible perf
 regression. The default `max_vertex_inputs` budgets one mesh cache; a game using
 both mesh renderers adds
 `max_meshes * skinned.max_mesh_layouts` to that base budget explicitly.
 
-Sprite custom-attribute materials can opt into immutable per-lane defaults; a
-one-emit block overrides the whole block and is then consumed. Without defaults,
-an omitted block asserts. See [Custom sprite attribute defaults](material.md#custom-sprite-attribute-defaults).
+Sprite materials declare the complete physical vertex and optional immutable full
+vertex defaults. An atomic emit override replaces its tail for that call only.
+Without defaults an omitted nonempty tail asserts. See
+[Full vertex layout and defaults](material.md#full-vertex-layout-and-defaults).
 Staging uploads have one stride, so a material transition changing that stride
 flushes even when it comes through ECS `draw_list`. Four-vertex `emit_geometry`
 calls on custom materials align their base vertex to a multiple of four for

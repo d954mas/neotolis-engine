@@ -272,6 +272,13 @@ int main(void) {
 
     /* Create material with atlas page texture */
     s_material = nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = {.stride = 52,
+                          .attr_count = 5,
+                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                    {.location = 0, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                    {.location = 1, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}}},
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv0", .location = 1}},

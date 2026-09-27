@@ -2498,8 +2498,8 @@ static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float 
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
     /* Emit THROUGH world_mat4 (byte-identical to emit_custom_geometry) so the bar lands under the
      * UI transform incl. the Y-flip. */
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, world_mat4, track_col);
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, world_mat4, value_col);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, world_mat4, track_col, NULL, 0);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, world_mat4, value_col, NULL, 0);
 }
 
 /* SPINNING ICON: a white quad rotated about its own center (the icon texture was intentionally
@@ -2529,7 +2529,7 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
         pos[i][1] = cy + (dx[i] * sn) + (dy[i] * cs);
     }
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color));
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color), NULL, 0);
 }
 
 /* Perspective cube remapped into the box's NDC sub-rect (no glViewport/scissor touch); the walker's
@@ -4334,6 +4334,11 @@ int main(int argc, char *argv[]) {
     s_rich_gold_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = {.stride = 20,
+                          .attr_count = 3,
+                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16}}},
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -4353,6 +4358,15 @@ int main(int argc, char *argv[]) {
     });
 
     nt_material_create_desc_t shape_desc = {
+        .vertex_layout = {.stride = 84,
+                          .attr_count = 7,
+                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
+                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52},
+                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 68}}},
         .blend = nt_blend_alpha_premultiplied(),
         .cull_mode = NT_CULL_NONE,
         .attr_map = {{.stream_name = "a_shape_layout", .location = 4},
@@ -4368,6 +4382,16 @@ int main(int argc, char *argv[]) {
     shape_desc.label = "ui_showcase_shape_shadow";
     s_shape_shadow_material = nt_material_create(&shape_desc);
     s_shape_uber_material = nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = {.stride = 84,
+                          .attr_count = 7,
+                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
+                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52},
+                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 68}}},
+        .vertex_defaults = (const float[21]){0},
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -4377,7 +4401,6 @@ int main(int argc, char *argv[]) {
                      {.stream_name = "a_shape_paint", .location = 6},
                      {.stream_name = "a_shape_border", .location = 7}},
         .attr_map_count = 4,
-        .has_attr_defaults = true,
         .label = "ui_showcase_shape_uber",
     });
 
@@ -4385,6 +4408,13 @@ int main(int argc, char *argv[]) {
      * a_layout @ loc 7, walker-filled by name) + the flat SDF FS. No texture — the shape is
      * per-pixel. Declares the custom per-vertex attrs so the renderer builds the extended layout. */
     s_radial_material = nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = {.stride = 52,
+                          .attr_count = 5,
+                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}}},
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
@@ -4402,6 +4432,15 @@ int main(int argc, char *argv[]) {
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
+            .vertex_layout = {.stride = 84,
+                              .attr_count = 7,
+                              .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                        {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                        {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
+                                        {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52},
+                                        {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 68}}},
             .textures = {{.name = "u_texture", .resource = s_radial_art_tex_handle}},
             .texture_count = 1,
             .blend = nt_blend_alpha_premultiplied(),
@@ -4423,6 +4462,15 @@ int main(int argc, char *argv[]) {
      * texture (not the full-bleed radial_art). Reveals a real packed sub-region (the bunny
      * icon), exercising the region-local wedge remap (a_uvrect). DESATURATE mode. */
     s_radial_image_packed_material = nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = {.stride = 84,
+                          .attr_count = 7,
+                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
+                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52},
+                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 68}}},
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),

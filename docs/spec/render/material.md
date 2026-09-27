@@ -123,31 +123,48 @@ const TextureAssetRef *material_get_textures(const MaterialAssetHeader *h) { ret
 
 ## One material, one copy
 
-### Custom sprite attribute defaults
+### Full vertex layout and defaults
 
-`attr_map` entries declare one FLOAT4 custom vertex lane each for the sprite
-renderer. `nt_material_create_desc_t.has_attr_defaults` explicitly enables a
-default block: creation copies each entry's `default_value[4]` in declaration
-order. These values are immutable and material-owned; the creation descriptor
-is borrowed only for the call. With the flag false, values are ignored and a
-custom-attribute sprite material still requires an explicit block for each emit.
+`nt_material_create_desc_t.vertex_layout` declares the complete physical vertex:
+storage type, component count, normalization, location, absolute byte offset and
+stride. Creation validates WebGL2 structural rules, copies the layout and sorts
+active attributes by location. Aliased byte ranges are allowed; duplicate
+locations are not. A missing layout has zero count/stride and no defaults.
+Meshes and text may omit it. Mesh streams still define their own physical layout;
+the material's independent `attr_map` maps stream names to shader locations and
+does not change mesh storage or supply missing mesh values. Semantic map8 and
+physical layout16 are independent limits.
 
-`nt_sprite_renderer_set_custom_attrs` supplies a complete one-emit override, not
-a partial update. The block must exactly match the bound material's declared
-custom stride. After consumption, the next emit uses the material defaults or
-asserts when no defaults were declared. A zero default block can select the plain
-sprite branch of a game-owned uber shader, while individual shapes override its
-parameters. Immediate, slice9, geometry and ECS sprite emits share this contract;
-UI does not maintain separate material-default state.
+`vertex_defaults` is NULL or points at one full vertex. Creation copies exactly
+`vertex_layout.stride` bytes into the material slot's fixed 256-byte storage;
+the source descriptor and bytes need only outlive the create call. WebGL2 limits
+the full stride to255. No per-material allocation or default mutation API exists.
+Uniform params remain vec4 values, independent of vertex data.
 
-Defaults are vertex data, not layout or pipeline identity. The sprite renderer
-borrows a pointer from the stable material pool at command open and copies the
-selected block into each emitted vertex without per-emit heap allocation or
-attribute-name lookup. The bound material remains alive through its last emit;
-destroying it does not alter attributes already copied into staged vertices.
-A material without custom attributes retains its 20-byte
-sprite layout and performs no custom copy. The sprite custom-stride capacity
-still applies; material defaults do not raise it.
+Sprite materials explicitly declare their full vertex. The sprite producer
+requires FLOAT3 position at location0/offset0, normalized USHORT2 UV at
+location3/offset12, and normalized UBYTE4 color at location2/offset16. Extra
+attributes start at offset20. Its stride must be a multiple of4 and fit
+`20 + NT_SPRITE_CUSTOM_STRIDE_MAX`; the default capacity64 permits full84,
+while a configured capacity128 permits full148. A valid generic layout with
+another prefix asserts when bound to this producer, not during material create.
+
+Every region/slice9/geometry emit accepts a complete `const void *attrs,
+uint16_t bytes` tail override. NULL/0 selects defaults bytes `[20,stride)`;
+without defaults a nonempty tail asserts. Plain stride20 requires NULL/0.
+Partial blocks, NULL/nonzero and non-NULL/zero assert. The renderer writes the
+prefix from ordinary emit arguments and copies only the selected tail to each
+vertex. Prefix default bytes are always overwritten; there is no tint multiply
+or merge. Override pointers are borrowed only during the emit, including skipped
+emits, and never affect later calls. ECS uses the same defaults without new item
+or component state. Materials stay alive through their last consuming emit.
+
+Defaults and semantic names do not participate in vertex-input identity. The
+renderer hashes all canonical physical fields before cache lookup, without
+padding or inactive entries. Equal layouts reuse a vertex input across materials;
+same-stride layouts with different physical fields do not. Layout-only changes
+do not create another pipeline. Stride changes flush staging; changing override
+values alone does not split batches.
 
 ### Shared values
 

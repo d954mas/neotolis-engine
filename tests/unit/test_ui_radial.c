@@ -56,6 +56,13 @@ static nt_material_t make_radial_material(void) {
     desc.attr_map[1].stream_name = "a_layout";
     desc.attr_map[1].location = 7;
     desc.attr_map_count = 2;
+    desc.vertex_layout = (nt_vertex_layout_t){.stride = 52,
+                                              .attr_count = 5,
+                                              .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                                        {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                                        {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                                        {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}}};
     desc.label = "radial_test_material";
 
     const nt_material_t mat = nt_material_create(&desc);
@@ -88,11 +95,10 @@ static void route_a_handler(const nt_ui_custom_frame_t *frame, void *userdata) {
     /* Bind the radial material (different fs + extended layout than the base
      * ctx->sprite_material), set the per-widget block, emit a quad. */
     nt_sprite_renderer_set_material(rc->radial_mat);
-    nt_sprite_renderer_set_custom_attrs(k_radial_attrs, (uint8_t)sizeof k_radial_attrs);
 
     const float positions[4][2] = {{0.0F, 0.0F}, {1.0F, 0.0F}, {1.0F, 1.0F}, {0.0F, 1.0F}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(rc->atlas, rc->region_index, positions, 4, idx, 6, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU);
+    nt_sprite_renderer_emit_geometry(rc->atlas, rc->region_index, positions, 4, idx, 6, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU, k_radial_attrs, (uint8_t)sizeof k_radial_attrs);
 }
 
 /* Route A proves the renderer hook end-to-end through the walker: a radial
@@ -446,6 +452,13 @@ static void test_image_custom_name_bound_reorder_safe(void) {
     desc.attr_map[1].stream_name = "a_radial";
     desc.attr_map[1].location = 4;
     desc.attr_map_count = 2;
+    desc.vertex_layout = (nt_vertex_layout_t){.stride = 52,
+                                              .attr_count = 5,
+                                              .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                                        {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                                        {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                                        {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}}};
     desc.label = "perm_test_material";
     const nt_material_t mat = nt_material_create(&desc);
 
@@ -543,6 +556,15 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
     desc.attr_map[3].stream_name = "a_layout";
     desc.attr_map[3].location = 7;
     desc.attr_map_count = 4;
+    desc.vertex_layout = (nt_vertex_layout_t){.stride = 84,
+                                              .attr_count = 7,
+                                              .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                                        {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                                        {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
+                                                        {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52},
+                                                        {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 68}}};
     desc.params[0].name = NT_UI_RADIAL_IMAGE_PARAM_MODE;
     desc.params[0].value[0] = (float)mode; /* reveal look baked at creation */
     desc.param_count = 1;

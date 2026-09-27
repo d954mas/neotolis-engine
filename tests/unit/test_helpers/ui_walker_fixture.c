@@ -41,6 +41,11 @@ static nt_material_t make_material(bool with_page_sampler) {
     /* Sprite materials name the atlas page's sampler; text materials declare nothing --
      * the font textures are the text renderer's own binds. */
     if (with_page_sampler) {
+        desc.vertex_layout = (nt_vertex_layout_t){.stride = 20,
+                                                  .attr_count = 3,
+                                                  .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                                            {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                                            {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16}}};
         desc.textures[0].name = "u_texture";
         desc.texture_count = 1;
     }

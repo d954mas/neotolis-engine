@@ -97,12 +97,12 @@ typedef struct {
 
 /* Per-widget custom per-vertex block — scratch-allocated, referenced by pointer only
  * for custom-attr widgets so a plain image keeps the payload small. Untyped: the bound
- * material's attr_map names the floats (walker injects a_layout/a_uvrect by name). Sized
- * for four FLOAT4 attrs (NT_SPRITE_CUSTOM_STRIDE_MAX = 64).
+ * material maps semantic names to locations and its vertex_layout maps locations to bytes.
+ * The walker injects FLOAT4 a_layout/a_uvrect by name; other bytes pass through unchanged.
  * injection vocabulary: docs/spec/ui/radial-widgets.md
  * "Radial widgets & the custom-attr image path" */
 typedef struct {
-    float custom_attrs[16];
+    uint8_t custom_attrs[64];
     uint8_t custom_bytes; /* > 0; the material declares this many per-vertex custom bytes. */
     uint8_t geom_mode;    /* NT_UI_IMAGE_GEOM_* — bbox rasterization strategy (not widget identity) */
 } nt_ui_image_custom_block_t;
