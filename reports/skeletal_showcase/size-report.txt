@@ -1,61 +1,61 @@
 # Size Report: skeletal_showcase (wasm-analysis-paired)
-# Commit: c7b5019
+# Commit: ca447e1
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 452 B
+Type                 461 B
 Import               570 B
-Function             315 B
+Function             328 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
-Elem                 141 B
-Code              319773 B
-Data               21518 B
-Custom              9562 B
+Elem                 152 B
+Code              342218 B
+Data               22635 B
+Custom              9883 B
 ---------------- ----------
-TOTAL             352441 B
+TOTAL             376357 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-55310 B   frame
-21758 B   main
+55389 B   frame
+22617 B   main
 17650 B   dispatch_command
-11040 B   nt_shape_renderer_init
+11050 B   nt_shape_renderer_init
+ 9606 B   mixing_declare_controls
  8830 B   Clay__ConfigureOpenElementPtr
  7745 B   nt_font_lookup_glyph_offset
- 7231 B   skinned_draw
+ 7125 B   skinned_draw
  6666 B   nt_ui_combo_begin
  6059 B   Clay__SizeContainersAlongAxis
  5873 B   nt_ui_scroll_begin
  5834 B   slider_core
  5737 B   declare_properties
  5643 B   Clay__InitializeEphemeralMemory
- 4581 B   skinned_declare_controls
- 4286 B   nt_skinned_mesh_renderer_draw_list
+ 5254 B   mixing_update
+ 4580 B   skinned_declare_controls
+ 4287 B   nt_skinned_mesh_renderer_draw_list
  4005 B   Clay__MeasureTextCached
+ 3366 B   nt_sprite_renderer_set_material
  3365 B   Clay__CloseElement
- 3365 B   nt_sprite_renderer_set_material
  3106 B   nt_ui_label
  3011 B   fmt_fp
- 3000 B   nt_gfx_make_texture
+ 3001 B   nt_gfx_make_texture
  2667 B   nt_http_request_ex
  2629 B   scrollbar_emit_axis
- 2624 B   nt_gfx_activate_mesh
+ 2626 B   nt_gfx_activate_mesh
  2448 B   nt_ui_checkbox
  2429 B   printf_core
  2368 B   atlas_on_resolve
  2084 B   nt_meshwire_decode_indices
- 2032 B   nt_gfx_make_program
- 1989 B   nt_ui_button_begin
 
-Total functions: 313
-Total code size: 319257 B
+Total functions: 326
+Total code size: 341679 B
 
 ## Built Engine Archives
 
@@ -126,5 +126,5 @@ TOTAL (archives)         4238074 B
 
 ## Data Segments Summary
 
-Segments: 74
-Total data size: 20994 B
+Segments: 78
+Total data size: 22082 B
