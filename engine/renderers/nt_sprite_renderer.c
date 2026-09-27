@@ -75,7 +75,8 @@ static struct {
      * in open_cmd, so the plain path stays a constant 20. */
     uint32_t cur_stride;
     const uint8_t *cur_attr_defaults; /* borrowed from the bound material's stable pool slot */
-    uint16_t source_uv_offset;        /* UINT16_MAX unless the material requests source-local UV */
+    uint32_t source_uv_hash;
+    uint16_t source_uv_offset; /* UINT16_MAX unless the material requests source-local UV */
 
     /* Recorded per-state draw commands. Last entry is the "currently open"
      * cmd that emit_one writes into; closed by close_current_cmd() before a
@@ -182,6 +183,7 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     NT_ASSERT(d.custom_max_vertices >= 16U && "sprite custom_max_vertices must be >= 16 (largest fixed single emit: slice9 = 16 verts)");
 
     memset(&s_sprite, 0, sizeof(s_sprite));
+    s_sprite.source_uv_hash = nt_hash32("a_source_uv", (uint32_t)(sizeof("a_source_uv") - 1U)).value;
     s_sprite.max_pipelines = d.max_pipelines;
     s_sprite.max_vertices = d.max_vertices;
     s_sprite.max_indices = d.max_indices;
@@ -364,9 +366,11 @@ static void close_current_cmd(void) {
 /* Resolve the renderer-owned source coordinate field once per material bind. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint16_t sprite_source_uv_offset(const nt_material_info_t *mi, uint32_t stride) {
-    const uint32_t source_uv_hash = nt_hash32_str("a_source_uv").value;
+    if (mi->attr_map_count == 0U) {
+        return UINT16_MAX;
+    }
     for (uint8_t ai = 0; ai < mi->attr_map_count; ++ai) {
-        if (mi->attr_map_hashes[ai] != source_uv_hash) {
+        if (mi->attr_map_hashes[ai] != s_sprite.source_uv_hash) {
             continue;
         }
         for (uint8_t vi = 0; vi < mi->vertex_layout.attr_count; ++vi) {

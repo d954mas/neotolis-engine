@@ -1255,9 +1255,9 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
     static uint32_t s_hash_uvrect;
     static uint32_t s_hash_aspect;
     if (s_hash_layout == 0U) {
-        s_hash_layout = nt_hash32_str("a_layout").value;
-        s_hash_uvrect = nt_hash32_str("a_uvrect").value;
-        s_hash_aspect = nt_hash32_str("a_aspect").value;
+        s_hash_layout = nt_hash32("a_layout", (uint32_t)(sizeof("a_layout") - 1U)).value;
+        s_hash_uvrect = nt_hash32("a_uvrect", (uint32_t)(sizeof("a_uvrect") - 1U)).value;
+        s_hash_aspect = nt_hash32("a_aspect", (uint32_t)(sizeof("a_aspect") - 1U)).value;
     }
 
     /* Layout and atlas orientation are resolved together at emit, so a pack
