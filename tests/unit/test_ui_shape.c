@@ -17,21 +17,19 @@ static nt_material_t s_shape_material;
 void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     const nt_material_create_desc_t desc = {
-        .vertex_layout = {.stride = 84,
-                          .attr_count = 7,
-                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
-                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
-                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
-                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
-                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52},
-                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 68}}},
+        .vertex_layout = {.stride = sizeof(nt_ui_shape_vertex_t),
+                          .attr_count = 10,
+                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, position)},
+                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, texcoord)},
+                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, color)},
+                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.layout)},
+                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.geometry)},
+                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.widths)},
+                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.center_y)},
+                                    {.location = 8, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.endpoint)},
+                                    {.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.border)},
+                                    {.location = 10, .type = NT_VERTEX_UINT8, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.control)}}},
         .program = nt_material_get_info(s_fx.sprite_material)->program,
-        .attr_map = {{.stream_name = "a_shape_layout", .location = 4},
-                     {.stream_name = "a_shape_geometry", .location = 5},
-                     {.stream_name = "a_shape_paint", .location = 6},
-                     {.stream_name = "a_shape_border", .location = 7}},
-        .attr_map_count = 4,
     };
     s_shape_material = nt_material_create(&desc);
 }

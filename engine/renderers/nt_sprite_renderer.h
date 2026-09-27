@@ -205,8 +205,8 @@ typedef struct {
 } nt_sprite_layout_info_t;
 void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *out);
 /* Read back the custom per-vertex attr block of the v_idx-th vertex of the last
- * emit, from the byte-staging path. float_count floats written. */
-void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
+ * emit, from the byte-staging path. Copies exactly bytes from the tail. */
+void nt_sprite_renderer_test_last_emit_attrs(uint32_t v_idx, void *out, uint16_t bytes);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void);
 /* Draw commands staged but not yet flushed. */

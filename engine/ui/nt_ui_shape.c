@@ -13,12 +13,27 @@ static void validate_shape_material(nt_material_t material) {
     NT_ASSERT(nt_material_valid(material) && "nt_ui_shape: material must be valid");
     const nt_material_info_t *info = nt_material_get_info(material);
     NT_ASSERT(info->program.id != 0U && "nt_ui_shape: material needs a program");
-    NT_ASSERT(info->attr_map_count == 4U && "nt_ui_shape: material needs four FLOAT4 attributes");
-    /* Fixed ABI xxHash32 values avoid hashing shader names on every declaration. */
-    NT_ASSERT(info->attr_map_hashes[0] == 0xF5149CD7U && info->attr_map_locations[0] == 4U && "a_shape_layout at location 4");
-    NT_ASSERT(info->attr_map_hashes[1] == 0xD0B0CF6FU && info->attr_map_locations[1] == 5U && "a_shape_geometry at location 5");
-    NT_ASSERT(info->attr_map_hashes[2] == 0xB5E611B0U && info->attr_map_locations[2] == 6U && "a_shape_paint at location 6");
-    NT_ASSERT(info->attr_map_hashes[3] == 0x3A033B94U && info->attr_map_locations[3] == 7U && "a_shape_border at location 7");
+    NT_ASSERT(info->vertex_layout.stride == sizeof(nt_ui_shape_vertex_t) && info->vertex_layout.attr_count == 10U);
+    /* Material creation canonicalizes physical fields by location. */
+    const nt_vertex_layout_t expected = {.stride = sizeof(nt_ui_shape_vertex_t),
+                                         .attr_count = 10,
+                                         .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, position)},
+                                                   {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, color)},
+                                                   {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, texcoord)},
+                                                   {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.layout)},
+                                                   {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.geometry)},
+                                                   {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.widths)},
+                                                   {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.center_y)},
+                                                   {.location = 8, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.endpoint)},
+                                                   {.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.border)},
+                                                   {.location = 10, .type = NT_VERTEX_UINT8, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.control)}}};
+    for (uint8_t i = 0; i < expected.attr_count; ++i) {
+        const nt_vertex_attr_t *want = &expected.attrs[i];
+        const nt_vertex_attr_t *actual = &info->vertex_layout.attrs[i];
+        NT_ASSERT(actual->location == want->location && actual->type == want->type && actual->count == want->count && actual->normalized == want->normalized && actual->offset == want->offset);
+        (void)actual;
+        (void)want;
+    }
     (void)info;
 }
 

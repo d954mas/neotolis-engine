@@ -683,6 +683,21 @@ void test_full_layout_accepts_aliases_and_independent_semantic_map(void) {
     TEST_ASSERT_EQUAL_UINT8(1, info->attr_map_count);
 }
 
+void test_physical_sixteen_fields_do_not_expand_semantic_map_eight(void) {
+    nt_material_create_desc_t desc = {.vertex_layout = {.stride = 16, .attr_count = 16}, .attr_map_count = 8};
+    const char *names[] = {"a", "b", "c", "d", "e", "f", "g", "h"};
+    for (uint8_t i = 0; i < 16U; ++i) {
+        desc.vertex_layout.attrs[i] = (nt_vertex_attr_t){.location = i, .type = NT_VERTEX_UINT8, .count = 1, .offset = i};
+    }
+    for (uint8_t i = 0; i < 8U; ++i) {
+        desc.attr_map[i] = (nt_material_attr_desc_t){.stream_name = names[i], .location = (uint8_t)(15U - i)};
+    }
+    const nt_material_info_t *info = nt_material_get_info(nt_material_create(&desc));
+    TEST_ASSERT_EQUAL_UINT8(16, info->vertex_layout.attr_count);
+    TEST_ASSERT_EQUAL_UINT8(8, info->attr_map_count);
+    TEST_ASSERT_EQUAL_UINT8(15, info->attr_map_locations[0]);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -690,6 +705,7 @@ int main(void) {
 
     /* Init / shutdown */
     RUN_TEST(test_init_shutdown);
+    RUN_TEST(test_physical_sixteen_fields_do_not_expand_semantic_map_eight);
     RUN_TEST(test_vertex_layout_rejects_invalid_physical_descriptors);
     RUN_TEST(test_full_layout_accepts_aliases_and_independent_semantic_map);
     RUN_TEST(test_vertex_layout_and_defaults_are_copied);

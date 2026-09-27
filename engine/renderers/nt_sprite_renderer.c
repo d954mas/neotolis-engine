@@ -1199,14 +1199,14 @@ void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *
     }
 }
 
-void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count) {
+void nt_sprite_renderer_test_last_emit_attrs(uint32_t v_idx, void *out, uint16_t bytes) {
     NT_ASSERT(out != NULL);
-    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_radial: index out of range");
-    NT_ASSERT((uint32_t)float_count * sizeof(float) <= NT_SPRITE_CUSTOM_STRIDE_MAX && "last_emit_radial: float_count exceeds custom stride");
+    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_attrs: index out of range");
+    NT_ASSERT(bytes <= s_sprite.cur_stride - NT_SPRITE_BASE_STRIDE && "last_emit_attrs: bytes exceed custom stride");
     /* Custom block sits at +20 within each vertex's cur_stride slot in staging
      * (flush leaves cur_stride + staging data intact for readback). */
     const uint8_t *src = s_sprite.staging + ((size_t)(s_sprite.last_emit_first_vertex + v_idx) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
-    memcpy(out, src, (size_t)float_count * sizeof(float));
+    memcpy(out, src, bytes);
 }
 
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }

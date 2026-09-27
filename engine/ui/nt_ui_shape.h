@@ -1,8 +1,48 @@
 #ifndef NT_UI_SHAPE_H
 #define NT_UI_SHAPE_H
 
+#include <stddef.h>
+
 #include "clay.h"
 #include "ui/nt_ui.h"
+
+/* Typed tail shared by dedicated shape shaders and the mode-zero sprite uber shader. */
+typedef struct {
+    float layout[4]; /* Width, height, affine padding/projective scale, center X. */
+    float geometry[4];
+    float widths[4];
+    float center_y;
+    uint8_t endpoint[4];
+    uint8_t border[4];
+    uint8_t control[4]; /* Fill alpha, mode, gradient, empty-interior/projective flags. */
+} nt_ui_shape_attrs_t;
+
+typedef struct {
+    float position[3];
+    uint16_t texcoord[2];
+    uint8_t color[4];
+    nt_ui_shape_attrs_t attrs;
+} nt_ui_shape_vertex_t;
+
+_Static_assert(sizeof(nt_ui_shape_attrs_t) == 64, "shape tail is 64 bytes");
+_Static_assert(sizeof(nt_ui_shape_vertex_t) == 84, "shape vertex is 84 bytes");
+_Static_assert(offsetof(nt_ui_shape_attrs_t, layout) == 0, "shape tail layout offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, attrs.layout) == 20, "shape vertex layout offset");
+_Static_assert(offsetof(nt_ui_shape_attrs_t, geometry) == 16, "shape tail geometry offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, attrs.geometry) == 36, "shape vertex geometry offset");
+_Static_assert(offsetof(nt_ui_shape_attrs_t, widths) == 32, "shape tail widths offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, attrs.widths) == 52, "shape vertex widths offset");
+_Static_assert(offsetof(nt_ui_shape_attrs_t, center_y) == 48, "shape tail center_y offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, attrs.center_y) == 68, "shape vertex center_y offset");
+_Static_assert(offsetof(nt_ui_shape_attrs_t, endpoint) == 52, "shape tail endpoint offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, attrs.endpoint) == 72, "shape vertex endpoint offset");
+_Static_assert(offsetof(nt_ui_shape_attrs_t, border) == 56, "shape tail border offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, attrs.border) == 76, "shape vertex border offset");
+_Static_assert(offsetof(nt_ui_shape_attrs_t, control) == 60, "shape tail control offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, attrs.control) == 80, "shape vertex control offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, position) == 0, "shape vertex position offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, texcoord) == 12, "shape vertex texcoord offset");
+_Static_assert(offsetof(nt_ui_shape_vertex_t, color) == 16, "shape vertex color offset");
 
 typedef enum { NT_UI_SHAPE_BOX = 1, NT_UI_SHAPE_RADIAL = 2 } nt_ui_shape_kind_t;
 typedef enum { NT_UI_SHAPE_SOLID = 0, NT_UI_SHAPE_HORIZONTAL = 1, NT_UI_SHAPE_VERTICAL = 2 } nt_ui_shape_gradient_t;

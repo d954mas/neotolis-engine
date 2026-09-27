@@ -19,6 +19,7 @@
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "resource/nt_resource.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
@@ -38,8 +39,7 @@ static Clay_RenderCommand s_test_cmds[MAX_TEST_CMDS];
 static const float k_radial_attrs[8] = {0.25F, 1.75F, 0.5F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
 
 /* Radial material: shares the fixture's vs/fs role but declares a_radial @ loc 4 +
- * a_layout @ loc 7 (walker-filled by name) so build_sprite_layout produces the
- * extended 32 B custom block (distinct pipeline). */
+ * a_layout @ loc 7 (walker-filled by name) with an explicit 52 B full vertex layout. */
 static nt_material_t make_radial_material(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "radial_vs"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "radial_fs"});
@@ -126,7 +126,7 @@ static void test_route_a_custom_binds_radial_material(void) {
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     for (uint32_t v = 0; v < 4U; v++) {
         float out[4] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 4);
+        nt_sprite_renderer_test_last_emit_attrs(v, out, 16);
         for (uint8_t k = 0; k < 4; k++) {
             TEST_ASSERT_TRUE_MESSAGE(out[k] == k_radial_attrs[k], "Route A: a_radial block not baked per-vertex");
         }
@@ -377,7 +377,7 @@ static void test_radial_emit_bakes_payload(void) {
     const float expect_aspect = 64.0F / 32.0F;
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 8);
+        nt_sprite_renderer_test_last_emit_attrs(v, out, 32);
         TEST_ASSERT_TRUE_MESSAGE(approx(out[0], start), "a_radial.x == angle_start");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[1], end), "a_radial.y == angle_end");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 0.5F), "a_radial.z == inner_radius_norm");
@@ -422,7 +422,7 @@ static void test_image_custom_injects_aspect(void) {
     const float expect_aspect = 96.0F / 32.0F;
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 8);
+        nt_sprite_renderer_test_last_emit_attrs(v, out, 32);
         TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 7.0F), "a_radial.x verbatim");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 8.0F), "a_radial.y verbatim");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 9.0F), "a_radial.z verbatim");
@@ -433,10 +433,7 @@ static void test_image_custom_injects_aspect(void) {
     }
 }
 
-/* Reorder-safety: a material whose attr_map is PERMUTED to [a_layout, a_radial] (a_layout
- * FIRST) must still get aspect written at a_layout's offset (block floats 0..3), proving the
- * walker resolves the injection BY NAME from attr_map, not by a fixed slot. This is the whole
- * point of the name-bound design — the block offset follows attr_map declaration order. */
+/* Semantic declaration order is independent of physical offsets. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_image_custom_name_bound_reorder_safe(void) {
     /* Build a material with the attr_map order reversed vs make_radial_material. */
@@ -462,7 +459,7 @@ static void test_image_custom_name_bound_reorder_safe(void) {
     desc.label = "perm_test_material";
     const nt_material_t mat = nt_material_create(&desc);
 
-    /* Block in attr_map order: a_layout placeholders @0..3, a_radial data @4..7. */
+    /* Physical layout places a_layout at tail 0 and a_radial at tail 16. */
     const float block[8] = {0.0F, 0.0F, 0.0F, 0.0F, 7.0F, 8.0F, 9.0F, 0.0F};
 
     nt_pointer_t mouse = {0};
@@ -490,7 +487,7 @@ static void test_image_custom_name_bound_reorder_safe(void) {
     const float expect_aspect = 96.0F / 32.0F;
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 8);
+        nt_sprite_renderer_test_last_emit_attrs(v, out, 32);
         /* a_layout is FIRST now: aspect at out[0], px at out[1..2]. */
         TEST_ASSERT_TRUE_MESSAGE(approx(out[0], expect_aspect), "permuted: a_layout.x at offset 0 == aspect");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 96.0F), "permuted: a_layout.y == bbox width px");
@@ -524,7 +521,7 @@ static void test_radial_fill_emit_payload(void) {
 
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     float out[8] = {0};
-    nt_sprite_renderer_test_last_emit_radial(0, out, 8);
+    nt_sprite_renderer_test_last_emit_attrs(0, out, 32);
     TEST_ASSERT_TRUE(approx(out[0], start));
     TEST_ASSERT_TRUE(approx(out[1], start + (fill * sweep))); /* fill→angle */
     TEST_ASSERT_TRUE(approx(out[4], 1.0F));                   /* square bbox → a_layout.x aspect 1 */
@@ -621,7 +618,7 @@ static void test_radial_image_region_bakes_payload(void) {
     const float expect_aspect = 64.0F / 32.0F;
     for (uint32_t v = 0; v < 4U; v++) {
         float out[16] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 16);
+        nt_sprite_renderer_test_last_emit_attrs(v, out, 64);
         TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 0.25F), "a_radial.x == angle_start");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 1.75F), "a_radial.y == angle_end");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 0.5F), "a_radial.z == inner_radius_norm");
@@ -655,7 +652,7 @@ static void test_radial_image_reveal_mode_plumbed(void) {
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 8);
+        nt_sprite_renderer_test_last_emit_attrs(v, out, 32);
         TEST_ASSERT_TRUE_MESSAGE(approx(out[4], 1.0F), "a_tint.r == 255/255");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[5], 128.0F / 255.0F), "a_tint.g == 128/255");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[6], 0.0F), "a_tint.b == 0/255");
@@ -695,7 +692,7 @@ static void test_radial_image_packed_region_bakes_uvrect(void) {
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     for (uint32_t v = 0; v < 4U; v++) {
         float out[16] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 16); /* full 64 B block */
+        nt_sprite_renderer_test_last_emit_attrs(v, out, 64); /* full 64 B block */
         TEST_ASSERT_TRUE_MESSAGE(approx(out[8], MINIMAL_UI_ATLAS_PACKED_U0), "a_uvrect.x == region u0");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[9], MINIMAL_UI_ATLAS_PACKED_V0), "a_uvrect.y == region v0");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[10], MINIMAL_UI_ATLAS_PACKED_U1), "a_uvrect.z == region u1");
@@ -727,7 +724,7 @@ static void test_radial_image_fill_emit(void) {
 
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     float out[4] = {0};
-    nt_sprite_renderer_test_last_emit_radial(0, out, 4);
+    nt_sprite_renderer_test_last_emit_attrs(0, out, 16);
     TEST_ASSERT_TRUE(approx(out[0], start));
     TEST_ASSERT_TRUE(approx(out[1], start + (fill * sweep))); /* fill->angle */
 }
@@ -764,7 +761,7 @@ static void test_radial_image_opacity_preserves_tint_strength(void) {
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
-        nt_sprite_renderer_test_last_emit_radial(v, out, 8);
+        nt_sprite_renderer_test_last_emit_attrs(v, out, 32);
         /* a_tint.w (float 7) = tint_strength: UNCHANGED by parent opacity (no fold for radial). */
         TEST_ASSERT_TRUE_MESSAGE(approx(out[7], 0.6F), "a_tint.w (tint_strength) UNCHANGED under 0.5 opacity");
 
@@ -775,8 +772,81 @@ static void test_radial_image_opacity_preserves_tint_strength(void) {
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_custom_semantic_subset_order_and_byte_payload(void) {
+    const nt_material_t radial = make_radial_material();
+    nt_material_create_desc_t desc = {.program = nt_material_get_info(radial)->program,
+                                      .vertex_layout = nt_material_get_info(radial)->vertex_layout,
+                                      .attr_map = {{.stream_name = "a_layout", .location = 7}, {.stream_name = "a_radial", .location = 4}},
+                                      .attr_map_count = 2};
+    const nt_material_t mat = nt_material_create(&desc);
+    uint8_t bytes[32];
+    for (size_t i = 0; i < sizeof(bytes); ++i) {
+        bytes[i] = (uint8_t)(255U - i);
+    }
+    const uint8_t expected[16] = {255, 254, 253, 252, 251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241, 240};
+    const char *subset[] = {"a_layout", NULL};
+    const char *reversed[] = {"a_radial", "a_layout", NULL};
+    const char *unknown[] = {"missing", NULL};
+    for (uint8_t variant = 0; variant < 2U; ++variant) {
+        const nt_pointer_t mouse = {0};
+        nt_ui_begin(s_fx.ctx, 800, 600, 0, &mouse, 1);
+        nt_ui_image_custom_t img = {.atlas = s_fx.atlas.handle,
+                                    .region_index = s_fx.atlas.white_region_idx,
+                                    .material = mat,
+                                    .custom_attrs = bytes,
+                                    .custom_bytes = sizeof(bytes),
+                                    .attr_names = variant == 0U ? subset : reversed,
+                                    .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY,
+                                    .slice9_scale = 1,
+                                    .color_packed = UINT32_MAX};
+        const Clay_ElementDeclaration decl = {.layout.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(32)}};
+        nt_ui_image_custom(s_fx.ctx, NULL, &img, &decl);
+        img.attr_names = unknown;
+        NT_TEST_EXPECT_ASSERT(nt_ui_image_custom(s_fx.ctx, NULL, &img, &decl));
+        nt_ui_end(s_fx.ctx);
+        const nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+        nt_ui_walk(s_fx.ctx, &target);
+        uint8_t actual[32];
+        nt_sprite_renderer_test_last_emit_attrs(0, actual, sizeof(actual));
+        TEST_ASSERT_EQUAL_MEMORY(expected, actual, sizeof(expected));
+        float layout[4];
+        memcpy(layout, actual + 16, sizeof(layout));
+        TEST_ASSERT_TRUE(layout[0] == 3.0F && layout[1] == 96.0F && layout[2] == 32.0F);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_known_injection_semantic_requires_compatible_physical_field(void) {
+    const nt_material_t radial = make_radial_material();
+    const nt_vertex_layout_t layout = nt_material_get_info(radial)->vertex_layout;
+    for (uint8_t variant = 0; variant < 4U; ++variant) {
+        nt_material_create_desc_t desc = {.program = nt_material_get_info(radial)->program, .vertex_layout = layout, .attr_map = {{.stream_name = "a_layout", .location = 7}}, .attr_map_count = 1};
+        nt_vertex_attr_t *attr = &desc.vertex_layout.attrs[4];
+        if (variant == 0U) {
+            attr->location = 6;
+        } else if (variant == 1U) {
+            attr->type = NT_VERTEX_UINT8;
+            attr->normalized = true;
+        } else if (variant == 2U) {
+            attr->count = 3;
+        } else {
+            attr->offset = 0;
+        }
+        const nt_material_t material = nt_material_create(&desc);
+        const nt_ui_image_custom_block_t block = {.custom_bytes = 32, .geom_mode = NT_UI_IMAGE_GEOM_GEOMETRY};
+        const nt_ui_image_payload_t payload = {.atlas = s_fx.atlas.handle, .region_index = s_fx.atlas.white_region_idx, .material = material, .slice9_scale = 1, .custom = &block};
+        Clay_RenderCommand command = {.commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE, .boundingBox = {0, 0, 96, 32}, .renderData.image.imageData = (void *)&payload};
+        ui_walker_fixture_inject_cmds(&s_fx, &command, 1, 1);
+        const nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+        NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_custom_semantic_subset_order_and_byte_payload);
+    RUN_TEST(test_known_injection_semantic_requires_compatible_physical_field);
     RUN_TEST(test_route_a_custom_binds_radial_material);
     RUN_TEST(test_route_a_custom_does_not_batch);
     RUN_TEST(test_route_b_shared_material_batches);

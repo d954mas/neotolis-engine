@@ -1873,9 +1873,9 @@ static float shape_affine_guard(const nt_ui_target_t *target, const float world[
     return (float)(fmax(fabs(d) + fabs(b), fabs(c) + fabs(a)) / fabs(determinant));
 }
 
-static void emit_shape_quad(const nt_ui_context_t *ctx, Clay_BoundingBox bb, const nt_ui_target_t *target, const float world[16], nt_ui_sprite_bind_t *bind, nt_material_t material, float attrs[16],
-                            uint32_t color, bool screen_space) {
-    const float pad = attrs[2];
+static void emit_shape_quad(const nt_ui_context_t *ctx, Clay_BoundingBox bb, const nt_ui_target_t *target, const float world[16], nt_ui_sprite_bind_t *bind, nt_material_t material,
+                            nt_ui_shape_attrs_t *attrs, uint32_t color, bool screen_space) {
+    const float pad = attrs->layout[2];
     if (!screen_space) {
         NT_ASSERT(ctx->view_proj_set && "analytic world UI requires nt_ui_set_view_proj");
         const Clay_BoundingBox support = {bb.x - pad, bb.y - pad, bb.width + (2.0F * pad), bb.height + (2.0F * pad)};
@@ -1883,10 +1883,10 @@ static void emit_shape_quad(const nt_ui_context_t *ctx, Clay_BoundingBox bb, con
         if (!shape_projective_prepare(target, ctx->view_proj, world, support, projection)) {
             return;
         }
-        attrs[2] = projection[0];
-        attrs[3] = projection[1];
-        attrs[8] = projection[2];
-        attrs[11] *= 4294967296.0F;
+        attrs->layout[2] = projection[0];
+        attrs->layout[3] = projection[1];
+        attrs->center_y = projection[2];
+        attrs->control[3] |= 2U;
     }
     const float vertices[4][2] = {{bb.x - pad, bb.y - pad}, {bb.x + bb.width + pad, bb.y - pad}, {bb.x + bb.width + pad, bb.y + bb.height + pad}, {bb.x - pad, bb.y + bb.height + pad}};
     if (screen_space) {
@@ -1908,13 +1908,7 @@ static void emit_shape_quad(const nt_ui_context_t *ctx, Clay_BoundingBox bb, con
     }
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
     prep_sprite_dispatch_mat(material, bind);
-    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, vertices, 4, indices, 6, world, color, attrs, 64U);
-}
-
-/* Normal binary32 ranges preserve all 24 payload bits and two control bits without signed zero. */
-static float shape_encode_paint(uint32_t payload, uint32_t flags) {
-    const float magnitude = (float)(payload + 1U) * ((flags & 2U) != 0U ? 4294967296.0F : 1.0F);
-    return (flags & 1U) != 0U ? -magnitude : magnitude;
+    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, vertices, 4, indices, 6, world, color, attrs, sizeof(*attrs));
 }
 
 static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd, const nt_ui_target_t *target, const float world[16], nt_ui_sprite_bind_t *bind, float opacity, bool screen_space) {
@@ -1928,50 +1922,53 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
     if (screen_space && guard == 0.0F) {
         return;
     }
-    float attrs[16] = {bb.width, bb.height, guard, 0.0F};
-    uint32_t interior_flags = 0U;
+    nt_ui_shape_attrs_t attrs = {.layout = {bb.width, bb.height, guard, 0.0F}};
+    uint8_t interior_flags = 0U;
     if (style->kind == NT_UI_SHAPE_BOX) {
-        shape_normalize_radii(&style->box, bb.width, bb.height, attrs + 4);
-        attrs[12] = style->paint.border_widths.left;
-        attrs[13] = style->paint.border_widths.top;
-        attrs[14] = style->paint.border_widths.right;
-        attrs[15] = style->paint.border_widths.bottom;
-        const bool has_border = attrs[12] > 0.0F || attrs[13] > 0.0F || attrs[14] > 0.0F || attrs[15] > 0.0F;
-        if (has_border && !shape_inner_nonempty(bb.width, bb.height, attrs + 4, attrs + 12)) {
+        shape_normalize_radii(&style->box, bb.width, bb.height, attrs.geometry);
+        attrs.widths[0] = style->paint.border_widths.left;
+        attrs.widths[1] = style->paint.border_widths.top;
+        attrs.widths[2] = style->paint.border_widths.right;
+        attrs.widths[3] = style->paint.border_widths.bottom;
+        const bool has_border = attrs.widths[0] > 0.0F || attrs.widths[1] > 0.0F || attrs.widths[2] > 0.0F || attrs.widths[3] > 0.0F;
+        if (has_border && !shape_inner_nonempty(bb.width, bb.height, attrs.geometry, attrs.widths)) {
             interior_flags = 1U;
         }
     } else {
-        attrs[4] = style->radial.angle_start;
-        attrs[5] = style->radial.angle_end;
-        attrs[6] = style->radial.inner_radius_norm;
+        attrs.geometry[0] = style->radial.angle_start;
+        attrs.geometry[1] = style->radial.angle_end;
+        attrs.geometry[2] = style->radial.inner_radius_norm;
     }
     const uint32_t inherited_alpha = (uint32_t)lrintf(opacity * 255.0F) << 24U;
     if ((style->shadow.color >> 24U) != 0U) {
-        float shadow[16];
-        memcpy(shadow, attrs, sizeof shadow);
-        shadow[12] = style->shadow.spread;
-        shadow[13] = style->shadow.softness;
-        shadow[14] = fmaxf(style->shadow.spread + style->shadow.softness, 0.0F);
-        shadow[15] = 0.0F;
-        shadow[2] += shadow[14];
-        shadow[8] = 0.0F;
-        shadow[9] = shape_encode_paint(0U, 3U);
-        shadow[10] = shape_encode_paint(0U, 0U);
-        shadow[11] = shape_encode_paint(style->shadow.color >> 24U, 0U);
+        nt_ui_shape_attrs_t shadow = attrs;
+        shadow.widths[0] = style->shadow.spread;
+        shadow.widths[1] = style->shadow.softness;
+        shadow.widths[2] = fmaxf(style->shadow.spread + style->shadow.softness, 0.0F);
+        shadow.widths[3] = 0.0F;
+        shadow.layout[2] += shadow.widths[2];
+        shadow.center_y = 0.0F;
+        shadow.control[0] = (uint8_t)(style->shadow.color >> 24U);
+        shadow.control[1] = 3U;
         Clay_BoundingBox shadow_box = bb;
         shadow_box.x += style->shadow.offset_x;
         shadow_box.y += style->shadow.offset_y;
-        emit_shape_quad(ctx, shadow_box, target, world, bind, style->shadow.material, shadow, (style->shadow.color & 0xFFFFFFU) | inherited_alpha, screen_space);
+        emit_shape_quad(ctx, shadow_box, target, world, bind, style->shadow.material, &shadow, (style->shadow.color & 0xFFFFFFU) | inherited_alpha, screen_space);
     }
     const uint32_t end = style->paint.gradient == NT_UI_SHAPE_SOLID ? style->paint.color0 : style->paint.color1;
     if (((style->paint.color0 | end | style->paint.border_color) >> 24U) == 0U) {
         return;
     }
-    attrs[8] = 0.0F;
-    attrs[9] = shape_encode_paint(end & 0xFFFFFFU, (uint32_t)style->kind);
-    attrs[10] = shape_encode_paint(style->paint.border_color & 0xFFFFFFU, (uint32_t)style->paint.gradient);
-    attrs[11] = shape_encode_paint((style->paint.color0 >> 24U) | ((end >> 24U) << 8U) | ((style->paint.border_color >> 24U) << 16U), interior_flags);
-    emit_shape_quad(ctx, bb, target, world, bind, style->material, attrs, (style->paint.color0 & 0xFFFFFFU) | inherited_alpha, screen_space);
+    attrs.center_y = 0.0F;
+    for (uint8_t i = 0; i < 4U; ++i) {
+        attrs.endpoint[i] = (uint8_t)(end >> (i * 8U));
+        attrs.border[i] = (uint8_t)(style->paint.border_color >> (i * 8U));
+    }
+    attrs.control[0] = (uint8_t)(style->paint.color0 >> 24U);
+    attrs.control[1] = (uint8_t)style->kind;
+    attrs.control[2] = (uint8_t)style->paint.gradient;
+    attrs.control[3] = interior_flags;
+    emit_shape_quad(ctx, bb, target, world, bind, style->material, &attrs, (style->paint.color0 & 0xFFFFFFU) | inherited_alpha, screen_space);
 }
 // #endregion
 
