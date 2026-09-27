@@ -413,12 +413,15 @@ struct tab_state {
     menu_params_t menu;
     /* Tabs tab: the begin/end-core demo strip's game-owned active index. */
     int tabs_demo_active;
+    /* Base Material tab: draw the whole UI with the one SDF+sprite base material. */
+    bool base_sdf;
     /* Rich Text tab state (game-owned effect clock + link latches; see rich_params_t). */
     rich_params_t rich;
 };
 
 static struct tab_state s_state = {
     .cb_value = true,
+    .base_sdf = true,
     .cb_locked = true, /* demos a locked-ON feature; disabled so it stays fixed. */
     .radio_sel = 1,
     .toggle_value = false,
@@ -586,7 +589,7 @@ static void link_programs(void) {
 }
 static nt_atlas_region_ref_t s_radial_art_ref;
 /* Rich-text inline-image by-name refs into the MAIN ui_showcase atlas (heart/gold). Inline images ride
- * the standard u8 sprite path now -- no bespoke material; the rich base uses s_sprite_material. */
+ * the u8 sprite path on the ctx sprite material (no dedicated material). */
 static nt_atlas_region_ref_t s_rich_heart_ref;
 static nt_atlas_region_ref_t s_rich_gold_ref;
 /* Rich-text font family (variant slots R/B/I/BI -> real DejaVu faces). Index = NT_UI_RICH_VARIANT_*
@@ -644,6 +647,7 @@ static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_events(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_shapes(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_rich(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_deco(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st);
@@ -678,6 +682,8 @@ static const showcase_entry_t g_tabs[] = {
     {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
     {"Radial", "SDF radial feedback: cooldown wedge + hold-to-confirm + four-mode image reveal + a batched dense grid.", "examples/ui_showcase/main.c:render_radial", render_radial, NULL},
     {"Shapes", "Analytic corners, borders, gradients and shadows. Atlas and procedural buttons share the same interaction.", "examples/ui_showcase/main.c:render_shapes", render_shapes, NULL},
+    {"Base Material", "One typed base material for the whole UI: defaults select plain images while SDF shapes override the tail, so panels, icons and radials share a batch.",
+     "examples/ui_showcase/main.c:render_base_material", render_base_material, NULL},
     {"Rich Text", "Styled multi-run text + inline icons + bold/italic + wave/typewriter effects + a clickable link, via BOTH the code-first builder AND the runtime markup parser.",
      "examples/ui_showcase/main.c:render_rich", render_rich, NULL},
     {"Dropdown", "Combobox on popup-core: a short list + a long scrolling list with edge-flip near the bottom.", "examples/ui_showcase/main.c:render_dropdown", render_dropdown, NULL},
@@ -2885,6 +2891,45 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     nt_ui_rich_end(ctx);
 }
 
+/* The frame loop binds the shape uber material as the ctx base while this tab is enabled. */
+static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st) {
+    char buf[96];
+    static const Clay_ElementDeclaration check_row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(44)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    static const Clay_ElementDeclaration row = {
+        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
+    static const Clay_ElementDeclaration cell = {.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(64)}}};
+    (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/base_sdf"), "One base material (off: plain base + a radial material)", &st->base_sdf, g_current->check,
+                         &check_row, true);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Panels, icons and radials interleaved -- one batch when they share the base:", g_current->caption);
+
+    nt_ui_shape_style_t rs = nt_ui_shape_style_defaults();
+    rs.kind = NT_UI_SHAPE_RADIAL;
+    rs.material = st->base_sdf ? s_shape_uber_material : s_shape_radial_material;
+    /* Shapes require a linked program; skip declaration until it links. */
+    const nt_material_info_t *rs_info = nt_material_get_info(rs.material);
+    if (!rs_info || !nt_gfx_program_ready(rs_info->program)) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "materials not ready", g_current->caption);
+        return;
+    }
+    rs.radial.inner_radius_norm = 0.5F;
+    rs.radial.angle_start = 0.5F * NT_PI;
+    const float c = st->radial.cooldown;
+    CLAY(row) {
+        for (int i = 0; i < 4; ++i) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(72)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .backgroundColor = {60, 70, 90, 255},
+                  .cornerRadius = CLAY_CORNER_RADIUS(12)}) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
+            }
+            rs.paint.color0 = showcase_hue_abgr((float)i / 4.0F);
+            rs.radial.angle_end = rs.radial.angle_start + c * RADIAL_TAU;
+            nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &rs, &cell);
+        }
+    }
+    (void)snprintf(buf, sizeof buf, "draw calls: %u", nt_ui_get_last_walk_draw_calls(ctx));
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo aggregates two fronts + a readout
 static void render_rich(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[128];
@@ -4138,10 +4183,11 @@ static void frame(void) {
         /* Snapshot before layout: a checkbox change takes effect together on the next frame. */
         const bool shape_uber_ready = nt_gfx_program_ready(s_shape_uber_program.program);
         const bool use_shape_uber = g_tabs[s_active_tab].render == render_shapes && s_state.shapes.mixed_material && shape_uber_ready;
+        const bool use_base_uber = g_tabs[s_active_tab].render == render_base_material && s_state.base_sdf && shape_uber_ready;
         s_shape_active_material = use_shape_uber ? s_shape_uber_material : s_shape_material;
         s_shape_active_radial_material = use_shape_uber ? s_shape_uber_material : s_shape_radial_material;
         s_shape_active_shadow_material = use_shape_uber ? s_shape_uber_material : s_shape_shadow_material;
-        nt_ui_set_sprite_material(s_ctx, use_shape_uber ? s_shape_uber_material : s_sprite_material);
+        nt_ui_set_sprite_material(s_ctx, use_shape_uber || use_base_uber ? s_shape_uber_material : s_sprite_material);
 
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);

@@ -1288,8 +1288,7 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
     const nt_ui_image_payload_t *payload = c->renderData.image.imageData;
     uint8_t block[64];
     const uint8_t count = build_custom_block(payload, payload->custom, &bb, 0U, block);
-    /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
-     * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
+    /* Corners TL/TR/BR/BL in Clay layout-space. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
     nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col, block, count);

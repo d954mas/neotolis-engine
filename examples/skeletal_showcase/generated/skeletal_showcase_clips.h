@@ -10,6 +10,13 @@
 #define ASSET_CLIP_SKELETAL_SHOWCASE_FOX_RUN_NANM ((nt_hash64_t){0x6B32754A517465D0ULL}) /* skeletal_showcase/fox/run.nanm */
 #define ASSET_CLIP_SKELETAL_SHOWCASE_FOX_SURVEY_NANM ((nt_hash64_t){0x49712E760C0B1C57ULL}) /* skeletal_showcase/fox/survey.nanm */
 #define ASSET_CLIP_SKELETAL_SHOWCASE_FOX_WALK_NANM ((nt_hash64_t){0x662B2E245C8FCAC7ULL}) /* skeletal_showcase/fox/walk.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_DEATH_NANM ((nt_hash64_t){0x276AC3F3F59A3135ULL}) /* skeletal_showcase/kaykit/death.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_IDLE_NANM ((nt_hash64_t){0x41ACB05F33082E0AULL}) /* skeletal_showcase/kaykit/idle.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_JUMP_NANM ((nt_hash64_t){0x8D4FB543761A2C13ULL}) /* skeletal_showcase/kaykit/jump.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_PUNCH_NANM ((nt_hash64_t){0x59E5A05CE9FAA8C9ULL}) /* skeletal_showcase/kaykit/punch.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_RUN_NANM ((nt_hash64_t){0x5217E775B9374C6EULL}) /* skeletal_showcase/kaykit/run.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_STAND_UP_NANM ((nt_hash64_t){0xCC6F964CE87F464DULL}) /* skeletal_showcase/kaykit/stand_up.nanm */
+#define ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_WALK_NANM ((nt_hash64_t){0x34068DB6B5A7697EULL}) /* skeletal_showcase/kaykit/walk.nanm */
 
 #if NT_HASH_LABELS
 static inline void skeletal_showcase_clips_register_labels(void) {
@@ -17,6 +24,13 @@ static inline void skeletal_showcase_clips_register_labels(void) {
     (void)nt_hash64_str("skeletal_showcase/fox/run.nanm");
     (void)nt_hash64_str("skeletal_showcase/fox/survey.nanm");
     (void)nt_hash64_str("skeletal_showcase/fox/walk.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/death.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/idle.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/jump.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/punch.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/run.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/stand_up.nanm");
+    (void)nt_hash64_str("skeletal_showcase/kaykit/walk.nanm");
 }
 #endif
 

@@ -188,6 +188,23 @@ does not keep a separate static-quad fast path unless measurements show a clear
 win on the target workload; this keeps the sprite batching code small and makes
 draw splitting depend only on capacity and state changes.
 
+### Sprite custom-attr block
+
+A sprite material declares its complete physical vertex layout. The producer
+writes the 20-byte position/UV/color prefix; typed fields after it form one
+tail block. Each non-ECS emit may replace that entire tail for its own vertices.
+An omitted block uses the material's copied
+[`vertex_defaults`](material.md#full-vertex-layout-and-defaults); omitting a
+nonempty tail without defaults asserts. Plain and custom widgets can share a
+material and batch when its defaults describe the plain mode. One staging batch
+has one stride, so changing stride flushes pending emits. ECS emits use material
+defaults because render items carry no tail override.
+
+A shader that derives a quad corner from `gl_VertexID & 3` needs each quad to
+start at a multiple of four vertices. The sprite renderer pads four-vertex
+custom geometry internally with up to three unreferenced vertices. If padding
+does not fit, the next emit flushes and starts at vertex zero.
+
 ## UI draw ordering (nt_ui walker)
 
 The UI walker has **three independent ordering axes** — do not conflate them:

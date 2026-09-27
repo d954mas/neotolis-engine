@@ -523,6 +523,23 @@ if(NOT EMSCRIPTEN)
     )
     nt_setup_test_target(test_sponza_program_assignment)
 
+    # Exercise the skeletal showcase's real game-owned mixing controller.
+    add_executable(test_skeletal_showcase_mixing unit/test_skeletal_showcase_mixing.c unit/test_helpers/nt_assert_trap.c)
+    target_include_directories(test_skeletal_showcase_mixing PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/unit"
+        "${CMAKE_SOURCE_DIR}/examples/skeletal_showcase/generated"
+    )
+    target_link_libraries(test_skeletal_showcase_mixing PRIVATE
+        nt_core nt_app_stub nt_input_stub nt_window_stub nt_math nt_log_stub nt_time nt_resource
+        nt_material nt_shared nt_atlas nt_skeletal nt_skeletal_assets
+        nt_sprite_renderer nt_text_renderer nt_font nt_ui nt_shape_renderer
+        nt_render nt_hash nt_mem_scratch nt_entity nt_transform_comp nt_drawable_comp
+        nt_mesh_comp nt_material_comp nt_skin_comp nt_skeletal_gpu nt_mesh_renderer
+        nt_skinned_mesh_renderer nt_gfx_fake nt_http_stub nt_fs_stub nt_platform
+        nt_basisu_transcoder_stub nt_meshwire_stub unity
+    )
+    nt_setup_test_target(test_skeletal_showcase_mixing)
+
     # --- Sort module tests ---
     add_executable(test_sort unit/test_sort.c unit/test_helpers/nt_assert_trap.c)
     target_include_directories(test_sort PRIVATE unit)
@@ -1431,6 +1448,7 @@ if(NOT EMSCRIPTEN)
         test_ui_radial
         test_ui_shape
         test_ui_shape_walk
+        test_nt_ui_base_custom_attrs
         test_nt_ui_clay_debug_view
         test_nt_ui_rich_build
         test_nt_ui_rich_custom
