@@ -38,7 +38,7 @@ holds the sprite and text shaders, the UI atlas, the font, the two Khronos rigs,
 and the KayKit mixing rig. Each imported rig has an NSKL skeleton, NSKN skin
 binding and skinned MESH assets; KayKit uses six mesh parts. The clips pack,
 `skeletal_showcase_clips.ntpack`, holds the four Khronos clips (Fox `Survey`,
-`Walk`, `Run` and the CesiumMan walk) plus five KayKit clips. Both packs mount at init, and
+`Walk`, `Run` and the CesiumMan walk) plus seven KayKit clips. Both packs mount at init, and
 the Skinned Meshes scene plays the clips of the second pack on the skeletons of the
 first, which is how the showcase exercises "a clip from another pack on an
 already-loaded skeleton". `raw/README.md` lists the raw inputs and their
@@ -223,17 +223,18 @@ snapshot and the order of `advance -> sample -> mix/override -> FK -> palette`.
 There is no animation-player or graph hidden behind the controls. The optional
 reusable player remains issue #569.
 
-The scene uses one 41-joint KayKit rig, six mesh parts and five 30 fps clips:
-Idle, Walking_A, Running_A, Jump_Full_Short and
-Unarmed_Melee_Attack_Punch_A. The result and optional source previews share
+The scene uses one 41-joint KayKit rig, six mesh parts and seven 30 fps clips:
+Idle, Walking_A, Running_A, Jump_Full_Short,
+Unarmed_Melee_Attack_Punch_A, Death_A and Lie_StandUp. The result and optional source previews share
 the same sampled poses and clocks. Frame-local samples and model matrices come
 from `nt_mem_scratch`; the persistent snapshot is 40 bytes per joint. Slot
 overflow is an `NT_ASSERT`, and a zero-gain occupied track still advances.
 
 The five modes expose distinct composition rules:
 
-- Crossfade mixes source and target with gains `(1-a, a)` and includes
-  run-to-jump and idle-to-run recipes.
+- Crossfade mixes source and target with gains `(1-a, a)`. Run-to-death is the
+  default high-contrast recipe; run-to-jump and idle-to-run remain available.
+  Get up holds the final death pose while blending into Lie_StandUp.
 - Blend space keeps idle/walk/run on one displayed normalized phase. The two-cycle mode
   uses `(1-v, v)`; the three-cycle mode uses adjacent triangular weights.
 - Partial body compares a flat weighted mix (`0.25` below the spine, `3` on
@@ -299,7 +300,8 @@ and confirm the pose follows. Switch `Character` to `CesiumMan`: `Clip` lists
 only `CesiumMan`; select it and confirm the walk plays upright.
 
 Mixing: switch to `Mixing & Crossfades`, enable Show sources and visit all five
-modes. Crossfade shows two moving clocks and complementary gains. Blend space
+modes. Crossfade starts with the high-contrast Run to Death recipe; also try Get
+up, Run to Jump and Idle to Run while watching the complementary gains. Blend space
 keeps every cycle clock phase-aligned, including the zero-gain clip. Partial
 body leaves the legs on locomotion while the punch affects the torso and arms;
 strict isolation removes the action from the legs completely. Override stays at
@@ -369,9 +371,9 @@ Context-loss restoration is reviewed in code; a full loss/retry run remains
 outside this showcase's evidence.
 
 The mixing scene has a parallel reusable scenario. It selects the scene,
-enables source previews, captures all five modes, exercises a same-frame
-interruption and repeats interruptions long enough to prove slot/snapshot
-reuse:
+enables source previews, captures all five modes plus the Run-to-Death and
+Death-to-Stand-up midpoints, exercises a same-frame interruption and repeats
+interruptions long enough to prove slot/snapshot reuse:
 
 ```bash
 python -m tools.devapi.scenarios.skeletal_mixing --output build/skeletal-mixing-native
@@ -383,7 +385,8 @@ scene bytes and repeated handoff count alongside the PNGs.
 
 The mixing scenario passed on native and WebGL2 for all five modes. Both runs
 observed `Frozen snapshot source; handoffs 1` at alpha zero and multiple later
-handoffs with unchanged snapshot and scene byte counts.
+handoffs with unchanged snapshot and scene byte counts. The two high-contrast
+midpoints also passed on both backends with alpha between 0.45 and 0.70.
 
 Verification of the original deformation comparison is native only. `skeletal_compare` measured 0
 mismatched pixels for Fox Walk, CesiumMan and the humanoid with shared and

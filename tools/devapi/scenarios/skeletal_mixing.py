@@ -59,6 +59,13 @@ def _wait_for_slots(client, minimum, max_frames=300):
     raise AssertionError(f"Mixing assets did not produce {minimum} occupied slots within {max_frames} frames")
 
 
+def _assert_mid_crossfade(client, label):
+    alpha = next(text for text in _texts(client) if text.startswith("alpha "))
+    value = float(re.match(r"alpha ([0-9.]+)", alpha).group(1))
+    if not 0.45 <= value <= 0.70:
+        raise AssertionError(f"{label}: capture is not mid-crossfade: {alpha}")
+
+
 def run(client, output, backend="native"):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -76,7 +83,12 @@ def run(client, output, backend="native"):
     telemetry = {}
     for mode in MODES:
         _select_mode(client, mode)
-        if mode in ("Partial body", "Override"):
+        if mode == "Crossfade":
+            _wait_for_slots(client, 1)
+            client.ui_click("mixing/run_death")
+            client.time_wait(0.55)
+            _assert_mid_crossfade(client, "Run to Death")
+        elif mode in ("Partial body", "Override"):
             _wait_for_slots(client, 2)
             client.time_wait(0.55)
         else:
@@ -98,6 +110,20 @@ def run(client, output, backend="native"):
         captures[mode] = _capture(client, output, mode.lower().replace(" ", "_"))
         telemetry[mode] = {"alpha": alpha, "memory": memory, "phase": phase}
 
+    _select_mode(client, "Crossfade")
+    client.ui_click("mixing/run_death")
+    client.time_wait(1.05)
+    death_texts = _texts(client)
+    if not any(text.startswith("Death t=") for text in death_texts) or any(text.startswith("Stand up t=") for text in death_texts):
+        raise AssertionError("Run to Death did not finish on the held death pose")
+    client.ui_click("mixing/get_up")
+    client.time_wait(0.55)
+    _assert_mid_crossfade(client, "Get up")
+    get_up_texts = _texts(client)
+    if not any(text.startswith("Death t=") for text in get_up_texts) or not any(text.startswith("Stand up t=") for text in get_up_texts):
+        raise AssertionError("Get up did not bind the final death pose and stand-up clip")
+    captures["Crossfade get up"] = _capture(client, output, "crossfade_get_up")
+
     _select_mode(client, "Interruption")
     client.ui_click("mixing/reset")
     client.wait_frames(3)
@@ -114,8 +140,7 @@ def run(client, output, backend="native"):
     client.ui_click("mixing/play")
     client.wait_frames(2)
     client.ui_click("mixing/repeat")
-    for _ in range(3):
-        client.wait_frames(15)
+    client.time_wait(1.05)
     repeated_texts = _texts(client)
     repeated = next(text for text in repeated_texts if "source; handoffs" in text)
     repeated_memory = next(text for text in repeated_texts if text.startswith("snapshot "))

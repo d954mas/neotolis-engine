@@ -49,6 +49,6 @@ joint rotations and the original six skinned meshes. It removes authored
 non-root translations and all scale channels. This explicit content edit makes
 the composed-pose bound `any_pose_radius + max(r_root)` valid; the original
 asset animates hips, IK controls and small scale noise and cannot use that
-formula. The packed clips are Idle, Walking_A, Running_A,
-Jump_Full_Short and Unarmed_Melee_Attack_Punch_A, sampled at their authored
+formula. The packed clips are Idle, Walking_A, Running_A, Jump_Full_Short,
+Unarmed_Melee_Attack_Punch_A, Death_A and Lie_StandUp, sampled at their authored
 30 fps. No runtime importer or retargeting is involved.

@@ -91,7 +91,7 @@
 #define CAMERA_FAR 50.0F
 #define CAMERA_PITCH_LIMIT 1.25F
 #define MIX_TRACK_COUNT 4U
-#define MIX_CLIP_COUNT 5U
+#define MIX_CLIP_COUNT 7U
 #define MIX_MESH_COUNT 6U
 #define MIX_CHARACTER_COUNT 4U
 #define MIX_ENTITY_COUNT (MIX_MESH_COUNT * MIX_CHARACTER_COUNT)
@@ -197,6 +197,8 @@ typedef enum {
     MIX_CLIP_RUN,
     MIX_CLIP_JUMP,
     MIX_CLIP_PUNCH,
+    MIX_CLIP_DEATH,
+    MIX_CLIP_STAND_UP,
 } mixing_clip_t;
 
 typedef struct {
@@ -813,7 +815,7 @@ static void skinned_update(void) {
 
 // #region mixing
 static const char *const s_mixing_mode_names[MIX_MODE_COUNT] = {"Crossfade", "Blend space", "Partial body", "Override", "Interruption"};
-static const char *const s_mixing_clip_names[MIX_CLIP_COUNT] = {"Idle", "Walk", "Run", "Jump", "Punch"};
+static const char *const s_mixing_clip_names[MIX_CLIP_COUNT] = {"Idle", "Walk", "Run", "Jump", "Punch", "Death", "Stand up"};
 
 static bool mixing_ready(void) {
     if (s_mixing_scene.skel == NULL || s_mixing_scene.skin == NULL) {
@@ -851,10 +853,22 @@ static void mixing_release_tracks(void) {
 
 static void mixing_pair(mixing_clip_t source, mixing_clip_t target) {
     mixing_release_tracks();
-    mixing_assign_slot(0, source, source != MIX_CLIP_JUMP);
-    mixing_assign_slot(1, target, target != MIX_CLIP_JUMP);
+    const bool source_looping = source != MIX_CLIP_JUMP && source != MIX_CLIP_DEATH && source != MIX_CLIP_STAND_UP;
+    const bool target_looping = target != MIX_CLIP_JUMP && target != MIX_CLIP_DEATH && target != MIX_CLIP_STAND_UP;
+    mixing_assign_slot(0, source, source_looping);
+    mixing_assign_slot(1, target, target_looping);
     s_mixing_scene.transition_elapsed = 0.0F;
     s_mixing_scene.using_snapshot = false;
+}
+
+static bool mixing_can_get_up(void) {
+    return (s_mixing_scene.slots[0].track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U && s_mixing_scene.slots[0].clip == MIX_CLIP_DEATH &&
+           s_mixing_scene.slots[0].track.time >= s_mixing_scene.slots[0].track.duration && (s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U;
+}
+
+static void mixing_fallen_to_stand(void) {
+    mixing_pair(MIX_CLIP_DEATH, MIX_CLIP_STAND_UP);
+    s_mixing_scene.slots[0].track.time = s_mixing_scene.slots[0].track.duration;
 }
 
 static void mixing_configure_mode(void) {
@@ -867,7 +881,7 @@ static void mixing_configure_mode(void) {
     s_mixing_scene.using_snapshot = false;
     switch (s_mixing_scene.mode) {
     case MIX_MODE_CROSSFADE:
-        mixing_pair(MIX_CLIP_RUN, MIX_CLIP_JUMP);
+        mixing_pair(MIX_CLIP_RUN, MIX_CLIP_DEATH);
         break;
     case MIX_MODE_BLEND_SPACE:
         mixing_assign_slot(0, MIX_CLIP_IDLE, true);
@@ -2076,6 +2090,15 @@ static void mixing_declare_controls(void) {
                     mixing_pair(MIX_CLIP_IDLE, MIX_CLIP_RUN);
                 }
             }
+            CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
+                if (text_button_fixed(nt_ui_id("mixing/run_death"), "Run -> Death", false, 106.0F, 32.0F) && mixing_ready()) {
+                    mixing_pair(MIX_CLIP_RUN, MIX_CLIP_DEATH);
+                }
+                const bool can_get_up = mixing_ready() && mixing_can_get_up();
+                if (text_button_fixed(nt_ui_id("mixing/get_up"), "Get up", can_get_up, 100.0F, 32.0F) && can_get_up) {
+                    mixing_fallen_to_stand();
+                }
+            }
             break;
         case MIX_MODE_BLEND_SPACE:
             (void)snprintf(text, sizeof text, "Speed %.2f", (double)s_mixing_scene.blend);
@@ -2714,8 +2737,9 @@ int main(int argc, char *argv[]) {
         }
     }
     const nt_hash64_t mix_clip_ids[MIX_CLIP_COUNT] = {
-        ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_IDLE_NANM, ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_WALK_NANM,  ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_RUN_NANM,
-        ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_JUMP_NANM, ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_PUNCH_NANM,
+        ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_IDLE_NANM,     ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_WALK_NANM,  ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_RUN_NANM,
+        ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_JUMP_NANM,     ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_PUNCH_NANM, ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_DEATH_NANM,
+        ASSET_CLIP_SKELETAL_SHOWCASE_KAYKIT_STAND_UP_NANM,
     };
     for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
         s_mix_clip_resource[i] = nt_resource_request(mix_clip_ids[i], NT_ASSET_CLIP);

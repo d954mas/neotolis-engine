@@ -162,6 +162,8 @@ static const clip_desc_t k_kaykit_clips[] = {
     {"Running_A", "skeletal_showcase/kaykit/run.nanm"},
     {"Jump_Full_Short", "skeletal_showcase/kaykit/jump.nanm"},
     {"Unarmed_Melee_Attack_Punch_A", "skeletal_showcase/kaykit/punch.nanm"},
+    {"Death_A", "skeletal_showcase/kaykit/death.nanm"},
+    {"Lie_StandUp", "skeletal_showcase/kaykit/stand_up.nanm"},
 };
 
 static const mesh_desc_t k_fox_meshes[] = {{NULL, "skeletal_showcase/fox.mesh"}};

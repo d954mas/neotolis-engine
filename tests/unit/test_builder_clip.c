@@ -925,6 +925,8 @@ static const khronos_clip_t k_khronos[] = {
     {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Running_A", 25, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
     {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Jump_Full_Short", 36, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
     {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Unarmed_Melee_Attack_Punch_A", 45, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Death_A", 25, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Lie_StandUp", 71, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

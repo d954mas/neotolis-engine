@@ -153,7 +153,48 @@ static void test_masks_and_composed_bound_come_from_the_loaded_rig(void) {
     TEST_ASSERT_TRUE(fabsf(s_mixing_scene.upper[1] - 1.0F) < 1e-6F);
     TEST_ASSERT_TRUE(fabsf(s_mixing_scene.lower[1]) < 1e-6F);
     TEST_ASSERT_TRUE(fabsf(s_mixing_scene.weighted[1] - 3.0F) < 1e-6F);
-    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.root_radius - 4.0F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.root_radius - 6.0F) < 1e-6F);
+}
+
+static void test_fallen_to_stand_starts_from_the_final_death_pose(void) {
+    mixing_fallen_to_stand();
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_DEATH, s_mixing_scene.slots[0].clip);
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_STAND_UP, s_mixing_scene.slots[1].clip);
+    TEST_ASSERT_TRUE(s_mixing_scene.slots[0].track.time == s_mixing_scene.slots[0].track.duration);
+    TEST_ASSERT_BITS_LOW(NT_SKELETAL_TRACK_LOOPING, s_mixing_scene.slots[0].track.flags);
+    TEST_ASSERT_BITS_LOW(NT_SKELETAL_TRACK_LOOPING, s_mixing_scene.slots[1].track.flags);
+
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[0].t[0] - (float)MIX_CLIP_DEATH) < 1e-6F);
+
+    s_mixing_scene.transition_elapsed = s_mixing_scene.transition_duration;
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_STAND_UP, s_mixing_scene.slots[0].clip);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_mixing_scene.slots[1].track.flags);
+}
+
+static void test_get_up_requires_a_completed_death(void) {
+    TEST_ASSERT_FALSE(mixing_can_get_up());
+    mixing_pair(MIX_CLIP_RUN, MIX_CLIP_DEATH);
+    TEST_ASSERT_FALSE(mixing_can_get_up());
+
+    s_mixing_scene.slots[1].track.time = s_mixing_scene.slots[1].track.duration;
+    s_mixing_scene.transition_elapsed = s_mixing_scene.transition_duration;
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_TRUE(mixing_can_get_up());
+
+    mixing_fallen_to_stand();
+    TEST_ASSERT_FALSE(mixing_can_get_up());
+}
+
+static void test_crossfade_defaults_to_the_high_contrast_death_target(void) {
+    s_mixing_scene.mode = MIX_MODE_CROSSFADE;
+    mixing_configure_mode();
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_RUN, s_mixing_scene.slots[0].clip);
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_DEATH, s_mixing_scene.slots[1].clip);
 }
 
 static void test_partial_body_uses_joint_weights_and_releases_the_source(void) {
@@ -325,6 +366,9 @@ int main(void) {
     RUN_TEST(test_interruption_captures_exact_signal_before_reuse);
     RUN_TEST(test_repeated_interruptions_reuse_one_snapshot);
     RUN_TEST(test_masks_and_composed_bound_come_from_the_loaded_rig);
+    RUN_TEST(test_fallen_to_stand_starts_from_the_final_death_pose);
+    RUN_TEST(test_get_up_requires_a_completed_death);
+    RUN_TEST(test_crossfade_defaults_to_the_high_contrast_death_target);
     RUN_TEST(test_partial_body_uses_joint_weights_and_releases_the_source);
     RUN_TEST(test_override_strength_is_independent_of_base_gain_and_releases_the_source);
     RUN_TEST(test_interruption_controller_preserves_the_visible_pose_at_handoff);
