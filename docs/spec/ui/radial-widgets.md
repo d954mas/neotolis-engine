@@ -116,10 +116,15 @@ with any rectangular region (full-bleed `[0,1]` texture or a packed sub-region).
   ring/reveal would deform. The slice9 struct fields remain for ABI parity with
   `nt_ui_image_style_t` but the widget asserts they are unset. A real
   geometry-local coordinate is the future path that would lift this.
-- **Angular convention is mathematical:** `0 = +X` axis, CCW positive. Two
-  independent `angle_start` / `angle_end` drive the sweep; there is no CW/CCW
-  flag — direction is implicit in the start/end order, and swapping the two
-  angles selects the complementary span.
+- **Angular convention follows local UI coordinates:** Y points down,
+  `0` points right, `+π/2` points down, `π` points left, and `3π/2` points
+  up. Increasing angles sweep clockwise on an unflipped, untransformed image
+  whose atlas region has identity orientation.
+  Two independent `angle_start` / `angle_end` drive the positive wrapped span;
+  swapping them selects the complementary span, not a short reverse sweep.
+  The reveal uses region-local UV, so image flips mirror the wedge with the art.
+  D4-rotated atlas regions can rotate or mirror the visible wedge relative to
+  these screen directions; that mismatch is not resolved by this convention.
 - **`fill` 0..1** is a thin convenience mapping `angle_end = angle_start +
   clamp(fill,0,1) * sweep_total` for cooldown / hold_progress idioms.
 - **`inner_radius_norm` `[0,1)`** carves a ring (0 = full disc); aspect from the

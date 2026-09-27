@@ -2,8 +2,8 @@ precision highp float;
 
 // Textured radial reveal (nt_ui_radial_image). Pairs with sprite_radial.vert.
 // Samples a real atlas region, then reveals the UN-SWEPT (remaining) sector via
-// one of four modes while the SWEPT sector stays full color. Mathematical angle
-// convention: 0 = +X, CCW positive.
+// one of four modes while the SWEPT sector stays full color. Region-local UV
+// has Y down for identity-oriented regions: 0 right, +pi/2 down, clockwise+.
 //
 // Wedge local coord is region-local [-1,1]: v_texcoord is normalized against the
 // region's atlas UV rect (v_uvrect = {u0,v0,u1,v1}) so the wedge centers on ANY
@@ -22,7 +22,6 @@ in vec4 v_radial;
 in vec4 v_tint;
 in vec4 v_uvrect;
 in vec4 v_layout;
-in vec2 v_local;
 
 out vec4 frag_color;
 
@@ -54,7 +53,7 @@ void main() {
     float ang = atan(p.y, p.x); // aspect-corrected space (matches r) so the wedge aligns with the oval
     float sweep = mod(ang - angle_start, TAU);
     float total = mod(angle_end - angle_start, TAU);
-    bool full_turn = abs(angle_end - angle_start) >= TAU - 1e-4; // |sweep|: a reverse (CCW) full turn is full too
+    bool full_turn = abs(angle_end - angle_start) >= TAU - 1e-4; // A full turn works for either angle order.
     float lead = clamp(r * sweep * ppu + 0.5, 0.0, 1.0);
     float trail = clamp(r * (total - sweep) * ppu + 0.5, 0.0, 1.0);
     float wedge_cov = full_turn ? 1.0 : (lead * trail);

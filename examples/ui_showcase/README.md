@@ -276,6 +276,10 @@ The radial widgets are **Model D**: the game owns the `fill` (a looping cooldown
 events `hold_progress`); the engine draws a flat `nt_ui_shape` RADIAL arc/sector/ring/oval per
 pixel (crisp AA, no vertex-pie facets). `nt_ui_radial_image` remains a textured reveal effect.
 Both paths bake angles into vertices so same-material elements can batch.
+Angles use local UI coordinates with Y down: `0` points right, `+π/2` down,
+and positive angles sweep clockwise. The top is `-π/2`; image flips mirror
+the reveal with the art. The image angle map assumes an identity-oriented
+atlas region; D4-rotated packing can rotate or mirror the visible wedge.
 
 | Element | Behavior |
 |---------|----------|
@@ -283,6 +287,7 @@ Both paths bake angles into vertices so same-material elements can batch.
 | **Oval** sector | a static 270° sector on a non-square (140×80) bbox — the `aspect` (w/h) keeps 0° at +X with no distortion |
 | **Hold** disc | press and HOLD the button; the events `hold_progress` fills the ring and confirms at the long-press threshold |
 | **Reveal** row (desaturate / dim / hide / tint) | `nt_ui_radial_image` on a full-bleed (UV [0,1]) textured swatch; the **swept** sector is full color, the **un-swept** sector gets the per-mode composite |
+| **Cardinal starts** | four fixed 90° sectors show 0° right, +90° down, +180° left and +270° up; each pair compares flat shape with textured HIDE reveal |
 | **Dense grid** (12×8) | every cell sweeps to a different phase but shares one active RADIAL material — the header `draw calls` count stays flat as the grid count grows (batched) |
 
 ## Radial visual-QA protocol
@@ -294,7 +299,8 @@ regression. Build + run the native showcase, open the **Radial** tab, and confir
 1. **Arc/sector crispness + AA** — at the small grid cells AND the large discs the arc edge is
    smooth, NOT a Defold-style vertex-pie of flat facets; the AA width reads consistent along the radius.
 2. **Oval shape** — the 140×80 oval sector has the correct aspect, no distortion at the angular edges.
-3. **Two-angle animation + seam** — drive the cooldown + hold radials; the 0°/360° boundary crosses
+3. **Angle directions + seam** — the fixed cardinal pairs agree for shape/image; the cooldown
+   begins at the top and sweeps clockwise. Drive cooldown + hold; the 0°/360° boundary crosses
    each quadrant with NO hairline seam or flicker as `fill` sweeps.
 4. **Four reveal modes** — desaturate / dim / hide / tint each apply ONLY to the un-swept sector;
    the swept sector stays full color; no premultiply halos at the swept boundary.

@@ -2230,28 +2230,28 @@ static void render_radial_tint_row(nt_ui_context_t *ctx) {
                 tstyle.material = s_radial_image_material[NT_UI_RADIAL_REVEAL_TINT];
                 tstyle.tint_color_packed = tint_colors[t];
                 tstyle.tint_strength = 0.85F;
-                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, 0.5F * NT_PI, 0.35F, RADIAL_TAU, &tstyle, &timg_decl);
+                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, -0.5F * NT_PI, 0.35F, RADIAL_TAU, &tstyle, &timg_decl);
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), tint_labels[t], g_current->caption);
             }
         }
     }
 }
 
-/* Two independent angles: each edge of the sector moves on its own. Shows CW, CCW,
+/* Two independent angles: each edge of the sector moves on its own. Shows CW and CCW edge motion,
  * symmetric open from the top, a spinning fixed-width arc, and a pac-man mouth. */
 static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t *st) {
-    static const char *const labels[5] = {"clockwise", "counter-cw", "both sides", "spin arc", "mouth"};
+    static const char *const labels[5] = {"CCW edge", "CW edge", "both sides", "spin arc", "mouth"};
     static const Clay_ElementDeclaration cell = {.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(72)}}};
     static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}};
     nt_ui_shape_style_t rs = nt_ui_shape_style_defaults();
     rs.kind = NT_UI_SHAPE_RADIAL;
     rs.material = s_shape_radial_material;
     const float c = st->radial.cooldown;                             /* 0..1 looping */
-    const float top = 0.5F * NT_PI;                                  /* 12 o'clock */
+    const float top = -0.5F * NT_PI;                                 /* 12 o'clock in Y-down UI */
     const float tri = (c < 0.5F) ? (c * 2.0F) : (2.0F - (c * 2.0F)); /* 0..1..0 */
     const float mouth = (0.05F + (0.4F * tri)) * NT_PI;
-    /* {start,end} per variant: CW fixes end + sweeps start back; CCW fixes start; both
-     * opens symmetrically; spin keeps a 90deg span rotating; mouth gaps at angle 0. */
+    /* {start,end}: first moves the start edge CCW, second moves the end edge CW;
+     * both opens symmetrically; spin keeps a 90deg span; mouth gaps at angle 0. */
     const float starts[5] = {top - (c * RADIAL_TAU), top, top - (c * NT_PI), c * RADIAL_TAU, mouth};
     const float ends[5] = {top, top + (c * RADIAL_TAU), top + (c * NT_PI), (c * RADIAL_TAU) + (0.5F * NT_PI), RADIAL_TAU - mouth};
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Two independent angles -- each edge moves on its own:", g_current->caption);
@@ -2262,6 +2262,34 @@ static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t 
                 rs.radial.angle_start = starts[i];
                 rs.radial.angle_end = ends[i];
                 nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &rs, &cell);
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), labels[i], g_current->caption);
+            }
+        }
+    }
+}
+
+/* Fixed quadrants make the Y-down angle contract visible beside the animated examples. */
+static void render_radial_cardinal_row(nt_ui_context_t *ctx) {
+    static const char *const labels[4] = {"0 right", "+90 down", "+180 left", "+270 up"};
+    static const Clay_ElementDeclaration cell = {.layout = {.sizing = {CLAY_SIZING_FIXED(56), CLAY_SIZING_FIXED(56)}}};
+    static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}};
+    static const Clay_ElementDeclaration pair = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 4}};
+    nt_ui_shape_style_t shape = nt_ui_shape_style_defaults();
+    shape.kind = NT_UI_SHAPE_RADIAL;
+    shape.material = s_shape_radial_material;
+    nt_ui_radial_image_style_t image = nt_ui_radial_image_style_defaults();
+    image.material = s_radial_image_material[NT_UI_RADIAL_REVEAL_HIDE];
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cardinal starts: shape (left) + image (right), each sweeping 90 degrees clockwise.", g_current->caption);
+    CLAY(row) {
+        for (int i = 0; i < 4; ++i) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                const float start = (float)i * 0.5F * NT_PI;
+                shape.radial.angle_start = start;
+                shape.radial.angle_end = start + 0.5F * NT_PI;
+                CLAY(pair) {
+                    nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &shape, &cell);
+                    nt_ui_radial_image(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, shape.radial.angle_start, shape.radial.angle_end, &image, &cell);
+                }
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), labels[i], g_current->caption);
             }
         }
@@ -2292,8 +2320,8 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     /* #region 1: cooldown + 2: hold-to-confirm + ring + oval */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cooldown sweep (looping timer) + hold-to-confirm (events hold_progress); ring + oval variants.", g_current->caption);
     CLAY(row_decl) {
-        /* Cooldown: fill ramps 0->1 over ~3s; start at +90deg (top), sweep a full turn. */
-        rstyle.radial.angle_start = 0.5F * NT_PI;
+        /* Cooldown: fill ramps 0->1 over ~3s; start at -90deg (top), sweep a full turn. */
+        rstyle.radial.angle_start = -0.5F * NT_PI;
         rstyle.radial.angle_end = rstyle.radial.angle_start + st->radial.cooldown * RADIAL_TAU;
         nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &rstyle, &disc_decl);
         /* Ring (inner cut) cooldown variant. */
@@ -2334,6 +2362,8 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     render_radial_two_angle_row(ctx, st);
     // #endregion
 
+    render_radial_cardinal_row(ctx);
+
     /* #region 3: four reveal modes on the [0,1]-UV radial_art (swept = full color) */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Radial-image reveal (swept = full color; un-swept = desaturate / dim / hide / tint), driven by the cooldown fill.", g_current->caption);
     static const char *const mode_labels[4] = {"desaturate", "dim", "hide", "tint"};
@@ -2346,7 +2376,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
                 /* mode + dim baked on the per-mode material; tint is per-widget (gold here). */
                 istyle.tint_color_packed = 0xFF33BFFFU; /* 0xAABBGGRR gold (r255 g191 b51) */
                 istyle.tint_strength = 0.85F;
-                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &istyle, &img_decl);
+                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, -0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &istyle, &img_decl);
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), mode_labels[m], g_current->caption);
             }
         }
@@ -2361,7 +2391,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
             nt_ui_radial_image_style_t pstyle = nt_ui_radial_image_style_defaults();
             pstyle.material = s_radial_image_packed_material;
-            nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_icon_bunny_ref, 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &pstyle, &img_decl);
+            nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_icon_bunny_ref, -0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &pstyle, &img_decl);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "packed (bunny)", g_current->caption);
         }
     }
@@ -2388,7 +2418,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
                         f -= 1.0F;
                     }
                     rstyle.paint.color0 = showcase_hue_abgr(phase);
-                    rstyle.radial.angle_start = 0.5F * NT_PI;
+                    rstyle.radial.angle_start = -0.5F * NT_PI;
                     rstyle.radial.angle_end = rstyle.radial.angle_start + f * RADIAL_TAU;
                     nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &rstyle, &cell_decl);
                 }

@@ -73,7 +73,7 @@ typedef struct {
     union {
         nt_ui_shape_radii_t box;
         struct {
-            float angle_start, angle_end; /* Finite radians; 0 is +X. */
+            float angle_start, angle_end; /* Finite radians in local UI space: 0 right, +pi/2 down, clockwise+. */
             float inner_radius_norm;      /* [0, 1); 0 is a disc. */
         } radial;
     };

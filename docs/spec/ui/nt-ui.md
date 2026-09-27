@@ -93,6 +93,12 @@ angular AA. It does not support a border or shadow. `nt_ui_radial_image`
 remains a separate textured reveal effect with its own API, shader layout and
 zero-sweep behavior.
 
+Radial angles use local UI coordinates before element transforms: Y points
+down, `0` points right, `+π/2` points down, `π` points left, and `3π/2`
+points up. Increasing angles sweep clockwise on an untransformed screen.
+The shader takes the positive wrapped span from `angle_start` to `angle_end`;
+swapping them selects the complementary span, not a short reverse sweep.
+
 The full shape vertex is the named `nt_ui_shape_vertex_t` (84 bytes), with
 a typed `nt_ui_shape_attrs_t` tail (64 bytes). Material declares all ten
 physical fields using full-vertex offsets; the semantic map is optional.

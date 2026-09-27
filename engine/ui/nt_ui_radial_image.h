@@ -5,7 +5,9 @@
  * un-swept sector via four reveal modes (swept sector = full color). Separate from
  * nt_ui_image; rides the custom-attr image path (REGION geom). Works with any
  * rectangular region (full-bleed or packed). slice9 is rejected in v1 (UV non-linear
- * across patches). Angular convention: 0 = +X, CCW+; swapping the angles reverses sweep.
+ * across patches). For an unflipped, identity-oriented atlas region, 0 points
+ * right and +pi/2 down in local UI space;
+ * positive angles sweep clockwise. Flips mirror the reveal with the art.
  * design + reveal modes + v1 limits: docs/spec/ui/radial-widgets.md
  * "Radial widgets & the custom-attr image path" */
 
@@ -68,8 +70,9 @@ static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void)
  * per-widget (style->tint_color_packed/tint_strength -> a_tint), not a material param. */
 #define NT_UI_RADIAL_IMAGE_PARAM_MODE "u_reveal_mode"
 
-/* Two-angle form. angle_start/angle_end in radians, mathematical convention
- * (0=+X, CCW+). region is by-pointer: resolved lazily, memoized into *region; an
+/* Two-angle form. angle_start/angle_end in local UI radians (0 right,
+ * +pi/2 down, clockwise+ before flips/transforms). Swapping angles selects
+ * the complementary span. region is by-pointer: resolved lazily, memoized into *region; an
  * unresolved/no-art ref skips the emit. data may be NULL. decl may be NULL
  * (GROW/GROW); the widget owns image/backgroundColor/userData. Must be called
  * between nt_ui_begin and nt_ui_end on the active ctx. Sweep caveat as

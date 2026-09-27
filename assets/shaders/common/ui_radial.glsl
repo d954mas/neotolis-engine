@@ -1,5 +1,6 @@
 #pragma once
 
+// p uses local UI coordinates with Y down; positive angles sweep clockwise.
 float nt_ui_radial_coverage(vec2 p, vec3 radial) {
     const float tau = 6.28318530717958647692;
     float radius = length(p);
