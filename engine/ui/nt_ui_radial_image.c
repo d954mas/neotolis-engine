@@ -19,12 +19,10 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial_image: inner_radius_norm must be finite in [0,1)");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_radial_image: style.slice9_scale must be finite > 0");
     NT_ASSERT(isfinite(style->tint_strength) && style->tint_strength >= 0.0F && style->tint_strength <= 1.0F && "nt_ui_radial_image: tint_strength must be finite in [0,1]");
-    /* slice9 unsupported: the reveal fs normalizes the atlas UV against the region's
-     * UV rect, which assumes a LINEAR mapping over the quad. slice9's per-patch UV is
-     * non-linear → the ring/reveal would deform. Any rectangular (non-slice9) region
-     * is supported; a real geometry-local coord is the future path for slice9. */
+    /* Slice9 patches use stretched geometry; the source-coordinate producer only
+     * covers the original atlas region vertices. */
     NT_ASSERT(!(style->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) && style->slice9_lrtb[0] == 0 && style->slice9_lrtb[1] == 0 && style->slice9_lrtb[2] == 0 && style->slice9_lrtb[3] == 0 &&
-              "nt_ui_radial_image: slice9 is unsupported (non-linear UV); rectangular regions only");
+              "nt_ui_radial_image: slice9 is unsupported; rectangular regions only");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_radial_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
     }
@@ -41,16 +39,20 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     if (region->region == NT_ATLAS_INVALID_REGION) {
         return;
     }
+    if (nt_resource_is_ready(region->atlas)) {
+        const nt_texture_region_t *resolved = nt_atlas_get_region(region->atlas, region->region);
+        NT_ASSERT((resolved->slice9_lrtb[0] | resolved->slice9_lrtb[1] | resolved->slice9_lrtb[2] | resolved->slice9_lrtb[3]) == 0 && "nt_ui_radial_image: baked slice9 is unsupported");
+    }
 
     /* Per-widget TINT color -> a_tint (0..1 floats). mode/dim stay material-level. */
     const Clay_Color tint_rgb = nt_ui_unpack_abgr(style->tint_color_packed);
 
-    /* a_uvrect/a_layout are walker-injected by name at emit; REGION = textured path. */
-    const float blk[16] = {
-        angle_start, angle_end, style->inner_radius_norm, 0.0F, tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F,
-    };
-    static const char *const attr_names[] = {"a_radial", "a_tint", "a_uvrect", "a_layout", NULL};
-    NT_ASSERT(nt_ui_internal_float4_block_matches(style->material, attr_names, 4) && "radial material must match fixed FLOAT4 payload offsets");
+    /* The sprite renderer writes a_source_uv per vertex from source-space positions. */
+    const float blk[11] = {angle_start, angle_end, style->inner_radius_norm, 0.0F, tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength, 0.0F, 0.0F, 0.0F};
+    static const char *const attr_names[] = {"a_radial", "a_tint", "a_aspect", "a_source_uv", NULL};
+    NT_ASSERT(nt_ui_internal_float4_block_matches(style->material, attr_names, 2) && "radial material must match fixed FLOAT4 payload offsets");
+    const nt_material_info_t *mi = nt_material_get_info(style->material);
+    NT_ASSERT(mi->vertex_layout.stride == 64U && "radial-image material must have the 64-byte source-UV layout");
     (void)attr_names;
     const nt_ui_image_custom_t img = {
         .atlas = region->atlas,
@@ -58,6 +60,7 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .material = style->material,
         .custom_attrs = blk,
         .custom_bytes = (uint8_t)sizeof blk,
+        .attr_names = attr_names,
         .geom_mode = NT_UI_IMAGE_GEOM_REGION,
         /* a_tint.w is the TINT reveal strength, not alpha. Real alpha fades via color_packed ->
          * a_color (the walker's backgroundColor.a path), never through a_tint. */

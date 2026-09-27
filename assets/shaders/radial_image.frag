@@ -3,10 +3,10 @@ precision highp float;
 // Textured radial reveal (nt_ui_radial_image). Pairs with sprite_radial.vert.
 // Samples a real atlas region, then reveals the UN-SWEPT (remaining) sector via
 // one of four modes while the SWEPT sector stays full color. Region-local UV
-// has Y down after undoing atlas D4: 0 right, +pi/2 down, clockwise+.
+// has Y down: 0 right, +pi/2 down, clockwise+.
 //
-// Wedge local coord is source-region [-1,1] from the vertex shader; raw atlas UV
-// only samples texture. This keeps packing rotations/mirrors out of the angle test.
+// Wedge local coord is source-image [-1,1] from the sprite renderer; raw atlas UV
+// only samples texture. Trim and packing orientation do not move the wedge.
 //
 // TINT is per-vertex (a_tint via v_tint): rgb=target color, w=mix strength. Many
 // tint colors share ONE material. mode + dim_factor stay material-level (u_reveal_mode).
@@ -19,8 +19,8 @@ in vec2 v_texcoord;
 in vec4 v_color;
 in vec4 v_radial;
 in vec4 v_tint;
-in vec4 v_layout;
 in vec2 v_local_uv;
+in float v_aspect;
 
 out vec4 frag_color;
 
@@ -30,7 +30,7 @@ void main() {
     float angle_start = v_radial.x;
     float angle_end = v_radial.y;
     float inner = v_radial.z;
-    float aspect = v_layout.x; // walker-injected bbox w/h
+    float aspect = v_aspect; // walker-injected bbox w/h
 
     // aspect = w/h re-rounds the angle on a non-square bbox so 0 stays +X.
     vec2 p = v_local_uv * vec2(1.0, aspect);
@@ -51,7 +51,7 @@ void main() {
     bool full_turn = abs(angle_end - angle_start) >= TAU - 1e-4; // A full turn works for either angle order.
     float lead = clamp(r * sweep * ppu + 0.5, 0.0, 1.0);
     float trail = clamp(r * (total - sweep) * ppu + 0.5, 0.0, 1.0);
-    float wedge_cov = full_turn ? 1.0 : (lead * trail);
+    float wedge_cov = full_turn ? 1.0 : ((angle_start == angle_end) ? 0.0 : (lead * trail));
 
     // Premultiply: texture is premultiplied; premultiply vertex color too.
     // Identical to sprite.frag.

@@ -86,6 +86,7 @@ void nt_ui_shape_end(nt_ui_context_t *ctx) {
 }
 
 void nt_ui_shape(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const nt_ui_shape_style_t *style, const Clay_ElementDeclaration *decl) {
-    nt_ui_shape_begin(ctx, data, style, decl);
+    const Clay_ElementDeclaration grow = {.layout.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}};
+    nt_ui_shape_begin(ctx, data, style, decl != NULL ? decl : &grow);
     nt_ui_shape_end(ctx);
 }

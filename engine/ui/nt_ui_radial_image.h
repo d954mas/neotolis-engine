@@ -5,10 +5,10 @@
  * un-swept sector via four reveal modes (swept sector = full color). Separate from
  * nt_ui_image; rides the custom-attr image path (REGION geom). Works with any
  * rectangular region (full-bleed or packed, including atlas D4 orientations).
- * slice9 is rejected in v1 (UV non-linear across patches). Before explicit
+ * slice9 is rejected in v1 (patch geometry needs separate source coordinates). Before explicit
  * flips/transforms, 0 points right and +pi/2 down in local UI space; positive
- * angles sweep clockwise. The walker injects atlas D4 into a_layout.w at emit;
- * explicit flips mirror the reveal with the art.
+ * angles sweep clockwise. The renderer supplies source-image UV regardless of
+ * atlas D4; explicit flips mirror the reveal with the art.
  * design + reveal modes + v1 limits: docs/spec/ui/radial-widgets.md
  * "Radial widgets & the custom-attr image path" */
 

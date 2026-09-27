@@ -4433,20 +4433,19 @@ int main(int argc, char *argv[]) {
 
     /* One radial-image material per reveal mode: u_reveal_mode (mode + dim_factor) is baked at
      * creation. The TINT is per-widget now (a_tint @ loc 5), so the TINT material serves every
-     * tint color from one batch. attr_map declares all four custom attrs (a_radial + a_tint +
-     * a_uvrect @ loc 6 + a_layout @ loc 7; the walker fills a_uvrect + a_layout by name). */
+     * tint color from one batch. The renderer fills a_source_uv; the walker fills a_aspect. */
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
-            .vertex_layout = {.stride = 84,
+            .vertex_layout = {.stride = 64,
                               .attr_count = 7,
                               .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
                                         {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
                                         {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
                                         {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
                                         {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
-                                        {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52},
-                                        {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 68}}},
+                                        {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 52},
+                                        {.location = 6, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 56}}},
             .textures = {{.name = "u_texture", .resource = s_radial_art_tex_handle}},
             .texture_count = 1,
             .blend = nt_blend_alpha_premultiplied(),
@@ -4455,8 +4454,8 @@ int main(int argc, char *argv[]) {
             .cull_mode = NT_CULL_NONE,
             .attr_map[0] = {.stream_name = "a_radial", .location = 4},
             .attr_map[1] = {.stream_name = "a_tint", .location = 5},
-            .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
-            .attr_map[3] = {.stream_name = "a_layout", .location = 7},
+            .attr_map[2] = {.stream_name = "a_source_uv", .location = 6},
+            .attr_map[3] = {.stream_name = "a_aspect", .location = 7},
             .attr_map_count = 4,
             .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
             .param_count = 1,
@@ -4466,17 +4465,17 @@ int main(int argc, char *argv[]) {
 
     /* Packed-region proof: a radial-image material bound to the SHARED ui_showcase atlas
      * texture (not the full-bleed radial_art). Reveals a real packed sub-region (the bunny
-     * icon), exercising the region-local wedge remap (a_uvrect). DESATURATE mode. */
+     * icon), exercising source-local wedge coordinates. DESATURATE mode. */
     s_radial_image_packed_material = nt_material_create(&(nt_material_create_desc_t){
-        .vertex_layout = {.stride = 84,
+        .vertex_layout = {.stride = 64,
                           .attr_count = 7,
                           .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
                                     {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
                                     {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
                                     {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
                                     {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
-                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52},
-                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 68}}},
+                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 52},
+                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 56}}},
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -4485,8 +4484,8 @@ int main(int argc, char *argv[]) {
         .cull_mode = NT_CULL_NONE,
         .attr_map[0] = {.stream_name = "a_radial", .location = 4},
         .attr_map[1] = {.stream_name = "a_tint", .location = 5},
-        .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
-        .attr_map[3] = {.stream_name = "a_layout", .location = 7},
+        .attr_map[2] = {.stream_name = "a_source_uv", .location = 6},
+        .attr_map[3] = {.stream_name = "a_aspect", .location = 7},
         .attr_map_count = 4,
         .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)NT_UI_RADIAL_REVEAL_DESATURATE, 0.4F, 0.0F, 0.0F}},
         .param_count = 1,

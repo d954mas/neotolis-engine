@@ -32,15 +32,17 @@ reveals still collapses to one `set_material` and one draw.
 
 ## Name-bound injection vocabulary
 
-The per-vertex custom block is a byte record. The material's full
+The custom block is a byte record copied to each vertex. The material's full
 `vertex_layout` declares its storage; `attr_map` maps semantic names to locations.
-The walker resolves name -> location -> physical attribute, checks FLOAT4,
-non-normalized storage wholly inside the tail, then subtracts20 from the full
-offset. Neither physical array order nor semantic map order defines bytes.
+The walker resolves name -> location -> physical attribute, checks the required
+FLOAT count and non-normalized storage wholly inside the tail, then subtracts
+20 from the full offset. Neither physical array order nor semantic map order
+defines bytes.
 
 - `a_layout` vec4 = `{aspect = bbox w/h, bbox_width_px, bbox_height_px,
-  region D4 transform}` for REGION geometry; `.w = 0` for GEOMETRY.
+  region D4 transform}` for generic REGION geometry; `.w = 0` for GEOMETRY.
 - `a_uvrect` vec4 = `{u0, v0, u1, v1}` = region min/max atlas UV.
+- `a_aspect` float = bbox width / height, or 1 when height is zero.
 
 Injection happens after Clay layout and atlas resolution. Other bytes copy
 verbatim. A missing semantic skips injection; a present semantic without a valid
@@ -48,13 +50,15 @@ physical field asserts. Optional `attr_names` is a NULL-terminated set of expect
 names, in any order and possibly a subset. It checks name presence only, never
 payload layout compatibility. The UI custom record has capacity64 bytes.
 
-`nt_ui_radial_image` additionally asserts its fixed FLOAT4 payload ABI:
-`a_radial` at full offset20, `a_tint` at36, `a_uvrect` at52 and
-`a_layout` at68. Each field must be FLOAT4, non-normalized, and resolved by
-semantic name to its physical location. Semantic array order remains irrelevant.
+`nt_ui_radial_image` uses a 64-byte full vertex. `a_radial` is FLOAT4 at offset20,
+`a_tint` FLOAT4 at36, `a_aspect` FLOAT at52 and `a_source_uv` FLOAT2 at56.
+The first two fields are uniform per emit. The walker injects `a_aspect`, while
+the sprite renderer overwrites `a_source_uv` per region vertex from the
+source-space position and original source dimensions. Semantic array order
+remains irrelevant.
 The generic custom-image API still accepts other valid byte layouts.
 
-**To add a new injected value:** pick a new attr name, fill it in the walker,
+**To add a new walker-injected value:** pick a new attr name, fill it in the walker,
 and name it in a material's `attr_map`. No payload struct change and no public
 API change. `nt_ui_radial_image` uses the generic custom-emit branch keyed on
 `payload.custom != NULL`. The separate [analytic shape path](nt-ui.md#analytic-shapes)
@@ -67,8 +71,8 @@ it does not change this generic injection contract or radial-image geometry.
 is present:
 
 - **`NT_UI_IMAGE_GEOM_REGION`** — the textured `emit_region` / `emit_slice9`
-  path. Real atlas art; origin, flip, and slice9 are honored. Used by
-  `nt_ui_radial_image`, which reveals a real texture.
+  path. Real atlas art; origin, flip, and slice9 are honored by generic custom
+  images. `nt_ui_radial_image` accepts rectangular regions and rejects slice9.
 - **`NT_UI_IMAGE_GEOM_GEOMETRY`** — a clean 4-corner bbox quad (TL/TR/BR/BL)
   against the white region via `emit_geometry`. Generic custom-image users can
   derive local coordinates from this quad rather than a packed region's winding.
@@ -107,19 +111,19 @@ reveal in the same mode. The **tint is per-widget** (`tint_color_packed` +
 `tint_strength` → baked into `a_tint`), so many differently-tinted radials share
 one TINT-mode material and still batch to a single draw.
 
-The walker reads the ready region's D4 transform into `a_layout.w` at emit time.
-The vertex shader normalizes atlas UV into region-local `[-1,1]` and undoes the
-packing transform (diagonal, flipH, flipV in reverse). Thus the
-wedge uses source-image coordinates regardless of atlas placement or orientation;
-the fragment shader samples the original atlas UV. This works with rectangular
-regions, including full-bleed, packed, and D4-rotated or mirrored regions.
+The sprite renderer writes source-image UV into `a_source_uv` from each region
+vertex's source-space position, including the alpha-trim offset. The wedge uses
+these coordinates; the fragment shader samples the original packed atlas UV.
+Packing placement and all D4 orientations therefore leave the wedge fixed to
+the source image. Explicit sprite flips mirror the art and wedge together.
+The radial full vertex is 64 bytes; basic sprites remain 20 bytes.
 
 **v1 limits:**
 
-- **slice9 is rejected.** The UV is non-linear across slice9 patches, so the
-  ring/reveal would deform. The slice9 struct fields remain for ABI parity with
-  `nt_ui_image_style_t` but the widget asserts they are unset. A real
-  geometry-local coordinate is the future path that would lift this.
+- **slice9 is rejected.** The region source-coordinate producer does not cover
+  independently stretched slice9 patch vertices. The slice9 struct fields remain
+  for ABI parity with `nt_ui_image_style_t`; the widget asserts both style
+  overrides and baked atlas borders are unset.
 - **Angular convention follows local UI coordinates:** Y points down,
   `0` points right, `+π/2` points down, `π` points left, and `3π/2` points
   up. Increasing angles sweep clockwise on an unflipped, untransformed image,
@@ -129,6 +133,8 @@ regions, including full-bleed, packed, and D4-rotated or mirrored regions.
   Explicit image flips mirror the wedge with the art. Atlas D4 packing is
   inverted before the angular test and does not alter the visible wedge.
 - **`fill` 0..1** is a thin convenience mapping `angle_end = angle_start +
-  clamp(fill,0,1) * sweep_total` for cooldown / hold_progress idioms.
+  clamp(fill,0,1) * sweep_total` for cooldown / hold_progress idioms. Equal
+  start/end angles have zero swept coverage, including the start ray, so HIDE
+  leaves no seam at `fill=0`.
 - **`inner_radius_norm` `[0,1)`** carves a ring (0 = full disc); aspect from the
   bbox lets the same shape render as an oval.

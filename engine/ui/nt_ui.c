@@ -1199,7 +1199,7 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
 
 /* Resolve semantic name to full physical layout before converting to a tail offset. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static int custom_attr_byte_offset(const nt_material_info_t *mi, uint32_t name_hash) {
+static int custom_attr_byte_offset(const nt_material_info_t *mi, uint32_t name_hash, uint8_t count) {
     for (uint8_t ai = 0; ai < mi->attr_map_count; ++ai) {
         if (mi->attr_map_hashes[ai] != name_hash) {
             continue;
@@ -1209,8 +1209,8 @@ static int custom_attr_byte_offset(const nt_material_info_t *mi, uint32_t name_h
             if (attr->location != mi->attr_map_locations[ai]) {
                 continue;
             }
-            NT_ASSERT(attr->offset >= 20U && (uint32_t)attr->offset + sizeof(float[4]) <= mi->vertex_layout.stride);
-            NT_ASSERT(attr->type == NT_VERTEX_FLOAT && attr->count == 4U && !attr->normalized);
+            NT_ASSERT(attr->offset >= 20U && (uint32_t)attr->offset + ((uint32_t)count * sizeof(float)) <= mi->vertex_layout.stride);
+            NT_ASSERT(attr->type == NT_VERTEX_FLOAT && attr->count == count && !attr->normalized);
             return (int)attr->offset - 20;
         }
         NT_ASSERT(false && "UI semantic has no physical vertex field");
@@ -1253,21 +1253,28 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
     /* Cache the injection-attr name hashes once (runtime hash; same fn the material used). */
     static uint32_t s_hash_layout;
     static uint32_t s_hash_uvrect;
+    static uint32_t s_hash_aspect;
     if (s_hash_layout == 0U) {
         s_hash_layout = nt_hash32_str("a_layout").value;
         s_hash_uvrect = nt_hash32_str("a_uvrect").value;
+        s_hash_aspect = nt_hash32_str("a_aspect").value;
     }
 
     /* Layout and atlas orientation are resolved together at emit, so a pack
      * replacement cannot pair a stale D4 transform with new region UVs. */
-    const int lo = custom_attr_byte_offset(mi, s_hash_layout);
+    const int lo = custom_attr_byte_offset(mi, s_hash_layout, 4U);
     if (lo >= 0) {
         const float layout[4] = {(bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F, bb->width, bb->height, (float)atlas_transform};
         memcpy(out + lo, layout, sizeof(layout));
     }
-    const int uo = custom_attr_byte_offset(mi, s_hash_uvrect);
+    const int uo = custom_attr_byte_offset(mi, s_hash_uvrect, 4U);
     if (uo >= 0) {
         inject_uvrect(p->atlas, p->region_index, out, uo);
+    }
+    const int ao = custom_attr_byte_offset(mi, s_hash_aspect, 1U);
+    if (ao >= 0) {
+        const float aspect = (bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F;
+        memcpy(out + ao, &aspect, sizeof aspect);
     }
     return blk->custom_bytes;
 }

@@ -153,11 +153,20 @@ Every region/slice9/geometry emit accepts a complete `const void *attrs,
 uint16_t bytes` tail override. NULL/0 selects defaults bytes `[20,stride)`;
 without defaults a nonempty tail asserts. Plain stride20 requires NULL/0.
 Partial blocks, NULL/nonzero and non-NULL/zero assert. The renderer writes the
-prefix from ordinary emit arguments and copies only the selected tail to each
-vertex. Prefix default bytes are always overwritten; there is no tint multiply
+prefix from ordinary emit arguments and copies the selected tail to each
+vertex, then fills any renderer-owned source UV field. Prefix default bytes are
+always overwritten; there is no tint multiply
 or merge. Override pointers are borrowed only during the emit, including skipped
 emits, and never affect later calls. ECS uses the same defaults without new item
 or component state. Materials stay alive through their last consuming emit.
+
+The optional `a_source_uv` semantic maps to a FLOAT2 tail field. For REGION
+geometry, the sprite renderer overwrites it per vertex from the region's
+source-space positions and original source dimensions, with Y down. Alpha trim,
+atlas placement and D4 packing do not change this coordinate; explicit sprite
+flips mirror the position and its source coordinate together. GEOMETRY and
+slice9 emits assert if the bound material requests it. The field is resolved
+once when a command opens; ordinary 20-byte sprites retain their existing path.
 
 Defaults and semantic names do not participate in vertex-input identity. The
 renderer hashes all canonical physical fields before cache lookup, without

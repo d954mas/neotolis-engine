@@ -293,7 +293,7 @@ int main(int argc, char *argv[]) {
     // #endregion
 
     // #region atlas: radial-image art (single full-bleed sprite -> UV spans [0,1])
-    /* The reveal now centers on ANY rectangular region (region-local UV via a_uvrect), so a
+    /* The reveal uses source-image coordinates for any rectangular region, so a
      * packed sub-region works too — the showcase proves that on the shared atlas's bunny. This
      * DEDICATED full-bleed single-sprite atlas (no padding/margin/extrude, non-POT, RECT,
      * fully-OPAQUE so the trimmer strips nothing) is kept for the A/B [0,1]-UV reference cell. */

@@ -432,63 +432,6 @@ static void assert_texel_round_trip(const uv_probe_t *probe, const uint8_t *src,
     TEST_FAIL_MESSAGE(msg);
 }
 
-/* Recover source-local corners from the packed UV and the region's D4 value. */
-static void assert_radial_inverse_d4(const NtAtlasRegion *reg, const decoded_atlas_vertex_t *verts) {
-    uint16_t u0 = UINT16_MAX;
-    uint16_t v0 = UINT16_MAX;
-    uint16_t u1 = 0;
-    uint16_t v1 = 0;
-    int32_t x0 = INT32_MAX;
-    int32_t y0 = INT32_MAX;
-    int32_t x1 = INT32_MIN;
-    int32_t y1 = INT32_MIN;
-    for (uint32_t i = 0; i < reg->vertex_count; ++i) {
-        if (verts[i].atlas_u < u0) {
-            u0 = verts[i].atlas_u;
-        }
-        if (verts[i].atlas_v < v0) {
-            v0 = verts[i].atlas_v;
-        }
-        if (verts[i].atlas_u > u1) {
-            u1 = verts[i].atlas_u;
-        }
-        if (verts[i].atlas_v > v1) {
-            v1 = verts[i].atlas_v;
-        }
-        if (verts[i].local_x < x0) {
-            x0 = verts[i].local_x;
-        }
-        if (verts[i].local_y < y0) {
-            y0 = verts[i].local_y;
-        }
-        if (verts[i].local_x > x1) {
-            x1 = verts[i].local_x;
-        }
-        if (verts[i].local_y > y1) {
-            y1 = verts[i].local_y;
-        }
-    }
-    TEST_ASSERT_TRUE_MESSAGE(u1 > u0 && v1 > v0 && x1 > x0 && y1 > y0, "radial D4 probe requires a non-degenerate rectangle");
-    for (uint32_t i = 0; i < reg->vertex_count; ++i) {
-        double qx = (double)(verts[i].atlas_u - u0) / (double)(u1 - u0);
-        double qy = (double)(verts[i].atlas_v - v0) / (double)(v1 - v0);
-        if (reg->transform & NT_ATLAS_XFORM_FLIP_H) {
-            qx = 1.0 - qx;
-        }
-        if (reg->transform & NT_ATLAS_XFORM_FLIP_V) {
-            qy = 1.0 - qy;
-        }
-        if (reg->transform & NT_ATLAS_XFORM_TRANSPOSE) {
-            const double swap = qx;
-            qx = qy;
-            qy = swap;
-        }
-        const double local_x = (double)(verts[i].local_x - x0) / (double)(x1 - x0);
-        const double local_y_down = (double)(y1 - verts[i].local_y) / (double)(y1 - y0);
-        TEST_ASSERT_TRUE_MESSAGE(fabs(qx - local_x) < 1e-6 && fabs(qy - local_y_down) < 1e-6, "inverse packed D4 must recover source-local radial coordinates");
-    }
-}
-
 /* Every opaque texel of ONE image must sample back its own colour through that
  * region's own local->UV map. The colour encodes the source texel, so a wrong
  * relative, a missed dimension swap or
@@ -499,7 +442,6 @@ static void assert_region_samples_image(const pack_file_t *pack, const atlas_vie
     decoded_atlas_vertex_t verts[NT_POLYGON_MAX_VERTICES];
     const uint16_t *idx = NULL;
     TEST_ASSERT_TRUE_MESSAGE(atlas_view_region_spans(view, r, verts, &idx), "region spans outside the blob");
-    assert_radial_inverse_d4(reg, verts);
     uv_probe_t probe = {.page = NULL, .page_w = 0, .page_h = 0, .map = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}}, .region = r, .transform = label};
     TEST_ASSERT_TRUE_MESSAGE(solve_local_to_uv(verts, reg->vertex_count, &probe.map), "the region's local->UV map is degenerate");
     TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_read_page_rgba(pack->bytes, pack->len, reg->page_index, &probe.page, &probe.page_w, &probe.page_h), "read the atlas page pixels");

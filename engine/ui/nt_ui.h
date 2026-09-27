@@ -98,7 +98,8 @@ typedef struct {
 /* Per-widget custom per-vertex block — scratch-allocated, referenced by pointer only
  * for custom-attr widgets so a plain image keeps the payload small. Untyped: the bound
  * material maps semantic names to locations and its vertex_layout maps locations to bytes.
- * The walker injects FLOAT4 a_layout/a_uvrect by name; other bytes pass through unchanged.
+ * The walker injects FLOAT4 a_layout/a_uvrect and FLOAT a_aspect by name;
+ * other bytes pass through unchanged.
  * injection vocabulary: docs/spec/ui/radial-widgets.md
  * "Radial widgets & the custom-attr image path" */
 typedef struct {

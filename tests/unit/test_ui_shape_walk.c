@@ -125,6 +125,20 @@ static void test_box_layout_and_asymmetric_radii(void) {
     TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(0).num_indices);
 }
 
+static void test_leaf_without_declaration_fills_parent_and_emits(void) {
+    const nt_ui_shape_style_t style = box_style();
+    begin_frame();
+    CLAY({.layout.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(90)}}) { nt_ui_shape(s_fx.ctx, NULL, &style, NULL); }
+    end_and_walk();
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_last_emit_vertex_count());
+    nt_ui_shape_attrs_t attrs;
+    nt_sprite_renderer_test_last_emit_attrs(0, &attrs, sizeof(attrs));
+    TEST_ASSERT_TRUE(attrs.layout[0] == 160.0F && attrs.layout[1] == 90.0F);
+}
+
 static void test_radii_share_css_adjacent_edge_scale(void) {
     nt_ui_shape_style_t style = box_style();
     style.box.top_left = 80.0F;
@@ -741,6 +755,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_screen_shape_culling_uses_projection_extent_with_offset_viewport);
     RUN_TEST(test_typed_defaults_override_and_skip_own_exact_bytes);
     RUN_TEST(test_box_layout_and_asymmetric_radii);
+    RUN_TEST(test_leaf_without_declaration_fills_parent_and_emits);
     RUN_TEST(test_radii_share_css_adjacent_edge_scale);
     RUN_TEST(test_four_border_sides_keep_layout_order_and_full_precision);
     RUN_TEST(test_zero_sides_do_not_inherit_another_side);

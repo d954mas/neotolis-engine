@@ -38,8 +38,7 @@
 #define UI_ATLAS_VERTEX_COUNT 14u
 #define UI_ATLAS_INDEX_COUNT 24u
 
-/* Packed sub-region UV bounds (raw u16): u in [0.25,0.5], v in [0.5,0.75].
- * Tests read these back from the walker-baked a_uvrect. */
+/* Packed sub-region UV bounds (raw u16): u in [0.25,0.5], v in [0.5,0.75]. */
 #define UI_ATLAS_PACKED_U0 0x4000u
 #define UI_ATLAS_PACKED_V0 0x8000u
 #define UI_ATLAS_PACKED_U1 0x8000u

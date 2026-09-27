@@ -36,11 +36,14 @@ static inline nt_ui_image_style_t nt_ui_image_style_defaults(void) { return (nt_
  * region is by-pointer: the engine resolves it lazily and memoizes the index into *region. */
 void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
 
-/* Generic custom-attr atlas-region emit (radial/radial_image/SDF). Injection is name-bound:
- * the material attr_map maps names to full vertex_layout locations; the walker injects FLOAT4
- * a_layout/a_uvrect and copies all other bytes. Contract: custom_bytes == vertex_layout.stride-20
- * <= NT_SPRITE_CUSTOM_STRIDE_MAX. data/decl may be NULL.
- * spec: docs/spec/ui/radial-widgets.md */
+/* Generic custom-attr atlas-region emit. Injection is name-bound:
+ * the material attr_map maps names to full vertex_layout locations; the walker injects
+ * FLOAT4 a_layout/a_uvrect and FLOAT
+ * a_aspect, then copies all other bytes.
+ * The sprite renderer fills a_source_uv per REGION vertex when requested.
+ * Contract: custom_bytes == vertex_layout.stride-20
+ * <=
+ * NT_SPRITE_CUSTOM_STRIDE_MAX. data/decl may be NULL. spec: docs/spec/ui/radial-widgets.md */
 typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;

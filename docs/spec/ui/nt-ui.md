@@ -18,12 +18,14 @@ building blocks per the engine's "set of modules" principle.
 
 ## Analytic shapes
 
-`nt_ui_shape` declares a leaf; `nt_ui_shape_begin/end` declares the same paint
-with children. `nt_ui_shape_style_t` is copied into frame scratch, while the
-game owns the material and program. Shapes use the ordinary sprite renderer
-and the bound atlas white region. They introduce no theme, interaction state,
-heap allocation or separate render pass. A button can compose its existing
-interaction with a shape child; atlas and slice9 skins remain available.
+`nt_ui_shape` declares a leaf and defaults to GROW/GROW when `decl` is NULL;
+`nt_ui_shape_begin/end` declares the same paint with children and keeps Clay's
+FIT/FIT default when `decl` is NULL. `nt_ui_shape_style_t` is copied into frame
+scratch, while the game owns the material and program. Shapes use the ordinary
+sprite renderer and the bound atlas white region. They introduce no theme,
+interaction state, heap allocation or separate render pass. A button can
+compose its existing interaction with a shape child; atlas and slice9 skins
+remain available.
 
 BOX describes a rectangle, rounded rectangle, pill or circle through four
 nonnegative corner radii in TL/TR/BR/BL order. One common CSS-style scale makes

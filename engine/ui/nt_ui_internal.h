@@ -24,7 +24,7 @@
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static inline bool nt_ui_internal_float4_block_matches(nt_material_t material, const char *const *names, uint8_t count) {
     const nt_material_info_t *info = nt_material_get_info(material);
-    if (info == NULL || info->vertex_layout.stride != 20U + ((uint32_t)count * 16U)) {
+    if (info == NULL) {
         return false;
     }
     for (uint8_t field = 0; field < count; ++field) {

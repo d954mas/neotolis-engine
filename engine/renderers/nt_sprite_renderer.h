@@ -42,8 +42,7 @@ typedef struct {
 _Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes");
 
 /* Byte cap for a material's appended custom per-vertex attribute block (opt-in).
- * Headroom for four FLOAT4 blocks (a_radial + a_tint + a_uvrect + a_layout) = 64 B,
- * spent in full by the radial-image material. Only custom-attr materials pay this;
+ * Four FLOAT4 blocks fit. Only custom-attr materials pay this;
  * plain sprites keep the locked 20 B vertex. */
 #ifndef NT_SPRITE_CUSTOM_STRIDE_MAX
 #define NT_SPRITE_CUSTOM_STRIDE_MAX 64
@@ -122,6 +121,10 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  * attrs/bytes must be NULL/0 or exactly material.vertex_layout.stride - 20 bytes.
  * NULL/0 uses the material defaults' tail; no defaults with a nonempty tail asserts.
  * Plain stride20 requires NULL/0. Prefix position/UV/color always come from emit arguments.
+ * Mapping a_source_uv to a FLOAT2 tail field asks REGION emits to overwrite it
+ * per vertex with
+ * source-image UV (x right, y down, before alpha trim).
+ * GEOMETRY and slice9 emits reject that semantic.
  * An override never changes later emits or the material. */
 
 /* Emit one atlas region at one mat4 transform.
