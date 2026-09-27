@@ -78,8 +78,9 @@ the measured sources: vertex `5e579c5acac85857`, vertex helper
 `c18812c6afb1d4b2`, shared fragment math `a80e9e64d3af675e`, shared radial
 `fdc098ea276e05196`, uber fragment `20b41bb1d0711de2`, combined prototype
 `5193653aad462aae`, runner `7e2770b98c3d355d6`. These measurements predate the
-projective transport and shader changes below. The final integrated engine's
-14-workload CPU/GPU/geometry measurement is recorded in the
+projective transport and shader changes below. The historical integrated
+engine measurement for baseline `2a46fbd7` (before typed vertex transport),
+covering 14 CPU/GPU/geometry workloads, is recorded in the
 [showcase comparison](../../../examples/ui_showcase/README.md#recorded-shapes-comparison).
 That engine measurement does not repeat the artifact-only combined-shadow
 experiment or establish the same relative result for a new combined shader.

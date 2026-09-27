@@ -486,6 +486,53 @@ static void export_projective_case(const char *name, const float view_proj[16], 
     printf("}\n");
 }
 
+static void test_screen_shape_culling_uses_projection_extent_with_offset_viewport(void) {
+    const nt_ui_shape_style_t style = box_style();
+    const float projection[16] = {2.0F / 800.0F, 0, 0, 0, 0, 2.0F / 600.0F, 0, 0, 0, 0, -1, 0, -1, -1, 0, 1};
+    for (uint8_t scaled = 0; scaled < 2U; ++scaled) {
+        nt_gfx_fake_draw_trace_reset(true);
+        begin_frame();
+        nt_ui_shape(s_fx.ctx, NULL, &style, &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(50)}});
+        nt_ui_end(s_fx.ctx);
+        nt_ui_target_t target = {.viewport = {100, 0, 800, 600}};
+        if (scaled != 0U) {
+            target.fb_size[0] = 1600;
+            target.fb_size[1] = 1200;
+        }
+        nt_ui_walk(s_fx.ctx, &target);
+        TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+        export_projective_case(scaled != 0U ? "screen-scaled-viewport-offset" : "screen-direct-viewport-offset", projection, &target, true, NULL, NULL);
+    }
+}
+
+static void test_typed_paint_with_asymmetric_widths_and_gradient(void) {
+    const float projection[16] = {2.0F / 800.0F, 0, 0, 0, 0, 2.0F / 600.0F, 0, 0, 0, 0, -1, 0, -1, -1, 0, 1};
+    const nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    const nt_ui_transform_t identity = nt_ui_transform_defaults();
+    for (uint8_t gradient = 1; gradient <= 2U; ++gradient) {
+        nt_gfx_fake_draw_trace_reset(true);
+        nt_ui_shape_style_t style = box_style();
+        style.box = (nt_ui_shape_radii_t){3, 17, 11, 5};
+        style.paint = (nt_ui_shape_paint_t){.color0 = 0x804020FFU,
+                                            .color1 = gradient == 1U ? 0xFF80FF00U : 0x0080FF00U,
+                                            .border_color = 0x7FFF0080U,
+                                            .border_widths = {1.25F, 7.5F, 0, 3.125F},
+                                            .gradient = (nt_ui_shape_gradient_t)gradient};
+        begin_frame();
+        emit_box(&style, NT_UI_DATA_XFORM(0, &identity, 0.5F));
+        nt_ui_end(s_fx.ctx);
+        nt_ui_walk(s_fx.ctx, &target);
+        const nt_ui_shape_attrs_t expected = {.layout = {200, 60, 1, 0},
+                                              .geometry = {3, 17, 11, 5},
+                                              .widths = {1.25F, 7.5F, 0, 3.125F},
+                                              .endpoint = {0, 255, 128, gradient == 1U ? 255 : 0},
+                                              .border = {128, 0, 255, 127},
+                                              .control = {128, 1, gradient, 0}};
+        assert_last_attrs(&expected);
+        export_projective_case(gradient == 1U ? "typed-horizontal-paint" : "typed-vertical-transparent-paint", projection, &target, true, NULL, NULL);
+    }
+}
+
 static void walk_projective_box(const char *name, const float view_proj[16], const nt_ui_transform_t *transform, const nt_ui_target_t *target, bool visible) {
     setup_projective_context();
     begin_frame();
@@ -690,6 +737,8 @@ static void test_typed_defaults_override_and_skip_own_exact_bytes(void) {
 int main(int argc, char **argv) {
     s_export_gpu_cases = argc == 2 && strcmp(argv[1], "--gpu-fixtures") == 0;
     UNITY_BEGIN();
+    RUN_TEST(test_typed_paint_with_asymmetric_widths_and_gradient);
+    RUN_TEST(test_screen_shape_culling_uses_projection_extent_with_offset_viewport);
     RUN_TEST(test_typed_defaults_override_and_skip_own_exact_bytes);
     RUN_TEST(test_box_layout_and_asymmetric_radii);
     RUN_TEST(test_radii_share_css_adjacent_edge_scale);

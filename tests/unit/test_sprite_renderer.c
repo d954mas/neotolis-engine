@@ -2430,11 +2430,14 @@ void test_emit_slice9_degrades_when_dst_smaller_than_borders(void) {
 void test_sprite_full_layout_cache_distinguishes_physical_fields(void) {
     nt_sprite_renderer_desc_t renderer = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&renderer));
+    s_atlas_res = register_test_atlas(0x518CAULL);
+    const uint32_t region = nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH);
     const nt_material_t base = create_radial_test_material("custom", 4);
     nt_material_create_desc_t desc = {.program = nt_material_get_info(base)->program, .vertex_layout = nt_material_get_info(base)->vertex_layout};
     desc.vertex_layout.stride = 40;
     const nt_vertex_layout_t layout = desc.vertex_layout;
 #if NT_GFX_CAPTURE_ENABLED
+    uint32_t expected_vertex_inputs[7] = {0};
     nt_gfx_end_pass();
     nt_gfx_capture_request();
     nt_gfx_begin_frame();
@@ -2463,6 +2466,16 @@ void test_sprite_full_layout_cache_distinguishes_physical_fields(void) {
             break;
         }
         nt_sprite_renderer_set_material(nt_material_create(&desc));
+        uint8_t tail[20];
+        for (uint8_t byte = 0; byte < 20U; ++byte) {
+            tail[byte] = (uint8_t)((variant * 31U) + byte);
+        }
+        nt_sprite_renderer_emit_region(s_atlas_res, region, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0, tail, sizeof(tail));
+        for (uint32_t vertex = 0; vertex < 4U; ++vertex) {
+            uint8_t actual_tail[20];
+            nt_sprite_renderer_test_last_emit_attrs(vertex, actual_tail, sizeof(actual_tail));
+            TEST_ASSERT_EQUAL_MEMORY(tail, actual_tail, sizeof(tail));
+        }
 #if NT_GFX_CAPTURE_ENABLED
         const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
         TEST_ASSERT_FALSE(capture.overflow);
@@ -2475,6 +2488,7 @@ void test_sprite_full_layout_cache_distinguishes_physical_fields(void) {
             }
         }
         TEST_ASSERT_NOT_NULL(actual);
+        expected_vertex_inputs[variant] = actual->object;
         TEST_ASSERT_EQUAL_UINT32(desc.vertex_layout.stride, actual->data.attribute.stride);
         TEST_ASSERT_EQUAL_UINT32(expected->offset, actual->data.attribute.offset);
         TEST_ASSERT_EQUAL_UINT32(expected->type, actual->data.attribute.type);
@@ -2494,6 +2508,28 @@ void test_sprite_full_layout_cache_distinguishes_physical_fields(void) {
     nt_sprite_renderer_set_material(nt_material_create(&desc));
     TEST_ASSERT_EQUAL_UINT32(6, nt_sprite_renderer_test_vertex_input_cache_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    nt_sprite_renderer_emit_region(s_atlas_res, region, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0, NULL, 0);
+    uint8_t actual_tail[20];
+    nt_sprite_renderer_test_last_emit_attrs(0, actual_tail, sizeof(actual_tail));
+    TEST_ASSERT_EQUAL_MEMORY(defaults + 20, actual_tail, sizeof(actual_tail));
+    nt_sprite_renderer_flush();
+#if NT_GFX_CAPTURE_ENABLED
+    expected_vertex_inputs[6] = expected_vertex_inputs[0];
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t draw = 0;
+    for (uint32_t i = 0; i < capture.count; ++i) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind != NT_GFX_EVENT_BEGIN || event->operation != NT_GFX_OP_DRAW_INDEXED) {
+            continue;
+        }
+        TEST_ASSERT_LESS_THAN_UINT32(7, draw);
+        TEST_ASSERT_EQUAL_UINT32(expected_vertex_inputs[draw], event->data.draw.vertex_input);
+        TEST_ASSERT_EQUAL_UINT32(4, event->data.draw.vertices);
+        ++draw;
+    }
+    TEST_ASSERT_EQUAL_UINT32(7, draw);
+#endif
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2516,7 +2552,7 @@ void test_sprite_rejects_unsupported_prefix_and_capacity(void) {
             desc.vertex_layout.attrs[3].offset = 0;
             break;
         case 3:
-            desc.vertex_layout.stride = 148;
+            desc.vertex_layout.stride = NT_SPRITE_CUSTOM_STRIDE_MAX == 64 ? 148 : (uint16_t)(24 + NT_SPRITE_CUSTOM_STRIDE_MAX);
             break;
         default:
             desc.vertex_layout = (nt_vertex_layout_t){0};
@@ -2531,8 +2567,36 @@ void test_sprite_rejects_unsupported_prefix_and_capacity(void) {
     }
 }
 
+static void test_configured_custom_capacity_copies_full_default_tail(void) {
+    nt_sprite_renderer_desc_t renderer = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&renderer));
+    s_atlas_res = register_test_atlas(0x518C0ULL);
+    const nt_material_t base = create_radial_test_material("custom", 4);
+    uint8_t defaults[20 + NT_SPRITE_CUSTOM_STRIDE_MAX];
+    for (size_t i = 0; i < sizeof(defaults); ++i) {
+        defaults[i] = (uint8_t)(i ^ 0xA5U);
+    }
+    uint8_t expected[NT_SPRITE_CUSTOM_STRIDE_MAX];
+    memcpy(expected, defaults + 20, sizeof(expected));
+    nt_material_create_desc_t desc = {.program = nt_material_get_info(base)->program, .vertex_layout = nt_material_get_info(base)->vertex_layout, .vertex_defaults = defaults};
+    desc.vertex_layout.stride = sizeof(defaults);
+    desc.vertex_layout.attrs[3] = (nt_vertex_attr_t){.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .offset = sizeof(defaults) - 4};
+    const nt_material_t material = nt_material_create(&desc);
+    memset(defaults, 0, sizeof(defaults));
+    nt_sprite_renderer_set_material(material);
+    nt_sprite_renderer_emit_region(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH), NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0, NULL, 0);
+    for (uint32_t vertex = 0; vertex < 4U; ++vertex) {
+        uint8_t actual[NT_SPRITE_CUSTOM_STRIDE_MAX];
+        nt_sprite_renderer_test_last_emit_attrs(vertex, actual, sizeof(actual));
+        TEST_ASSERT_EQUAL_MEMORY(expected, actual, sizeof(actual));
+    }
+    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_configured_custom_capacity_copies_full_default_tail);
     RUN_TEST(test_sprite_full_layout_cache_distinguishes_physical_fields);
     RUN_TEST(test_sprite_rejects_unsupported_prefix_and_capacity);
     RUN_TEST(test_sprite_renderer_init_shutdown);

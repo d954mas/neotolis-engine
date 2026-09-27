@@ -50,13 +50,14 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         angle_start, angle_end, style->inner_radius_norm, 0.0F, tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F,
     };
     static const char *const attr_names[] = {"a_radial", "a_tint", "a_uvrect", "a_layout", NULL};
+    NT_ASSERT(nt_ui_internal_float4_block_matches(style->material, attr_names, 4) && "radial material must match fixed FLOAT4 payload offsets");
+    (void)attr_names;
     const nt_ui_image_custom_t img = {
         .atlas = region->atlas,
         .region_index = region->region,
         .material = style->material,
         .custom_attrs = blk,
         .custom_bytes = (uint8_t)sizeof blk,
-        .attr_names = attr_names,
         .geom_mode = NT_UI_IMAGE_GEOM_REGION,
         /* a_tint.w is the TINT reveal strength, not alpha. Real alpha fades via color_packed ->
          * a_color (the walker's backgroundColor.a path), never through a_tint. */

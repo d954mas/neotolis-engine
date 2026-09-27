@@ -5,18 +5,51 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
 #include "color/nt_color.h" /* canonical packed<->float color home (Clay-free) */
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
+#include "hash/nt_hash.h"
 #include "input/nt_input.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_shape.h"
 #include "ui/nt_ui_state.h"
+
+/* Fixed FLOAT4 widget payloads need both semantic names and their physical offsets. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static inline bool nt_ui_internal_float4_block_matches(nt_material_t material, const char *const *names, uint8_t count) {
+    const nt_material_info_t *info = nt_material_get_info(material);
+    if (info == NULL || info->vertex_layout.stride != 20U + ((uint32_t)count * 16U)) {
+        return false;
+    }
+    for (uint8_t field = 0; field < count; ++field) {
+        const uint32_t hash = nt_hash32(names[field], (uint32_t)strlen(names[field])).value;
+        bool matched = false;
+        for (uint8_t semantic = 0; semantic < info->attr_map_count; ++semantic) {
+            if (info->attr_map_hashes[semantic] != hash) {
+                continue;
+            }
+            for (uint8_t physical = 0; physical < info->vertex_layout.attr_count; ++physical) {
+                const nt_vertex_attr_t *attr = &info->vertex_layout.attrs[physical];
+                if (attr->location != info->attr_map_locations[semantic]) {
+                    continue;
+                }
+                matched = attr->type == NT_VERTEX_FLOAT && attr->count == 4U && !attr->normalized && attr->offset == 20U + ((uint32_t)field * 16U);
+                break;
+            }
+            break;
+        }
+        if (!matched) {
+            return false;
+        }
+    }
+    return true;
+}
 
 #define NT_UI_IMAGE_ANALYTIC_SHAPE (1U << 2)
 struct nt_ui_shape_payload {

@@ -49,6 +49,13 @@ physical field asserts. Optional `attr_names` is a NULL-terminated set of expect
 names, in any order and possibly a subset. It checks name presence only, never
 payload layout compatibility. The UI custom record has capacity64 bytes.
 
+The radial convenience producers additionally assert their fixed FLOAT4 payload
+ABI: flat radial has `a_radial` at full offset20 and `a_layout` at36;
+radial image has `a_radial` at20, `a_tint` at36, `a_uvrect` at52 and
+`a_layout` at68. Each field must be FLOAT4, non-normalized, and resolved by
+semantic name to its physical location. Semantic array order remains irrelevant.
+The generic custom-image API still accepts other valid byte layouts.
+
 **To add a new injected value:** pick a new attr name, fill it in the walker,
 and name it in a material's `attr_map`. No payload struct change and no public
 API change. These radial widgets use the generic custom-emit branch keyed on

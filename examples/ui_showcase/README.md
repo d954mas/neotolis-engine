@@ -131,7 +131,8 @@ these windows do not label samples with scene identities automatically.
 
 ### Recorded Shapes comparison
 
-On 2026-09-27, the optimized profiling build ran all 14 workloads in Chrome
+On 2026-09-27, the optimized profiling build of baseline `2a46fbd7`, before
+full material layouts and typed SDF transport, ran all 14 workloads in Chrome
 153.0.8010.53, WebGL2 / Intel UHD ANGLE D3D11, at 1440x1000 and DPR 1.
 Each row contains 256 samples after Reset and a three-second steady interval.
 CPU/GPU are whole-frame medians; geometry and uploads cover the entire UI,

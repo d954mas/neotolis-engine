@@ -24,7 +24,7 @@ static bool nt_ui_image_attr_names_ok(const nt_material_info_t *mi, const char *
         return true;
     }
     for (uint32_t i = 0; names[i] != NULL; ++i) {
-        const uint32_t hash = nt_hash32_str(names[i]).value;
+        const uint32_t hash = nt_hash32(names[i], (uint32_t)strlen(names[i])).value;
         bool found = false;
         for (uint8_t j = 0; j < mi->attr_map_count; ++j) {
             found = found || mi->attr_map_hashes[j] == hash;
