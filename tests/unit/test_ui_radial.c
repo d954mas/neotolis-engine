@@ -511,8 +511,7 @@ static void test_radial_image_region_bakes_payload(void) {
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     radial_image_walk(&ref, &style, 64.0F, 32.0F);
 
-    /* White region = 4 verts; every vert carries the same 64 B block. aspect is now in
-     * a_layout.x (out[12]); a_radial.w is freed (0). */
+    /* White region = 4 verts; every vert carries the same 64 B block. */
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     const float expect_aspect = 64.0F / 32.0F;
     for (uint32_t v = 0; v < 4U; v++) {
@@ -521,10 +520,35 @@ static void test_radial_image_region_bakes_payload(void) {
         TEST_ASSERT_TRUE_MESSAGE(approx(out[0], 0.25F), "a_radial.x == angle_start");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[1], 1.75F), "a_radial.y == angle_end");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[2], 0.5F), "a_radial.z == inner_radius_norm");
-        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], 0.0F), "a_radial.w == 0 (aspect moved to a_layout)");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[3], 0.0F), "a_radial.w remains unused");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[12], expect_aspect), "a_layout.x == aspect (w/h)");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[13], 64.0F), "a_layout.y == bbox width px");
         TEST_ASSERT_TRUE_MESSAGE(approx(out[14], 32.0F), "a_layout.z == bbox height px");
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[15], 0.0F), "a_layout.w == identity atlas transform");
+    }
+}
+
+/* The walker pairs the resolved region's D4 value with its UV bounds without
+ * changing the 84-byte vertex. */
+static void test_radial_image_bakes_atlas_d4_transform(void) {
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material();
+    nt_texture_region_t *region = (nt_texture_region_t *)nt_atlas_get_region(s_fx.atlas.handle, s_fx.atlas.packed_region_idx);
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.packed_region_idx);
+    for (uint8_t transform = 0; transform < 8U; ++transform) {
+        nt_pointer_t mouse = {0};
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        CLAY({.id = CLAY_ID("ri_d4_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(64)}}}) {
+            nt_ui_radial_image(s_fx.ctx, NULL, &ref, 0.25F, 1.75F, &style, &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(64)}});
+        }
+        nt_ui_end(s_fx.ctx);
+        /* Change after declaration: the walker must pair this transform with its UVs. */
+        region->transform = transform;
+        nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+        nt_ui_walk(s_fx.ctx, &target);
+        float out[16] = {0};
+        nt_sprite_renderer_test_last_emit_attrs(0, out, sizeof out);
+        TEST_ASSERT_TRUE_MESSAGE(approx(out[15], (float)transform), "a_layout.w must carry packed atlas D4 transform");
     }
 }
 
@@ -809,6 +833,7 @@ int main(void) {
     RUN_TEST(test_image_custom_injects_aspect);
     RUN_TEST(test_image_custom_name_bound_reorder_safe);
     RUN_TEST(test_radial_image_region_bakes_payload);
+    RUN_TEST(test_radial_image_bakes_atlas_d4_transform);
     RUN_TEST(test_radial_image_reveal_mode_plumbed);
     RUN_TEST(test_radial_image_packed_region_bakes_uvrect);
     RUN_TEST(test_radial_image_style_abi);

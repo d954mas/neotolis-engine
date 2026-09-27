@@ -277,9 +277,8 @@ events `hold_progress`); the engine draws a flat `nt_ui_shape` RADIAL arc/sector
 pixel (crisp AA, no vertex-pie facets). `nt_ui_radial_image` remains a textured reveal effect.
 Both paths bake angles into vertices so same-material elements can batch.
 Angles use local UI coordinates with Y down: `0` points right, `+π/2` down,
-and positive angles sweep clockwise. The top is `-π/2`; image flips mirror
-the reveal with the art. The image angle map assumes an identity-oriented
-atlas region; D4-rotated packing can rotate or mirror the visible wedge.
+and positive angles sweep clockwise. The top is `-π/2`; explicit image flips
+mirror the reveal with the art. Atlas D4 packing does not change the wedge.
 
 | Element | Behavior |
 |---------|----------|

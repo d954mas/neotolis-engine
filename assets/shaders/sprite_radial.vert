@@ -17,15 +17,15 @@ layout(location = 4) in vec4 a_radial;
 layout(location = 5) in vec4 a_tint;
 // loc 6 (a_uvrect): region min/max atlas UV {u0,v0,u1,v1}. radial_image only.
 layout(location = 6) in vec4 a_uvrect;
-// loc 7 (a_layout): walker-injected x=aspect (w/h), yz=bbox px size, w=0.
+// loc 7 (a_layout): walker-injected x=aspect, yz=bbox px size, w=atlas D4 value.
 layout(location = 7) in vec4 a_layout;
 
 out vec2 v_texcoord;
 out vec4 v_color;
 out vec4 v_radial;
 out vec4 v_tint;
-out vec4 v_uvrect;
 out vec4 v_layout;
+out vec2 v_local_uv;
 
 void main() {
     gl_Position = view_proj * vec4(a_position, 1.0);
@@ -33,6 +33,13 @@ void main() {
     v_color = a_color;
     v_radial = a_radial;
     v_tint = a_tint;
-    v_uvrect = a_uvrect;
     v_layout = a_layout;
+
+    // Builder maps source -> atlas as diagonal, flipH, flipV. Undo in reverse.
+    vec2 uv = (a_texcoord - a_uvrect.xy) / max(a_uvrect.zw - a_uvrect.xy, vec2(1e-6));
+    int d4 = int(a_layout.w + 0.5);
+    if ((d4 & 1) != 0) uv.x = 1.0 - uv.x;
+    if ((d4 & 2) != 0) uv.y = 1.0 - uv.y;
+    if ((d4 & 4) != 0) uv = uv.yx;
+    v_local_uv = uv * 2.0 - 1.0;
 }

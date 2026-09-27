@@ -38,7 +38,8 @@ The walker resolves name -> location -> physical attribute, checks FLOAT4,
 non-normalized storage wholly inside the tail, then subtracts20 from the full
 offset. Neither physical array order nor semantic map order defines bytes.
 
-- `a_layout` vec4 = `{aspect = bbox w/h, bbox_width_px, bbox_height_px, 0}`.
+- `a_layout` vec4 = `{aspect = bbox w/h, bbox_width_px, bbox_height_px,
+  region D4 transform}` for REGION geometry; `.w = 0` for GEOMETRY.
 - `a_uvrect` vec4 = `{u0, v0, u1, v1}` = region min/max atlas UV.
 
 Injection happens after Clay layout and atlas resolution. Other bytes copy
@@ -106,9 +107,12 @@ reveal in the same mode. The **tint is per-widget** (`tint_color_packed` +
 `tint_strength` → baked into `a_tint`), so many differently-tinted radials share
 one TINT-mode material and still batch to a single draw.
 
-The reveal fragment shader normalizes `v_texcoord` into region-local `[-1,1]`,
-so the wedge centers on the region wherever it sits in the atlas page; this works
-with any rectangular region (full-bleed `[0,1]` texture or a packed sub-region).
+The walker reads the ready region's D4 transform into `a_layout.w` at emit time.
+The vertex shader normalizes atlas UV into region-local `[-1,1]` and undoes the
+packing transform (diagonal, flipH, flipV in reverse). Thus the
+wedge uses source-image coordinates regardless of atlas placement or orientation;
+the fragment shader samples the original atlas UV. This works with rectangular
+regions, including full-bleed, packed, and D4-rotated or mirrored regions.
 
 **v1 limits:**
 
@@ -118,13 +122,12 @@ with any rectangular region (full-bleed `[0,1]` texture or a packed sub-region).
   geometry-local coordinate is the future path that would lift this.
 - **Angular convention follows local UI coordinates:** Y points down,
   `0` points right, `+π/2` points down, `π` points left, and `3π/2` points
-  up. Increasing angles sweep clockwise on an unflipped, untransformed image
-  whose atlas region has identity orientation.
+  up. Increasing angles sweep clockwise on an unflipped, untransformed image,
+  independent of its atlas packing orientation.
   Two independent `angle_start` / `angle_end` drive the positive wrapped span;
   swapping them selects the complementary span, not a short reverse sweep.
-  The reveal uses region-local UV, so image flips mirror the wedge with the art.
-  D4-rotated atlas regions can rotate or mirror the visible wedge relative to
-  these screen directions; that mismatch is not resolved by this convention.
+  Explicit image flips mirror the wedge with the art. Atlas D4 packing is
+  inverted before the angular test and does not alter the visible wedge.
 - **`fill` 0..1** is a thin convenience mapping `angle_end = angle_start +
   clamp(fill,0,1) * sweep_total` for cooldown / hold_progress idioms.
 - **`inner_radius_norm` `[0,1)`** carves a ring (0 = full disc); aspect from the

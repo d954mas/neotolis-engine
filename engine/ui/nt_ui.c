@@ -1134,7 +1134,7 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 // #endregion
 
 // #region helper_emit_image
-static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, uint8_t out[64]);
+static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, uint8_t atlas_transform, uint8_t out[64]);
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) {
@@ -1159,7 +1159,7 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
         return;
     }
     uint8_t block[64];
-    const uint16_t custom_bytes = p->custom != NULL ? build_custom_block(p, p->custom, &bb, block) : 0U;
+    const uint16_t custom_bytes = p->custom != NULL ? build_custom_block(p, p->custom, &bb, r->transform, block) : 0U;
     const void *custom = custom_bytes != 0U ? block : NULL;
 
     /* The flag or a non-zero lrtb selects the override; the flag with zeros turns a baked
@@ -1243,7 +1243,7 @@ static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, uint8_t *o
  * by name and physical vertex offset. Radial widgets fade via
  * color_packed/a_color (the walker's backgroundColor fold), never via a_tint -- a_tint.w is a reveal
  * strength, not alpha. Returns byte count. */
-static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, uint8_t out[64]) {
+static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, uint8_t atlas_transform, uint8_t out[64]) {
     NT_ASSERT(blk->custom_bytes > 0 && blk->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
     memcpy(out, blk->custom_attrs, blk->custom_bytes);
 
@@ -1258,12 +1258,11 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
         s_hash_uvrect = nt_hash32_str("a_uvrect").value;
     }
 
-    /* a_layout = {aspect = w/h, bbox_width_px, bbox_height_px, 0}. Bbox-derived at emit
-     * so the shape stays correct under GROW/FIT/PERCENT/null-decl, not just FIXED w/h.
-     * px size opens rounded/outline/shadow/blur effects to wrappers. */
+    /* Layout and atlas orientation are resolved together at emit, so a pack
+     * replacement cannot pair a stale D4 transform with new region UVs. */
     const int lo = custom_attr_byte_offset(mi, s_hash_layout);
     if (lo >= 0) {
-        const float layout[4] = {(bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F, bb->width, bb->height, 0.0F};
+        const float layout[4] = {(bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F, bb->width, bb->height, (float)atlas_transform};
         memcpy(out + lo, layout, sizeof(layout));
     }
     const int uo = custom_attr_byte_offset(mi, s_hash_uvrect);
@@ -1281,7 +1280,7 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
     }
     const nt_ui_image_payload_t *payload = c->renderData.image.imageData;
     uint8_t block[64];
-    const uint8_t count = build_custom_block(payload, payload->custom, &bb, block);
+    const uint8_t count = build_custom_block(payload, payload->custom, &bb, 0U, block);
     /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};

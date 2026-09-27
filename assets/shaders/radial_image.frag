@@ -3,11 +3,10 @@ precision highp float;
 // Textured radial reveal (nt_ui_radial_image). Pairs with sprite_radial.vert.
 // Samples a real atlas region, then reveals the UN-SWEPT (remaining) sector via
 // one of four modes while the SWEPT sector stays full color. Region-local UV
-// has Y down for identity-oriented regions: 0 right, +pi/2 down, clockwise+.
+// has Y down after undoing atlas D4: 0 right, +pi/2 down, clockwise+.
 //
-// Wedge local coord is region-local [-1,1]: v_texcoord is normalized against the
-// region's atlas UV rect (v_uvrect = {u0,v0,u1,v1}) so the wedge centers on ANY
-// rectangular atlas region, packed sub-region included — no full-bleed requirement.
+// Wedge local coord is source-region [-1,1] from the vertex shader; raw atlas UV
+// only samples texture. This keeps packing rotations/mirrors out of the angle test.
 //
 // TINT is per-vertex (a_tint via v_tint): rgb=target color, w=mix strength. Many
 // tint colors share ONE material. mode + dim_factor stay material-level (u_reveal_mode).
@@ -20,8 +19,8 @@ in vec2 v_texcoord;
 in vec4 v_color;
 in vec4 v_radial;
 in vec4 v_tint;
-in vec4 v_uvrect;
 in vec4 v_layout;
+in vec2 v_local_uv;
 
 out vec4 frag_color;
 
@@ -33,11 +32,7 @@ void main() {
     float inner = v_radial.z;
     float aspect = v_layout.x; // walker-injected bbox w/h
 
-    // Region-local UV → [-1,1] for the angular/ring test (image path reuses the
-    // UV rather than gl_VertexID). v_texcoord is normalized against the region's
-    // atlas UV rect so a packed sub-region centers the wedge. aspect = w/h re-rounds
-    // the angle on a non-square bbox so 0 stays +X.
-    vec2 v_local_uv = (v_texcoord - v_uvrect.xy) / max(v_uvrect.zw - v_uvrect.xy, vec2(1e-6)) * 2.0 - 1.0;
+    // aspect = w/h re-rounds the angle on a non-square bbox so 0 stays +X.
     vec2 p = v_local_uv * vec2(1.0, aspect);
     float r = length(p);
 
