@@ -74,6 +74,7 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
 void nt_ui_radial_image_fill(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float fill, float sweep_total,
                              const nt_ui_radial_image_style_t *style, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(isfinite(angle_start) && isfinite(fill) && isfinite(sweep_total) && "nt_ui_radial_image_fill: angle_start/fill/sweep_total must be finite");
-    const float angle_end = nt_ui_radial_fill_to_end(angle_start, fill, sweep_total);
+    const float clamped_fill = fminf(fmaxf(fill, 0.0F), 1.0F);
+    const float angle_end = angle_start + (clamped_fill * sweep_total);
     nt_ui_radial_image(ctx, data, region, angle_start, angle_end, style, decl);
 }

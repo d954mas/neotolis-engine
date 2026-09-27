@@ -85,13 +85,13 @@ covering 14 CPU/GPU/geometry workloads, is recorded in the
 That engine measurement does not repeat the artifact-only combined-shadow
 experiment or establish the same relative result for a new combined shader.
 
-The new RADIAL mode preserves the old angle/ring domain and intersects it
+The RADIAL mode preserves the angle/ring domain and intersects it
 with the original rectangle using screen-space AA. Equal start/end angles
-produce an empty new shape. Its screen-space path reuses the legacy radial
+produce an empty shape. Its screen-space path uses the shared radial
 coverage; its world path uses homogeneous half-planes for screen-derivative
-angular AA. It does not support a border or shadow. Existing `nt_ui_radial`,
-`nt_ui_radial_fill` and `nt_ui_radial_image` retain their APIs, shader layouts
-and behavior, including their legacy zero-sweep coverage.
+angular AA. It does not support a border or shadow. `nt_ui_radial_image`
+remains a separate textured reveal effect with its own API, shader layout and
+zero-sweep behavior.
 
 The full shape vertex is the named `nt_ui_shape_vertex_t` (84 bytes), with
 a typed `nt_ui_shape_attrs_t` tail (64 bytes). Material declares all ten

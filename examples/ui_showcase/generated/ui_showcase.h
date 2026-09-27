@@ -10,7 +10,6 @@
 #define ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0 ((nt_hash64_t){0x086706E397DD0EE1ULL}) /* ui_showcase_radial_art/tex0 */
 
 /* --- SHADER --- */
-#define ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG ((nt_hash64_t){0x1CBD5703DB548D54ULL}) /* assets/shaders/radial.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG ((nt_hash64_t){0x6117F8B5C957DCF7ULL}) /* assets/shaders/radial_image.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
@@ -65,7 +64,6 @@
 
 #if NT_HASH_LABELS
 static inline void ui_showcase_register_labels(void) {
-    (void)nt_hash64_str("assets/shaders/radial.frag");
     (void)nt_hash64_str("assets/shaders/radial_image.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.vert");

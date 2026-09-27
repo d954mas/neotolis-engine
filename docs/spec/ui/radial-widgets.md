@@ -1,21 +1,19 @@
 # Radial widgets & the custom-attr image path
 
-Design rationale for `nt_ui_radial` / `nt_ui_radial_image` and the generic
-custom-attr atlas-region emit they ride (`nt_ui_image_custom`): Route B (Clay
-IMAGE + per-element material) chosen for batching, name-bound attr injection,
-REGION vs GEOMETRY modes, the four hard boundaries of the path, and reveal
-modes with their v1 limits.
+Design rationale for `nt_ui_radial_image` and the generic custom-attr
+atlas-region emit it uses (`nt_ui_image_custom`): Clay IMAGE + per-element
+material for batching, name-bound attr injection, geometry modes, and reveal
+modes with their v1 limits. Flat radial shapes use `nt_ui_shape` instead.
 
 Related: [Scope](../core/scope.md), [Rich Text](rich-text.md), [Material System](../render/material.md)
 
-This section holds the design rationale behind the radial widgets
-(`nt_ui_radial`, `nt_ui_radial_image`) and the generic custom-attr atlas-region
-emit they ride (`nt_ui_image_custom`). The headers carry only the short
-caller-facing contract; the reasoning lives here.
+This section holds the design rationale behind the textured radial reveal
+(`nt_ui_radial_image`) and its generic custom-attr atlas-region emit. The
+analytic flat RADIAL is specified in [Analytic shapes](nt-ui.md#analytic-shapes).
 
 ## Route A (Clay CUSTOM) vs Route B (IMAGE + material)
 
-A radial could be drawn two ways:
+A textured radial reveal could be drawn two ways:
 
 - **Route A — Clay CUSTOM element.** The game gets a bbox and a raw draw
   callback and emits geometry itself.
@@ -25,12 +23,12 @@ A radial could be drawn two ways:
 
 Neotolis uses **Route B**. The reason is batching: Route A drops out of the
 walker's image emit and cannot share draw state, so every CUSTOM widget is its
-own draw. Route B keeps every radial on the sprite renderer's emit path, so many
-radials that share one material batch into a single draw. The per-element
+own draw. Route B keeps every reveal on the sprite renderer's emit path, so many
+reveals that share one material batch into a single draw. The per-element
 material override (`nt_ui_image_payload_t.material`) carries the SDF fragment
 shader and extended vertex layout; the walker only re-binds it when the `.id`
 differs from the currently bound material, so a screen full of identical-material
-radials still collapses to one `set_material` and one draw.
+reveals still collapses to one `set_material` and one draw.
 
 ## Name-bound injection vocabulary
 
@@ -49,16 +47,15 @@ physical field asserts. Optional `attr_names` is a NULL-terminated set of expect
 names, in any order and possibly a subset. It checks name presence only, never
 payload layout compatibility. The UI custom record has capacity64 bytes.
 
-The radial convenience producers additionally assert their fixed FLOAT4 payload
-ABI: flat radial has `a_radial` at full offset20 and `a_layout` at36;
-radial image has `a_radial` at20, `a_tint` at36, `a_uvrect` at52 and
+`nt_ui_radial_image` additionally asserts its fixed FLOAT4 payload ABI:
+`a_radial` at full offset20, `a_tint` at36, `a_uvrect` at52 and
 `a_layout` at68. Each field must be FLOAT4, non-normalized, and resolved by
 semantic name to its physical location. Semantic array order remains irrelevant.
 The generic custom-image API still accepts other valid byte layouts.
 
 **To add a new injected value:** pick a new attr name, fill it in the walker,
 and name it in a material's `attr_map`. No payload struct change and no public
-API change. These radial widgets use the generic custom-emit branch keyed on
+API change. `nt_ui_radial_image` uses the generic custom-emit branch keyed on
 `payload.custom != NULL`. The separate [analytic shape path](nt-ui.md#analytic-shapes)
 uses a private payload flag for copied shape styles and expanded paint bounds;
 it does not change this generic injection contract or radial-image geometry.
@@ -72,10 +69,9 @@ is present:
   path. Real atlas art; origin, flip, and slice9 are honored. Used by
   `nt_ui_radial_image`, which reveals a real texture.
 - **`NT_UI_IMAGE_GEOM_GEOMETRY`** — a clean 4-corner bbox quad (TL/TR/BR/BL)
-  against the white region via `emit_geometry`. Required by SDF shaders that
-  derive a local `[-1,1]` coordinate from `gl_VertexID & 3`; a packed region's
-  own winding would break that derivation. Used by `nt_ui_radial` (flat SDF
-  shape on the white pixel).
+  against the white region via `emit_geometry`. Generic custom-image users can
+  derive local coordinates from this quad rather than a packed region's winding.
+  Flat RADIAL uses the separate `nt_ui_shape` path.
 
 ## The four walls (what this path does NOT do)
 
@@ -122,8 +118,8 @@ with any rectangular region (full-bleed `[0,1]` texture or a packed sub-region).
   geometry-local coordinate is the future path that would lift this.
 - **Angular convention is mathematical:** `0 = +X` axis, CCW positive. Two
   independent `angle_start` / `angle_end` drive the sweep; there is no CW/CCW
-  flag — direction is implicit in the start/end order, and **swapping the two
-  angles reverses the sweep** (flip is API-layer, no shader branch).
+  flag — direction is implicit in the start/end order, and swapping the two
+  angles selects the complementary span.
 - **`fill` 0..1** is a thin convenience mapping `angle_end = angle_start +
   clamp(fill,0,1) * sweep_total` for cooldown / hold_progress idioms.
 - **`inner_radius_norm` `[0,1)`** carves a ring (0 = full disc); aspect from the

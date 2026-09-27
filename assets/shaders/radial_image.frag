@@ -42,7 +42,7 @@ void main() {
     vec2 p = v_local_uv * vec2(1.0, aspect);
     float r = length(p);
 
-    // Pixel-space coverage (slug-style, like radial.frag): a 1px box-filter so the
+    // Pixel-space coverage: a 1px box-filter so the
     // ring and reveal edges stay crisp at any size. ppu = pixels per local unit.
     // Outer edge is the textured tile quad itself (no SDF outer mask).
     float ppu = 1.0 / max(fwidth(r), 1e-6);

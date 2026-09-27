@@ -88,17 +88,15 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/sprite.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.frag", NT_BUILD_SHADER_FRAGMENT);
-    /* Radial: shared extended-layout VS (a_radial @ loc 4) + the flat SDF FS
-     * (nt_ui_radial) + the textured reveal FS (nt_ui_radial_image). */
+    /* Radial image retains its own textured reveal vertex/fragment pair. */
     nt_builder_add_shader(ctx, "assets/shaders/sprite_radial.vert", NT_BUILD_SHADER_VERTEX);
-    nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/radial_image.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/sprite_ui_shape.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/ui_shape.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/ui_shape_radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/ui_shape_shadow.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/ui_shape_uber.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 12 (sprite + slug_text + radial + analytic shapes)\n");
+    (void)printf("  Shaders added: 11 (sprite + slug_text + radial image + analytic shapes)\n");
     // #endregion
 
     // #region atlas: widget art + slice9 panels + white pixel

@@ -375,7 +375,7 @@ static nt_material_t create_test_material_with_param(void) {
     return mat;
 }
 
-/* Analytic-coverage shape (nt_ui_radial's flat SDF): borrows region geometry, samples nothing. */
+/* Analytic-coverage material: borrows region geometry, samples nothing. */
 static nt_material_t create_test_material_textureless(void) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));

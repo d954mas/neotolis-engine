@@ -14,8 +14,7 @@
 #include "atlas/nt_atlas.h" /* nt_atlas_region_ref_t */
 #include "clay.h"
 #include "material/nt_material.h"
-#include "ui/nt_ui.h"        /* nt_ui_element_data_t */
-#include "ui/nt_ui_radial.h" /* nt_ui_radial_fill_to_end (shared fill->angle math) */
+#include "ui/nt_ui.h" /* nt_ui_element_data_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -74,13 +73,13 @@ static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void)
  * unresolved/no-art ref skips the emit. data may be NULL. decl may be NULL
  * (GROW/GROW); the widget owns image/backgroundColor/userData. Must be called
  * between nt_ui_begin and nt_ui_end on the active ctx. Sweep caveat as
- * nt_ui_radial.h: a negative fill*sweep_total puts end before start -> the
+ * the angle shader: a negative fill*sweep_total puts end before start -> the
  * complementary span, not a short reverse arc. */
 void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float angle_end, const nt_ui_radial_image_style_t *style,
                         const Clay_ElementDeclaration *decl);
 
 /* fill convenience: angle_end = angle_start + clamp(fill,0,1) * sweep_total
- * (shares nt_ui_radial_fill_to_end). The common cooldown / hold_progress idiom.
+ * The common cooldown / hold_progress idiom.
  * fill is clamped [0,1]; sweep_total is the full sweep in radians. */
 void nt_ui_radial_image_fill(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float fill, float sweep_total,
                              const nt_ui_radial_image_style_t *style, const Clay_ElementDeclaration *decl);

@@ -49,7 +49,7 @@ lighten and writes the index on click).
 11. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
     `hold_progress` drives a fill bar and confirms on `long_pressed`, plus a
     double-click target with a readout; see the **Interaction-events controls** below.
-12. **Radial** - SDF radial feedback (`nt_ui_radial` + `nt_ui_radial_image`): a
+12. **Radial** - SDF radial feedback (`nt_ui_shape` RADIAL + `nt_ui_radial_image`): a
     looping **cooldown** wedge, a **hold-to-confirm** wedge driven by the events
     `hold_progress`, ring + oval shape variants, the **four reveal modes**
     (desaturate / dim / hide / tint) on a textured radial-image, and a **dense
@@ -273,16 +273,17 @@ These tabs wire the interaction events + app-widgets. All widget state is
 ## Radial controls (Radial tab)
 
 The radial widgets are **Model D**: the game owns the `fill` (a looping cooldown timer or the
-events `hold_progress`); the engine draws an SDF arc/sector/ring/oval per pixel (crisp AA, no
-vertex-pie facets) and bakes the angles into a per-vertex custom attribute so many radials batch.
+events `hold_progress`); the engine draws a flat `nt_ui_shape` RADIAL arc/sector/ring/oval per
+pixel (crisp AA, no vertex-pie facets). `nt_ui_radial_image` remains a textured reveal effect.
+Both paths bake angles into vertices so same-material elements can batch.
 
 | Element | Behavior |
 |---------|----------|
-| **Cooldown** disc + ring | a looping timer ramps `fill` 0→1 over ~3 s; `nt_ui_radial_fill` sweeps a full turn from the top |
+| **Cooldown** disc + ring | a looping timer ramps `fill` 0→1 over ~3 s; the game maps it to a RADIAL sweep from the top |
 | **Oval** sector | a static 270° sector on a non-square (140×80) bbox — the `aspect` (w/h) keeps 0° at +X with no distortion |
 | **Hold** disc | press and HOLD the button; the events `hold_progress` fills the ring and confirms at the long-press threshold |
 | **Reveal** row (desaturate / dim / hide / tint) | `nt_ui_radial_image` on a full-bleed (UV [0,1]) textured swatch; the **swept** sector is full color, the **un-swept** sector gets the per-mode composite |
-| **Dense grid** (12×8) | every cell sweeps to a different phase but shares ONE `s_radial_material` — the header `draw calls` count stays flat as the grid count grows (batched) |
+| **Dense grid** (12×8) | every cell sweeps to a different phase but shares one active RADIAL material — the header `draw calls` count stays flat as the grid count grows (batched) |
 
 ## Radial visual-QA protocol
 
