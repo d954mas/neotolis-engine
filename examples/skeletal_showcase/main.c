@@ -97,6 +97,8 @@
 #define MIX_ENTITY_COUNT (MIX_MESH_COUNT * MIX_CHARACTER_COUNT)
 #define SHOWCASE_ENTITY_COUNT (SKELETAL_SHOWCASE_MAX_INSTANCES + 2U + MIX_ENTITY_COUNT)
 
+static const float s_mix_positions[MIX_CHARACTER_COUNT][3] = {{0.0F, 0.0F, 0.0F}, {-2.2F, 0.0F, 0.0F}, {2.2F, 0.0F, 0.0F}, {0.0F, 0.0F, 2.2F}};
+
 typedef enum {
     RIG_HUMANOID = 0,
     RIG_FOX,
@@ -707,14 +709,6 @@ static void refresh_views(void) {
     for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
         s_mixing_scene.clips[i] = nt_resource_is_ready(s_mix_clip_resource[i]) ? nt_skeletal_assets_clip(s_mix_clip_resource[i]) : NULL;
     }
-    if (s_mixing_scene.skel != NULL && s_mixing_scene.skin != NULL) {
-        NT_ASSERT(s_mixing_scene.skin->rig_compat_id.value == s_mixing_scene.skel->rig_compat_id.value && "mixing: skin pairs with KayKit rig");
-        for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
-            if (s_mixing_scene.clips[i] != NULL) {
-                NT_ASSERT(s_mixing_scene.clips[i]->rig_compat_id.value == s_mixing_scene.skel->rig_compat_id.value && "mixing: clip pairs with KayKit rig");
-            }
-        }
-    }
 }
 
 // #region playback
@@ -871,7 +865,6 @@ static void mixing_configure_mode(void) {
     s_mixing_scene.transition_elapsed = 0.0F;
     s_mixing_scene.phase = 0.17F;
     s_mixing_scene.using_snapshot = false;
-    s_mixing_scene.pending_target = -1;
     switch (s_mixing_scene.mode) {
     case MIX_MODE_CROSSFADE:
         mixing_pair(MIX_CLIP_RUN, MIX_CLIP_JUMP);
@@ -900,8 +893,16 @@ static void mixing_configure_mode(void) {
     }
 }
 
-static void mixing_init_factors(void) {
+static void mixing_assert_compatible_assets(void) {
     NT_ASSERT(s_mixing_scene.skel != NULL);
+    NT_ASSERT(s_mixing_scene.skin->rig_compat_id.value == s_mixing_scene.skel->rig_compat_id.value && "mixing: skin pairs with KayKit rig");
+    for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
+        NT_ASSERT(s_mixing_scene.clips[i]->rig_compat_id.value == s_mixing_scene.skel->rig_compat_id.value && "mixing: clip pairs with KayKit rig");
+    }
+}
+
+static void mixing_init_factors(void) {
+    mixing_assert_compatible_assets();
     const uint32_t spine_id = nt_hash32_str("spine").value;
     uint16_t spine = s_mixing_scene.skel->joint_count;
     for (uint16_t j = 0; j < s_mixing_scene.skel->joint_count; ++j) {
@@ -948,18 +949,21 @@ static void mixing_two(const nt_skeletal_trs_t *a, const nt_skeletal_trs_t *b, f
     nt_skeletal_mix(inputs, 2, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, out);
 }
 
-static void mixing_finish_transition(void) {
+static void mixing_finish_transition(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT]) {
     if ((s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U || mixing_alpha() < 1.0F) {
         return;
     }
     s_mixing_scene.slots[0] = s_mixing_scene.slots[1];
     mixing_release_slot(1);
     s_mixing_scene.using_snapshot = false;
+    poses[0] = poses[1];
+    poses[1] = NULL;
 }
 
 static void mixing_request_interruption(mixing_clip_t target) {
     const mixing_slot_t *live = (s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U ? &s_mixing_scene.slots[1] : &s_mixing_scene.slots[0];
-    if (live->clip == target) {
+    if ((live->track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U && live->clip == target) {
+        s_mixing_scene.pending_target = -1;
         return;
     }
     s_mixing_scene.pending_target = (int)target;
@@ -1023,6 +1027,8 @@ static void mixing_advance_tracks(double dt) {
 
 static void mixing_update_blend_space(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT]) {
     float gains[3];
+    nt_skeletal_mix_input_t inputs[3];
+    uint32_t input_count = 0;
     mixing_blend_gains(s_mixing_scene.blend, s_mixing_scene.three_cycles, gains);
     double duration = 0.0;
     for (uint32_t i = 0; i < 3; ++i) {
@@ -1034,11 +1040,17 @@ static void mixing_update_blend_space(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT])
     }
     for (uint32_t i = 0; i < 3; ++i) {
         s_mixing_scene.slots[i].track.time = (double)s_mixing_scene.phase * s_mixing_scene.slots[i].track.duration;
+        if (gains[i] == 0.0F && !s_mixing_scene.show_sources) {
+            continue;
+        }
         poses[i] = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
         nt_skeletal_sample(s_mixing_scene.clips[s_mixing_scene.slots[i].clip], s_mixing_scene.slots[i].track.time, poses[i]);
+        if (gains[i] > 0.0F) {
+            inputs[input_count++] = (nt_skeletal_mix_input_t){.pose = poses[i], .gain = gains[i]};
+        }
     }
-    const nt_skeletal_mix_input_t inputs[3] = {{.pose = poses[0], .gain = gains[0]}, {.pose = poses[1], .gain = gains[1]}, {.pose = poses[2], .gain = gains[2]}};
-    nt_skeletal_mix(inputs, 3, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
+    NT_ASSERT(input_count > 0U);
+    nt_skeletal_mix(inputs, input_count, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
 }
 
 static void mixing_prepare_models(nt_skeletal_trs_t *poses[MIX_TRACK_COUNT]) {
@@ -1104,12 +1116,7 @@ static void mixing_update(void) {
     switch (s_mixing_scene.mode) {
     case MIX_MODE_CROSSFADE:
         mixing_compose_locomotion(poses, s_mixing_scene.final_pose);
-        const bool crossfade_finished = (s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U && mixing_alpha() >= 1.0F;
-        mixing_finish_transition();
-        if (crossfade_finished) {
-            poses[0] = poses[1];
-            poses[1] = NULL;
-        }
+        mixing_finish_transition(poses);
         break;
     case MIX_MODE_BLEND_SPACE:
         mixing_update_blend_space(poses);
@@ -1117,6 +1124,7 @@ static void mixing_update(void) {
     case MIX_MODE_PARTIAL_BODY: {
         nt_skeletal_trs_t *signal = NT_MEM_SCRATCH_ALLOC_ARRAY(nt_skeletal_trs_t, s_mixing_scene.skel->joint_count);
         mixing_compose_locomotion(poses, signal);
+        mixing_finish_transition(poses);
         s_mixing_scene.slots[2].gain = 1.0F;
         const nt_skeletal_mix_input_t inputs[2] = {
             {.pose = signal, .weights = s_mixing_scene.strict_partial ? s_mixing_scene.lower : NULL, .gain = 1.0F},
@@ -1127,14 +1135,20 @@ static void mixing_update(void) {
     }
     case MIX_MODE_OVERRIDE: {
         const float alpha = mixing_alpha();
-        s_mixing_scene.slots[0].gain = (1.0F - alpha) * s_mixing_scene.base_gain_scale;
-        s_mixing_scene.slots[1].gain = alpha * s_mixing_scene.base_gain_scale;
+        if ((s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U) {
+            s_mixing_scene.slots[0].gain = (1.0F - alpha) * s_mixing_scene.base_gain_scale;
+            s_mixing_scene.slots[1].gain = alpha * s_mixing_scene.base_gain_scale;
+            const nt_skeletal_mix_input_t inputs[2] = {
+                {.pose = poses[0], .gain = s_mixing_scene.slots[0].gain},
+                {.pose = poses[1], .gain = s_mixing_scene.slots[1].gain},
+            };
+            nt_skeletal_mix(inputs, 2, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
+        } else {
+            s_mixing_scene.slots[0].gain = s_mixing_scene.base_gain_scale;
+            memcpy(s_mixing_scene.final_pose, poses[0], s_mixing_scene.skel->joint_count * sizeof *s_mixing_scene.final_pose);
+        }
         s_mixing_scene.slots[2].gain = 0.8F;
-        const nt_skeletal_mix_input_t inputs[2] = {
-            {.pose = poses[0], .gain = s_mixing_scene.slots[0].gain},
-            {.pose = poses[1], .gain = s_mixing_scene.slots[1].gain},
-        };
-        nt_skeletal_mix(inputs, 2, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
+        mixing_finish_transition(poses);
         nt_skeletal_override(s_mixing_scene.final_pose, poses[2], s_mixing_scene.upper, 0.8F, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
         break;
     }
@@ -1153,12 +1167,7 @@ static void mixing_update(void) {
         }
         const nt_skeletal_mix_input_t inputs[2] = {{.pose = signal, .weights = s_mixing_scene.lower, .gain = 1.0F}, {.pose = poses[2], .weights = s_mixing_scene.upper, .gain = 1.0F}};
         nt_skeletal_mix(inputs, 2, s_mixing_scene.skel->rest, s_mixing_scene.skel->joint_count, s_mixing_scene.final_pose);
-        const bool transition_finished = (s_mixing_scene.slots[1].track.flags & NT_SKELETAL_TRACK_OCCUPIED) != 0U && mixing_alpha() >= 1.0F;
-        mixing_finish_transition();
-        if (transition_finished) {
-            poses[0] = poses[1];
-            poses[1] = NULL;
-        }
+        mixing_finish_transition(poses);
         if (s_mixing_scene.repeating && !s_mixing_scene.paused) {
             s_mixing_scene.repeat_elapsed += g_nt_app.dt;
             if (s_mixing_scene.repeat_elapsed >= 0.3F) {
@@ -1529,6 +1538,10 @@ static void init_mesh_scene(void) {
             const uint32_t index = i - 2U;
             const uint32_t row = index / 16U;
             nt_transform_comp_set_position(e, (float)(index % 16U) * 5.0F, 0, (float)row * 5.0F);
+        } else if (i >= SKELETAL_SHOWCASE_MAX_INSTANCES + 2U) {
+            const uint32_t index = i - (SKELETAL_SHOWCASE_MAX_INSTANCES + 2U);
+            const uint32_t character = index / MIX_MESH_COUNT;
+            nt_transform_comp_set_position(e, s_mix_positions[character][0], s_mix_positions[character][1], s_mix_positions[character][2]);
         }
     }
     nt_transform_comp_update();
@@ -2017,7 +2030,9 @@ static void ordering_declare_controls(void) {
         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
         (void)snprintf(text, sizeof text, "Palette bytes: %u", s_order_stats.palettes * HUMANOID_JOINT_COUNT * 48U);
         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
-        (void)snprintf(text, sizeof text, "Upload bytes: %u", s_order_stats.palettes * (3U * SKELETAL_SHOWCASE_MAX_PALETTE) * 16U);
+        const uint32_t palettes_per_row = SKELETAL_SHOWCASE_MAX_PALETTE / HUMANOID_JOINT_COUNT;
+        const uint32_t palette_rows = (s_order_stats.palettes + palettes_per_row - 1U) / palettes_per_row;
+        (void)snprintf(text, sizeof text, "Upload bytes: %u", palette_rows * (3U * SKELETAL_SHOWCASE_MAX_PALETTE) * 16U);
         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
     }
 }
@@ -2392,14 +2407,13 @@ static void mixing_draw(void) {
         }
     }
     draw_ground(s_fit_scale);
-    static const float positions[MIX_CHARACTER_COUNT][3] = {{0.0F, 0.0F, 0.0F}, {-2.2F, 0.0F, 0.0F}, {2.2F, 0.0F, 0.0F}, {0.0F, 0.0F, 2.2F}};
     const float radius = mixing_culling_radius();
     nt_render_item_t items[MIX_ENTITY_COUNT];
     bool visible[MIX_CHARACTER_COUNT] = {false};
     uint32_t ready = 0;
     nt_skeletal_gpu_begin_frame();
     for (uint32_t character = 0; character < s_mixing_scene.draw_count; ++character) {
-        if (s_mixing_scene.draw_model[character] == NULL || !mixing_sphere_visible(positions[character], radius)) {
+        if (s_mixing_scene.draw_model[character] == NULL || !mixing_sphere_visible(s_mix_positions[character], radius)) {
             continue;
         }
         visible[character] = true;
@@ -2413,7 +2427,6 @@ static void mixing_draw(void) {
                 continue;
             }
             const nt_entity_t e = s_mix_entities[character][mesh];
-            nt_transform_comp_set_position(e, positions[character][0], positions[character][1], positions[character][2]);
             *nt_mesh_comp_handle(e) = (nt_mesh_t){nt_resource_get(s_mix_mesh_resource[mesh])};
             *nt_material_comp_handle(e) = s_mix_material;
             if (mesh > 0) {
@@ -2422,7 +2435,6 @@ static void mixing_draw(void) {
             items[ready++] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(s_mix_material, *nt_mesh_comp_handle(e))};
         }
     }
-    nt_transform_comp_update();
     nt_skeletal_gpu_flush();
     nt_skinned_mesh_renderer_draw_list(items, ready);
 }

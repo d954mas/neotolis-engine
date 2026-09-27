@@ -48,6 +48,17 @@ def _capture(client, output, name):
     return str(path)
 
 
+def _wait_for_slots(client, minimum, max_frames=300):
+    for _ in range(max_frames):
+        alpha = next((text for text in _texts(client) if text.startswith("alpha ")), None)
+        if alpha is not None:
+            match = re.search(r"slots (\d+)/", alpha)
+            if match is not None and int(match.group(1)) >= minimum:
+                return
+        client.wait_frames(1)
+    raise AssertionError(f"Mixing assets did not produce {minimum} occupied slots within {max_frames} frames")
+
+
 def run(client, output, backend="native"):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -65,12 +76,18 @@ def run(client, output, backend="native"):
     telemetry = {}
     for mode in MODES:
         _select_mode(client, mode)
-        client.wait_frames(5)
+        if mode in ("Partial body", "Override"):
+            _wait_for_slots(client, 2)
+            client.time_wait(0.55)
+        else:
+            client.wait_frames(5)
         texts = _texts(client)
         alpha = next((text for text in texts if text.startswith("alpha ")), None)
         memory = next((text for text in texts if text.startswith("snapshot ")), None)
         if alpha is None or memory is None:
             raise AssertionError(f"{mode}: missing alpha/ownership telemetry")
+        if mode in ("Partial body", "Override") and "slots 2/4" not in alpha:
+            raise AssertionError(f"{mode}: completed base transition retained its source: {alpha}")
         phase = next((text for text in texts if text.startswith("phase ")), None)
         if mode == "Blend space" and phase is None:
             raise AssertionError("Blend space: missing normalized phase telemetry")

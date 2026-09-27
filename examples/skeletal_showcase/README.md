@@ -102,7 +102,7 @@ limb. NSKL does not mark exporter wrappers, so besides CesiumMan
 `Z_UP`/`Armature` and Fox `root` this also covers Fox's skin joints
 `_rootJoint` and `b_Root_00`, which rest at the origin. `Test` on an imported
 rig bends every third joint outside that scaffolding about Z. The scene holds
-at most 32 joints; the pack builder asserts it. Visual QA: CesiumMan stands
+at most 48 joints; the pack builder asserts it. Visual QA: CesiumMan stands
 upright, Fox faces along its authored axis.
 
 The properties panel shows the selected joint's local offset in degrees and its
@@ -210,9 +210,10 @@ It does not test transitions between two `nt_gfx_begin_pass` calls. Both draws
 reuse one palette upload. Per-pass counters show measured draw calls and
 instances plus the expected count for that completed frame, excluding UI.
 
-The palette texture is 96 by 256 RGBA32F texels. Each 21-joint palette occupies
-one row: 1008 useful bytes, 1536 uploaded bytes. Shared mode builds one palette;
-independent mode builds N. Both views together draw 2N instances.
+The palette texture is 144 by 256 RGBA32F texels. Each 21-joint palette uses
+63 texels (1008 useful bytes), so two palettes fit in one row. A flush uploads
+whole touched rows: `ceil(N / 2) * 2304` bytes for N independent palettes and
+2304 bytes for one shared palette. Both views together draw 2N instances.
 
 ## Mixing & Crossfades
 
@@ -236,10 +237,11 @@ The five modes expose distinct composition rules:
 - Blend space keeps idle/walk/run on one displayed normalized phase. The two-cycle mode
   uses `(1-v, v)`; the three-cycle mode uses adjacent triangular weights.
 - Partial body compares a flat weighted mix (`0.25` below the spine, `3` on
-  the spine subtree) with strict locomotion/action isolation.
+  the spine subtree) with strict locomotion/action isolation. It releases the
+  outgoing locomotion slot when the base transition completes.
 - Override first builds the locomotion base, then applies the punch to the
   upper-body mask at alpha `0.8`; changing the base gain sum does not change
-  the override strength.
+  the override strength. It also releases the completed base source.
 - Interruption captures the current locomotion signal before reusing source
   slots. A new target starts at alpha zero from that frozen pose. Repeat asks
   for another target every `0.3 s`, while the independent arm action keeps its

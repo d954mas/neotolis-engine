@@ -23,6 +23,8 @@ static nt_skeletal_clip_t s_test_clips[MIX_CLIP_COUNT];
 void setUp(void) {
     nt_test_assert_install();
     memset(&s_mixing_scene, 0, sizeof s_mixing_scene);
+    memset(s_test_rest, 0, sizeof s_test_rest);
+    memset(s_test_clip_base, 0, sizeof s_test_clip_base);
     for (uint32_t j = 0; j < 3; ++j) {
         s_test_rest[j].q[3] = 1.0F;
         s_test_rest[j].s[0] = s_test_rest[j].s[1] = s_test_rest[j].s[2] = 1.0F;
@@ -37,11 +39,14 @@ void setUp(void) {
     for (uint32_t i = 0; i < MIX_CLIP_COUNT; ++i) {
         memcpy(s_test_clip_base[i], s_test_rest, sizeof s_test_rest);
         s_test_clip_base[i][0].t[0] = (float)i;
+        s_test_clip_base[i][1].t[1] = 10.0F * (float)i;
+        s_test_clip_base[i][2].t[2] = 100.0F * (float)i;
         s_test_clips[i] = (nt_skeletal_clip_t){.duration = 1.0, .base = s_test_clip_base[i], .r_root = (float)i, .sample_count = 1, .joint_count = 3};
         s_mixing_scene.clips[i] = &s_test_clips[i];
     }
     s_mixing_scene.transition_duration = 1.0F;
     s_mixing_scene.pending_target = -1;
+    g_nt_app.dt = 0.0F;
 }
 
 void tearDown(void) {}
@@ -56,6 +61,33 @@ static void test_blend_space_uses_adjacent_normalized_weights(void) {
     TEST_ASSERT_TRUE(fabsf(gains[0]) < 1e-6F);
     TEST_ASSERT_TRUE(fabsf(gains[1] - 0.75F) < 1e-6F);
     TEST_ASSERT_TRUE(fabsf(gains[2] - 0.25F) < 1e-6F);
+}
+
+static void test_blend_space_skips_zero_gain_sampling_without_previews(void) {
+    mixing_assign_slot(0, MIX_CLIP_IDLE, true);
+    mixing_assign_slot(1, MIX_CLIP_WALK, true);
+    mixing_assign_slot(2, MIX_CLIP_RUN, true);
+    s_mixing_scene.blend = 0.25F;
+    s_mixing_scene.phase = 0.5F;
+    s_mixing_scene.paused = true;
+
+    nt_skeletal_trs_t *poses[MIX_TRACK_COUNT] = {0};
+    nt_mem_scratch_reset();
+    mixing_update_blend_space(poses);
+    TEST_ASSERT_NULL(poses[0]);
+    TEST_ASSERT_NOT_NULL(poses[1]);
+    TEST_ASSERT_NOT_NULL(poses[2]);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[0].t[0] - 1.25F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[1].t[1] - 12.5F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[2].t[2] - 125.0F) < 1e-6F);
+
+    s_mixing_scene.show_sources = true;
+    for (uint32_t i = 0; i < MIX_TRACK_COUNT; ++i) {
+        poses[i] = NULL;
+    }
+    nt_mem_scratch_reset();
+    mixing_update_blend_space(poses);
+    TEST_ASSERT_NOT_NULL(poses[0]);
 }
 
 static void test_zero_gain_track_stays_occupied_and_advances(void) {
@@ -124,6 +156,98 @@ static void test_masks_and_composed_bound_come_from_the_loaded_rig(void) {
     TEST_ASSERT_TRUE(fabsf(s_mixing_scene.root_radius - 4.0F) < 1e-6F);
 }
 
+static void test_partial_body_uses_joint_weights_and_releases_the_source(void) {
+    s_mixing_scene.mode = MIX_MODE_PARTIAL_BODY;
+    mixing_init_factors();
+    mixing_assign_slot(0, MIX_CLIP_IDLE, true);
+    mixing_assign_slot(1, MIX_CLIP_RUN, true);
+    mixing_assign_slot(2, MIX_CLIP_PUNCH, true);
+    s_mixing_scene.transition_elapsed = 0.5F;
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[0].t[0] - 1.6F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[1].t[1] - 32.5F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[2].t[2] - 325.0F) < 1e-6F);
+
+    s_mixing_scene.transition_elapsed = s_mixing_scene.transition_duration;
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_RUN, s_mixing_scene.slots[0].clip);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_mixing_scene.slots[1].track.flags);
+}
+
+static void test_override_strength_is_independent_of_base_gain_and_releases_the_source(void) {
+    s_mixing_scene.mode = MIX_MODE_OVERRIDE;
+    mixing_init_factors();
+    mixing_assign_slot(0, MIX_CLIP_IDLE, true);
+    mixing_assign_slot(1, MIX_CLIP_RUN, true);
+    mixing_assign_slot(2, MIX_CLIP_PUNCH, true);
+    s_mixing_scene.transition_elapsed = 0.5F;
+    s_mixing_scene.base_gain_scale = 0.25F;
+    nt_mem_scratch_reset();
+    mixing_update();
+    nt_skeletal_trs_t first[3];
+    memcpy(first, s_mixing_scene.final_pose, sizeof first);
+    TEST_ASSERT_TRUE(fabsf(first[0].t[0] - 1.0F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(first[1].t[1] - 34.0F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(first[2].t[2] - 340.0F) < 1e-6F);
+
+    s_mixing_scene.base_gain_scale = 2.0F;
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_EQUAL_MEMORY(first, s_mixing_scene.final_pose, sizeof first);
+
+    s_mixing_scene.transition_elapsed = s_mixing_scene.transition_duration;
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_RUN, s_mixing_scene.slots[0].clip);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_mixing_scene.slots[1].track.flags);
+}
+
+static void test_interruption_controller_preserves_the_visible_pose_at_handoff(void) {
+    s_mixing_scene.mode = MIX_MODE_INTERRUPTION;
+    mixing_init_factors();
+    mixing_assign_slot(0, MIX_CLIP_IDLE, true);
+    mixing_assign_slot(1, MIX_CLIP_RUN, true);
+    mixing_assign_slot(2, MIX_CLIP_PUNCH, true);
+    s_mixing_scene.transition_elapsed = 0.35F;
+    nt_mem_scratch_reset();
+    mixing_update();
+    nt_skeletal_trs_t before[3];
+    memcpy(before, s_mixing_scene.final_pose, sizeof before);
+
+    s_mixing_scene.pending_target = MIX_CLIP_JUMP;
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_EQUAL_MEMORY(before, s_mixing_scene.final_pose, sizeof before);
+    TEST_ASSERT_TRUE(s_mixing_scene.using_snapshot);
+    TEST_ASSERT_TRUE(fabsf(mixing_alpha()) < 1e-6F);
+    TEST_ASSERT_EQUAL_UINT32(1U, s_mixing_scene.handoff_count);
+}
+
+static void test_loading_configuration_preserves_a_queued_idle_interruption(void) {
+    s_mixing_scene.mode = MIX_MODE_INTERRUPTION;
+    mixing_request_interruption(MIX_CLIP_IDLE);
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_IDLE, s_mixing_scene.pending_target);
+    mixing_init_factors();
+    mixing_configure_mode();
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_IDLE, s_mixing_scene.pending_target);
+
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_EQUAL_INT(-1, s_mixing_scene.pending_target);
+    TEST_ASSERT_EQUAL_INT(MIX_CLIP_IDLE, s_mixing_scene.slots[1].clip);
+    TEST_ASSERT_EQUAL_UINT32(1U, s_mixing_scene.handoff_count);
+}
+
+static void test_requesting_the_live_clip_cancels_a_queued_interruption(void) {
+    mixing_assign_slot(0, MIX_CLIP_IDLE, true);
+    mixing_assign_slot(1, MIX_CLIP_RUN, true);
+    s_mixing_scene.pending_target = MIX_CLIP_JUMP;
+    mixing_request_interruption(MIX_CLIP_RUN);
+    TEST_ASSERT_EQUAL_INT(-1, s_mixing_scene.pending_target);
+}
+
 static void test_zero_duration_interruption_displays_new_target_immediately(void) {
     s_mixing_scene.mode = MIX_MODE_INTERRUPTION;
     s_mixing_scene.show_sources = true;
@@ -143,6 +267,21 @@ static void test_zero_duration_interruption_displays_new_target_immediately(void
     TEST_ASSERT_FALSE(s_mixing_scene.using_snapshot);
     TEST_ASSERT_NOT_NULL(s_mixing_scene.draw_model[1]);
     TEST_ASSERT_NULL(s_mixing_scene.draw_model[2]);
+}
+
+static void test_crossfade_uses_source_and_target_in_the_declared_order(void) {
+    s_mixing_scene.mode = MIX_MODE_CROSSFADE;
+    mixing_init_factors();
+    mixing_assign_slot(0, MIX_CLIP_IDLE, true);
+    mixing_assign_slot(1, MIX_CLIP_RUN, true);
+    s_mixing_scene.transition_elapsed = 0.25F;
+    nt_mem_scratch_reset();
+    mixing_update();
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[0].t[0] - 0.5F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[1].t[1] - 5.0F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.final_pose[2].t[2] - 50.0F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.slots[0].gain - 0.75F) < 1e-6F);
+    TEST_ASSERT_TRUE(fabsf(s_mixing_scene.slots[1].gain - 0.25F) < 1e-6F);
 }
 
 static void test_completed_crossfade_shows_only_live_source(void) {
@@ -180,12 +319,19 @@ int main(void) {
     nt_mem_scratch_init(4096U);
     UNITY_BEGIN();
     RUN_TEST(test_blend_space_uses_adjacent_normalized_weights);
+    RUN_TEST(test_blend_space_skips_zero_gain_sampling_without_previews);
     RUN_TEST(test_zero_gain_track_stays_occupied_and_advances);
     RUN_TEST(test_assigning_an_occupied_slot_asserts);
     RUN_TEST(test_interruption_captures_exact_signal_before_reuse);
     RUN_TEST(test_repeated_interruptions_reuse_one_snapshot);
     RUN_TEST(test_masks_and_composed_bound_come_from_the_loaded_rig);
+    RUN_TEST(test_partial_body_uses_joint_weights_and_releases_the_source);
+    RUN_TEST(test_override_strength_is_independent_of_base_gain_and_releases_the_source);
+    RUN_TEST(test_interruption_controller_preserves_the_visible_pose_at_handoff);
+    RUN_TEST(test_loading_configuration_preserves_a_queued_idle_interruption);
+    RUN_TEST(test_requesting_the_live_clip_cancels_a_queued_interruption);
     RUN_TEST(test_zero_duration_interruption_displays_new_target_immediately);
+    RUN_TEST(test_crossfade_uses_source_and_target_in_the_declared_order);
     RUN_TEST(test_completed_crossfade_shows_only_live_source);
     RUN_TEST(test_culling_radius_pads_normalized_uint8_weights);
     const int result = UNITY_END();
