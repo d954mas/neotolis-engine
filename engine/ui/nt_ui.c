@@ -1908,8 +1908,8 @@ static void emit_shape_quad(const nt_ui_context_t *ctx, Clay_BoundingBox bb, con
             max_x = fmaxf(max_x, x);
             max_y = fmaxf(max_y, y);
         }
-        /* Vertices use projection coordinates; the GPU viewport applies its origin later. */
-        if (max_x < 0.0F || min_x > target->viewport[2] || max_y < 0.0F || min_y > target->viewport[3]) {
+        /* The screen Y-flip includes the viewport origin; X remains viewport-local. */
+        if (max_x < 0.0F || min_x > target->viewport[2] || max_y < target->viewport[1] || min_y > target->viewport[1] + target->viewport[3]) {
             return;
         }
     }

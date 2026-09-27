@@ -139,6 +139,20 @@ static void test_leaf_without_declaration_fills_parent_and_emits(void) {
     TEST_ASSERT_TRUE(attrs.layout[0] == 160.0F && attrs.layout[1] == 90.0F);
 }
 
+static void test_screen_shape_cull_uses_viewport_y_origin(void) {
+    const nt_ui_shape_style_t style = box_style();
+    begin_frame();
+    nt_ui_shape(s_fx.ctx, NULL, &style, &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(20)}});
+    nt_ui_end(s_fx.ctx);
+    const nt_ui_target_t target = {.viewport = {101, 47, 640, 480}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    float top_left[3];
+    nt_sprite_renderer_test_last_emit_position(0, top_left);
+    TEST_ASSERT_TRUE(top_left[1] > target.viewport[1] + target.viewport[3] - 2.0F);
+}
+
 static void test_radii_share_css_adjacent_edge_scale(void) {
     nt_ui_shape_style_t style = box_style();
     style.box.top_left = 80.0F;
@@ -756,6 +770,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_typed_defaults_override_and_skip_own_exact_bytes);
     RUN_TEST(test_box_layout_and_asymmetric_radii);
     RUN_TEST(test_leaf_without_declaration_fills_parent_and_emits);
+    RUN_TEST(test_screen_shape_cull_uses_viewport_y_origin);
     RUN_TEST(test_radii_share_css_adjacent_edge_scale);
     RUN_TEST(test_four_border_sides_keep_layout_order_and_full_precision);
     RUN_TEST(test_zero_sides_do_not_inherit_another_side);
