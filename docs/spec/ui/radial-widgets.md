@@ -48,8 +48,10 @@ verbatim from the widget's block.
 
 **To add a new injected value:** pick a new attr name, fill it in the walker,
 and name it in a material's `attr_map`. No payload struct change and no public
-API change. There are deliberately no per-widget flags or branches in the
-walker — it has one generic custom-emit branch keyed on `payload.custom != NULL`.
+API change. These radial widgets use the generic custom-emit branch keyed on
+`payload.custom != NULL`. The separate [analytic shape path](nt-ui.md#analytic-shapes)
+uses a private payload flag for copied shape styles and expanded paint bounds;
+it does not change this generic injection contract or radial-image geometry.
 
 ## geom_mode: REGION vs GEOMETRY
 

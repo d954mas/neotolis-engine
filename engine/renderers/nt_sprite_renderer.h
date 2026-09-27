@@ -113,15 +113,17 @@ void nt_sprite_renderer_flush(void);
 
 /* Requires a valid material with an assigned program; rechecks program identity even for the same material.
  * May flush the open command. An unready program opens a command that flush skips.
- *
+ * Borrows mat through the last emit using this binding; destroying it ends further emits.
+ * Already staged vertices retain their copied attributes until flush.
  * Numeric params remain mutable and are read at flush. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
 /* Set the custom per-vertex attr block baked into every vertex of the next emit
  * (like color — uniform across the widget's verts). When the bound material declares
- * custom attrs (attr_map_count > 0), EACH emit must be preceded by this call with
- * bytes == attr_map_count*16 (asserted; wrong size desyncs the upload stride). Plain
- * materials ignore it. bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX. Consumed (cleared) per emit. */
+ * custom attrs (attr_map_count > 0), bytes must equal attr_map_count*16 (asserted).
+ * Each emit consumes its block, including skipped emits. An omitted block uses opt-in defaults;
+ * without defaults each emit requires this call. Plain materials require no block.
+ * bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX. */
 void nt_sprite_renderer_set_custom_attrs(const float *attrs, uint8_t bytes);
 
 /* Emit one atlas region at one mat4 transform.
@@ -183,6 +185,9 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
  *                         same subset read as emit_region.
  *   color_packed        - 0xAABBGGRR.
  *
+ * With custom attrs, a four-vertex emit starts at a multiple of four so shaders
+ * may derive local corners from gl_VertexID & 3. Zeroed, unindexed staging padding
+ * counts against vertex capacity. Plain materials retain unpadded geometry.
  * Capacity overflow handled internally (snapshot + flush + reopen).
  * Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,

@@ -39,6 +39,7 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atla
     NT_ASSERT(ctx != NULL && "nt_ui_image: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_image: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_image: style must be non-NULL");
+    NT_ASSERT((style->flags & ~(NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE)) == 0U);
     NT_ASSERT(region != NULL && region->atlas.id != 0 && "nt_ui_image: invalid atlas handle");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_image: style.slice9_scale must be finite > 0");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
@@ -92,6 +93,7 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(ctx != NULL && "nt_ui_image_custom: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_image_custom: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(img != NULL && "nt_ui_image_custom: img must be non-NULL");
+    NT_ASSERT((img->flags & ~(NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE)) == 0U);
     NT_ASSERT(img->atlas.id != 0 && "nt_ui_image_custom: invalid atlas handle");
     NT_ASSERT(img->material.id != 0 && "nt_ui_image_custom: material must be valid (custom-attr path)");
     NT_ASSERT(img->custom_bytes > 0 && img->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui_image_custom: custom_bytes in (0, NT_SPRITE_CUSTOM_STRIDE_MAX]");

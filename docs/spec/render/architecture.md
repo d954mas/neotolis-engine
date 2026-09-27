@@ -256,6 +256,16 @@ regression. The default `max_vertex_inputs` budgets one mesh cache; a game using
 both mesh renderers adds
 `max_meshes * skinned.max_mesh_layouts` to that base budget explicitly.
 
+Sprite custom-attribute materials can opt into immutable per-lane defaults; a
+one-emit block overrides the whole block and is then consumed. Without defaults,
+an omitted block asserts. See [Custom sprite attribute defaults](material.md#custom-sprite-attribute-defaults).
+Staging uploads have one stride, so a material transition changing that stride
+flushes even when it comes through ECS `draw_list`. Four-vertex `emit_geometry`
+calls on custom materials align their base vertex to a multiple of four for
+`gl_VertexID & 3` local-corner shaders. Any padding is zeroed, unindexed and
+included in vertex capacity; capacity overflow restarts the emit at vertex zero.
+Plain geometry keeps its existing unpadded 20-byte path.
+
 The sprite renderer owns its vertex/index buffers and clears its entire
 vertex-input cache on shutdown or GPU restore before replacing those buffers.
 Cache entries are weak: a hit validates the handle, and an entry whose

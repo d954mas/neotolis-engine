@@ -16,6 +16,161 @@ inline calls, no asset hot-reload of UI definitions, no scene-graph
 integration. Game owns the loop and render order; `nt_ui` provides
 building blocks per the engine's "set of modules" principle.
 
+## Analytic shapes
+
+`nt_ui_shape` declares a leaf; `nt_ui_shape_begin/end` declares the same paint
+with children. `nt_ui_shape_style_t` is copied into frame scratch, while the
+game owns the material and program. Shapes use the ordinary sprite renderer
+and the bound atlas white region. They introduce no theme, interaction state,
+heap allocation or separate render pass. A button can compose its existing
+interaction with a shape child; atlas and slice9 skins remain available.
+
+BOX describes a rectangle, rounded rectangle, pill or circle through four
+nonnegative corner radii in TL/TR/BR/BL order. One common CSS-style scale makes
+each adjacent radius sum fit its side; radii are not independently clamped to
+half the size. Four independent nonnegative FLOAT32 border widths in
+left/top/right/bottom order occupy the inside of the contour. A side may have
+zero width; all four zero widths contribute exactly zero border coverage.
+
+The inner contour combines inset straight edges with elliptical corner arcs:
+each ellipse axis is the outer radius minus its adjacent side width, clamped
+to zero. Only the applicable corner portions constrain the interior, which
+also stays inside the outer contour. Large widths can leave partial arcs, a
+narrow lens, or no interior. CPU preparation marks an empty interior so the
+border covers the full outer shape. Ellipse evaluation approximates distance
+near the contour; it is not an exact Euclidean ellipse distance function.
+Derivative AA estimates coverage rather than integrating the exact pixel area.
+Opposing edges share an AA footprint as the inset narrows. A vertex-prepared
+support strip bounds near-empty curved interiors; its direction is selected
+from six corner/edge candidates, not a global minimum-width search. This
+prevents a vanishing interior from retaining a constant half-covered fringe.
+
+Within one BOX, premultiplied fill and border partition coverage:
+`fill * inner + border * (outer - inner)`. The border is not composited over
+the fill, so a translucent border does not reveal that BOX's fill underneath
+its band. Separate shape emits follow ordinary source-over blending and
+preserve declaration/layer order. Paint uses straight `0xAABBGGRR` inputs,
+including transparent black as a literal color. Horizontal and vertical
+two-color gradients span the original local bounding box. The vertex shader
+premultiplies each endpoint and applies inherited opacity once before
+interpolation. Border color is independent and does not inherit the fill
+gradient.
+
+The optional BOX shadow is a separate quad immediately before its body, under
+the same transform, layer and scissor. Offset, spread and softness use layout
+pixels. Softness has finite support and a cubic transition, not a Gaussian
+blur. The whole shadow silhouette remains visible through transparent body
+paint. Alpha zero disables its emit. A game may select a dedicated shadow
+material or the same uber material; the engine never globally groups shadows.
+
+Separate shadow/body was retained after a bounded WebGL2 comparison of the
+historical affine shader baseline on
+2026-09-27: Chrome 153.0.8010.53, Intel UHD through ANGLE D3D11, 1024x1024,
+20 warmups and 30 valid non-disjoint timer samples, each averaging eight
+repetitions. At 256 shapes, separate/combined GPU medians were 0.750/1.123 ms;
+at 1024 shapes, 1.061/2.112 ms. Corresponding p95 values were 0.798/1.196 ms
+and 1.130/2.350 ms. The maximum image-channel difference was 1/255. Separate
+uses two 348-byte quads per shape; combined used one enlarged quad and an
+artifact-only shader with fixed shadow uniforms. Timings include GPU clear
+and batched draws, not engine CPU submission or uploads. They do not establish
+an engine-wide speedup or performance on other GPUs. SHA-256 prefixes identify
+the measured sources: vertex `5e579c5acac85857`, vertex helper
+`c18812c6afb1d4b2`, shared fragment math `a80e9e64d3af675e`, shared radial
+`fdc098ea276e05196`, uber fragment `20b41bb1d0711de2`, combined prototype
+`5193653aad462aae`, runner `7e2770b98c3d355d6`. These measurements predate the
+projective transport and shader changes below. The final integrated engine's
+14-workload CPU/GPU/geometry measurement is recorded in the
+[showcase comparison](../../../examples/ui_showcase/README.md#recorded-shapes-comparison).
+That engine measurement does not repeat the artifact-only combined-shadow
+experiment or establish the same relative result for a new combined shader.
+
+The new RADIAL mode preserves the old angle/ring domain and intersects it
+with the original rectangle using screen-space AA. Equal start/end angles
+produce an empty new shape. Its screen-space path reuses the legacy radial
+coverage; its world path uses homogeneous half-planes for screen-derivative
+angular AA. It does not support a border or shadow. Existing `nt_ui_radial`,
+`nt_ui_radial_fill` and `nt_ui_radial_image` retain their APIs, shader layouts
+and behavior, including their legacy zero-sweep coverage.
+
+The current shader ABI is four FLOAT4 attributes at locations 4, 5, 6 and 7,
+named `a_shape_layout`, `a_shape_geometry`, `a_shape_paint` and
+`a_shape_border`: 64 custom bytes. Together with the 20-byte sprite prefix,
+the vertex is 84 bytes. Layout holds width, height, expansion metadata and
+center X; paint X holds center Y. Screen-space emits use symmetric local
+padding as the expansion metadata and zero centers. World emits use a
+dimensionless screen expansion scale and an NDC center. Geometry holds BOX
+radii or radial start/end/inner radius. Border holds four FLOAT32 widths in
+L/T/R/B order for BOX, zeros for RADIAL, or spread/softness/finite support
+padding/zero for shadow. All lengths retain FLOAT32 precision.
+
+Paint Y/Z/W carry endpoint RGB24, border RGB24 and the packed alpha bytes
+for fill/endpoint/border. Each unsigned 24-bit integer `v` carries two control
+bits through `sign * float(v + 1) * (high_bit ? 2^32 : 1)`. Its magnitude
+lies in `[1, 2^24]` or `[2^32, 2^56]`, so normal FLOAT32 values preserve every
+payload bit. Vertex decoding uses comparisons, absolute value and exact
+power-of-two multiplication; it does not depend on signed zero, subnormals
+or bit reinterpretation. Y control bits select plain/BOX/RADIAL/shadow;
+Z selects solid/horizontal/vertical gradient; W selects empty interior and
+world projection. Shadow stores its alpha in the low byte of W. An all-zero
+block selects the ordinary sprite branch before decoding the biased payload.
+Paint and shape parameters are flat varyings; local coordinates are
+perspective correct. New shape fragments with zero coverage discard instead
+of writing depth. Sprite mode retains ordinary sprite shader semantics.
+
+World shapes require `nt_ui_set_view_proj` before walking, including shapes
+without interaction. The game must upload the same matrix to the shader's
+Globals block; the setter does not upload GPU state. CPU preparation uses the
+composed world matrix, including element depth bias, and the integer physical
+viewport dimensions used by the walker. Viewport origins cancel in its
+viewport-relative coordinates. Body and shadow support are prepared separately.
+It clips support against the positive homogeneous sheet, four source edges
+and a viewport expanded by two physical pixels. It does not clip near/far:
+a body outside a depth plane can still have a visible antialiasing fringe.
+A singular projection or empty clipped support emits nothing.
+
+An interior screen center and scale `1 + 1.5 / minimum_edge_distance` expand
+the projected support by at least 1.5 physical pixels. The vertex shader
+preserves clip W while expanding XY and sets raster clip Z to zero. Fragment
+evaluation reconstructs original homogeneous local coordinates and depth at
+the actual sample. Explicit chain-rule derivatives evaluate the contour and
+AA without nested GLSL derivatives or division by the homogeneous coordinate
+for contour coverage. Gradient colors use bounded local-coordinate ratios.
+The fragment shader discards original NDC depth outside `[-1, 1]` and writes
+the recovered depth. These are paint bounds only; they do not enlarge layout,
+children or hit boxes.
+
+Uber is an explicit material choice. Opt-in material attribute defaults with
+four zero FLOAT4 values select sprite mode for ordinary images, slice9 and
+Clay geometry. Shape emits override and consume the block. Materials without
+defaults retain the missing-attributes assertion. Basic sprite materials keep
+their 20-byte vertices. Custom quads align their base vertex to four so the
+shader's corner derivation remains valid after trimmed atlas polygons.
+
+Shape declarations set the narrow vendored Clay IMAGE `nt_defer_culling`
+option. Clay preserves their IMAGE command even when the logical box is
+offscreen. For screen-space UI, the walker culls transformed paint bounds
+after accounting for affine AA padding and shadow support. Layout, child
+placement and hit boxes do not expand.
+The image payload's private analytic flag selects a copied shape style rather
+than a generic custom-attribute block, without growing ordinary image payloads.
+Public image/panel constructors accept only their documented override bits.
+
+Ordinary Clay RECTANGLE/BORDER currently keep their existing renderer. Both
+Clay and BOX support four side widths; this is not a reason to exclude a Clay
+adapter. Migration requires an explicit material choice and parity checks for
+corner degeneracy, opacity, command order and transformed AA bounds. Clay's
+background precedes children, while its border and betweenChildren separators
+follow them within the same layer. Combining those into one BOX would change
+both ordering and translucent-border compositing. Selecting an explicit shape
+does not change existing Clay rendering or force an uber material on every game.
+
+An inner highlight is skin composition, not a separate shader mode. Emit a
+transparent-fill BOX with a thin light border after the body; a uniform inset
+uses a smaller bounding box and reduced radii. A top-only highlight uses widths
+`{0, t, 0, 0}`. Each highlight adds one quad and may batch with the body when
+their material and other draw state match. No interaction or highlight state
+is stored by the shape module.
+
 ## Clay as a public dependency
 
 `NT_UI_TIMING_ENABLED` independently selects layout/build/walk measurement.

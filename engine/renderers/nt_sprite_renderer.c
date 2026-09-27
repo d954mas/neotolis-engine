@@ -73,15 +73,12 @@ static struct {
     /* Byte stride of the current batch = 20 + cur_material_custom_bytes. Set per-flush
      * in open_cmd, so the plain path stays a constant 20. */
     uint32_t cur_stride;
-    /* "Current" per-widget custom attr block (set via set_custom_attrs, baked
-     * into every emitted vertex like color). cur_custom_bytes==0 → plain emit. */
+    /* "Current" per-widget custom attr block; zero bytes selects material defaults. */
     uint8_t cur_custom_attrs[NT_SPRITE_CUSTOM_STRIDE_MAX];
     uint8_t cur_custom_bytes;
-    /* Custom byte count the bound material's attr_map declares (attr_map_count *
-     * 16, one FLOAT4 per attr — matches build_sprite_layout). bake asserts the
-     * caller's cur_custom_bytes matches, catching a forgotten/mismatched
-     * set_custom_attrs. 0 for a plain material. */
+    /* attr_map_count * 16: the stride is material-owned even when defaults supply the data. */
     uint8_t cur_material_custom_bytes;
+    const uint8_t *cur_attr_defaults; /* borrowed from the bound material's stable pool slot */
 
     /* Recorded per-state draw commands. Last entry is the "currently open"
      * cmd that emit_one writes into; closed by close_current_cmd() before a
@@ -158,6 +155,7 @@ static void destroy_gpu_resources(void) {
     s_sprite.cur_stride = 0;
     s_sprite.cur_custom_bytes = 0;
     s_sprite.cur_material_custom_bytes = 0;
+    s_sprite.cur_attr_defaults = NULL;
     s_sprite.current_mat = (nt_material_t){0};
     s_sprite.current_program = NT_PROGRAM_INVALID;
     s_sprite.last_draw_list_calls = 0;
@@ -386,7 +384,9 @@ static void close_current_cmd(void) {
  * at the current staging index_count. Caller must close the previous cmd via
  * close_current_cmd() before opening a new one. */
 static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_material_t mat) {
-    if (s_sprite.cmd_count >= NT_SPRITE_RENDERER_MAX_DRAW_CMDS) {
+    const uint32_t stride = (uint32_t)NT_SPRITE_BASE_STRIDE + ((uint32_t)mi->attr_map_count * 16U);
+    /* draw_list opens commands directly; one staging upload has one stride. */
+    if (s_sprite.cmd_count >= NT_SPRITE_RENDERER_MAX_DRAW_CMDS || (s_sprite.vertex_count > 0 && stride != s_sprite.cur_stride)) {
         nt_sprite_renderer_flush();
     }
     NT_ASSERT(s_sprite.cmd_count < NT_SPRITE_RENDERER_MAX_DRAW_CMDS && "sprite draw-cmd queue full; raise NT_SPRITE_RENDERER_MAX_DRAW_CMDS");
@@ -402,9 +402,10 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
      * (not in set_material) so the ECS draw_list path, which calls open_cmd
      * directly, is covered too. */
     s_sprite.cur_material_custom_bytes = (uint8_t)(mi->attr_map_count * 16);
+    s_sprite.cur_attr_defaults = mi->has_attr_defaults ? (const uint8_t *)mi->attr_map_defaults : NULL;
     /* The whole batch opened here uploads at this stride (set per-flush, not
      * per-emit, so the plain fast path stays a constant 20). */
-    s_sprite.cur_stride = (uint32_t)NT_SPRITE_BASE_STRIDE + s_sprite.cur_material_custom_bytes;
+    s_sprite.cur_stride = stride;
     c->tex_count = mi->tex_count;
     /* Slot 0 is the atlas page by contract: ensure_current_cmd_page_texture substitutes
      * into it before any index is staged, so resolving the material's value is dead work. */
@@ -445,6 +446,7 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
         return true;
     }
     if (page_tex == 0) {
+        s_sprite.cur_custom_bytes = 0;
         return false;
     }
 
@@ -471,22 +473,21 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
  * range [base, base+count) — identical for every vertex of the emit (the value
  * is per-widget, supplied by the caller, like color). The block sits CONTIGUOUS
  * with each vertex at staging + i*cur_stride + 20, so flush uploads it directly.
- * No-op when no custom attrs are set (plain emit — the base is already staged). */
+ * An omitted block uses opt-in material defaults. Plain materials need no bake. */
 static inline void bake_custom_attrs(uint32_t base, uint32_t count) {
-    /* The pipeline stride comes from the material's attr_map; the bake stride comes
-     * from set_custom_attrs. A mismatch (forgot set_custom_attrs, or wrong byte
-     * count) corrupts the draw — catch it here. Plain material: both 0. */
-    NT_ASSERT(s_sprite.cur_custom_bytes == s_sprite.cur_material_custom_bytes && "custom-attr bytes don't match the bound material's attr_map stride (forgot set_custom_attrs or wrong size)");
-    if (s_sprite.cur_custom_bytes == 0) {
+    /* A partial override would leave bytes undefined at the material's vertex stride. */
+    NT_ASSERT((s_sprite.cur_custom_bytes == 0 || s_sprite.cur_custom_bytes == s_sprite.cur_material_custom_bytes) && "custom-attr bytes don't match the bound material's attr_map stride");
+    if (s_sprite.cur_material_custom_bytes == 0) {
         return;
     }
+    const uint8_t *src = (s_sprite.cur_custom_bytes != 0) ? s_sprite.cur_custom_attrs : s_sprite.cur_attr_defaults;
+    NT_ASSERT(src != NULL && "custom-attr material needs set_custom_attrs or material defaults");
     NT_ASSERT(base + count <= s_sprite.custom_max_vertices && "custom-attr bake out of range at extended stride");
     for (uint32_t i = 0; i < count; i++) {
         uint8_t *dst = s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
-        memcpy(dst, s_sprite.cur_custom_attrs, s_sprite.cur_custom_bytes);
+        memcpy(dst, src, s_sprite.cur_material_custom_bytes);
     }
-    /* Each emit CONSUMES its block: the next emit that forgets set_custom_attrs
-     * then trips the material-stride assert instead of silently reusing this one. */
+    /* Each emit consumes its override; the next emit uses defaults or asserts. */
     s_sprite.cur_custom_bytes = 0;
 }
 
@@ -552,6 +553,7 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
     NT_ASSERT(r != NULL && positions != NULL && uvs != NULL && idx != NULL);
     NT_ASSERT(m != NULL);
     if (r->vertex_count == 0U) {
+        s_sprite.cur_custom_bytes = 0;
         return; /* tombstone — silent no-op (matches old emit_one behaviour) */
     }
     if (!ensure_current_cmd_page_texture(page_tex)) {
@@ -928,6 +930,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
     if (h.region->vertex_count == 0U) {
+        s_sprite.cur_custom_bytes = 0;
         return; /* tombstone or out-of-range */
     }
     emit_region_resolved(h.region, h.positions, h.uvs, h.indices, nt_resource_get(h.page_resource), h.ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits);
@@ -950,6 +953,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
     if (h.region->vertex_count == 0U) {
+        s_sprite.cur_custom_bytes = 0;
         return; /* tombstone */
     }
     const uint32_t page_tex = nt_resource_get(h.page_resource);
@@ -960,13 +964,20 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     /* Cap by the bound MATERIAL's stride, not the per-emit block: a forgotten
      * set_custom_attrs still emits at the extended stride. */
     const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
-    if (s_sprite.vertex_count + vertex_count > vcap || s_sprite.index_count + index_count > s_sprite.max_indices) {
+    /* Analytic quads derive their local corner from gl_VertexID & 3. */
+    uint32_t pad = (s_sprite.cur_material_custom_bytes > 0 && vertex_count == 4U) ? ((4U - (s_sprite.vertex_count & 3U)) & 3U) : 0U;
+    if (s_sprite.vertex_count + pad + vertex_count > vcap || s_sprite.index_count + index_count > s_sprite.max_indices) {
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
         open_cmd_from_snapshot(&snapshot);
+        pad = 0;
     }
     /* A single emit larger than the (post-flush empty) cap can't fit — fail fast instead of overrunning staging. */
     NT_ASSERT(vertex_count <= vcap && index_count <= s_sprite.max_indices && "emit_geometry: single emit exceeds staging cap (raise custom_max_vertices / max_indices)");
+    if (pad > 0) {
+        memset(s_sprite.staging + ((size_t)s_sprite.vertex_count * s_sprite.cur_stride), 0, (size_t)pad * s_sprite.cur_stride);
+        s_sprite.vertex_count += pad;
+    }
 
     /* Sample at the region's UV centroid -- the corner of vertex 0 would
      * land at the texel boundary and bleed into neighbours under linear
@@ -1045,6 +1056,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     nt_atlas_region_handles_t rh;
     nt_atlas_get_region_handles(atlas, region_index, &rh);
     if (rh.region->vertex_count == 0U) {
+        s_sprite.cur_custom_bytes = 0;
         return; /* tombstone */
     }
 

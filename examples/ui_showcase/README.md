@@ -17,7 +17,7 @@ The left tab list itself **dogfoods the reusable `nt_ui_tabbar`** widget (the ga
 owns the active-tab index; the widget draws the accent bar + selected fill + hover
 lighten and writes the index on click).
 
-## Tabs (18 entries)
+## Tabs
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
 2. **Buttons** - six cells: standard (idle/hover/pressed/disabled) / exaggerated
@@ -80,6 +80,95 @@ lighten and writes the index on click).
     tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
     list, which uses the one-call `labels[]` wrapper with a LEFT accent).
 18. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+
+## Shapes tab
+
+**Shapes**, immediately after **Radial**, compares procedural controls with atlas
+art. The two buttons use the existing `nt_ui_button` interaction and animation:
+hover, press, drag outside to cancel, scale, press offset and disabled opacity.
+**Buttons enabled** toggles both. Each has a separate click counter.
+
+The gallery includes sharp/rounded/asymmetric corners, pill, circle, thin/thick
+borders, four different side widths, zero-width sides, empty interior,
+horizontal/vertical gradients, transparent paint, soft shadow, a radial ring,
+and an inner highlight composed from an inset transparent-fill BOX. Scroll down for mixed atlas/slice9/Clay/shape ordering and a rotated,
+nonuniformly scaled shape container with inherited opacity and child text.
+
+**Mixed sprite + shape material** switches between dedicated BOX/RADIAL/SHADOW
+programs and one uber material. The latter supplies neutral material attribute
+defaults to ordinary sprites. The change takes effect on the next frame.
+
+**Measurement grid (256 cards)** replaces the gallery with a 16×16 grid of
+28×20 layout-pixel cards at 2-pixel spacing. **Clay** and **SDF** use the same
+solid color and radius 6. **4 sides** adds left/top/right/bottom widths
+1/2/3/4 with an opaque white border to either Clay or SDF. For SDF, **+ gradient**
+adds a horizontal gradient; **+ shadow** adds a separate shadow to that same
+border/gradient workload. Unsupported effects are disabled for Clay and atlas.
+**Atlas** shows the existing ornamental slice9 path
+and is a reference workload, not a pixel-equivalent baseline. Keep the whole
+grid visible and preserve viewport, DPR, theme, scroll position and material
+selection when comparing runs.
+
+The existing overlay reports whole-frame CPU/GPU/draw data. The grid readout
+reports the preceding whole UI walk: draws, submitted vertices/indices and
+buffer upload bytes, including the surrounding showcase controls. It excludes
+the later inspector/debug overlay. Detailed layout/build-tree/walk timings use
+the existing UI getters; a build without UI timing says so explicitly. Geometry
+counts and uploads use existing gfx counter deltas around `nt_ui_walk`.
+These controls prepare a comparison; they do not establish a
+performance result. Build/profiling flags and GPU timer validation are described
+in [docs/build.md](../../docs/build.md).
+
+For recorded samples, enable metrics, UI/GPU timing and INFO logging explicitly
+on the optimized profiling build. Select a workload, leave the pointer outside
+the cards and warm up for at least two seconds. Click **Reset metrics**, wait for
+at least `NT_METRICS_WINDOW` rendered frames (256 by default), then click **Log
+snapshot**. The ordinary application/browser console receives the selected
+backend/material mode, framebuffer dimensions, sample counts, median and p95
+for whole-frame CPU/GPU and the whole-UI counters/timings. A GPU sample count of
+zero is unavailable data, not zero GPU cost. Repeat after every setting change;
+these windows do not label samples with scene identities automatically.
+
+### Recorded Shapes comparison
+
+On 2026-09-27, the optimized profiling build ran all 14 workloads in Chrome
+153.0.8010.53, WebGL2 / Intel UHD ANGLE D3D11, at 1440x1000 and DPR 1.
+Each row contains 256 samples after Reset and a three-second steady interval.
+CPU/GPU are whole-frame medians; geometry and uploads cover the entire UI,
+including fixed controls and text. No console or GL errors were observed.
+
+| Material | Workload | CPU ms | GPU ms | UI draws | Vertices | Indices | Upload bytes |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Dedicated | Atlas solid | 0.370 | 3.044 | 13 | 7284 | 19620 | 308204 |
+| Dedicated | Clay solid | 0.370 | 2.890 | 13 | 10616 | 27306 | 390412 |
+| Dedicated | Clay border | 0.445 | 3.042 | 14 | 24952 | 70314 | 763148 |
+| Dedicated | SDF solid | 0.375 | 3.076 | 14 | 4208 | 7326 | 287436 |
+| Dedicated | SDF border | 0.420 | 3.155 | 14 | 4208 | 7326 | 287436 |
+| Dedicated | SDF gradient | 0.440 | 3.170 | 14 | 4208 | 7326 | 287436 |
+| Dedicated | SDF shadow | 0.765 | 2.765 | 525 | 5240 | 8874 | 377100 |
+| Uber | Atlas solid | 0.385 | 3.826 | 14 | 7288 | 19626 | 613704 |
+| Uber | Clay solid | 0.675 | 3.526 | 14 | 10620 | 27312 | 908904 |
+| Uber | Clay border | 0.695 | 3.773 | 18 | 24960 | 70326 | 2199432 |
+| Uber | SDF solid | 0.480 | 3.719 | 13 | 4212 | 7332 | 330792 |
+| Uber | SDF border | 0.495 | 3.620 | 13 | 4212 | 7332 | 330792 |
+| Uber | SDF gradient | 0.635 | 3.488 | 13 | 4212 | 7332 | 330792 |
+| Uber | SDF shadow | 0.495 | 3.702 | 13 | 5236 | 8868 | 419880 |
+
+The matched solid/border subset compares Clay geometry with SDF. Atlas has
+different art; gradient/shadow have no fabricated old-path equivalent. SDF
+border reduces geometry and upload bytes here, but GPU medians are not
+uniformly lower. Alternating dedicated body/shadow materials require 525 draws;
+the same uber material retains 13. These are individual steady windows on one
+integrated GPU, not a cross-device speed guarantee or isolated effect cost.
+
+Measured release WASM: 440984 bytes, SHA256 prefix `efac7a8bf2ebd4c0`;
+pack: 1288296 bytes, `06687fa720576b46`; common shape shader:
+`a6ef8f8b0b63c138`. This includes projective transport and final affine edge
+corrections. Actual debug/release captures also cover DPR 1/2, browser zoom
+125%, resize, hover/press/click, disabled click and drag-off cancellation for
+both button skins. Five solid-shape half-coverage contours differ by at most
+0.335 logical pixels between DPR 1 and 2 under the sampled-contour check.
+This does not establish exact pixel-area filtering or mobile performance.
 
 ## Controls
 

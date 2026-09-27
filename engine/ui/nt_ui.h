@@ -117,13 +117,16 @@ typedef struct {
     float origin_y;
     float slice9_scale; /* multiplies atlas/override slice9 borders; MUST be finite > 0 (walker asserts). */
     uint8_t flip_bits;
-    uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
+    uint8_t flags; /* Image overrides; bit 2 selects the engine-owned analytic payload. */
     /* Optional per-element material override. .id==0 = use the walker's bound base
      * material; re-bound only when .id differs, so same-material elements batch. */
     nt_material_t material;
-    /* NULL = plain image (common case). Non-NULL = custom-attr widget; the block
-     * (payload-lifetime scratch) carries the per-vertex attrs. */
-    const nt_ui_image_custom_block_t *custom;
+    /* Plain image: custom=NULL. Analytic bit selects shape; otherwise custom
+     * points at the generic per-vertex block. Both have frame-scratch lifetime. */
+    union {
+        const nt_ui_image_custom_block_t *custom;
+        const struct nt_ui_shape_payload *shape;
+    };
 } nt_ui_image_payload_t;
 /* Non-pointer prefix is 36 B; `custom` is pointer-aligned and adds sizeof(void*). */
 _Static_assert(sizeof(nt_ui_image_payload_t) == ((36U + (sizeof(void *) - 1U)) & ~(sizeof(void *) - 1U)) + sizeof(void *), "nt_ui_image_payload_t stable ABI (40 B wasm / 48 B native; was 100 B)");
@@ -320,7 +323,8 @@ void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *
 bool nt_ui_context_has_frame(const nt_ui_context_t *ctx);
 
 /* REQUIRED for ctx with use_raycast_input=true. Call IMMEDIATELY after nt_ui_begin and BEFORE
- * any widget hit-test (nt_ui_button_begin, nt_ui_step_interaction*, nt_ui_test_hit etc.). The
+ * any widget hit-test (nt_ui_button_begin, nt_ui_step_interaction*, nt_ui_test_hit etc.)
+ * or analytic shape walk. The
  * setter copies into ctx and pre-computes the inverse for raycast; `nt_ui_begin` resets the
  * view_proj_set flag so a forgotten setter trips the per-frame assert instead of silently
  * raycasting through last frame's stale camera. ctx is non-NULL, use_raycast_input is true,
@@ -331,7 +335,8 @@ bool nt_ui_context_has_frame(const nt_ui_context_t *ctx);
  * `glm_ortho(0, w, h, 0, near, far)` (flipped top/bottom). For perspective 3D world UI, set up
  * lookAt with up = (0, -1, 0) so screen-down aligns with Clay layout-down.
  *
- * Render-side contract: this setter only feeds the hit-test path. The sprite/text materials
+ * Render-side contract: the copied matrix also prepares projected shape bounds and depth bias.
+ * This setter does not update GPU uniforms. The sprite/text materials
  * must receive the SAME view_proj via the game's frame-uniforms UBO before nt_ui_walk, or the
  * rendered geometry will not match where hit-test thinks the widgets are. */
 void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]);

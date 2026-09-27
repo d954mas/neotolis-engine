@@ -123,6 +123,34 @@ const TextureAssetRef *material_get_textures(const MaterialAssetHeader *h) { ret
 
 ## One material, one copy
 
+### Custom sprite attribute defaults
+
+`attr_map` entries declare one FLOAT4 custom vertex lane each for the sprite
+renderer. `nt_material_create_desc_t.has_attr_defaults` explicitly enables a
+default block: creation copies each entry's `default_value[4]` in declaration
+order. These values are immutable and material-owned; the creation descriptor
+is borrowed only for the call. With the flag false, values are ignored and a
+custom-attribute sprite material still requires an explicit block for each emit.
+
+`nt_sprite_renderer_set_custom_attrs` supplies a complete one-emit override, not
+a partial update. The block must exactly match the bound material's declared
+custom stride. After consumption, the next emit uses the material defaults or
+asserts when no defaults were declared. A zero default block can select the plain
+sprite branch of a game-owned uber shader, while individual shapes override its
+parameters. Immediate, slice9, geometry and ECS sprite emits share this contract;
+UI does not maintain separate material-default state.
+
+Defaults are vertex data, not layout or pipeline identity. The sprite renderer
+borrows a pointer from the stable material pool at command open and copies the
+selected block into each emitted vertex without per-emit heap allocation or
+attribute-name lookup. The bound material remains alive through its last emit;
+destroying it does not alter attributes already copied into staged vertices.
+A material without custom attributes retains its 20-byte
+sprite layout and performs no custom copy. The sprite custom-stride capacity
+still applies; material defaults do not raise it.
+
+### Shared values
+
 No duplicated material data. Material is created once (either from code via descriptor or loaded from pack asset in the future) and lives in a single pool slot. Multiple entities reference the same material handle.
 
 Per-entity variation (e.g. per-character color, dissolve progress) goes through entity param components, not material mutation — each entity carries its own values, the material stays shared.

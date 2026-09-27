@@ -19,6 +19,7 @@
 
 _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 required");
 
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -1133,6 +1134,8 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 // #endregion
 
 // #region helper_emit_image
+static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float out[16]);
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
@@ -1154,6 +1157,11 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) 
     const nt_texture_region_t *r = nt_atlas_get_region(p->atlas, p->region_index);
     if (r->vertex_count == 0U) {
         return;
+    }
+    if (p->custom != NULL) {
+        float block[16];
+        const uint8_t count = build_custom_block(p, p->custom, &bb, block);
+        nt_sprite_renderer_set_custom_attrs(block, (uint8_t)(count * sizeof(float)));
     }
 
     /* The flag or a non-zero lrtb selects the override; the flag with zeros turns a baked
@@ -1262,19 +1270,16 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
     return fcount;
 }
 
-/* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel.
- *
- * INVARIANT (load-bearing): the fs's gl_VertexID&3 corner derivation requires each
- * quad's base vertex index to be a multiple of 4. This holds because GEOMETRY-mode
- * widgets use a DISTINCT material — flushed on material change, which resets the
- * staging vertex_count to 0 — and emit EXACTLY 4 verts per widget. Emitting
- * non-4-vertex geometry into that material, or sharing it with other geometry,
- * would break the corner derivation. */
+/* Sprite geometry aligns custom quads so gl_VertexID & 3 also works in mixed batches. */
 static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16]) {
     const Clay_BoundingBox bb = c->boundingBox;
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
         return;
     }
+    const nt_ui_image_payload_t *payload = c->renderData.image.imageData;
+    float block[16];
+    const uint8_t count = build_custom_block(payload, payload->custom, &bb, block);
+    nt_sprite_renderer_set_custom_attrs(block, (uint8_t)(count * sizeof(float)));
     /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
@@ -1634,6 +1639,341 @@ static inline void mat4_mul_vec4_flat(const float m[16], const float v[4], float
     out[3] = (m[3] * v[0]) + (m[7] * v[1]) + (m[11] * v[2]) + (m[15] * v[3]);
 }
 
+// #region analytic_shapes
+static void shape_normalize_radii(const nt_ui_shape_radii_t *r, float width, float height, float out[4]) {
+    const double radii[4] = {(double)r->top_left, (double)r->top_right, (double)r->bottom_right, (double)r->bottom_left};
+    const double sums[4] = {radii[0] + radii[1], radii[1] + radii[2], radii[2] + radii[3], radii[3] + radii[0]};
+    const double edges[4] = {(double)width, (double)height, (double)width, (double)height};
+    double scale = 1.0;
+    for (int i = 0; i < 4; ++i) {
+        if (sums[i] > edges[i]) {
+            scale = fmin(scale, edges[i] / sums[i]);
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        out[i] = (float)(radii[i] * scale);
+    }
+}
+
+typedef struct {
+    double cx;
+    double cy;
+    double rx;
+    double ry;
+    double sx;
+    double sy;
+} shape_inner_arc_t;
+
+static void shape_inner_arcs(double width, double height, const float radii[4], const float sides[4], shape_inner_arc_t arcs[8]) {
+    const double sx[4] = {-1.0, 1.0, 1.0, -1.0};
+    const double sy[4] = {-1.0, -1.0, 1.0, 1.0};
+    for (int set = 0; set < 2; ++set) {
+        const double left = set != 0 ? (double)sides[0] : 0.0;
+        const double top = set != 0 ? (double)sides[1] : 0.0;
+        const double right = set != 0 ? (double)sides[2] : 0.0;
+        const double bottom = set != 0 ? (double)sides[3] : 0.0;
+        const double widths_x[4] = {left, right, right, left};
+        const double widths_y[4] = {top, top, bottom, bottom};
+        const double x[4] = {left, width - right, width - right, left};
+        const double y[4] = {top, top, height - bottom, height - bottom};
+        for (int corner = 0; corner < 4; ++corner) {
+            const double rx = fmax((double)radii[corner] - widths_x[corner], 0.0);
+            const double ry = fmax((double)radii[corner] - widths_y[corner], 0.0);
+            arcs[(set * 4) + corner] = (shape_inner_arc_t){x[corner] - (sx[corner] * rx), y[corner] - (sy[corner] * ry), rx, ry, sx[corner], sy[corner]};
+        }
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool shape_inner_nonempty(float width, float height, const float radii[4], const float sides[4]) {
+    double left = (double)sides[0];
+    double right = (double)width - (double)sides[2];
+    if (right <= left || (double)height - (double)sides[3] <= (double)sides[1]) {
+        return false;
+    }
+    shape_inner_arc_t arcs[8];
+    shape_inner_arcs((double)width, (double)height, radii, sides, arcs);
+    /* Each vertical slice is an interval; its width is concave over x. */
+    for (int iteration = 0; iteration < 64; ++iteration) {
+        const double x = left + ((right - left) * 0.5);
+        double top = (double)sides[1];
+        double bottom = (double)height - (double)sides[3];
+        double top_slope = 0.0;
+        double bottom_slope = 0.0;
+        for (int corner = 0; corner < 8; ++corner) {
+            const shape_inner_arc_t *arc = &arcs[corner];
+            if (arc->rx <= 0.0 || arc->ry <= 0.0 || arc->sx * (x - arc->cx) <= 0.0) {
+                continue;
+            }
+            const double u = fmax(-1.0, fmin(1.0, (x - arc->cx) / arc->rx));
+            const double root = sqrt(fmax(0.0, 1.0 - (u * u)));
+            const double edge = arc->cy + (arc->sy * arc->ry * root);
+            const double slope = root > 0.0 ? (-arc->sy * arc->ry * u) / (arc->rx * root) : copysign((double)INFINITY, -arc->sy * u);
+            if (arc->sy < 0.0 && edge > top) {
+                top = edge;
+                top_slope = slope;
+            } else if (arc->sy > 0.0 && edge < bottom) {
+                bottom = edge;
+                bottom_slope = slope;
+            }
+        }
+        if (bottom > top) {
+            return true;
+        }
+        if (x == left || x == right) {
+            return false;
+        }
+        if (bottom_slope > top_slope) {
+            left = x;
+        } else {
+            right = x;
+        }
+    }
+    return false;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static int shape_projection_clip(double polygon[12][2], int count, const double line[3]) {
+    if (count == 0) {
+        return 0;
+    }
+    double result[12][2];
+    int length = 0;
+    double px = polygon[count - 1][0];
+    double py = polygon[count - 1][1];
+    double previous = (line[0] * px) + (line[1] * py) + line[2];
+    for (int i = 0; i < count; ++i) {
+        const double x = polygon[i][0];
+        const double y = polygon[i][1];
+        const double current = (line[0] * x) + (line[1] * y) + line[2];
+        if ((previous >= 0.0) != (current >= 0.0)) {
+            const double t = previous / (previous - current);
+            NT_ASSERT(length < 12);
+            result[length][0] = px + (t * (x - px));
+            result[length++][1] = py + (t * (y - py));
+        }
+        if (current >= 0.0) {
+            NT_ASSERT(length < 12);
+            result[length][0] = x;
+            result[length++][1] = y;
+        }
+        px = x;
+        py = y;
+        previous = current;
+    }
+    for (int i = 0; i < length; ++i) {
+        polygon[i][0] = result[i][0];
+        polygon[i][1] = result[i][1];
+    }
+    return length;
+}
+
+static bool shape_projective_prepare(const nt_ui_target_t *target, const float view_proj[16], const float world[16], Clay_BoundingBox support, float out[3]) {
+    const double vw = target->fb_size[0] > 0.0F ? (double)((int)target->fb_size[0] - (2 * (int)roundf(target->fb_offset[0]))) : (double)(int)target->viewport[2];
+    const double vh = target->fb_size[0] > 0.0F ? (double)((int)target->fb_size[1] - (2 * (int)roundf(target->fb_offset[1]))) : (double)(int)target->viewport[3];
+    if (vw <= 0.0 || vh <= 0.0) {
+        return false;
+    }
+    double clip[4][3] = {{0}};
+    for (int row = 0; row < 4; ++row) {
+        for (int k = 0; k < 4; ++k) {
+            const double vp = (double)view_proj[(k * 4) + row];
+            const double origin = (double)world[12 + k] + ((double)support.x * (double)world[k]) + ((double)support.y * (double)world[4 + k]);
+            clip[row][0] += vp * (double)world[k];
+            clip[row][1] += vp * (double)world[4 + k];
+            clip[row][2] += vp * origin;
+        }
+    }
+    double h[3][3];
+    for (int k = 0; k < 3; ++k) {
+        h[0][k] = (vw * 0.5) * (clip[0][k] + clip[3][k]);
+        h[1][k] = (vh * 0.5) * (clip[1][k] + clip[3][k]);
+        h[2][k] = clip[3][k];
+    }
+    const double a = h[0][0];
+    const double b = h[0][1];
+    const double c = h[0][2];
+    const double d = h[1][0];
+    const double e = h[1][1];
+    const double f = h[1][2];
+    const double g = h[2][0];
+    const double j = h[2][1];
+    const double k = h[2][2];
+    double inverse[3][3] = {
+        {(e * k) - (f * j), (c * j) - (b * k), (b * f) - (c * e)}, {(f * g) - (d * k), (a * k) - (c * g), (c * d) - (a * f)}, {(d * j) - (e * g), (b * g) - (a * j), (a * e) - (b * d)}};
+    const double determinant = (a * inverse[0][0]) + (b * inverse[1][0]) + (c * inverse[2][0]);
+    if (determinant == 0.0) {
+        return false;
+    }
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            inverse[row][column] /= determinant;
+        }
+    }
+    double planes[5][3];
+    for (int column = 0; column < 3; ++column) {
+        planes[0][column] = inverse[2][column];
+        planes[1][column] = inverse[0][column];
+        planes[2][column] = ((double)support.width * inverse[2][column]) - inverse[0][column];
+        planes[3][column] = inverse[1][column];
+        planes[4][column] = ((double)support.height * inverse[2][column]) - inverse[1][column];
+    }
+    double polygon[12][2] = {{-2, -2}, {vw + 2, -2}, {vw + 2, vh + 2}, {-2, vh + 2}};
+    int count = 4;
+    /* Depth clipping belongs after AA expansion: an outside body can have an inside fringe. */
+    for (int row = 0; row < 5; ++row) {
+        count = shape_projection_clip(polygon, count, planes[row]);
+    }
+    if (count == 0) {
+        return false;
+    }
+    double cx = 0.0;
+    double cy = 0.0;
+    for (int i = 0; i < count; ++i) {
+        cx += polygon[i][0];
+        cy += polygon[i][1];
+    }
+    cx /= (double)count;
+    cy /= (double)count;
+    double radius = (double)INFINITY;
+    for (int row = 1; row < 5; ++row) {
+        const double edge = (planes[row][0] * cx) + (planes[row][1] * cy) + planes[row][2];
+        radius = fmin(radius, edge / hypot(planes[row][0], planes[row][1]));
+    }
+    if (radius <= 0.0) {
+        return false;
+    }
+    const double scale = 1.0 + (1.5 / radius);
+    NT_ASSERT(isfinite(scale) && scale <= (double)FLT_MAX);
+    out[0] = (float)scale;
+    out[1] = (float)((2.0 * cx / vw) - 1.0);
+    out[2] = (float)((2.0 * cy / vh) - 1.0);
+    return true;
+}
+
+static float shape_affine_guard(const nt_ui_target_t *target, const float world[16]) {
+    const double width = target->fb_size[0] > 0.0F ? (double)((int)target->fb_size[0] - (2 * (int)roundf(target->fb_offset[0]))) : (double)(int)target->viewport[2];
+    const double height = target->fb_size[0] > 0.0F ? (double)((int)target->fb_size[1] - (2 * (int)roundf(target->fb_offset[1]))) : (double)(int)target->viewport[3];
+    if (width <= 0.0 || height <= 0.0) {
+        return 0.0F;
+    }
+    const double sx = width / (double)target->viewport[2];
+    const double sy = height / (double)target->viewport[3];
+    const double a = (double)world[0] * sx;
+    const double b = (double)world[4] * sx;
+    const double c = (double)world[1] * sy;
+    const double d = (double)world[5] * sy;
+    const double determinant = (a * d) - (b * c);
+    if (determinant == 0.0) {
+        return 0.0F;
+    }
+    /* Inverse-Jacobian row sums enclose a physical-pixel square after any affine transform. */
+    return (float)(fmax(fabs(d) + fabs(b), fabs(c) + fabs(a)) / fabs(determinant));
+}
+
+static void emit_shape_quad(const nt_ui_context_t *ctx, Clay_BoundingBox bb, const nt_ui_target_t *target, const float world[16], nt_ui_sprite_bind_t *bind, nt_material_t material, float attrs[16],
+                            uint32_t color, bool screen_space) {
+    const float pad = attrs[2];
+    if (!screen_space) {
+        NT_ASSERT(ctx->view_proj_set && "analytic world UI requires nt_ui_set_view_proj");
+        const Clay_BoundingBox support = {bb.x - pad, bb.y - pad, bb.width + (2.0F * pad), bb.height + (2.0F * pad)};
+        float projection[3];
+        if (!shape_projective_prepare(target, ctx->view_proj, world, support, projection)) {
+            return;
+        }
+        attrs[2] = projection[0];
+        attrs[3] = projection[1];
+        attrs[8] = projection[2];
+        attrs[11] *= 4294967296.0F;
+    }
+    const float vertices[4][2] = {{bb.x - pad, bb.y - pad}, {bb.x + bb.width + pad, bb.y - pad}, {bb.x + bb.width + pad, bb.y + bb.height + pad}, {bb.x - pad, bb.y + bb.height + pad}};
+    if (screen_space) {
+        float min_x = INFINITY;
+        float min_y = INFINITY;
+        float max_x = -INFINITY;
+        float max_y = -INFINITY;
+        for (int i = 0; i < 4; ++i) {
+            const float x = (world[0] * vertices[i][0]) + (world[4] * vertices[i][1]) + world[12];
+            const float y = (world[1] * vertices[i][0]) + (world[5] * vertices[i][1]) + world[13];
+            min_x = fminf(min_x, x);
+            min_y = fminf(min_y, y);
+            max_x = fmaxf(max_x, x);
+            max_y = fmaxf(max_y, y);
+        }
+        if (max_x < target->viewport[0] || min_x > target->viewport[0] + target->viewport[2] || max_y < target->viewport[1] || min_y > target->viewport[1] + target->viewport[3]) {
+            return;
+        }
+    }
+    const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+    prep_sprite_dispatch_mat(material, bind);
+    nt_sprite_renderer_set_custom_attrs(attrs, 64U);
+    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, vertices, 4, indices, 6, world, color);
+}
+
+/* Normal binary32 ranges preserve all 24 payload bits and two control bits without signed zero. */
+static float shape_encode_paint(uint32_t payload, uint32_t flags) {
+    const float magnitude = (float)(payload + 1U) * ((flags & 2U) != 0U ? 4294967296.0F : 1.0F);
+    return (flags & 1U) != 0U ? -magnitude : magnitude;
+}
+
+static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd, const nt_ui_target_t *target, const float world[16], nt_ui_sprite_bind_t *bind, float opacity, bool screen_space) {
+    const nt_ui_image_payload_t *payload = cmd->renderData.image.imageData;
+    const nt_ui_shape_style_t *style = &payload->shape->style;
+    const Clay_BoundingBox bb = cmd->boundingBox;
+    if (bb.width <= 0.0F || bb.height <= 0.0F || opacity <= 0.0F) {
+        return;
+    }
+    const float guard = screen_space ? shape_affine_guard(target, world) : 0.0F;
+    if (screen_space && guard == 0.0F) {
+        return;
+    }
+    float attrs[16] = {bb.width, bb.height, guard, 0.0F};
+    uint32_t interior_flags = 0U;
+    if (style->kind == NT_UI_SHAPE_BOX) {
+        shape_normalize_radii(&style->box, bb.width, bb.height, attrs + 4);
+        attrs[12] = style->paint.border_widths.left;
+        attrs[13] = style->paint.border_widths.top;
+        attrs[14] = style->paint.border_widths.right;
+        attrs[15] = style->paint.border_widths.bottom;
+        const bool has_border = attrs[12] > 0.0F || attrs[13] > 0.0F || attrs[14] > 0.0F || attrs[15] > 0.0F;
+        if (has_border && !shape_inner_nonempty(bb.width, bb.height, attrs + 4, attrs + 12)) {
+            interior_flags = 1U;
+        }
+    } else {
+        attrs[4] = style->radial.angle_start;
+        attrs[5] = style->radial.angle_end;
+        attrs[6] = style->radial.inner_radius_norm;
+    }
+    const uint32_t inherited_alpha = (uint32_t)lrintf(opacity * 255.0F) << 24U;
+    if ((style->shadow.color >> 24U) != 0U) {
+        float shadow[16];
+        memcpy(shadow, attrs, sizeof shadow);
+        shadow[12] = style->shadow.spread;
+        shadow[13] = style->shadow.softness;
+        shadow[14] = fmaxf(style->shadow.spread + style->shadow.softness, 0.0F);
+        shadow[15] = 0.0F;
+        shadow[2] += shadow[14];
+        shadow[8] = 0.0F;
+        shadow[9] = shape_encode_paint(0U, 3U);
+        shadow[10] = shape_encode_paint(0U, 0U);
+        shadow[11] = shape_encode_paint(style->shadow.color >> 24U, 0U);
+        Clay_BoundingBox shadow_box = bb;
+        shadow_box.x += style->shadow.offset_x;
+        shadow_box.y += style->shadow.offset_y;
+        emit_shape_quad(ctx, shadow_box, target, world, bind, style->shadow.material, shadow, (style->shadow.color & 0xFFFFFFU) | inherited_alpha, screen_space);
+    }
+    const uint32_t end = style->paint.gradient == NT_UI_SHAPE_SOLID ? style->paint.color0 : style->paint.color1;
+    if (((style->paint.color0 | end | style->paint.border_color) >> 24U) == 0U) {
+        return;
+    }
+    attrs[8] = 0.0F;
+    attrs[9] = shape_encode_paint(end & 0xFFFFFFU, (uint32_t)style->kind);
+    attrs[10] = shape_encode_paint(style->paint.border_color & 0xFFFFFFU, (uint32_t)style->paint.gradient);
+    attrs[11] = shape_encode_paint((style->paint.color0 >> 24U) | ((end >> 24U) << 8U) | ((style->paint.border_color >> 24U) << 16U), interior_flags);
+    emit_shape_quad(ctx, bb, target, world, bind, style->material, attrs, (style->paint.color0 & 0xFFFFFFU) | inherited_alpha, screen_space);
+}
+// #endregion
+
 static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierarchy_depth, float world_mat4[16]) {
     if (ctx->element_depth_bias_ndc == 0.0F || hierarchy_depth == 0U) {
         return;
@@ -1736,6 +2076,10 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
          * Routed through prep so a shared override batches and the base<->override
          * boundary flushes exactly once. */
         const nt_ui_image_payload_t *ip = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+        if (ip != NULL && (ip->flags & NT_UI_IMAGE_ANALYTIC_SHAPE) != 0U) {
+            emit_shape(ctx, c, target, world_mat4, bind, ws->accum_opacity, !ctx->use_raycast_input || force_screen_space);
+            return;
+        }
         const nt_material_t img_mat = (ip != NULL && ip->material.id != 0) ? ip->material : ctx->sprite_material;
         prep_sprite_dispatch_mat(img_mat, bind);
         Clay_RenderCommand local = *c;
@@ -1750,21 +2094,13 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
             }
         }
-        /* One generic custom-attr branch (no per-widget identity): custom_bytes>0 → bake
-         * the widget block (a_layout/a_uvrect injected by name) and dispatch by geom_mode. */
-        if (ip != NULL && ip->custom != NULL) {
-            float blk[16];
-            const uint8_t fcount = build_custom_block(ip, ip->custom, &c->boundingBox, blk);
-            nt_sprite_renderer_set_custom_attrs(blk, (uint8_t)(fcount * sizeof(float)));
-            if (ip->custom->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
-                const Clay_Color rt = local.renderData.image.backgroundColor;
-                const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
-                const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
-                emit_custom_geometry(ctx, &local, rcol, world_mat4);
-                return;
-            }
-            /* REGION mode: emit_image rasterizes the textured region (origin/flip/slice9
-             * honored), baking the bound block across all verts. */
+        /* Prepare overrides inside the emit, after readiness and empty-geometry skips. */
+        if (ip != NULL && ip->custom != NULL && ip->custom->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
+            const Clay_Color rt = local.renderData.image.backgroundColor;
+            const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
+            const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
+            emit_custom_geometry(ctx, &local, rcol, world_mat4);
+            return;
         }
         emit_image(&local, world_mat4);
         return;

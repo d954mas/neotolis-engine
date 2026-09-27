@@ -1492,6 +1492,219 @@ void test_sprite_renderer_custom_attr_emit_bakes_per_vertex(void) {
     }
 }
 
+void test_sprite_renderer_material_defaults_and_one_shot_override(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xA9ULL);
+    nt_material_create_desc_t material = {
+        .program = nt_gfx_fake_make_program(NULL, 0),
+        .attr_map = {{.stream_name = "custom", .location = 4}},
+        .attr_map_count = 1,
+        .has_attr_defaults = true,
+    };
+    nt_sprite_renderer_set_material(nt_material_create(&material));
+    const uint32_t region = nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH);
+    const float zero[4] = {0};
+    float actual[4];
+    nt_sprite_renderer_emit_region(s_atlas_res, region, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0);
+    nt_sprite_renderer_test_last_emit_radial(0, actual, 4);
+    TEST_ASSERT_EQUAL_MEMORY(zero, actual, sizeof(zero));
+
+    const float custom[4] = {9.0F, 0.25F, -3.0F, 7.0F};
+    nt_sprite_renderer_set_custom_attrs(custom, sizeof(custom));
+    nt_sprite_renderer_emit_region(s_atlas_res, region, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0);
+    nt_sprite_renderer_test_last_emit_radial(3, actual, 4);
+    TEST_ASSERT_EQUAL_MEMORY(custom, actual, sizeof(custom));
+
+    const uint32_t slice9 = nt_atlas_find_region(s_atlas_res, FIXTURE_RS9_HASH);
+    nt_sprite_renderer_emit_slice9(s_atlas_res, slice9, NT_MATH_MAT4_IDENTITY, 100, 100, 0, 0, NULL, 1, UINT32_MAX, 0);
+    nt_sprite_renderer_test_last_emit_radial(15, actual, 4);
+    TEST_ASSERT_EQUAL_MEMORY(zero, actual, sizeof(zero));
+}
+
+void test_sprite_renderer_custom_without_defaults_still_requires_each_block(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xAAULL);
+    nt_sprite_renderer_set_material(create_radial_test_material("custom", 4));
+    const uint32_t region = nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH);
+    const float custom[4] = {1, 2, 3, 4};
+    nt_sprite_renderer_set_custom_attrs(custom, sizeof(custom));
+    nt_sprite_renderer_emit_region(s_atlas_res, region, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0);
+    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_emit_region(s_atlas_res, region, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0));
+}
+
+void test_sprite_renderer_defaults_survive_page_overflow_and_rebinding(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    desc.custom_max_vertices = 16;
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xABULL);
+    nt_material_create_desc_t material = {
+        .program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1),
+        .textures = {{.name = "u_texture"}},
+        .texture_count = 1,
+        .attr_map = {{.stream_name = "custom", .location = 4, .default_value = {2, 4, 8, 16}}},
+        .attr_map_count = 1,
+        .has_attr_defaults = true,
+    };
+    const nt_material_t mat = nt_material_create(&material);
+    nt_sprite_renderer_set_material(mat);
+    for (unsigned i = 0; i < 5; ++i) {
+        const uint64_t region_hash = (i & 1U) ? FIXTURE_R1_HASH : FIXTURE_R0_HASH;
+        nt_sprite_renderer_emit_region(s_atlas_res, nt_atlas_find_region(s_atlas_res, region_hash), NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0);
+        float actual[4];
+        nt_sprite_renderer_test_last_emit_radial(0, actual, 4);
+        TEST_ASSERT_EQUAL_MEMORY(material.attr_map[0].default_value, actual, sizeof(actual));
+    }
+    TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_draw_call_count());
+    nt_sprite_renderer_set_material(create_test_material());
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0);
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0);
+    float actual[4];
+    nt_sprite_renderer_test_last_emit_radial(0, actual, 4);
+    TEST_ASSERT_EQUAL_MEMORY(material.attr_map[0].default_value, actual, sizeof(actual));
+    const float wrong[8] = {0};
+    nt_sprite_renderer_set_custom_attrs(wrong, sizeof(wrong));
+    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0));
+}
+
+void test_sprite_renderer_skipped_emits_consume_custom_override(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xAEULL);
+    nt_resource_unregister(nt_hash32_str("sprite_renderer_pages"), (nt_hash64_t){FIXTURE_PAGE0_RID});
+    nt_resource_step();
+    const nt_material_create_desc_t material = {
+        .program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1),
+        .textures = {{.name = "u_texture"}},
+        .texture_count = 1,
+        .attr_map = {{.stream_name = "custom", .location = 4, .default_value = {2, 4, 8, 16}}},
+        .attr_map_count = 1,
+        .has_attr_defaults = true,
+    };
+    nt_sprite_renderer_set_material(nt_material_create(&material));
+    const float custom[4] = {9, 7, 5, 3};
+    const float positions[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+    const uint32_t region = nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH);
+    const uint32_t ready_region = nt_atlas_find_region(s_atlas_res, FIXTURE_R1_HASH);
+    const uint32_t slice9 = nt_atlas_find_region(s_atlas_res, FIXTURE_RS9_HASH);
+    for (int mode = 0; mode < 3; ++mode) {
+        nt_sprite_renderer_set_custom_attrs(custom, sizeof(custom));
+        if (mode == 0) {
+            nt_sprite_renderer_emit_region(s_atlas_res, region, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0);
+        } else if (mode == 1) {
+            nt_sprite_renderer_emit_geometry(s_atlas_res, region, positions, 4, indices, 6, NT_MATH_MAT4_IDENTITY, UINT32_MAX);
+        } else {
+            nt_sprite_renderer_emit_slice9(s_atlas_res, slice9, NT_MATH_MAT4_IDENTITY, 100, 100, 0, 0, NULL, 1, UINT32_MAX, 0);
+        }
+        nt_sprite_renderer_emit_region(s_atlas_res, ready_region, NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0);
+        float actual[4];
+        nt_sprite_renderer_test_last_emit_radial(0, actual, 4);
+        TEST_ASSERT_EQUAL_MEMORY(material.attr_map[0].default_value, actual, sizeof(actual));
+    }
+}
+
+void test_sprite_renderer_draw_list_defaults_split_different_strides(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xACULL);
+    const nt_material_create_desc_t material = {
+        .program = nt_gfx_fake_make_program(NULL, 0),
+        .attr_map = {{.stream_name = "custom", .location = 4, .default_value = {3, 5, 7, 11}}},
+        .attr_map_count = 1,
+        .has_attr_defaults = true,
+    };
+    const nt_material_t custom = nt_material_create(&material);
+    const nt_material_t plain = create_test_material();
+    const nt_entity_t entities[3] = {create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, custom), create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, plain),
+                                     create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, custom)};
+    const nt_material_t materials[3] = {custom, plain, custom};
+    nt_render_item_t items[3];
+    for (unsigned i = 0; i < 3; ++i) {
+        items[i] = (nt_render_item_t){.entity = entities[i].id, .batch_key = sprite_batch_key(entities[i], materials[i])};
+    }
+    nt_sprite_renderer_test_reset_nonempty_flush_calls();
+    nt_sprite_renderer_draw_list(items, 3);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_sprite_renderer_test_nonempty_flush_calls());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_sprite_renderer_test_draw_call_count());
+    float actual[4];
+    nt_sprite_renderer_test_last_emit_radial(3, actual, 4);
+    TEST_ASSERT_EQUAL_MEMORY(material.attr_map[0].default_value, actual, sizeof(actual));
+}
+
+void test_sprite_renderer_custom_quads_align_after_triangles_and_overflow(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    desc.custom_max_vertices = 16;
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xADULL);
+    nt_sprite_renderer_set_material(create_radial_test_material("custom", 4));
+    const float custom[4] = {1, 2, 3, 4};
+    const float positions[4][2] = {{0, 0}, {10, 0}, {10, 10}, {0, 10}};
+    const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+    for (unsigned i = 0; i < 3; ++i) {
+        nt_sprite_renderer_set_custom_attrs(custom, sizeof(custom));
+        nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 3, indices, 3, NT_MATH_MAT4_IDENTITY, UINT32_MAX);
+    }
+    nt_sprite_renderer_set_custom_attrs(custom, sizeof(custom));
+    nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 4, indices, 6, NT_MATH_MAT4_IDENTITY, UINT32_MAX);
+    TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_draw_call_count());
+    float actual[4];
+    nt_sprite_renderer_test_last_emit_radial(0, actual, 4);
+    TEST_ASSERT_EQUAL_MEMORY(custom, actual, sizeof(actual));
+
+    nt_sprite_renderer_set_custom_attrs(custom, sizeof(custom));
+    nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 4, indices, 6, NT_MATH_MAT4_IDENTITY, UINT32_MAX);
+    TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
+    nt_sprite_renderer_set_material(create_test_material());
+    nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 3, indices, 3, NT_MATH_MAT4_IDENTITY, UINT32_MAX);
+    nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 4, indices, 6, NT_MATH_MAT4_IDENTITY, UINT32_MAX);
+    TEST_ASSERT_EQUAL_UINT32(7, nt_sprite_renderer_test_vertex_count());
+}
+
+void test_sprite_renderer_custom_quad_aligns_after_trimmed_atlas_page_change(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    uint8_t atlas_blob[1024];
+    const uint32_t atlas_size = build_test_atlas_blob(atlas_blob, sizeof(atlas_blob), 0);
+    NtAtlasHeader *header = (NtAtlasHeader *)atlas_blob;
+    NtAtlasRegion *regions = (NtAtlasRegion *)(atlas_blob + sizeof(NtAtlasHeader) + ((size_t)header->page_count * sizeof(uint64_t)));
+    regions[2].vertex_count = 3;
+    regions[2].index_count = 3;
+    regions[2].trim_offset_x = 5;
+    regions[2].trim_offset_y = 7;
+    uint32_t pack_size;
+    uint8_t *pack = build_pack_blob_for_atlas_ppu(0xAEULL, atlas_blob, atlas_size, 0, &pack_size);
+    s_pack_blobs[s_pack_blob_count++] = pack;
+    const nt_hash32_t pack_id = nt_hash32_str("trimmed_triangle");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack_id, pack, pack_size));
+    s_atlas_res = nt_resource_request((nt_hash64_t){.value = 0xAEULL}, NT_ASSET_ATLAS);
+    nt_resource_step();
+    nt_resource_step();
+    const nt_material_create_desc_t material = {
+        .program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1),
+        .textures = {{.name = "u_texture"}},
+        .texture_count = 1,
+        .attr_map = {{.stream_name = "custom", .location = 4}},
+        .attr_map_count = 1,
+        .has_attr_defaults = true,
+    };
+    nt_sprite_renderer_set_material(nt_material_create(&material));
+    nt_sprite_renderer_emit_region(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_RPOLY_HASH), NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_sprite_renderer_test_vertex_count());
+    const float positions[4][2] = {{0, 0}, {10, 0}, {10, 10}, {0, 10}};
+    const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_emit_geometry(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_R1_HASH), positions, 4, indices, 6, NT_MATH_MAT4_IDENTITY, UINT32_MAX);
+    TEST_ASSERT_EQUAL_UINT32(8, nt_sprite_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_cmd_count());
+    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
+}
+
 /* ---- Test: FLIP_X / FLIP_Y mirror around the region pivot ---- */
 
 static void assert_pos_close(float ex, float ey, const float pos[3], const char *msg) {
@@ -2155,6 +2368,13 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_attr_map_location_step_splits_vertex_inputs);
     RUN_TEST(test_sprite_renderer_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_sprite_renderer_custom_attr_emit_bakes_per_vertex);
+    RUN_TEST(test_sprite_renderer_material_defaults_and_one_shot_override);
+    RUN_TEST(test_sprite_renderer_custom_without_defaults_still_requires_each_block);
+    RUN_TEST(test_sprite_renderer_defaults_survive_page_overflow_and_rebinding);
+    RUN_TEST(test_sprite_renderer_skipped_emits_consume_custom_override);
+    RUN_TEST(test_sprite_renderer_draw_list_defaults_split_different_strides);
+    RUN_TEST(test_sprite_renderer_custom_quads_align_after_triangles_and_overflow);
+    RUN_TEST(test_sprite_renderer_custom_quad_aligns_after_trimmed_atlas_page_change);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_intrinsic_scale_emit_positions_and_uvs);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);

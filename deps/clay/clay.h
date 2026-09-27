@@ -442,6 +442,7 @@ CLAY__WRAPPER_STRUCT(Clay_AspectRatioElementConfig);
 // Controls various settings related to image elements.
 typedef struct Clay_ImageElementConfig {
     void* imageData; // A transparent pointer used to pass image data through to the renderer.
+    bool nt_defer_culling; // Renderer owns transformed/effect bounds; layout keeps logical bounds.
 } Clay_ImageElementConfig;
 
 CLAY__WRAPPER_STRUCT(Clay_ImageElementConfig);
@@ -2908,6 +2909,7 @@ void Clay__CalculateFinalLayout(void) {
                             break;
                         }
                         case CLAY__ELEMENT_CONFIG_TYPE_IMAGE: {
+                            shouldRender |= elementConfig->config.imageElementConfig->nt_defer_culling;
                             renderCommand.commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
                             renderCommand.renderData = CLAY__INIT(Clay_RenderData) {
                                 .image = {

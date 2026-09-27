@@ -15,7 +15,13 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
+#include "ui/nt_ui_shape.h"
 #include "ui/nt_ui_state.h"
+
+#define NT_UI_IMAGE_ANALYTIC_SHAPE (1U << 2)
+struct nt_ui_shape_payload {
+    nt_ui_shape_style_t style;
+};
 
 /* Depth (not count) — independent of max_elements; deep nests are rare. */
 #ifndef NT_UI_TREE_DFS_DEPTH_CAP
