@@ -177,6 +177,8 @@ A normal transition is a **live crossfade** (R1): both clips advance, the game r
 
 **Interruption** (R8: new target while a crossfade is in progress, fixed capacity): reference recipe, entirely game code with kernels. In the update that detects the interruption: evaluate the current signal (before its external gain/mask, before later composition and IK) into capture scratch; copy into **one preallocated snapshot per interruptible signal** (`40·J` bytes; scratch and snapshot never alias); release the replaced live sources; display `override(snapshot, target, NULL, 0, J, signal)` in that same update, then ramp `a`. Another interruption overwrites the same snapshot. Promise: C0 pose continuity at the handoff within float tolerance; from the next update the snapshot is frozen (C1 break accepted); not across seeks, mask jumps or hemisphere ambiguities. Zero-duration replacement is immediate. A game that allocates no snapshot explicitly accepts a pop. The snapshot is an ordinary game buffer: the engine adds no transition object, history chain or eviction.
 
+`examples/skeletal_showcase`, scene `Mixing & Crossfades`, is the reference implementation of this game-owned recipe. It also shows live crossfades, phase-synchronized blend spaces, per-joint weighted mixing and masked override without adding a player or graph to the engine.
+
 ## 8. FK, procedural edits, IK, sockets, physics
 
 Composition ends at a local pose. The game applies local edits and runs FK (whole rig or the edited subtree; same contract). A local write makes the model pose stale until FK; no dirty graph. Sockets per §4; no bone entities.

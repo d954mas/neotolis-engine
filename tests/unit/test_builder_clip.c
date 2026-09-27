@@ -899,29 +899,39 @@ void test_clip_from_another_glb_maps_by_name_and_parent(void) {
 // #region khronos assets
 typedef struct {
     const char *path;
-    const char *name;      /* the animation, NULL for the unnamed one */
-    uint32_t sample_count; /* round(last key * 24) + 1, from the input accessors */
-    bool snapped;          /* the source is not a whole number of frames at 24 fps */
-    float max_lin, max_t;  /* ceilings above the measured errors */
-    float min_lin, min_t;  /* floors below them, non-zero where the grid visibly misses the source */
+    const char *name; /* the animation, NULL for the unnamed one */
+    uint32_t sample_count;
+    float sample_fps;
+    bool snapped;         /* the source is not a whole number of frames at sample_fps */
+    bool expect_sparse_q; /* the source leaves at least one joint rotation in base */
+    bool composed_bound_compatible;
+    float max_lin, max_t; /* ceilings above the measured errors */
+    float min_lin, min_t; /* floors below them, non-zero where the grid visibly misses the source */
 } khronos_clip_t;
 
 /* Frame counts from the input accessors; the ceilings sit above the measured
  * errors (Frobenius distance 2 sqrt(2) sin(theta / 2)). */
-static const khronos_clip_t k_khronos[4] = {
-    {"examples/skeletal_showcase/raw/Fox.glb", "Survey", 83, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* 82 frames, 2e-6 / 4.5e-5 cm */
-    {"examples/skeletal_showcase/raw/Fox.glb", "Walk", 18, false, 0.02F, 0.5F, 0.0F, 0.0F},   /* 17 frames, 0.0064 (0.26 deg) / 0.061 cm */
+static const khronos_clip_t k_khronos[] = {
+    {"examples/skeletal_showcase/raw/Fox.glb", "Survey", 83, 24, false, true, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* 82 frames, 2e-6 / 4.5e-5 cm */
+    {"examples/skeletal_showcase/raw/Fox.glb", "Walk", 18, 24, false, true, false, 0.02F, 0.5F, 0.0F, 0.0F},   /* 17 frames, 0.0064 (0.26 deg) / 0.061 cm */
     /* Run: 27.8 frames, snaps to 28 with a warning; keys 20.8..27.8 sit 0.2 frames
      * from the nearest grid sample, off every sub-sample: 0.117 (4.7 deg) / 1.78 cm.
      * Both worst times land on a key (frame n + 0.8), which only the authored
      * key times of the dense set reach: the quarter sub-samples would stop at n + 0.75. */
-    {"examples/skeletal_showcase/raw/Fox.glb", "Run", 29, true, 0.2F, 2.5F, 0.1F, 1.5F},
-    {"examples/skeletal_showcase/raw/CesiumMan.glb", NULL, 49, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* unnamed, 48 frames, first key at 1/24 s (holds before it) */
+    {"examples/skeletal_showcase/raw/Fox.glb", "Run", 29, 24, true, true, false, 0.2F, 2.5F, 0.1F, 1.5F},
+    {"examples/skeletal_showcase/raw/CesiumMan.glb", NULL, 49, 24, false, true, false, 0.02F, 0.5F, 0.0F, 0.0F}, /* unnamed, 48 frames, first key at 1/24 s (holds before it) */
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Idle", 33, 30, false, false, true, 0.02F, 0.5F, -1.0F, -1.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Walking_A", 33, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Running_A", 25, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Jump_Full_Short", 36, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Unarmed_Melee_Attack_Punch_A", 45, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Death_A", 25, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
+    {"examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb", "Lie_StandUp", 71, 30, false, false, true, 0.02F, 0.5F, 0.0F, 0.0F},
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_khronos_clips_export_at_24_fps(void) {
-    for (uint32_t i = 0; i < 4; i++) {
+void test_showcase_clips_export_at_authored_fps(void) {
+    for (uint32_t i = 0; i < (uint32_t)(sizeof k_khronos / sizeof k_khronos[0]); i++) {
         const khronos_clip_t *asset = &k_khronos[i];
         nt_glb_scene_t scene;
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, asset->path));
@@ -930,7 +940,7 @@ void test_khronos_clips_export_at_24_fps(void) {
         (void)remove(PACK_PATH);
         NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
         nt_builder_clip_report_t report;
-        nt_builder_add_scene_clip(ctx, &scene, asset->name, &rig, FPS, CLIP_ID, &report);
+        nt_builder_add_scene_clip(ctx, &scene, asset->name, &rig, asset->sample_fps, CLIP_ID, &report);
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
         nt_builder_free_pack(ctx);
         TEST_ASSERT_EQUAL_UINT32(asset->snapped ? 1U : 0U, s_log_warnings);
@@ -951,18 +961,36 @@ void test_khronos_clips_export_at_24_fps(void) {
         TEST_ASSERT_EQUAL_UINT32(asset->sample_count, view.sample_count);
         /* The grid step is one frame up to float rounding: the shipped duration
          * is the frame count over 24, whatever the source length was. */
-        ASSERT_F32((float)((double)(asset->sample_count - 1U) / 24.0), report.duration);
+        ASSERT_F32((float)((double)(asset->sample_count - 1U) / (double)asset->sample_fps), report.duration);
         TEST_ASSERT_TRUE(view.duration == (double)report.duration);
         TEST_ASSERT_TRUE(report.cpu_error_lin > asset->min_lin && report.cpu_error_lin <= asset->max_lin);
         TEST_ASSERT_TRUE(report.cpu_error_t > asset->min_t && report.cpu_error_t <= asset->max_t);
         if (asset->snapped) {
-            TEST_ASSERT_TRUE(fabs(fmod(report.worst_time_lin * 24.0, 1.0) - 0.8) < 1e-3);
-            TEST_ASSERT_TRUE(fabs(fmod(report.worst_time_t * 24.0, 1.0) - 0.8) < 1e-3);
+            TEST_ASSERT_TRUE(fabs(fmod(report.worst_time_lin * (double)asset->sample_fps, 1.0) - 0.8) < 1e-3);
+            TEST_ASSERT_TRUE(fabs(fmod(report.worst_time_t * (double)asset->sample_fps, 1.0) - 0.8) < 1e-3);
         }
         TEST_ASSERT_TRUE(view.r_joints > 0.0F && view.s_max >= 1.0F);
         TEST_ASSERT_EQUAL_HEX64(rig.skeleton.rig_compat_id.value, view.rig_compat_id.value);
-        /* Both skins leave some joints unanimated, and every rotation moves. */
-        TEST_ASSERT_TRUE(view.n_q > 0 && view.n_q < view.joint_count);
+        /* The imported clips all rotate; the original fixtures also retain sparse rows. */
+        TEST_ASSERT_TRUE(view.n_q > 0);
+        if (asset->expect_sparse_q) {
+            TEST_ASSERT_TRUE(view.n_q < view.joint_count);
+        }
+        if (asset->composed_bound_compatible) {
+            TEST_ASSERT_TRUE(view.n_t <= 1U);
+            if (view.n_t == 1U) {
+                TEST_ASSERT_EQUAL_UINT16(0U, view.t_joint[0]);
+            }
+            TEST_ASSERT_EQUAL_UINT16(0U, view.n_s);
+            for (uint16_t j = 0; j < view.joint_count; ++j) {
+                for (uint32_t c = 0; c < 3U; ++c) {
+                    if (j != 0U) {
+                        ASSERT_F32(rig.skeleton.rest[j].t[c], view.base[j].t[c]);
+                    }
+                    ASSERT_F32(rig.skeleton.rest[j].s[c], view.base[j].s[c]);
+                }
+            }
+        }
         free(payload);
         nt_builder_free_rig(&rig);
         nt_builder_free_glb_scene(&scene);
@@ -990,6 +1018,6 @@ int main(void) {
     RUN_TEST(test_bad_arguments_are_rejected);
     RUN_TEST(test_an_unmatched_name_is_rejected);
     RUN_TEST(test_clip_from_another_glb_maps_by_name_and_parent);
-    RUN_TEST(test_khronos_clips_export_at_24_fps);
+    RUN_TEST(test_showcase_clips_export_at_authored_fps);
     return UNITY_END();
 }

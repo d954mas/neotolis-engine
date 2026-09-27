@@ -1,5 +1,5 @@
 /* Build the Skeletal showcase packs: the rig pack carries the UI atlas, font
- * and both Khronos rigs (skeleton, skin binding, skinned mesh); the clips pack
+ * and the three rigs (skeleton, skin binding, skinned mesh); the clips pack
  * carries every clip, so the showcase plays clips from one pack on a skeleton
  * mounted from another. The font is reused from ui_showcase and is distributed
  * under Apache 2.0. */
@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -41,12 +42,19 @@ typedef struct {
 } clip_desc_t;
 
 typedef struct {
+    const char *node_name; /* NULL selects the first node skinned by skin 0 */
+    const char *resource_id;
+} mesh_desc_t;
+
+typedef struct {
     const char *glb_path;
     const char *skeleton_id;
     const char *binding_id;
-    const char *mesh_id;
+    const mesh_desc_t *meshes;
+    uint32_t mesh_count;
     const char *texture_id;
     bool has_normal; /* the scene API asserts on a layout stream the primitive lacks */
+    float sample_fps;
     const clip_desc_t *clips;
     uint32_t clip_count;
 } character_desc_t;
@@ -66,13 +74,14 @@ static uint32_t skinned_layout(NtStreamLayout out[5], bool has_normal) {
 
 /* The node whose mesh this rig's skin deforms; its primitives are what the
  * export walks. */
-static uint32_t skinned_node(const nt_glb_scene_t *scene, uint32_t skin_index) {
+static uint32_t skinned_node(const nt_glb_scene_t *scene, uint32_t skin_index, const char *name) {
     for (uint32_t i = 0; i < scene->node_count; i++) {
-        if (scene->nodes[i].skin_index == skin_index && scene->nodes[i].mesh_index != UINT32_MAX) {
+        const bool name_matches = name == NULL || (scene->nodes[i].name != NULL && strcmp(scene->nodes[i].name, name) == 0);
+        if (scene->nodes[i].skin_index == skin_index && scene->nodes[i].mesh_index != UINT32_MAX && name_matches) {
             return i;
         }
     }
-    NT_BUILD_ASSERT(0 && "skeletal_showcase: no node instantiates a mesh with the rig's skin");
+    NT_BUILD_ASSERT(0 && "skeletal_showcase: requested skinned node not found");
     return UINT32_MAX;
 }
 
@@ -82,8 +91,8 @@ static void print_clip_report(const char *resource_id, const nt_builder_clip_rep
 }
 
 /* The rig of skin 0 up to the scene root is imported once and feeds every
- * export of the character: skeleton, binding and primitive 0 of the skinned
- * mesh into rig_ctx, the clips into clip_ctx. */
+ * export of the character: skeleton, binding and primitive 0 of each selected
+ * skinned mesh into rig_ctx, the clips into clip_ctx. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx, const character_desc_t *desc) {
     nt_glb_scene_t scene;
@@ -99,8 +108,19 @@ static void add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx,
     NtStreamLayout layout[5];
     const uint32_t stream_count = skinned_layout(layout, desc->has_normal);
     const nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = stream_count, .tangent_mode = NT_TANGENT_AUTO};
-    const uint32_t mesh = scene.nodes[skinned_node(&scene, rig.skin_index)].mesh_index;
-    nt_builder_add_scene_skinned_mesh(rig_ctx, &rig, mesh, 0, NT_BUILDER_SKIN_DROP_TOLERANCE, desc->mesh_id, &mesh_opts);
+    NT_BUILD_ASSERT(desc->mesh_count > 0 && desc->meshes != NULL);
+    uint32_t mesh = UINT32_MAX;
+    for (uint32_t m = 0; m < desc->mesh_count; ++m) {
+        const uint32_t node = skinned_node(&scene, rig.skin_index, desc->meshes[m].node_name);
+        const uint32_t selected_mesh = scene.nodes[node].mesh_index;
+        NT_BUILD_ASSERT(scene.meshes[selected_mesh].primitive_count == 1 && "skeletal_showcase: selected mesh must contain exactly one primitive");
+        nt_builder_add_scene_skinned_mesh(rig_ctx, &rig, selected_mesh, 0, NT_BUILDER_SKIN_DROP_TOLERANCE, desc->meshes[m].resource_id, &mesh_opts);
+        if (mesh == UINT32_MAX) {
+            mesh = selected_mesh;
+        } else {
+            NT_BUILD_ASSERT(scene.meshes[selected_mesh].material_index == scene.meshes[mesh].material_index && "skeletal_showcase: character mesh parts must share one material");
+        }
+    }
 
     const uint32_t material = scene.meshes[mesh].material_index;
     NT_BUILD_ASSERT(material < scene.material_count);
@@ -118,7 +138,7 @@ static void add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx,
 
     for (uint32_t c = 0; c < desc->clip_count; c++) {
         nt_builder_clip_report_t report;
-        nt_builder_add_scene_clip(clip_ctx, &scene, desc->clips[c].animation, &rig, SAMPLE_FPS, desc->clips[c].resource_id, &report);
+        nt_builder_add_scene_clip(clip_ctx, &scene, desc->clips[c].animation, &rig, desc->sample_fps, desc->clips[c].resource_id, &report);
         print_clip_report(desc->clips[c].resource_id, &report);
     }
 
@@ -136,13 +156,32 @@ static const clip_desc_t k_cesiumman_clips[] = {
     {NULL, "skeletal_showcase/cesiumman.nanm"},
 };
 
+static const clip_desc_t k_kaykit_clips[] = {
+    {"Idle", "skeletal_showcase/kaykit/idle.nanm"},
+    {"Walking_A", "skeletal_showcase/kaykit/walk.nanm"},
+    {"Running_A", "skeletal_showcase/kaykit/run.nanm"},
+    {"Jump_Full_Short", "skeletal_showcase/kaykit/jump.nanm"},
+    {"Unarmed_Melee_Attack_Punch_A", "skeletal_showcase/kaykit/punch.nanm"},
+    {"Death_A", "skeletal_showcase/kaykit/death.nanm"},
+    {"Lie_StandUp", "skeletal_showcase/kaykit/stand_up.nanm"},
+};
+
+static const mesh_desc_t k_fox_meshes[] = {{NULL, "skeletal_showcase/fox.mesh"}};
+static const mesh_desc_t k_cesiumman_meshes[] = {{NULL, "skeletal_showcase/cesiumman.mesh"}};
+static const mesh_desc_t k_kaykit_meshes[] = {
+    {"Knight_ArmLeft", "skeletal_showcase/kaykit/arm_left.mesh"}, {"Knight_ArmRight", "skeletal_showcase/kaykit/arm_right.mesh"}, {"Knight_Body", "skeletal_showcase/kaykit/body.mesh"},
+    {"Knight_Head", "skeletal_showcase/kaykit/head.mesh"},        {"Knight_LegLeft", "skeletal_showcase/kaykit/leg_left.mesh"},   {"Knight_LegRight", "skeletal_showcase/kaykit/leg_right.mesh"},
+};
+
 static const character_desc_t k_fox = {
     .glb_path = "examples/skeletal_showcase/raw/Fox.glb",
     .skeleton_id = "skeletal_showcase/fox.nskl",
     .binding_id = "skeletal_showcase/fox.nskn",
-    .mesh_id = "skeletal_showcase/fox.mesh",
+    .meshes = k_fox_meshes,
+    .mesh_count = (uint32_t)(sizeof k_fox_meshes / sizeof k_fox_meshes[0]),
     .texture_id = "skeletal_showcase/fox.texture",
     .has_normal = false,
+    .sample_fps = SAMPLE_FPS,
     .clips = k_fox_clips,
     .clip_count = (uint32_t)(sizeof k_fox_clips / sizeof k_fox_clips[0]),
 };
@@ -151,11 +190,26 @@ static const character_desc_t k_cesiumman = {
     .glb_path = "examples/skeletal_showcase/raw/CesiumMan.glb",
     .skeleton_id = "skeletal_showcase/cesiumman.nskl",
     .binding_id = "skeletal_showcase/cesiumman.nskn",
-    .mesh_id = "skeletal_showcase/cesiumman.mesh",
+    .meshes = k_cesiumman_meshes,
+    .mesh_count = (uint32_t)(sizeof k_cesiumman_meshes / sizeof k_cesiumman_meshes[0]),
     .texture_id = "skeletal_showcase/cesiumman.texture",
     .has_normal = true,
+    .sample_fps = SAMPLE_FPS,
     .clips = k_cesiumman_clips,
     .clip_count = (uint32_t)(sizeof k_cesiumman_clips / sizeof k_cesiumman_clips[0]),
+};
+
+static const character_desc_t k_kaykit = {
+    .glb_path = "examples/skeletal_showcase/raw/KayKit_Knight_Mixing.glb",
+    .skeleton_id = "skeletal_showcase/kaykit.nskl",
+    .binding_id = "skeletal_showcase/kaykit.nskn",
+    .meshes = k_kaykit_meshes,
+    .mesh_count = (uint32_t)(sizeof k_kaykit_meshes / sizeof k_kaykit_meshes[0]),
+    .texture_id = "skeletal_showcase/kaykit.texture",
+    .has_normal = true,
+    .sample_fps = 30.0F,
+    .clips = k_kaykit_clips,
+    .clip_count = (uint32_t)(sizeof k_kaykit_clips / sizeof k_kaykit_clips[0]),
 };
 
 static bool finish(NtBuilderContext *ctx, const char *name) {
@@ -256,6 +310,7 @@ int main(int argc, char *argv[]) {
 
     add_character(rig_ctx, clip_ctx, &k_fox);
     add_character(rig_ctx, clip_ctx, &k_cesiumman);
+    add_character(rig_ctx, clip_ctx, &k_kaykit);
 
     if (!finish(rig_ctx, "skeletal_showcase.ntpack")) {
         nt_builder_free_pack(clip_ctx);

@@ -24,8 +24,9 @@ cmake --preset wasm-debug
 cmake --build --preset wasm-debug --target skeletal_showcase
 ```
 
-The scene list contains `Skeleton & Pose`, `Skinned Meshes` and `Order & Instancing`. The top
-selector selects a scene; the right panel holds the scene's controls. Stage
+The scene list contains `Skeleton & Pose`, `Skinned Meshes`, `Order &
+Instancing` and `Mixing & Crossfades`. The top selector selects a scene; the
+right panel holds the scene's controls. Stage
 orbit is owned by the shell: drag with the left mouse button inside the stage,
 drag with the right mouse button to pan, and use the wheel to zoom. UI controls
 do not move the camera.
@@ -33,10 +34,11 @@ do not move the camera.
 ## Packs
 
 `build_packs.c` builds two packs. The rig pack, `skeletal_showcase.ntpack`,
-holds the sprite and text shaders, the UI atlas, the font, and for each of the
-two Khronos rigs its NSKL skeleton, NSKN skin binding and skinned MESH. The
-clips pack, `skeletal_showcase_clips.ntpack`, holds the four clips (Fox
-`Survey`, `Walk`, `Run` and the CesiumMan walk). Both packs mount at init, and
+holds the sprite and text shaders, the UI atlas, the font, the two Khronos rigs,
+and the KayKit mixing rig. Each imported rig has an NSKL skeleton, NSKN skin
+binding and skinned MESH assets; KayKit uses six mesh parts. The clips pack,
+`skeletal_showcase_clips.ntpack`, holds the four Khronos clips (Fox `Survey`,
+`Walk`, `Run` and the CesiumMan walk) plus seven KayKit clips. Both packs mount at init, and
 the Skinned Meshes scene plays the clips of the second pack on the skeletons of the
 first, which is how the showcase exercises "a clip from another pack on an
 already-loaded skeleton". `raw/README.md` lists the raw inputs and their
@@ -45,9 +47,11 @@ attribution.
 Each glb is parsed once; its rig is imported with the default selection (skin 0,
 no cut) and fed to both builder contexts. The skinned mesh is primitive 0 of the
 mesh of the node that instantiates skin 0, exported with `POSITION`, `JOINTS`
-and `WEIGHTS`, float32 `TEXCOORD_0` and, for CesiumMan only, `NORMAL` (the Fox primitive has none).
-Base-color textures come from each primitive material and ship as RAW with mipmaps.
-Both CPU and GPU use the same textured unlit shading; normals are not used. Every clip is sampled at 24 fps, and the builder prints
+and `WEIGHTS`, float32 `TEXCOORD_0` and, for CesiumMan and KayKit, `NORMAL`
+(the Fox primitive has none). Base-color textures come from each primitive
+material and ship as RAW with mipmaps. Both CPU and GPU use the same textured
+unlit shading; normals are not used. The Khronos clips are sampled at 24 fps
+and KayKit at 30 fps; the builder prints
 one report line per clip:
 
 ```
@@ -98,7 +102,7 @@ limb. NSKL does not mark exporter wrappers, so besides CesiumMan
 `Z_UP`/`Armature` and Fox `root` this also covers Fox's skin joints
 `_rootJoint` and `b_Root_00`, which rest at the origin. `Test` on an imported
 rig bends every third joint outside that scaffolding about Z. The scene holds
-at most 32 joints; the pack builder asserts it. Visual QA: CesiumMan stands
+at most 48 joints; the pack builder asserts it. Visual QA: CesiumMan stands
 upright, Fox faces along its authored axis.
 
 The properties panel shows the selected joint's local offset in degrees and its
@@ -206,9 +210,57 @@ It does not test transitions between two `nt_gfx_begin_pass` calls. Both draws
 reuse one palette upload. Per-pass counters show measured draw calls and
 instances plus the expected count for that completed frame, excluding UI.
 
-The palette texture is 96 by 256 RGBA32F texels. Each 21-joint palette occupies
-one row: 1008 useful bytes, 1536 uploaded bytes. Shared mode builds one palette;
-independent mode builds N. Both views together draw 2N instances.
+The palette texture is 144 by 256 RGBA32F texels. Each 21-joint palette uses
+63 texels (1008 useful bytes), so two palettes fit in one row. A flush uploads
+whole touched rows: `ceil(N / 2) * 2304` bytes for N independent palettes and
+2304 bytes for one shared palette. Both views together draw 2N instances.
+
+## Mixing & Crossfades
+
+This scene is the game-side recipe for the engine's stateless skeletal kernels.
+It owns four fixed track slots, clip assignments, gains, joint factors, one
+snapshot and the order of `advance -> sample -> mix/override -> FK -> palette`.
+There is no animation-player or graph hidden behind the controls. The optional
+reusable player remains issue #569.
+
+The scene uses one 41-joint KayKit rig, six mesh parts and seven 30 fps clips:
+Idle, Walking_A, Running_A, Jump_Full_Short,
+Unarmed_Melee_Attack_Punch_A, Death_A and Lie_StandUp. The result and optional source previews share
+the same sampled poses and clocks. Frame-local samples and model matrices come
+from `nt_mem_scratch`; the persistent snapshot is 40 bytes per joint. Slot
+overflow is an `NT_ASSERT`, and a zero-gain occupied track still advances.
+
+The five modes expose distinct composition rules:
+
+- Crossfade mixes source and target with gains `(1-a, a)`. Run-to-death is the
+  default high-contrast recipe; run-to-jump and idle-to-run remain available.
+  Get up holds the final death pose while blending into Lie_StandUp.
+- Blend space keeps idle/walk/run on one displayed normalized phase. The two-cycle mode
+  uses `(1-v, v)`; the three-cycle mode uses adjacent triangular weights.
+- Partial body compares a flat weighted mix (`0.25` below the spine, `3` on
+  the spine subtree) with strict locomotion/action isolation. It releases the
+  outgoing locomotion slot when the base transition completes.
+- Override first builds the locomotion base, then applies the punch to the
+  upper-body mask at alpha `0.8`; changing the base gain sum does not change
+  the override strength. It also releases the completed base source.
+- Interruption captures the current locomotion signal before reusing source
+  slots. A new target starts at alpha zero from that frozen pose. Repeat asks
+  for another target every `0.3 s`, while the independent arm action keeps its
+  own clock.
+
+Show sources draws the result and active source, target and action slots with
+one palette per visible character and six render items per character. The
+caption above the stage maps their positions. Mode changes and Reset demo preserve the camera;
+switching top-level scenes still uses the shell's normal refit.
+
+The culling sphere starts with `skin.any_pose_radius + max(clip.r_root)`. The
+scene adds `4/255 * any_pose_radius` because its packed MESH has four normalized
+UINT8 weight lanes. The base formula is valid for this committed derivative
+because `prepare_kaykit_mixing.mjs` preserves root translation and rotations
+while removing authored non-root translations and scale channels;
+`raw/README.md` records the source, hashes and exact edit. A different asset
+that changes non-root translation or local scale cannot reuse this bound
+without a game-supplied radius or disabled culling.
 
 ## Shell
 
@@ -247,6 +299,16 @@ holds; check `Reverse` and confirm it runs back to 0 and holds. Pause, press
 and confirm the pose follows. Switch `Character` to `CesiumMan`: `Clip` lists
 only `CesiumMan`; select it and confirm the walk plays upright.
 
+Mixing: switch to `Mixing & Crossfades`, enable Show sources and visit all five
+modes. Crossfade starts with the high-contrast Run to Death recipe; also try Get
+up, Run to Jump and Idle to Run while watching the complementary gains. Blend space
+keeps every cycle clock phase-aligned, including the zero-gain clip. Partial
+body leaves the legs on locomotion while the punch affects the torso and arms;
+strict isolation removes the action from the legs completely. Override stays at
+80% on the upper body while Base gain scale changes. In Interruption, press
+Jump during the initial idle-to-run transition: the label changes to Frozen
+snapshot at alpha zero. Enable Repeat and confirm handoffs rise while snapshot
+and scene byte counts stay constant.
 
 ### Capture and compare
 
@@ -308,8 +370,25 @@ The Python comparator's `compare(client, output, backend)` also accepts a
 Context-loss restoration is reviewed in code; a full loss/retry run remains
 outside this showcase's evidence.
 
+The mixing scene has a parallel reusable scenario. It selects the scene,
+enables source previews, captures all five modes plus the Run-to-Death and
+Death-to-Stand-up midpoints, exercises a same-frame interruption and repeats
+interruptions long enough to prove slot/snapshot reuse:
 
-Verification of the current code is native only. `skeletal_compare` measured 0
+```bash
+python -m tools.devapi.scenarios.skeletal_mixing --output build/skeletal-mixing-native
+```
+
+`run(client, output, backend)` accepts the same Playwright-backed client for
+WebGL2. The JSON report records visible alpha, slot count, snapshot bytes,
+scene bytes and repeated handoff count alongside the PNGs.
+
+The mixing scenario passed on native and WebGL2 for all five modes. Both runs
+observed `Frozen snapshot source; handoffs 1` at alpha zero and multiple later
+handoffs with unchanged snapshot and scene byte counts. The two high-contrast
+midpoints also passed on both backends with alpha between 0.45 and 0.70.
+
+Verification of the original deformation comparison is native only. `skeletal_compare` measured 0
 mismatched pixels for Fox Walk, CesiumMan and the humanoid with shared and
 independent clothes, each stepped while paused. The ordering table was checked
 for N=17 with two passes. The WebGL2 capture pair of the `CPU reference` toggle
