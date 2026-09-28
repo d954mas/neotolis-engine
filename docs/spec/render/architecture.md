@@ -704,11 +704,19 @@ bytes do not imply fewer draws or a universal GPU speedup.
 Wire submissions preserve order across independent lines, connected paths and
 immutable-template types. Consecutive submissions to one queue still batch;
 switching queue or template type flushes the preceding wire run.
+The renderer does not reorder commands or retain a global debug list. A game
+whose opaque, depth-tested diagnostic shapes do not require submission order
+groups its own list by wire queue/template type before calling the renderer.
+This keeps overlay order explicit and makes mass physics visualization batchable
+without an engine sort policy.
 
 `NT_SHAPE_RENDERER_MAX_LINES` bounds the independent-line queue (default 8192).
 `NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` bounds the connected-segment queue
 (default 1024). Each ready-made wire type has
 `ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)` staging entries (default 512).
+A single CPU staging union backs the independent-line, connected-segment and
+fixed-template queues because queue switches flush the active wire run before
+the next representation writes. Their configured limits stay independent.
 A full queue flushes automatically; GPU streaming buffers use disjoint ring
 ranges until wrap. A skipped flush after failed initialization empties every
 queue, preventing overflow during context recovery. Shutdown and GPU restore

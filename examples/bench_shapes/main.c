@@ -481,8 +481,14 @@ static void draw_room(void) {
 /* ---- Draw pre-built shapes ---- */
 
 static void draw_shapes(void) {
-    for (int i = 0; i < s_shape_count; i++) {
-        dispatch_shape(&s_shapes[i]);
+    /* The benchmark owns content order. Grouping by primitive type models a debug
+     * collector whose opaque/depth-tested shapes do not require submission order. */
+    for (int type = BENCH_LINE; type <= BENCH_CAP; type++) {
+        for (int i = 0; i < s_shape_count; i++) {
+            if (s_shapes[i].type == type) {
+                dispatch_shape(&s_shapes[i]);
+            }
+        }
     }
 }
 
