@@ -639,12 +639,14 @@ static bool wire_template_queued_except(int keep_type) {
     return false;
 }
 
+static void flush_wire_run(void);
+
 static void push_wire_instance(int type, const float center[3], float radius, float half_height, const float *rot, const float color[4]) {
     if (s_shape.line_count != 0 || s_shape.stroke_count != 0 || wire_template_queued_except(type)) {
-        nt_shape_renderer_flush();
+        flush_wire_run();
     }
     if (s_shape.wire_counts[type] == NT_WIRE_MAX_INSTANCES) {
-        nt_shape_renderer_flush();
+        flush_wire_run();
     }
     nt_shape_instance_t *inst = &s_shape.wire_data[type][s_shape.wire_counts[type]++];
     memcpy(inst->center, center, sizeof(inst->center));
@@ -867,10 +869,10 @@ static void build_templates(void) {
 /* Neighbors let adjacent segments construct the same endpoint cross-section. */
 static void emit_wire_segment(const float prev[3], const float a[3], const float b[3], const float next[3], const float color[4]) {
     if (s_shape.line_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
-        nt_shape_renderer_flush();
+        flush_wire_run();
     }
     if (s_shape.stroke_count >= NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS) {
-        nt_shape_renderer_flush();
+        flush_wire_run();
     }
     nt_shape_stroke_instance_t *inst = &s_shape.strokes[s_shape.stroke_count++];
     memcpy(inst->prev, prev, sizeof(inst->prev));
@@ -882,10 +884,10 @@ static void emit_wire_segment(const float prev[3], const float a[3], const float
 
 static void emit_wire_edge(const float a[3], const float b[3], const float color[4]) {
     if (s_shape.stroke_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
-        nt_shape_renderer_flush();
+        flush_wire_run();
     }
     if (s_shape.line_count >= NT_SHAPE_RENDERER_MAX_LINES) {
-        nt_shape_renderer_flush();
+        flush_wire_run();
     }
     nt_shape_line_instance_t *inst = &s_shape.lines[s_shape.line_count++];
     memcpy(inst->a, a, sizeof(inst->a));
@@ -1190,6 +1192,48 @@ static void flush_strokes(nt_buffer_t buffer, nt_vertex_input_t vi, const void *
     nt_gfx_draw_indexed_instanced(0, indices, 7, count);
 }
 
+static void flush_wire_run(void) {
+    if (!s_shape.initialized) {
+        memset(s_shape.wire_counts, 0, sizeof(s_shape.wire_counts));
+        s_shape.line_count = 0;
+        s_shape.stroke_count = 0;
+        return;
+    }
+
+    for (int type = 0; type < NT_WIRE_COUNT; type++) {
+        uint32_t count = s_shape.wire_counts[type];
+        if (!count) {
+            continue;
+        }
+        uint32_t bytes = count * (uint32_t)sizeof(nt_shape_instance_t);
+        uint32_t capacity = NT_SHAPE_RENDERER_MAX_INSTANCES * (uint32_t)sizeof(nt_shape_instance_t);
+        if (s_shape.inst_ring_cursor + bytes > capacity) {
+            s_shape.inst_ring_cursor = 0;
+        }
+        uint32_t base = s_shape.inst_ring_cursor;
+        s_shape.inst_ring_cursor += bytes;
+        nt_gfx_update_buffer(s_shape.inst_buf, base, s_shape.wire_data[type], bytes);
+        nt_gfx_bind_pipeline(s_shape.depth_enabled ? s_shape.wire_pip_depth : s_shape.wire_pip_overlay);
+        nt_gfx_bind_vertex_input(s_shape.wire_vi[type]);
+        nt_gfx_bind_instance_buffer(s_shape.inst_buf, base);
+        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
+        float cp[4] = {s_shape.cam_pos[0], s_shape.cam_pos[1], s_shape.cam_pos[2], 0};
+        nt_gfx_set_uniform_vec4(s_u_cam_pos, cp);
+        nt_gfx_set_uniform_float(s_u_line_width, s_shape.line_width);
+        nt_gfx_set_uniform_vec4(s_u_pixel_scale, s_shape.pixel_scale);
+        nt_shape_template_t *tpl = &s_shape.wire_templates[type];
+        nt_gfx_draw_indexed_instanced(0, tpl->num_indices, tpl->num_vertices, count);
+        s_shape.wire_counts[type] = 0;
+    }
+
+    flush_strokes(s_shape.line_instance_buf, s_shape.line_vi, s_shape.lines, s_shape.line_count, s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t), sizeof(s_shape.lines),
+                  &s_shape.line_ring_cursor, 6);
+    flush_strokes(s_shape.stroke_instance_buf, s_shape.stroke_vi, s_shape.strokes, s_shape.stroke_count, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t), sizeof(s_shape.strokes),
+                  &s_shape.stroke_ring_cursor, 12);
+    s_shape.line_count = 0;
+    s_shape.stroke_count = 0;
+}
+
 void nt_shape_renderer_flush(void) {
     /* A skipped flush must free CPU staging for the next emit. */
     if (!s_shape.initialized) {
@@ -1242,38 +1286,7 @@ void nt_shape_renderer_flush(void) {
         s_shape.index_count = 0;
     }
 
-    for (int type = 0; type < NT_WIRE_COUNT; type++) {
-        uint32_t count = s_shape.wire_counts[type];
-        if (!count) {
-            continue;
-        }
-        uint32_t bytes = count * (uint32_t)sizeof(nt_shape_instance_t);
-        uint32_t capacity = NT_SHAPE_RENDERER_MAX_INSTANCES * (uint32_t)sizeof(nt_shape_instance_t);
-        if (s_shape.inst_ring_cursor + bytes > capacity) {
-            s_shape.inst_ring_cursor = 0;
-        }
-        uint32_t base = s_shape.inst_ring_cursor;
-        s_shape.inst_ring_cursor += bytes;
-        nt_gfx_update_buffer(s_shape.inst_buf, base, s_shape.wire_data[type], bytes);
-        nt_gfx_bind_pipeline(s_shape.depth_enabled ? s_shape.wire_pip_depth : s_shape.wire_pip_overlay);
-        nt_gfx_bind_vertex_input(s_shape.wire_vi[type]);
-        nt_gfx_bind_instance_buffer(s_shape.inst_buf, base);
-        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
-        float cp[4] = {s_shape.cam_pos[0], s_shape.cam_pos[1], s_shape.cam_pos[2], 0};
-        nt_gfx_set_uniform_vec4(s_u_cam_pos, cp);
-        nt_gfx_set_uniform_float(s_u_line_width, s_shape.line_width);
-        nt_gfx_set_uniform_vec4(s_u_pixel_scale, s_shape.pixel_scale);
-        nt_shape_template_t *tpl = &s_shape.wire_templates[type];
-        nt_gfx_draw_indexed_instanced(0, tpl->num_indices, tpl->num_vertices, count);
-        s_shape.wire_counts[type] = 0;
-    }
-
-    flush_strokes(s_shape.line_instance_buf, s_shape.line_vi, s_shape.lines, s_shape.line_count, s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t), sizeof(s_shape.lines),
-                  &s_shape.line_ring_cursor, 6);
-    flush_strokes(s_shape.stroke_instance_buf, s_shape.stroke_vi, s_shape.strokes, s_shape.stroke_count, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t), sizeof(s_shape.strokes),
-                  &s_shape.stroke_ring_cursor, 12);
-    s_shape.line_count = 0;
-    s_shape.stroke_count = 0;
+    flush_wire_run();
 }
 
 /* ---- State setters ---- */
@@ -1302,7 +1315,7 @@ void nt_shape_renderer_set_line_width(float width) {
         return;
     }
     if (s_shape.line_count != 0 || s_shape.stroke_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
-        nt_shape_renderer_flush();
+        flush_wire_run();
     }
     s_shape.line_width = width;
     memset(s_shape.pixel_scale, 0, sizeof(s_shape.pixel_scale));
@@ -1317,7 +1330,7 @@ void nt_shape_renderer_set_line_width_pixels(float width, uint32_t viewport_widt
         return;
     }
     if (s_shape.line_count != 0 || s_shape.stroke_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
-        nt_shape_renderer_flush();
+        flush_wire_run();
     }
     s_shape.line_width = width;
     s_shape.pixel_scale[0] = x;
