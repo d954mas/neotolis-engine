@@ -60,10 +60,8 @@ void nt_shape_renderer_set_depth(bool enabled);
 
 void nt_shape_renderer_line(const float a[3], const float b[3], const float color[4]);
 
-/* Connected world-space points; butt ends, miter joins with bevel beyond 4 half-widths.
- * Points are borrowed for the call and must be finite; points may be null only when count is zero.
- * Consecutive duplicates are skipped; count < 2 is a no-op. Closed paths join last to first;
- * a repeated final copy of the first point is optional. */
+/* Connected finite world-space points, read during the call; consecutive duplicates are skipped.
+ * Joins, ends and closing rules: render architecture, "Shape strokes". */
 void nt_shape_renderer_polyline(const float (*points)[3], uint32_t count, bool closed, const float color[4]);
 
 /* ---- Rectangle ---- */

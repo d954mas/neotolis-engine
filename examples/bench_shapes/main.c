@@ -345,7 +345,7 @@ static void dispatch_shape(const bench_shape_t *s) {
 
 static void draw_letter_path(const float (*points)[3], uint32_t count, const float color[4]) {
     bool closed = count > 2 && points[0][0] == points[count - 1][0] && points[0][2] == points[count - 1][2];
-    nt_shape_renderer_polyline(points, closed ? count - 1 : count, closed, color);
+    nt_shape_renderer_polyline(points, count, closed, color);
 }
 
 static void draw_letter(float ox, float oz, float scale, const float *strokes, int count, const float color[4]) {
@@ -481,14 +481,8 @@ static void draw_room(void) {
 /* ---- Draw pre-built shapes ---- */
 
 static void draw_shapes(void) {
-    /* The benchmark owns content order. Grouping by primitive type models a debug
-     * collector whose opaque/depth-tested shapes do not require submission order. */
-    for (int type = BENCH_LINE; type <= BENCH_CAP; type++) {
-        for (int i = 0; i < s_shape_count; i++) {
-            if (s_shapes[i].type == type) {
-                dispatch_shape(&s_shapes[i]);
-            }
-        }
+    for (int i = 0; i < s_shape_count; i++) {
+        dispatch_shape(&s_shapes[i]);
     }
 }
 

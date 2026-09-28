@@ -634,26 +634,39 @@ static void test_width_changes_keep_filled_shapes_batched(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
-static void test_wire_queue_changes_keep_filled_shapes_batched(void) {
+static void test_interleaved_wires_batch_by_kind(void) {
     const float color[4] = {1, 1, 1, 1};
     const float points[][3] = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}};
     nt_gfx_fake_draw_trace_reset(true);
-
-    nt_shape_renderer_rect((float[3]){-1, 0, 0}, (float[2]){1, 1}, color);
-    nt_shape_renderer_circle_wire((float[3]){0, 0, 0}, 1, color);
-    nt_shape_renderer_sphere_wire((float[3]){0, 0, 0}, 1, color);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_instance_count(NT_SHAPE_TEST_RECT));
-
-    nt_shape_renderer_rect((float[3]){1, 0, 0}, (float[2]){1, 1}, color);
-    nt_shape_renderer_line(points[0], points[1], color);
-    nt_shape_renderer_polyline(points, 3, false, color);
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_shape_renderer_test_instance_count(NT_SHAPE_TEST_RECT));
+    for (int i = 0; i < 3; i++) {
+        nt_shape_renderer_rect((float[3]){-1, 0, 0}, (float[2]){1, 1}, color);
+        nt_shape_renderer_circle_wire(points[0], 1, color);
+        nt_shape_renderer_sphere_wire(points[0], 1, color);
+        nt_shape_renderer_line(points[0], points[1], color);
+        nt_shape_renderer_polyline(points, 3, false, color);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 
     nt_shape_renderer_flush();
+    /* Fills first, then circle and sphere templates, connected segments, independent lines. */
     TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(3).instance_count);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(0).instance_count);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(1).instance_count);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(2).instance_count);
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(3).instance_count);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(4).instance_count);
+}
+
+static void test_width_change_with_pending_strokes_draws_fills_first(void) {
+    const float color[4] = {1, 1, 1, 1};
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_circle_wire((float[3]){0, 0, 0}, 1, color);
+    nt_shape_renderer_rect((float[3]){-1, 0, 0}, (float[2]){1, 1}, color);
+    nt_shape_renderer_rect((float[3]){1, 0, 0}, (float[2]){1, 1}, color);
+    nt_shape_renderer_set_line_width(4);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(0).instance_count);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).instance_count);
 }
 
 static void test_polyline_overflow_preserves_all_segments(void) {
@@ -729,7 +742,8 @@ int main(void) {
     RUN_TEST(test_polyline_asserts_non_finite_points);
     RUN_TEST(test_width_mode_and_viewport_changes_flush_wires);
     RUN_TEST(test_width_changes_keep_filled_shapes_batched);
-    RUN_TEST(test_wire_queue_changes_keep_filled_shapes_batched);
+    RUN_TEST(test_interleaved_wires_batch_by_kind);
+    RUN_TEST(test_width_change_with_pending_strokes_draws_fills_first);
     RUN_TEST(test_shape_init_shutdown);
     RUN_TEST(test_shape_flush_empty);
     RUN_TEST(test_shape_set_vp_extracts_cam_pos);

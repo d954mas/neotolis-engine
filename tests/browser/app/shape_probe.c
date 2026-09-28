@@ -76,11 +76,13 @@ static bool probe_overlay_order(nt_render_target_t target) {
     nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width(0.3F);
     begin_probe_pass(target);
-    nt_shape_renderer_rect_wire((float[3]){0, 0, 0}, (float[2]){1, 1}, (float[4]){1, 0, 0, 1});
-    nt_shape_renderer_line((float[3]){-0.5F, 0.5F, 0}, (float[3]){0.5F, 0.5F, 0}, (float[4]){0, 1, 0, 1});
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, (float[4]){0, 1, 0, 1});
+    nt_shape_renderer_rect((float[3]){0, 0, 0}, (float[2]){1, 1}, (float[4]){1, 0, 0, 1});
+    nt_shape_renderer_flush();
+    nt_shape_renderer_rect((float[3]){-0.25F, 0, 0}, (float[2]){0.5F, 0.5F}, (float[4]){0, 0, 1, 1});
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    return read_probe_pass(frame) && pixel_is(frame, 32, 16, 0, 255, 0);
+    return read_probe_pass(frame) && pixel_is(frame, 40, 32, 0, 255, 0) && pixel_is(frame, 40, 20, 255, 0, 0) && pixel_is(frame, 24, 32, 0, 0, 255);
 }
 
 static bool probe_pixel_width_depth(nt_render_target_t target) {

@@ -650,9 +650,10 @@ without relying on implementation-dependent hardware line widths.
   viewport. Both dimensions must be positive; both width setters require a
   finite positive width and assert programmer violations.
 
-Width, width mode and viewport dimension changes flush pending strokes before
-replacing state; filled-only batches remain pending. VP, camera position and
-depth changes flush all pending geometry. Identical values do not flush.
+Width, width mode and viewport dimension changes flush all pending geometry
+when strokes are pending; filled-only batches remain pending. VP, camera
+position and depth changes flush all pending geometry. Identical values do not
+flush.
 Settings survive GPU restore, including a failed restore followed by retry.
 The game must flush before changing render passes or directly changing the gfx
 viewport; the renderer does not intercept gfx state changes.
@@ -680,47 +681,33 @@ remain independent segments, and cylinder strut/ring intersections do not gain
 an arbitrary two-edge join. No global graph stitching, hidden-edge extraction,
 mesh silhouette or duplicate-edge removal is implied by these APIs.
 
-The stroke pipelines retain opaque rendering and the existing depth behavior.
-Inner bevel triangles and intersecting paths can overlap; the renderer does
-not promise composited translucent strokes. Boundary antialiasing and circle
-subdivision are separate from joining segments. Fixing joins does not change
-the 16-segment approximation of a circle.
+Strokes are opaque and follow the depth setting. Inner bevel triangles and
+intersecting paths can overlap; the renderer does not promise composited
+translucent strokes.
 
-### Storage and batching
+### Storage and draw order
 
 No heap allocation or trigonometry occurs when submitting these strokes.
-Independent segments retain 28-byte instances and two triangles. General path
-segments store previous/start/end/next points and color in 52 bytes, using seven
-vertices and four triangles; two triangles collapse for a miter. Their queues
-are separate so independent lines do not upload unused neighbors. Their depth
-and overlay pipelines share the same program and template buffers.
+Independent segments store only their endpoints. Connected path segments also
+store both neighbors, so a flush inside a path keeps its joins. Circle, sphere,
+cylinder and capsule wires use immutable templates built at initialization and
+one instance per shape.
 
-Circle, sphere, cylinder and capsule wires use immutable templates built at
-initialization, one 44-byte instance per shape and one draw per nonempty wire
-shape type. They share the existing filled-shape instance buffer and ring
-cursor. Mixed wire types therefore require separate draws; fewer uploaded
-bytes do not imply fewer draws or a universal GPU speedup.
+Every flush draws filled instanced shapes by type, then triangles and meshes,
+then wire templates by type, connected segments and independent lines. Within
+one flush this kind order replaces submission order: outlines stay on top of
+fills, and interleaved submissions batch into at most one draw per kind. Flushes
+are the only ordering barriers — explicit `flush`, a full queue and the state
+changes above. A game that needs a later layer over an earlier one, typically in
+overlay mode, calls `flush` between them.
 
-Wire submissions preserve order across independent lines, connected paths and
-immutable-template types. Consecutive submissions to one queue still batch;
-switching queue or template type flushes the preceding wire run.
-The renderer does not reorder commands or retain a global debug list. A game
-whose opaque, depth-tested diagnostic shapes do not require submission order
-groups its own list by wire queue/template type before calling the renderer.
-This keeps overlay order explicit and makes mass physics visualization batchable
-without an engine sort policy.
-
-`NT_SHAPE_RENDERER_MAX_LINES` bounds the independent-line queue (default 8192).
-`NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` bounds the connected-segment queue
-(default 1024). Each ready-made wire type has
-`ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)` staging entries (default 512).
-A single CPU staging union backs the independent-line, connected-segment and
-fixed-template queues because queue switches flush the active wire run before
-the next representation writes. Their configured limits stay independent.
-A full queue flushes automatically; GPU streaming buffers use disjoint ring
-ranges until wrap. A skipped flush after failed initialization empties every
-queue, preventing overflow during context recovery. Shutdown and GPU restore
-release/recreate the templates, vertex inputs and streaming buffers together.
+`NT_SHAPE_RENDERER_MAX_LINES` bounds independent lines (default 8192) and
+`NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` connected segments (default 1024).
+Each wire template type holds `ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)`
+shapes (default 512). A full queue flushes all pending geometry. A skipped flush
+after failed initialization empties every queue, preventing overflow during
+context recovery. Shutdown and GPU restore release and recreate the templates,
+vertex inputs and streaming buffers together.
 
 ## Renderer complexity classes
 

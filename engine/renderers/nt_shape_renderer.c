@@ -85,49 +85,46 @@ static const char *s_shape_fs_src = "precision mediump float;\n"
     "vec3 pixel_side(vec2 edge) {\n"                                                                                                                                                                   \
     "    return vec3(-edge.y,edge.x,0)*inversesqrt(max(dot(edge,edge),1e-12));\n"                                                                                                                      \
     "}\n"                                                                                                                                                                                              \
-    "vec4 pixel_position(vec2 corner, vec3 prev, vec3 a, vec3 b, vec3 next) {\n"                                                                                                                       \
-    "    vec4 ca=u_vp*vec4(biased(a),1), cb=u_vp*vec4(biased(b),1);\n"                                                                                                                                 \
-    "    vec4 cp=u_vp*vec4(biased(prev),1), cn=u_vp*vec4(biased(next),1);\n"                                                                                                                           \
-    "    bool hide_a=ca.z+ca.w<0.0, hide_b=cb.z+cb.w<0.0;\n"                                                                                                                                           \
-    "    if (hide_a && hide_b) return vec4(0,0,2,1);\n"                                                                                                                                                \
-    "    if (hide_a) {ca=near_clip(ca,cb);cp=ca;}\n"                                                                                                                                                   \
-    "    if (hide_b) {cb=near_clip(cb,ca);cn=cb;}\n"                                                                                                                                                   \
-    "    if (cp.z+cp.w<0.0) cp=near_clip(cp,ca);\n"                                                                                                                                                    \
-    "    if (cn.z+cn.w<0.0) cn=near_clip(cn,cb);\n"                                                                                                                                                    \
-    "    vec4 p=corner.x<0.5?ca:cb;\n"                                                                                                                                                                 \
-    "    vec4 before=corner.x<0.5?cp:ca, after=corner.x<0.5?cb:cn;\n"                                                                                                                                  \
-    "    vec2 pos=p.xy/max(p.w,1e-6);\n"                                                                                                                                                               \
-    "    vec2 incoming=(pos-before.xy/max(before.w,1e-6))/u_pixel_scale.xy;\n"                                                                                                                         \
-    "    vec2 outgoing=(after.xy/max(after.w,1e-6)-pos)/u_pixel_scale.xy;\n"                                                                                                                           \
+    "vec4 pixel_position(vec2 corner, vec3 before, vec3 p, vec3 after) {\n"                                                                                                                            \
+    "    vec4 cb=u_vp*vec4(biased(before),1), cp=u_vp*vec4(biased(p),1), ca=u_vp*vec4(biased(after),1);\n"                                                                                             \
+    "    bool start=corner.x<0.5;\n"                                                                                                                                                                   \
+    "    vec4 other=start?ca:cb, outer=start?cb:ca;\n"                                                                                                                                                 \
+    "    bool hide_p=cp.z+cp.w<0.0, hide_other=other.z+other.w<0.0;\n"                                                                                                                                 \
+    "    if (hide_p && hide_other) return vec4(0,0,2,1);\n"                                                                                                                                            \
+    "    if (hide_p) {cp=near_clip(cp,other);outer=cp;}\n"                                                                                                                                             \
+    "    else if (outer.z+outer.w<0.0) outer=near_clip(outer,cp);\n"                                                                                                                                   \
+    "    if (hide_other) other=near_clip(other,cp);\n"                                                                                                                                                 \
+    "    cb=start?outer:other; ca=start?other:outer;\n"                                                                                                                                                \
+    "    vec2 pos=cp.xy/max(cp.w,1e-6);\n"                                                                                                                                                             \
+    "    vec2 incoming=(pos-cb.xy/max(cb.w,1e-6))/u_pixel_scale.xy;\n"                                                                                                                                 \
+    "    vec2 outgoing=(ca.xy/max(ca.w,1e-6)-pos)/u_pixel_scale.xy;\n"                                                                                                                                 \
     "    vec3 offset=join_offset(pixel_side(incoming),pixel_side(outgoing),corner.y);\n"                                                                                                               \
-    "    p.xy+=offset.xy*(0.5*u_line_width)*u_pixel_scale.xy*p.w;\n"                                                                                                                                   \
-    "    return p;\n"                                                                                                                                                                                  \
+    "    cp.xy+=offset.xy*(0.5*u_line_width)*u_pixel_scale.xy*cp.w;\n"                                                                                                                                 \
+    "    return cp;\n"                                                                                                                                                                                 \
     "}\n"                                                                                                                                                                                              \
-    "vec4 stroke_position(vec2 corner, vec3 prev, vec3 a, vec3 b, vec3 next) {\n"                                                                                                                      \
-    "    if (u_pixel_scale.x>0.0) return pixel_position(corner,prev,a,b,next);\n"                                                                                                                      \
-    "    vec3 p = corner.x < 0.5 ? a : b;\n"                                                                                                                                                           \
-    "    vec3 before = corner.x < 0.5 ? prev : a;\n"                                                                                                                                                   \
-    "    vec3 after = corner.x < 0.5 ? b : next;\n"                                                                                                                                                    \
+    "vec4 stroke_position(vec2 corner, vec3 before, vec3 p, vec3 after) {\n"                                                                                                                           \
+    "    if (u_pixel_scale.x>0.0) return pixel_position(corner,before,p,after);\n"                                                                                                                     \
     "    vec3 view = u_cam_pos.xyz-p;\n"                                                                                                                                                               \
     "    vec3 offset = join_offset(side(p-before,view),side(after-p,view),corner.y);\n"                                                                                                                \
     "    return u_vp*vec4(biased(p+offset*(0.5*u_line_width)),1);\n"                                                                                                                                   \
     "}\n"
 
-static const char *s_line_vs_src = "precision highp float;\n"
-                                   "layout(location = 0) in vec2 a_corner;\n"
-                                   "layout(location = 1) in vec3 i_prev;\n"
-                                   "layout(location = 2) in vec3 i_a;\n"
-                                   "layout(location = 3) in vec3 i_b;\n"
-                                   "layout(location = 4) in vec3 i_next;\n"
-                                   "layout(location = 5) in vec4 i_color;\n"
-                                   "out mediump vec4 v_color;\n" NT_STROKE_GLSL "void main(){gl_Position=stroke_position(a_corner,i_prev,i_a,i_b,i_next);v_color=i_color;}\n";
+static const char *s_line_vs_src =
+    "precision highp float;\n"
+    "layout(location = 0) in vec2 a_corner;\n"
+    "layout(location = 1) in vec3 i_prev;\n"
+    "layout(location = 2) in vec3 i_a;\n"
+    "layout(location = 3) in vec3 i_b;\n"
+    "layout(location = 4) in vec3 i_next;\n"
+    "layout(location = 5) in vec4 i_color;\n"
+    "out mediump vec4 v_color;\n" NT_STROKE_GLSL "void main(){bool s=a_corner.x<0.5;gl_Position=stroke_position(a_corner,s?i_prev:i_a,s?i_a:i_b,s?i_b:i_next);v_color=i_color;}\n";
 
+/* Template vertices already store their corner's (before, p, after) triple. */
 static const char *s_wire_vs_src = "precision highp float;\n"
                                    "layout(location=0) in vec2 a_corner;\n"
-                                   "layout(location=1) in vec4 a_prev;\n"
-                                   "layout(location=2) in vec4 a_a;\n"
-                                   "layout(location=3) in vec4 a_b;\n"
-                                   "layout(location=4) in vec4 a_next;\n"
+                                   "layout(location=1) in vec4 a_before;\n"
+                                   "layout(location=2) in vec4 a_p;\n"
+                                   "layout(location=3) in vec4 a_after;\n"
                                    "layout(location=5) in vec3 i_center;\n"
                                    "layout(location=6) in vec3 i_scale;\n"
                                    "layout(location=7) in vec4 i_rot;\n"
@@ -138,7 +135,7 @@ static const char *s_wire_vs_src = "precision highp float;\n"
                                    "    v.y+=p.w*i_scale.y;\n"
                                    "    vec3 t=2.0*cross(i_rot.xyz,v);\n"
                                    "    return i_center+v+i_rot.w*t+cross(i_rot.xyz,t);\n"
-                                   "}\n" NT_STROKE_GLSL "void main(){gl_Position=stroke_position(a_corner,wire_point(a_prev),wire_point(a_a),wire_point(a_b),wire_point(a_next));v_color=i_color;}\n";
+                                   "}\n" NT_STROKE_GLSL "void main(){gl_Position=stroke_position(a_corner,wire_point(a_before),wire_point(a_p),wire_point(a_after));v_color=i_color;}\n";
 
 /* ---- Instance data ---- */
 
@@ -186,10 +183,13 @@ enum {
 
 enum { NT_WIRE_CIRCLE, NT_WIRE_SPHERE, NT_WIRE_CYLINDER, NT_WIRE_CAPSULE, NT_WIRE_COUNT };
 #define NT_WIRE_MAX_INSTANCES ((NT_SHAPE_RENDERER_MAX_INSTANCES + NT_WIRE_COUNT - 1) / NT_WIRE_COUNT)
-#define NT_WIRE_MAX_SEGMENTS 68
+/* Capsule meridian: both hemispheres plus one point at each end of the straight side. */
+#define NT_WIRE_CAP_POINTS (NT_SHAPE_SEGMENTS + 2)
+#define NT_WIRE_MAX_SEGMENTS ((2 * NT_SHAPE_SEGMENTS) + (2 * NT_WIRE_CAP_POINTS))
 
+/* points = (before, p, after) of this corner; w tags the capsule/cylinder half. */
 typedef struct {
-    float points[4][4];
+    float points[3][4];
     float corner[2];
 } nt_wire_vertex_t;
 
@@ -251,7 +251,6 @@ static struct {
     nt_program_t batch_prog;
     nt_pipeline_t batch_pip_depth;
     nt_pipeline_t batch_pip_overlay;
-    nt_pipeline_t batch_pip_active;
     nt_buffer_t batch_vbo;
     nt_buffer_t batch_ibo;
     nt_vertex_input_t batch_vi;
@@ -265,7 +264,6 @@ static struct {
     nt_program_t inst_prog;
     nt_pipeline_t inst_pip_depth;
     nt_pipeline_t inst_pip_overlay;
-    nt_pipeline_t inst_pip_active;
     nt_buffer_t inst_buf;      /* shared GPU instance buffer, reused per type */
     uint32_t inst_ring_cursor; /* next free byte; disjoint writes avoid driver copies of in-flight data */
     nt_shape_template_t templates[NT_SHAPE_TYPE_COUNT];
@@ -280,14 +278,12 @@ static struct {
     nt_program_t cap_inst_prog;
     nt_pipeline_t cap_inst_pip_depth;
     nt_pipeline_t cap_inst_pip_overlay;
-    nt_pipeline_t cap_inst_pip_active;
 
     /* Instanced lines */
     nt_shader_t line_vs;
     nt_program_t line_prog;
     nt_pipeline_t line_pip_depth;
     nt_pipeline_t line_pip_overlay;
-    nt_pipeline_t line_pip_active;
     nt_buffer_t line_template_vbo;
     nt_buffer_t line_template_ibo;
     nt_buffer_t line_instance_buf;
@@ -306,11 +302,14 @@ static struct {
     nt_shape_template_t wire_templates[NT_WIRE_COUNT];
     nt_vertex_input_t wire_vi[NT_WIRE_COUNT];
     uint32_t wire_counts[NT_WIRE_COUNT];
+    nt_shape_instance_t wire_data[NT_WIRE_COUNT][NT_WIRE_MAX_INSTANCES];
+    nt_shape_stroke_instance_t strokes[NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS];
+    /* Wire templates are built during init, while the line queue is empty; this keeps
+     * the scratch off the small WASM stack at no extra memory. */
     union {
         nt_shape_line_instance_t lines[NT_SHAPE_RENDERER_MAX_LINES];
-        nt_shape_stroke_instance_t strokes[NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS];
-        nt_shape_instance_t wire_data[NT_WIRE_MAX_INSTANCES];
-    } wire_staging;
+        nt_wire_vertex_t wire_build[NT_WIRE_MAX_SEGMENTS * 7];
+    } line_staging;
 
     /* Settings */
     float vp[16];
@@ -423,9 +422,9 @@ static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
     return nt_gfx_make_pipeline(&desc);
 }
 
-static nt_pipeline_t make_line_pipeline(bool depth) {
+static nt_pipeline_t make_stroke_pipeline(nt_program_t program, bool depth) {
     nt_pipeline_desc_t desc = {
-        .program = s_shape.line_prog,
+        .program = program,
         .depth_test = depth,
         .depth_write = depth,
         .depth_func = NT_DEPTH_LEQUAL,
@@ -538,11 +537,11 @@ static nt_shape_template_t make_template(const float *verts, uint32_t nv, const 
 static void wire_segment_vertices(nt_wire_vertex_t *vertices, const float prev[4], const float a[4], const float b[4], const float next[4]) {
     for (uint32_t v = 0; v < 7; v++) {
         nt_wire_vertex_t *dst = &vertices[v];
-        memcpy(dst->points[0], prev, sizeof(dst->points[0]));
-        memcpy(dst->points[1], a, sizeof(dst->points[1]));
-        memcpy(dst->points[2], b, sizeof(dst->points[2]));
-        memcpy(dst->points[3], next, sizeof(dst->points[3]));
-        dst->corner[0] = v < 5 ? 0.0F : 1.0F;
+        bool start = v < 5;
+        memcpy(dst->points[0], start ? prev : a, sizeof(dst->points[0]));
+        memcpy(dst->points[1], start ? a : b, sizeof(dst->points[1]));
+        memcpy(dst->points[2], start ? b : next, sizeof(dst->points[2]));
+        dst->corner[0] = start ? 0.0F : 1.0F;
         dst->corner[1] = (float)(v < 5 ? v : v - 5);
     }
 }
@@ -570,7 +569,7 @@ static void wire_template_path(nt_wire_vertex_t *vertices, uint16_t *indices, ui
     }
 }
 
-static void wire_ring_points(float points[20][4], int plane, float tag) {
+static void wire_ring_points(float points[NT_WIRE_CAP_POINTS][4], int plane, float tag) {
     for (int i = 0; i < NT_SHAPE_SEGMENTS; i++) {
         memset(points[i], 0, sizeof(points[i]));
         points[i][plane == 2 ? 1 : 0] = s_shape.cos_lut[i];
@@ -579,21 +578,24 @@ static void wire_ring_points(float points[20][4], int plane, float tag) {
     }
 }
 
-static void wire_capsule_profile(float points[20][4], int plane) {
-    for (int i = 0; i < 18; i++) {
-        int row = i <= 9 ? i : 18 - i;
-        float angle = row <= 4 ? (float)row * (NT_PI / 8.0F) : (float)(row - 1) * (NT_PI / 8.0F);
+/* The equator angle repeats once per hemisphere, joined by the straight side. */
+static void wire_capsule_profile(float points[NT_WIRE_CAP_POINTS][4], int plane) {
+    const int half = NT_WIRE_CAP_POINTS / 2;
+    for (int i = 0; i < NT_WIRE_CAP_POINTS; i++) {
+        int row = i <= half ? i : NT_WIRE_CAP_POINTS - i;
+        bool top = row <= NT_SEG_CAP_HALF;
+        int k = top ? row : row - 1;
         memset(points[i], 0, sizeof(points[i]));
-        points[i][plane == 0 ? 0 : 2] = sinf(angle) * (i <= 9 ? 1.0F : -1.0F);
-        points[i][1] = cosf(angle);
-        points[i][3] = row <= 4 ? 1.0F : -1.0F;
+        points[i][plane == 0 ? 0 : 2] = s_shape.sin_lut[k] * (i <= half ? 1.0F : -1.0F);
+        points[i][1] = s_shape.cos_lut[k];
+        points[i][3] = top ? 1.0F : -1.0F;
     }
 }
 
 static void build_wire_template(int type) {
-    nt_wire_vertex_t vertices[NT_WIRE_MAX_SEGMENTS * 7];
+    nt_wire_vertex_t *vertices = s_shape.line_staging.wire_build;
     uint16_t indices[NT_WIRE_MAX_SEGMENTS * 12];
-    float points[20][4];
+    float points[NT_WIRE_CAP_POINTS][4];
     uint32_t segments = 0;
     static const int ring_counts[NT_WIRE_COUNT] = {1, 3, 2, 2};
     for (int ring = 0; ring < ring_counts[type]; ring++) {
@@ -614,43 +616,28 @@ static void build_wire_template(int type) {
     if (type == NT_WIRE_CAPSULE) {
         for (int plane = 0; plane < 2; plane++) {
             wire_capsule_profile(points, plane);
-            wire_template_path(vertices, indices, &segments, (const float(*)[4])points, 18, true);
+            wire_template_path(vertices, indices, &segments, (const float(*)[4])points, NT_WIRE_CAP_POINTS, true);
         }
     }
-    s_shape.wire_templates[type] = make_template_ex((const float *)vertices, segments * 7, 18, indices, segments * 12, "shape_wire_template");
+    s_shape.wire_templates[type] = make_template_ex((const float *)vertices, segments * 7, sizeof(nt_wire_vertex_t) / sizeof(float), indices, segments * 12, "shape_wire_template");
 }
 
 static nt_vertex_layout_t wire_vertex_layout(void) {
     return (nt_vertex_layout_t){.stride = sizeof(nt_wire_vertex_t),
-                                .attr_count = 5,
+                                .attr_count = 4,
                                 .attrs = {
-                                    {.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 64},
+                                    {.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 48},
                                     {.location = 1, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
                                     {.location = 2, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
                                     {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 48},
                                 }};
 }
 
-static bool wire_template_queued_except(int keep_type) {
-    for (int type = 0; type < NT_WIRE_COUNT; type++) {
-        if (type != keep_type && s_shape.wire_counts[type] != 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void flush_wire_run(void);
-
 static void push_wire_instance(int type, const float center[3], float radius, float half_height, const float *rot, const float color[4]) {
-    if (s_shape.line_count != 0 || s_shape.stroke_count != 0 || wire_template_queued_except(type)) {
-        flush_wire_run();
-    }
     if (s_shape.wire_counts[type] == NT_WIRE_MAX_INSTANCES) {
-        flush_wire_run();
+        nt_shape_renderer_flush();
     }
-    nt_shape_instance_t *inst = &s_shape.wire_staging.wire_data[s_shape.wire_counts[type]++];
+    nt_shape_instance_t *inst = &s_shape.wire_data[type][s_shape.wire_counts[type]++];
     memcpy(inst->center, center, sizeof(inst->center));
     inst->scale[0] = radius;
     inst->scale[1] = half_height;
@@ -870,13 +857,10 @@ static void build_templates(void) {
 
 /* Neighbors let adjacent segments construct the same endpoint cross-section. */
 static void emit_wire_segment(const float prev[3], const float a[3], const float b[3], const float next[3], const float color[4]) {
-    if (s_shape.line_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
-        flush_wire_run();
-    }
     if (s_shape.stroke_count >= NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS) {
-        flush_wire_run();
+        nt_shape_renderer_flush();
     }
-    nt_shape_stroke_instance_t *inst = &s_shape.wire_staging.strokes[s_shape.stroke_count++];
+    nt_shape_stroke_instance_t *inst = &s_shape.strokes[s_shape.stroke_count++];
     memcpy(inst->prev, prev, sizeof(inst->prev));
     memcpy(inst->next, next, sizeof(inst->next));
     memcpy(inst->a, a, sizeof(inst->a));
@@ -885,30 +869,13 @@ static void emit_wire_segment(const float prev[3], const float a[3], const float
 }
 
 static void emit_wire_edge(const float a[3], const float b[3], const float color[4]) {
-    if (s_shape.stroke_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
-        flush_wire_run();
-    }
     if (s_shape.line_count >= NT_SHAPE_RENDERER_MAX_LINES) {
-        flush_wire_run();
+        nt_shape_renderer_flush();
     }
-    nt_shape_line_instance_t *inst = &s_shape.wire_staging.lines[s_shape.line_count++];
+    nt_shape_line_instance_t *inst = &s_shape.line_staging.lines[s_shape.line_count++];
     memcpy(inst->a, a, sizeof(inst->a));
     memcpy(inst->b, b, sizeof(inst->b));
     pack_color(inst->color, color);
-}
-
-static bool build_stroke_vertex_input(void) {
-    s_shape.stroke_instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS * (uint32_t)sizeof(nt_shape_stroke_instance_t), .label = "shape_stroke_inst"});
-    if (!s_shape.stroke_instance_buf.id) {
-        return false;
-    }
-    s_shape.stroke_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = line_template_layout(),
-                                                                           .instance_layout = stroke_instance_layout(),
-                                                                           .vertex_buffer = s_shape.line_template_vbo,
-                                                                           .index_buffer = s_shape.line_template_ibo,
-                                                                           .label = "shape_stroke_vi"});
-    return s_shape.stroke_vi.id != 0;
 }
 
 static bool build_wire_vertex_inputs(void) {
@@ -956,15 +923,10 @@ void nt_shape_renderer_init(void) {
     s_shape.inst_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_inst_vs_src, .label = "shape_inst_vs"});
     s_shape.cap_inst_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_cap_inst_vs_src, .label = "shape_cap_inst_vs"});
     s_shape.line_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_line_vs_src, .label = "shape_line_vs"});
-
-    if (!s_shape.fs.id || !s_shape.batch_vs.id || !s_shape.inst_vs.id || !s_shape.cap_inst_vs.id || !s_shape.line_vs.id) {
-        NT_LOG_ERROR("init failed -- shader creation error");
-        nt_shape_renderer_shutdown();
-        return;
-    }
-
     s_shape.wire_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_wire_vs_src, .label = "shape_wire_vs"});
-    if (!s_shape.wire_vs.id) {
+
+    if (!s_shape.fs.id || !s_shape.batch_vs.id || !s_shape.inst_vs.id || !s_shape.cap_inst_vs.id || !s_shape.line_vs.id || !s_shape.wire_vs.id) {
+        NT_LOG_ERROR("init failed -- shader creation error");
         nt_shape_renderer_shutdown();
         return;
     }
@@ -974,14 +936,10 @@ void nt_shape_renderer_init(void) {
     s_shape.inst_prog = nt_gfx_make_program(s_shape.inst_vs, s_shape.fs);
     s_shape.cap_inst_prog = nt_gfx_make_program(s_shape.cap_inst_vs, s_shape.fs);
     s_shape.line_prog = nt_gfx_make_program(s_shape.line_vs, s_shape.fs);
-    if (!nt_gfx_program_ready(s_shape.batch_prog) || !nt_gfx_program_ready(s_shape.inst_prog) || !nt_gfx_program_ready(s_shape.cap_inst_prog) || !nt_gfx_program_ready(s_shape.line_prog)) {
-        NT_LOG_ERROR("init failed -- program link error");
-        nt_shape_renderer_shutdown();
-        return;
-    }
-
     s_shape.wire_prog = nt_gfx_make_program(s_shape.wire_vs, s_shape.fs);
-    if (!nt_gfx_program_ready(s_shape.wire_prog)) {
+    if (!nt_gfx_program_ready(s_shape.batch_prog) || !nt_gfx_program_ready(s_shape.inst_prog) || !nt_gfx_program_ready(s_shape.cap_inst_prog) || !nt_gfx_program_ready(s_shape.line_prog) ||
+        !nt_gfx_program_ready(s_shape.wire_prog)) {
+        NT_LOG_ERROR("init failed -- program link error");
         nt_shape_renderer_shutdown();
         return;
     }
@@ -993,18 +951,10 @@ void nt_shape_renderer_init(void) {
     s_shape.inst_pip_overlay = make_inst_pipeline(false);
     s_shape.cap_inst_pip_depth = make_cap_inst_pipeline(true);
     s_shape.cap_inst_pip_overlay = make_cap_inst_pipeline(false);
-    s_shape.line_pip_depth = make_line_pipeline(true);
-    s_shape.line_pip_overlay = make_line_pipeline(false);
-
-    nt_pipeline_desc_t wire_desc = {.program = s_shape.wire_prog, .depth_test = true, .depth_write = true, .depth_func = NT_DEPTH_LEQUAL, .label = "shape_wire_pipeline"};
-    s_shape.wire_pip_depth = nt_gfx_make_pipeline(&wire_desc);
-    wire_desc.depth_test = false;
-    wire_desc.depth_write = false;
-    s_shape.wire_pip_overlay = nt_gfx_make_pipeline(&wire_desc);
-    if (!s_shape.wire_pip_depth.id || !s_shape.wire_pip_overlay.id) {
-        nt_shape_renderer_shutdown();
-        return;
-    }
+    s_shape.line_pip_depth = make_stroke_pipeline(s_shape.line_prog, true);
+    s_shape.line_pip_overlay = make_stroke_pipeline(s_shape.line_prog, false);
+    s_shape.wire_pip_depth = make_stroke_pipeline(s_shape.wire_prog, true);
+    s_shape.wire_pip_overlay = make_stroke_pipeline(s_shape.wire_prog, false);
 
     /* CPU batch buffers (triangle, mesh) */
     s_shape.batch_vbo = nt_gfx_make_buffer(
@@ -1029,6 +979,8 @@ void nt_shape_renderer_init(void) {
         .type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = line_template_indices, .size = sizeof(line_template_indices), .index_type = NT_INDEX_UINT16, .label = "shape_line_idx"});
     s_shape.line_instance_buf = nt_gfx_make_buffer(
         &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_LINES * (uint32_t)sizeof(nt_shape_line_instance_t), .label = "shape_line_inst"});
+    s_shape.stroke_instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS * (uint32_t)sizeof(nt_shape_stroke_instance_t), .label = "shape_stroke_inst"});
 
     /* Verify all buffers/pipelines were created successfully (the vertex
      * inputs below trap on invalid buffer handles instead of skipping). */
@@ -1037,8 +989,8 @@ void nt_shape_renderer_init(void) {
         template_bufs_ok = template_bufs_ok && s_shape.templates[t].vbo.id != 0 && s_shape.templates[t].ibo.id != 0;
     }
     if (!template_bufs_ok || !s_shape.batch_pip_depth.id || !s_shape.batch_pip_overlay.id || !s_shape.inst_pip_depth.id || !s_shape.inst_pip_overlay.id || !s_shape.cap_inst_pip_depth.id ||
-        !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id || !s_shape.line_pip_overlay.id || !s_shape.batch_vbo.id || !s_shape.batch_ibo.id || !s_shape.inst_buf.id ||
-        !s_shape.line_template_vbo.id || !s_shape.line_template_ibo.id || !s_shape.line_instance_buf.id) {
+        !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id || !s_shape.line_pip_overlay.id || !s_shape.wire_pip_depth.id || !s_shape.wire_pip_overlay.id || !s_shape.batch_vbo.id ||
+        !s_shape.batch_ibo.id || !s_shape.inst_buf.id || !s_shape.line_template_vbo.id || !s_shape.line_template_ibo.id || !s_shape.line_instance_buf.id || !s_shape.stroke_instance_buf.id) {
         NT_LOG_ERROR("init failed -- resource creation error");
         nt_shape_renderer_shutdown();
         return;
@@ -1064,17 +1016,24 @@ void nt_shape_renderer_init(void) {
         .index_buffer = s_shape.line_template_ibo,
         .label = "shape_line_vi",
     });
+    s_shape.stroke_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = line_template_layout(),
+        .instance_layout = stroke_instance_layout(),
+        .vertex_buffer = s_shape.line_template_vbo,
+        .index_buffer = s_shape.line_template_ibo,
+        .label = "shape_stroke_vi",
+    });
     bool template_vis_ok = true;
     for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
         template_vis_ok = template_vis_ok && s_shape.template_vi[t].id != 0;
     }
-    if (!s_shape.batch_vi.id || !template_vis_ok || !s_shape.line_vi.id) {
+    if (!s_shape.batch_vi.id || !template_vis_ok || !s_shape.line_vi.id || !s_shape.stroke_vi.id) {
         NT_LOG_ERROR("init failed -- vertex input creation error");
         nt_shape_renderer_shutdown();
         return;
     }
 
-    if (!build_wire_vertex_inputs() || !build_stroke_vertex_input()) {
+    if (!build_wire_vertex_inputs()) {
         NT_LOG_ERROR("init failed -- wire template creation error");
         nt_shape_renderer_shutdown();
         return;
@@ -1082,10 +1041,6 @@ void nt_shape_renderer_init(void) {
 
     s_shape.line_width = 0.02F;
     s_shape.depth_enabled = true;
-    s_shape.batch_pip_active = s_shape.batch_pip_depth;
-    s_shape.inst_pip_active = s_shape.inst_pip_depth;
-    s_shape.cap_inst_pip_active = s_shape.cap_inst_pip_depth;
-    s_shape.line_pip_active = s_shape.line_pip_depth;
 }
 
 void nt_shape_renderer_shutdown(void) {
@@ -1167,23 +1122,21 @@ void nt_shape_renderer_restore_gpu(void) {
         return;
     }
     s_shape.restore_pending = false;
-    s_shape.batch_pip_active = saved_depth ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay;
-    s_shape.inst_pip_active = saved_depth ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay;
-    s_shape.cap_inst_pip_active = saved_depth ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay;
-    s_shape.line_pip_active = saved_depth ? s_shape.line_pip_depth : s_shape.line_pip_overlay;
 }
 
-static void flush_strokes(nt_buffer_t buffer, nt_vertex_input_t vi, const void *data, uint32_t count, uint32_t bytes, uint32_t capacity, uint32_t *cursor, uint32_t indices) {
-    if (count == 0) {
-        return;
-    }
+/* Disjoint ring ranges avoid driver copies of in-flight data; after a wrap the driver copies. */
+static uint32_t ring_upload(nt_buffer_t buffer, uint32_t *cursor, uint32_t capacity, const void *data, uint32_t bytes) {
     if (*cursor + bytes > capacity) {
         *cursor = 0;
     }
     uint32_t base = *cursor;
     *cursor += bytes;
     nt_gfx_update_buffer(buffer, base, data, bytes);
-    nt_gfx_bind_pipeline(s_shape.line_pip_active);
+    return base;
+}
+
+static void draw_strokes(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_buffer_t buffer, uint32_t base, uint32_t num_indices, uint32_t num_vertices, uint32_t count) {
+    nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_bind_instance_buffer(buffer, base);
     nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
@@ -1191,62 +1144,22 @@ static void flush_strokes(nt_buffer_t buffer, nt_vertex_input_t vi, const void *
     nt_gfx_set_uniform_vec4(s_u_cam_pos, cp);
     nt_gfx_set_uniform_float(s_u_line_width, s_shape.line_width);
     nt_gfx_set_uniform_vec4(s_u_pixel_scale, s_shape.pixel_scale);
-    nt_gfx_draw_indexed_instanced(0, indices, 7, count);
-}
-
-static void flush_wire_run(void) {
-    if (!s_shape.initialized) {
-        memset(s_shape.wire_counts, 0, sizeof(s_shape.wire_counts));
-        s_shape.line_count = 0;
-        s_shape.stroke_count = 0;
-        return;
-    }
-
-    for (int type = 0; type < NT_WIRE_COUNT; type++) {
-        uint32_t count = s_shape.wire_counts[type];
-        if (!count) {
-            continue;
-        }
-        uint32_t bytes = count * (uint32_t)sizeof(nt_shape_instance_t);
-        uint32_t capacity = NT_SHAPE_RENDERER_MAX_INSTANCES * (uint32_t)sizeof(nt_shape_instance_t);
-        if (s_shape.inst_ring_cursor + bytes > capacity) {
-            s_shape.inst_ring_cursor = 0;
-        }
-        uint32_t base = s_shape.inst_ring_cursor;
-        s_shape.inst_ring_cursor += bytes;
-        nt_gfx_update_buffer(s_shape.inst_buf, base, s_shape.wire_staging.wire_data, bytes);
-        nt_gfx_bind_pipeline(s_shape.depth_enabled ? s_shape.wire_pip_depth : s_shape.wire_pip_overlay);
-        nt_gfx_bind_vertex_input(s_shape.wire_vi[type]);
-        nt_gfx_bind_instance_buffer(s_shape.inst_buf, base);
-        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
-        float cp[4] = {s_shape.cam_pos[0], s_shape.cam_pos[1], s_shape.cam_pos[2], 0};
-        nt_gfx_set_uniform_vec4(s_u_cam_pos, cp);
-        nt_gfx_set_uniform_float(s_u_line_width, s_shape.line_width);
-        nt_gfx_set_uniform_vec4(s_u_pixel_scale, s_shape.pixel_scale);
-        nt_shape_template_t *tpl = &s_shape.wire_templates[type];
-        nt_gfx_draw_indexed_instanced(0, tpl->num_indices, tpl->num_vertices, count);
-        s_shape.wire_counts[type] = 0;
-    }
-
-    flush_strokes(s_shape.line_instance_buf, s_shape.line_vi, s_shape.wire_staging.lines, s_shape.line_count, s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t),
-                  sizeof(s_shape.wire_staging.lines), &s_shape.line_ring_cursor, 6);
-    flush_strokes(s_shape.stroke_instance_buf, s_shape.stroke_vi, s_shape.wire_staging.strokes, s_shape.stroke_count, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t),
-                  sizeof(s_shape.wire_staging.strokes), &s_shape.stroke_ring_cursor, 12);
-    s_shape.line_count = 0;
-    s_shape.stroke_count = 0;
+    nt_gfx_draw_indexed_instanced(0, num_indices, num_vertices, count);
 }
 
 void nt_shape_renderer_flush(void) {
     /* A skipped flush must free CPU staging for the next emit. */
     if (!s_shape.initialized) {
-        memset(s_shape.wire_counts, 0, sizeof(s_shape.wire_counts));
         memset(s_shape.inst_counts, 0, sizeof(s_shape.inst_counts));
+        memset(s_shape.wire_counts, 0, sizeof(s_shape.wire_counts));
         s_shape.vertex_count = 0;
         s_shape.index_count = 0;
         s_shape.line_count = 0;
         s_shape.stroke_count = 0;
         return;
     }
+    const bool depth = s_shape.depth_enabled;
+    const uint32_t inst_capacity = NT_SHAPE_RENDERER_MAX_INSTANCES * (uint32_t)sizeof(nt_shape_instance_t);
 
     /* Flush instanced shapes (rect, cube, circle, sphere, cylinder, capsule) */
     for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
@@ -1254,15 +1167,12 @@ void nt_shape_renderer_flush(void) {
         if (cnt == 0) {
             continue;
         }
-        uint32_t inst_bytes = cnt * (uint32_t)sizeof(nt_shape_instance_t);
-        uint32_t inst_capacity = NT_SHAPE_RENDERER_MAX_INSTANCES * (uint32_t)sizeof(nt_shape_instance_t);
-        if (s_shape.inst_ring_cursor + inst_bytes > inst_capacity) {
-            s_shape.inst_ring_cursor = 0; /* wrap overlaps in-flight data (every alloc once a frame fills capacity); driver copies */
+        uint32_t inst_base = ring_upload(s_shape.inst_buf, &s_shape.inst_ring_cursor, inst_capacity, s_shape.inst_data[t], cnt * (uint32_t)sizeof(nt_shape_instance_t));
+        if (t == NT_SHAPE_CAPSULE) {
+            nt_gfx_bind_pipeline(depth ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay);
+        } else {
+            nt_gfx_bind_pipeline(depth ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay);
         }
-        uint32_t inst_base = s_shape.inst_ring_cursor;
-        s_shape.inst_ring_cursor = inst_base + inst_bytes;
-        nt_gfx_update_buffer(s_shape.inst_buf, inst_base, s_shape.inst_data[t], inst_bytes);
-        nt_gfx_bind_pipeline(t == NT_SHAPE_CAPSULE ? s_shape.cap_inst_pip_active : s_shape.inst_pip_active);
         nt_gfx_bind_vertex_input(s_shape.template_vi[t]);
         nt_gfx_bind_instance_buffer(s_shape.inst_buf, inst_base);
         nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
@@ -1278,7 +1188,7 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_update_buffer(s_shape.batch_vbo, 0, s_shape.vertices, s_shape.vertex_count * (uint32_t)sizeof(nt_shape_renderer_vertex_t));
         nt_gfx_update_buffer(s_shape.batch_ibo, 0, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(nt_shape_index_t));
 
-        nt_gfx_bind_pipeline(s_shape.batch_pip_active);
+        nt_gfx_bind_pipeline(depth ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay);
         nt_gfx_bind_vertex_input(s_shape.batch_vi);
         nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
 
@@ -1288,7 +1198,31 @@ void nt_shape_renderer_flush(void) {
         s_shape.index_count = 0;
     }
 
-    flush_wire_run();
+    /* Strokes last: within one flush, outlines stay on top of filled shapes. */
+    for (int type = 0; type < NT_WIRE_COUNT; type++) {
+        uint32_t count = s_shape.wire_counts[type];
+        if (count == 0) {
+            continue;
+        }
+        uint32_t base = ring_upload(s_shape.inst_buf, &s_shape.inst_ring_cursor, inst_capacity, s_shape.wire_data[type], count * (uint32_t)sizeof(nt_shape_instance_t));
+        const nt_shape_template_t *tpl = &s_shape.wire_templates[type];
+        draw_strokes(depth ? s_shape.wire_pip_depth : s_shape.wire_pip_overlay, s_shape.wire_vi[type], s_shape.inst_buf, base, tpl->num_indices, tpl->num_vertices, count);
+        s_shape.wire_counts[type] = 0;
+    }
+    nt_pipeline_t line_pip = depth ? s_shape.line_pip_depth : s_shape.line_pip_overlay;
+    if (s_shape.stroke_count > 0) {
+        uint32_t base =
+            ring_upload(s_shape.stroke_instance_buf, &s_shape.stroke_ring_cursor, sizeof(s_shape.strokes), s_shape.strokes, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t));
+        draw_strokes(line_pip, s_shape.stroke_vi, s_shape.stroke_instance_buf, base, 12, 7, s_shape.stroke_count);
+        s_shape.stroke_count = 0;
+    }
+    if (s_shape.line_count > 0) {
+        uint32_t base = ring_upload(s_shape.line_instance_buf, &s_shape.line_ring_cursor, sizeof(s_shape.line_staging.lines), s_shape.line_staging.lines,
+                                    s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t));
+        /* Independent lines skip the join triangles of the shared template. */
+        draw_strokes(line_pip, s_shape.line_vi, s_shape.line_instance_buf, base, 6, 7, s_shape.line_count);
+        s_shape.line_count = 0;
+    }
 }
 
 /* ---- State setters ---- */
@@ -1311,13 +1245,22 @@ void nt_shape_renderer_set_cam_pos(const float pos[3]) {
     s_shape.cam_pos[2] = pos[2];
 }
 
+/* Width affects only strokes; a full flush keeps pending outlines above earlier fills. */
+static bool strokes_pending(void) {
+    uint32_t pending = s_shape.line_count | s_shape.stroke_count;
+    for (int type = 0; type < NT_WIRE_COUNT; type++) {
+        pending |= s_shape.wire_counts[type];
+    }
+    return pending != 0;
+}
+
 void nt_shape_renderer_set_line_width(float width) {
     NT_ASSERT(isfinite(width) && width > 0.0F);
     if (width == s_shape.line_width && s_shape.pixel_scale[0] == 0.0F) {
         return;
     }
-    if (s_shape.line_count != 0 || s_shape.stroke_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
-        flush_wire_run();
+    if (strokes_pending()) {
+        nt_shape_renderer_flush();
     }
     s_shape.line_width = width;
     memset(s_shape.pixel_scale, 0, sizeof(s_shape.pixel_scale));
@@ -1331,8 +1274,8 @@ void nt_shape_renderer_set_line_width_pixels(float width, uint32_t viewport_widt
     if (width == s_shape.line_width && x == s_shape.pixel_scale[0] && y == s_shape.pixel_scale[1]) {
         return;
     }
-    if (s_shape.line_count != 0 || s_shape.stroke_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
-        flush_wire_run();
+    if (strokes_pending()) {
+        nt_shape_renderer_flush();
     }
     s_shape.line_width = width;
     s_shape.pixel_scale[0] = x;
@@ -1345,10 +1288,6 @@ void nt_shape_renderer_set_depth(bool enabled) {
     }
     nt_shape_renderer_flush();
     s_shape.depth_enabled = enabled;
-    s_shape.batch_pip_active = enabled ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay;
-    s_shape.inst_pip_active = enabled ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay;
-    s_shape.cap_inst_pip_active = enabled ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay;
-    s_shape.line_pip_active = enabled ? s_shape.line_pip_depth : s_shape.line_pip_overlay;
 }
 
 /* ---- Line ---- */
@@ -1417,15 +1356,13 @@ void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], const 
     float hx = size[0] * 0.5F;
     float hy = size[1] * 0.5F;
 
-    float c0[3] = {pos[0] - hx, pos[1] - hy, pos[2]};
-    float c1[3] = {pos[0] + hx, pos[1] - hy, pos[2]};
-    float c2[3] = {pos[0] + hx, pos[1] + hy, pos[2]};
-    float c3[3] = {pos[0] - hx, pos[1] + hy, pos[2]};
-
-    emit_wire_segment(c3, c0, c1, c2, color);
-    emit_wire_segment(c0, c1, c2, c3, color);
-    emit_wire_segment(c1, c2, c3, c0, color);
-    emit_wire_segment(c2, c3, c0, c1, color);
+    const float corners[4][3] = {
+        {pos[0] - hx, pos[1] - hy, pos[2]},
+        {pos[0] + hx, pos[1] - hy, pos[2]},
+        {pos[0] + hx, pos[1] + hy, pos[2]},
+        {pos[0] - hx, pos[1] + hy, pos[2]},
+    };
+    nt_shape_renderer_polyline(corners, 4, true, color);
 }
 
 void nt_shape_renderer_rect_rot(const float pos[3], const float size[2], const float rot[4], const float color[4]) {
@@ -1483,9 +1420,8 @@ void nt_shape_renderer_triangle(const float a[3], const float b[3], const float 
 }
 
 void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const float c[3], const float color[4]) {
-    emit_wire_segment(c, a, b, c, color);
-    emit_wire_segment(a, b, c, a, color);
-    emit_wire_segment(b, c, a, b, color);
+    const float corners[3][3] = {{a[0], a[1], a[2]}, {b[0], b[1], b[2]}, {c[0], c[1], c[2]}};
+    nt_shape_renderer_polyline(corners, 3, true, color);
 }
 
 /* ---- Circle ---- */
