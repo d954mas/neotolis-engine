@@ -133,6 +133,11 @@ bool nt_gfx_program_ready(nt_program_t prog) {
     return false;
 }
 
+bool nt_gfx_program_linking(nt_program_t prog) {
+    (void)prog;
+    return false;
+}
+
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
     (void)pip;
     return (nt_program_t){0};

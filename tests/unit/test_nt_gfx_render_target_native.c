@@ -1,6 +1,7 @@
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_gfx_link_wait.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -735,7 +736,7 @@ static void test_global_block_registered_before_link_binds_in_the_program(void) 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    TEST_ASSERT_TRUE(nt_test_wait_program(prog));
 
     /* Bind a pipeline so the program becomes current, then read the binding
      * GL actually recorded for the block. */
@@ -924,7 +925,7 @@ static void test_global_block_registered_after_link_binds_in_that_program(void) 
 
     /* Registration must update this already-linked program. */
     nt_program_t prog = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    TEST_ASSERT_TRUE(nt_test_wait_program(prog));
     nt_gfx_register_global_block("Globals", 5);
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
@@ -953,7 +954,7 @@ static GLuint bind_uniform_test_program(const char *fragment_source) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
     nt_program_t program = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(program));
+    TEST_ASSERT_TRUE(nt_test_wait_program(program));
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
@@ -1047,7 +1048,7 @@ static nt_program_t make_sampler_program(const char *vertex_source, const char *
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    TEST_ASSERT_TRUE(nt_test_wait_program(prog));
     return prog;
 }
 
@@ -1097,6 +1098,50 @@ static void test_supported_sampler_types_retain_their_classes(void) {
     TEST_ASSERT_FALSE(nt_gfx_test_program_sampler_info(prog, nt_hash32_str("u_missing"), &infos[0]));
 }
 
+static void test_program_is_linking_until_a_poll_sees_the_link_finish(void) {
+    static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision mediump float;\n"
+                                         "uniform vec4 u_color;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = u_color; }\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, prog.id);
+    /* A live program is linking or ready, whatever the driver's link speed. */
+    const bool linking = nt_gfx_program_linking(prog);
+    TEST_ASSERT_TRUE(linking || nt_gfx_program_ready(prog));
+    TEST_ASSERT_TRUE(nt_test_wait_program(prog));
+    TEST_ASSERT_FALSE(nt_gfx_program_linking(prog));
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+    nt_gfx_destroy_pipeline(pip);
+    nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
+static void test_link_error_asserts_when_the_link_finishes(void) {
+    static const char *vertex_source = "out vec2 v_uv;\n"
+                                       "void main() { v_uv = vec2(0.0); gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
+    static const char *fragment_source = "precision mediump float;\n"
+                                         "in vec3 v_uv;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(v_uv, 1.0); }\n";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, prog.id);
+    NT_TEST_EXPECT_ASSERT((void)nt_test_wait_program(prog));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program link failed"));
+    /* A failed link is a husk: neither ready nor linking, so an owner relinks instead of waiting. */
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
+    TEST_ASSERT_FALSE(nt_gfx_program_linking(prog));
+    nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
 static void test_signed_sampler_type_asserts_at_link(void) {
     static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
     static const char *fragment_source = "precision highp float;\n"
@@ -1105,7 +1150,7 @@ static void test_signed_sampler_type_asserts_at_link(void) {
                                          "void main() { frag_color = vec4(texture(u_signed_ids, vec2(0.5))); }\n";
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    NT_TEST_EXPECT_ASSERT((void)nt_test_wait_program(nt_gfx_make_program(vs, fs)));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "signed integer texture format"));
 }
 
@@ -1165,7 +1210,7 @@ static void test_program_with_an_unsupported_sampler_type_asserts(void) {
                                          "void main() { frag_color = texture(u_env, vec3(0.0, 0.0, 1.0)); }\n";
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    NT_TEST_EXPECT_ASSERT((void)nt_test_wait_program(nt_gfx_make_program(vs, fs)));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
 }
 
@@ -1178,7 +1223,7 @@ static void test_program_with_a_desktop_only_sampler_type_asserts(void) {
                                          "void main() { frag_color = texture(u_rect, vec2(0.0)); }\n";
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    NT_TEST_EXPECT_ASSERT((void)nt_test_wait_program(nt_gfx_make_program(vs, fs)));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
 }
 
@@ -1208,7 +1253,7 @@ static void test_cube_array_sampler_types_assert_at_link(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     for (size_t i = 0; i < sizeof(fragment_sources) / sizeof(fragment_sources[0]); i++) {
         nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_sources[i]});
-        NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+        NT_TEST_EXPECT_ASSERT((void)nt_test_wait_program(nt_gfx_make_program(vs, fs)));
         TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "unsupported sampler type"));
         nt_gfx_destroy_shader(fs);
     }
@@ -1229,7 +1274,7 @@ static void test_program_with_more_samplers_than_units_asserts(void) {
                                          "}\n";
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
-    NT_TEST_EXPECT_ASSERT((void)nt_gfx_make_program(vs, fs));
+    NT_TEST_EXPECT_ASSERT((void)nt_test_wait_program(nt_gfx_make_program(vs, fs)));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "NT_GFX_MAX_TEXTURE_SLOTS"));
 }
 
@@ -1447,6 +1492,9 @@ static void assert_reflection_query_failure_retries(GLenum skipped_query) {
     });
     uint32_t existing = nt_gfx_backend_create_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, existing);
+    TEST_ASSERT_EQUAL_INT(NT_GFX_LINK_DONE, nt_gfx_backend_finish_program(existing, true));
+    uint32_t failing = nt_gfx_backend_create_program(vs, fs);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, failing);
 
     s_get_program_iv = glad_glGetProgramiv;
     s_get_active_uniform = glad_glGetActiveUniform;
@@ -1457,20 +1505,21 @@ static void assert_reflection_query_failure_retries(GLenum skipped_query) {
     nt_test_assert_install();
     nt_test_assert_last_expr[0] = '\0';
     nt_test_assert_armed = true;
-    volatile uint32_t failed = UINT32_MAX;
+    volatile nt_gfx_link_t link = NT_GFX_LINK_DONE;
     if (setjmp(nt_test_assert_jmp) == 0) {
-        failed = nt_gfx_backend_create_program(vs, fs);
+        link = nt_gfx_backend_finish_program(failing, true);
     }
     nt_test_assert_armed = false;
     glad_glGetProgramiv = s_get_program_iv;
     glad_glGetActiveUniform = s_get_active_uniform;
     TEST_ASSERT_EQUAL_STRING_MESSAGE("", nt_test_assert_last_expr, "incomplete reflection must return failure without asserting");
-    TEST_ASSERT_EQUAL_UINT32(0, failed);
+    TEST_ASSERT_EQUAL_INT(NT_GFX_LINK_FAILED, link);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, s_failed_reflection_program);
     TEST_ASSERT_FALSE(glIsProgram(s_failed_reflection_program));
 
     uint32_t retry = nt_gfx_backend_create_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, retry);
+    TEST_ASSERT_EQUAL_INT(NT_GFX_LINK_DONE, nt_gfx_backend_finish_program(retry, true));
     nt_gfx_backend_destroy_program(retry);
     nt_gfx_backend_destroy_program(existing);
     nt_gfx_backend_destroy_shader(fs);
@@ -1519,6 +1568,8 @@ int main(void) {
     RUN_TEST(test_uniform_cache_asserts_when_array_elements_exceed_capacity);
     RUN_TEST(test_uniform_cache_asserts_when_scalar_uniforms_exceed_capacity);
     RUN_TEST(test_supported_sampler_types_retain_their_classes);
+    RUN_TEST(test_program_is_linking_until_a_poll_sees_the_link_finish);
+    RUN_TEST(test_link_error_asserts_when_the_link_finishes);
     RUN_TEST(test_signed_sampler_type_asserts_at_link);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);

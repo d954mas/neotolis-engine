@@ -52,6 +52,9 @@ uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index);
 void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]);
 void nt_gfx_fake_fail_next_program_create(void);
 void nt_gfx_fake_lose_context_on_program_create(void);
+/* While set, a link poll reports PENDING; a waiting finish (make_pipeline) still completes it. */
+void nt_gfx_fake_set_links_pending(bool pending);
+void nt_gfx_fake_fail_next_link(void);
 void nt_gfx_fake_fail_next_pipeline_create(void);
 void nt_gfx_fake_fail_next_sampler_create(void);
 /* Viewport size the front-end passed to the last begin_pass; 0 for the default framebuffer. */

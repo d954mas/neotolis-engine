@@ -327,6 +327,41 @@ void test_gfx_program_valid_and_ready(void) {
     nt_gfx_destroy_program(prog);
 }
 
+/* ---- Program: a running link is neither ready nor lost ---- */
+
+void test_gfx_linking_program_turns_ready_when_its_link_finishes(void) {
+    nt_gfx_fake_set_links_pending(true);
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
+    TEST_ASSERT_TRUE(nt_gfx_program_linking(prog));
+
+    nt_gfx_fake_set_links_pending(false);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    TEST_ASSERT_FALSE(nt_gfx_program_linking(prog));
+    nt_gfx_destroy_program(prog);
+}
+
+void test_gfx_make_pipeline_waits_for_a_linking_program(void) {
+    nt_gfx_fake_set_links_pending(true);
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    nt_gfx_destroy_pipeline(pip);
+    nt_gfx_destroy_program(prog);
+}
+
+void test_gfx_failed_link_asserts_and_leaves_a_husk(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_gfx_fake_fail_next_link();
+    EXPECT_ASSERT(nt_gfx_program_ready(prog));
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
+    TEST_ASSERT_FALSE(nt_gfx_program_linking(prog));
+    nt_gfx_destroy_program(prog);
+}
+
 /* ---- Program: destroy invalidates; a stale nonzero handle asserts ---- */
 
 void test_gfx_destroy_program_invalidates(void) {
@@ -3130,6 +3165,9 @@ int main(void) {
     RUN_TEST(test_gfx_draw_asserts_when_bound_program_is_destroyed);
     RUN_TEST(test_gfx_make_program_does_not_dedup);
     RUN_TEST(test_gfx_program_valid_and_ready);
+    RUN_TEST(test_gfx_linking_program_turns_ready_when_its_link_finishes);
+    RUN_TEST(test_gfx_make_pipeline_waits_for_a_linking_program);
+    RUN_TEST(test_gfx_failed_link_asserts_and_leaves_a_husk);
     RUN_TEST(test_gfx_destroy_program_invalidates);
     RUN_TEST(test_gfx_program_slot_reused_after_destroy);
     RUN_TEST(test_gfx_program_survives_shader_destroy);

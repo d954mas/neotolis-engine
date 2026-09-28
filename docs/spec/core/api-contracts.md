@@ -146,17 +146,32 @@ Recovery requires the owner to destroy the old program and link a new handle.
 
 Handle validity and GPU liveness are separate. `nt_gfx_program_valid` reports
 whether the handle still refers to a live slot; `nt_gfx_program_ready` reports
-whether the GL program behind it exists. Processing context loss clears readiness while
-handles stay valid, and because no API relinks, a valid handle that is not ready
-never becomes ready again -- that state is terminal, not transitional.
-`nt_gfx_make_pipeline` requires readiness.
+whether the GL program behind it is linked.
+
+`nt_gfx_make_program` only starts the link. Browsers link on worker threads, and
+reading the link status at once would block the main thread until the link is
+done, so the handle is first *linking*: `nt_gfx_program_linking` is true and
+`nt_gfx_program_ready` is false. Both queries poll without blocking. With
+`KHR_parallel_shader_compile` they read `GL_COMPLETION_STATUS_KHR`; without it a
+link finishes on the first poll after the next `nt_gfx_begin_frame`. The poll
+that sees the link finish reads its status, binds the registered global blocks,
+reflects its uniforms and turns the handle ready. `nt_gfx_make_pipeline` is the
+one call that waits for a linking program, so a caller that builds its pipeline
+right after `nt_gfx_make_program` still works and pays the link there.
+
+Processing context loss clears readiness while handles stay valid, and because
+no API relinks, a valid handle that is neither ready nor linking never becomes
+ready again -- that state is terminal, not transitional. An owner that polls
+waits while its program is linking and relinks only once it is neither.
 
 `nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op and asserts on
 a stale non-zero handle. Clear the owner's variable to `NT_PROGRAM_INVALID`
 when destroying it.
 
-A link failure is a developer error and asserts, alongside an invalid stage
-handle, and an exhausted program pool.
+A link failure is a developer error and asserts when the link finishes, in the
+poll or the `nt_gfx_make_pipeline` that finishes it, alongside an invalid stage
+handle and an exhausted program pool. When asserts are off, the failed handle
+is terminal like one a loss left behind.
 
 `nt_gfx_register_global_block` applies the global name -> binding slot registry
 to existing and future programs; registration may precede or follow linking.
@@ -192,7 +207,7 @@ batch is dropped instead -- there is nothing left to draw it through.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
-the first assignment, after context loss is processed, or after program
+the first assignment, while the program links, after context loss is processed, or after program
 destruction. The ECS `draw_list` paths skip unready programs and warn once until
 a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` /
 `nt_text_renderer_set_material` entry points assert only that a program was

@@ -177,7 +177,8 @@ static bool make_quad_resources(void) {
         return false;
     }
     s_demo.quad_program = nt_gfx_make_program(s_demo.quad_vs, s_demo.quad_fs);
-    if (!nt_gfx_program_ready(s_demo.quad_program)) {
+    /* make_pipeline waits for the link. */
+    if (s_demo.quad_program.id == 0) {
         return false;
     }
 

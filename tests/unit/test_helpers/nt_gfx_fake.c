@@ -15,6 +15,7 @@ uint32_t nt_gfx_fake_backend_snapshot_count(void) { return s_fake_backend_snapsh
 // #region sampler units
 typedef struct {
     bool used;
+    bool linked;
     uint32_t sampler_hashes[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_classes[NT_GFX_MAX_TEXTURE_SLOTS];
     uint8_t sampler_count;
@@ -119,6 +120,8 @@ static uint32_t s_fake_last_destroyed_texture;
 static uint8_t s_fake_fail_buffer_creates;
 static bool s_fake_fail_next_program_create;
 static bool s_fake_lose_context_on_program_create;
+static bool s_fake_links_pending;
+static bool s_fake_fail_next_link;
 static bool s_fake_fail_next_pipeline_create;
 static bool s_fake_fail_next_sampler_create;
 static bool s_fake_fail_next_backend_restore_lost;
@@ -201,6 +204,8 @@ void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
 }
 void nt_gfx_fake_fail_next_program_create(void) { s_fake_fail_next_program_create = true; }
 void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
+void nt_gfx_fake_set_links_pending(bool pending) { s_fake_links_pending = pending; }
+void nt_gfx_fake_fail_next_link(void) { s_fake_fail_next_link = true; }
 void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_create = true; }
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend_restore_lost = true; }
@@ -271,6 +276,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_buffer_creates = 0;
     s_fake_fail_next_program_create = false;
     s_fake_lose_context_on_program_create = false;
+    s_fake_links_pending = false;
+    s_fake_fail_next_link = false;
     s_fake_fail_next_pipeline_create = false;
     s_fake_fail_next_sampler_create = false;
     s_fake_fail_next_backend_restore_lost = false;
@@ -431,6 +438,21 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     NT_ASSERT(slot != 0 && "fake program table full");
     s_fake_program_table[slot] = s_fake_program_template;
     return slot;
+}
+
+nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) {
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && "finish_program: handle out of range");
+    if (s_fake_fail_next_link) {
+        s_fake_fail_next_link = false;
+        memset(&s_fake_program_table[backend_handle], 0, sizeof(s_fake_program_table[backend_handle]));
+        return NT_GFX_LINK_FAILED;
+    }
+    nt_gfx_fake_program_t *rec = &s_fake_program_table[backend_handle];
+    if (!rec->linked && s_fake_links_pending && !wait) {
+        return NT_GFX_LINK_PENDING;
+    }
+    rec->linked = true;
+    return NT_GFX_LINK_DONE;
 }
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) {

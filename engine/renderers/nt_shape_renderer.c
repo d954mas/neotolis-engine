@@ -943,9 +943,9 @@ void nt_shape_renderer_init(void) {
     s_shape.cap_inst_prog = nt_gfx_make_program(s_shape.cap_inst_vs, s_shape.fs);
     s_shape.line_prog = nt_gfx_make_program(s_shape.line_vs, s_shape.fs);
     s_shape.wire_prog = nt_gfx_make_program(s_shape.wire_vs, s_shape.fs);
-    if (!nt_gfx_program_ready(s_shape.batch_prog) || !nt_gfx_program_ready(s_shape.inst_prog) || !nt_gfx_program_ready(s_shape.cap_inst_prog) || !nt_gfx_program_ready(s_shape.line_prog) ||
-        !nt_gfx_program_ready(s_shape.wire_prog)) {
-        NT_LOG_ERROR("init failed -- program link error");
+    /* All five links run in parallel; the first pipeline below waits for its own. */
+    if (s_shape.batch_prog.id == 0 || s_shape.inst_prog.id == 0 || s_shape.cap_inst_prog.id == 0 || s_shape.line_prog.id == 0 || s_shape.wire_prog.id == 0) {
+        NT_LOG_ERROR("init failed -- program creation error");
         nt_shape_renderer_shutdown();
         return;
     }

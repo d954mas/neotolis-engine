@@ -831,11 +831,14 @@ void nt_gfx_end_pass(void);
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
-/* Links valid stages. Link errors, >16 non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert.
+/* Starts linking valid stages; the handle is linking until nt_gfx_program_ready turns true
+ * on a later poll, or until nt_gfx_make_pipeline waits for it. Link errors, >16
+ * non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert when the link finishes.
  * Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
-/* Creation preserves the currently bound pipeline. */
+/* Creation preserves the currently bound pipeline. A linking program is waited for
+ * here, which blocks on the driver; poll nt_gfx_program_ready first to avoid it. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_vertex_input. The VI
  * borrows its buffers; creation borrows desc/label and preserves the bound VI.
@@ -900,9 +903,13 @@ bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
  * slot -- they are baked objects with no re-fill path). Renderer caches
  * check this on lookup and self-heal. */
 bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
-/* Reports a live program backend, required by nt_gfx_make_pipeline.
+/* Reports a linked program backend. Polls a running link without blocking: false
+ * while the driver links, true from the poll that sees it finish.
  * Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
+/* True while a link started by nt_gfx_make_program still runs: not ready yet, but
+ * not lost either, so an owner waits instead of relinking. Polls like program_ready. */
+bool nt_gfx_program_linking(nt_program_t prog);
 /* The program the pipeline borrows; INVALID for an invalid or stale pipeline. */
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */

@@ -3,6 +3,7 @@
 
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
+#include "test_helpers/nt_gfx_link_wait.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -919,7 +920,7 @@ static void test_uniform_write_targets_bound_pipelines_program(void) {
     /* Program and pipeline slots must differ to expose wrong-slot routing. */
     nt_program_t spare =
         nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src}), nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src}));
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(spare));
+    TEST_ASSERT_TRUE(nt_test_wait_program(spare));
     nt_pipeline_t pip_b = make_pipeline_ex(vs_src, fs_src, false, true, false);
 
     begin_black_pass();

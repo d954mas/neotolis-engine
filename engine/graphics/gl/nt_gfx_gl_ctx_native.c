@@ -71,6 +71,8 @@ bool nt_gfx_gl_ctx_enable_debug_groups(void) {
 
 #endif
 
+bool nt_gfx_gl_ctx_enable_parallel_link(void) { return GLAD_GL_KHR_parallel_shader_compile != 0 || GLAD_GL_ARB_parallel_shader_compile != 0; }
+
 #if NT_GFX_NATIVE_GL_DEBUG
 /* GLAD_API_PTR matches GLDEBUGPROC's calling convention (__stdcall on Windows); a plain
    function pointer would mismatch the stack on the driver's callback. */

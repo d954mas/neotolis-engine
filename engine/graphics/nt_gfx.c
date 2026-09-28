@@ -805,7 +805,7 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     }
 
     /* Before the link, not after: the GL backend's program table has the same
-     * capacity, so linking first makes exhaustion surface as a link failure. */
+     * capacity, so allocating first makes exhaustion surface as a failed link start. */
     uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
@@ -821,6 +821,23 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, id);
     return NT_GFX_RESULT_ACCEPTED;
+}
+
+/* Finishes the link make_program started. A failed link leaves the handle a husk,
+ * as a loss does: never ready again, and its owner destroys it. */
+static bool program_linked(uint32_t slot, bool wait) {
+    const uint32_t backend = s_gfx.program_backends[slot];
+    if (backend == 0) {
+        return false;
+    }
+    const nt_gfx_link_t link = nt_gfx_backend_finish_program(backend, wait);
+    if (link == NT_GFX_LINK_FAILED) {
+        s_gfx.program_backends[slot] = 0;
+        const bool lost = backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST;
+        NT_ASSERT(lost && "program link failed");
+        (void)lost;
+    }
+    return link == NT_GFX_LINK_DONE;
 }
 
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs) {
@@ -906,7 +923,13 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
+    /* The one place that waits for a link: a caller building a pipeline right after
+     * make_program pays the link here, as it did before links were asynchronous. */
+    const bool linked = nt_pool_valid(&s_gfx.program_pool, desc->program.id) && program_linked(nt_pool_slot_index(desc->program.id), true);
+    if (!linked && backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
+        return NT_GFX_RESULT_CONTEXT_LOST;
+    }
+    NT_ASSERT(linked && "make_pipeline: program is not linked");
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
@@ -1483,7 +1506,15 @@ bool nt_gfx_program_ready(nt_program_t prog) {
     if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
         return false;
     }
-    return s_gfx.program_backends[nt_pool_slot_index(prog.id)] != 0;
+    return program_linked(nt_pool_slot_index(prog.id), false);
+}
+
+bool nt_gfx_program_linking(nt_program_t prog) {
+    if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
+        return false;
+    }
+    const uint32_t slot = nt_pool_slot_index(prog.id);
+    return !program_linked(slot, false) && s_gfx.program_backends[slot] != 0;
 }
 
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {

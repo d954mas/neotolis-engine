@@ -1,4 +1,5 @@
 #include "graphics/nt_gfx.h"
+#include "test_helpers/nt_gfx_link_wait.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -266,7 +267,7 @@ static void test_initial_uniform_records_cover_only_vec4(void) {
     nt_shader_t fs = nt_gfx_make_shader(
         &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform vec4 tint; uniform int mode; out vec4 color; void main(){color=tint*float(mode);}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_NOT_EQUAL(0, program.id);
+    TEST_ASSERT_TRUE(nt_test_wait_program(program));
     nt_gfx_capture_request();
     nt_gfx_begin_frame();
     nt_gfx_begin_frame(); /* a recorded frame without gfx work still snapshots inherited state */

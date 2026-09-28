@@ -155,10 +155,20 @@ void nt_gfx_backend_end_pass(void);
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
-/* Links the pair, caches its uniform locations and fixes one texture unit per
- * active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS).
- * Returns 0 on link failure. */
+/* Starts linking the pair; returns 0 when no link could start (lost context, full table). */
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
+
+typedef enum {
+    NT_GFX_LINK_PENDING,
+    NT_GFX_LINK_DONE,
+    NT_GFX_LINK_FAILED,
+} nt_gfx_link_t;
+
+/* Completes a started link: caches its uniform locations and fixes one texture unit per
+ * active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS).
+ * Without wait it reports PENDING while the driver still links. FAILED has logged
+ * (unless the context is lost) and freed the backend slot. */
+nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 
 /* Sampler units and classes are immutable program state, recorded at link. */

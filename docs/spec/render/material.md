@@ -71,7 +71,7 @@ two slots on one unit would fight over it at every draw.
 >
 > A material has no readiness field or version. Use
 > `nt_gfx_program_ready(info->program)` before building a pipeline: it is false
-> before assignment, after context loss is processed, or after program
+> before assignment, while the program links, after context loss is processed, or after program
 > destruction. The material survives recovery and retains its old program
 > handle until reassignment.
 >
