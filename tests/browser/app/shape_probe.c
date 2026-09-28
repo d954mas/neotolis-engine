@@ -73,6 +73,7 @@ static bool probe_closed_circle(nt_render_target_t target) {
 
 static bool probe_overlay_order(nt_render_target_t target) {
     nt_shape_renderer_set_vp(s_identity_vp);
+    nt_shape_renderer_set_depth(false);
     nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width(0.3F);
     begin_probe_pass(target);

@@ -213,6 +213,26 @@ static void test_pixel_line_clips_at_near_plane(void) {
     assert_pixel(frame, 48, 48, 0, 0, 0);
 }
 
+/* The join at the visible vertex must use the near-clipped neighbor, not its w<0 projection. */
+static void test_pixel_join_clips_hidden_neighbor(void) {
+    const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
+    const float points[][3] = {{-0.05F, 0, 1}, {0.5F, 0, -2}, {0.5F, 1, -2}};
+    nt_shape_renderer_set_vp(perspective);
+    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 0});
+    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_polyline(points, 3, false, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    assert_pixel(frame, 37, 31, 255, 255, 255);
+    assert_pixel(frame, 37, 32, 255, 255, 255);
+    TEST_ASSERT_EQUAL_UINT32(0, lit_column(frame, 10, 0, 64));
+}
+
 static void test_polyline_outer_corner_and_butt_end(void) {
     const float points[][3] = {{-0.5F, -0.5F, 0}, {0, -0.5F, 0}, {0, 0.5F, 0}};
     nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
@@ -263,6 +283,7 @@ int main(void) {
     };
     nt_window_init();
     UNITY_BEGIN();
+    RUN_TEST(test_pixel_join_clips_hidden_neighbor);
     RUN_TEST(test_polyline_outer_corner_and_butt_end);
     RUN_TEST(test_pixel_width_uses_active_viewport_height);
     RUN_TEST(test_pixel_width_is_constant_across_depth_and_restore);

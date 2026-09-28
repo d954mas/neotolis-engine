@@ -133,7 +133,7 @@ uint32_t nt_shape_renderer_test_instance_count(int type);
 uint32_t nt_shape_renderer_test_instance_capacity(void);
 uint32_t nt_shape_renderer_test_vertex_count(void);
 uint32_t nt_shape_renderer_test_index_count(void);
-uint32_t nt_shape_renderer_test_line_count(void);
+uint32_t nt_shape_renderer_test_stroke_count(void);
 const float *nt_shape_renderer_test_vp(void);
 const float *nt_shape_renderer_test_cam_pos(void);
 float nt_shape_renderer_test_line_width(void);
