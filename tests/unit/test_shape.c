@@ -1,3 +1,4 @@
+#include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
 /* NT_TEST_ACCESS defined via CMake target_compile_definitions */
 #include "graphics/nt_gfx.h"
@@ -6,6 +7,7 @@
 #include "unity.h"
 
 #include <math.h>
+#include <string.h>
 
 /* Helper: float approximately equal (avoids UNITY_EXCLUDE_FLOAT issue) */
 static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
@@ -43,22 +45,25 @@ void test_shape_flush_empty(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_index_count());
 }
 
-/* ---- 3. set_cam_pos sets camera position ---- */
+/* ---- 3. set_vp derives the stroke eye ---- */
 
-void test_shape_set_vp_extracts_cam_pos(void) {
-    float pos1[3] = {0.0F, 0.0F, 0.0F};
-    nt_shape_renderer_set_cam_pos(pos1);
-    const float *cam = nt_shape_renderer_test_cam_pos();
-    TEST_ASSERT_TRUE(float_near(cam[0], 0.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(cam[1], 0.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(cam[2], 0.0F, 0.001F));
+void test_shape_set_vp_derives_eye(void) {
+    /* Perspective (fov 90, near 1, far 10) looking down -z from (3, 4, 5). */
+    const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, -3, -4, (-1.22222222F * -5.0F) - 2.22222222F, 5};
+    nt_shape_renderer_set_vp(perspective);
+    const float *eye = nt_shape_renderer_test_eye();
+    TEST_ASSERT_TRUE(float_near(eye[0], 3.0F, 1e-4F));
+    TEST_ASSERT_TRUE(float_near(eye[1], 4.0F, 1e-4F));
+    TEST_ASSERT_TRUE(float_near(eye[2], 5.0F, 1e-4F));
+    TEST_ASSERT_TRUE(float_near(eye[3], 1.0F, 1e-6F));
 
-    float pos2[3] = {-5.0F, -3.0F, 2.0F};
-    nt_shape_renderer_set_cam_pos(pos2);
-    cam = nt_shape_renderer_test_cam_pos();
-    TEST_ASSERT_TRUE(float_near(cam[0], -5.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(cam[1], -3.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(cam[2], 2.0F, 0.001F));
+    /* Orthographic view down -z: no eye point, only the direction toward the viewer. */
+    const float ortho[16] = {0.01F, 0, 0, 0, 0, 0.01F, 0, 0, 0, 0, -0.02F, 0, 0, 0, -0.8F, 1};
+    nt_shape_renderer_set_vp(ortho);
+    eye = nt_shape_renderer_test_eye();
+    TEST_ASSERT_TRUE(eye[3] == 0.0F);
+    TEST_ASSERT_TRUE(eye[0] == 0.0F && eye[1] == 0.0F);
+    TEST_ASSERT_TRUE(eye[2] > 0.0F);
 }
 
 /* ---- 4. set_depth auto-flushes non-empty batch ---- */
@@ -68,11 +73,11 @@ void test_shape_set_depth_auto_flush(void) {
     float b[3] = {1, 0, 0};
     float col[4] = {1, 1, 1, 1};
     nt_shape_renderer_line(a, b, col);
-    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_shape_renderer_test_stroke_count());
 
     nt_shape_renderer_set_depth(false);
     /* After auto-flush, buffers should be reset */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_stroke_count());
 }
 
 /* ---- 5. set_line_width stores value ---- */
@@ -90,7 +95,7 @@ void test_shape_line_vertex_count(void) {
     float col[4] = {1, 0, 0, 1};
     nt_shape_renderer_line(a, b, col);
     /* Lines use instanced draw: 1 line = 1 instance */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_stroke_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_vertex_count());
 }
 
@@ -113,7 +118,7 @@ void test_shape_rect_wire_counts(void) {
     float col[4] = {0, 1, 0, 1};
     nt_shape_renderer_rect_wire(pos, size, col);
     /* 4 edges = 4 line instances */
-    TEST_ASSERT_EQUAL_UINT32(4, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(4, nt_shape_renderer_test_stroke_count());
 }
 
 /* ---- 11. Triangle fill counts ---- */
@@ -137,7 +142,7 @@ void test_shape_triangle_wire_counts(void) {
     float col[4] = {0, 0, 1, 1};
     nt_shape_renderer_triangle_wire(a, b, c, col);
     /* 3 edges = 3 line instances */
-    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_stroke_count());
 }
 
 /* ---- 14. Auto-flush on overflow ---- */
@@ -184,7 +189,7 @@ void test_shape_batch_accumulates(void) {
     nt_shape_renderer_rect(pos, size, col);   /* 1 rect instance */
     nt_shape_renderer_triangle(a, b, c, col); /* 3v + 3i (CPU batch) */
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_stroke_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_instance_count(NT_SHAPE_TEST_RECT));
     TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_index_count());
@@ -205,9 +210,12 @@ void test_shape_circle_fill_counts(void) {
 void test_shape_circle_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {1, 0, 0, 1};
-    /* 16 edges = 16 line instances */
     nt_shape_renderer_circle_wire(center, 1.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(16, nt_shape_renderer_test_line_count());
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(16U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
 /* ---- 18. Cube fill counts (instanced) ---- */
@@ -229,7 +237,7 @@ void test_shape_cube_wire_counts(void) {
     float col[4] = {0, 1, 0, 1};
     /* 12 edges = 12 line instances */
     nt_shape_renderer_cube_wire(center, size, col);
-    TEST_ASSERT_EQUAL_UINT32(12, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(12, nt_shape_renderer_test_stroke_count());
 }
 
 /* ---- 21. Sphere fill counts (instanced) ---- */
@@ -247,9 +255,12 @@ void test_shape_sphere_fill_counts(void) {
 void test_shape_sphere_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {0, 0, 1, 1};
-    /* 3 great circles x 16 edges = 48 line instances */
     nt_shape_renderer_sphere_wire(center, 1.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(48, nt_shape_renderer_test_line_count());
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(48U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
 /* ---- 22b. Sphere rot instance count ---- */
@@ -269,7 +280,11 @@ void test_shape_sphere_wire_rot_counts(void) {
     float col[4] = {0, 0, 1, 1};
     float rot[4] = {0, 0, 0.7071068F, 0.7071068F};
     nt_shape_renderer_sphere_wire_rot(center, 1.0F, rot, col);
-    TEST_ASSERT_EQUAL_UINT32(48, nt_shape_renderer_test_line_count());
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(48U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
 /* ---- 23. Circle rot instance count matches base ---- */
@@ -308,9 +323,12 @@ void test_shape_cylinder_fill_counts(void) {
 void test_shape_cylinder_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {1, 1, 0, 1};
-    /* Top circle (16) + bottom circle (16) + 4 vertical struts = 36 line instances */
     nt_shape_renderer_cylinder_wire(center, 1.0F, 2.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(36, nt_shape_renderer_test_line_count());
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(36U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
 /* ---- 27. Capsule fill counts (32 segments) ---- */
@@ -328,9 +346,12 @@ void test_shape_capsule_fill_counts(void) {
 void test_shape_capsule_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {0, 1, 1, 1};
-    /* 4 meridians x 9 edges + 2 latitude rings x 16 edges = 36 + 32 = 68 line instances */
     nt_shape_renderer_capsule_wire(center, 0.5F, 2.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(68, nt_shape_renderer_test_line_count());
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(68U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
 /* ---- 29. Mesh fill copies geometry into batch ---- */
@@ -353,7 +374,7 @@ void test_shape_mesh_wire_counts(void) {
     uint16_t indices[] = {0, 1, 2};
     float col[4] = {1, 1, 1, 1};
     nt_shape_renderer_mesh_wire(positions, 3, indices, 3, col);
-    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_stroke_count());
 }
 
 /* ---- 31. Cylinder rot instance count matches base ---- */
@@ -407,7 +428,7 @@ static void assert_shape_staging_empty(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_index_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_stroke_count());
 }
 
 void test_shape_failed_restore_flush_discards_staging(void) {
@@ -438,10 +459,10 @@ void test_shape_failed_restore_flush_discards_staging(void) {
 
 void test_shape_failed_restore_preserves_settings(void) {
     const float vp[16] = {2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 5, 6, 7, 1};
-    const float cam_pos[3] = {-5, 3, 2};
     for (int depth = 0; depth < 2; depth++) {
         nt_shape_renderer_set_vp(vp);
-        nt_shape_renderer_set_cam_pos(cam_pos);
+        float eye[4];
+        memcpy(eye, nt_shape_renderer_test_eye(), sizeof(eye));
         nt_shape_renderer_set_line_width(3);
         nt_shape_renderer_set_depth(depth != 0);
         nt_gfx_fake_fail_next_pipeline_create();
@@ -449,7 +470,7 @@ void test_shape_failed_restore_preserves_settings(void) {
             restore_shape_between_frames();
             TEST_ASSERT_EQUAL_INT(attempt != 0, nt_shape_renderer_test_initialized());
             TEST_ASSERT_EQUAL_MEMORY(vp, nt_shape_renderer_test_vp(), sizeof(vp));
-            TEST_ASSERT_EQUAL_MEMORY(cam_pos, nt_shape_renderer_test_cam_pos(), sizeof(cam_pos));
+            TEST_ASSERT_EQUAL_MEMORY(eye, nt_shape_renderer_test_eye(), sizeof(eye));
             TEST_ASSERT_EQUAL_INT(3, (int)nt_shape_renderer_test_line_width());
             TEST_ASSERT_EQUAL_INT(depth != 0, nt_shape_renderer_test_depth_enabled());
         }
@@ -558,20 +579,166 @@ void test_shape_failed_restore_geometry_staging_stays_bounded(void) {
 
     for (uint32_t i = 0; i < NT_SHAPE_RENDERER_MAX_LINES * 3 + 1; i++) {
         nt_shape_renderer_line(positions, positions + 3, color);
-        TEST_ASSERT_LESS_OR_EQUAL_UINT32(NT_SHAPE_RENDERER_MAX_LINES, nt_shape_renderer_test_line_count());
+        TEST_ASSERT_LESS_OR_EQUAL_UINT32(NT_SHAPE_RENDERER_MAX_LINES, nt_shape_renderer_test_stroke_count());
     }
-    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_stroke_count());
     nt_shape_renderer_flush();
     assert_shape_staging_empty();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
+static void test_polyline_skips_repeated_points_and_closes_once(void) {
+    const float points[][3] = {{0, 0, 0}, {0, 0, 0}, {1, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 0, 0}};
+    const float color[4] = {1, 1, 1, 1};
+    nt_shape_renderer_polyline(NULL, 0, false, color);
+    nt_shape_renderer_polyline(points, 1, true, color);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_stroke_count());
+    nt_shape_renderer_polyline(points, 6, true, color);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_stroke_count());
+    nt_shape_renderer_flush();
+    nt_shape_renderer_polyline(points, 5, false, color);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_shape_renderer_test_stroke_count());
+}
+
+static void test_polyline_asserts_non_finite_points(void) {
+    float points[][3] = {{0, 0, 0}, {1, NAN, 0}};
+    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_polyline((const float(*)[3])points, 2, false, (float[4]){1, 1, 1, 1}));
+    points[1][1] = 0;
+    points[0][2] = INFINITY;
+    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_polyline((const float(*)[3])points, 2, false, (float[4]){1, 1, 1, 1}));
+}
+
+static void test_width_mode_and_viewport_changes_flush_wires(void) {
+    const float center[3] = {0, 0, 0};
+    const float color[4] = {1, 1, 1, 1};
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_circle_wire(center, 1, color);
+    nt_shape_renderer_set_line_width_pixels(4, 640, 480);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    nt_shape_renderer_circle_wire(center, 1, color);
+    nt_shape_renderer_set_line_width_pixels(4, 640, 480);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    nt_shape_renderer_set_line_width_pixels(4, 1280, 960);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    nt_shape_renderer_circle_wire(center, 1, color);
+    nt_shape_renderer_set_line_width(4);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_count());
+}
+
+static void test_interleaved_wires_batch_by_kind(void) {
+    const float color[4] = {1, 1, 1, 1};
+    const float points[][3] = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}};
+    nt_gfx_fake_draw_trace_reset(true);
+    for (int i = 0; i < 3; i++) {
+        nt_shape_renderer_rect((float[3]){-1, 0, 0}, (float[2]){1, 1}, color);
+        nt_shape_renderer_circle_wire(points[0], 1, color);
+        nt_shape_renderer_sphere_wire(points[0], 1, color);
+        nt_shape_renderer_line(points[0], points[1], color);
+        nt_shape_renderer_polyline(points, 3, false, color);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
+
+    nt_shape_renderer_flush();
+    /* Fills first, then circle and sphere templates, connected segments, independent lines. */
+    static const uint32_t indices[5] = {6, 16 * 12, 48 * 12, 12, 6};
+    static const uint32_t instances[5] = {3, 3, 3, 6, 3};
+    TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_fake_draw_trace_count());
+    for (uint32_t i = 0; i < 5; i++) {
+        TEST_ASSERT_EQUAL_UINT32(indices[i], nt_gfx_fake_draw_trace_at(i).num_indices);
+        TEST_ASSERT_EQUAL_UINT32(instances[i], nt_gfx_fake_draw_trace_at(i).instance_count);
+    }
+}
+
+static void test_width_change_with_pending_strokes_draws_fills_first(void) {
+    const float color[4] = {1, 1, 1, 1};
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_circle_wire((float[3]){0, 0, 0}, 1, color);
+    nt_shape_renderer_rect((float[3]){-1, 0, 0}, (float[2]){1, 1}, color);
+    nt_shape_renderer_rect((float[3]){1, 0, 0}, (float[2]){1, 1}, color);
+    nt_shape_renderer_set_line_width(4);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(0).instance_count);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).instance_count);
+}
+
+static void test_polyline_overflow_preserves_all_segments(void) {
+    static float points[NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS + 3][3];
+    for (uint32_t i = 0; i < NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS + 3; i++) {
+        points[i][0] = (float)i;
+        points[i][1] = (float)(i % 2);
+    }
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_polyline((const float(*)[3])points, NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS + 3, false, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS, nt_gfx_fake_draw_trace_at(0).instance_count);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(1).instance_count);
+}
+
+static void test_wire_instances_overflow_without_losing_shapes(void) {
+    uint32_t count = nt_shape_renderer_test_instance_capacity() + 1;
+    nt_gfx_fake_draw_trace_reset(true);
+    for (uint32_t i = 0; i < count; i++) {
+        nt_shape_renderer_capsule_wire((float[3]){1, 2, 3}, 0.5F, 3, (float[4]){1, 1, 1, 1});
+    }
+    nt_shape_renderer_flush();
+    uint32_t actual = 0;
+    for (uint32_t i = 0; i < nt_gfx_fake_draw_trace_count(); i++) {
+        actual += nt_gfx_fake_draw_trace_at(i).instance_count;
+    }
+    TEST_ASSERT_EQUAL_UINT32(count, actual);
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
+}
+
+static void test_failed_restore_discards_new_stroke_queues(void) {
+    const float points[][3] = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}};
+    const float color[4] = {1, 1, 1, 1};
+    nt_shape_renderer_set_line_width_pixels(3, 800, 600);
+    nt_gfx_fake_fail_next_pipeline_create();
+    restore_shape_between_frames();
+    TEST_ASSERT_FALSE(nt_shape_renderer_test_initialized());
+    nt_gfx_fake_reset();
+    for (uint32_t i = 0; i < NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS * 2; i++) {
+        nt_shape_renderer_polyline(points, 3, false, color);
+        nt_shape_renderer_circle_wire(points[0], 1, color);
+        nt_shape_renderer_sphere_wire(points[0], 1, color);
+        nt_shape_renderer_cylinder_wire(points[0], 1, 3, color);
+        nt_shape_renderer_capsule_wire(points[0], 1, 3, color);
+    }
+    nt_shape_renderer_flush();
+    assert_shape_staging_empty();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count());
+    restore_shape_between_frames();
+    TEST_ASSERT_TRUE(nt_shape_renderer_test_initialized());
+    nt_shape_renderer_line(points[0], points[1], color);
+    nt_shape_renderer_flush();
+    bool found = false;
+    for (uint32_t i = 0; i < nt_gfx_fake_uniform_vec4_count(); i++) {
+        if (nt_gfx_fake_uniform_vec4_hash_at(i) == nt_hash32_str("u_pixel_scale").value) {
+            float value[4];
+            nt_gfx_fake_uniform_vec4_value_at(i, value);
+            TEST_ASSERT_TRUE(float_near(value[0], 2.0F / 800.0F, 1e-7F));
+            TEST_ASSERT_TRUE(float_near(value[1], 2.0F / 600.0F, 1e-7F));
+            found = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_failed_restore_discards_new_stroke_queues);
+    RUN_TEST(test_polyline_overflow_preserves_all_segments);
+    RUN_TEST(test_wire_instances_overflow_without_losing_shapes);
+    RUN_TEST(test_polyline_skips_repeated_points_and_closes_once);
+    RUN_TEST(test_polyline_asserts_non_finite_points);
+    RUN_TEST(test_width_mode_and_viewport_changes_flush_wires);
+    RUN_TEST(test_interleaved_wires_batch_by_kind);
+    RUN_TEST(test_width_change_with_pending_strokes_draws_fills_first);
     RUN_TEST(test_shape_init_shutdown);
     RUN_TEST(test_shape_flush_empty);
-    RUN_TEST(test_shape_set_vp_extracts_cam_pos);
+    RUN_TEST(test_shape_set_vp_derives_eye);
     RUN_TEST(test_shape_set_depth_auto_flush);
     RUN_TEST(test_shape_set_line_width);
     RUN_TEST(test_shape_line_vertex_count);

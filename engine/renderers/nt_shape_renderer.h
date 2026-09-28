@@ -17,6 +17,10 @@
 #define NT_SHAPE_RENDERER_MAX_LINES 8192
 #endif
 
+#ifndef NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS
+#define NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS 1024
+#endif
+
 /* ---- Index type (auto-selected by MAX_VERTICES) ---- */
 
 #if NT_SHAPE_RENDERER_MAX_VERTICES > 65535
@@ -39,18 +43,27 @@ typedef struct {
 void nt_shape_renderer_init(void);
 void nt_shape_renderer_shutdown(void);
 void nt_shape_renderer_restore_gpu(void);
+/* Draws pending fills, then strokes. The only draw-order barrier: render architecture, "Shape strokes". */
 void nt_shape_renderer_flush(void);
 
 /* ---- State setters ---- */
 
+/* Also defines the camera that world-width strokes face. */
 void nt_shape_renderer_set_vp(const float vp[16]);
-void nt_shape_renderer_set_cam_pos(const float pos[3]);
+/* Select world-space thickness (default 0.02). Width must be finite and positive. */
 void nt_shape_renderer_set_line_width(float width);
+/* Select framebuffer-pixel thickness. Width must be finite and positive; viewport dimensions must be positive.
+ * Pass the active viewport dimensions, not CSS size. */
+void nt_shape_renderer_set_line_width_pixels(float width, uint32_t viewport_width, uint32_t viewport_height);
 void nt_shape_renderer_set_depth(bool enabled);
 
 /* ---- Line ---- */
 
 void nt_shape_renderer_line(const float a[3], const float b[3], const float color[4]);
+
+/* Connected finite world-space points, read during the call; consecutive duplicates are skipped.
+ * Joins, ends and closing rules: render architecture, "Shape strokes". */
+void nt_shape_renderer_polyline(const float (*points)[3], uint32_t count, bool closed, const float color[4]);
 
 /* ---- Rectangle ---- */
 
@@ -121,9 +134,9 @@ uint32_t nt_shape_renderer_test_instance_count(int type);
 uint32_t nt_shape_renderer_test_instance_capacity(void);
 uint32_t nt_shape_renderer_test_vertex_count(void);
 uint32_t nt_shape_renderer_test_index_count(void);
-uint32_t nt_shape_renderer_test_line_count(void);
+uint32_t nt_shape_renderer_test_stroke_count(void);
 const float *nt_shape_renderer_test_vp(void);
-const float *nt_shape_renderer_test_cam_pos(void);
+const float *nt_shape_renderer_test_eye(void);
 float nt_shape_renderer_test_line_width(void);
 bool nt_shape_renderer_test_depth_enabled(void);
 bool nt_shape_renderer_test_initialized(void);

@@ -427,8 +427,9 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_gfx_scissor)
 
     # --- Shape module tests ---
-    add_executable(test_shape unit/test_shape.c)
+    add_executable(test_shape unit/test_shape.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_shape PRIVATE nt_shape_renderer nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
+    target_include_directories(test_shape PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_set_warning_flags(test_shape)
     nt_set_sanitizer_flags(test_shape)
     set_target_properties(test_shape PROPERTIES

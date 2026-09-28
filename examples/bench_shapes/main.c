@@ -339,19 +339,39 @@ static void dispatch_shape(const bench_shape_t *s) {
     }
 }
 
-/* ---- stroke font: draw a letter on the floor (XZ plane, y=0.002) ---- */
+/* ---- stroke font: draw a letter on the floor (XZ plane, y=0.02) ---- */
+
+#define LETTER_MAX_SEGMENTS 5
+
+static void draw_letter_path(const float (*points)[3], uint32_t count, const float color[4]) {
+    bool closed = count > 2 && points[0][0] == points[count - 1][0] && points[0][2] == points[count - 1][2];
+    nt_shape_renderer_polyline(points, count, closed, color);
+}
 
 static void draw_letter(float ox, float oz, float scale, const float *strokes, int count, const float color[4]) {
+    NT_ASSERT(count <= LETTER_MAX_SEGMENTS);
+    float points[LETTER_MAX_SEGMENTS + 1][3];
+    uint32_t point_count = 0;
     for (int i = 0; i < count; i++) {
         int si = i * 4;
         float x0 = ox + (strokes[si] * scale);
         float z0 = oz - (strokes[si + 1] * scale);
         float x1 = ox + (strokes[si + 2] * scale);
         float z1 = oz - (strokes[si + 3] * scale);
-        float a[3] = {x0, 0.002F, z0};
-        float b[3] = {x1, 0.002F, z1};
-        nt_shape_renderer_line(a, b, color);
+        if (point_count != 0 && (points[point_count - 1][0] != x0 || points[point_count - 1][2] != z0)) {
+            draw_letter_path((const float(*)[3])points, point_count, color);
+            point_count = 0;
+        }
+        if (point_count == 0) {
+            points[point_count][0] = x0;
+            points[point_count][1] = 0.02F;
+            points[point_count++][2] = z0;
+        }
+        points[point_count][0] = x1;
+        points[point_count][1] = 0.02F;
+        points[point_count++][2] = z1;
     }
+    draw_letter_path((const float(*)[3])points, point_count, color);
 }
 
 /* clang-format off */
@@ -572,7 +592,6 @@ static void frame(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.05F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
 
     nt_shape_renderer_set_vp((float *)vp);
-    nt_shape_renderer_set_cam_pos(s_cam_pos);
     nt_shape_renderer_set_depth(true);
 
     double t_render_start = nt_time_now();

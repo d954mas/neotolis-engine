@@ -74,9 +74,9 @@ static void test_multi_flush_ring_offsets_render_correctly(void) {
     nt_shape_renderer_flush();
 
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame)));
-
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
     nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
 
     assert_pixel(frame, 16, 32, 255, 0, 0); /* left half: red rect (flush 1, write 1) */
     assert_pixel(frame, 48, 32, 0, 255, 0); /* cube center: green (flush 1, write 2 at nonzero offset) */
@@ -107,12 +107,174 @@ static void test_ring_wrap_still_renders(void) {
     nt_shape_renderer_flush();
 
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame)));
-
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
     nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
 
     assert_pixel(frame, 16, 32, 255, 0, 0); /* left half still red */
     assert_pixel(frame, 48, 32, 0, 255, 0); /* post-wrap green rect renders */
+}
+
+static void test_wire_circle_has_closed_outer_joins(void) {
+    nt_shape_renderer_set_line_width(0.3F);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
+    nt_shape_renderer_circle_wire_rot((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    assert_pixel(frame, 32, 12, 255, 255, 255);
+    assert_pixel(frame, 51, 32, 255, 255, 255);
+    assert_pixel(frame, 32, 32, 0, 0, 0);
+}
+
+/* Within one flush the line stays above a later fill; the next flush draws over both. */
+static void test_overlay_strokes_draw_over_fills_until_flush(void) {
+    nt_shape_renderer_set_line_width(0.3F);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, (float[4]){0, 1, 0, 1});
+    nt_shape_renderer_rect((float[3]){0, 0, 0}, (float[2]){1, 1}, (float[4]){1, 0, 0, 1});
+    nt_shape_renderer_flush();
+    nt_shape_renderer_rect((float[3]){-0.25F, 0, 0}, (float[2]){0.5F, 0.5F}, (float[4]){0, 0, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    assert_pixel(frame, 40, 32, 0, 255, 0);
+    assert_pixel(frame, 40, 20, 255, 0, 0);
+    assert_pixel(frame, 24, 32, 0, 0, 255);
+}
+
+static uint32_t lit_column(const uint8_t *frame, int x, int begin, int end) {
+    uint32_t count = 0;
+    for (int y = begin; y < end; y++) {
+        count += pixel_at(frame, x, y)[0] > 128;
+    }
+    return count;
+}
+
+static void test_pixel_width_is_constant_across_depth_and_restore(void) {
+    const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
+    const float white[4] = {1, 1, 1, 1};
+    nt_shape_renderer_set_vp(perspective);
+    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
+    nt_shape_renderer_restore_gpu();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_line((float[3]){-0.75F, -0.5F, -2}, (float[3]){0.75F, -0.5F, -2}, white);
+    nt_shape_renderer_line((float[3]){-1.5F, 1, -4}, (float[3]){1.5F, 1, -4}, white);
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 32, 0, 32));
+    TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 32, 32, 64));
+}
+
+static void test_pixel_join_bevel_is_bounded(void) {
+    const float points[][3] = {{-0.6F, -0.4F, 0}, {0, 0.4F, 0}, {-0.5F, -0.4F, 0}};
+    nt_shape_renderer_set_line_width_pixels(8, RT_W, RT_H);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_polyline(points, 3, false, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    assert_pixel(frame, 31, 19, 255, 255, 255);
+    assert_pixel(frame, 32, 5, 0, 0, 0);
+}
+
+static void test_pixel_line_clips_at_near_plane(void) {
+    const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
+    nt_shape_renderer_set_vp(perspective);
+    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0.2F}, (float[3]){0.75F, 0, -3}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_line((float[3]){-1, 0.5F, 0.2F}, (float[3]){1, 0.5F, -0.5F}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 35, 0, 64));
+    assert_pixel(frame, 16, 16, 0, 0, 0);
+    assert_pixel(frame, 48, 48, 0, 0, 0);
+}
+
+/* Far off-axis in a wide orthographic view, a world-width stroke still keeps its full width. */
+static void test_ortho_world_width_off_axis(void) {
+    const float ortho[16] = {0.01F, 0, 0, 0, 0, 0.01F, 0, 0, 0, 0, -0.02F, 0, 0, 0, -0.8F, 1};
+    nt_shape_renderer_set_vp(ortho);
+    nt_shape_renderer_set_line_width(25);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_line((float[3]){-90, 80, 0}, (float[3]){90, 80, 0}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    TEST_ASSERT_EQUAL_UINT32(8, lit_column(frame, 32, 0, 32));
+}
+
+/* The join at the visible vertex must use the near-clipped neighbor, not its w<0 projection. */
+static void test_pixel_join_clips_hidden_neighbor(void) {
+    const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
+    const float points[][3] = {{-0.05F, 0, 1}, {0.5F, 0, -2}, {0.5F, 1, -2}};
+    nt_shape_renderer_set_vp(perspective);
+    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_polyline(points, 3, false, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    assert_pixel(frame, 37, 31, 255, 255, 255);
+    assert_pixel(frame, 37, 32, 255, 255, 255);
+    TEST_ASSERT_EQUAL_UINT32(0, lit_column(frame, 10, 0, 64));
+}
+
+static void test_polyline_outer_corner_and_butt_end(void) {
+    const float points[][3] = {{-0.5F, -0.5F, 0}, {0, -0.5F, 0}, {0, 0.5F, 0}};
+    nt_shape_renderer_set_line_width(0.3F);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    const float offscreen[][3] = {{-5, -5, 0}, {-4, -5, 0}};
+    for (uint32_t i = 1; i < NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS; i++) {
+        nt_shape_renderer_polyline(offscreen, 2, false, (float[4]){1, 1, 1, 1});
+    }
+    nt_shape_renderer_polyline(points, 3, false, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    assert_pixel(frame, 35, 51, 255, 255, 255);
+    assert_pixel(frame, 32, 14, 0, 0, 0);
+}
+
+static void test_pixel_width_uses_active_viewport_height(void) {
+    nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H / 2);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_gfx_set_viewport(0, 0, RT_W, RT_H / 2);
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 32, 0, RT_H));
+    assert_pixel(frame, 32, 48, 255, 255, 255);
 }
 
 int main(void) {
@@ -129,6 +291,15 @@ int main(void) {
     };
     nt_window_init();
     UNITY_BEGIN();
+    RUN_TEST(test_ortho_world_width_off_axis);
+    RUN_TEST(test_pixel_join_clips_hidden_neighbor);
+    RUN_TEST(test_polyline_outer_corner_and_butt_end);
+    RUN_TEST(test_pixel_width_uses_active_viewport_height);
+    RUN_TEST(test_pixel_width_is_constant_across_depth_and_restore);
+    RUN_TEST(test_pixel_join_bevel_is_bounded);
+    RUN_TEST(test_pixel_line_clips_at_near_plane);
+    RUN_TEST(test_wire_circle_has_closed_outer_joins);
+    RUN_TEST(test_overlay_strokes_draw_over_fills_until_flush);
     RUN_TEST(test_multi_flush_ring_offsets_render_correctly);
     RUN_TEST(test_ring_wrap_still_renders);
     int failures = UNITY_END();
