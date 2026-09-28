@@ -172,7 +172,7 @@ ctest --test-dir build/_cmake/native-debug --output-on-failure --no-tests=error 
 python build/issue34/reproduce.py
 ```
 
-`test_shape`: 37/37, native ring tests: 2/2. Исследовательский GL capture: 1/1; fake trace дал приведённые выше значения. При readback драйвер выдал `Pixel-path performance warning: Pixel transfer is synchronized with 3D rendering.` Это предупреждение синхронного чтения пикселей, не ошибка изображения и не измерение производительности renderer.
+`test_shape`: 45/45, native ring tests: 9/9. Исследовательский GL capture: 1/1; fake trace дал приведённые выше значения. При readback драйвер выдал `Pixel-path performance warning: Pixel transfer is synchronized with 3D rendering.` Это предупреждение синхронного чтения пикселей, не ошибка изображения и не измерение производительности renderer.
 
 `reproduce.py` компилирует отдельные временные translation units с флагами свежей compilation database и линкует их с библиотеками этого же ворктри. Производственные исходники не подменяются. PNG получен конвертацией PPM readback; воспроизводимый PPM создаётся самим стендом. Игнорируемые build-артефакты существуют только в данном ворктри и не входят в Git.
 
@@ -230,6 +230,6 @@ ctest --test-dir build/_cmake/native-debug --output-on-failure --no-tests=error 
 Реальные кадры демо: `build/issue34/spinning-fixed-0.png` … `spinning-fixed-3.png`; исходные — `spinning-shape-0.png` … `spinning-shape-3.png`.
 Щели на внешних стыках устранены. Гранёность 16-сегментного круга и отсутствие AA сохраняются.
 
-Native GL и WebGL 2 прошли одинаковые восемь пиксельных проверок: внешний стык через auto-flush и butt end, замкнутый шов, bevel на остром угле, pixel width на разных глубинах, отдельный viewport, near-plane crossing, восстановление настроек и кольцевые записи буфера. WebGL-стенд собран из того же файла тестов против свежих wasm-debug библиотек; GLFW setup удалён из временного TU, размер очереди для старого ring test подставлен как 2048, производственные исходники не подменялись. Сборка — `python build/issue34/build_web_probe.py`, запуск — `build/issue34/stroke_web_probe.html` через локальный HTTP server. Результат: `8 Tests 0 Failures`; console ошибок/предупреждений нет. В браузере также просмотрены wire-режимы сферы, цилиндра и капсулы в штатном demo.
+Native GL suite содержит девять pixel-тестов: внешний стык через auto-flush и butt end, замкнутый шов, bevel на остром угле, pixel width на разных глубинах, отдельный viewport, near-plane crossing, восстановление настроек, несколько ring-записей и ring wrap. `tests/browser/shape_strokes.spec.ts` фиксирует восемь соответствующих WebGL 2 проверок в существующем `browser_smoke`; test-only hook возвращает битовую маску после реального render-target readback. Свежий wasm-debug target прошёл этот тест и весь Chromium project последовательно: 26 passed, 1 пропущен по отсутствующему BC7 capability, ошибок страницы нет. Отдельный аппаратный прогон Chromium 153 через ANGLE/D3D11 на Intel UHD Graphics также прошёл прежний восьмитестовый стенд; в браузере просмотрены wire-режимы сферы, цилиндра и капсулы в штатном demo.
 
 `bash scripts/format_and_check.sh` проходит после восстановления LFS ресурсов. Документ и build-стенды не добавляют зависимости в runtime.

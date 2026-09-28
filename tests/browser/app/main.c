@@ -25,6 +25,7 @@
 #include "nt_mesh_format.h" /* in-code mesh blob for the instanced VAO probe */
 #include "nt_pack_format.h" /* NT_ASSET_* resource-type enum */
 #include "render/nt_render_defs.h"
+#include "renderers/nt_shape_renderer.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -51,6 +52,7 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h> /* EM_JS / EMSCRIPTEN_KEEPALIVE for the window.__nt hooks */
+uint32_t nt_test_shape_stroke_probe(void);
 #endif
 
 #include "clay.h"
@@ -717,6 +719,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'basis_build_codecs': function() { return _nt_test_basis_build_codecs(); },
         'basis_sample': function(level) { return _nt_test_basis_sample(level) >>> 0; },
         'basis_single_pixel_format': function() { return _nt_test_basis_single_pixel_format(); },
+        'shape_stroke_probe': function() { return _nt_test_shape_stroke_probe() >>> 0; },
         'gpu_command': function(operation, segment) { return _nt_test_gpu_command(operation, segment || 0); },
         'hide_probe': function(mode) { _nt_test_hide_probe(mode); },
         'field_visible': function() { return _nt_test_field_visible() !== 0; },
@@ -877,6 +880,7 @@ static bool gpu_restore_step(void) {
     bool ok = s_frame_ubo.id != 0;
     ok = (nt_sprite_renderer_restore_gpu() == NT_OK) && ok;
     ok = (nt_text_renderer_restore_gpu() == NT_OK) && ok;
+    nt_shape_renderer_restore_gpu();
     /* The probe's mesh and vertex input died with the context. */
     mesh_probe_destroy();
     ok = mesh_probe_create() && ok;
@@ -1099,6 +1103,7 @@ int main(int argc, char *argv[]) {
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
+    nt_shape_renderer_init();
     const bool probe_ok = mesh_probe_create();
     NT_ASSERT(probe_ok && "mesh probe creation failed at startup"); /* cold start: the context is alive */
     (void)probe_ok;
@@ -1236,6 +1241,7 @@ int main(int argc, char *argv[]) {
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();
     nt_sprite_renderer_shutdown();
+    nt_shape_renderer_shutdown();
     nt_font_destroy(s_font);
     for (uint32_t i = 0; i < 4U; i++) {
         nt_font_destroy(s_rich_font[i]);
