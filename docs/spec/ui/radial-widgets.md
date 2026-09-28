@@ -34,7 +34,7 @@ reveals still collapses to one `set_material` and one draw.
 
 The custom block is a byte record copied verbatim to each vertex tail. The
 material's full `vertex_layout` declares its storage. `custom_bytes` equals
-`vertex_layout.stride - 20`; the UI custom record has capacity64 bytes. The
+`vertex_layout.stride - 20`; the UI custom record has capacity 64 bytes. The
 only walker-written value is the bbox aspect: when `aspect_offset` is nonzero,
 the walker writes FLOAT bbox width / height (1 when height is zero) at that
 full-vertex byte offset after Clay layout. The offset must lie inside the tail.
@@ -43,9 +43,9 @@ Custom images always use the region emit (`emit_region` / `emit_slice9`), so
 origin, flip and slice9 are honored by generic custom images.
 
 `nt_ui_radial_image` uses the exported `NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT`, a
-64-byte full vertex: `a_radial` FLOAT4 at offset20 (location4), `a_tint` FLOAT4
-at36 (location5), `a_aspect` FLOAT at52 (location7) and `a_source_uv` FLOAT2 at56
-(location6). Its material must use that layout and set `source_uv_offset =
+64-byte full vertex: `a_radial` FLOAT4 at offset 20 (location 4), `a_tint` FLOAT4
+at 36 (location 5), `a_aspect` FLOAT at 52 (location 7) and `a_source_uv` FLOAT2 at 56
+(location 6). Its material must use that layout and set `source_uv_offset =
 NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET` (56); the widget asserts both. No
 `attr_map` is needed. The first two fields are uniform per emit. The widget sets
 `aspect_offset` to 52, and the sprite renderer overwrites `a_source_uv` per

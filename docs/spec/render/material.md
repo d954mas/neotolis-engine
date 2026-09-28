@@ -142,15 +142,15 @@ as creation canonicalizes them. Modules that own a fixed vertex format export
 it as a `nt_vertex_layout_t` constant (`NT_SPRITE_VERTEX_LAYOUT`,
 `NT_UI_SHAPE_VERTEX_LAYOUT`, `NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT`); games pass the
 constant, and the module asserts layout equality. WebGL2 limits the full stride
-to255. Materials store no vertex bytes. Uniform params remain vec4 values,
+to 255. Materials store no vertex bytes. Uniform params remain vec4 values,
 independent of vertex data.
 
 Sprite materials explicitly declare their full vertex. The sprite producer
-requires FLOAT3 position at location0/offset0, normalized USHORT2 UV at
-location3/offset12, and normalized UBYTE4 color at location2/offset16. Extra
-attributes start at offset20. Its stride must be a multiple of4 and fit
-`20 + NT_SPRITE_CUSTOM_STRIDE_MAX`; the default capacity64 permits full84,
-while a configured capacity128 permits full148. A valid generic layout with
+requires FLOAT3 position at location 0/offset 0, normalized USHORT2 UV at
+location 3/offset 12, and normalized UBYTE4 color at location 2/offset 16. Extra
+attributes start at offset 20. Its stride must be a multiple of 4 and fit
+`20 + NT_SPRITE_CUSTOM_STRIDE_MAX`; the default capacity 64 permits full 84,
+while a configured capacity 128 permits full 148. A valid generic layout with
 another prefix asserts when the sprite renderer first builds a vertex input for
 that layout, not during material create. `NT_SPRITE_VERTEX_LAYOUT` is the plain
 20-byte layout.
@@ -158,7 +158,7 @@ that layout, not during material create. `NT_SPRITE_VERTEX_LAYOUT` is the plain
 Every region/slice9/geometry emit accepts a complete `const void *attrs,
 uint16_t bytes` tail override. NULL/0 writes a zero tail `[20,stride)`; a
 material that needs nonzero tail values takes them from every emit. Plain
-stride20 requires NULL/0. Partial blocks, NULL/nonzero and non-NULL/zero
+stride 20 requires NULL/0. Partial blocks, NULL/nonzero and non-NULL/zero
 assert. The renderer writes the prefix from ordinary emit arguments and copies
 the selected tail to each vertex word by word, then fills any renderer-owned
 source UV field. There is no tint multiply or merge. Override pointers are

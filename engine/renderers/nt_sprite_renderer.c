@@ -411,7 +411,6 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
         return true;
     }
     if (page_tex == 0) {
-
         return false;
     }
 
@@ -454,11 +453,9 @@ static inline void bake_source_uvs(uint32_t base, uint32_t count, const nt_textu
     }
 }
 
-static inline void bake_custom_attrs(uint32_t base, uint32_t count, const void *src, const nt_texture_region_t *region, const float (*positions)[2], float ipu) {
+/* Out of line: inlined into every emit kind it costs ~0.8-1 KB of wasm; plain sprites skip the call. */
+static NT_NOINLINE void bake_custom_tail(uint32_t base, uint32_t count, const void *src, const nt_texture_region_t *region, const float (*positions)[2], float ipu) {
     const uint32_t tail = s_sprite.cur_stride - NT_SPRITE_BASE_STRIDE;
-    if (tail == 0U) {
-        return;
-    }
     NT_ASSERT(base + count <= s_sprite.custom_max_vertices);
     for (uint32_t i = 0; i < count; ++i) {
         uint8_t *dst = s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
@@ -469,6 +466,12 @@ static inline void bake_custom_attrs(uint32_t base, uint32_t count, const void *
     }
     if (s_sprite.source_uv_offset != 0U) {
         bake_source_uvs(base, count, region, positions, ipu);
+    }
+}
+
+static inline void bake_custom_attrs(uint32_t base, uint32_t count, const void *src, const nt_texture_region_t *region, const float (*positions)[2], float ipu) {
+    if (s_sprite.cur_stride > NT_SPRITE_BASE_STRIDE) {
+        bake_custom_tail(base, count, src, region, positions, ipu);
     }
 }
 // #endregion
@@ -512,7 +515,6 @@ static NT_ALWAYS_INLINE void emit_region_resolved(const nt_texture_region_t *r, 
     NT_ASSERT(r != NULL && positions != NULL && uvs != NULL && idx != NULL);
     NT_ASSERT(m != NULL);
     if (r->vertex_count == 0U) {
-
         return; /* tombstone — silent no-op (matches old emit_one behaviour) */
     }
     if (!ensure_current_cmd_page_texture(page_tex)) {
@@ -893,7 +895,6 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
     if (h.region->vertex_count == 0U) {
-
         return; /* tombstone or out-of-range */
     }
     emit_region_resolved(h.region, h.positions, h.uvs, h.indices, nt_resource_get(h.page_resource), h.ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits, src);
@@ -928,7 +929,6 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
     if (h.region->vertex_count == 0U) {
-
         return; /* tombstone */
     }
     const uint32_t page_tex = nt_resource_get(h.page_resource);
@@ -1024,7 +1024,6 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     nt_atlas_region_handles_t rh;
     nt_atlas_get_region_handles(atlas, region_index, &rh);
     if (rh.region->vertex_count == 0U) {
-
         return; /* tombstone */
     }
 

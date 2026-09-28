@@ -209,7 +209,6 @@ bool nt_material_valid(nt_material_t mat) {
     return nt_pool_valid(&s_mat.pool, mat.id);
 }
 
-/* Returns mutable info pointer for a valid handle, or NULL */
 bool nt_material_vertex_layout_equals(const nt_material_info_t *info, const nt_vertex_layout_t *expected) {
     const nt_vertex_layout_t *actual = &info->vertex_layout;
     if (actual->stride != expected->stride || actual->attr_count != expected->attr_count) {
@@ -225,6 +224,7 @@ bool nt_material_vertex_layout_equals(const nt_material_info_t *info, const nt_v
     return true;
 }
 
+/* Returns mutable info pointer for a valid handle, or NULL */
 static nt_material_info_t *get_mutable_info(nt_material_t mat) {
     NT_ASSERT(s_mat.initialized && "material module not initialized");
     if (!s_mat.initialized || mat.id == 0) {

@@ -1842,7 +1842,9 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
     const uint32_t end = style->paint.gradient == NT_UI_SHAPE_SOLID ? style->paint.color0 : style->paint.color1;
     const float reach = fmaxf(style->shadow.spread + style->shadow.softness, 0.0F);
     const Clay_BoundingBox shadow_box = {bb.x + style->shadow.offset_x, bb.y + style->shadow.offset_y, bb.width, bb.height};
-    bool body_visible = ((style->paint.color0 | end | style->paint.border_color) >> 24U) != 0U;
+    const nt_ui_shape_border_widths_t *bw = &style->paint.border_widths;
+    const bool has_border = style->kind == NT_UI_SHAPE_BOX && (bw->left > 0.0F || bw->top > 0.0F || bw->right > 0.0F || bw->bottom > 0.0F);
+    bool body_visible = ((style->paint.color0 | end | (has_border ? style->paint.border_color : 0U)) >> 24U) != 0U;
     bool shadow_visible = (style->shadow.color >> 24U) != 0U;
     if (screen_space) {
         body_visible = body_visible && shape_screen_visible(bb, guard, target, world);
@@ -1860,7 +1862,6 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
         attrs.widths[1] = style->paint.border_widths.top;
         attrs.widths[2] = style->paint.border_widths.right;
         attrs.widths[3] = style->paint.border_widths.bottom;
-        const bool has_border = attrs.widths[0] > 0.0F || attrs.widths[1] > 0.0F || attrs.widths[2] > 0.0F || attrs.widths[3] > 0.0F;
         if (body_visible && has_border && !shape_inner_nonempty(bb.width, bb.height, attrs.geometry, attrs.widths)) {
             interior_flags = 1U;
         }

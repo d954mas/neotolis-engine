@@ -518,11 +518,14 @@ static void test_radial_image_rejects_baked_slice9(void) {
     nt_texture_region_t *region = (nt_texture_region_t *)nt_atlas_get_region(s_fx.atlas.handle, s_fx.atlas.packed_region_idx);
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.packed_region_idx);
     const nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800, 600, 0, &mouse, 1);
     region->slice9_lrtb[0] = 1;
-    NT_TEST_EXPECT_ASSERT(nt_ui_radial_image(s_fx.ctx, NULL, &ref, 0.0F, 1.0F, &style, NULL));
-    region->slice9_lrtb[0] = 0;
+    nt_ui_begin(s_fx.ctx, 800, 600, 0, &mouse, 1);
+    nt_ui_radial_image(s_fx.ctx, NULL, &ref, 0.0F, 1.0F, &style, NULL);
     nt_ui_end(s_fx.ctx);
+    /* The sprite renderer rejects source UV on the baked slice9 emit. */
+    const nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+    region->slice9_lrtb[0] = 0;
 }
 
 static void test_source_uv_material_rejects_geometry_emit(void) {

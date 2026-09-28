@@ -27,7 +27,7 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(style != NULL && "nt_ui_radial_image: style must be non-NULL");
     NT_ASSERT(region != NULL && region->atlas.id != 0 && "nt_ui_radial_image: invalid atlas handle");
     NT_ASSERT(style->material.id != 0 && "nt_ui_radial_image: style.material must be a valid radial-image material");
-    NT_ASSERT(nt_material_vertex_layout_equals(nt_material_get_info(style->material), &NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT) &&
+    NT_ASSERT(nt_material_valid(style->material) && nt_material_vertex_layout_equals(nt_material_get_info(style->material), &NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT) &&
               nt_material_get_info(style->material)->source_uv_offset == NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET &&
               "nt_ui_radial_image: material needs NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT and its source UV offset");
     NT_ASSERT(isfinite(angle_start) && isfinite(angle_end) && "nt_ui_radial_image: angles must be finite");
@@ -53,10 +53,6 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     nt_atlas_resolve_ref(region);
     if (region->region == NT_ATLAS_INVALID_REGION) {
         return;
-    }
-    if (nt_resource_is_ready(region->atlas)) {
-        const nt_texture_region_t *resolved = nt_atlas_get_region(region->atlas, region->region);
-        NT_ASSERT((resolved->slice9_lrtb[0] | resolved->slice9_lrtb[1] | resolved->slice9_lrtb[2] | resolved->slice9_lrtb[3]) == 0 && "nt_ui_radial_image: baked slice9 is unsupported");
     }
 
     /* Per-widget TINT color -> a_tint (0..1 floats). mode/dim stay material-level. */
