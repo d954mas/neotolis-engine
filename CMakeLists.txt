@@ -287,6 +287,15 @@ if(NOT EMSCRIPTEN)
         set(USE_LIBIDN2 OFF)
         if(WIN32)
             set(CURL_USE_SCHANNEL ON)
+        else()
+            set(CURL_USE_OPENSSL ON)
+            # A CA directory makes libcurl re-parse the bundle on every new https connection;
+            # without one it caches the parsed store, OpenSSL's default paths standing in when
+            # no bundle is found. FORCEd: curl's 3.18 policies drop normal variables here.
+            unset(CURL_CA_PATH)
+            unset(CURL_CA_FALLBACK)
+            set(CURL_CA_PATH "none" CACHE STRING "CA directory of the vendored libcurl" FORCE)
+            set(CURL_CA_FALLBACK ON CACHE BOOL "OpenSSL default CA paths when no bundle is found" FORCE)
         endif()
         add_subdirectory(deps/curl EXCLUDE_FROM_ALL)
         # CRT pins only for targets THIS block created — outside the guard the

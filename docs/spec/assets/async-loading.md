@@ -115,6 +115,13 @@ flight; `nt_resource_step()` calls it too, and the pump is global, so it
 advances the game's own requests as well (see
 [frame lifecycle](../runtime/frame-lifecycle.md)).
 
+Connections are kept alive and reused across requests, as `fetch()` does. The
+native backend pools up to `NT_HTTP_MAX_REQUESTS` idle connections, the most it
+can ever have busy at once, so a burst of requests to one host leaves its
+connections open for the next burst instead of reconnecting (a TCP and TLS
+handshake each on https). An idle connection still closes after libcurl's idle
+limit (`CURLOPT_MAXAGE_CONN`, 118 s) or the server's keep-alive timeout.
+
 The pack loader treats a non-2xx status and a 2xx response with an empty body as
 load failures (normal retry policy applies).
 

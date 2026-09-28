@@ -199,6 +199,12 @@ bool nt_http_backend_init(void) {
         curl_global_cleanup();
         return false;
     }
+    /* curl's default pool limit is 4 x the transfers running right now, so after a burst
+     * it closes idle connections that the next burst reopens with a full TLS handshake.
+     * No more than NT_HTTP_MAX_REQUESTS transfers ever run, so none is useless to keep. */
+    CURLMcode pool = curl_multi_setopt(s_native.multi, CURLMOPT_MAXCONNECTS, (long)NT_HTTP_MAX_REQUESTS);
+    NT_ASSERT(pool == CURLM_OK);
+    (void)pool;
     /* A consumer-provided libcurl without async DNS would block nt_http_update
      * (and the frame) on every hostname resolve, silently breaking the
      * non-blocking frame contract — refuse init instead (the vendored build
