@@ -253,6 +253,27 @@ void test_program_ref_keeps_a_program_while_it_links(void) {
     nt_program_ref_drop(&ref);
 }
 
+/* A link that finishes between the ref's two polls is ready, not lost: the ref keeps it. */
+void test_program_ref_keeps_a_program_whose_link_finishes_mid_update(void) {
+    nt_program_ref_t ref = {0};
+    ref.vs = publish_stage("ref_race_vs", make_stage(NT_SHADER_VERTEX).id);
+    ref.fs = publish_stage("ref_race_fs", make_stage(NT_SHADER_FRAGMENT).id);
+    nt_resource_step();
+
+    nt_gfx_fake_set_links_pending(true);
+    TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
+    const nt_program_t linking = ref.program;
+    const uint32_t creates = nt_gfx_fake_program_create_count();
+    nt_gfx_fake_set_links_pending(false);
+    nt_gfx_fake_set_link_pending_polls(1U);
+
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    TEST_ASSERT_EQUAL_UINT32(linking.id, ref.program.id);
+    TEST_ASSERT_TRUE(nt_gfx_program_ready(ref.program));
+    TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_program_create_count());
+    nt_program_ref_drop(&ref);
+}
+
 /* ---- Unity setUp / tearDown ---- */
 
 static void test_assert_handler(const char *expr, const char *file, int line) {
@@ -1544,6 +1565,7 @@ int main(void) {
     RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
     RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
     RUN_TEST(test_program_ref_keeps_a_program_while_it_links);
+    RUN_TEST(test_program_ref_keeps_a_program_whose_link_finishes_mid_update);
     RUN_TEST(test_a_replaced_program_does_not_redirect_a_staged_batch);
     RUN_TEST(test_overflow_flush_reopens_the_batch_pipeline);
     RUN_TEST(test_font_cache_flush_preserves_the_entire_run);

@@ -24,7 +24,9 @@ static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
     NT_ASSERT(ref != NULL && "nt_program_ref_update: ref is required");
     NT_ASSERT(ref->vs.id != 0 && ref->fs.id != 0 && "nt_program_ref: request both stage resources before update()");
     if (ref->program.id != 0) {
-        if (nt_gfx_program_ready(ref->program) || nt_gfx_program_linking(ref->program)) {
+        /* Linking first: each call polls the driver, and a link that finishes between the
+         * polls must read as ready, which a finished link stays, not as lost. */
+        if (nt_gfx_program_linking(ref->program) || nt_gfx_program_ready(ref->program)) {
             return false;
         }
         /* Lost readiness is terminal; reclaim before linking a replacement. */
