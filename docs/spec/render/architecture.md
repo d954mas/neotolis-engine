@@ -248,25 +248,25 @@ what varies: per stream a presence bit and the mapped location (mesh streams ×
 material attr_map — attr_map entries matching no stream do not split; a
 material mapping none of the streams derives an empty layout and takes the
 attribute-less gl_VertexID path) plus the color mode that selects the instance
-layout. The sprite renderer hashes the complete canonical material vertex layout: stride,
-attribute count and each location/type/count/normalization/offset. Names, defaults,
-inactive entries and C padding do not enter identity. Handles are revalidated on lookup because buffer destruction can invalidate
+layout. The sprite renderer keys vertex inputs by the material's `vertex_layout_key`, a hash of
+the complete canonical vertex layout: stride, attribute count and each
+location/type/count/normalization/offset. Names, `source_uv_offset`, inactive
+entries and C padding do not enter identity. Handles are revalidated on lookup because buffer destruction can invalidate
 cached versions. Exhausting a mesh's version row asserts, naming the knob —
 silent eviction would hide VAO re-creation thrash as an invisible perf
 regression. The default `max_vertex_inputs` budgets one mesh cache; a game using
 both mesh renderers adds
 `max_meshes * skinned.max_mesh_layouts` to that base budget explicitly.
 
-Sprite materials declare the complete physical vertex and optional immutable full
-vertex defaults. An atomic emit override replaces its tail for that call only.
-Without defaults an omitted nonempty tail asserts. See
-[Full vertex layout and defaults](material.md#full-vertex-layout-and-defaults).
+Sprite materials declare the complete physical vertex. An atomic emit override
+replaces its tail for that call only; an omitted tail is written as zeros. See
+[Full vertex layout](material.md#full-vertex-layout).
 Staging uploads have one stride, so a material transition changing that stride
-flushes even when it comes through ECS `draw_list`. Four-vertex `emit_geometry`
-calls on custom materials align their base vertex to a multiple of four for
-`gl_VertexID & 3` local-corner shaders. Any padding is zeroed, unindexed and
-included in vertex capacity; capacity overflow restarts the emit at vertex zero.
-Plain geometry keeps its existing unpadded 20-byte path.
+flushes even when it comes through ECS `draw_list`. A caller whose shader derives
+local corners from `gl_VertexID & 3` calls
+`nt_sprite_renderer_align_next_vertex_to_4()` before the four-vertex emit. Any
+padding is unindexed and included in vertex capacity; without room the next emit
+flushes and starts at vertex zero. Emits never pad implicitly.
 
 The sprite renderer owns its vertex/index buffers and clears its entire
 vertex-input cache on shutdown or GPU restore before replacing those buffers.

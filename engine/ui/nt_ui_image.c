@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
 #include "renderers/nt_sprite_renderer.h"
@@ -17,24 +16,6 @@ const nt_ui_widget_def_t NT_UI_IMAGE_DEF = {
     .pill_color = 0xFFB45A78U,
     ._reserved = 0U,
 };
-
-/* Names describe expected semantics, never offsets or declaration order. */
-static bool nt_ui_image_attr_names_ok(const nt_material_info_t *mi, const char *const *names) {
-    if (names == NULL) {
-        return true;
-    }
-    for (uint32_t i = 0; names[i] != NULL; ++i) {
-        const uint32_t hash = nt_hash32(names[i], (uint32_t)strlen(names[i])).value;
-        bool found = false;
-        for (uint8_t j = 0; j < mi->attr_map_count; ++j) {
-            found = found || mi->attr_map_hashes[j] == hash;
-        }
-        if (!found) {
-            return false;
-        }
-    }
-    return true;
-}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl) {
@@ -106,7 +87,7 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* Declaration path -- no GL here, so this asks about assignment, not liveness. */
     NT_ASSERT(mi != NULL && mi->program.id != 0 && "nt_ui_image_custom: material must have a program");
     NT_ASSERT(mi->vertex_layout.stride >= 20U && (uint32_t)mi->vertex_layout.stride - 20U == img->custom_bytes && "nt_ui_image_custom: custom_bytes must equal material vertex stride minus 20");
-    NT_ASSERT(nt_ui_image_attr_names_ok(mi, img->attr_names) && "nt_ui_image_custom: attr_names contains an unknown material semantic");
+    NT_ASSERT((img->aspect_offset == 0U || (img->aspect_offset >= 20U && img->aspect_offset + sizeof(float) <= mi->vertex_layout.stride)) && "nt_ui_image_custom: aspect_offset outside the tail");
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_image_custom: decl->id must be 0 (id auto-assigned by Clay)");
         NT_ASSERT(decl->image.imageData == NULL && "nt_ui_image_custom: decl->image.imageData must be NULL (atlas+region controls image)");
@@ -118,7 +99,7 @@ void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
      * the payload only carries a pointer, so plain images stay small. */
     nt_ui_image_custom_block_t *blk = NT_MEM_SCRATCH_ALLOC(nt_ui_image_custom_block_t);
     NT_ASSERT(blk != NULL && "nt_ui_image_custom: scratch alloc failed (block)");
-    *blk = (nt_ui_image_custom_block_t){.custom_bytes = img->custom_bytes, .geom_mode = img->geom_mode};
+    *blk = (nt_ui_image_custom_block_t){.custom_bytes = img->custom_bytes, .aspect_offset = img->aspect_offset};
     memcpy(blk->custom_attrs, img->custom_attrs, img->custom_bytes);
 
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);

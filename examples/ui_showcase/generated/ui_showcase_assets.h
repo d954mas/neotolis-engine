@@ -18,8 +18,6 @@
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT ((nt_hash64_t){0x54AB053A2ADAE2D0ULL}) /* assets/shaders/sprite_radial.vert */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_UI_SHAPE_VERT ((nt_hash64_t){0xDC321E76096109A6ULL}) /* assets/shaders/sprite_ui_shape.vert */
 #define ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_FRAG ((nt_hash64_t){0xDDFD139FE91956FDULL}) /* assets/shaders/ui_shape.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_RADIAL_FRAG ((nt_hash64_t){0x704A82912AAB65F4ULL}) /* assets/shaders/ui_shape_radial.frag */
-#define ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_SHADOW_FRAG ((nt_hash64_t){0x420193467B23D6EFULL}) /* assets/shaders/ui_shape_shadow.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_UBER_FRAG ((nt_hash64_t){0xB8CDD71105A003AAULL}) /* assets/shaders/ui_shape_uber.frag */
 
 /* --- FONT --- */
@@ -72,8 +70,6 @@ static inline void ui_showcase_assets_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/sprite_radial.vert");
     (void)nt_hash64_str("assets/shaders/sprite_ui_shape.vert");
     (void)nt_hash64_str("assets/shaders/ui_shape.frag");
-    (void)nt_hash64_str("assets/shaders/ui_shape_radial.frag");
-    (void)nt_hash64_str("assets/shaders/ui_shape_shadow.frag");
     (void)nt_hash64_str("assets/shaders/ui_shape_uber.frag");
     (void)nt_hash64_str("ui_showcase/font");
     (void)nt_hash64_str("ui_showcase/font_rich_b");

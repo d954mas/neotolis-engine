@@ -74,9 +74,7 @@ static struct {
     /* Byte stride of the current batch, owned by the full material layout. Set per-flush
      * in open_cmd, so the plain path stays a constant 20. */
     uint32_t cur_stride;
-    const uint8_t *cur_attr_defaults; /* borrowed from the bound material's stable pool slot */
-    uint32_t source_uv_hash;
-    uint16_t source_uv_offset; /* UINT16_MAX unless the material requests source-local UV */
+    uint8_t source_uv_offset; /* 0 unless the material requests source-image UV */
 
     /* Recorded per-state draw commands. Last entry is the "currently open"
      * cmd that emit_one writes into; closed by close_current_cmd() before a
@@ -151,9 +149,7 @@ static void destroy_gpu_resources(void) {
     s_sprite.vertex_count = 0;
     s_sprite.index_count = 0;
     s_sprite.cur_stride = 0;
-
-    s_sprite.cur_attr_defaults = NULL;
-    s_sprite.source_uv_offset = UINT16_MAX;
+    s_sprite.source_uv_offset = 0;
     s_sprite.current_mat = (nt_material_t){0};
     s_sprite.current_program = NT_PROGRAM_INVALID;
     s_sprite.last_draw_list_calls = 0;
@@ -183,7 +179,6 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     NT_ASSERT(d.custom_max_vertices >= 16U && "sprite custom_max_vertices must be >= 16 (largest fixed single emit: slice9 = 16 verts)");
 
     memset(&s_sprite, 0, sizeof(s_sprite));
-    s_sprite.source_uv_hash = nt_hash32("a_source_uv", (uint32_t)(sizeof("a_source_uv") - 1U)).value;
     s_sprite.max_pipelines = d.max_pipelines;
     s_sprite.max_vertices = d.max_vertices;
     s_sprite.max_indices = d.max_indices;
@@ -232,6 +227,12 @@ nt_result_t nt_sprite_renderer_restore_gpu(void) {
 }
 // #endregion
 
+const nt_vertex_layout_t NT_SPRITE_VERTEX_LAYOUT = {.stride = NT_SPRITE_BASE_STRIDE,
+                                                    .attr_count = 3,
+                                                    .attrs = {{.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                                              {.location = NT_ATTR_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                                              {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12}}};
+
 // #region pipeline cache
 /* The producer writes exactly this prefix; the material owns the full layout. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -261,24 +262,6 @@ static void assert_sprite_layout(const nt_vertex_layout_t *layout) {
     }
     NT_ASSERT(base_mask == 7U && "sprite material requires position/UV/color prefix");
     (void)base_mask;
-}
-
-static uint64_t nt_sprite_layout_key(const nt_vertex_layout_t *layout) {
-    uint8_t bytes[3 + (NT_GFX_MAX_VERTEX_ATTRS * 6)];
-    bytes[0] = (uint8_t)layout->stride;
-    bytes[1] = (uint8_t)(layout->stride >> 8U);
-    bytes[2] = layout->attr_count;
-    for (uint8_t i = 0; i < layout->attr_count; ++i) {
-        const nt_vertex_attr_t *attr = &layout->attrs[i];
-        uint8_t *dst = bytes + 3U + ((size_t)i * 6U);
-        dst[0] = attr->location;
-        dst[1] = (uint8_t)attr->type;
-        dst[2] = attr->count;
-        dst[3] = attr->normalized ? 1U : 0U;
-        dst[4] = (uint8_t)attr->offset;
-        dst[5] = (uint8_t)(attr->offset >> 8U);
-    }
-    return nt_hash64(bytes, 3U + ((uint32_t)layout->attr_count * 6U)).value;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -313,7 +296,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
  * validates and a dead entry recreates in place (the mesh-row pattern) --
  * repeated losses must not grow the cache toward the hardcap. */
 static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *mat_info) {
-    const uint64_t key = nt_sprite_layout_key(&mat_info->vertex_layout);
+    const uint64_t key = mat_info->vertex_layout_key;
     uint16_t idx = s_sprite.vi_count;
     for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
         if (s_sprite.vi_entries[i].key != key) {
@@ -331,6 +314,8 @@ static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *m
             return NT_VERTEX_INPUT_INVALID; /* OFF-mode guard, same as the mesh versions table */
         }
     }
+    /* The key covers the whole layout, so one check per cached layout suffices. */
+    assert_sprite_layout(&mat_info->vertex_layout);
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = mat_info->vertex_layout,
         .vertex_buffer = s_sprite.vbo,
@@ -363,35 +348,10 @@ static void close_current_cmd(void) {
     }
 }
 
-/* Resolve the renderer-owned source coordinate field once per material bind. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint16_t sprite_source_uv_offset(const nt_material_info_t *mi, uint32_t stride) {
-    if (mi->attr_map_count == 0U) {
-        return UINT16_MAX;
-    }
-    for (uint8_t ai = 0; ai < mi->attr_map_count; ++ai) {
-        if (mi->attr_map_hashes[ai] != s_sprite.source_uv_hash) {
-            continue;
-        }
-        for (uint8_t vi = 0; vi < mi->vertex_layout.attr_count; ++vi) {
-            const nt_vertex_attr_t *attr = &mi->vertex_layout.attrs[vi];
-            if (attr->location != mi->attr_map_locations[ai]) {
-                continue;
-            }
-            NT_ASSERT(attr->type == NT_VERTEX_FLOAT && attr->count == 2U && !attr->normalized && attr->offset >= NT_SPRITE_BASE_STRIDE && (uint32_t)attr->offset + sizeof(float[2]) <= stride &&
-                      "a_source_uv must be FLOAT2 inside the sprite tail");
-            return attr->offset;
-        }
-        NT_ASSERT(false && "a_source_uv has no physical vertex field");
-    }
-    return UINT16_MAX;
-}
-
 /* Open a new cmd with state captured from a resolved material_info, anchored
  * at the current staging index_count. Caller must close the previous cmd via
  * close_current_cmd() before opening a new one. */
 static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_material_t mat) {
-    assert_sprite_layout(&mi->vertex_layout);
     const uint32_t stride = mi->vertex_layout.stride;
     /* draw_list opens commands directly; one staging upload has one stride. */
     if (s_sprite.cmd_count >= NT_SPRITE_RENDERER_MAX_DRAW_CMDS || (s_sprite.vertex_count > 0 && stride != s_sprite.cur_stride)) {
@@ -406,8 +366,8 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     s_sprite.current_mat = mat;
     s_sprite.current_program = mi->program;
 
-    s_sprite.cur_attr_defaults = mi->has_vertex_defaults ? mi->vertex_defaults + NT_SPRITE_BASE_STRIDE : NULL;
-    s_sprite.source_uv_offset = sprite_source_uv_offset(mi, stride);
+    NT_ASSERT((mi->source_uv_offset == 0U || mi->source_uv_offset >= NT_SPRITE_BASE_STRIDE) && "source UV must live in the sprite tail");
+    s_sprite.source_uv_offset = mi->source_uv_offset;
     /* The whole batch opened here uploads at this stride (set per-flush, not
      * per-emit, so the plain fast path stays a constant 20). */
     s_sprite.cur_stride = stride;
@@ -474,13 +434,12 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 // #endregion
 
 // #region custom_attrs
+static const uint8_t s_zero_tail[NT_SPRITE_CUSTOM_STRIDE_MAX];
+
 static inline const void *select_custom_attrs(const void *attrs, uint16_t bytes) {
-    const uint32_t tail = s_sprite.cur_stride - NT_SPRITE_BASE_STRIDE;
-    NT_ASSERT((attrs == NULL && bytes == 0U) || (attrs != NULL && tail != 0U && bytes == tail));
-    const void *src = attrs != NULL ? attrs : s_sprite.cur_attr_defaults;
-    NT_ASSERT(tail == 0U || src != NULL);
+    NT_ASSERT((attrs == NULL && bytes == 0U) || (attrs != NULL && s_sprite.cur_stride > NT_SPRITE_BASE_STRIDE && bytes == s_sprite.cur_stride - NT_SPRITE_BASE_STRIDE));
     (void)bytes;
-    return src;
+    return attrs != NULL ? attrs : s_zero_tail;
 }
 
 /* Atlas positions are y-up source-space; local UI Y grows down. */
@@ -503,9 +462,12 @@ static inline void bake_custom_attrs(uint32_t base, uint32_t count, const void *
     NT_ASSERT(base + count <= s_sprite.custom_max_vertices);
     for (uint32_t i = 0; i < count; ++i) {
         uint8_t *dst = s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
-        memcpy(dst, src, tail);
+        /* Constant-size word copies inline; a runtime-size memcpy is a call per vertex. */
+        for (uint32_t w = 0; w < tail; w += 4U) {
+            memcpy(dst + w, (const uint8_t *)src + w, 4U);
+        }
     }
-    if (s_sprite.source_uv_offset != UINT16_MAX) {
+    if (s_sprite.source_uv_offset != 0U) {
         bake_source_uvs(base, count, region, positions, ipu);
     }
 }
@@ -544,17 +506,9 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
 
 // #region emit_region_resolved
 /* always_inline keeps the ECS hot path's inlined shape. */
-#if defined(__GNUC__) || defined(__clang__)
-#define NT_SPRITE_EMIT_INLINE static inline __attribute__((always_inline))
-#elif defined(_MSC_VER)
-#define NT_SPRITE_EMIT_INLINE static inline __forceinline
-#else
-#define NT_SPRITE_EMIT_INLINE static inline
-#endif
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, const float (*positions)[2], const nt_atlas_uv_t *uvs, const uint16_t *idx, uint32_t page_tex, float ipu, const float *m,
-                                                float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits, const void *src) {
+static NT_ALWAYS_INLINE void emit_region_resolved(const nt_texture_region_t *r, const float (*positions)[2], const nt_atlas_uv_t *uvs, const uint16_t *idx, uint32_t page_tex, float ipu,
+                                                  const float *m, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits, const void *src) {
     NT_ASSERT(r != NULL && positions != NULL && uvs != NULL && idx != NULL);
     NT_ASSERT(m != NULL);
     if (r->vertex_count == 0U) {
@@ -813,7 +767,7 @@ static void slice9_assert_region(const slice9_grid_t *g) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_slice9_grid(const slice9_grid_t *g, const void *src) {
-    NT_ASSERT(s_sprite.source_uv_offset == UINT16_MAX && "a_source_uv requires atlas REGION geometry");
+    NT_ASSERT(s_sprite.source_uv_offset == 0U && "source UV requires atlas REGION geometry");
     slice9_assert_region(g);
     const uint32_t vcap = (s_sprite.cur_stride > NT_SPRITE_BASE_STRIDE) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
     if (s_sprite.vertex_count + 16U > vcap || s_sprite.index_count + 54U > s_sprite.max_indices) {
@@ -947,11 +901,21 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
 // #endregion
 
 // #region emit_geometry
+void nt_sprite_renderer_align_next_vertex_to_4(void) {
+    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_align_next_vertex_to_4: call nt_sprite_renderer_set_material first");
+    const uint32_t pad = (4U - (s_sprite.vertex_count & 3U)) & 3U;
+    const uint32_t vcap = (s_sprite.cur_stride > NT_SPRITE_BASE_STRIDE) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
+    /* Without room the next emit flushes and starts at vertex 0. Pad vertices are never indexed. */
+    if (s_sprite.vertex_count + pad <= vcap) {
+        s_sprite.vertex_count += pad;
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
                                       const float *world_matrix, uint32_t color_packed, const void *attrs, uint16_t bytes) {
     NT_ASSERT(s_sprite.initialized);
-    NT_ASSERT(s_sprite.source_uv_offset == UINT16_MAX && "a_source_uv requires atlas REGION geometry");
+    NT_ASSERT(s_sprite.source_uv_offset == 0U && "source UV requires atlas REGION geometry");
     const void *src = select_custom_attrs(attrs, bytes);
     NT_ASSERT(positions != NULL && indices != NULL && world_matrix != NULL);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_geometry: invalid atlas handle");
@@ -974,20 +938,13 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 
     /* Capacity follows the material layout, including default-backed emits. */
     const uint32_t vcap = (s_sprite.cur_stride > NT_SPRITE_BASE_STRIDE) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
-    /* Analytic quads derive their local corner from gl_VertexID & 3. */
-    uint32_t pad = (s_sprite.cur_stride > NT_SPRITE_BASE_STRIDE && vertex_count == 4U) ? ((4U - (s_sprite.vertex_count & 3U)) & 3U) : 0U;
-    if (s_sprite.vertex_count + pad + vertex_count > vcap || s_sprite.index_count + index_count > s_sprite.max_indices) {
+    if (s_sprite.vertex_count + vertex_count > vcap || s_sprite.index_count + index_count > s_sprite.max_indices) {
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
         open_cmd_from_snapshot(&snapshot);
-        pad = 0;
     }
     /* A single emit larger than the (post-flush empty) cap can't fit — fail fast instead of overrunning staging. */
     NT_ASSERT(vertex_count <= vcap && index_count <= s_sprite.max_indices && "emit_geometry: single emit exceeds staging cap (raise custom_max_vertices / max_indices)");
-    if (pad > 0) {
-        memset(s_sprite.staging + ((size_t)s_sprite.vertex_count * s_sprite.cur_stride), 0, (size_t)pad * s_sprite.cur_stride);
-        s_sprite.vertex_count += pad;
-    }
 
     /* Sample at the region's UV centroid -- the corner of vertex 0 would
      * land at the texel boundary and bleed into neighbours under linear
@@ -1233,20 +1190,6 @@ void nt_sprite_renderer_flush(void) {
 
 // #region test accessors
 #ifdef NT_TEST_ACCESS
-void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *out) {
-    NT_ASSERT(out != NULL);
-    const nt_material_info_t *mi = nt_material_get_info(mat);
-    NT_ASSERT(mi != NULL && mi->program.id != 0);
-    nt_vertex_layout_t layout = mi->vertex_layout;
-    memset(out, 0, sizeof(*out));
-    out->stride = layout.stride;
-    out->attr_count = layout.attr_count;
-    for (uint8_t i = 0; i < layout.attr_count && i < 16; i++) {
-        out->locations[i] = layout.attrs[i].location;
-        out->offsets[i] = layout.attrs[i].offset;
-    }
-}
-
 void nt_sprite_renderer_test_last_emit_attrs(uint32_t v_idx, void *out, uint16_t bytes) {
     NT_ASSERT(out != NULL);
     NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_attrs: index out of range");

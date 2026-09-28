@@ -62,30 +62,12 @@ The optional BOX shadow is a separate quad immediately before its body, under
 the same transform, layer and scissor. Offset, spread and softness use layout
 pixels. Softness has finite support and a cubic transition, not a Gaussian
 blur. The whole shadow silhouette remains visible through transparent body
-paint. Alpha zero disables its emit. A game may select a dedicated shadow
-material or the same uber material; the engine never globally groups shadows.
+paint. Alpha zero disables its emit. The shadow quad uses the shape's own
+material, so shadow and body batch into one draw; the engine never globally
+groups shadows.
 
-Separate shadow/body was retained after a bounded WebGL2 comparison of the
-historical affine shader baseline on
-2026-09-27: Chrome 153.0.8010.53, Intel UHD through ANGLE D3D11, 1024x1024,
-20 warmups and 30 valid non-disjoint timer samples, each averaging eight
-repetitions. At 256 shapes, separate/combined GPU medians were 0.750/1.123 ms;
-at 1024 shapes, 1.061/2.112 ms. Corresponding p95 values were 0.798/1.196 ms
-and 1.130/2.350 ms. The maximum image-channel difference was 1/255. Separate
-uses two 348-byte quads per shape; combined used one enlarged quad and an
-artifact-only shader with fixed shadow uniforms. Timings include GPU clear
-and batched draws, not engine CPU submission or uploads. They do not establish
-an engine-wide speedup or performance on other GPUs. SHA-256 prefixes identify
-the measured sources: vertex `5e579c5acac85857`, vertex helper
-`c18812c6afb1d4b2`, shared fragment math `a80e9e64d3af675e`, shared radial
-`fdc098ea276e05196`, uber fragment `20b41bb1d0711de2`, combined prototype
-`5193653aad462aae`, runner `7e2770b98c3d355d6`. These measurements predate the
-projective transport and shader changes below. The historical integrated
-engine measurement for baseline `2a46fbd7` (before typed vertex transport),
-covering 14 CPU/GPU/geometry workloads, is recorded in the
-[showcase comparison](../../../examples/ui_showcase/README.md#recorded-shapes-comparison).
-That engine measurement does not repeat the artifact-only combined-shadow
-experiment or establish the same relative result for a new combined shader.
+Separate shadow/body quads are the chosen design; recorded measurements are in
+the [showcase comparison](../../../examples/ui_showcase/README.md#recorded-shapes-comparison).
 
 The RADIAL mode preserves the angle/ring domain and intersects it
 with the original rectangle using screen-space AA. Equal start/end angles
@@ -102,8 +84,10 @@ The shader takes the positive wrapped span from `angle_start` to `angle_end`;
 swapping them selects the complementary span, not a short reverse sweep.
 
 The full shape vertex is the named `nt_ui_shape_vertex_t` (84 bytes), with
-a typed `nt_ui_shape_attrs_t` tail (64 bytes). Material declares all ten
-physical fields using full-vertex offsets; the semantic map is optional.
+a typed `nt_ui_shape_attrs_t` tail (64 bytes). The material uses the exported
+`NT_UI_SHAPE_VERTEX_LAYOUT`, which declares all ten physical fields using
+full-vertex offsets; the shape asserts layout equality. The semantic map is
+optional.
 
 | Offset | Location | Storage | Meaning |
 |---:|---:|---|---|
@@ -121,12 +105,17 @@ physical fields using full-vertex offsets; the semantic map is optional.
 All lengths and projective metadata retain FLOAT32 precision. Screen emits
 use local padding and zero centers; world emits use a dimensionless expansion
 scale and an NDC center. Mode 0 selects ordinary sprites, 1 BOX, 2 RADIAL,
-3 shadow. Gradient is solid/horizontal/vertical (0/1/2); flag bits 1 and 2
-mark empty interior and projective evaluation. Control inputs are GLSL vec4,
+3 shadow. Gradient is solid/horizontal/vertical (0/1/2); in the flags byte,
+bit 0 (value 1) marks an empty interior and bit 1 (value 2) projective
+evaluation. Control inputs are GLSL vec4,
 with unnormalized byte values 0..255. Fill alpha is divided by 255. Endpoint
 and border colors are premultiplied by their own alpha; inherited opacity is
 then applied once. Gradient interpolation remains premultiplied.
 
+One fragment shader, `assets/shaders/ui_shape.frag`, serves BOX, RADIAL and
+shadow by branching on the flat per-primitive mode; the mode is uniform within a
+quad, so derivative control flow stays uniform. `assets/shaders/ui_shape_uber.frag`
+adds mode 0 for ordinary textured sprites.
 Paint and shape parameters are flat varyings; local coordinates are perspective
 correct. Shape fragments with zero coverage discard instead of writing depth.
 Mode 0 retains ordinary sprite semantics. No float color/control codec is used.
@@ -153,33 +142,29 @@ The fragment shader discards original NDC depth outside `[-1, 1]` and writes
 the recovered depth. These are paint bounds only; they do not enlarge layout,
 children or hit boxes.
 
-Uber is an explicit material choice. Its optional full default vertex is
-copied by material creation and sets mode 0. Ordinary images, slice9 and Clay
-geometry use its 64-byte default tail. Shape emits pass a complete typed tail
-override for that call. Prefix position/UV/color are always generated by the
-sprite renderer, irrespective of their default values. Materials without
-defaults require an explicit tail on every emit. Basic sprite materials declare
-20-byte vertices; ordinary sprites in the mixed uber still use 84 bytes.
-Custom quads align their base vertex to four so the shader's corner derivation
-remains valid after trimmed atlas polygons.
+Uber is an explicit material choice. Ordinary images, slice9 and Clay geometry
+pass no tail, so the sprite renderer writes a zero 64-byte tail, which selects
+mode 0. Shape emits pass a complete typed tail override for that call. Prefix
+position/UV/color are always generated by the sprite renderer. Basic sprite
+materials declare 20-byte vertices; ordinary sprites in the mixed uber still use
+84 bytes. The walker calls `nt_sprite_renderer_align_next_vertex_to_4()` before
+each shape quad so the shader's corner derivation remains valid after trimmed
+atlas polygons.
 
 Shape declarations set the narrow vendored Clay IMAGE `nt_defer_culling`
 option. Clay preserves their IMAGE command even when the logical box is
-offscreen. For screen-space UI, the walker culls transformed paint bounds
-after accounting for affine AA padding and shadow support. Layout, child
-placement and hit boxes do not expand.
-The image payload's private analytic flag selects a copied shape style rather
-than a generic custom-attribute block, without growing ordinary image payloads.
+offscreen. For screen-space UI, the walker culls the body and shadow quads
+separately by their transformed paint bounds, including affine AA padding and
+shadow support, before per-shape CPU preparation. Layout, child placement and
+hit boxes do not expand.
+The image payload's private flag `NT_UI_IMAGE_ANALYTIC_SHAPE` (bit 2, declared in
+`nt_ui.h` next to the payload) selects a copied shape style rather than a generic
+custom-attribute block, without growing ordinary image payloads.
 Public image/panel constructors accept only their documented override bits.
 
-Ordinary Clay RECTANGLE/BORDER currently keep their existing renderer. Both
-Clay and BOX support four side widths; this is not a reason to exclude a Clay
-adapter. Migration requires an explicit material choice and parity checks for
-corner degeneracy, opacity, command order and transformed AA bounds. Clay's
-background precedes children, while its border and betweenChildren separators
-follow them within the same layer. Combining those into one BOX would change
-both ordering and translucent-border compositing. Selecting an explicit shape
-does not change existing Clay rendering or force an uber material on every game.
+Ordinary Clay RECTANGLE/BORDER keep their existing tessellated renderer.
+Selecting an explicit shape does not change Clay rendering or force an uber
+material on every game.
 
 An inner highlight is skin composition, not a separate shader mode. Emit a
 transparent-fill BOX with a thin light border after the body; a uniform inset
@@ -383,11 +368,12 @@ Both modes use the same `tree_baked[layout_idx]` + per-id mirror
 
 ### Custom-attr base material
 
-The base sprite material may declare an extended typed `vertex_layout` with
-`vertex_defaults` ([Full vertex layout and defaults](../render/material.md#full-vertex-layout-and-defaults)).
-Every emit without its own tail block bakes those defaults: RECTANGLE, BORDER,
-IMAGE, rich-text inline images and the debug overlays. An `nt_ui_image_custom`
-block replaces the tail for its own emit. Custom widgets on the base handle
+The base sprite material may declare an extended typed `vertex_layout`
+([Full vertex layout](../render/material.md#full-vertex-layout)).
+Every emit without its own tail block writes a zero tail: RECTANGLE, BORDER,
+IMAGE, rich-text inline images and the debug overlays. The base shader must
+treat that zero tail as its plain mode. An `nt_ui_image_custom` block replaces
+the tail for its own emit. Custom widgets on the base handle
 can then batch with plain panels and icons instead of flushing at every
 boundary.
 

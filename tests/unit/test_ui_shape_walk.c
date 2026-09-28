@@ -14,24 +14,11 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 static nt_material_t s_body_material;
-static nt_material_t s_shadow_material;
 static bool s_export_gpu_cases;
 
 static nt_material_t make_shape_material(nt_program_t program) {
     return nt_material_create(&(nt_material_create_desc_t){
-        .vertex_layout = {.stride = sizeof(nt_ui_shape_vertex_t),
-                          .attr_count = 10,
-                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, position)},
-                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, texcoord)},
-                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, color)},
-                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.layout)},
-                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.geometry)},
-                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.widths)},
-                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.center_y)},
-                                    {.location = 8, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.endpoint)},
-                                    {.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.border)},
-                                    {.location = 10, .type = NT_VERTEX_UINT8, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.control)}}},
-        .vertex_defaults = &(const nt_ui_shape_vertex_t){0},
+        .vertex_layout = NT_UI_SHAPE_VERTEX_LAYOUT,
         .program = program,
         .textures = {{.name = "u_texture"}},
         .texture_count = 1,
@@ -41,14 +28,10 @@ static nt_material_t make_shape_material(nt_program_t program) {
 void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     s_body_material = make_shape_material(nt_material_get_info(s_fx.sprite_material)->program);
-    const nt_program_t shadow_program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
-    nt_gfx_fake_set_samplers(NULL, 0);
-    s_shadow_material = make_shape_material(shadow_program);
     nt_gfx_fake_draw_trace_reset(true);
 }
 
 void tearDown(void) {
-    nt_material_destroy(s_shadow_material);
     nt_material_destroy(s_body_material);
     ui_walker_fixture_shutdown(&s_fx);
 }
@@ -104,14 +87,6 @@ static void test_box_layout_and_asymmetric_radii(void) {
     emit_box(&style, NULL);
     end_and_walk();
 
-    nt_sprite_layout_info_t layout;
-    nt_sprite_renderer_test_layout(s_body_material, &layout);
-    TEST_ASSERT_EQUAL_UINT32(84, layout.stride);
-    TEST_ASSERT_EQUAL_UINT32(10, layout.attr_count);
-    for (uint32_t i = 3; i < 7; ++i) {
-        TEST_ASSERT_EQUAL_UINT32(i + 1U, layout.locations[i]);
-        TEST_ASSERT_EQUAL_UINT32(20U + ((i - 3U) * 16U), layout.offsets[i]);
-    }
     const nt_ui_shape_attrs_t expected = {
         .layout = {200, 60, 1, 0}, .geometry = {40, 40, 10, 10}, .widths = {0, 0, 0, 0}, .center_y = 0, .endpoint = {255, 255, 255, 255}, .border = {0, 0, 0, 0}, .control = {255, 1, 0, 0}};
     assert_last_attrs(&expected);
@@ -264,17 +239,14 @@ static void test_radial_parameters_and_vertical_gradient_reach_vertices(void) {
     assert_last_attrs(&expected);
 }
 
-static void test_shadow_precedes_body_with_distinct_materials(void) {
+static void test_shadow_precedes_body_in_one_draw(void) {
     nt_ui_shape_style_t style = box_style();
-    style.shadow = (nt_ui_shape_shadow_t){.material = s_shadow_material, .color = 0x80402010U, .offset_x = 4, .offset_y = 8, .spread = 2, .softness = 3};
+    style.shadow = (nt_ui_shape_shadow_t){.color = 0x80402010U, .offset_x = 4, .offset_y = 8, .spread = 2, .softness = 3};
     begin_frame();
     emit_box(&style, NULL);
     end_and_walk();
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(s_shadow_material)->program.id, nt_gfx_fake_draw_trace_at(0).program.id);
-    TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(s_body_material)->program.id, nt_gfx_fake_draw_trace_at(1).program.id);
-    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(0).num_indices);
-    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(1).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(12, nt_gfx_fake_draw_trace_at(0).num_indices);
     const nt_ui_shape_attrs_t expected = {
         .layout = {200, 60, 1, 0}, .geometry = {40, 40, 10, 10}, .widths = {0, 0, 0, 0}, .center_y = 0, .endpoint = {255, 255, 255, 255}, .border = {0, 0, 0, 0}, .control = {255, 1, 0, 0}};
     assert_last_attrs(&expected);
@@ -283,13 +255,12 @@ static void test_shadow_precedes_body_with_distinct_materials(void) {
 static void test_transparent_body_keeps_only_visible_shadow(void) {
     nt_ui_shape_style_t style = box_style();
     style.paint.color0 = 0;
-    style.shadow = (nt_ui_shape_shadow_t){.material = s_shadow_material, .color = 0x80402010U, .spread = 2, .softness = 3};
+    style.shadow = (nt_ui_shape_shadow_t){.color = 0x80402010U, .spread = 2, .softness = 3};
     begin_frame();
     emit_box(&style, NULL);
     end_and_walk();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(0).num_indices);
-    TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(s_shadow_material)->program.id, nt_gfx_fake_draw_trace_at(0).program.id);
     const nt_ui_shape_attrs_t expected = {
         .layout = {200, 60, 6, 0}, .geometry = {40, 40, 10, 10}, .widths = {2, 3, 5, 0}, .center_y = 0, .endpoint = {0, 0, 0, 0}, .border = {0, 0, 0, 0}, .control = {128, 3, 0, 0}};
     assert_last_attrs(&expected);
@@ -317,7 +288,7 @@ static void test_transparent_shape_container_keeps_visible_children(void) {
 static void test_uber_batches_shadow_shapes_and_plain_rect_without_attr_leak(void) {
     nt_ui_set_sprite_material(s_fx.ctx, s_body_material);
     nt_ui_shape_style_t style = box_style();
-    style.shadow = (nt_ui_shape_shadow_t){.material = s_body_material, .color = 0xFF000000U, .spread = 2, .softness = 3};
+    style.shadow = (nt_ui_shape_shadow_t){.color = 0xFF000000U, .spread = 2, .softness = 3};
     begin_frame();
     CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(100)}}}) {
         emit_box(&style, NULL);
@@ -353,12 +324,15 @@ static void test_offscreen_layout_transformed_into_view_still_draws(void) {
     TEST_ASSERT_TRUE(position[0] == -1.0F && position[1] == 551.0F);
 }
 
-static void assert_skipped_custom_image_preserves_plain_defaults(nt_resource_t atlas, uint8_t geom_mode, float width) {
+static void test_unready_custom_region_does_not_leak_attrs_to_plain_rect(void) {
+    const nt_resource_t atlas = nt_resource_request((nt_hash64_t){.value = 0x518BADU}, NT_ASSET_ATLAS);
+    TEST_ASSERT_NOT_EQUAL(0, atlas.id);
+    TEST_ASSERT_FALSE(nt_resource_is_ready(atlas));
     nt_ui_set_sprite_material(s_fx.ctx, s_body_material);
-    const nt_ui_image_custom_block_t block = {.custom_attrs = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, .custom_bytes = 64, .geom_mode = geom_mode};
+    const nt_ui_image_custom_block_t block = {.custom_attrs = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, .custom_bytes = 64};
     const nt_ui_image_payload_t payload = {.atlas = atlas, .region_index = s_fx.atlas.white_region_idx, .slice9_scale = 1.0F, .material = s_body_material, .custom = &block};
     Clay_RenderCommand commands[2] = {
-        {.commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE, .boundingBox = {10, 10, width, 20}, .renderData.image.imageData = (void *)&payload},
+        {.commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE, .boundingBox = {10, 10, 20, 20}, .renderData.image.imageData = (void *)&payload},
         {.commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE, .boundingBox = {40, 10, 20, 20}, .renderData.rectangle.backgroundColor = {255, 0, 0, 128}},
     };
     ui_walker_fixture_inject_cmds(&s_fx, commands, 2, 2);
@@ -374,18 +348,9 @@ static void assert_skipped_custom_image_preserves_plain_defaults(nt_resource_t a
     TEST_ASSERT_EQUAL_UINT8(128, color[3]);
 }
 
-static void test_zero_width_custom_geometry_does_not_leak_attrs_to_plain_rect(void) { assert_skipped_custom_image_preserves_plain_defaults(s_fx.atlas.handle, NT_UI_IMAGE_GEOM_GEOMETRY, 0.0F); }
-
-static void test_unready_custom_region_does_not_leak_attrs_to_plain_rect(void) {
-    const nt_resource_t atlas = nt_resource_request((nt_hash64_t){.value = 0x518BADU}, NT_ASSET_ATLAS);
-    TEST_ASSERT_NOT_EQUAL(0, atlas.id);
-    TEST_ASSERT_FALSE(nt_resource_is_ready(atlas));
-    assert_skipped_custom_image_preserves_plain_defaults(atlas, NT_UI_IMAGE_GEOM_REGION, 20.0F);
-}
-
 static void test_shadow_only_visible_keeps_outset_and_offset(void) {
     nt_ui_shape_style_t style = box_style();
-    style.shadow = (nt_ui_shape_shadow_t){.material = s_shadow_material, .color = 0x80402010U, .offset_x = 4, .offset_y = -150, .spread = 2, .softness = 3};
+    style.shadow = (nt_ui_shape_shadow_t){.color = 0x80402010U, .offset_x = 4, .offset_y = -150, .spread = 2, .softness = 3};
     begin_frame();
     CLAY({.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM, .sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(1000)}}}) {
         CLAY({.layout.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(700)}}) {}
@@ -393,7 +358,6 @@ static void test_shadow_only_visible_keeps_outset_and_offset(void) {
     }
     end_and_walk();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(s_shadow_material)->program.id, nt_gfx_fake_draw_trace_at(0).program.id);
     const nt_ui_shape_attrs_t expected = {
         .layout = {200, 60, 6, 0}, .geometry = {40, 40, 10, 10}, .widths = {2, 3, 5, 0}, .center_y = 0, .endpoint = {0, 0, 0, 0}, .border = {0, 0, 0, 0}, .control = {128, 3, 0, 0}};
     assert_last_attrs(&expected);
@@ -410,7 +374,7 @@ static void test_shadow_only_visible_keeps_outset_and_offset(void) {
 
 static void test_transformed_paint_outside_view_is_culled(void) {
     nt_ui_shape_style_t style = box_style();
-    style.shadow = (nt_ui_shape_shadow_t){.material = s_shadow_material, .color = 0xFF000000U, .spread = 2, .softness = 3};
+    style.shadow = (nt_ui_shape_shadow_t){.color = 0xFF000000U, .spread = 2, .softness = 3};
     nt_ui_transform_t transform = nt_ui_transform_defaults();
     transform.offset_x = 1000.0F;
     begin_frame();
@@ -681,13 +645,12 @@ static void test_projective_shadow_can_be_visible_without_body(void) {
     begin_frame();
     nt_ui_set_view_proj(s_fx.ctx, vp);
     nt_ui_shape_style_t style = box_style();
-    style.shadow = (nt_ui_shape_shadow_t){.material = s_shadow_material, .color = 0x80402010U, .offset_x = 400, .spread = 2, .softness = 3};
+    style.shadow = (nt_ui_shape_shadow_t){.color = 0x80402010U, .offset_x = 400, .spread = 2, .softness = 3};
     emit_box(&style, NULL);
     nt_ui_end(s_fx.ctx);
     nt_ui_walk(s_fx.ctx, &target);
     export_projective_case("shadow-only-perspective", vp, &target, true, NULL, NULL);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(s_shadow_material)->program.id, nt_gfx_fake_draw_trace_at(0).program.id);
     nt_ui_shape_attrs_t attrs;
     nt_sprite_renderer_test_last_emit_attrs(0, &attrs, sizeof(attrs));
     TEST_ASSERT_TRUE(isfinite(attrs.layout[2]) && attrs.layout[2] > 1.0F);
@@ -703,26 +666,16 @@ static void test_projective_shadow_can_be_visible_without_body(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_typed_defaults_override_and_skip_own_exact_bytes(void) {
-    nt_ui_shape_vertex_t source = {.position = {NAN, INFINITY, -99},
-                                   .texcoord = {123, 456},
-                                   .color = {1, 2, 3, 4},
-                                   .attrs = {.layout = {17, 23, 0.25F, -2},
-                                             .geometry = {0.1F, 0.25F, 8, 13},
-                                             .widths = {0, 0.5F, 3, 7},
-                                             .center_y = 0.125F,
-                                             .endpoint = {0, 127, 128, 255},
-                                             .border = {255, 128, 127, 0},
-                                             .control = {255, 0, 2, 0}}};
-    const nt_ui_shape_attrs_t defaults = source.attrs;
-    nt_material_create_desc_t desc = {.program = nt_material_get_info(s_body_material)->program,
-                                      .vertex_layout = nt_material_get_info(s_body_material)->vertex_layout,
-                                      .vertex_defaults = &source,
-                                      .textures = {{.name = "u_texture"}},
-                                      .texture_count = 1};
-    const nt_material_t material = nt_material_create(&desc);
-    memset(&source, 0xEE, sizeof(source));
-    nt_ui_shape_attrs_t override = defaults;
+static void test_zero_tail_override_and_skip_own_exact_bytes(void) {
+    const nt_ui_shape_attrs_t defaults = {0};
+    const nt_material_t material = make_shape_material(nt_material_get_info(s_body_material)->program);
+    nt_ui_shape_attrs_t override = {.layout = {17, 23, 0.25F, -2},
+                                    .geometry = {0.1F, 0.25F, 8, 13},
+                                    .widths = {0, 0.5F, 3, 7},
+                                    .center_y = 0.125F,
+                                    .endpoint = {0, 127, 128, 255},
+                                    .border = {255, 128, 127, 0},
+                                    .control = {255, 0, 2, 0}};
     override.layout[0] = 71;
     override.endpoint[0] = 255;
     override.border[3] = 128;
@@ -755,10 +708,8 @@ static void test_typed_defaults_override_and_skip_own_exact_bytes(void) {
         nt_sprite_renderer_test_last_emit_texcoord(0, uv);
         TEST_ASSERT_TRUE(actual_position[0] == -0.5F && actual_position[1] == -0.5F && actual_position[2] == 0.0F);
         TEST_ASSERT_EQUAL_UINT8_ARRAY(((const uint8_t[]){0x44, 0x88, 0xCC, 0x80}), color, 4);
-        TEST_ASSERT_TRUE(uv[0] != 123U && uv[1] != 456U);
         export_projective_case(steps[step], identity, &target, true, steps[step], expected);
     }
-    TEST_ASSERT_EQUAL_MEMORY(&defaults, nt_material_get_info(material)->vertex_defaults + 20, sizeof(defaults));
     nt_material_destroy(material);
 }
 
@@ -767,7 +718,7 @@ int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_typed_paint_with_asymmetric_widths_and_gradient);
     RUN_TEST(test_screen_shape_culling_uses_projection_extent_with_offset_viewport);
-    RUN_TEST(test_typed_defaults_override_and_skip_own_exact_bytes);
+    RUN_TEST(test_zero_tail_override_and_skip_own_exact_bytes);
     RUN_TEST(test_box_layout_and_asymmetric_radii);
     RUN_TEST(test_leaf_without_declaration_fills_parent_and_emits);
     RUN_TEST(test_screen_shape_cull_uses_viewport_y_origin);
@@ -779,11 +730,10 @@ int main(int argc, char **argv) {
     RUN_TEST(test_overlapping_corners_keep_nonempty_interior);
     RUN_TEST(test_paint_alpha_stays_separate_from_inherited_opacity);
     RUN_TEST(test_radial_parameters_and_vertical_gradient_reach_vertices);
-    RUN_TEST(test_shadow_precedes_body_with_distinct_materials);
+    RUN_TEST(test_shadow_precedes_body_in_one_draw);
     RUN_TEST(test_transparent_body_keeps_only_visible_shadow);
     RUN_TEST(test_transparent_shape_container_keeps_visible_children);
     RUN_TEST(test_uber_batches_shadow_shapes_and_plain_rect_without_attr_leak);
-    RUN_TEST(test_zero_width_custom_geometry_does_not_leak_attrs_to_plain_rect);
     RUN_TEST(test_unready_custom_region_does_not_leak_attrs_to_plain_rect);
     RUN_TEST(test_offscreen_layout_transformed_into_view_still_draws);
     RUN_TEST(test_shadow_only_visible_keeps_outset_and_offset);

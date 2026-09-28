@@ -95,17 +95,13 @@ typedef struct {
     float fb_offset[2];
 } nt_ui_target_t;
 
-/* Per-widget custom per-vertex block — scratch-allocated, referenced by pointer only
- * for custom-attr widgets so a plain image keeps the payload small. Untyped: the bound
- * material maps semantic names to locations and its vertex_layout maps locations to bytes.
- * The walker injects FLOAT4 a_layout/a_uvrect and FLOAT a_aspect by name;
- * other bytes pass through unchanged.
- * injection vocabulary: docs/spec/ui/radial-widgets.md
- * "Radial widgets & the custom-attr image path" */
+/* Per-widget custom per-vertex tail — scratch-allocated, referenced by pointer only
+ * for custom-attr widgets so a plain image keeps the payload small. Bytes pass through
+ * unchanged except the optional walker-written FLOAT bbox aspect (width/height). */
 typedef struct {
     uint8_t custom_attrs[64];
-    uint8_t custom_bytes; /* > 0; the material declares this many per-vertex custom bytes. */
-    uint8_t geom_mode;    /* NT_UI_IMAGE_GEOM_* — bbox rasterization strategy (not widget identity) */
+    uint8_t custom_bytes;  /* > 0; the material declares this many per-vertex custom bytes. */
+    uint8_t aspect_offset; /* vertex byte offset of the FLOAT aspect; 0 = none */
 } nt_ui_image_custom_block_t;
 
 /* Pointed to by Clay_ImageElementConfig.imageData; must outlive the matching nt_ui_walk.
@@ -118,7 +114,7 @@ typedef struct {
     float origin_y;
     float slice9_scale; /* multiplies atlas/override slice9 borders; MUST be finite > 0 (walker asserts). */
     uint8_t flip_bits;
-    uint8_t flags; /* Image overrides; bit 2 selects the engine-owned analytic payload. */
+    uint8_t flags; /* Image overrides (nt_ui_image.h) | NT_UI_IMAGE_ANALYTIC_SHAPE */
     /* Optional per-element material override. .id==0 = use the walker's bound base
      * material; re-bound only when .id differs, so same-material elements batch. */
     nt_material_t material;
@@ -129,14 +125,10 @@ typedef struct {
         const struct nt_ui_shape_payload *shape;
     };
 } nt_ui_image_payload_t;
+/* Engine-owned payload flag; public image flags in nt_ui_image.h stay below this bit. */
+#define NT_UI_IMAGE_ANALYTIC_SHAPE (1U << 2)
 /* Non-pointer prefix is 36 B; `custom` is pointer-aligned and adds sizeof(void*). */
 _Static_assert(sizeof(nt_ui_image_payload_t) == ((36U + (sizeof(void *) - 1U)) & ~(sizeof(void *) - 1U)) + sizeof(void *), "nt_ui_image_payload_t stable ABI (40 B wasm / 48 B native; was 100 B)");
-
-/* geom_mode: bbox rasterization when custom_bytes > 0. REGION = textured emit (real
- * atlas art). GEOMETRY = clean white-region bbox quad for SDF shaders that derive a
- * [-1,1] coord from gl_VertexID&3. See spec "Radial widgets & the custom-attr image path". */
-#define NT_UI_IMAGE_GEOM_REGION 0U
-#define NT_UI_IMAGE_GEOM_GEOMETRY 1U
 
 /* Frame snapshot passed to the CUSTOM handler.
  *   ctx        — the UI context (read-only): lets a handler read state/material defaults + viewport

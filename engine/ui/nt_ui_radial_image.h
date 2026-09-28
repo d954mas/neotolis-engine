@@ -66,6 +66,12 @@ static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void)
     };
 }
 
+/* Radial-image material vertex_layout: sprite prefix, a_radial (loc 4, @20), a_tint (loc 5, @36),
+ * a_source_uv (loc 6, @56, renderer-written) and a_aspect (loc 7, @52, walker-written). The
+ * material also sets source_uv_offset = NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET. */
+extern const nt_vertex_layout_t NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT;
+#define NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET 56U
+
 /* Material param the shader reads, set once on the material by the game at creation
  * (one material per reveal mode). u_reveal_mode = {mode, dim_factor, 0, 0}. TINT is
  * per-widget (style->tint_color_packed/tint_strength -> a_tint), not a material param. */

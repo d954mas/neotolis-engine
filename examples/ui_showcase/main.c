@@ -549,14 +549,11 @@ static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 /* One radial-image material per reveal mode keeps u_reveal_mode stable. */
 static nt_material_t s_shape_material, s_shape_uber_material, s_shape_active_material;
-static nt_material_t s_shape_radial_material, s_shape_shadow_material;
-static nt_material_t s_shape_active_radial_material, s_shape_active_shadow_material;
 static nt_material_t s_radial_image_material[4];     /* indexed by nt_ui_radial_reveal_mode_t */
 static nt_material_t s_radial_image_packed_material; /* radial-image on the SHARED atlas (packed sub-region proof) */
 static nt_program_ref_t s_sprite_program;
 static nt_program_ref_t s_text_program;
 static nt_program_ref_t s_shape_program, s_shape_uber_program;
-static nt_program_ref_t s_shape_radial_program, s_shape_shadow_program;
 static nt_program_ref_t s_radial_image_program; /* shared by all five radial-image materials */
 
 /* Links each pair once both its stages are ready. The programs are ours:
@@ -573,12 +570,6 @@ static void link_programs(void) {
     }
     if (nt_program_ref_update(&s_shape_uber_program)) {
         nt_material_set_program(s_shape_uber_material, s_shape_uber_program.program);
-    }
-    if (nt_program_ref_update(&s_shape_radial_program)) {
-        nt_material_set_program(s_shape_radial_material, s_shape_radial_program.program);
-    }
-    if (nt_program_ref_update(&s_shape_shadow_program)) {
-        nt_material_set_program(s_shape_shadow_material, s_shape_shadow_program.program);
     }
     if (nt_program_ref_update(&s_radial_image_program)) {
         for (int m = 0; m < 4; ++m) {
@@ -1301,7 +1292,7 @@ static bool shape_demo_button(nt_ui_context_t *ctx, uint32_t id, bool procedural
             .kind = NT_UI_SHAPE_BOX,
             .box = {12, 12, 12, 12},
             .paint = {.color0 = color, .color1 = 0xFF734319U, .border_color = 0xFFF4D4AAU, .border_widths = {1, 1, 1, 1}, .gradient = NT_UI_SHAPE_VERTICAL},
-            .shadow = {.material = s_shape_active_shadow_material, .color = 0x70000000U, .offset_y = 4, .softness = 5},
+            .shadow = {.color = 0x70000000U, .offset_y = 4, .softness = 5},
         };
         nt_ui_shape_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &skin,
                           &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}});
@@ -1316,10 +1307,7 @@ static bool shape_demo_button(nt_ui_context_t *ctx, uint32_t id, bool procedural
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void render_shapes(nt_ui_context_t *ctx, tab_state_t *st) {
     const nt_material_info_t *info = nt_material_get_info(s_shape_active_material);
-    const nt_material_info_t *radial_info = nt_material_get_info(s_shape_active_radial_material);
-    const nt_material_info_t *shadow_info = nt_material_get_info(s_shape_active_shadow_material);
-    if (info == NULL || radial_info == NULL || shadow_info == NULL || !nt_gfx_program_ready(info->program) || !nt_gfx_program_ready(radial_info->program) ||
-        !nt_gfx_program_ready(shadow_info->program)) {
+    if (info == NULL || !nt_gfx_program_ready(info->program)) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Loading shape shaders...", g_current->caption);
         return;
     }
@@ -1396,7 +1384,7 @@ static void render_shapes(nt_ui_context_t *ctx, tab_state_t *st) {
             card.paint.color1 = 0xFFBA63E9U;
         }
         if (st->shapes.workload_effect >= 3) {
-            card.shadow = (nt_ui_shape_shadow_t){.material = s_shape_active_shadow_material, .color = 0x90000000U, .offset_x = 1, .offset_y = 1, .softness = 2};
+            card.shadow = (nt_ui_shape_shadow_t){.color = 0x90000000U, .offset_x = 1, .offset_y = 1, .softness = 2};
         }
         CLAY({.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2}}) {
             for (int y = 0; y < 16; ++y) {
@@ -1481,14 +1469,13 @@ static void render_shapes(nt_ui_context_t *ctx, tab_state_t *st) {
                     break;
                 case 9:
                 case 10:
-                    shape.shadow = (nt_ui_shape_shadow_t){.material = s_shape_active_shadow_material, .color = 0xB0000000U, .offset_x = 5, .offset_y = 6, .spread = 2, .softness = 8};
+                    shape.shadow = (nt_ui_shape_shadow_t){.color = 0xB0000000U, .offset_x = 5, .offset_y = 6, .spread = 2, .softness = 8};
                     if (index == 10) {
                         shape.paint.color0 = 0x6060E8E0U;
                     }
                     break;
                 case 11:
                     shape.kind = NT_UI_SHAPE_RADIAL;
-                    shape.material = s_shape_active_radial_material;
                     shape.radial.angle_start = 0.0F;
                     shape.radial.angle_end = 4.7F;
                     shape.radial.inner_radius_norm = 0.65F;
@@ -2251,7 +2238,7 @@ static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t 
     static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}};
     nt_ui_shape_style_t rs = nt_ui_shape_style_defaults();
     rs.kind = NT_UI_SHAPE_RADIAL;
-    rs.material = s_shape_radial_material;
+    rs.material = s_shape_material;
     const float c = st->radial.cooldown;                             /* 0..1 looping */
     const float top = -0.5F * NT_PI;                                 /* 12 o'clock in Y-down UI */
     const float tri = (c < 0.5F) ? (c * 2.0F) : (2.0F - (c * 2.0F)); /* 0..1..0 */
@@ -2282,7 +2269,7 @@ static void render_radial_cardinal_row(nt_ui_context_t *ctx) {
     static const Clay_ElementDeclaration pair = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 4}};
     nt_ui_shape_style_t shape = nt_ui_shape_style_defaults();
     shape.kind = NT_UI_SHAPE_RADIAL;
-    shape.material = s_shape_radial_material;
+    shape.material = s_shape_material;
     nt_ui_radial_image_style_t image = nt_ui_radial_image_style_defaults();
     image.material = s_radial_image_material[NT_UI_RADIAL_REVEAL_HIDE];
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cardinal starts: shape (left) + image (right), each sweeping 90 degrees clockwise.", g_current->caption);
@@ -2305,7 +2292,7 @@ static void render_radial_cardinal_row(nt_ui_context_t *ctx) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo render aggregates several CLAY regions
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
-    const nt_material_info_t *radial_info = nt_material_get_info(s_shape_radial_material);
+    const nt_material_info_t *radial_info = nt_material_get_info(s_shape_material);
     if (!radial_info || !nt_gfx_program_ready(radial_info->program)) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "radial materials not ready", g_current->caption);
         return;
@@ -2313,7 +2300,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
 
     nt_ui_shape_style_t rstyle = nt_ui_shape_style_defaults();
     rstyle.kind = NT_UI_SHAPE_RADIAL;
-    rstyle.material = s_shape_radial_material;
+    rstyle.material = s_shape_material;
 
     nt_ui_shape_style_t ring_style = rstyle;
     ring_style.radial.inner_radius_norm = 0.55F; /* carve a ring (cooldown-meter look) */
@@ -2904,7 +2891,7 @@ static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st) {
 
     nt_ui_shape_style_t rs = nt_ui_shape_style_defaults();
     rs.kind = NT_UI_SHAPE_RADIAL;
-    rs.material = st->base_sdf ? s_shape_uber_material : s_shape_radial_material;
+    rs.material = st->base_sdf ? s_shape_uber_material : s_shape_material;
     /* Shapes require a linked program; skip declaration until it links. */
     const nt_material_info_t *rs_info = nt_material_get_info(rs.material);
     if (!rs_info || !nt_gfx_program_ready(rs_info->program)) {
@@ -4044,8 +4031,6 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_program_ref_drop(&s_shape_program);
         nt_program_ref_drop(&s_shape_uber_program);
-        nt_program_ref_drop(&s_shape_radial_program);
-        nt_program_ref_drop(&s_shape_shadow_program);
         nt_program_ref_drop(&s_radial_image_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         /* Force a style re-init so memoized atlas region indices refresh after GL restore. */
@@ -4185,8 +4170,6 @@ static void frame(void) {
         const bool use_shape_uber = g_tabs[s_active_tab].render == render_shapes && s_state.shapes.mixed_material && shape_uber_ready;
         const bool use_base_uber = g_tabs[s_active_tab].render == render_base_material && s_state.base_sdf && shape_uber_ready;
         s_shape_active_material = use_shape_uber ? s_shape_uber_material : s_shape_material;
-        s_shape_active_radial_material = use_shape_uber ? s_shape_uber_material : s_shape_radial_material;
-        s_shape_active_shadow_material = use_shape_uber ? s_shape_uber_material : s_shape_shadow_material;
         nt_ui_set_sprite_material(s_ctx, use_shape_uber || use_base_uber ? s_shape_uber_material : s_sprite_material);
 
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
@@ -4395,10 +4378,6 @@ int main(int argc, char *argv[]) {
     s_shape_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_FRAG, NT_ASSET_SHADER_CODE);
     s_shape_uber_program.vs = s_shape_program.vs;
     s_shape_uber_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_UBER_FRAG, NT_ASSET_SHADER_CODE);
-    s_shape_radial_program.vs = s_shape_program.vs;
-    s_shape_radial_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
-    s_shape_shadow_program.vs = s_shape_program.vs;
-    s_shape_shadow_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_SHADOW_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_image_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
     s_radial_image_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_art_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART, NT_ASSET_ATLAS);
@@ -4411,11 +4390,7 @@ int main(int argc, char *argv[]) {
     s_rich_gold_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
-        .vertex_layout = {.stride = 20,
-                          .attr_count = 3,
-                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
-                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16}}},
+        .vertex_layout = NT_SPRITE_VERTEX_LAYOUT,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -4435,41 +4410,14 @@ int main(int argc, char *argv[]) {
     });
 
     nt_material_create_desc_t shape_desc = {
-        .vertex_layout = {.stride = sizeof(nt_ui_shape_vertex_t),
-                          .attr_count = 10,
-                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, position)},
-                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, texcoord)},
-                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, color)},
-                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.layout)},
-                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.geometry)},
-                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.widths)},
-                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.center_y)},
-                                    {.location = 8, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.endpoint)},
-                                    {.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.border)},
-                                    {.location = 10, .type = NT_VERTEX_UINT8, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.control)}}},
+        .vertex_layout = NT_UI_SHAPE_VERTEX_LAYOUT,
         .blend = nt_blend_alpha_premultiplied(),
         .cull_mode = NT_CULL_NONE,
         .label = "ui_showcase_shape",
     };
     s_shape_material = nt_material_create(&shape_desc);
-    shape_desc.label = "ui_showcase_shape_radial";
-    s_shape_radial_material = nt_material_create(&shape_desc);
-    shape_desc.label = "ui_showcase_shape_shadow";
-    s_shape_shadow_material = nt_material_create(&shape_desc);
     s_shape_uber_material = nt_material_create(&(nt_material_create_desc_t){
-        .vertex_layout = {.stride = sizeof(nt_ui_shape_vertex_t),
-                          .attr_count = 10,
-                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, position)},
-                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, texcoord)},
-                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, color)},
-                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.layout)},
-                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.geometry)},
-                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.widths)},
-                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.center_y)},
-                                    {.location = 8, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.endpoint)},
-                                    {.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.border)},
-                                    {.location = 10, .type = NT_VERTEX_UINT8, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.control)}}},
-        .vertex_defaults = &(const nt_ui_shape_vertex_t){0},
+        .vertex_layout = NT_UI_SHAPE_VERTEX_LAYOUT,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -4479,30 +4427,18 @@ int main(int argc, char *argv[]) {
 
     /* One radial-image material per reveal mode: u_reveal_mode (mode + dim_factor) is baked at
      * creation. The TINT is per-widget now (a_tint @ loc 5), so the TINT material serves every
-     * tint color from one batch. The renderer fills a_source_uv; the walker fills a_aspect. */
+     * tint color from one batch. The renderer fills a_source_uv; the widget has the walker fill a_aspect. */
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
-            .vertex_layout = {.stride = 64,
-                              .attr_count = 7,
-                              .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                                        {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
-                                        {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
-                                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
-                                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
-                                        {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 52},
-                                        {.location = 6, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 56}}},
+            .vertex_layout = NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT,
+            .source_uv_offset = NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET,
             .textures = {{.name = "u_texture", .resource = s_radial_art_tex_handle}},
             .texture_count = 1,
             .blend = nt_blend_alpha_premultiplied(),
             .depth_test = false,
             .depth_write = false,
             .cull_mode = NT_CULL_NONE,
-            .attr_map[0] = {.stream_name = "a_radial", .location = 4},
-            .attr_map[1] = {.stream_name = "a_tint", .location = 5},
-            .attr_map[2] = {.stream_name = "a_source_uv", .location = 6},
-            .attr_map[3] = {.stream_name = "a_aspect", .location = 7},
-            .attr_map_count = 4,
             .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
             .param_count = 1,
             .label = k_radial_image_labels[m],
@@ -4513,26 +4449,14 @@ int main(int argc, char *argv[]) {
      * texture (not the full-bleed radial_art). Reveals a real packed sub-region (the bunny
      * icon), exercising source-local wedge coordinates. DESATURATE mode. */
     s_radial_image_packed_material = nt_material_create(&(nt_material_create_desc_t){
-        .vertex_layout = {.stride = 64,
-                          .attr_count = 7,
-                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
-                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
-                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
-                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
-                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 52},
-                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 56}}},
+        .vertex_layout = NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT,
+        .source_uv_offset = NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
-        .attr_map[0] = {.stream_name = "a_radial", .location = 4},
-        .attr_map[1] = {.stream_name = "a_tint", .location = 5},
-        .attr_map[2] = {.stream_name = "a_source_uv", .location = 6},
-        .attr_map[3] = {.stream_name = "a_aspect", .location = 7},
-        .attr_map_count = 4,
         .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)NT_UI_RADIAL_REVEAL_DESATURATE, 0.4F, 0.0F, 0.0F}},
         .param_count = 1,
         .label = "ui_showcase_radial_img_packed",
@@ -4588,8 +4512,6 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_text_material);
     nt_material_destroy(s_shape_material);
     nt_material_destroy(s_shape_uber_material);
-    nt_material_destroy(s_shape_radial_material);
-    nt_material_destroy(s_shape_shadow_material);
     for (int m = 0; m < 4; ++m) {
         nt_material_destroy(s_radial_image_material[m]);
     }
@@ -4598,8 +4520,6 @@ int main(int argc, char *argv[]) {
     nt_program_ref_drop(&s_text_program);
     nt_program_ref_drop(&s_shape_program);
     nt_program_ref_drop(&s_shape_uber_program);
-    nt_program_ref_drop(&s_shape_radial_program);
-    nt_program_ref_drop(&s_shape_shadow_program);
     nt_program_ref_drop(&s_radial_image_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();

@@ -164,7 +164,7 @@ The composed tint (the run's `<color>` × any per-atom effect tint) is packed to
 the standard **u8** sprite tint. The block's **image material** textures the
 region and the self-emit folds parent opacity into tint alpha exactly like rich
 TEXT. The material may have the plain 20-byte sprite layout or an extended typed
-layout with `vertex_defaults`; inline images pass no tail override. There is no
+layout; inline images pass no tail override, so their tail is zero. There is no
 engine-provided rich material, float4 `a_tint`, or per-image custom block. An
 unset style text or image material resolves to the ctx default at each walk, so
 swapping the base between walks changes the material drawn. `set_material` is

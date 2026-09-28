@@ -59,10 +59,11 @@ lighten and writes the index on click).
     batched grid** that proves N radials sharing one material stay one draw call;
     see the **Radial controls** + **Radial visual-QA protocol** below.
 14. **Shapes** - analytic BOX/RADIAL shapes, asymmetric borders, gradients and
-    shadows with dedicated or shared material batching; see the **Shapes tab** below.
+    shadows with a dedicated shape material or a shared uber material; see the
+    **Shapes tab** below.
 15. **Base Material** - the same typed shape uber material for the whole UI:
-    plain images use its zeroed vertex defaults, while SDF shapes provide their
-    own attributes. The checkbox switches to a plain image material plus a
+    plain images get the renderer's zero tail (mode 0), while SDF shapes provide
+    their own attributes. The checkbox switches to a plain image material plus a
     separate radial shape material; the `draw calls` readout shows the difference.
 16. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
     block (`nt_ui_rich_text` + `nt_ui_rich_text_markup`), authored **two ways**:
@@ -103,9 +104,10 @@ horizontal/vertical gradients, transparent paint, soft shadow, a radial ring,
 and an inner highlight composed from an inset transparent-fill BOX. Scroll down for mixed atlas/slice9/Clay/shape ordering and a rotated,
 nonuniformly scaled shape container with inherited opacity and child text.
 
-**Mixed sprite + shape material** switches between dedicated BOX/RADIAL/SHADOW
-programs and one uber material. The latter supplies neutral material attribute
-defaults to ordinary sprites. The change takes effect on the next frame.
+**Mixed sprite + shape material** switches between a plain sprite material plus
+one dedicated shape material (`ui_shape.frag`, serving BOX, RADIAL and shadow)
+and one uber material for everything. Ordinary sprites on the uber material get
+a zero tail, which selects mode 0. The change takes effect on the next frame.
 
 **Measurement grid (256 cards)** replaces the gallery with a 16×16 grid of
 28×20 layout-pixel cards at 2-pixel spacing. **Clay** and **SDF** use the same
@@ -140,6 +142,26 @@ these windows do not label samples with scene identities automatically.
 
 ### Recorded Shapes comparison
 
+**Shadow/body quad split (artifact-only WebGL2 comparison).** On 2026-09-27,
+separate shadow and body quads were compared with one combined quad using the
+historical affine shader baseline: Chrome 153.0.8010.53, Intel UHD through
+ANGLE D3D11, 1024x1024, 20 warmups and 30 valid non-disjoint timer samples,
+each averaging eight repetitions. At 256 shapes, separate/combined GPU medians
+were 0.750/1.123 ms; at 1024 shapes, 1.061/2.112 ms. Corresponding p95 values
+were 0.798/1.196 ms and 1.130/2.350 ms. The maximum image-channel difference was
+1/255. Separate used two 348-byte quads per shape; combined used one enlarged
+quad and an artifact-only shader with fixed shadow uniforms. Timings include GPU
+clear and batched draws, not engine CPU submission or uploads. They do not
+establish an engine-wide speedup or performance on other GPUs. SHA-256 prefixes
+identify the measured sources: vertex `5e579c5acac85857`, vertex helper
+`c18812c6afb1d4b2`, shared fragment math `a80e9e64d3af675e`, shared radial
+`fdc098ea276e05196`, uber fragment `20b41bb1d0711de2`, combined prototype
+`5193653aad462aae`, runner `7e2770b98c3d355d6`. These measurements predate
+projective transport and the later shader changes. The integrated engine
+measurement below does not repeat this combined-shadow experiment.
+
+**Integrated engine workloads.**
+
 On 2026-09-27, the optimized profiling build of baseline `2a46fbd7`, before
 full material layouts and typed SDF transport, ran all 14 workloads in Chrome
 153.0.8010.53, WebGL2 / Intel UHD ANGLE D3D11, at 1440x1000 and DPR 1.
@@ -167,8 +189,9 @@ including fixed controls and text. No console or GL errors were observed.
 The matched solid/border subset compares Clay geometry with SDF. Atlas has
 different art; gradient/shadow have no fabricated old-path equivalent. SDF
 border reduces geometry and upload bytes here, but GPU medians are not
-uniformly lower. Alternating dedicated body/shadow materials require 525 draws;
-the same uber material retains 13. These are individual steady windows on one
+uniformly lower. In that baseline, alternating dedicated body/shadow materials
+required 525 draws; the same uber material retained 13. Shadows now always use
+the shape's own material, so this alternation no longer occurs. These are individual steady windows on one
 integrated GPU, not a cross-device speed guarantee or isolated effect cost.
 
 Measured release WASM: 440984 bytes, SHA256 prefix `efac7a8bf2ebd4c0`;

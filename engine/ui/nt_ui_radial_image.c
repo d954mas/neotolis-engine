@@ -7,6 +7,18 @@
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
 
+#define RADIAL_IMAGE_ASPECT_OFFSET 52U
+
+const nt_vertex_layout_t NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT = {.stride = 64,
+                                                             .attr_count = 7,
+                                                             .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                                                       {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
+                                                                       {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                                                       {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20},
+                                                                       {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36},
+                                                                       {.location = 6, .type = NT_VERTEX_FLOAT, .count = 2, .offset = NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET},
+                                                                       {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .offset = RADIAL_IMAGE_ASPECT_OFFSET}}};
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, float angle_start, float angle_end, const nt_ui_radial_image_style_t *style,
                         const Clay_ElementDeclaration *decl) {
@@ -15,6 +27,9 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(style != NULL && "nt_ui_radial_image: style must be non-NULL");
     NT_ASSERT(region != NULL && region->atlas.id != 0 && "nt_ui_radial_image: invalid atlas handle");
     NT_ASSERT(style->material.id != 0 && "nt_ui_radial_image: style.material must be a valid radial-image material");
+    NT_ASSERT(nt_material_vertex_layout_equals(nt_material_get_info(style->material), &NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT) &&
+              nt_material_get_info(style->material)->source_uv_offset == NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET &&
+              "nt_ui_radial_image: material needs NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT and its source UV offset");
     NT_ASSERT(isfinite(angle_start) && isfinite(angle_end) && "nt_ui_radial_image: angles must be finite");
     NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial_image: inner_radius_norm must be finite in [0,1)");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_radial_image: style.slice9_scale must be finite > 0");
@@ -47,21 +62,15 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* Per-widget TINT color -> a_tint (0..1 floats). mode/dim stay material-level. */
     const Clay_Color tint_rgb = nt_ui_unpack_abgr(style->tint_color_packed);
 
-    /* The sprite renderer writes a_source_uv per vertex from source-space positions. */
+    /* The walker writes a_aspect; the sprite renderer writes a_source_uv per vertex. */
     const float blk[11] = {angle_start, angle_end, style->inner_radius_norm, 0.0F, tint_rgb.r / 255.0F, tint_rgb.g / 255.0F, tint_rgb.b / 255.0F, style->tint_strength, 0.0F, 0.0F, 0.0F};
-    static const char *const attr_names[] = {"a_radial", "a_tint", "a_aspect", "a_source_uv", NULL};
-    NT_ASSERT(nt_ui_internal_float4_block_matches(style->material, attr_names, 2) && "radial material must match fixed FLOAT4 payload offsets");
-    const nt_material_info_t *mi = nt_material_get_info(style->material);
-    NT_ASSERT(mi->vertex_layout.stride == 64U && "radial-image material must have the 64-byte source-UV layout");
-    (void)attr_names;
     const nt_ui_image_custom_t img = {
         .atlas = region->atlas,
         .region_index = region->region,
         .material = style->material,
         .custom_attrs = blk,
         .custom_bytes = (uint8_t)sizeof blk,
-        .attr_names = attr_names,
-        .geom_mode = NT_UI_IMAGE_GEOM_REGION,
+        .aspect_offset = RADIAL_IMAGE_ASPECT_OFFSET,
         /* a_tint.w is the TINT reveal strength, not alpha. Real alpha fades via color_packed ->
          * a_color (the walker's backgroundColor.a path), never through a_tint. */
         .flip_bits = style->flip_bits,

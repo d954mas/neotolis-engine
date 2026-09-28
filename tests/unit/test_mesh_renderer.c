@@ -1749,7 +1749,6 @@ static void test_mesh_streams_own_types_despite_full_material_layout(void) {
     streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("color").value, .type = NT_STREAM_FLOAT32, .count = 4};
     streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("uv").value, .type = NT_STREAM_UINT16, .count = 2};
     const nt_mesh_t mesh = {.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
-    const uint8_t defaults[20] = {0xCC};
     const nt_material_t material =
         nt_material_create(&(nt_material_create_desc_t){.program = create_test_program(),
                                                         .vertex_layout = {.stride = 20,
@@ -1757,7 +1756,6 @@ static void test_mesh_streams_own_types_despite_full_material_layout(void) {
                                                                           .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 1},
                                                                                     {.location = 2, .type = NT_VERTEX_UINT8, .count = 1, .offset = 1},
                                                                                     {.location = 3, .type = NT_VERTEX_UINT8, .count = 1, .offset = 2}}},
-                                                        .vertex_defaults = defaults,
                                                         .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "color", .location = 2}, {.stream_name = "uv", .location = 3}},
                                                         .attr_map_count = 3});
     const nt_entity_t entity = create_test_entity(mesh, material);

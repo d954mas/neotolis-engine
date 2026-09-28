@@ -1,4 +1,4 @@
-/* A custom-attr base material with attr defaults: every base emit bakes the defaults, so plain widgets
+/* A custom-attr base material: every base emit writes a zero tail, so plain widgets
  * and nt_ui_image_custom share one material and one batch. */
 
 #include <stdalign.h>
@@ -20,11 +20,10 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
-/* Distinct from each other and from zero, so a missing or swapped block cannot pass. */
-static const float k_defaults[4] = {0.125F, 0.25F, 0.5F, 1.0F};
+/* Nonzero, so a missing block or a stale tail cannot pass. */
 static const float k_widget_block[4] = {3.0F, 5.0F, 7.0F, 11.0F};
 
-/* One game attr the walker never injects (not a_layout/a_uvrect): the bytes must arrive verbatim. */
+/* One game attr the walker never writes: the bytes must arrive verbatim. */
 static nt_material_t make_one_attr_material(void) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
@@ -37,7 +36,6 @@ static nt_material_t make_one_attr_material(void) {
     desc.vertex_layout.stride = 36;
     desc.vertex_layout.attrs[3] = (nt_vertex_attr_t){.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20};
     desc.vertex_layout.attr_count = 4;
-    desc.vertex_defaults = (const float[9]){0, 0, 0, 0, 0, 0.125F, 0.25F, 0.5F, 1.0F};
     desc.attr_map[0].stream_name = "a_game";
     desc.attr_map[0].location = 4;
     desc.attr_map_count = 1;
@@ -50,9 +48,9 @@ void setUp(void) { ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WAL
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 /* RECTANGLE + BORDER + IMAGE + slice9 IMAGE + nt_ui_image_custom REGION under one custom-attr base
- * material: one draw, every base vertex carries the defaults, the widget's vertices its own block. */
+ * material: one draw, base vertices carry a zero tail, the widget's vertices its own block. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_defaults_ride_every_base_emit_in_one_batch(void) {
+static void test_zero_tail_rides_every_base_emit_in_one_batch(void) {
     const nt_material_t mat = make_one_attr_material();
     nt_ui_set_sprite_material(s_fx.ctx, mat);
 
@@ -80,7 +78,6 @@ static void test_defaults_ride_every_base_emit_in_one_batch(void) {
             .material = mat,
             .custom_attrs = k_widget_block,
             .custom_bytes = (uint8_t)sizeof k_widget_block,
-            .geom_mode = NT_UI_IMAGE_GEOM_REGION,
             .origin_x = 0.5F,
             .origin_y = 0.5F,
             .slice9_scale = 1.0F,
@@ -105,17 +102,34 @@ static void test_defaults_ride_every_base_emit_in_one_batch(void) {
         TEST_ASSERT_EQUAL_MEMORY_MESSAGE(k_widget_block, got, sizeof k_widget_block, "custom widget keeps its own block");
     }
 
+    /* The widget-only walk leaves its block in staging slot 0; the plain rect must overwrite it. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    const nt_ui_image_custom_t first = {
+        .atlas = s_fx.atlas.handle,
+        .region_index = s_fx.atlas.white_region_idx,
+        .material = mat,
+        .custom_attrs = k_widget_block,
+        .custom_bytes = (uint8_t)sizeof k_widget_block,
+        .origin_x = 0.5F,
+        .origin_y = 0.5F,
+        .slice9_scale = 1.0F,
+        .color_packed = 0xFFFFFFFFU,
+    };
+    nt_ui_image_custom(s_fx.ctx, NULL, &first, &box);
+    nt_ui_end(s_fx.ctx);
+    nt_ui_walk(s_fx.ctx, &target);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("plain-only"), .layout = box.layout, .backgroundColor = {255, 255, 255, 255}}) {}
     nt_ui_end(s_fx.ctx);
     nt_ui_walk(s_fx.ctx, &target);
-    float got[4] = {0};
+    const float zero[4] = {0};
+    float got[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     nt_sprite_renderer_test_last_emit_attrs(0, got, sizeof(got));
-    TEST_ASSERT_EQUAL_MEMORY(k_defaults, got, sizeof(got));
+    TEST_ASSERT_EQUAL_MEMORY(zero, got, sizeof(got));
 }
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_defaults_ride_every_base_emit_in_one_batch);
+    RUN_TEST(test_zero_tail_rides_every_base_emit_in_one_batch);
     return UNITY_END();
 }

@@ -4,7 +4,8 @@
 //   1. nt_layout_index in Clay_RenderCommand + nt_current_layout_index
 //      in Clay_Context. Stores source layout element index on every render
 //      command. Used by nt_ui's build_tree pass to map each render command
-//      back to its source element. Search "nt_" for patch sites (4 total).
+//      back to its source element. Search "nt_layout_index" and
+//      "nt_current_layout_index" for patch sites (4 total).
 //   2. CLAY__MAX_SCROLL_CONTAINERS overrides the hardcoded scroll/clip-container
 //      pool size (upstream 10): every .clip takes one slot, reclaimed only in
 //      Clay_UpdateScrollContainers. Search "NT patch" for the 2 sites.
@@ -25,6 +26,9 @@
 //      Public toggle API reports disabled-view requests through the error handler.
 //      Debug child floats use relative zIndex=1 to match patch 4.
 //      EndLayout reserves sidebar width so games can enable it after nt_ui_begin.
+//   6. Clay_ImageElementConfig.nt_defer_culling keeps an offscreen IMAGE command:
+//      analytic shapes cull their transformed shadow/AA bounds in the renderer.
+//      Field + "shouldRender |=" in the IMAGE render-command case; search "nt_defer_culling".
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.

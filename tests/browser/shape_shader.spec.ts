@@ -121,8 +121,8 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
       'shadow-projective': [[48, 48]],
     };
     const samples: Record<string, number[][]> = {};
-    for (const shape of cases) {
-      const fragment = shape.mode === 1 ? 'box' : shape.mode === 2 ? 'radial' : 'shadow';
+    // The uber program's shape modes must match the dedicated shape program pixel for pixel.
+    for (const [fragment, shape] of ['shape', 'uber'].flatMap(name => cases.map(shape => [name, shape] as const))) {
       gl.useProgram(programs[fragment]);
       globals[3] = shape.projective ? 0.08 : 0; // W varies across projective quads.
       gl.bindBuffer(gl.UNIFORM_BUFFER, uniformBuffer);
@@ -158,7 +158,7 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
       const pixel = new Uint8Array(4);
-      samples[shape.name] = coords[shape.name].map(([x, y]) => {
+      samples[fragment === 'shape' ? shape.name : `uber:${shape.name}`] = coords[shape.name].map(([x, y]) => {
         gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
         return Array.from(pixel);
       });
@@ -171,8 +171,7 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
       globals.set(fixture.viewProj);
       gl.bindBuffer(gl.UNIFORM_BUFFER, uniformBuffer);
       gl.bufferSubData(gl.UNIFORM_BUFFER, 0, globals);
-      const mode = fixture.vertices[0].bytes[81];
-      gl.useProgram(programs[mode === 1 ? 'box' : 'radial']);
+      gl.useProgram(programs.shape);
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(fixture.indices), gl.STREAM_DRAW);
       gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(fixture.vertices.flatMap(vertex => vertex.bytes)), gl.STREAM_DRAW);
       for (const attr of fixture.layout.attributes) {
@@ -192,15 +191,14 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
   }, {
     vertex: shaderSource('sprite_ui_shape.vert'),
     fragments: {
-      box: shaderSource('ui_shape.frag'),
-      radial: shaderSource('ui_shape_radial.frag'),
-      shadow: shaderSource('ui_shape_shadow.frag'),
+      shape: shaderSource('ui_shape.frag'),
       uber: shaderSource('ui_shape_uber.frag'),
     },
     fixtures,
   });
 
   expect(result.error).toBe(0);
+  for (const name of Object.keys(result.samples).filter(key => key.startsWith('uber:'))) expect(result.samples[name]).toEqual(result.samples[name.slice(5)]);
   const [fill, left, right, top, bottom, topLeft, topRight, bottomRight, bottomLeft] = result.samples.box;
   expect(fill[0]).toBeGreaterThan(200);
   for (const border of [left, right, top, bottom, topRight, bottomLeft]) expect(border[1]).toBeGreaterThan(150);

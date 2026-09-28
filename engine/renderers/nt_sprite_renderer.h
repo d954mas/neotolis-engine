@@ -41,6 +41,9 @@ typedef struct {
 } nt_sprite_vertex_t;
 _Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes");
 
+/* Material vertex_layout for plain sprites; custom layouts keep this prefix. */
+extern const nt_vertex_layout_t NT_SPRITE_VERTEX_LAYOUT;
+
 /* Byte cap for a material's appended custom per-vertex attribute block (opt-in).
  * Four FLOAT4 blocks fit. Only custom-attr materials pay this;
  * plain sprites keep the locked 20 B vertex. */
@@ -118,14 +121,10 @@ void nt_sprite_renderer_flush(void);
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
 /* Every emit accepts one complete tail block, copied during the call to each vertex.
- * attrs/bytes must be NULL/0 or exactly material.vertex_layout.stride - 20 bytes.
- * NULL/0 uses the material defaults' tail; no defaults with a nonempty tail asserts.
- * Plain stride20 requires NULL/0. Prefix position/UV/color always come from emit arguments.
- * Mapping a_source_uv to a FLOAT2 tail field asks REGION emits to overwrite it
- * per vertex with
- * source-image UV (x right, y down, before alpha trim).
- * GEOMETRY and slice9 emits reject that semantic.
- * An override never changes later emits or the material. */
+ * attrs/bytes must be NULL/0 or exactly material.vertex_layout.stride - 20 bytes; NULL/0
+ * writes a zero tail. Prefix position/UV/color always come from emit arguments.
+ * A material source_uv_offset makes REGION emits overwrite that FLOAT2 per vertex with
+ * source-image UV (x right, y down, before alpha trim); geometry and slice9 emits reject it. */
 
 /* Emit one atlas region at one mat4 transform.
  *
@@ -187,26 +186,18 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
  *                         same subset read as emit_region.
  *   color_packed        - 0xAABBGGRR.
  *
- * With custom attrs, a four-vertex emit starts at a multiple of four so shaders
- * may derive local corners from gl_VertexID & 3. Zeroed, unindexed staging padding
- * counts against vertex capacity. Plain materials retain unpadded geometry.
  * Capacity overflow handled internally (snapshot + flush + reopen).
  * Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
                                       const float *world_matrix, uint32_t color_packed, const void *attrs, uint16_t bytes);
 
+/* Pad staging with up to 3 unindexed vertices so the next quad starts at a multiple of 4,
+ * for shaders that derive the corner from gl_VertexID & 3. Without room the next emit
+ * flushes and starts at vertex 0. Call set_material first. */
+void nt_sprite_renderer_align_next_vertex_to_4(void);
+
 // #region test_access
 #ifdef NT_TEST_ACCESS
-/* Resolved vertex layout snapshot for a material: stride + per-attr GL
- * location/offset. attr_count==3 for a plain material (base 20 B), 3+N for a
- * custom-attr material (extended stride). */
-typedef struct {
-    uint32_t stride;
-    uint32_t attr_count;
-    uint32_t locations[16]; /* NT_GFX_MAX_VERTEX_ATTRS */
-    uint32_t offsets[16];
-} nt_sprite_layout_info_t;
-void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *out);
 /* Read back the custom per-vertex attr block of the v_idx-th vertex of the last
  * emit, from the byte-staging path. Copies exactly bytes from the tail. */
 void nt_sprite_renderer_test_last_emit_attrs(uint32_t v_idx, void *out, uint16_t bytes);

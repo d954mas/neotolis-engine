@@ -510,49 +510,48 @@ static void test_inline_image_defaults_material_from_ctx(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one IMAGE atom emitted via the ctx default material");
 }
 
-static nt_material_t make_rich_custom_material(float first_default) {
+/* Tail size identifies the drawn material: readback asserts bytes fit the bound stride. */
+static nt_material_t make_rich_custom_material(uint16_t tail_bytes) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
     desc.program = nt_material_get_info(s_fx.sprite_material)->program;
     desc.vertex_layout = nt_material_get_info(s_fx.sprite_material)->vertex_layout;
-    desc.vertex_layout.stride = 36;
+    desc.vertex_layout.stride = (uint16_t)(20U + tail_bytes);
     desc.vertex_layout.attrs[3] = (nt_vertex_attr_t){.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20};
     desc.vertex_layout.attr_count = 4;
-    desc.vertex_defaults = (const float[9]){0, 0, 0, 0, 0, first_default, 0.25F, 0.5F, 1.0F};
     desc.textures[0].name = "u_texture";
     desc.texture_count = 1;
-    desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "a_game", .location = 4};
-    desc.attr_map_count = 1;
     desc.label = "rich_custom_material";
     return nt_material_create(&desc);
 }
 
-static void assert_inline_image_carries(float first_default) {
-    const float want[4] = {first_default, 0.25F, 0.5F, 1.0F};
+static void assert_inline_image_zero_tail(uint16_t tail_bytes) {
+    const uint8_t zero[32] = {0};
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx));
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     for (uint32_t v = 0; v < 4U; v++) {
-        float got[4] = {0};
-        nt_sprite_renderer_test_last_emit_attrs(v, got, sizeof(got));
-        TEST_ASSERT_EQUAL_MEMORY(want, got, sizeof want);
+        uint8_t got[32];
+        memset(got, 0xFF, sizeof got);
+        nt_sprite_renderer_test_last_emit_attrs(v, got, tail_bytes);
+        TEST_ASSERT_EQUAL_MEMORY(zero, got, tail_bytes);
     }
 }
 
-/* A style image_material with its own defaults bakes those, not the ctx base's. */
-static void test_inline_image_bakes_style_material_defaults(void) {
-    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(0.125F));
-    frame_text_image_text(make_rich_custom_material(0.75F), NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
-    assert_inline_image_carries(0.75F);
+/* A style image_material wins over the ctx base. */
+static void test_inline_image_uses_style_material(void) {
+    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(16U));
+    frame_text_image_text(make_rich_custom_material(32U), NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
+    assert_inline_image_zero_tail(32U);
 }
 
 /* The default resolves per walk: a base swapped between two walks of one frame is the one drawn. */
 static void test_inline_image_default_follows_base_swap_between_walks(void) {
     nt_ui_set_sprite_material(s_fx.ctx, s_fx.sprite_material);
     frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
-    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(0.375F));
+    nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(16U));
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
-    assert_inline_image_carries(0.375F);
+    assert_inline_image_zero_tail(16U);
 }
 
 /* (6) the inline image's composed <color> reaches the standard u8 sprite tint: a run with
@@ -2604,7 +2603,7 @@ int main(void) {
     RUN_TEST(test_over_cap_layers_hard_guard);
     RUN_TEST(test_inline_image_emits_sprite_and_text);
     RUN_TEST(test_inline_image_defaults_material_from_ctx);
-    RUN_TEST(test_inline_image_bakes_style_material_defaults);
+    RUN_TEST(test_inline_image_uses_style_material);
     RUN_TEST(test_inline_image_default_follows_base_swap_between_walks);
     RUN_TEST(test_inline_image_fades_with_parent_opacity);
     RUN_TEST(test_two_inline_images_coalesce);

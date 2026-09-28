@@ -93,8 +93,6 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/radial_image.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/sprite_ui_shape.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/ui_shape.frag", NT_BUILD_SHADER_FRAGMENT);
-    nt_builder_add_shader(ctx, "assets/shaders/ui_shape_radial.frag", NT_BUILD_SHADER_FRAGMENT);
-    nt_builder_add_shader(ctx, "assets/shaders/ui_shape_shadow.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/ui_shape_uber.frag", NT_BUILD_SHADER_FRAGMENT);
     (void)printf("  Shaders added: 11 (sprite + slug_text + radial image + analytic shapes)\n");
     // #endregion

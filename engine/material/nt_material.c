@@ -47,6 +47,24 @@ void nt_material_shutdown(void) {
 
 /* ---- Create / Destroy / Query ---- */
 
+static uint64_t vertex_layout_key(const nt_vertex_layout_t *layout) {
+    uint8_t bytes[3 + (NT_GFX_MAX_VERTEX_ATTRS * 6)];
+    bytes[0] = (uint8_t)layout->stride;
+    bytes[1] = (uint8_t)(layout->stride >> 8U);
+    bytes[2] = layout->attr_count;
+    for (uint8_t i = 0; i < layout->attr_count; ++i) {
+        const nt_vertex_attr_t *attr = &layout->attrs[i];
+        uint8_t *dst = bytes + 3U + ((size_t)i * 6U);
+        dst[0] = attr->location;
+        dst[1] = (uint8_t)attr->type;
+        dst[2] = attr->count;
+        dst[3] = attr->normalized ? 1U : 0U;
+        dst[4] = (uint8_t)attr->offset;
+        dst[5] = (uint8_t)(attr->offset >> 8U);
+    }
+    return nt_hash64(bytes, 3U + ((uint32_t)layout->attr_count * 6U)).value;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(s_mat.initialized); /* create before init */
@@ -70,7 +88,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(layout->attr_count <= NT_GFX_MAX_VERTEX_ATTRS);
     NT_ASSERT(layout->stride <= 255U && "WebGL2 caps vertex stride at 255 bytes");
     NT_ASSERT((layout->attr_count == 0U) == (layout->stride == 0U));
-    NT_ASSERT(layout->attr_count != 0U || desc->vertex_defaults == NULL);
+    NT_ASSERT(desc->source_uv_offset == 0U || (uint32_t)desc->source_uv_offset + sizeof(float[2]) <= layout->stride);
     for (uint8_t i = 0; i < layout->attr_count; ++i) {
         const nt_vertex_attr_t *attr = &layout->attrs[i];
         const uint32_t size = nt_vertex_type_size(attr->type);
@@ -114,10 +132,8 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         dst->normalized = src->normalized;
         dst->offset = src->offset;
     }
-    info->has_vertex_defaults = desc->vertex_defaults != NULL;
-    if (info->has_vertex_defaults) {
-        memcpy(info->vertex_defaults, desc->vertex_defaults, layout->stride);
-    }
+    info->vertex_layout_key = vertex_layout_key(&info->vertex_layout);
+    info->source_uv_offset = desc->source_uv_offset;
 
     /* Textures */
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
@@ -194,6 +210,21 @@ bool nt_material_valid(nt_material_t mat) {
 }
 
 /* Returns mutable info pointer for a valid handle, or NULL */
+bool nt_material_vertex_layout_equals(const nt_material_info_t *info, const nt_vertex_layout_t *expected) {
+    const nt_vertex_layout_t *actual = &info->vertex_layout;
+    if (actual->stride != expected->stride || actual->attr_count != expected->attr_count) {
+        return false;
+    }
+    for (uint8_t i = 0; i < actual->attr_count; ++i) {
+        const nt_vertex_attr_t *a = &actual->attrs[i];
+        const nt_vertex_attr_t *e = &expected->attrs[i];
+        if (a->location != e->location || a->type != e->type || a->count != e->count || a->normalized != e->normalized || a->offset != e->offset) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static nt_material_info_t *get_mutable_info(nt_material_t mat) {
     NT_ASSERT(s_mat.initialized && "material module not initialized");
     if (!s_mat.initialized || mat.id == 0) {

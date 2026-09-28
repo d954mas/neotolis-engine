@@ -21,8 +21,14 @@ out vec4 frag_color;
 
 void main() {
     gl_FragDepth = gl_FragCoord.z;
+    // Flat per-primitive mode keeps derivative control flow uniform within a quad.
+    uint mode = uint(v_layout.z);
     if (v_expansion.z > 0.0) {
-        frag_color = nt_ui_shape_projective_color(v_local, v_clip, v_expansion, v_layout, v_geometry, v_widths, v_paint, v_inner_strip, v_fill, v_endpoint, v_border, 1, gl_FragDepth);
+        frag_color = nt_ui_shape_projective_color(v_local, v_clip, v_expansion, v_layout, v_geometry, v_widths, v_paint, v_inner_strip, v_fill, v_endpoint, v_border, int(mode), gl_FragDepth);
+    } else if (mode == 3u) {
+        frag_color = nt_ui_shape_shadow(v_local, v_layout, v_geometry, v_paint, v_fill);
+    } else if (mode == 2u) {
+        frag_color = nt_ui_shape_radial(v_local, v_layout, v_geometry, v_fill, v_endpoint);
     } else {
         frag_color = nt_ui_shape_box(v_local, v_layout, v_geometry, v_widths, v_paint.x, v_inner_strip, v_fill, v_endpoint, v_border);
     }

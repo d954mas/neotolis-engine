@@ -2,8 +2,8 @@
 
 Design rationale for `nt_ui_radial_image` and the generic custom-attr
 atlas-region emit it uses (`nt_ui_image_custom`): Clay IMAGE + per-element
-material for batching, name-bound attr injection, geometry modes, and reveal
-modes with their v1 limits. Flat radial shapes use `nt_ui_shape` instead.
+material for batching, the walker-written aspect, and reveal modes with their
+v1 limits. Flat radial shapes use `nt_ui_shape` instead.
 
 Related: [Scope](../core/scope.md), [Rich Text](rich-text.md), [Material System](../render/material.md)
 
@@ -30,53 +30,33 @@ shader and extended vertex layout; the walker only re-binds it when the `.id`
 differs from the currently bound material, so a screen full of identical-material
 reveals still collapses to one `set_material` and one draw.
 
-## Name-bound injection vocabulary
+## Walker-written aspect
 
-The custom block is a byte record copied to each vertex. The material's full
-`vertex_layout` declares its storage; `attr_map` maps semantic names to locations.
-The walker resolves name -> location -> physical attribute, checks the required
-FLOAT count and non-normalized storage wholly inside the tail, then subtracts
-20 from the full offset. Neither physical array order nor semantic map order
-defines bytes.
+The custom block is a byte record copied verbatim to each vertex tail. The
+material's full `vertex_layout` declares its storage. `custom_bytes` equals
+`vertex_layout.stride - 20`; the UI custom record has capacity64 bytes. The
+only walker-written value is the bbox aspect: when `aspect_offset` is nonzero,
+the walker writes FLOAT bbox width / height (1 when height is zero) at that
+full-vertex byte offset after Clay layout. The offset must lie inside the tail.
+Other bytes, including any per-widget layout or UV data, come from the widget.
+Custom images always use the region emit (`emit_region` / `emit_slice9`), so
+origin, flip and slice9 are honored by generic custom images.
 
-- `a_layout` vec4 = `{aspect = bbox w/h, bbox_width_px, bbox_height_px,
-  region D4 transform}` for generic REGION geometry; `.w = 0` for GEOMETRY.
-- `a_uvrect` vec4 = `{u0, v0, u1, v1}` = region min/max atlas UV.
-- `a_aspect` float = bbox width / height, or 1 when height is zero.
-
-Injection happens after Clay layout and atlas resolution. Other bytes copy
-verbatim. A missing semantic skips injection; a present semantic without a valid
-physical field asserts. Optional `attr_names` is a NULL-terminated set of expected
-names, in any order and possibly a subset. It checks name presence only, never
-payload layout compatibility. The UI custom record has capacity64 bytes.
-
-`nt_ui_radial_image` uses a 64-byte full vertex. `a_radial` is FLOAT4 at offset20,
-`a_tint` FLOAT4 at36, `a_aspect` FLOAT at52 and `a_source_uv` FLOAT2 at56.
-The first two fields are uniform per emit. The walker injects `a_aspect`, while
-the sprite renderer overwrites `a_source_uv` per region vertex from the
-source-space position and original source dimensions. Semantic array order
-remains irrelevant.
+`nt_ui_radial_image` uses the exported `NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT`, a
+64-byte full vertex: `a_radial` FLOAT4 at offset20 (location4), `a_tint` FLOAT4
+at36 (location5), `a_aspect` FLOAT at52 (location7) and `a_source_uv` FLOAT2 at56
+(location6). Its material must use that layout and set `source_uv_offset =
+NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET` (56); the widget asserts both. No
+`attr_map` is needed. The first two fields are uniform per emit. The widget sets
+`aspect_offset` to 52, and the sprite renderer overwrites `a_source_uv` per
+region vertex from the source-space position and original source dimensions.
 The generic custom-image API still accepts other valid byte layouts.
 
-**To add a new walker-injected value:** pick a new attr name, fill it in the walker,
-and name it in a material's `attr_map`. No payload struct change and no public
-API change. `nt_ui_radial_image` uses the generic custom-emit branch keyed on
+`nt_ui_radial_image` uses the generic custom-emit branch keyed on
 `payload.custom != NULL`. The separate [analytic shape path](nt-ui.md#analytic-shapes)
-uses a private payload flag for copied shape styles and expanded paint bounds;
-it does not change this generic injection contract or radial-image geometry.
-
-## geom_mode: REGION vs GEOMETRY
-
-`geom_mode` selects how the walker rasterizes the element's bbox when the block
-is present:
-
-- **`NT_UI_IMAGE_GEOM_REGION`** — the textured `emit_region` / `emit_slice9`
-  path. Real atlas art; origin, flip, and slice9 are honored by generic custom
-  images. `nt_ui_radial_image` accepts rectangular regions and rejects slice9.
-- **`NT_UI_IMAGE_GEOM_GEOMETRY`** — a clean 4-corner bbox quad (TL/TR/BR/BL)
-  against the white region via `emit_geometry`. Generic custom-image users can
-  derive local coordinates from this quad rather than a packed region's winding.
-  Flat RADIAL uses the separate `nt_ui_shape` path.
+uses the private payload flag `NT_UI_IMAGE_ANALYTIC_SHAPE` for copied shape
+styles and expanded paint bounds; it does not change this generic custom-image
+contract or radial-image geometry.
 
 ## The four walls (what this path does NOT do)
 
@@ -89,7 +69,7 @@ boundaries:
 2. **64-byte UI cap.** Typed fields and padding occupy the same byte record.
 3. **Time / animation is not a walker injection.** A widget that needs a time-driven
    shader writes the current time into `custom_attrs` itself each frame — no shipped
-   widget does this (the demo animates via `color_packed`); the walker injects only layout.
+   widget does this (the demo animates via `color_packed`); the walker writes only the optional aspect.
 4. **A second texture rides the material** (`textures[]`), not the custom block.
 
 ## Reveal modes and v1 limits (`nt_ui_radial_image`)
