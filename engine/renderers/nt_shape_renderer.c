@@ -190,7 +190,7 @@ enum {
 
 enum { NT_WIRE_CIRCLE, NT_WIRE_SPHERE, NT_WIRE_CYLINDER, NT_WIRE_CAPSULE, NT_WIRE_COUNT };
 #define NT_WIRE_MAX_INSTANCES ((NT_SHAPE_RENDERER_MAX_INSTANCES + NT_WIRE_COUNT - 1) / NT_WIRE_COUNT)
-/* Capsule meridian: both hemispheres plus one point at each end of the straight side. */
+/* Capsule meridian: a full ring plus the equator angle repeated on each straight side. */
 #define NT_WIRE_CAP_POINTS (NT_SHAPE_SEGMENTS + 2)
 #define NT_WIRE_MAX_SEGMENTS ((2 * NT_SHAPE_SEGMENTS) + (2 * NT_WIRE_CAP_POINTS))
 

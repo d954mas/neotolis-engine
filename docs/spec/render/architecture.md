@@ -620,8 +620,9 @@ never adds a persistent GL-state mirror or queries GL to reconstruct them.
 ## Shape strokes
 
 `nt_shape_renderer` owns immediate-mode shape geometry and batches it until
-`flush`; the game owns the pass, view-projection matrix and viewport. It uses triangle geometry for thick lines on native GL and WebGL 2,
-without relying on implementation-dependent hardware line widths.
+`flush`; the game owns the pass, view-projection matrix and viewport. Thick
+lines are triangle geometry on native GL and WebGL 2, so width never depends on
+hardware line-width support.
 
 ### Paths and width
 
@@ -635,9 +636,8 @@ without relying on implementation-dependent hardware line widths.
   are skipped using component-wise equality. Fewer than two remaining positions
   emit nothing; two positions produce one segment even with `closed=true`.
   `points` may be null only when `count=0`. Positions must be finite.
-- Joins use a miter up to four half-widths, then a bevel. The bevel has actual
-  connecting triangles. A flush in the middle of a path retains the same
-  neighbor geometry on both sides of its boundary.
+- Joins use a miter up to four half-widths, then a bevel. A flush in the middle
+  of a path keeps its joins.
 - `set_line_width(width)` selects world units, including when switching back
   from pixels. The default is `0.02`. Width is applied after a shape's scale and
   rotation, so it is independent of radius or height; the camera projection
@@ -686,11 +686,9 @@ translucent strokes.
 
 ### Storage and draw order
 
-No heap allocation or trigonometry occurs when submitting these strokes.
-Independent segments store only their endpoints. Connected path segments also
-store both neighbors, so a flush inside a path keeps its joins. Circle, sphere,
-cylinder and capsule wires use immutable templates built at initialization and
-one instance per shape.
+No heap allocation or trigonometry occurs when submitting strokes. Circle,
+sphere, cylinder and capsule wires use immutable templates built at
+initialization and cost one instance per shape.
 
 Every flush draws filled instanced shapes by type, then triangles and meshes,
 then wire templates by type, connected segments and independent lines. Within
@@ -705,8 +703,7 @@ overlay mode, calls `flush` between them.
 Each wire template type holds `ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)`
 shapes (default 512). A full queue flushes all pending geometry. A skipped flush
 after failed initialization empties every queue, preventing overflow during
-context recovery. Shutdown and GPU restore release and recreate the templates,
-vertex inputs and streaming buffers together.
+context recovery.
 
 ## Renderer complexity classes
 

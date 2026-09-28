@@ -43,10 +43,12 @@ typedef struct {
 void nt_shape_renderer_init(void);
 void nt_shape_renderer_shutdown(void);
 void nt_shape_renderer_restore_gpu(void);
+/* Draws pending fills, then strokes. The only draw-order barrier: render architecture, "Shape strokes". */
 void nt_shape_renderer_flush(void);
 
 /* ---- State setters ---- */
 
+/* Also defines the camera that world-width strokes face. */
 void nt_shape_renderer_set_vp(const float vp[16]);
 /* Select world-space thickness (default 0.02). Width must be finite and positive. */
 void nt_shape_renderer_set_line_width(float width);
