@@ -442,7 +442,8 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
+    const bool can_render = s_atlas_bound && s_font_bound && sprite_info && (nt_gfx_program_poll(sprite_info->program) == NT_GFX_PROGRAM_READY) && text_info &&
+                            (nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY);
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));

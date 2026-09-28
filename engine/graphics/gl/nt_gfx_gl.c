@@ -107,7 +107,7 @@ typedef struct {
     GLuint program;
     /* Until finish_program: reflection, sampler units and UBO bindings wait for the link. */
     bool linking;
-    uint64_t link_frame; /* frame_sequence the link started in */
+    uint64_t link_frame; /* last pending poll; creation frame when completion cannot be queried */
     uint32_t link_vs;    /* stages named in a failed link's log */
     uint32_t link_fs;
     nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
@@ -279,8 +279,7 @@ void nt_gfx_backend_capture_initial_state(void) {
     }
     for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
         const nt_gfx_gl_program_t *program = &s_programs[i];
-        /* A program still linking has no reflection yet; finish_program defines it. */
-        if (program->program == 0 || program->linking) {
+        if (program->program == 0) {
             continue;
         }
         capture_program_definition(i);
@@ -1168,6 +1167,9 @@ static void nt_gfx_gl_log_lines(const char *log) {
 }
 
 static void nt_gfx_gl_log_shader(uint32_t shader, const char *stage) {
+    if (shader == 0) {
+        return;
+    }
     GLint len = 0;
     NT_GL(glGetShaderiv, (GLuint)shader, GL_INFO_LOG_LENGTH, &len);
     if (len <= 1) {
@@ -1204,6 +1206,15 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
      * sweep also runs when nt_gfx_init failed before glad loaded an entry point. */
     if (backend_handle == 0) {
         return;
+    }
+    /* Emscripten drops deleted shader IDs even while a program keeps the attachment. */
+    for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
+        if (s_programs[i].link_vs == backend_handle) {
+            s_programs[i].link_vs = 0;
+        }
+        if (s_programs[i].link_fs == backend_handle) {
+            s_programs[i].link_fs = 0;
+        }
     }
     NT_GL(glDeleteShader, (GLuint)backend_handle);
 }
@@ -1422,10 +1433,13 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     s_programs[slot] = (nt_gfx_gl_program_t){
         .program = program,
         .linking = true,
-        .link_frame = g_nt_gfx.counters.frame_sequence,
+        .link_frame = s_parallel_link ? 0 : g_nt_gfx.counters.frame_sequence,
         .link_vs = vs_backend,
         .link_fs = fs_backend,
     };
+#if NT_GFX_CAPTURE_ENABLED
+    capture_program_definition(slot);
+#endif
     return slot;
 }
 
@@ -1437,16 +1451,18 @@ nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) 
         return NT_GFX_LINK_DONE;
     }
     if (!wait) {
+        if (rec->link_frame == g_nt_gfx.counters.frame_sequence) {
+            return NT_GFX_LINK_PENDING;
+        }
+        rec->link_frame = g_nt_gfx.counters.frame_sequence;
         if (s_parallel_link) {
             GLint done = 0;
             NT_GL(glGetProgramiv, rec->program, GL_COMPLETION_STATUS_KHR, &done);
             if (!done) {
                 return NT_GFX_LINK_PENDING;
             }
-        } else if (rec->link_frame == g_nt_gfx.counters.frame_sequence) {
-            /* Without a completion query, one frame boundary still lets the link overlap the frame. */
-            return NT_GFX_LINK_PENDING;
         }
+        /* Without the extension, finishing here may still wait for the driver. */
     }
     rec->linking = false;
     const bool linked = nt_gfx_gl_finish_link(rec);

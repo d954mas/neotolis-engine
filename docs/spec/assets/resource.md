@@ -340,8 +340,8 @@ discards staged glyphs while its buffers are missing. Examples may explicitly
 choose fail-fast handling, while a game that needs retries owns that policy.
 
 Materials survive teardown and retain their old program handles. Destroying a
-program bumps its slot generation, so `nt_gfx_program_ready(info->program)`
-reports false. Material handles remain unchanged; ECS components, the UI context,
+program bumps its slot generation, so `nt_gfx_program_poll(info->program)`
+reports UNAVAILABLE. Material handles remain unchanged; ECS components, the UI context,
 and game-side structures need no re-binding.
 
 A font keeps its `nt_font_add` source list of resource handles. Once the context

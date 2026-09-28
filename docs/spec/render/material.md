@@ -69,11 +69,11 @@ two slots on one unit would fight over it at every draw.
 > per-frame gate needs no assignment latch. The material module never links,
 > destroys, or inspects the program.
 >
-> A material has no readiness field or version. Use
-> `nt_gfx_program_ready(info->program)` before building a pipeline: it is false
-> before assignment, while the program links, after context loss is processed, or after program
-> destruction. The material survives recovery and retains its old program
-> handle until reassignment.
+> A material has no readiness field or version. Poll
+> `nt_gfx_program_poll(info->program)` for `NT_GFX_PROGRAM_READY` before building
+> a pipeline without waiting. LINKING is temporary; UNAVAILABLE means no assigned
+> program or a terminal handle after loss/destruction. The material survives
+> recovery and retains its old program handle until reassignment.
 >
 > Pipeline cache keys include the program handle. Destroying the replaced
 > program frees its pipelines; dead cache records are removed during insertion

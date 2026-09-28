@@ -301,10 +301,11 @@ static uint64_t nt_sprite_layout_key(const nt_material_info_t *mat_info) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* A recovered context may still have materials awaiting a new program. */
-    if (!nt_gfx_program_ready(mat_info->program)) {
+    const nt_gfx_program_state_t program_state = nt_gfx_program_poll(mat_info->program);
+    if (program_state != NT_GFX_PROGRAM_READY) {
         /* The one choke point every caller passes through, so the immediate and
          * draw_list paths both get told. */
-        nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
+        nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info, program_state);
         return (nt_pipeline_t){0};
     }
     /* Vertex-inputs own layouts; the pipeline is program x state, keyed by its exact desc identity. */

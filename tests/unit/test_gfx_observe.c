@@ -76,7 +76,7 @@ static void test_loss_is_wiped_at_begin_frame_and_pass_calls_are_no_ops(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(program));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
 
@@ -98,10 +98,10 @@ static void test_loss_during_an_iteration_is_wiped_at_the_next_begin_frame(void)
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(program));
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(program));
 }
 
 /* Creates on a loss the browser has not reported yet and on a known loss end CONTEXT_LOST without error logs. */
@@ -131,7 +131,7 @@ static void test_loss_and_restore_between_iterations_restore_in_one_begin_frame(
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(program));
 }
 
 /* Loading after init lands in the first frame, so its creations are counted like any frame's. */

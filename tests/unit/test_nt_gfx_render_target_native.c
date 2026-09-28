@@ -28,6 +28,7 @@ void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_textures = 3;
     desc.max_render_targets = 2;
+    desc.capture_capacity = 256;
     nt_gfx_init(&desc);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
@@ -892,7 +893,7 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
     test_target_t target = make_test_target(4, 4, NT_TEXTURE_FORMAT_RGBA8, NT_TEXTURE_FORMAT_DEPTH24);
 
     nt_gfx_destroy_pipeline(pip_a);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(prog));
 
     uint8_t pixels[4 * 4 * 4] = {0};
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
@@ -1109,14 +1110,120 @@ static void test_program_is_linking_until_a_poll_sees_the_link_finish(void) {
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, prog.id);
     /* A live program is linking or ready, whatever the driver's link speed. */
-    const bool linking = nt_gfx_program_linking(prog);
-    TEST_ASSERT_TRUE(linking || nt_gfx_program_ready(prog));
+    const nt_gfx_program_state_t state = nt_gfx_program_poll(prog);
+    TEST_ASSERT_TRUE(state == NT_GFX_PROGRAM_LINKING || state == NT_GFX_PROGRAM_READY);
     TEST_ASSERT_TRUE(nt_test_wait_program(prog));
-    TEST_ASSERT_FALSE(nt_gfx_program_linking(prog));
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
+static PFNGLGETSHADERIVPROC s_saved_get_shader_iv;
+static uint32_t s_deleted_stage_queries;
+
+static void GLAD_API_PTR count_deleted_stage_query(GLuint shader, GLenum query, GLint *value) {
+    s_deleted_stage_queries++;
+    s_saved_get_shader_iv(shader, query, value);
+}
+
+static PFNGLGETPROGRAMIVPROC s_saved_link_query;
+static uint32_t s_completion_queries;
+
+static void GLAD_API_PTR hold_link_pending(GLuint program, GLenum query, GLint *value) {
+    if (query == GL_COMPLETION_STATUS_KHR) {
+        s_completion_queries++;
+        *value = GL_FALSE;
+        return;
+    }
+    s_saved_link_query(program, query, value);
+}
+
+#if NT_GFX_CAPTURE_ENABLED
+static void assert_pending_poll_capture(nt_gfx_capture_view_t capture) {
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t definitions[2] = {0};
+    uint32_t definition_count = 0;
+    uint32_t open_program = 0;
+    uint32_t completed_polls = 0;
+    uint32_t queries = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->detail == NT_GFX_OBJECT_PROGRAM && event->object_kind == NT_GFX_OBJECT_NONE) {
+            TEST_ASSERT_LESS_THAN_UINT32(2, definition_count);
+            definitions[definition_count++] = event->data.backend.args[1];
+        }
+        if (event->operation == NT_GFX_OP_STATE && event->object_kind == NT_GFX_OBJECT_PROGRAM) {
+            if (event->kind == NT_GFX_EVENT_BEGIN) {
+                TEST_ASSERT_EQUAL_UINT32(0, open_program);
+                open_program = event->object;
+            } else if (event->kind == NT_GFX_EVENT_RESULT) {
+                TEST_ASSERT_EQUAL_UINT32(open_program, event->object);
+                TEST_ASSERT_EQUAL_INT(NT_GFX_RESULT_UNREADY, event->result);
+                open_program = 0;
+                completed_polls++;
+            }
+        }
+        if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_glGetProgramiv) {
+            TEST_ASSERT_NOT_EQUAL_UINT32(0, open_program);
+            TEST_ASSERT_EQUAL_UINT32(2, definition_count);
+            TEST_ASSERT_TRUE(event->data.backend.args[0] == definitions[0] || event->data.backend.args[0] == definitions[1]);
+            TEST_ASSERT_EQUAL_UINT32(GL_COMPLETION_STATUS_KHR, event->data.backend.args[1]);
+            queries++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, open_program);
+    TEST_ASSERT_EQUAL_UINT32(20, completed_polls);
+    TEST_ASSERT_EQUAL_UINT32(2, queries);
+}
+#endif
+
+static void test_pending_program_polls_query_driver_once_per_frame(void) {
+    if (!GLAD_GL_KHR_parallel_shader_compile && !GLAD_GL_ARB_parallel_shader_compile) {
+        TEST_IGNORE_MESSAGE("parallel shader completion query unavailable");
+    }
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 color; void main() { color = vec4(1.0); }"});
+    nt_program_t first = nt_gfx_make_program(vs, fs);
+    nt_program_t second = nt_gfx_make_program(vs, fs);
+    s_saved_link_query = glad_glGetProgramiv;
+    s_completion_queries = 0;
+    glad_glGetProgramiv = hold_link_pending;
+    bool all_pending = true;
+    for (uint32_t i = 0; i < 10; i++) {
+        all_pending &= (nt_gfx_program_poll(first) == NT_GFX_PROGRAM_LINKING);
+        all_pending &= (nt_gfx_program_poll(second) == NT_GFX_PROGRAM_LINKING);
+    }
+    const uint32_t first_frame_queries = s_completion_queries;
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_capture_request();
+#endif
+    nt_gfx_begin_frame();
+    for (uint32_t i = 0; i < 10; i++) {
+        all_pending &= (nt_gfx_program_poll(first) == NT_GFX_PROGRAM_LINKING);
+        all_pending &= (nt_gfx_program_poll(second) == NT_GFX_PROGRAM_LINKING);
+    }
+    const uint32_t second_frame_queries = s_completion_queries;
+#if NT_GFX_CAPTURE_ENABLED
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+#endif
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = first});
+    const bool pipeline_program_ready = (nt_gfx_program_poll(first) == NT_GFX_PROGRAM_READY);
+    glad_glGetProgramiv = s_saved_link_query;
+#if NT_GFX_CAPTURE_ENABLED
+    assert_pending_poll_capture(capture);
+#endif
+    TEST_ASSERT_TRUE(all_pending);
+    TEST_ASSERT_EQUAL_UINT32(2, first_frame_queries);
+    TEST_ASSERT_EQUAL_UINT32(4, second_frame_queries);
+    TEST_ASSERT_EQUAL_UINT32(second_frame_queries, s_completion_queries);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+    TEST_ASSERT_TRUE(pipeline_program_ready);
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_program(second);
+    nt_gfx_destroy_program(first);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
 }
@@ -1132,14 +1239,27 @@ static void test_link_error_asserts_when_the_link_finishes(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, prog.id);
-    NT_TEST_EXPECT_ASSERT((void)nt_test_wait_program(prog));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program link failed"));
-    /* A failed link is a husk: neither ready nor linking, so an owner relinks instead of waiting. */
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
-    TEST_ASSERT_FALSE(nt_gfx_program_linking(prog));
-    nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
+    s_saved_get_shader_iv = glad_glGetShaderiv;
+    s_deleted_stage_queries = 0;
+    glad_glGetShaderiv = count_deleted_stage_query;
+    nt_test_assert_install();
+    nt_test_assert_armed = true;
+    volatile bool asserted = false;
+    if (setjmp(nt_test_assert_jmp) == 0) {
+        (void)nt_test_wait_program(prog);
+    } else {
+        asserted = true;
+    }
+    nt_test_assert_armed = false;
+    glad_glGetShaderiv = s_saved_get_shader_iv;
+    TEST_ASSERT_TRUE(asserted);
+    TEST_ASSERT_EQUAL_UINT32(0, s_deleted_stage_queries);
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program link failed"));
+    /* A failed link is a husk: neither ready nor linking, so an owner relinks instead of waiting. */
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(prog));
+    nt_gfx_destroy_program(prog);
 }
 
 static void test_signed_sampler_type_asserts_at_link(void) {
@@ -1570,6 +1690,7 @@ int main(void) {
     RUN_TEST(test_supported_sampler_types_retain_their_classes);
     RUN_TEST(test_program_is_linking_until_a_poll_sees_the_link_finish);
     RUN_TEST(test_link_error_asserts_when_the_link_finishes);
+    RUN_TEST(test_pending_program_polls_query_driver_once_per_frame);
     RUN_TEST(test_signed_sampler_type_asserts_at_link);
     RUN_TEST(test_vertex_stage_and_array_samplers_get_distinct_units);
     RUN_TEST(test_reflection_reports_active_uniforms_with_glsl_declarations);

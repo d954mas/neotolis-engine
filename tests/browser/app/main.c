@@ -213,7 +213,7 @@ static void mesh_probe_destroy(void) {
 }
 
 static void mesh_probe_draw(void) {
-    if (s_mesh_vi.id == 0 || !nt_gfx_program_ready(s_mesh_program)) {
+    if (s_mesh_vi.id == 0 || nt_gfx_program_poll(s_mesh_program) != NT_GFX_PROGRAM_READY) {
         return;
     }
     /* Instance data at byte offset 8: proves the nonzero-offset re-pointing
@@ -283,7 +283,9 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_restore_frames(void) { return s_nt_restore_frames; }
 /* Both game programs linked and assigned -- false through the whole window
  * between the loss and the relink. */
-EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program)) ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) {
+    return ((nt_gfx_program_poll(s_sprite_program.program) == NT_GFX_PROGRAM_READY) && (nt_gfx_program_poll(s_text_program.program) == NT_GFX_PROGRAM_READY)) ? 1 : 0;
+}
 EMSCRIPTEN_KEEPALIVE int nt_test_float_texture_linear(void) { return nt_gfx_gpu_caps()->has_float_texture_linear ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_diagnostics_config(int field) {
     const int values[] = {NT_LOG_MIN_LEVEL, NT_UI_TIMING_ENABLED, NT_GFX_GPU_TIMING_ENABLED, NT_METRICS_ENABLED};
@@ -960,8 +962,8 @@ static void frame(void) {
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     /* A pending restore means renderer buffers may be missing; submitting
      * sprites then asserts by contract, so rendering waits it out. */
-    const bool can_render = !s_gpu_restore_pending && s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info &&
-                            nt_gfx_program_ready(text_info->program);
+    const bool can_render = !s_gpu_restore_pending && s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && (nt_gfx_program_poll(sprite_info->program) == NT_GFX_PROGRAM_READY) &&
+                            text_info && (nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY);
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));

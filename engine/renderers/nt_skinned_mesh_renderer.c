@@ -102,7 +102,6 @@ static uint32_t find_run_end(const nt_render_item_t *items, uint32_t leader, uin
 }
 
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *material) {
-    NT_ASSERT(nt_gfx_program_ready(material->program));
     const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(material, "skinned_mesh_pipeline");
     const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
     nt_pipeline_t pipeline = nt_renderer_pipeline_cache_find(s_skinned.pipelines, s_skinned.pipeline_count, &key);
@@ -304,8 +303,9 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info(mesh_handle);
             NT_ASSERT(material != NULL && mesh != NULL && "skinned draw references a destroyed material or mesh");
             const uint16_t stride = s_instance_layouts[material->color_mode].stride;
-            if (!nt_gfx_program_ready(material->program)) {
-                nt_renderer_warn_program_not_ready(&s_skinned.warned_program_not_ready, material);
+            const nt_gfx_program_state_t program_state = nt_gfx_program_poll(material->program);
+            if (program_state != NT_GFX_PROGRAM_READY) {
+                nt_renderer_warn_program_not_ready(&s_skinned.warned_program_not_ready, material, program_state);
                 draw_offset += instance_count * stride;
                 run_start = run_end;
                 continue;

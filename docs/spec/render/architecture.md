@@ -492,7 +492,8 @@ cascaded destroys). Only frontend cache hits
 (END result CACHE), rejections and losses are left out; an operation whose
 backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
 (SKIP/INACTIVE) still ends ACCEPTED and counts. A GPU timer poll with no result
-yet ends `UNREADY`. Texture
+yet ends `UNREADY`. Program polling is a `STATE` operation naming the program;
+READY ends ACCEPTED, LINKING or UNAVAILABLE ends UNREADY. Texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
 Each initialization restarts the frame sequence: the first frame after init is 1,
@@ -523,6 +524,8 @@ All record bytes are initialized before publication. A recorded frame starts at
 the begin_frame that opens it and first snapshots
 inherited state, including one definition per live resource (plus
 program uniform/sampler and vertex-input attribute records), into the same array.
+Pending programs include their backend slot/raw-name definition; reflection
+records appear only when polling or pipeline creation finishes the link.
 Size the capacity for that snapshot plus the frame's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
@@ -595,7 +598,7 @@ Program publication and initial state include `INITIAL/SAMPLER` records with
 backend program slot, name hash, location, unit and sampler class in args 0–4.
 `INITIAL/UNIFORM_VEC4` gives program slot/name hash/location in args 0–2 and cached
 vec4 values; `UNKNOWN` means no retained value. These INITIAL records can occur
-inside CREATE when the program first becomes available. Inactive names emit
+inside the poll STATE operation or pipeline CREATE that finishes linking. Inactive names emit
 SKIP/INACTIVE; cache skips are distinct from invalid requests.
 
 `SKIP` records mark work that was not issued without ending an operation:

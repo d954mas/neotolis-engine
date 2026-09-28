@@ -54,8 +54,7 @@ void nt_gfx_fake_fail_next_program_create(void);
 void nt_gfx_fake_lose_context_on_program_create(void);
 /* While set, a link poll reports PENDING; a waiting finish (make_pipeline) still completes it. */
 void nt_gfx_fake_set_links_pending(bool pending);
-/* The next `polls` link polls report PENDING, then the link finishes: a driver finishing between two polls. */
-void nt_gfx_fake_set_link_pending_polls(uint32_t polls);
+void nt_gfx_fake_delay_next_link_poll(void);
 void nt_gfx_fake_fail_next_link(void);
 void nt_gfx_fake_fail_next_pipeline_create(void);
 void nt_gfx_fake_fail_next_sampler_create(void);

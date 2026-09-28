@@ -2355,7 +2355,7 @@ static void skinned_draw(void) {
         const nt_mesh_t mesh = cpu ? sources[i]->reference : gpu_mesh;
         const nt_material_t material = cpu ? s_static_material[textures[i]] : s_skin_material[textures[i]];
         if ((!cpu && !humanoid && !nt_resource_is_ready(s_mesh_resource[p->rig])) || mesh.id == 0 || !nt_resource_is_ready(s_texture_resource[textures[i]]) ||
-            !nt_gfx_program_ready(nt_material_get_info(material)->program)) {
+            nt_gfx_program_poll(nt_material_get_info(material)->program) != NT_GFX_PROGRAM_READY) {
             continue;
         }
         const nt_entity_t e = s_mesh_entities[i];
@@ -2420,7 +2420,7 @@ static float mixing_culling_radius(void) {
 
 static void mixing_draw(void) {
     if (!mixing_ready() || s_mixing_scene.draw_model[0] == NULL || g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F || !nt_resource_is_ready(s_mix_texture_resource) ||
-        !nt_gfx_program_ready(s_skin_program.program)) {
+        nt_gfx_program_poll(s_skin_program.program) != NT_GFX_PROGRAM_READY) {
         return;
     }
     for (uint32_t mesh = 0; mesh < MIX_MESH_COUNT; ++mesh) {
@@ -2464,7 +2464,7 @@ static void mixing_draw(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void ordering_draw(void) {
     if (g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F || !nt_resource_is_ready(s_texture_resource[RIG_HUMANOID]) || !nt_resource_is_ready(s_texture_resource[RIG_COUNT]) ||
-        !nt_gfx_program_ready(s_skin_program.program)) {
+        nt_gfx_program_poll(s_skin_program.program) != NT_GFX_PROGRAM_READY) {
         return;
     }
     const uint32_t count = (uint32_t)s_order_count;
@@ -2617,7 +2617,8 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool ready = s_atlas_bound && s_font_bound && sprite_info != NULL && text_info != NULL && nt_gfx_program_ready(sprite_info->program) && nt_gfx_program_ready(text_info->program);
+    const bool ready = s_atlas_bound && s_font_bound && sprite_info != NULL && text_info != NULL && (nt_gfx_program_poll(sprite_info->program) == NT_GFX_PROGRAM_READY) &&
+                       (nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY);
     if (ready) {
         const float css_w = g_nt_window.width > 0U ? (float)g_nt_window.width : fb_w;
         const float css_h = g_nt_window.height > 0U ? (float)g_nt_window.height : fb_h;

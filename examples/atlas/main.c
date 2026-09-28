@@ -193,7 +193,7 @@ static void frame(void) {
 
     /* Render */
     const nt_material_info_t *mat_info = nt_material_get_info(s_material);
-    bool can_render = mat_info && nt_gfx_program_ready(mat_info->program) && nt_resource_is_ready(s_mesh_handle);
+    bool can_render = mat_info && (nt_gfx_program_poll(mat_info->program) == NT_GFX_PROGRAM_READY) && nt_resource_is_ready(s_mesh_handle);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
 

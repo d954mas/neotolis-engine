@@ -203,7 +203,7 @@ void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(first));
 
     /* No drop() anywhere. The stages are dead too, so the ref waits instead of
      * relinking from corpses -- and must not keep handing out the old program. */
@@ -226,7 +226,7 @@ void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
 
     TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, ref.program.id);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(ref.program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(ref.program));
 
     nt_program_ref_drop(&ref);
 }
@@ -242,35 +242,31 @@ void test_program_ref_keeps_a_program_while_it_links(void) {
     const uint32_t creates = nt_gfx_fake_program_create_count();
     TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
     const nt_program_t linking = ref.program;
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(linking));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_LINKING, nt_gfx_program_poll(linking));
     TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
     TEST_ASSERT_EQUAL_UINT32(linking.id, ref.program.id);
     TEST_ASSERT_EQUAL_UINT32(creates + 1U, nt_gfx_fake_program_create_count());
 
     nt_gfx_fake_set_links_pending(false);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(ref.program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(ref.program));
     TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
     nt_program_ref_drop(&ref);
 }
 
-/* A link that finishes between the ref's two polls is ready, not lost: the ref keeps it. */
-void test_program_ref_keeps_a_program_whose_link_finishes_mid_update(void) {
+void test_program_ref_keeps_a_program_that_finishes_between_polls(void) {
     nt_program_ref_t ref = {0};
-    ref.vs = publish_stage("ref_race_vs", make_stage(NT_SHADER_VERTEX).id);
-    ref.fs = publish_stage("ref_race_fs", make_stage(NT_SHADER_FRAGMENT).id);
+    ref.vs = publish_stage("ref_finish_vs", make_stage(NT_SHADER_VERTEX).id);
+    ref.fs = publish_stage("ref_finish_fs", make_stage(NT_SHADER_FRAGMENT).id);
     nt_resource_step();
 
-    nt_gfx_fake_set_links_pending(true);
     TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
     const nt_program_t linking = ref.program;
     const uint32_t creates = nt_gfx_fake_program_create_count();
-    nt_gfx_fake_set_links_pending(false);
-    nt_gfx_fake_set_link_pending_polls(1U);
-
+    nt_gfx_fake_delay_next_link_poll();
     TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
     TEST_ASSERT_EQUAL_UINT32(linking.id, ref.program.id);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(ref.program));
     TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_program_create_count());
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(linking));
     nt_program_ref_drop(&ref);
 }
 
@@ -1027,7 +1023,7 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(nt_gfx_program_valid(first));
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(first));
 
     /* Restore frame: reset the renderer, drop the program, keep the material. */
     nt_gfx_fake_set_context_lost(false);
@@ -1565,7 +1561,7 @@ int main(void) {
     RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
     RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
     RUN_TEST(test_program_ref_keeps_a_program_while_it_links);
-    RUN_TEST(test_program_ref_keeps_a_program_whose_link_finishes_mid_update);
+    RUN_TEST(test_program_ref_keeps_a_program_that_finishes_between_polls);
     RUN_TEST(test_a_replaced_program_does_not_redirect_a_staged_batch);
     RUN_TEST(test_overflow_flush_reopens_the_batch_pipeline);
     RUN_TEST(test_font_cache_flush_preserves_the_entire_run);

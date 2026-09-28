@@ -121,7 +121,7 @@ static uint8_t s_fake_fail_buffer_creates;
 static bool s_fake_fail_next_program_create;
 static bool s_fake_lose_context_on_program_create;
 static bool s_fake_links_pending;
-static uint32_t s_fake_link_pending_polls;
+static bool s_fake_delay_next_link_poll;
 static bool s_fake_fail_next_link;
 static bool s_fake_fail_next_pipeline_create;
 static bool s_fake_fail_next_sampler_create;
@@ -206,7 +206,7 @@ void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
 void nt_gfx_fake_fail_next_program_create(void) { s_fake_fail_next_program_create = true; }
 void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
 void nt_gfx_fake_set_links_pending(bool pending) { s_fake_links_pending = pending; }
-void nt_gfx_fake_set_link_pending_polls(uint32_t polls) { s_fake_link_pending_polls = polls; }
+void nt_gfx_fake_delay_next_link_poll(void) { s_fake_delay_next_link_poll = true; }
 void nt_gfx_fake_fail_next_link(void) { s_fake_fail_next_link = true; }
 void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_create = true; }
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
@@ -279,7 +279,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_next_program_create = false;
     s_fake_lose_context_on_program_create = false;
     s_fake_links_pending = false;
-    s_fake_link_pending_polls = 0;
+    s_fake_delay_next_link_poll = false;
     s_fake_fail_next_link = false;
     s_fake_fail_next_pipeline_create = false;
     s_fake_fail_next_sampler_create = false;
@@ -451,11 +451,11 @@ nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) 
         return NT_GFX_LINK_FAILED;
     }
     nt_gfx_fake_program_t *rec = &s_fake_program_table[backend_handle];
-    if (!rec->linked && s_fake_links_pending && !wait) {
+    if (!rec->linked && s_fake_delay_next_link_poll && !wait) {
+        s_fake_delay_next_link_poll = false;
         return NT_GFX_LINK_PENDING;
     }
-    if (!rec->linked && s_fake_link_pending_polls > 0 && !wait) {
-        s_fake_link_pending_polls--;
+    if (!rec->linked && s_fake_links_pending && !wait) {
         return NT_GFX_LINK_PENDING;
     }
     rec->linked = true;

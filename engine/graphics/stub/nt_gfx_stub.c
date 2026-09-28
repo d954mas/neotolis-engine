@@ -128,14 +128,9 @@ bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi) {
     return false;
 }
 
-bool nt_gfx_program_ready(nt_program_t prog) {
+nt_gfx_program_state_t nt_gfx_program_poll(nt_program_t prog) {
     (void)prog;
-    return false;
-}
-
-bool nt_gfx_program_linking(nt_program_t prog) {
-    (void)prog;
-    return false;
+    return NT_GFX_PROGRAM_UNAVAILABLE;
 }
 
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
