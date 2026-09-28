@@ -1,3 +1,4 @@
+#include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
 /* NT_TEST_ACCESS defined via CMake target_compile_definitions */
 #include "graphics/nt_gfx.h"
@@ -209,6 +210,7 @@ void test_shape_circle_wire_counts(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_shape_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(16U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
@@ -253,6 +255,7 @@ void test_shape_sphere_wire_counts(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_shape_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(48U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
@@ -276,6 +279,7 @@ void test_shape_sphere_wire_rot_counts(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_shape_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(48U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
@@ -319,6 +323,7 @@ void test_shape_cylinder_wire_counts(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_shape_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(36U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
@@ -341,6 +346,7 @@ void test_shape_capsule_wire_counts(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_shape_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(68U * 12U, nt_gfx_fake_draw_trace_at(0).num_indices);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
 }
 
@@ -591,6 +597,14 @@ static void test_polyline_skips_repeated_points_and_closes_once(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_shape_renderer_test_line_count());
 }
 
+static void test_polyline_asserts_non_finite_points(void) {
+    float points[][3] = {{0, 0, 0}, {1, NAN, 0}};
+    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_polyline((const float(*)[3])points, 2, false, (float[4]){1, 1, 1, 1}));
+    points[1][1] = 0;
+    points[0][2] = INFINITY;
+    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_polyline((const float(*)[3])points, 2, false, (float[4]){1, 1, 1, 1}));
+}
+
 static void test_width_mode_and_viewport_changes_flush_wires(void) {
     const float center[3] = {0, 0, 0};
     const float color[4] = {1, 1, 1, 1};
@@ -712,6 +726,7 @@ int main(void) {
     RUN_TEST(test_polyline_overflow_preserves_all_segments);
     RUN_TEST(test_wire_instances_overflow_without_losing_shapes);
     RUN_TEST(test_polyline_skips_repeated_points_and_closes_once);
+    RUN_TEST(test_polyline_asserts_non_finite_points);
     RUN_TEST(test_width_mode_and_viewport_changes_flush_wires);
     RUN_TEST(test_width_changes_keep_filled_shapes_batched);
     RUN_TEST(test_wire_queue_changes_keep_filled_shapes_batched);

@@ -1365,8 +1365,15 @@ static uint32_t next_distinct(const float (*points)[3], uint32_t count, uint32_t
     return next;
 }
 
+static void assert_finite_points(const float (*points)[3], uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        NT_ASSERT(isfinite(points[i][0]) && isfinite(points[i][1]) && isfinite(points[i][2]));
+    }
+}
+
 void nt_shape_renderer_polyline(const float (*points)[3], uint32_t count, bool closed, const float color[4]) {
     NT_ASSERT(points != NULL || count == 0);
+    assert_finite_points(points, count);
     if (count < 2) {
         return;
     }

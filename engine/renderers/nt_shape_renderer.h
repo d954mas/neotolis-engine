@@ -51,7 +51,8 @@ void nt_shape_renderer_set_vp(const float vp[16]);
 void nt_shape_renderer_set_cam_pos(const float pos[3]);
 /* Select world-space thickness (default 0.02). Width must be finite and positive. */
 void nt_shape_renderer_set_line_width(float width);
-/* Select framebuffer-pixel thickness. Pass the active viewport dimensions, not CSS size. */
+/* Select framebuffer-pixel thickness. Width must be finite and positive; viewport dimensions must be positive.
+ * Pass the active viewport dimensions, not CSS size. */
 void nt_shape_renderer_set_line_width_pixels(float width, uint32_t viewport_width, uint32_t viewport_height);
 void nt_shape_renderer_set_depth(bool enabled);
 
@@ -60,8 +61,9 @@ void nt_shape_renderer_set_depth(bool enabled);
 void nt_shape_renderer_line(const float a[3], const float b[3], const float color[4]);
 
 /* Connected world-space points; butt ends, miter joins with bevel beyond 4 half-widths.
- * Points are consumed during the call. Consecutive duplicates are skipped; count < 2 is a no-op.
- * Closed paths join last to first; a repeated final copy of the first point is optional. */
+ * Points are borrowed for the call and must be finite; points may be null only when count is zero.
+ * Consecutive duplicates are skipped; count < 2 is a no-op. Closed paths join last to first;
+ * a repeated final copy of the first point is optional. */
 void nt_shape_renderer_polyline(const float (*points)[3], uint32_t count, bool closed, const float color[4]);
 
 /* ---- Rectangle ---- */
