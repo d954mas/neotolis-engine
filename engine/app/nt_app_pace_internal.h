@@ -10,9 +10,13 @@
    frame. Deadlines advance by whole target periods, so a display whose period does not divide
    target_ms still averages 1 / target_ms; a tick more than one period late (hidden tab, stall)
    restarts the schedule at now instead of running catch-up frames. target_ms <= 0 is uncapped. */
-static inline bool nt_app_pace_tick(double *next_ms, double now_ms, double target_ms) {
+static inline bool nt_app_pace_tick(double *next_ms, double last_ms, double now_ms, double target_ms) {
     if (target_ms <= 0.0) {
         return true;
+    }
+    /* A shorter live cap must not wait for a deadline set by the prior cap. */
+    if (*next_ms - last_ms > target_ms + NT_APP_PACE_TOLERANCE_MS) {
+        *next_ms = last_ms + target_ms;
     }
     if (now_ms < *next_ms - NT_APP_PACE_TOLERANCE_MS) {
         return false;

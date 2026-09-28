@@ -37,7 +37,7 @@ static int pace_feed(pace_run_t *run, double hz, double start_ms, double seconds
     for (int i = 0; i < count; i++) {
         double now = start_ms + ((double)i * 1000.0 / hz) + pace_jitter(run);
         run->ticks++;
-        if (!nt_app_pace_tick(&run->next_ms, now, target_ms)) {
+        if (!nt_app_pace_tick(&run->next_ms, run->last_frame_ms, now, target_ms)) {
             continue;
         }
         if (run->last_frame_ms >= 0.0 && now - run->last_frame_ms < run->min_interval_ms) {
@@ -88,6 +88,13 @@ void test_gap_restarts_schedule_without_catch_up(void) {
     TEST_ASSERT_TRUE(run.min_interval_ms >= TARGET_60_MS * 0.5);
 }
 
+void test_shrinking_cap_uses_new_period(void) {
+    double next_ms = 0.0;
+    TEST_ASSERT_TRUE(nt_app_pace_tick(&next_ms, 0.0, 5000.0, 1000.0));
+    TEST_ASSERT_FALSE(nt_app_pace_tick(&next_ms, 5000.0, 5007.0, TARGET_60_MS));
+    TEST_ASSERT_TRUE(nt_app_pace_tick(&next_ms, 5000.0, 5020.0, TARGET_60_MS));
+}
+
 void test_zero_target_is_uncapped(void) {
     pace_run_t run = pace_run_new();
     pace_feed(&run, 144.0, 1000.0, 2.0, 0.0);
@@ -100,6 +107,7 @@ int main(void) {
     RUN_TEST(test_slower_displays_run_every_tick);
     RUN_TEST(test_lower_cap_divides_display_rate);
     RUN_TEST(test_gap_restarts_schedule_without_catch_up);
+    RUN_TEST(test_shrinking_cap_uses_new_period);
     RUN_TEST(test_zero_target_is_uncapped);
     return UNITY_END();
 }

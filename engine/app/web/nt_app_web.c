@@ -22,7 +22,7 @@ static EM_BOOL nt_app_web_frame(double time_ms, void *user_data) {
 
     /* Frame-rate cap (wall-time pacing): skipped while a MANUAL crunch is draining so lockstep
        advances at the RAF rate, not throttled to target_dt. */
-    if (!(g_nt_app.mode == NT_APP_MODE_MANUAL && g_nt_app.pending_steps > 0) && !nt_app_pace_tick(&s_next_time_ms, time_ms, (double)g_nt_app.target_dt * 1000.0)) {
+    if (!(g_nt_app.mode == NT_APP_MODE_MANUAL && g_nt_app.pending_steps > 0) && !nt_app_pace_tick(&s_next_time_ms, s_prev_time_ms, time_ms, (double)g_nt_app.target_dt * 1000.0)) {
         return EM_TRUE;
     }
 
