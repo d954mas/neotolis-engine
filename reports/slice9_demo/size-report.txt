@@ -1,5 +1,5 @@
 # Size Report: slice9_demo (wasm-analysis-paired)
-# Commit: ca447e1
+# Commit: 7d31ffe
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                  55 B
-Code              197557 B
+Code              197606 B
 Data               11300 B
 Custom              5937 B
 ---------------- ----------
-TOTAL             215980 B
+TOTAL             216029 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL             215980 B
  1103 B   nt_material_create
 
 Total functions: 175
-Total code size: 197261 B
+Total code size: 197310 B
 
 ## Built Engine Archives
 
@@ -63,7 +63,7 @@ Total code size: 197261 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 2666 B
+libnt_app.a                 2770 B
 libnt_app_stub.a            2620 B
 libnt_atlas.a               5912 B
 libnt_base64.a               964 B
@@ -102,7 +102,7 @@ libnt_pool.a                1376 B
 libnt_postfx_blur.a         8720 B
 libnt_render.a              7674 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a   1144652 B
+libnt_shape_renderer.a   1308998 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2854 B
@@ -122,7 +122,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4238074 B
+TOTAL (archives)         4402524 B
 
 ## Data Segments Summary
 
