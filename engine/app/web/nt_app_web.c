@@ -3,6 +3,7 @@
 #ifdef NT_PLATFORM_WEB
 
 #include "app/nt_app.h"
+#include "app/nt_app_pace_internal.h"
 #include "core/nt_assert.h"
 #include <emscripten/html5.h>
 #include <math.h>
@@ -11,6 +12,7 @@
 
 static nt_app_frame_fn s_frame_fn;
 static double s_prev_time_ms;
+static double s_next_time_ms; /* frame-cap deadline, see nt_app_pace_tick */
 
 /* ---- RAF callback ---- */
 
@@ -18,17 +20,10 @@ static double s_prev_time_ms;
 static EM_BOOL nt_app_web_frame(double time_ms, void *user_data) {
     (void)user_data;
 
-    /* Frame rate cap: skip RAF tick if target_dt not elapsed.
-     * We allow a 2ms jitter margin so a 60Hz RAF (16.66ms) arriving
-     * slightly early (e.g. 15.5ms) isn't dropped, which would otherwise
-     * halve the frame rate to 30 FPS on that tick. */
     /* Frame-rate cap (wall-time pacing): skipped while a MANUAL crunch is draining so lockstep
        advances at the RAF rate, not throttled to target_dt. */
-    if (g_nt_app.target_dt > 0.0F && !(g_nt_app.mode == NT_APP_MODE_MANUAL && g_nt_app.pending_steps > 0)) {
-        double target_ms = (double)g_nt_app.target_dt * 1000.0 - 2.0;
-        if (time_ms - s_prev_time_ms < target_ms) {
-            return EM_TRUE;
-        }
+    if (!(g_nt_app.mode == NT_APP_MODE_MANUAL && g_nt_app.pending_steps > 0) && !nt_app_pace_tick(&s_next_time_ms, s_prev_time_ms, time_ms, (double)g_nt_app.target_dt * 1000.0)) {
+        return EM_TRUE;
     }
 
     float wall_dt = fminf((float)((time_ms - s_prev_time_ms) / 1000.0), g_nt_app.max_dt);

@@ -248,6 +248,16 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_app COMMAND test_app)
 
+    # --- Web frame-cap pacing (header-only; replays synthetic RAF clocks natively) ---
+    add_executable(test_app_pace unit/test_app_pace.c)
+    target_link_libraries(test_app_pace PRIVATE nt_app_interface unity)
+    nt_set_warning_flags(test_app_pace)
+    nt_set_sanitizer_flags(test_app_pace)
+    set_target_properties(test_app_pace PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_app_pace COMMAND test_app_pace)
+
     # --- Managed loop (time-control) tests (L1: pause/manual/scale loop + sim-advance counter) ---
     add_executable(test_app_managed unit/test_app_managed.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_app_managed PRIVATE nt_app_stub nt_log_stub unity)

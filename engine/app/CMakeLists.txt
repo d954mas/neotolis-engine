@@ -7,6 +7,7 @@ if(EMSCRIPTEN)
     nt_add_module(nt_app LOG_DOMAIN "app"
         nt_app.c
         web/nt_app_web.c
+        nt_app_pace_internal.h
         nt_app.h
     )
     # RAF callback fires after main() returns -- runtime must stay alive
