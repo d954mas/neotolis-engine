@@ -115,12 +115,10 @@ flight; `nt_resource_step()` calls it too, and the pump is global, so it
 advances the game's own requests as well (see
 [frame lifecycle](../runtime/frame-lifecycle.md)).
 
-Connections are kept alive and reused across requests, as `fetch()` does. The
-native backend pools up to `NT_HTTP_MAX_REQUESTS` idle connections, the most it
-can ever have busy at once, so a burst of requests to one host leaves its
-connections open for the next burst instead of reconnecting (a TCP and TLS
-handshake each on https). An idle connection still closes after libcurl's idle
-limit (`CURLOPT_MAXAGE_CONN`, 118 s) or the server's keep-alive timeout.
+Connections are kept alive and reused across requests, as `fetch()` does. A
+request sent on a reused connection that the server closed before any response
+arrived may be sent again on a new connection, on both backends; an endpoint that
+must not act twice needs its own request id.
 
 The pack loader treats a non-2xx status and a 2xx response with an empty body as
 load failures (normal retry policy applies).
@@ -142,6 +140,7 @@ native backend via `CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders
 | obs-fold continuation lines (legacy servers) | browser unfolds them | folded line is dropped or emitted as a garbage header line |
 | Mid-transfer progress numbers | decoded stream bytes vs raw Content-Length | wire (possibly compressed) bytes |
 | Relative URL (`"/path"`) | resolved against the page origin | no base URL — the request FAILs |
+| Connection pool | browser-managed (about 6 per host on HTTP/1.1, one on HTTP/2) | HTTP/1.1 only; at most `NT_HTTP_MAX_REQUESTS` connections open in total, across hosts, so a burst to one host leaves its connections for the next burst; an idle connection is not reused past libcurl's idle limit (`CURLOPT_MAXAGE_CONN`) and closes on a later request or at shutdown |
 
 Progress numbers are transport-level best effort while DOWNLOADING on both
 backends; at DONE both report `received == total ==` decoded size.

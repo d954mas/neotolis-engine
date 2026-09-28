@@ -286,9 +286,9 @@ static void test_timeout_mid_body_keeps_status(void) {
     nt_http_free(req);
 }
 
-/* Fires NT_HTTP_MAX_REQUESTS overlapping /peer requests and records the client
- * port each one arrived on. */
-static void peer_burst(unsigned ports[NT_HTTP_MAX_REQUESTS]) {
+/* Fires NT_HTTP_MAX_REQUESTS overlapping /peer requests and records the number
+ * the server gave the connection each one arrived on. */
+static void peer_burst(unsigned connections[NT_HTTP_MAX_REQUESTS]) {
     nt_http_request_t reqs[NT_HTTP_MAX_REQUESTS];
     for (int i = 0; i < NT_HTTP_MAX_REQUESTS; i++) {
         reqs[i] = nt_http_request(make_url("/peer"));
@@ -304,15 +304,15 @@ static void peer_burst(unsigned ports[NT_HTTP_MAX_REQUESTS]) {
         TEST_ASSERT_LESS_THAN(sizeof(text), size);
         memcpy(text, data, size);
         free(data);
-        ports[i] = (unsigned)strtoul(text, NULL, 10);
-        TEST_ASSERT_NOT_EQUAL(0U, ports[i]);
+        connections[i] = (unsigned)strtoul(text, NULL, 10);
+        TEST_ASSERT_NOT_EQUAL(0U, connections[i]);
         nt_http_free(reqs[i]);
     }
 }
 
 /* A burst's connections stay pooled when it ends: the next burst to the same
- * host must not reconnect. Pins the pool size; on https each reconnect it saves
- * is a TCP and TLS handshake. */
+ * host must not reconnect. Pins that the pool keeps a whole burst's connections;
+ * on https each reconnect it saves is a TCP and TLS setup. */
 static void test_burst_reuses_previous_burst_connections(void) {
     unsigned first[NT_HTTP_MAX_REQUESTS];
     unsigned second[NT_HTTP_MAX_REQUESTS];

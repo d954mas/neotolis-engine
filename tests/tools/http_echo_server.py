@@ -8,24 +8,32 @@ Endpoints: POST /echo (byte-exact echo + request headers reflected into
 X-Echo-* response headers), GET /hello, /status404, /slow (5 s stall),
 /slowbody (headers then stall), /gzip, /truncated, /empty, /loop,
 /r301hello + /hello301 (redirect probes), and /peer (a short hold, then the
-client's TCP port, so a test can tell a reused connection from a new one).
-/echo, /status404 and /slow match tests/browser/serve.mjs, so both acceptance
-tests assert the same contract there; the rest are native-only.
+number of the TCP connection it arrived on, so a test can tell a reused
+connection from a new one). tests/browser/serve.mjs serves the same /status404
+and /slow and a narrower POST /echo (Content-Type and X-NT-Test reflected); the
+rest are native-only.
 """
 import gzip
+import itertools
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 class Server(ThreadingHTTPServer):
-    # A burst of NT_HTTP_MAX_REQUESTS connects arrives at once; a full backlog
-    # answers with RST on Windows
+    # A burst of NT_HTTP_MAX_REQUESTS connects arrives at once; a backlog smaller
+    # than the burst answers the rest with RST on Windows
     request_queue_size = 64
 
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # Numbers every accepted connection; next() on a count is atomic under the GIL
+    _connections = itertools.count(1)
+
+    def setup(self):
+        super().setup()
+        self.connection_number = next(Handler._connections)
 
     def log_message(self, *args):
         pass
@@ -82,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/peer":
             # Long enough that a burst's requests overlap and each needs its own connection
             time.sleep(0.3)
-            self._reply(200, str(self.client_address[1]).encode())
+            self._reply(200, str(self.connection_number).encode())
         elif self.path == "/hello301":
             # Lands here only when a redirected POST correctly became a GET
             self._reply(200, b"hello-neotolis")

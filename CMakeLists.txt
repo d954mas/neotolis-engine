@@ -288,14 +288,27 @@ if(NOT EMSCRIPTEN)
         if(WIN32)
             set(CURL_USE_SCHANNEL ON)
         else()
-            set(CURL_USE_OPENSSL ON)
-            # A CA directory makes libcurl re-parse the bundle on every new https connection;
-            # without one it caches the parsed store, OpenSSL's default paths standing in when
-            # no bundle is found. FORCEd: curl's 3.18 policies drop normal variables here.
-            unset(CURL_CA_PATH)
-            unset(CURL_CA_FALLBACK)
-            set(CURL_CA_PATH "none" CACHE STRING "CA directory of the vendored libcurl" FORCE)
-            set(CURL_CA_FALLBACK ON CACHE BOOL "OpenSSL default CA paths when no bundle is found" FORCE)
+            # curl's default backend here is OpenSSL unless the consumer picked another one.
+            set(_nt_curl_openssl ON)
+            foreach(_nt_tls CURL_USE_MBEDTLS CURL_USE_WOLFSSL CURL_USE_GNUTLS CURL_USE_RUSTLS)
+                if(${_nt_tls})
+                    set(_nt_curl_openssl OFF)
+                endif()
+            endforeach()
+            if((DEFINED CURL_ENABLE_SSL AND NOT CURL_ENABLE_SSL) OR (DEFINED CURL_USE_OPENSSL AND NOT CURL_USE_OPENSSL))
+                set(_nt_curl_openssl OFF)
+            endif()
+            # A CA directory makes OpenSSL libcurl re-parse the bundle on every new https
+            # connection; from the bundle alone it caches the parsed store. Only a directory
+            # curl auto-detected (it caches CURL_CA_PATH_SET) is replaced, never a consumer's.
+            if(_nt_curl_openssl AND (NOT DEFINED CACHE{CURL_CA_PATH} OR DEFINED CACHE{CURL_CA_PATH_SET}))
+                # FORCEd cache entries: curl's 3.18 policies drop same-named normal variables.
+                unset(CURL_CA_PATH)
+                unset(CURL_CA_FALLBACK)
+                unset(CURL_CA_PATH_SET CACHE)
+                set(CURL_CA_PATH "none" CACHE STRING "CA directory of the vendored libcurl" FORCE)
+                set(CURL_CA_FALLBACK ON CACHE BOOL "OpenSSL default CA paths when no bundle is found" FORCE)
+            endif()
         endif()
         add_subdirectory(deps/curl EXCLUDE_FROM_ALL)
         # CRT pins only for targets THIS block created — outside the guard the
