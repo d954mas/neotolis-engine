@@ -1148,6 +1148,9 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
         /* Integer storage samples NEAREST only, so extra levels are dead VRAM. */
         NT_ASSERT(local_desc.level_count <= 1 && "integer texture mip levels are not sampleable");
     }
+    if (local_desc.format == NT_TEXTURE_FORMAT_RGBA16F) {
+        NT_ASSERT((!local_desc.gen_mipmaps || g_nt_gfx.gpu_caps.has_float_render_target) && "RGBA16F mipmaps require float rendering support");
+    }
     if (local_desc.format == NT_TEXTURE_FORMAT_RGBA32F) {
         NT_ASSERT((g_nt_gfx.gpu_caps.has_float_texture_linear || !texture_filter_uses_linear(local_desc.min_filter)) && "RGBA32F min_filter requires float texture linear support");
         NT_ASSERT((g_nt_gfx.gpu_caps.has_float_texture_linear || local_desc.mag_filter == NT_FILTER_NEAREST) && "RGBA32F mag_filter requires float texture linear support");
@@ -1189,7 +1192,7 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
     s_gfx.texture_metas[slot].width = local_desc.width;
     s_gfx.texture_metas[slot].height = local_desc.height;
     s_gfx.texture_metas[slot].format = (uint8_t)local_desc.format;
-    /* Levels the storage really has: gen_mipmaps fills the chain GL-side. */
+    /* Requested levels; driver upload failures are not polled. */
     uint8_t mip_count = local_desc.level_count > 1 ? local_desc.level_count : 1;
     if (local_desc.gen_mipmaps && local_desc.data) {
         mip_count = nt_texture_full_chain_levels(local_desc.width, local_desc.height);

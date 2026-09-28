@@ -360,10 +360,10 @@ proportionality but not on specific weights. Comparison itself is core in
 GLES 3.0, WebGL 2, and desktop GL 3.0+, so it needs no capability bit.
 
 Mip completeness needs no bind-time gate: `GL_TEXTURE_MAX_LEVEL` is set to
-`mip_count - 1` when the storage is created, so a texture's levels `0..MAX_LEVEL`
-all exist by the time its handle is published. A sampler override with a mipmap
-minification filter is therefore always valid, and over a single-level texture
-it samples level 0.
+`mip_count - 1` when storage commands are issued, matching the uploaded or generated
+chain. A sampler override may therefore use a mipmap minification filter even
+for a single-level texture, where it samples level 0. Driver upload failures
+are not polled, so a published handle does not guarantee complete GPU storage.
 
 Block-compressed storage (`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`,
 `ASTC_4x4_RGBA`) is normalized color for the sampler classes: it satisfies
@@ -379,6 +379,8 @@ both allow `NEAREST` or `NEAREST_MIPMAP_NEAREST` minification and require
 changing the requested sampler.
 RGBA32F mipmap generation additionally requires `has_float_render_target`:
 WebGL requires the source storage to be both filterable and color-renderable.
+RGBA16F mipmap generation requires `has_float_render_target` as well; its
+filtering is core and needs no float-filtering extension.
 This does not add RGBA32F render-target support to the engine.
 
 This capability supplies low-level targets and depth textures only. It does not
@@ -440,19 +442,22 @@ operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
 failure reason and error log. The backend asks only where the answer prevents a crash or a
 misleading log: before shader and program creation, because Emscripten throws on
 the null object some browsers return on a lost context; error logs for link,
-uniform reflection and framebuffer completeness, which a loss suppresses; and
-the vertex array made at context setup, whose name 0 asserts only on a live
-context. A GPU timer query named 0 leaves its segment unallocated and skipped,
-because `beginQuery` throws on it. A fresh context (init or restore) first
+uniform reflection and framebuffer completeness, which a loss suppresses;
+after texture upload, because a nonzero WebGL name does not establish context
+liveness; and the vertex array made at context setup, whose name 0 asserts only
+on a live context. A GPU timer query named 0 leaves its segment unallocated and
+skipped, because `beginQuery` throws on it. A fresh context (init or restore) first
 drains GL errors: Emscripten keeps a recorded error across contexts, so a call
 that reached the dead context must not fail the fresh one's first check.
 
 Texture creation reads no GL error: on WebGL `glGetError` is a blocking
-round trip to the GPU process that waits for the queued uploads. A lost context
-creates no texture name, so the create still ends `CONTEXT_LOST`; GL misuse is
-reported under `NT_GFX_WEB_GL_DEBUG` / `NT_GFX_NATIVE_GL_DEBUG`. An upload the
-driver rejects on a live context (out of memory) is not detected: the create
-ends `ACCEPTED` and the texture samples incomplete.
+round trip to the GPU process that waits for the queued uploads. After upload,
+the backend asks whether the context is lost without waiting for GPU completion;
+a confirmed loss deletes the name and ends the create `CONTEXT_LOST`, including
+when the browser returned a non-null texture object during loss. GL misuse is
+reported under `NT_GFX_WEB_GL_DEBUG` / `NT_GFX_NATIVE_GL_DEBUG`. An upload or mipmap
+generation the driver rejects on a live context (out of memory) is not detected:
+the create ends `ACCEPTED` but GPU storage may be incomplete.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before

@@ -1794,7 +1794,6 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
 static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     GLuint tex;
     NT_GL_GEN(glGenTextures, 1, &tex);
-    /* A lost context creates no name; the frontend reports it as CONTEXT_LOST. */
     if (tex == 0) {
         return 0;
     }
@@ -1839,10 +1838,12 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     const uint8_t top_level = (desc->gen_mipmaps && desc->data) ? nt_texture_full_chain_levels(desc->width, desc->height) : levels;
     NT_GL(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)(top_level - 1));
 
-    /* No error check: on WebGL glGetError is a blocking GPU-process round trip (tens of ms
-     * per texture). A loss shows up as name 0 above, GL misuse under the GL_DEBUG options;
-     * an out-of-memory upload leaves the texture incomplete instead of failing the create. */
-    // const GLenum err = glGetError();
+    /* A nonzero WebGL name can survive loss. Query it without waiting for uploads;
+     * glGetError would synchronize with the GPU process, so live upload errors stay unchecked. */
+    if (nt_gfx_gl_ctx_query_lost()) {
+        NT_GL_DELETE(glDeleteTextures, 1, &tex);
+        return 0;
+    }
 
     return tex;
 }
