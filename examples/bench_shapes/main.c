@@ -339,7 +339,7 @@ static void dispatch_shape(const bench_shape_t *s) {
     }
 }
 
-/* ---- stroke font: draw a letter on the floor (XZ plane, y=0.002) ---- */
+/* ---- stroke font: draw a letter on the floor (XZ plane, y=0.02) ---- */
 
 #define LETTER_MAX_SEGMENTS 5
 
@@ -364,11 +364,11 @@ static void draw_letter(float ox, float oz, float scale, const float *strokes, i
         }
         if (point_count == 0) {
             points[point_count][0] = x0;
-            points[point_count][1] = 0.002F;
+            points[point_count][1] = 0.02F;
             points[point_count++][2] = z0;
         }
         points[point_count][0] = x1;
-        points[point_count][1] = 0.002F;
+        points[point_count][1] = 0.02F;
         points[point_count++][2] = z1;
     }
     draw_letter_path((const float(*)[3])points, point_count, color);
