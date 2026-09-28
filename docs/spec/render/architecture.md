@@ -440,14 +440,19 @@ operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
 failure reason and error log. The backend asks only where the answer prevents a crash or a
 misleading log: before shader and program creation, because Emscripten throws on
 the null object some browsers return on a lost context; error logs for link,
-uniform reflection, framebuffer completeness and texture creation, which a loss
-suppresses; a GL error pending before a texture upload, which a loss turns from
-an assert into a rolled-back failure; and the vertex array made at context
-setup, whose name 0 asserts only on a live context. A GPU timer query named 0
-leaves its segment unallocated and skipped, because `beginQuery` throws on it. A
-fresh context (init or restore) first drains GL errors: Emscripten keeps a
-recorded error across contexts, so a call that reached the dead context must not
-fail the fresh one's first check.
+uniform reflection and framebuffer completeness, which a loss suppresses; and
+the vertex array made at context setup, whose name 0 asserts only on a live
+context. A GPU timer query named 0 leaves its segment unallocated and skipped,
+because `beginQuery` throws on it. A fresh context (init or restore) first
+drains GL errors: Emscripten keeps a recorded error across contexts, so a call
+that reached the dead context must not fail the fresh one's first check.
+
+Texture creation reads no GL error: on WebGL `glGetError` is a blocking
+round trip to the GPU process that waits for the queued uploads. A lost context
+creates no texture name, so the create still ends `CONTEXT_LOST`; GL misuse is
+reported under `NT_GFX_WEB_GL_DEBUG` / `NT_GFX_NATIVE_GL_DEBUG`. An upload the
+driver rejects on a live context (out of memory) is not detected: the create
+ends `ACCEPTED` and the texture samples incomplete.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
