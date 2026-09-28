@@ -140,7 +140,7 @@ native backend via `CURLOPT_ACCEPT_ENCODING` with curl's gzip/deflate decoders
 | obs-fold continuation lines (legacy servers) | browser unfolds them | folded line is dropped or emitted as a garbage header line |
 | Mid-transfer progress numbers | decoded stream bytes vs raw Content-Length | wire (possibly compressed) bytes |
 | Relative URL (`"/path"`) | resolved against the page origin | no base URL — the request FAILs |
-| Connection pool | browser-managed (about 6 per host on HTTP/1.1, one on HTTP/2) | HTTP/1.1 only; at most `NT_HTTP_MAX_REQUESTS` connections open in total, across hosts, so a burst to one host leaves its connections for the next burst; an idle connection is not reused past libcurl's idle limit (`CURLOPT_MAXAGE_CONN`) and closes on a later request or at shutdown |
+| Connection pool | browser-managed (about 6 per host on HTTP/1.1, one on HTTP/2) | The vendored build uses HTTP/1.1. The connection cache retains up to `NT_HTTP_MAX_REQUESTS` connections across hosts after transfers complete, so a burst to one host can reuse the previous burst's connections. This is not a hard limit on all open connections: transfers to other hosts may temporarily exceed it. An idle connection is not reused past libcurl's idle limit (`CURLOPT_MAXAGE_CONN`) and closes on a later request or at shutdown. |
 
 Progress numbers are transport-level best effort while DOWNLOADING on both
 backends; at DONE both report `received == total ==` decoded size.
