@@ -48,7 +48,6 @@ void nt_shape_renderer_flush(void);
 /* ---- State setters ---- */
 
 void nt_shape_renderer_set_vp(const float vp[16]);
-void nt_shape_renderer_set_cam_pos(const float pos[3]);
 /* Select world-space thickness (default 0.02). Width must be finite and positive. */
 void nt_shape_renderer_set_line_width(float width);
 /* Select framebuffer-pixel thickness. Width must be finite and positive; viewport dimensions must be positive.
@@ -135,7 +134,7 @@ uint32_t nt_shape_renderer_test_vertex_count(void);
 uint32_t nt_shape_renderer_test_index_count(void);
 uint32_t nt_shape_renderer_test_stroke_count(void);
 const float *nt_shape_renderer_test_vp(void);
-const float *nt_shape_renderer_test_cam_pos(void);
+const float *nt_shape_renderer_test_eye(void);
 float nt_shape_renderer_test_line_width(void);
 bool nt_shape_renderer_test_depth_enabled(void);
 bool nt_shape_renderer_test_initialized(void);

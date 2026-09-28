@@ -389,9 +389,7 @@ static void draw_scene_contents(void) {
     glm_perspective(glm_rad(55.0F), aspect, 0.1F, 20.0F, proj);
     glm_mat4_mul(proj, view, vp);
 
-    float cam_pos[3] = {0.0F, 2.2F, 5.2F};
     nt_shape_renderer_set_vp((float *)vp);
-    nt_shape_renderer_set_cam_pos(cam_pos);
     nt_shape_renderer_set_depth(true);
 
     float t = (float)nt_time_now();

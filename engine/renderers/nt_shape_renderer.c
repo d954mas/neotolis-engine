@@ -51,7 +51,7 @@ static const char *s_shape_fs_src = "precision mediump float;\n"
 
 #define NT_STROKE_GLSL                                                                                                                                                                                 \
     "uniform mat4 u_vp;\n"                                                                                                                                                                             \
-    "uniform vec4 u_cam_pos;\n"                                                                                                                                                                        \
+    "uniform vec4 u_eye;\n"                                                                                                                                                                            \
     "uniform float u_line_width;\n"                                                                                                                                                                    \
     "uniform vec4 u_pixel_scale;\n"                                                                                                                                                                    \
     "vec3 side(vec3 edge, vec3 view) {\n"                                                                                                                                                              \
@@ -72,8 +72,11 @@ static const char *s_shape_fs_src = "precision mediump float;\n"
     "    if (role > 3.5) offset = vec3(0);\n"                                                                                                                                                          \
     "    return offset;\n"                                                                                                                                                                             \
     "}\n"                                                                                                                                                                                              \
+    "vec3 to_eye(vec3 p) {\n"                                                                                                                                                                          \
+    "    return u_eye.xyz-p*u_eye.w;\n"                                                                                                                                                                \
+    "}\n"                                                                                                                                                                                              \
     "vec3 biased(vec3 p) {\n"                                                                                                                                                                          \
-    "    vec3 view = u_cam_pos.xyz-p;\n"                                                                                                                                                               \
+    "    vec3 view = to_eye(p);\n"                                                                                                                                                                     \
     "    float dist = length(view);\n"                                                                                                                                                                 \
     "    return dist > 1e-6 ? p+view*(0.0005/dist) : p;\n"                                                                                                                                             \
     "}\n"                                                                                                                                                                                              \
@@ -104,7 +107,7 @@ static const char *s_shape_fs_src = "precision mediump float;\n"
     "}\n"                                                                                                                                                                                              \
     "vec4 stroke_position(vec2 corner, vec3 before, vec3 p, vec3 after) {\n"                                                                                                                           \
     "    if (u_pixel_scale.x>0.0) return pixel_position(corner,before,p,after);\n"                                                                                                                     \
-    "    vec3 view = u_cam_pos.xyz-p;\n"                                                                                                                                                               \
+    "    vec3 view = to_eye(p);\n"                                                                                                                                                                     \
     "    vec3 offset = join_offset(side(p-before,view),side(after-p,view),corner.y);\n"                                                                                                                \
     "    return u_vp*vec4(biased(p+offset*(0.5*u_line_width)),1);\n"                                                                                                                                   \
     "}\n"
@@ -317,7 +320,7 @@ static struct {
 
     /* Settings */
     float vp[16];
-    float cam_pos[3];
+    float eye[4]; /* derived from vp; w = 0 for an orthographic view direction */
     float line_width;
     float pixel_scale[4];
     bool depth_enabled;
@@ -905,14 +908,14 @@ static bool build_wire_vertex_inputs(void) {
 
 /* Fixed uniform names: hashed once, the draw path sets them every frame. */
 static nt_hash32_t s_u_vp;
-static nt_hash32_t s_u_cam_pos;
+static nt_hash32_t s_u_eye;
 static nt_hash32_t s_u_line_width;
 static nt_hash32_t s_u_pixel_scale;
 
 void nt_shape_renderer_init(void) {
     memset(&s_shape, 0, sizeof(s_shape));
     s_u_vp = nt_hash32_str("u_vp");
-    s_u_cam_pos = nt_hash32_str("u_cam_pos");
+    s_u_eye = nt_hash32_str("u_eye");
     s_u_line_width = nt_hash32_str("u_line_width");
     s_u_pixel_scale = nt_hash32_str("u_pixel_scale");
     /* Set before anything is created: the failure paths below route cleanup
@@ -1098,13 +1101,13 @@ void nt_shape_renderer_restore_gpu(void) {
     }
     /* Save CPU-side state that survives context loss */
     float saved_vp[16];
-    float saved_cam_pos[3];
+    float saved_eye[4];
+    memcpy(saved_eye, s_shape.eye, sizeof(saved_eye));
     float saved_line_width = s_shape.line_width;
     float saved_pixel_scale[4];
     memcpy(saved_pixel_scale, s_shape.pixel_scale, sizeof(saved_pixel_scale));
     bool saved_depth = s_shape.depth_enabled;
     memcpy(saved_vp, s_shape.vp, sizeof(saved_vp));
-    memcpy(saved_cam_pos, s_shape.cam_pos, sizeof(saved_cam_pos));
 
     /* Shutdown destroys GPU handles (no-ops for zero backends after context loss)
        and clears all state including CPU-side arrays. */
@@ -1115,7 +1118,7 @@ void nt_shape_renderer_restore_gpu(void) {
 
     /* Restore saved settings */
     memcpy(s_shape.vp, saved_vp, sizeof(s_shape.vp));
-    memcpy(s_shape.cam_pos, saved_cam_pos, sizeof(s_shape.cam_pos));
+    memcpy(s_shape.eye, saved_eye, sizeof(s_shape.eye));
     s_shape.line_width = saved_line_width;
     memcpy(s_shape.pixel_scale, saved_pixel_scale, sizeof(saved_pixel_scale));
     s_shape.depth_enabled = saved_depth;
@@ -1142,8 +1145,7 @@ static void draw_strokes(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_buffer
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_bind_instance_buffer(buffer, base);
     nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
-    float cp[4] = {s_shape.cam_pos[0], s_shape.cam_pos[1], s_shape.cam_pos[2], 0};
-    nt_gfx_set_uniform_vec4(s_u_cam_pos, cp);
+    nt_gfx_set_uniform_vec4(s_u_eye, s_shape.eye);
     nt_gfx_set_uniform_float(s_u_line_width, s_shape.line_width);
     nt_gfx_set_uniform_vec4(s_u_pixel_scale, s_shape.pixel_scale);
     nt_gfx_draw_indexed_instanced(0, num_indices, num_vertices, count);
@@ -1229,22 +1231,48 @@ void nt_shape_renderer_flush(void) {
 
 /* ---- State setters ---- */
 
+static float det3(const float a[3], const float b[3], const float c[3]) {
+    return (a[0] * ((b[1] * c[2]) - (b[2] * c[1]))) - (a[1] * ((b[0] * c[2]) - (b[2] * c[0]))) + (a[2] * ((b[0] * c[1]) - (b[1] * c[0])));
+}
+
+/* Strokes face the projection center: the homogeneous point VP maps to clip x = y = w = 0.
+ * An orthographic VP has no such point; its w = 0 result is the direction toward the viewer. */
+static void eye_from_vp(const float vp[16], float eye[4]) {
+    /* Column-major: clip row r is (vp[r], vp[4 + r], vp[8 + r], vp[12 + r]). */
+    const float rows[3][4] = {{vp[0], vp[4], vp[8], vp[12]}, {vp[1], vp[5], vp[9], vp[13]}, {vp[3], vp[7], vp[11], vp[15]}};
+    for (int col = 0; col < 4; col++) {
+        float minor[3][3];
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0, k = 0; c < 4; c++) {
+                if (c != col) {
+                    minor[r][k++] = rows[r][c];
+                }
+            }
+        }
+        float det = det3(minor[0], minor[1], minor[2]);
+        eye[col] = (col % 2 == 0) ? det : -det;
+    }
+    if (eye[3] != 0.0F) {
+        float inv_w = 1.0F / eye[3];
+        eye[0] *= inv_w;
+        eye[1] *= inv_w;
+        eye[2] *= inv_w;
+        eye[3] = 1.0F;
+    } else if ((vp[2] * eye[0]) + (vp[6] * eye[1]) + (vp[10] * eye[2]) > 0.0F) {
+        /* Clip z decreases toward the viewer. */
+        eye[0] = -eye[0];
+        eye[1] = -eye[1];
+        eye[2] = -eye[2];
+    }
+}
+
 void nt_shape_renderer_set_vp(const float vp[16]) {
     if (memcmp(s_shape.vp, vp, sizeof(float) * 16) == 0) { // NOLINT — intentional bitwise dirty-check
         return;
     }
     nt_shape_renderer_flush();
     memcpy(s_shape.vp, vp, sizeof(float) * 16);
-}
-
-void nt_shape_renderer_set_cam_pos(const float pos[3]) {
-    if (s_shape.cam_pos[0] == pos[0] && s_shape.cam_pos[1] == pos[1] && s_shape.cam_pos[2] == pos[2]) {
-        return;
-    }
-    nt_shape_renderer_flush();
-    s_shape.cam_pos[0] = pos[0];
-    s_shape.cam_pos[1] = pos[1];
-    s_shape.cam_pos[2] = pos[2];
+    eye_from_vp(vp, s_shape.eye);
 }
 
 void nt_shape_renderer_set_line_width(float width) {
@@ -1644,7 +1672,7 @@ uint32_t nt_shape_renderer_test_stroke_count(void) {
     return count;
 }
 const float *nt_shape_renderer_test_vp(void) { return s_shape.vp; }
-const float *nt_shape_renderer_test_cam_pos(void) { return s_shape.cam_pos; }
+const float *nt_shape_renderer_test_eye(void) { return s_shape.eye; }
 float nt_shape_renderer_test_line_width(void) { return s_shape.line_width; }
 bool nt_shape_renderer_test_depth_enabled(void) { return s_shape.depth_enabled; }
 bool nt_shape_renderer_test_initialized(void) { return s_shape.initialized; }

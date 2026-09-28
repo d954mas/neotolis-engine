@@ -592,7 +592,6 @@ static void frame(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.05F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
 
     nt_shape_renderer_set_vp((float *)vp);
-    nt_shape_renderer_set_cam_pos(s_cam_pos);
     nt_shape_renderer_set_depth(true);
 
     double t_render_start = nt_time_now();

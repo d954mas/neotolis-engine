@@ -7,6 +7,7 @@
 #include "unity.h"
 
 #include <math.h>
+#include <string.h>
 
 /* Helper: float approximately equal (avoids UNITY_EXCLUDE_FLOAT issue) */
 static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
@@ -44,22 +45,25 @@ void test_shape_flush_empty(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_index_count());
 }
 
-/* ---- 3. set_cam_pos sets camera position ---- */
+/* ---- 3. set_vp derives the stroke eye ---- */
 
-void test_shape_set_vp_extracts_cam_pos(void) {
-    float pos1[3] = {0.0F, 0.0F, 0.0F};
-    nt_shape_renderer_set_cam_pos(pos1);
-    const float *cam = nt_shape_renderer_test_cam_pos();
-    TEST_ASSERT_TRUE(float_near(cam[0], 0.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(cam[1], 0.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(cam[2], 0.0F, 0.001F));
+void test_shape_set_vp_derives_eye(void) {
+    /* Perspective (fov 90, near 1, far 10) looking down -z from (3, 4, 5). */
+    const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, -3, -4, (-1.22222222F * -5.0F) - 2.22222222F, 5};
+    nt_shape_renderer_set_vp(perspective);
+    const float *eye = nt_shape_renderer_test_eye();
+    TEST_ASSERT_TRUE(float_near(eye[0], 3.0F, 1e-4F));
+    TEST_ASSERT_TRUE(float_near(eye[1], 4.0F, 1e-4F));
+    TEST_ASSERT_TRUE(float_near(eye[2], 5.0F, 1e-4F));
+    TEST_ASSERT_TRUE(float_near(eye[3], 1.0F, 1e-6F));
 
-    float pos2[3] = {-5.0F, -3.0F, 2.0F};
-    nt_shape_renderer_set_cam_pos(pos2);
-    cam = nt_shape_renderer_test_cam_pos();
-    TEST_ASSERT_TRUE(float_near(cam[0], -5.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(cam[1], -3.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(cam[2], 2.0F, 0.001F));
+    /* Orthographic view down -z: no eye point, only the direction toward the viewer. */
+    const float ortho[16] = {0.01F, 0, 0, 0, 0, 0.01F, 0, 0, 0, 0, -0.02F, 0, 0, 0, -0.8F, 1};
+    nt_shape_renderer_set_vp(ortho);
+    eye = nt_shape_renderer_test_eye();
+    TEST_ASSERT_TRUE(eye[3] == 0.0F);
+    TEST_ASSERT_TRUE(eye[0] == 0.0F && eye[1] == 0.0F);
+    TEST_ASSERT_TRUE(eye[2] > 0.0F);
 }
 
 /* ---- 4. set_depth auto-flushes non-empty batch ---- */
@@ -455,10 +459,10 @@ void test_shape_failed_restore_flush_discards_staging(void) {
 
 void test_shape_failed_restore_preserves_settings(void) {
     const float vp[16] = {2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 5, 6, 7, 1};
-    const float cam_pos[3] = {-5, 3, 2};
     for (int depth = 0; depth < 2; depth++) {
         nt_shape_renderer_set_vp(vp);
-        nt_shape_renderer_set_cam_pos(cam_pos);
+        float eye[4];
+        memcpy(eye, nt_shape_renderer_test_eye(), sizeof(eye));
         nt_shape_renderer_set_line_width(3);
         nt_shape_renderer_set_depth(depth != 0);
         nt_gfx_fake_fail_next_pipeline_create();
@@ -466,7 +470,7 @@ void test_shape_failed_restore_preserves_settings(void) {
             restore_shape_between_frames();
             TEST_ASSERT_EQUAL_INT(attempt != 0, nt_shape_renderer_test_initialized());
             TEST_ASSERT_EQUAL_MEMORY(vp, nt_shape_renderer_test_vp(), sizeof(vp));
-            TEST_ASSERT_EQUAL_MEMORY(cam_pos, nt_shape_renderer_test_cam_pos(), sizeof(cam_pos));
+            TEST_ASSERT_EQUAL_MEMORY(eye, nt_shape_renderer_test_eye(), sizeof(eye));
             TEST_ASSERT_EQUAL_INT(3, (int)nt_shape_renderer_test_line_width());
             TEST_ASSERT_EQUAL_INT(depth != 0, nt_shape_renderer_test_depth_enabled());
         }
@@ -734,7 +738,7 @@ int main(void) {
     RUN_TEST(test_width_change_with_pending_strokes_draws_fills_first);
     RUN_TEST(test_shape_init_shutdown);
     RUN_TEST(test_shape_flush_empty);
-    RUN_TEST(test_shape_set_vp_extracts_cam_pos);
+    RUN_TEST(test_shape_set_vp_derives_eye);
     RUN_TEST(test_shape_set_depth_auto_flush);
     RUN_TEST(test_shape_set_line_width);
     RUN_TEST(test_shape_line_vertex_count);

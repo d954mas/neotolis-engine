@@ -62,7 +62,6 @@ static bool probe_multi_flush_ring(nt_render_target_t target) {
 
 static bool probe_closed_circle(nt_render_target_t target) {
     nt_shape_renderer_set_vp(s_identity_vp);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width(0.3F);
     begin_probe_pass(target);
     nt_shape_renderer_circle_wire_rot((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, (float[4]){1, 1, 1, 1});
@@ -74,7 +73,6 @@ static bool probe_closed_circle(nt_render_target_t target) {
 static bool probe_overlay_order(nt_render_target_t target) {
     nt_shape_renderer_set_vp(s_identity_vp);
     nt_shape_renderer_set_depth(false);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width(0.3F);
     begin_probe_pass(target);
     nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, (float[4]){0, 1, 0, 1});
@@ -89,7 +87,6 @@ static bool probe_overlay_order(nt_render_target_t target) {
 static bool probe_pixel_width_depth(nt_render_target_t target) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 0});
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
     begin_probe_pass(target);
     nt_shape_renderer_line((float[3]){-0.75F, -0.5F, -2}, (float[3]){0.75F, -0.5F, -2}, (float[4]){1, 1, 1, 1});
@@ -102,7 +99,6 @@ static bool probe_pixel_width_depth(nt_render_target_t target) {
 static bool probe_pixel_bevel(nt_render_target_t target) {
     const float points[][3] = {{-0.6F, -0.4F, 0}, {0, 0.4F, 0}, {-0.5F, -0.4F, 0}};
     nt_shape_renderer_set_vp(s_identity_vp);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width_pixels(8, RT_W, RT_H);
     begin_probe_pass(target);
     nt_shape_renderer_polyline(points, 3, false, (float[4]){1, 1, 1, 1});
@@ -114,7 +110,6 @@ static bool probe_pixel_bevel(nt_render_target_t target) {
 static bool probe_near_clip(nt_render_target_t target) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 0});
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
     begin_probe_pass(target);
     nt_shape_renderer_line((float[3]){-0.5F, 0, 0.2F}, (float[3]){0.75F, 0, -3}, (float[4]){1, 1, 1, 1});
@@ -128,7 +123,6 @@ static bool probe_outer_corner(nt_render_target_t target) {
     const float points[][3] = {{-0.5F, -0.5F, 0}, {0, -0.5F, 0}, {0, 0.5F, 0}};
     const float offscreen[][3] = {{-5, -5, 0}, {-4, -5, 0}};
     nt_shape_renderer_set_vp(s_identity_vp);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width(0.3F);
     begin_probe_pass(target);
     for (uint32_t i = 1; i < NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS; i++) {
@@ -142,7 +136,6 @@ static bool probe_outer_corner(nt_render_target_t target) {
 
 static bool probe_active_viewport(nt_render_target_t target) {
     nt_shape_renderer_set_vp(s_identity_vp);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H / 2);
     begin_probe_pass(target);
     nt_gfx_set_viewport(0, 0, RT_W, RT_H / 2);

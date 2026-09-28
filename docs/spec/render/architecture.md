@@ -620,8 +620,7 @@ never adds a persistent GL-state mirror or queries GL to reconstruct them.
 ## Shape strokes
 
 `nt_shape_renderer` owns immediate-mode shape geometry and batches it until
-`flush`; the game owns the pass, view-projection matrix, camera position and
-viewport. It uses triangle geometry for thick lines on native GL and WebGL 2,
+`flush`; the game owns the pass, view-projection matrix and viewport. It uses triangle geometry for thick lines on native GL and WebGL 2,
 without relying on implementation-dependent hardware line widths.
 
 ### Paths and width
@@ -650,13 +649,15 @@ without relying on implementation-dependent hardware line widths.
   viewport. Both dimensions must be positive; both width setters require a
   finite positive width and assert programmer violations.
 
-Width, width mode, viewport dimension, VP, camera position and depth changes
-flush all pending geometry. Identical values do not flush.
+Width, width mode, viewport dimension, VP and depth changes flush all pending
+geometry. Identical values do not flush.
 Settings survive GPU restore, including a failed restore followed by retry.
 The game must flush before changing render passes or directly changing the gfx
 viewport; the renderer does not intercept gfx state changes.
 
-World strokes use camera-facing cross-sections at each endpoint. Pixel strokes
+World strokes use camera-facing cross-sections at each endpoint. The camera is
+derived from the VP matrix: perspective strokes face its projection center,
+orthographic strokes face the constant view direction. Pixel strokes
 project adjacent points into viewport pixel coordinates before constructing
 joins. Their centerline is clipped against the homogeneous near plane before
 perspective division; clipped ends become butt ends. A fully hidden segment

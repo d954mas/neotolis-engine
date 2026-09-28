@@ -900,9 +900,7 @@ static void frame(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.06F, 0.07F, 0.10F, 1.0F}, .clear_depth = 1.0F});
 
     /* 3D pass: shape_renderer drives its own VP. */
-    const float cam_pos[3] = {s_player_pos[0], s_player_pos[1], s_player_pos[2]};
     nt_shape_renderer_set_vp((const float *)vp_3d);
-    nt_shape_renderer_set_cam_pos(cam_pos);
     nt_shape_renderer_set_depth(true);
     draw_room();
     draw_boards();

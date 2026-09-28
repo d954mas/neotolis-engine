@@ -116,7 +116,6 @@ static void test_ring_wrap_still_renders(void) {
 }
 
 static void test_wire_circle_has_closed_outer_joins(void) {
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width(0.3F);
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
@@ -133,7 +132,6 @@ static void test_wire_circle_has_closed_outer_joins(void) {
 
 /* Within one flush the line stays above a later fill; the next flush draws over both. */
 static void test_overlay_strokes_draw_over_fills_until_flush(void) {
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width(0.3F);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
     nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, (float[4]){0, 1, 0, 1});
@@ -162,7 +160,6 @@ static void test_pixel_width_is_constant_across_depth_and_restore(void) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     const float white[4] = {1, 1, 1, 1};
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 0});
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
     nt_shape_renderer_restore_gpu();
     nt_gfx_begin_frame();
@@ -180,7 +177,6 @@ static void test_pixel_width_is_constant_across_depth_and_restore(void) {
 
 static void test_pixel_join_bevel_is_bounded(void) {
     const float points[][3] = {{-0.6F, -0.4F, 0}, {0, 0.4F, 0}, {-0.5F, -0.4F, 0}};
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width_pixels(8, RT_W, RT_H);
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
@@ -197,7 +193,6 @@ static void test_pixel_join_bevel_is_bounded(void) {
 static void test_pixel_line_clips_at_near_plane(void) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 0});
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
@@ -213,12 +208,27 @@ static void test_pixel_line_clips_at_near_plane(void) {
     assert_pixel(frame, 48, 48, 0, 0, 0);
 }
 
+/* Far off-axis in a wide orthographic view, a world-width stroke still keeps its full width. */
+static void test_ortho_world_width_off_axis(void) {
+    const float ortho[16] = {0.01F, 0, 0, 0, 0, 0.01F, 0, 0, 0, 0, -0.02F, 0, 0, 0, -0.8F, 1};
+    nt_shape_renderer_set_vp(ortho);
+    nt_shape_renderer_set_line_width(25);
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
+    nt_shape_renderer_line((float[3]){-90, 80, 0}, (float[3]){90, 80, 0}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    TEST_ASSERT_EQUAL_UINT32(8, lit_column(frame, 32, 0, 32));
+}
+
 /* The join at the visible vertex must use the near-clipped neighbor, not its w<0 projection. */
 static void test_pixel_join_clips_hidden_neighbor(void) {
     const float perspective[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.22222222F, -1, 0, 0, -2.22222222F, 0};
     const float points[][3] = {{-0.05F, 0, 1}, {0.5F, 0, -2}, {0.5F, 1, -2}};
     nt_shape_renderer_set_vp(perspective);
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 0});
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
@@ -235,7 +245,6 @@ static void test_pixel_join_clips_hidden_neighbor(void) {
 
 static void test_polyline_outer_corner_and_butt_end(void) {
     const float points[][3] = {{-0.5F, -0.5F, 0}, {0, -0.5F, 0}, {0, 0.5F, 0}};
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width(0.3F);
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
@@ -254,7 +263,6 @@ static void test_polyline_outer_corner_and_butt_end(void) {
 }
 
 static void test_pixel_width_uses_active_viewport_height(void) {
-    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H / 2);
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1});
@@ -283,6 +291,7 @@ int main(void) {
     };
     nt_window_init();
     UNITY_BEGIN();
+    RUN_TEST(test_ortho_world_width_off_axis);
     RUN_TEST(test_pixel_join_clips_hidden_neighbor);
     RUN_TEST(test_polyline_outer_corner_and_butt_end);
     RUN_TEST(test_pixel_width_uses_active_viewport_height);
