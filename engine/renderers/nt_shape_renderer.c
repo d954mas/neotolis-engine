@@ -293,12 +293,10 @@ static struct {
     nt_buffer_t line_instance_buf;
     nt_vertex_input_t line_vi;
     uint32_t line_ring_cursor;
-    nt_shape_line_instance_t lines[NT_SHAPE_RENDERER_MAX_LINES];
     uint32_t line_count;
     nt_buffer_t stroke_instance_buf;
     nt_vertex_input_t stroke_vi;
     uint32_t stroke_ring_cursor;
-    nt_shape_stroke_instance_t strokes[NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS];
     uint32_t stroke_count;
 
     nt_shader_t wire_vs;
@@ -307,8 +305,12 @@ static struct {
     nt_pipeline_t wire_pip_overlay;
     nt_shape_template_t wire_templates[NT_WIRE_COUNT];
     nt_vertex_input_t wire_vi[NT_WIRE_COUNT];
-    nt_shape_instance_t wire_data[NT_WIRE_COUNT][NT_WIRE_MAX_INSTANCES];
     uint32_t wire_counts[NT_WIRE_COUNT];
+    union {
+        nt_shape_line_instance_t lines[NT_SHAPE_RENDERER_MAX_LINES];
+        nt_shape_stroke_instance_t strokes[NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS];
+        nt_shape_instance_t wire_data[NT_WIRE_MAX_INSTANCES];
+    } wire_staging;
 
     /* Settings */
     float vp[16];
@@ -648,7 +650,7 @@ static void push_wire_instance(int type, const float center[3], float radius, fl
     if (s_shape.wire_counts[type] == NT_WIRE_MAX_INSTANCES) {
         flush_wire_run();
     }
-    nt_shape_instance_t *inst = &s_shape.wire_data[type][s_shape.wire_counts[type]++];
+    nt_shape_instance_t *inst = &s_shape.wire_staging.wire_data[s_shape.wire_counts[type]++];
     memcpy(inst->center, center, sizeof(inst->center));
     inst->scale[0] = radius;
     inst->scale[1] = half_height;
@@ -874,7 +876,7 @@ static void emit_wire_segment(const float prev[3], const float a[3], const float
     if (s_shape.stroke_count >= NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS) {
         flush_wire_run();
     }
-    nt_shape_stroke_instance_t *inst = &s_shape.strokes[s_shape.stroke_count++];
+    nt_shape_stroke_instance_t *inst = &s_shape.wire_staging.strokes[s_shape.stroke_count++];
     memcpy(inst->prev, prev, sizeof(inst->prev));
     memcpy(inst->next, next, sizeof(inst->next));
     memcpy(inst->a, a, sizeof(inst->a));
@@ -889,7 +891,7 @@ static void emit_wire_edge(const float a[3], const float b[3], const float color
     if (s_shape.line_count >= NT_SHAPE_RENDERER_MAX_LINES) {
         flush_wire_run();
     }
-    nt_shape_line_instance_t *inst = &s_shape.lines[s_shape.line_count++];
+    nt_shape_line_instance_t *inst = &s_shape.wire_staging.lines[s_shape.line_count++];
     memcpy(inst->a, a, sizeof(inst->a));
     memcpy(inst->b, b, sizeof(inst->b));
     pack_color(inst->color, color);
@@ -1212,7 +1214,7 @@ static void flush_wire_run(void) {
         }
         uint32_t base = s_shape.inst_ring_cursor;
         s_shape.inst_ring_cursor += bytes;
-        nt_gfx_update_buffer(s_shape.inst_buf, base, s_shape.wire_data[type], bytes);
+        nt_gfx_update_buffer(s_shape.inst_buf, base, s_shape.wire_staging.wire_data, bytes);
         nt_gfx_bind_pipeline(s_shape.depth_enabled ? s_shape.wire_pip_depth : s_shape.wire_pip_overlay);
         nt_gfx_bind_vertex_input(s_shape.wire_vi[type]);
         nt_gfx_bind_instance_buffer(s_shape.inst_buf, base);
@@ -1226,10 +1228,10 @@ static void flush_wire_run(void) {
         s_shape.wire_counts[type] = 0;
     }
 
-    flush_strokes(s_shape.line_instance_buf, s_shape.line_vi, s_shape.lines, s_shape.line_count, s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t), sizeof(s_shape.lines),
-                  &s_shape.line_ring_cursor, 6);
-    flush_strokes(s_shape.stroke_instance_buf, s_shape.stroke_vi, s_shape.strokes, s_shape.stroke_count, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t), sizeof(s_shape.strokes),
-                  &s_shape.stroke_ring_cursor, 12);
+    flush_strokes(s_shape.line_instance_buf, s_shape.line_vi, s_shape.wire_staging.lines, s_shape.line_count, s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t),
+                  sizeof(s_shape.wire_staging.lines), &s_shape.line_ring_cursor, 6);
+    flush_strokes(s_shape.stroke_instance_buf, s_shape.stroke_vi, s_shape.wire_staging.strokes, s_shape.stroke_count, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t),
+                  sizeof(s_shape.wire_staging.strokes), &s_shape.stroke_ring_cursor, 12);
     s_shape.line_count = 0;
     s_shape.stroke_count = 0;
 }
