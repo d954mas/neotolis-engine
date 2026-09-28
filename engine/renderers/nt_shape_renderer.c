@@ -630,7 +630,19 @@ static nt_vertex_layout_t wire_vertex_layout(void) {
                                 }};
 }
 
+static bool wire_template_queued_except(int keep_type) {
+    for (int type = 0; type < NT_WIRE_COUNT; type++) {
+        if (type != keep_type && s_shape.wire_counts[type] != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void push_wire_instance(int type, const float center[3], float radius, float half_height, const float *rot, const float color[4]) {
+    if (s_shape.line_count != 0 || s_shape.stroke_count != 0 || wire_template_queued_except(type)) {
+        nt_shape_renderer_flush();
+    }
     if (s_shape.wire_counts[type] == NT_WIRE_MAX_INSTANCES) {
         nt_shape_renderer_flush();
     }
@@ -854,6 +866,9 @@ static void build_templates(void) {
 
 /* Neighbors let adjacent segments construct the same endpoint cross-section. */
 static void emit_wire_segment(const float prev[3], const float a[3], const float b[3], const float next[3], const float color[4]) {
+    if (s_shape.line_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
+        nt_shape_renderer_flush();
+    }
     if (s_shape.stroke_count >= NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS) {
         nt_shape_renderer_flush();
     }
@@ -866,6 +881,9 @@ static void emit_wire_segment(const float prev[3], const float a[3], const float
 }
 
 static void emit_wire_edge(const float a[3], const float b[3], const float color[4]) {
+    if (s_shape.stroke_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
+        nt_shape_renderer_flush();
+    }
     if (s_shape.line_count >= NT_SHAPE_RENDERER_MAX_LINES) {
         nt_shape_renderer_flush();
     }
@@ -1283,7 +1301,9 @@ void nt_shape_renderer_set_line_width(float width) {
     if (width == s_shape.line_width && s_shape.pixel_scale[0] == 0.0F) {
         return;
     }
-    nt_shape_renderer_flush();
+    if (s_shape.line_count != 0 || s_shape.stroke_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
+        nt_shape_renderer_flush();
+    }
     s_shape.line_width = width;
     memset(s_shape.pixel_scale, 0, sizeof(s_shape.pixel_scale));
 }
@@ -1296,7 +1316,9 @@ void nt_shape_renderer_set_line_width_pixels(float width, uint32_t viewport_widt
     if (width == s_shape.line_width && x == s_shape.pixel_scale[0] && y == s_shape.pixel_scale[1]) {
         return;
     }
-    nt_shape_renderer_flush();
+    if (s_shape.line_count != 0 || s_shape.stroke_count != 0 || wire_template_queued_except(NT_WIRE_COUNT)) {
+        nt_shape_renderer_flush();
+    }
     s_shape.line_width = width;
     s_shape.pixel_scale[0] = x;
     s_shape.pixel_scale[1] = y;

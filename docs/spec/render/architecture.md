@@ -650,8 +650,9 @@ without relying on implementation-dependent hardware line widths.
   viewport. Both dimensions must be positive; both width setters require a
   finite positive width and assert programmer violations.
 
-Width, width mode, viewport dimensions, VP, camera position and depth changes
-flush pending geometry before replacing state. Identical values do not flush.
+Width, width mode and viewport dimension changes flush pending strokes before
+replacing state; filled-only batches remain pending. VP, camera position and
+depth changes flush all pending geometry. Identical values do not flush.
 Settings survive GPU restore, including a failed restore followed by retry.
 The game must flush before changing render passes or directly changing the gfx
 viewport; the renderer does not intercept gfx state changes.
@@ -699,6 +700,10 @@ initialization, one 44-byte instance per shape and one draw per nonempty wire
 shape type. They share the existing filled-shape instance buffer and ring
 cursor. Mixed wire types therefore require separate draws; fewer uploaded
 bytes do not imply fewer draws or a universal GPU speedup.
+
+Wire submissions preserve order across independent lines, connected paths and
+immutable-template types. Consecutive submissions to one queue still batch;
+switching queue or template type flushes the preceding wire run.
 
 `NT_SHAPE_RENDERER_MAX_LINES` bounds the independent-line queue (default 8192).
 `NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` bounds the connected-segment queue

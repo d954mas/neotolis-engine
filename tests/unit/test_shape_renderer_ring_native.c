@@ -130,6 +130,19 @@ static void test_wire_circle_has_closed_outer_joins(void) {
     assert_pixel(frame, 32, 32, 0, 0, 0);
 }
 
+static void test_overlay_wires_keep_submission_order(void) {
+    nt_shape_renderer_set_cam_pos((float[3]){0, 0, 5});
+    nt_shape_renderer_set_line_width(0.3F);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
+    nt_shape_renderer_rect_wire((float[3]){0, 0, 0}, (float[2]){1, 1}, (float[4]){1, 0, 0, 1});
+    nt_shape_renderer_line((float[3]){-0.5F, 0.5F, 0}, (float[3]){0.5F, 0.5F, 0}, (float[4]){0, 1, 0, 1});
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame)));
+    nt_gfx_end_pass();
+    assert_pixel(frame, 32, 16, 0, 255, 0);
+}
+
 static uint32_t lit_column(const uint8_t *frame, int x, int begin, int end) {
     uint32_t count = 0;
     for (int y = begin; y < end; y++) {
@@ -244,6 +257,7 @@ int main(void) {
     RUN_TEST(test_pixel_join_bevel_is_bounded);
     RUN_TEST(test_pixel_line_clips_at_near_plane);
     RUN_TEST(test_wire_circle_has_closed_outer_joins);
+    RUN_TEST(test_overlay_wires_keep_submission_order);
     RUN_TEST(test_multi_flush_ring_offsets_render_correctly);
     RUN_TEST(test_ring_wrap_still_renders);
     int failures = UNITY_END();

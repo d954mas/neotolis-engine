@@ -608,6 +608,18 @@ static void test_width_mode_and_viewport_changes_flush_wires(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_count());
 }
 
+static void test_width_changes_keep_filled_shapes_batched(void) {
+    const float color[4] = {1, 1, 1, 1};
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_shape_renderer_rect((float[3]){-1, 0, 0}, (float[2]){1, 1}, color);
+    nt_shape_renderer_set_line_width_pixels(4, 640, 480);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
+    nt_shape_renderer_rect((float[3]){1, 0, 0}, (float[2]){1, 1}, color);
+    nt_shape_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(0).instance_count);
+}
+
 static void test_polyline_overflow_preserves_all_segments(void) {
     static float points[NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS + 3][3];
     for (uint32_t i = 0; i < NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS + 3; i++) {
@@ -679,6 +691,7 @@ int main(void) {
     RUN_TEST(test_wire_instances_overflow_without_losing_shapes);
     RUN_TEST(test_polyline_skips_repeated_points_and_closes_once);
     RUN_TEST(test_width_mode_and_viewport_changes_flush_wires);
+    RUN_TEST(test_width_changes_keep_filled_shapes_batched);
     RUN_TEST(test_shape_init_shutdown);
     RUN_TEST(test_shape_flush_empty);
     RUN_TEST(test_shape_set_vp_extracts_cam_pos);
