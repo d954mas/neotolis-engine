@@ -80,6 +80,16 @@ baseInstance, so per-draw instance re-pointing stays). An empty layout with
 no buffers is the attribute-less `gl_VertexID` path; every draw asserts a
 bound vertex input.
 
+Instance data has two paths, and a game renderer picks per workload. Instanced
+attributes cost one `glBindBuffer` plus a `glVertexAttribPointer` per instance
+attribute on every re-point and have no instance-count limit, so they suit a
+few large instanced draws (particles, foliage, big crowds in one batch). A
+uniform-block range (`nt_gfx_bind_uniform_buffer_range`, indexed by
+`gl_InstanceID` plus a per-draw base uniform) binds once per chunk and costs one
+int uniform per draw, but a chunk is capped by the 16 KB block, so it suits many
+small runs; the engine's mesh, skinned mesh and shape renderers use it (see
+below).
+
 A vertex attribute is the raw GL triple `(type, count 1-4,
 normalized)` plus location and byte offset (`nt_vertex_attr_t`) — no enum of
 allowed combinations; the float/half/byte/short subset of the

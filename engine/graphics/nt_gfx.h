@@ -978,7 +978,9 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 /* Re-specifies instance attrib pointers at byte_offset into the bound vertex
  * input, which must declare a nonempty instance_layout; both asserted. The
  * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets);
- * asserted. Re-bind per draw to re-point. */
+ * asserted. Re-bind per draw to re-point. Suits few large instanced draws;
+ * many small runs are cheaper through a uniform-block range (see
+ * render/architecture.md, vertex inputs). */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
