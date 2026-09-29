@@ -22,6 +22,7 @@ typedef struct {
     float color[4];
 } nt_mesh_instance_t;
 _Static_assert(sizeof(nt_mesh_instance_t) == 64, "mesh instance payload is four vec4s");
+_Static_assert(NT_MESH_RENDERER_CHUNK_INSTANCES == NT_INSTANCE_BLOCK_SIZE / sizeof(nt_mesh_instance_t), "public chunk capacity must match the payload");
 
 /* ---- Module state ---- */
 
@@ -104,8 +105,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
 
     s_mesh_renderer.max_instances = desc->max_instances;
     s_mesh_renderer.max_pipelines = desc->max_pipelines;
-    const uint32_t block_capacity = NT_INSTANCE_BLOCK_SIZE / (uint32_t)sizeof(nt_mesh_instance_t);
-    s_mesh_renderer.chunk_capacity = desc->max_instances < block_capacity ? desc->max_instances : block_capacity;
+    s_mesh_renderer.chunk_capacity = desc->max_instances < NT_MESH_RENDERER_CHUNK_INSTANCES ? desc->max_instances : NT_MESH_RENDERER_CHUNK_INSTANCES;
     s_mesh_renderer.instance_base = nt_hash32_str(NT_INSTANCE_BASE_UNIFORM);
     nt_gfx_register_global_block(NT_INSTANCE_BLOCK_NAME, NT_INSTANCE_BLOCK_SLOT);
     /* Allocate pipeline cache */

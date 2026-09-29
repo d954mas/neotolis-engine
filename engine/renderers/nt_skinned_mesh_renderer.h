@@ -8,6 +8,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Instances per 16 KB instance-block range, i.e. the most one draw carries. */
+#define NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES 170U
+
 typedef struct {
     uint16_t max_instances; /* instances the uniform-buffer ring holds before it wraps */
     uint16_t max_pipelines;
@@ -36,8 +39,9 @@ nt_result_t nt_skinned_mesh_renderer_restore_gpu(void);
  * positive uniform joint/world scale. Declare u_skin_matrices in the material;
  * the renderer supplies its texture and default sampler from skin_comp.
  * Instances carry world transform, skin frames and the drawable colour (white
- * without a drawable component), in chunks of up to 170; a run crossing a
- * chunk edge draws twice. */
+ * without a drawable component), in chunks of up to
+ * NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES; a run crossing a chunk edge draws
+ * twice. */
 void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access

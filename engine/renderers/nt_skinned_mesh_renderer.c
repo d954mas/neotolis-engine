@@ -27,6 +27,7 @@ typedef struct {
     float color[4];
 } nt_skinned_instance_t;
 _Static_assert(sizeof(nt_skinned_instance_t) == 96, "skinned instance payload is six vec4s");
+_Static_assert(NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES == NT_INSTANCE_BLOCK_SIZE / sizeof(nt_skinned_instance_t), "public chunk capacity must match the payload");
 
 static struct {
     nt_renderer_pipeline_entry_t *pipelines;
@@ -139,8 +140,7 @@ nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t 
     s_skinned.max_instances = desc->max_instances;
     s_skinned.max_pipelines = desc->max_pipelines;
     s_skinned.skin_sampler_hash = nt_hash32_str("u_skin_matrices").value;
-    const uint32_t block_capacity = NT_INSTANCE_BLOCK_SIZE / (uint32_t)sizeof(nt_skinned_instance_t);
-    s_skinned.chunk_capacity = desc->max_instances < block_capacity ? desc->max_instances : block_capacity;
+    s_skinned.chunk_capacity = desc->max_instances < NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES ? desc->max_instances : NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES;
     s_skinned.instance_base = nt_hash32_str(NT_INSTANCE_BASE_UNIFORM);
     nt_gfx_register_global_block(NT_INSTANCE_BLOCK_NAME, NT_INSTANCE_BLOCK_SLOT);
 

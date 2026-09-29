@@ -21,6 +21,9 @@ static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mes
     return (material_slot << NT_POOL_SLOT_SHIFT) | mesh_slot;
 }
 
+/* Instances per 16 KB instance-block range, i.e. the most one draw carries. */
+#define NT_MESH_RENDERER_CHUNK_INSTANCES 256U
+
 typedef struct {
     /* Instances the uniform-buffer ring holds before it wraps, i.e. roughly one
      * frame's worth; a wrap makes the driver order the overwrite. Default: 4096. */
@@ -53,7 +56,8 @@ nt_result_t nt_mesh_renderer_restore_gpu(void);
 /* items may be NULL only when count is 0; otherwise it is borrowed for the call. */
 /* Instances reach the shader through common/instance.glsl: world transform and
  * the drawable colour (white without a drawable component). Items are drawn in
- * chunks of up to 256; a batch_key run crossing a chunk edge draws twice. */
+ * chunks of up to NT_MESH_RENDERER_CHUNK_INSTANCES; a batch_key run crossing a
+ * chunk edge draws twice. */
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access
