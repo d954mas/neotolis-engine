@@ -288,7 +288,8 @@ Destroying a texture or a live render target inside a pass asserts: pass-scoped
 draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
-uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
+uniform-buffer binding calls `glBindBufferBase` (`glBindBufferRange` for a
+range) on every request. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
