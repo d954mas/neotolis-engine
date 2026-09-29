@@ -334,3 +334,11 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh) {
 }
 
 uint16_t nt_gfx_max_meshes(void) { return 0; }
+
+uint32_t nt_gfx_transient_texture_capacity(void) { return 0; }
+
+nt_texture_t nt_gfx_transient_texture(const void *texels, uint32_t texel_count) {
+    (void)texels;
+    (void)texel_count;
+    return (nt_texture_t){0};
+}

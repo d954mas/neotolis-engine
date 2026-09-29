@@ -1,16 +1,21 @@
 #pragma once
 
-/* Per-instance data from the engine's instancing renderers. A flat vec4 array
- * reflects as one active uniform; each payload reads a fixed number of vec4s
- * at nt_instance_index(). The renderer binds 16 KB (WebGL2's guaranteed block
- * size) at slot 15 and sets nt_instance_base per draw. */
-layout(std140) uniform NtInstances {
-    vec4 nt_instance_data[1024];
-};
-uniform int nt_instance_base;
+/* Per-instance data from the engine's instancing renderers: a gfx transient
+ * RGBA32F texture, NT_GFX_TRANSIENT_TEXTURE_WIDTH (1024) texels per row, one
+ * payload after another. The renderer sets nt_instance_base per draw to its
+ * run's first instance in the texture. */
+uniform highp sampler2D nt_instances;
+uniform highp int nt_instance_base;
 
-int nt_instance_index() {
+highp int nt_instance_index() {
     return nt_instance_base + gl_InstanceID;
+}
+
+/* Texel k of the current instance's payload of stride texels; a payload may
+ * straddle two rows, so each texel is addressed on its own. */
+highp vec4 nt_instance_texel(highp int stride, highp int k) {
+    highp int i = nt_instance_index() * stride + k;
+    return texelFetch(nt_instances, ivec2(i & 1023, i >> 10), 0);
 }
 
 mat4 nt_instance_world(vec4 row0, vec4 row1, vec4 row2) {
@@ -29,6 +34,5 @@ struct nt_instance_t {
 };
 
 nt_instance_t nt_instance() {
-    int i = nt_instance_index() * 4;
-    return nt_instance_t(nt_instance_world(nt_instance_data[i], nt_instance_data[i + 1], nt_instance_data[i + 2]), nt_instance_data[i + 3]);
+    return nt_instance_t(nt_instance_world(nt_instance_texel(4, 0), nt_instance_texel(4, 1), nt_instance_texel(4, 2)), nt_instance_texel(4, 3));
 }

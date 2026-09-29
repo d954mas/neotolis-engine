@@ -58,16 +58,17 @@ instead, and `nt_gfx_register_global_block` applies it to existing and future
 programs that declare the block. The registry borrows each name without copying;
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registrations
 survive context loss. The buffer varies per draw via `nt_gfx_bind_uniform_buffer`,
-or a range of one buffer via `nt_gfx_bind_uniform_buffer_range`; repeating the
-slot's current bind costs no GL call.
+or a range of one buffer via `nt_gfx_bind_uniform_buffer_range`.
 
-Slot 15 is reserved for `NtInstances`, the per-instance block of the mesh and
-skinned mesh renderers (`common/instance.glsl`); each of them registers it at
-init. Its int uniform `nt_instance_base` takes one of the 16 cached uniform
-entries of a program that declares it. Read instances through
-`nt_instance_index()`: a program indexing by `gl_InstanceID` alone, or omitting
-`nt_instance_base`, reads the chunk's first run for every run, because gfx
-ignores writes to inactive uniforms.
+`nt_instances` is a reserved sampler name: the mesh and skinned mesh renderers
+bind their instance texture under it, outside the material's texture slots, and
+material creation asserts on it. Its int uniform `nt_instance_base` takes one of
+the 16 cached uniform entries of a program that declares it. Read instances
+through `nt_instance()` / `nt_skinned_instance()` (`common/instance.glsl`,
+`common/skin.glsl`): a program indexing by `gl_InstanceID` alone reads the
+call's first run for every run, because gfx ignores writes to inactive
+uniforms. Both are declared `highp`: a vertex shader's default sampler precision
+is `lowp`, which would read world matrices at half precision on Mali.
 
 The GL backend caches at most 16 active standalone non-sampler uniform locations
 per program. Each active array element consumes one entry; uniforms in blocks do

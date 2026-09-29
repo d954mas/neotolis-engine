@@ -19,6 +19,7 @@ static void count_error_logs(nt_log_level_t level, const char *domain, const cha
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 64;
+    desc.max_transient_textures = 0; /* the event counts below are exact; transient textures have their own tests */
     nt_gfx_init(&desc);
 }
 
@@ -608,6 +609,7 @@ static void test_exact_capacity_and_one_record_short(void) {
         nt_gfx_shutdown();
         nt_gfx_desc_t desc = nt_gfx_desc_defaults();
         desc.capture_capacity = needed - missing;
+        desc.max_transient_textures = 0; /* as in setUp, so the snapshot is the same size */
         nt_gfx_init(&desc);
         record_next_frame();
         nt_gfx_begin_frame();

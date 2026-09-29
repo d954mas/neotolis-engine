@@ -9,7 +9,6 @@
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
-#include "renderers/nt_renderer_instance.h"
 #include "renderers/nt_renderer_shared.h"
 #include "skin_comp/nt_skin_comp.h"
 #include "transform_comp/nt_transform_comp.h"
@@ -17,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* std140 mirror of the skinned payload read by nt_skinned_instance() in
+/* Texel mirror of the skinned payload read by nt_skinned_instance() in
  * common/skin.glsl. Frame origins are texel coordinates stored as floats,
  * exact below 2^24; skin.x is the blend alpha between the two frames. */
 typedef struct {
@@ -26,19 +25,18 @@ typedef struct {
     float skin[4];
     float color[4];
 } nt_skinned_instance_t;
-_Static_assert(sizeof(nt_skinned_instance_t) == 96, "skinned instance payload is six vec4s");
-_Static_assert(NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES == NT_INSTANCE_BLOCK_SIZE / sizeof(nt_skinned_instance_t), "public chunk capacity must match the payload");
+#define NT_SKINNED_INSTANCE_TEXELS 6U
+_Static_assert(sizeof(nt_skinned_instance_t) == (size_t)NT_SKINNED_INSTANCE_TEXELS * 16U, "skinned instance payload is six texels");
 
 static struct {
     nt_renderer_pipeline_entry_t *pipelines;
     uint16_t max_pipelines;
     uint16_t pipeline_count;
     nt_renderer_mesh_vi_cache_t vi_cache;
-    nt_renderer_instance_ring_t ring;
-    nt_skinned_instance_t *staging; /* [chunk_capacity] */
-    uint16_t max_instances;
-    uint32_t chunk_capacity; /* instances per bound block range */
+    nt_skinned_instance_t *staging; /* [slice_instances]: one transient texture */
+    uint32_t slice_instances;
     nt_hash32_t instance_base;
+    nt_hash32_t instances_sampler;
     uint32_t skin_sampler_hash;
     bool warned_program_not_ready;
 #ifdef NT_TEST_ACCESS
@@ -112,12 +110,7 @@ static nt_renderer_material_view_t supplied_material_view(const nt_material_info
     return view;
 }
 
-static nt_result_t create_gpu_resources(void) {
-    return nt_renderer_instance_ring_create(&s_skinned.ring, s_skinned.max_instances, (uint32_t)sizeof(nt_skinned_instance_t), "skinned_mesh_renderer_instances");
-}
-
 static void destroy_gpu_resources(void) {
-    nt_renderer_instance_ring_destroy(&s_skinned.ring);
     for (uint16_t i = 0; i < s_skinned.pipeline_count; i++) {
         nt_gfx_destroy_pipeline(s_skinned.pipelines[i].pipeline);
     }
@@ -134,16 +127,19 @@ static void destroy_gpu_resources(void) {
 nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t *desc) {
     NT_ASSERT(!s_skinned.initialized);
     NT_ASSERT(desc != NULL);
-    NT_ASSERT(desc->max_instances > 0);
     NT_ASSERT(desc->max_pipelines > 0);
     NT_ASSERT(desc->max_mesh_layouts > 0);
     memset(&s_skinned, 0, sizeof(s_skinned));
-    s_skinned.max_instances = desc->max_instances;
+    /* 0 without transient textures, and on the stub backend. */
+    s_skinned.slice_instances = nt_gfx_transient_texture_capacity() / NT_SKINNED_INSTANCE_TEXELS;
+    if (s_skinned.slice_instances == 0) {
+        NT_LOG_ERROR("instance data needs gfx transient textures -- set nt_gfx_desc_t.max_transient_textures");
+        return NT_ERR_INIT_FAILED;
+    }
     s_skinned.max_pipelines = desc->max_pipelines;
     s_skinned.skin_sampler_hash = nt_hash32_str("u_skin_matrices").value;
-    s_skinned.chunk_capacity = desc->max_instances < NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES ? desc->max_instances : NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES;
-    s_skinned.instance_base = nt_hash32_str(NT_INSTANCE_BASE_UNIFORM);
-    nt_gfx_register_global_block(NT_INSTANCE_BLOCK_NAME, NT_INSTANCE_BLOCK_SLOT);
+    s_skinned.instance_base = nt_hash32_str(NT_RENDERER_INSTANCE_BASE_UNIFORM);
+    s_skinned.instances_sampler = nt_hash32_str(NT_MATERIAL_INSTANCES_SAMPLER);
 
     s_skinned.pipelines = (nt_renderer_pipeline_entry_t *)calloc(desc->max_pipelines, sizeof(nt_renderer_pipeline_entry_t));
     if (s_skinned.pipelines == NULL) {
@@ -155,19 +151,11 @@ nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t 
         memset(&s_skinned, 0, sizeof(s_skinned));
         return NT_ERR_INIT_FAILED;
     }
-    s_skinned.staging = (nt_skinned_instance_t *)calloc(s_skinned.chunk_capacity, sizeof(nt_skinned_instance_t));
+    s_skinned.staging = (nt_skinned_instance_t *)calloc(s_skinned.slice_instances, sizeof(nt_skinned_instance_t));
     if (s_skinned.staging == NULL) {
         nt_renderer_mesh_vi_cache_shutdown(&s_skinned.vi_cache);
         free(s_skinned.pipelines);
         NT_LOG_ERROR("failed to allocate instance data");
-        memset(&s_skinned, 0, sizeof(s_skinned));
-        return NT_ERR_INIT_FAILED;
-    }
-    if (create_gpu_resources() != NT_OK) {
-        free(s_skinned.staging);
-        nt_renderer_mesh_vi_cache_shutdown(&s_skinned.vi_cache);
-        free(s_skinned.pipelines);
-        NT_LOG_ERROR("failed to create instance buffer");
         memset(&s_skinned, 0, sizeof(s_skinned));
         return NT_ERR_INIT_FAILED;
     }
@@ -187,11 +175,10 @@ void nt_skinned_mesh_renderer_shutdown(void) {
 }
 
 nt_result_t nt_skinned_mesh_renderer_restore_gpu(void) {
-    if (!s_skinned.initialized) {
-        return NT_OK;
+    if (s_skinned.initialized) {
+        destroy_gpu_resources();
     }
-    destroy_gpu_resources();
-    return create_gpu_resources();
+    return NT_OK;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -201,12 +188,10 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
         return;
     }
     NT_ASSERT(items != NULL);
-    NT_ASSERT(s_skinned.ring.buffer.id != 0 && "retry failed GPU restore before drawing");
 #ifdef NT_TEST_ACCESS
     s_skinned.frame_draw_calls = 0;
     s_skinned.frame_instance_total = 0;
 #endif
-    uint32_t chunk_start = 0;
     nt_material_t previous_material = {0};
     nt_mesh_t previous_mesh = {0};
     nt_texture_t previous_deformation = {0};
@@ -215,27 +200,35 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
     nt_vertex_input_t vertex_input = {0};
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
 
-    while (chunk_start < count) {
-        uint32_t chunk_count = count - chunk_start;
-        if (chunk_count > s_skinned.chunk_capacity) {
-            chunk_count = s_skinned.chunk_capacity;
+    for (uint32_t slice_start = 0; slice_start < count; slice_start += s_skinned.slice_instances) {
+        uint32_t slice_count = count - slice_start;
+        if (slice_count > s_skinned.slice_instances) {
+            slice_count = s_skinned.slice_instances;
         }
-        const uint32_t chunk_end = chunk_start + chunk_count;
-        for (uint32_t i = 0; i < chunk_count; i++) {
-            const nt_entity_t entity = {.id = items[chunk_start + i].entity};
+        const uint32_t slice_end = slice_start + slice_count;
+        for (uint32_t i = 0; i < slice_count; i++) {
+            const nt_entity_t entity = {.id = items[slice_start + i].entity};
             const nt_deformation_binding_t binding = *nt_skin_comp_handle(entity);
             NT_ASSERT(binding.texture.id != 0 && "skinned draw requires a deformation texture");
             pack_instance(&s_skinned.staging[i], entity, &binding, &drawable_view);
         }
-        nt_renderer_instance_ring_push(&s_skinned.ring, s_skinned.staging, chunk_count * (uint32_t)sizeof(nt_skinned_instance_t));
+        const nt_gfx_texture_binding_t instances = {
+            .name = s_skinned.instances_sampler,
+            .texture = nt_gfx_transient_texture(s_skinned.staging, slice_count * NT_SKINNED_INSTANCE_TEXELS),
+        };
+        /* INVALID only while the context is lost, when every draw is a no-op anyway. */
+        if (instances.texture.id == 0) {
+            return;
+        }
+        bool slice_unbound = true; /* each slice samples its own instance texture */
 
-        uint32_t run_start = chunk_start;
-        while (run_start < chunk_end) {
+        uint32_t run_start = slice_start;
+        while (run_start < slice_end) {
             nt_entity_t entity = {.id = items[run_start].entity};
             const nt_deformation_binding_t deformation = *nt_skin_comp_handle(entity);
             nt_material_t material_handle = *nt_material_comp_handle(entity);
             nt_mesh_t mesh_handle = *nt_mesh_comp_handle(entity);
-            const uint32_t run_end = find_run_end(items, run_start, chunk_end, deformation.texture.id);
+            const uint32_t run_end = find_run_end(items, run_start, slice_end, deformation.texture.id);
             const uint32_t instance_count = run_end - run_start;
             const nt_material_info_t *material = nt_material_get_info(material_handle);
             const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info(mesh_handle);
@@ -265,21 +258,18 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             }
 
             nt_renderer_bind_pipeline(&bound, pipeline);
-            if (material_changed) {
+            if (material_changed || deformation_changed || slice_unbound) {
                 nt_sampler_t samplers[NT_MATERIAL_MAX_TEXTURES];
                 const nt_renderer_material_view_t view = supplied_material_view(material, deformation.texture, samplers);
                 nt_renderer_apply_material_uniforms(&bound, material_handle.id, &view);
-                nt_renderer_apply_texture_slots(&view);
-            } else if (deformation_changed) {
-                nt_sampler_t samplers[NT_MATERIAL_MAX_TEXTURES];
-                const nt_renderer_material_view_t view = supplied_material_view(material, deformation.texture, samplers);
-                nt_renderer_apply_texture_slots(&view);
+                nt_renderer_apply_texture_slots(&view, &instances);
+                slice_unbound = false;
             }
             nt_renderer_bind_vertex_input(&bound, vertex_input);
             previous_material = material_handle;
             previous_mesh = mesh_handle;
             previous_deformation = deformation.texture;
-            nt_gfx_set_uniform_int(s_skinned.instance_base, (int)(run_start - chunk_start));
+            nt_gfx_set_uniform_int(s_skinned.instance_base, (int)(run_start - slice_start));
             if (mesh->index_count > 0) {
                 nt_gfx_draw_indexed_instanced(0, mesh->index_count, mesh->vertex_count, instance_count);
             } else {
@@ -291,7 +281,6 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
 #endif
             run_start = run_end;
         }
-        chunk_start = chunk_end;
     }
 }
 

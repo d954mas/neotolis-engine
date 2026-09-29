@@ -480,39 +480,6 @@ static void test_failed_upload_keeps_issued_bytes(void) {
     }
 }
 
-#if NT_GFX_CAPTURE_ENABLED
-/* The second frame's initial records describe what the first frame left behind. */
-static void assert_initial_state_after_first_frame(const float color[4]) {
-    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    bool color_known = false;
-    bool viewport_known = false;
-    uint32_t ubo_slots = 0;
-    uint32_t slot0_buffer = 0;
-    for (uint32_t i = 0; i < capture.count; i++) {
-        const nt_gfx_event_t *e = &capture.events[i];
-        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UNIFORM_VEC4 && e->data.backend.args[1] == nt_hash32_str("u_color").value) {
-            TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, e->result);
-            TEST_ASSERT_EQUAL_MEMORY(color, e->data.backend.values, sizeof(float[4]));
-            color_known = true;
-        }
-        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UBO) {
-            ubo_slots++;
-            slot0_buffer = e->data.binding.slot == 0 ? e->data.binding.secondary : slot0_buffer;
-        }
-        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_VIEWPORT) {
-            TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_width, e->data.state.integers[2]);
-            TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_height, e->data.state.integers[3]);
-            viewport_known = true;
-        }
-    }
-    TEST_ASSERT_TRUE(color_known);
-    TEST_ASSERT_TRUE(viewport_known);
-    /* Frame 0 left the UBO bound to slot 0, so the snapshot names it. */
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_UBO_SLOTS, ubo_slots);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, slot0_buffer);
-}
-#endif
-
 static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     const char *vs_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }";
     const char *fs_source = "precision mediump float; uniform vec4 u_color; out vec4 color; void main() { color = u_color; }";
@@ -541,7 +508,24 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
         nt_gfx_begin_frame();
 #if NT_GFX_CAPTURE_ENABLED
         if (frame == 1) {
-            assert_initial_state_after_first_frame(color);
+            nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+            bool color_known = false;
+            bool viewport_known = false;
+            for (uint32_t i = 0; i < capture.count; i++) {
+                const nt_gfx_event_t *e = &capture.events[i];
+                if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UNIFORM_VEC4 && e->data.backend.args[1] == nt_hash32_str("u_color").value) {
+                    TEST_ASSERT_EQUAL(NT_GFX_RESULT_NONE, e->result);
+                    TEST_ASSERT_EQUAL_MEMORY(color, e->data.backend.values, sizeof(color));
+                    color_known = true;
+                }
+                if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_VIEWPORT) {
+                    TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_width, e->data.state.integers[2]);
+                    TEST_ASSERT_EQUAL_UINT32(g_nt_window.fb_height, e->data.state.integers[3]);
+                    viewport_known = true;
+                }
+            }
+            TEST_ASSERT_TRUE(color_known);
+            TEST_ASSERT_TRUE(viewport_known);
         }
 #endif
         nt_gfx_counters_t c = g_nt_gfx.last_frame;
@@ -555,7 +539,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
         TEST_ASSERT_EQUAL_UINT32(s_ubo_calls, c.gl[NT_GFX_GL_glBindBufferBase]);
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.gl[NT_GFX_GL_glUseProgram]);
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.gl[NT_GFX_GL_glUniform4fv]);
-        TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.gl[NT_GFX_GL_glBindBufferBase]);
+        TEST_ASSERT_EQUAL_UINT32(2, c.gl[NT_GFX_GL_glBindBufferBase]);
 #if NT_GFX_CAPTURE_ENABLED
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glUseProgram], captured_calls(NT_GFX_GL_glUseProgram));
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glBindVertexArray], captured_calls(NT_GFX_GL_glBindVertexArray));

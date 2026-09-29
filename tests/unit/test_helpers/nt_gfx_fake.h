@@ -65,6 +65,7 @@ uint32_t nt_gfx_fake_update_texture_count(void);
 typedef struct {
     uint16_t x, y, w, h;
     const void *data; /* the caller's pointer, still readable while its owner keeps the staging alive */
+    uint32_t backend; /* compare with nt_gfx_fake_bound_texture_at */
 } nt_gfx_fake_update_texture_rect_t;
 /* Update i since the last reset (history capacity 16; zero past it). */
 nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t index);

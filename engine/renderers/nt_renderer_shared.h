@@ -334,10 +334,16 @@ static inline void nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, u
     b->material = material_id;
 }
 
+/* Per-instance data is a transient texture bound under NT_MATERIAL_INSTANCES_SAMPLER;
+ * the shader reads it through common/instance.glsl, offset by this uniform. */
+#define NT_RENDERER_INSTANCE_BASE_UNIFORM "nt_instance_base"
+_Static_assert(NT_MATERIAL_MAX_TEXTURES + 1 <= NT_GFX_MAX_TEXTURE_SLOTS, "material textures plus the instance texture must fit the sampler slots");
+
 /* Semantic set: gfx ignores inactive names, validates active coverage, then
- * resolves every texture and sampler before issuing backend binds. */
-static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_view_t *v) {
-    nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES];
+ * resolves every texture and sampler before issuing backend binds. extra is an
+ * engine binding outside the material (NULL for none). */
+static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_view_t *v, const nt_gfx_texture_binding_t *extra) {
+    nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES + 1];
     for (uint8_t t = 0; t < v->tex_count; t++) {
         bindings[t] = (nt_gfx_texture_binding_t){
             .name = {.value = v->tex_name_hashes[t]},
@@ -345,7 +351,11 @@ static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_vi
             .sampler = v->tex_samplers[t],
         };
     }
-    nt_gfx_apply_texture_bindings(bindings, v->tex_count);
+    uint8_t count = v->tex_count;
+    if (extra != NULL) {
+        bindings[count++] = *extra;
+    }
+    nt_gfx_apply_texture_bindings(bindings, count);
 }
 
 static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_material_info_t *mi) {

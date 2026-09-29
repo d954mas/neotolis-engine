@@ -2555,25 +2555,6 @@ void test_register_global_block_max(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_GLOBAL_BLOCKS, count);
 }
 
-/* Every user of a shared block registers it; the registry keeps one entry. */
-void test_register_global_block_repeat_is_noop(void) {
-    char copy[] = "Globals"; /* equal by content, not by pointer */
-    nt_gfx_register_global_block("Globals", 0);
-    nt_gfx_register_global_block(copy, 0);
-
-    const nt_global_block_t *blocks;
-    uint32_t count;
-    nt_gfx_get_global_blocks(&blocks, &count);
-    TEST_ASSERT_EQUAL_UINT32(1, count);
-}
-
-void test_register_global_block_conflicts_assert(void) {
-    nt_gfx_register_global_block("Globals", 0);
-    EXPECT_ASSERT(nt_gfx_register_global_block("Globals", 1));
-    EXPECT_ASSERT(nt_gfx_register_global_block("Lighting", 0));
-    EXPECT_ASSERT(nt_gfx_register_global_block("Lighting", NT_GFX_MAX_UBO_SLOTS));
-}
-
 void test_register_global_block_cleared_on_shutdown(void) {
     nt_gfx_register_global_block("Globals", 0);
     nt_gfx_shutdown();
@@ -2835,7 +2816,7 @@ static nt_buffer_t make_test_ubo(uint32_t size) { return nt_gfx_make_buffer(&(nt
 void test_bind_uniform_buffer_range_reaches_backend(void) {
     nt_buffer_t ubo = make_test_ubo(1024);
     nt_gfx_bind_uniform_buffer(ubo, 1);
-    nt_gfx_bind_uniform_buffer_range(ubo, NT_GFX_MAX_UBO_SLOTS - 1, 768, 256); /* last slot, final legal range */
+    nt_gfx_bind_uniform_buffer_range(ubo, 7, 768, 256); /* final legal range */
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
     nt_gfx_fake_ubo_bind_t whole = nt_gfx_fake_ubo_bind_at(0);
@@ -2843,7 +2824,7 @@ void test_bind_uniform_buffer_range_reaches_backend(void) {
     TEST_ASSERT_EQUAL_UINT32(1, whole.slot);
     TEST_ASSERT_EQUAL_UINT32(0, whole.size);
     TEST_ASSERT_EQUAL_UINT32(whole.buffer_backend, range.buffer_backend);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_UBO_SLOTS - 1, range.slot);
+    TEST_ASSERT_EQUAL_UINT32(7, range.slot);
     TEST_ASSERT_EQUAL_UINT32(768, range.offset);
     TEST_ASSERT_EQUAL_UINT32(256, range.size);
 }
@@ -2856,11 +2837,82 @@ void test_bind_uniform_buffer_range_asserts(void) {
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 512));         /* past the end */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0xFFFFFF00U, 512)); /* offset + size wraps */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 2048));          /* larger than the buffer */
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, NT_GFX_MAX_UBO_SLOTS, 0, 256));
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, NT_GFX_MAX_UBO_SLOTS));
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(vbo, 0, 0, 256));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
 }
+
+// #region transient textures
+static float s_transient_texels[4096 * 4];
+
+static void init_with_transients(uint16_t count, uint16_t height) {
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.max_transient_textures = count;
+    desc.transient_texture_height = height;
+    nt_gfx_init(&desc);
+}
+
+void test_transient_textures_are_absent_by_request(void) {
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_transient_texture_capacity());
+    EXPECT_ASSERT(nt_gfx_transient_texture(s_transient_texels, 1));
+}
+
+/* Each upload takes the next texture and writes only the rows its texels reach. */
+void test_transient_textures_hand_out_in_turn_and_upload_used_rows(void) {
+    init_with_transients(3, 4);
+    TEST_ASSERT_EQUAL_UINT32(4096, nt_gfx_transient_texture_capacity());
+    nt_gfx_fake_reset();
+
+    const nt_texture_t a = nt_gfx_transient_texture(s_transient_texels, 1);
+    const nt_texture_t b = nt_gfx_transient_texture(s_transient_texels, 1025);
+    const nt_texture_t c = nt_gfx_transient_texture(s_transient_texels, 4096);
+    TEST_ASSERT_TRUE(a.id != 0 && b.id != 0 && c.id != 0);
+    TEST_ASSERT_TRUE(a.id != b.id && b.id != c.id && a.id != c.id);
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA32F, nt_gfx_texture_format(a));
+    const uint16_t rows[3] = {1, 2, 4};
+    for (uint32_t i = 0; i < 3; i++) {
+        const nt_gfx_fake_update_texture_rect_t rect = nt_gfx_fake_update_texture_rect_at(i);
+        TEST_ASSERT_EQUAL_UINT16(0, rect.x);
+        TEST_ASSERT_EQUAL_UINT16(0, rect.y);
+        TEST_ASSERT_EQUAL_UINT16(NT_GFX_TRANSIENT_TEXTURE_WIDTH, rect.w);
+        TEST_ASSERT_EQUAL_UINT16(rows[i], rect.h);
+    }
+    EXPECT_ASSERT(nt_gfx_transient_texture(s_transient_texels, 4097));
+}
+
+/* A fourth upload in a frame of three reuses the oldest and is counted; the next
+ * frame starts the count again. */
+void test_transient_overflow_is_counted_per_frame(void) {
+    init_with_transients(3, 1);
+    const nt_texture_t first = nt_gfx_transient_texture(s_transient_texels, 1);
+    (void)nt_gfx_transient_texture(s_transient_texels, 1);
+    (void)nt_gfx_transient_texture(s_transient_texels, 1);
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.transient_overflows);
+    TEST_ASSERT_EQUAL_UINT32(first.id, nt_gfx_transient_texture(s_transient_texels, 1).id);
+    TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.counters.transient_overflows);
+
+    nt_gfx_begin_frame();
+    for (uint32_t i = 0; i < 3; i++) {
+        (void)nt_gfx_transient_texture(s_transient_texels, 1);
+    }
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.transient_overflows);
+}
+
+/* gfx owns them: INVALID while lost, recreated by the restore itself. */
+void test_transient_textures_come_back_after_restore(void) {
+    init_with_transients(2, 1);
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_transient_texture(s_transient_texels, 1).id);
+
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    const nt_texture_t restored = nt_gfx_transient_texture(s_transient_texels, 1);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, restored.id);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(restored));
+}
+// #endregion
 
 /* The alignment is a device cap, re-read on every probe. */
 void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
@@ -3288,6 +3340,10 @@ int main(void) {
     RUN_TEST(test_bind_uniform_buffer_range_reaches_backend);
     RUN_TEST(test_bind_uniform_buffer_range_asserts);
     RUN_TEST(test_bind_uniform_buffer_range_follows_probed_alignment);
+    RUN_TEST(test_transient_textures_are_absent_by_request);
+    RUN_TEST(test_transient_textures_hand_out_in_turn_and_upload_used_rows);
+    RUN_TEST(test_transient_overflow_is_counted_per_frame);
+    RUN_TEST(test_transient_textures_come_back_after_restore);
     RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_update_buffer_at_offset);
     RUN_TEST(test_update_buffer_rejects_out_of_range);
@@ -3296,8 +3352,6 @@ int main(void) {
     /* Global block registration tests */
     RUN_TEST(test_register_global_block);
     RUN_TEST(test_register_global_block_max);
-    RUN_TEST(test_register_global_block_repeat_is_noop);
-    RUN_TEST(test_register_global_block_conflicts_assert);
     RUN_TEST(test_register_global_block_cleared_on_shutdown);
     /* New pixel format tests */
     RUN_TEST(test_gfx_make_texture_rgba16f);

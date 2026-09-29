@@ -8,18 +8,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Instances per 16 KB instance-block range, i.e. the most one draw carries. */
-#define NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES 170U
-
 typedef struct {
-    uint16_t max_instances; /* instances the uniform-buffer ring holds before it wraps */
     uint16_t max_pipelines;
     uint16_t max_mesh_layouts;
 } nt_skinned_mesh_renderer_desc_t;
 
 static inline nt_skinned_mesh_renderer_desc_t nt_skinned_mesh_renderer_desc_defaults(void) {
     return (nt_skinned_mesh_renderer_desc_t){
-        .max_instances = 4096,
         .max_pipelines = 64,
         .max_mesh_layouts = 4,
     };
@@ -29,8 +24,8 @@ static inline nt_skinned_mesh_renderer_desc_t nt_skinned_mesh_renderer_desc_defa
 nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t *desc);
 void nt_skinned_mesh_renderer_shutdown(void);
 
-/* Retains CPU storage and initialization; drops GPU caches and recreates the
- * instance ring. Failure must be retried before drawing. */
+/* Retains CPU storage and initialization; drops the pipeline and vertex-input
+ * caches. Always NT_OK. */
 nt_result_t nt_skinned_mesh_renderer_restore_gpu(void);
 
 /* Caller controls visibility/sorting; items and referenced bindings stay live
@@ -39,9 +34,8 @@ nt_result_t nt_skinned_mesh_renderer_restore_gpu(void);
  * positive uniform joint/world scale. Declare u_skin_matrices in the material;
  * the renderer supplies its texture and default sampler from skin_comp.
  * Instances carry world transform, skin frames and the drawable colour (white
- * without a drawable component), in chunks of up to
- * NT_SKINNED_MESH_RENDERER_CHUNK_INSTANCES; a run crossing a chunk edge draws
- * twice. */
+ * without a drawable component) in gfx transient textures, as for the mesh
+ * renderer. */
 void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access

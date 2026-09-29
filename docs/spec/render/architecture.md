@@ -85,10 +85,25 @@ attributes cost one `glBindBuffer` plus a `glVertexAttribPointer` per instance
 attribute on every re-point and have no instance-count limit, so they suit a
 few large instanced draws (particles, foliage, big crowds in one batch); the
 shape renderer, which draws once per shape kind per flush, uses them. A
-uniform-block range (`nt_gfx_bind_uniform_buffer_range`, indexed by
-`gl_InstanceID` plus a per-draw base uniform) binds once per chunk and costs one
-int uniform per draw, but a chunk is capped by the 16 KB block, so it suits many
-small runs; the engine's mesh and skinned mesh renderers use it (see below).
+transient texture (`nt_gfx_transient_texture`, read with `texelFetch` at
+`gl_InstanceID` plus a per-draw base uniform) costs one upload per call and one
+int uniform per draw, with nothing to re-point, so it suits many small runs; the
+engine's mesh and skinned mesh renderers use it (see below).
+
+Transient textures are gfx-owned: `max_transient_textures` RGBA32F textures of
+`NT_GFX_TRANSIENT_TEXTURE_WIDTH` (1024) x `transient_texture_height` texels,
+created at init on top of `max_textures` and again by every context restore; 0
+creates none. `nt_gfx_transient_texture` uploads the rows its texels reach into
+the next texture in turn and returns it, valid until the next `begin_frame`. The
+turn exists because Mali/ANGLE track a resource as a whole: rewriting a texture,
+or any part of a buffer, that an earlier draw of the frame read stalls the GPU,
+so each upload goes to a texture no earlier draw of the frame sampled. More
+uploads in one frame than textures reuse the oldest: still correct, but the
+driver orders the rewrite; `counters.transient_overflows` counts them and gfx
+warns once. The count sizes uploads per frame, not frames in flight: a texture
+rewritten one frame after its last read showed no stall. The same rule applies
+to `nt_gfx_bind_uniform_buffer_range`: upload every range of a frame before the
+first draw that reads the buffer.
 
 A vertex attribute is the raw GL triple `(type, count 1-4,
 normalized)` plus location and byte offset (`nt_vertex_attr_t`) — no enum of
@@ -263,25 +278,23 @@ regression. The default `max_vertex_inputs` budgets one mesh cache; a game using
 both mesh renderers adds
 `max_meshes * skinned.max_mesh_layouts` to that base budget explicitly.
 
-The mesh and skinned mesh renderers pass per-instance data through the
-`NtInstances` uniform block declared in `assets/shaders/common/instance.glsl`,
-not through instanced attributes, so their vertex inputs carry mesh streams
-only. Each renderer owns one uniform-buffer ring. Per chunk it packs the
-instances, uploads them, and binds a full 16 KB range at slot 15 with
-`nt_gfx_bind_uniform_buffer_range`, at an offset aligned to
-`gpu_caps.uniform_buffer_offset_alignment`; each run then sets the int uniform
-`nt_instance_base` to its first instance within the chunk, and the shader reads
-`nt_instance_base + gl_InstanceID`. The block is a flat `vec4[1024]` read at a
-per-renderer stride: mesh 4 vec4s (world rows, colour; 256 per chunk), skinned
-6 (world rows, frame origins, blend alpha, colour; 170 per chunk). Colour is
-always part of the payload: the drawable colour, or white for an entity without
-a drawable component. A run crossing a chunk edge draws once per chunk. The
-ring holds `max_instances` instances packed in full chunks per wrap; each push
-starts at an aligned offset, so many small `draw_list` calls wrap sooner. A push
-packs right after the previous one, inside a range an earlier draw still binds
-but never reads, and a wrap overwrites bytes an earlier draw may read; the
-driver orders both. GPU restore recreates the ring, which re-reads the
-alignment.
+The mesh and skinned mesh renderers pass per-instance data through a transient
+texture, not through instanced attributes, so their vertex inputs carry mesh
+streams only. Each `draw_list` packs its instances into staging sized to one
+transient texture, uploads them with `nt_gfx_transient_texture`, binds that
+texture under the reserved sampler `nt_instances` next to the material's
+textures, and draws each run after setting the int uniform `nt_instance_base` to
+the run's first instance; the shader reads texels
+`(nt_instance_base + gl_InstanceID) * stride + k` through
+`assets/shaders/common/instance.glsl`. Payloads are mesh 4 texels (world rows,
+colour; 256 per texture row) and skinned 6 (world rows, frame origins, blend
+alpha, colour; 170 per row, so a payload can straddle two rows). Colour is always
+part of the payload: the drawable colour, or white for an entity without a
+drawable component. A call with more instances than one texture holds takes one
+texture per slice and re-applies the texture set at each slice start; a run
+crossing a slice edge draws once per slice. The renderers own no GPU buffers:
+GPU restore only drops their pipeline and vertex-input caches, and without
+transient textures their init fails.
 
 The sprite renderer owns its vertex/index buffers and clears its entire
 vertex-input cache on shutdown or GPU restore before replacing those buffers.
@@ -746,8 +759,8 @@ Not all renderers carry the same weight. The engine ships three classes; copying
 
 **Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`,
 `nt_mesh_renderer`, optional `nt_skinned_mesh_renderer`). Single pipeline, fixed
-pattern, one or more instanced draws per compatible run — split where a chunk
-fills its instance-block range (see items-sorting-batching.md). Use for 3D
+pattern, one or more instanced draws per compatible run — split where a call
+fills its instance texture (see items-sorting-batching.md). Use for 3D
 meshes, custom geometry, anything where the game owns batching strategy. Stay
 minimal. The mesh renderers do state-delta tracking through the shared
 `static inline` helper, which costs them no cmd queue and no snapshot machinery.

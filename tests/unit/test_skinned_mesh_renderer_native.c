@@ -497,6 +497,8 @@ void setUp(void) {
         .max_meshes = 16,
         .max_vertex_inputs = 64,
         .max_render_targets = 4,
+        .max_transient_textures = 4,
+        .transient_texture_height = 2, /* two rows: an instance can straddle */
     });
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 32});
@@ -507,8 +509,8 @@ void setUp(void) {
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 32});
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
     s_initialized = true;
-    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_instances = 8, .max_pipelines = 4, .max_mesh_layouts = 4}));
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 8, .max_pipelines = 4, .max_mesh_layouts = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
 
     const bool sources_ready = load_shader_source("tests/fixtures/skinned_mesh_renderer_native.vert", &skin_source) &&
                                load_shader_source("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
@@ -647,7 +649,7 @@ static void test_degenerate_normal_and_tangent_guards_are_finite_and_determinist
     assert_probe_matches_mask(s_actual, 128, 128, 191); /* deterministic +Z tangent */
 }
 
-/* The second run draws at base 1 inside the chunk and reads its own colour:
+/* The second run draws at base 1 inside the instance texture and reads its own colour:
  * white, since that entity has no drawable component. */
 static void test_entity_without_drawable_reads_white_after_a_colored_one(void) {
     const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
@@ -674,13 +676,32 @@ static void test_entity_without_drawable_reads_white_after_a_colored_one(void) {
 
     render_skinned_list(items, 2, s_actual);
     assert_cpu_gpu_frames_agree();
+}
 
-    /* WebGL rejects a draw whose bound range is smaller than the block, so the
-     * shader's block must be exactly the 16 KB the renderer binds. */
-    const GLuint program = (GLuint)nt_gfx_gl_test_cached_program();
-    GLint block_size = 0;
-    glGetActiveUniformBlockiv(program, glGetUniformBlockIndex(program, "NtInstances"), GL_UNIFORM_BLOCK_DATA_SIZE, &block_size);
-    TEST_ASSERT_EQUAL_INT(16384, block_size);
+/* Skinned payloads are six texels, so instance 170 spans texels 1020..1025 across
+ * the first row edge; it must still read all six of its own texels. */
+static void test_instance_straddling_a_texture_row_matches_cpu_reference(void) {
+    const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
+    test_vertex_t reference_vertices[VERTEX_COUNT];
+    deform_vertices(binding, false, reference_vertices);
+    nt_mesh_t reference_mesh = make_mesh(reference_vertices);
+    nt_material_t reference_material = make_reference_material(3.0F);
+    render_entity(make_entity(reference_mesh, reference_material, NULL), reference_material, reference_mesh, false, s_expected);
+
+    nt_mesh_t mesh = make_mesh(k_bar);
+    nt_material_t material = make_skinned_material(3.0F);
+    nt_entity_t hidden = make_entity(mesh, material, &binding);
+    nt_transform_comp_set_position(hidden, 1000.0F, 0.0F, 0.0F); /* off screen */
+    nt_entity_t probe = make_entity(mesh, material, &binding);
+    nt_transform_comp_update();
+    static nt_render_item_t items[171];
+    for (uint32_t i = 0; i < 170; i++) {
+        items[i] = (nt_render_item_t){.entity = hidden.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
+    }
+    items[170] = (nt_render_item_t){.entity = probe.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
+
+    render_skinned_list(items, 171, s_actual);
+    assert_cpu_gpu_frames_agree();
 }
 
 int main(void) {
@@ -695,6 +716,7 @@ int main(void) {
     RUN_TEST(test_palette_frames_and_interpolation_match_cpu_reference);
     RUN_TEST(test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic);
     RUN_TEST(test_entity_without_drawable_reads_white_after_a_colored_one);
+    RUN_TEST(test_instance_straddling_a_texture_row_matches_cpu_reference);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

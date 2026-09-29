@@ -86,6 +86,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->texture_count; i++) {
         /* A slot with no uniform name is a declaration nothing can bind. */
         NT_ASSERT(desc->textures[i].name != NULL && "material texture slot needs a sampler uniform name");
+        NT_ASSERT(strcmp(desc->textures[i].name, NT_MATERIAL_INSTANCES_SAMPLER) != 0 && "nt_instances is reserved for the renderers' instance texture");
         info->tex_resources[i] = desc->textures[i].resource;
         info->tex_name_hashes[i] = nt_hash32_str(desc->textures[i].name).value;
         info->tex_samplers[i] = desc->textures[i].sampler;

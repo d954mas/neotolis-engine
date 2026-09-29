@@ -21,13 +21,7 @@ static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mes
     return (material_slot << NT_POOL_SLOT_SHIFT) | mesh_slot;
 }
 
-/* Instances per 16 KB instance-block range, i.e. the most one draw carries. */
-#define NT_MESH_RENDERER_CHUNK_INSTANCES 256U
-
 typedef struct {
-    /* Instances the uniform-buffer ring holds before it wraps, i.e. roughly one
-     * frame's worth; a wrap makes the driver order the overwrite. Default: 4096. */
-    uint16_t max_instances;
     uint16_t max_pipelines; /* pipeline cache capacity, default: 64 */
     /* Vertex-input versions kept per mesh (one per distinct derived layout
      * drawing that mesh). Exceeding it ASSERTS -- silent eviction would hide
@@ -36,14 +30,13 @@ typedef struct {
     uint16_t max_mesh_layouts;
 } nt_mesh_renderer_desc_t;
 
-static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_instances = 4096, .max_pipelines = 64, .max_mesh_layouts = 4}; }
+static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_pipelines = 64, .max_mesh_layouts = 4}; }
 
 /* desc is required, non-NULL and borrowed for the duration of the call. */
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
-/* Retains CPU storage and initialization; drops GPU caches and recreates buffers.
- * Failure returns NT_ERR_INIT_FAILED: retry before drawing, or shut down.
- * Inactive modules are unchanged and return NT_OK. */
+/* Retains CPU storage and initialization; drops the pipeline and vertex-input
+ * caches. Always NT_OK; inactive modules are unchanged. */
 nt_result_t nt_mesh_renderer_restore_gpu(void);
 
 /* Contract: caller must pre-filter `items` by visibility — the renderer draws
@@ -55,9 +48,9 @@ nt_result_t nt_mesh_renderer_restore_gpu(void);
  * bindings, and referenced resources stay live and unchanged through this call. */
 /* items may be NULL only when count is 0; otherwise it is borrowed for the call. */
 /* Instances reach the shader through common/instance.glsl: world transform and
- * the drawable colour (white without a drawable component). Items are drawn in
- * chunks of up to NT_MESH_RENDERER_CHUNK_INSTANCES; a batch_key run crossing a
- * chunk edge draws twice. */
+ * the drawable colour (white without a drawable component), uploaded into one
+ * gfx transient texture per call. A call longer than one texture holds takes
+ * several, and a batch_key run crossing that edge draws twice. */
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access
@@ -67,7 +60,6 @@ uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
 uint32_t nt_mesh_renderer_test_vertex_input_count(void);
 uint32_t nt_mesh_renderer_test_draw_call_count(void);
 uint32_t nt_mesh_renderer_test_instance_total(void);
-uint32_t nt_mesh_renderer_test_ring_cursor(void);
 bool nt_mesh_renderer_test_initialized(void);
 #endif
 // #endregion

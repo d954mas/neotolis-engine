@@ -10,6 +10,8 @@
 /* ---- Compile-time limits ---- */
 
 #define NT_MATERIAL_MAX_TEXTURES 4
+/* Reserved: the instancing renderers bind their instance texture under this sampler name. */
+#define NT_MATERIAL_INSTANCES_SAMPLER "nt_instances"
 #define NT_MATERIAL_MAX_PARAMS 4
 #define NT_MATERIAL_MAX_ATTR_MAP 8
 #define NT_MAX_PER_ENTITY_PARAMS 4

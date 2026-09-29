@@ -30,7 +30,10 @@ A material declares every sampler its program uses. A specialized renderer may
 document that it supplies the runtime texture and sampler for one named
 declaration, but the declaration still belongs to the material/program contract
 and counts toward the material limit. The renderer substitutes that slot and
-applies one complete combined set; it does not add a hidden binding. The
+applies one complete combined set; it adds no hidden binding of its own. The one
+engine exception is the instance texture: the mesh and skinned mesh renderers
+bind it under the reserved name `nt_instances`, outside the material's slots,
+and material creation asserts on that name (see shader.md). The
 implemented example is `u_skin_matrices`: a skinned material declares it within
 its four slots, while `nt_skinned_mesh_renderer` supplies the current
 deformation texture and its default sampler. That slot's descriptor resource may

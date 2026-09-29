@@ -206,6 +206,8 @@ void setUp(void) {
         /* 48 non-mesh inputs + 8 meshes * (2 static + 4 skinned layouts). */
         .max_vertex_inputs = 96,
         .max_render_targets = 4,
+        .max_transient_textures = 4,
+        .transient_texture_height = 1,
     });
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 16});
@@ -236,6 +238,13 @@ void tearDown(void) {
     nt_resource_shutdown();
     nt_gfx_shutdown();
     nt_hash_shutdown();
+}
+
+/* The data of the most recent instance-texture upload. */
+static const float *last_instance_upload(void) {
+    const uint32_t count = nt_gfx_fake_update_texture_count();
+    TEST_ASSERT_GREATER_THAN_UINT32(0, count);
+    return (const float *)nt_gfx_fake_update_texture_rect_at(count - 1U).data;
 }
 
 void test_one_compatible_item_draws_with_supplied_deformation_texture(void) {
@@ -363,9 +372,7 @@ void test_packed_instances_keep_each_entity_world_and_binding(void) {
 
     nt_skinned_mesh_renderer_draw_list(items, 2);
 
-    const float *packed = (const float *)nt_gfx_fake_last_update_buffer_data();
-    TEST_ASSERT_NOT_NULL(packed);
-    TEST_ASSERT_EQUAL_UINT32(2 * 96, nt_gfx_fake_last_update_buffer_size());
+    const float *packed = last_instance_upload();
     /* Per instance: world rows at 0..11 (x translation in row 0's w), frames at 12..15, skin (alpha, 0, 0, 0) at 16..19. */
     const float rows[2][4] = {{1.0F, 0.0F, 0.0F, 9.0F}, {1.0F, 0.0F, 0.0F, 5.0F}};
     const float frames[2][4] = {{11.0F, 12.0F, 13.0F, 14.0F}, {1.0F, 2.0F, 3.0F, 4.0F}};
@@ -427,29 +434,6 @@ void test_material_transition_reapplies_complete_surface_and_skin_set(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(3));
 }
 
-void test_chunk_limit_splits_one_run_without_dropping_instances(void) {
-    nt_skinned_mesh_renderer_shutdown();
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 2, .max_pipelines = 4, .max_mesh_layouts = 2}));
-    nt_mesh_t mesh = make_mesh();
-    nt_texture_t texture = make_deformation_texture();
-    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
-    nt_render_item_t items[3];
-    for (uint32_t i = 0; i < 3; i++) {
-        nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
-        items[i] = make_item(entity, material, mesh);
-    }
-
-    nt_gfx_fake_reset();
-    nt_gfx_fake_draw_trace_reset(true);
-    nt_skinned_mesh_renderer_draw_list(items, 3);
-
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(0).instance_count);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).instance_count);
-    TEST_ASSERT_EQUAL_UINT32(3, nt_skinned_mesh_renderer_test_instance_total());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_update_buffer_count());
-}
-
 void test_indexed_and_nonindexed_meshes_use_matching_draw_paths(void) {
     nt_mesh_t indexed = make_indexed_mesh();
     nt_mesh_t nonindexed = make_mesh();
@@ -481,15 +465,15 @@ void test_color_is_the_drawable_color_or_white(void) {
 
     nt_skinned_mesh_renderer_draw_list(items, 2);
 
-    const float *packed = (const float *)nt_gfx_fake_last_update_buffer_data();
+    const float *packed = last_instance_upload();
     const float tint[4] = {0.25F, 1.5F, 0.75F, 1.0F};
     const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     TEST_ASSERT_EQUAL_MEMORY(tint, packed + 20, sizeof(float[4]));
     TEST_ASSERT_EQUAL_MEMORY(white, packed + 24 + 20, sizeof(float[4]));
 }
 
-/* One upload and one range bind for the chunk; each run draws at its offset in it. */
-void test_runs_draw_at_their_base_within_one_bound_chunk(void) {
+/* One upload per call; each run draws at its offset in the instance texture. */
+void test_runs_draw_at_their_base_within_one_texture(void) {
     nt_mesh_t mesh = make_mesh();
     nt_texture_t texture = make_deformation_texture();
     nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1);
@@ -503,10 +487,7 @@ void test_runs_draw_at_their_base_within_one_bound_chunk(void) {
     nt_skinned_mesh_renderer_draw_list(items, 3);
 
     TEST_ASSERT_EQUAL_UINT32(3, nt_skinned_mesh_renderer_test_draw_call_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
-    TEST_ASSERT_EQUAL_UINT32(15, nt_gfx_fake_ubo_bind_at(0).slot);
-    TEST_ASSERT_EQUAL_UINT32(16384, nt_gfx_fake_ubo_bind_at(0).size);
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_update_buffer_offset(), nt_gfx_fake_ubo_bind_at(0).offset);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_update_texture_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_uniform_int_count());
     for (uint32_t i = 0; i < 3; i++) {
         TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("nt_instance_base").value, nt_gfx_fake_uniform_int_hash_at(i));
@@ -514,17 +495,17 @@ void test_runs_draw_at_their_base_within_one_bound_chunk(void) {
     }
 }
 
-/* 170 skinned instances fill a 16 KB block; the 171st starts a new chunk. */
-void test_chunks_split_at_block_capacity(void) {
+/* One 1024-texel row holds 170 skinned instances; the 171st takes a second
+ * texture, which the second draw samples and which carries its own item. */
+void test_slices_split_at_texture_capacity(void) {
     nt_mesh_t mesh = make_mesh();
-    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices", "nt_instances"}, 2));
     const nt_texture_t texture = make_deformation_texture();
     const nt_render_item_t item = make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture}), material, mesh);
     static nt_render_item_t items[171];
     for (uint32_t i = 0; i < 171; i++) {
         items[i] = item;
     }
-    /* The second chunk packs its own item, not the first chunk's. */
     items[170] = make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture, .x0 = 9, .y0 = 7}), material, mesh);
 
     nt_gfx_fake_reset();
@@ -532,10 +513,16 @@ void test_chunks_split_at_block_capacity(void) {
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_skinned_mesh_renderer_test_draw_call_count());
     TEST_ASSERT_EQUAL_UINT32(171, nt_skinned_mesh_renderer_test_instance_total());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
-    TEST_ASSERT_EQUAL_UINT32(96, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_update_texture_count());
+    const nt_gfx_fake_update_texture_rect_t second = nt_gfx_fake_update_texture_rect_at(1);
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_update_texture_rect_at(0).backend, second.backend);
+    bool second_bound = false;
+    for (uint32_t i = 0; i < nt_gfx_fake_bound_texture_count(); i++) {
+        second_bound = second_bound || nt_gfx_fake_bound_texture_at(i) == second.backend;
+    }
+    TEST_ASSERT_TRUE(second_bound);
     const float frames[4] = {9.0F, 7.0F, 0.0F, 0.0F};
-    TEST_ASSERT_EQUAL_MEMORY(frames, (const float *)nt_gfx_fake_last_update_buffer_data() + 12, sizeof(frames));
+    TEST_ASSERT_EQUAL_MEMORY(frames, (const float *)second.data + 12, sizeof(frames));
 }
 
 void test_active_skin_sampler_must_be_declared_by_material(void) {
@@ -558,7 +545,7 @@ void test_zero_deformation_texture_asserts(void) {
 }
 
 void test_static_mesh_renderer_ignores_unmapped_skin_streams(void) {
-    nt_mesh_renderer_desc_t desc = {.max_instances = 2, .max_pipelines = 2, .max_mesh_layouts = 2};
+    nt_mesh_renderer_desc_t desc = {.max_pipelines = 2, .max_mesh_layouts = 2};
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&desc));
     nt_mesh_t mesh = make_skin_stream_mesh();
     nt_material_t material = make_material_without_skin(nt_gfx_fake_make_program(NULL, 0));
@@ -616,15 +603,8 @@ void test_failed_pipeline_and_vertex_input_creation_are_retryable(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
 }
 
-void test_init_and_restore_failures_leave_an_explicit_retry_path(void) {
-    nt_skinned_mesh_renderer_shutdown();
-    nt_skinned_mesh_renderer_desc_t desc = {.max_instances = 2, .max_pipelines = 2, .max_mesh_layouts = 2};
-    nt_gfx_fake_fail_buffer_creates(1);
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_skinned_mesh_renderer_init(&desc));
-    TEST_ASSERT_FALSE(nt_skinned_mesh_renderer_test_initialized());
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_restore_gpu());
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&desc));
-
+/* Restore drops the pipeline and vertex-input caches; the next draw rebuilds them. */
+void test_restore_drops_caches_and_the_next_draw_rebuilds(void) {
     nt_mesh_t mesh = make_mesh();
     nt_texture_t texture = make_deformation_texture();
     nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
@@ -632,17 +612,11 @@ void test_init_and_restore_failures_leave_an_explicit_retry_path(void) {
     nt_render_item_t item = make_item(entity, material, mesh);
     nt_skinned_mesh_renderer_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
-
-    nt_gfx_fake_set_context_lost(true);
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_skinned_mesh_renderer_restore_gpu());
-    nt_gfx_fake_set_context_lost(false);
-    TEST_ASSERT_TRUE(nt_skinned_mesh_renderer_test_initialized());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_vertex_input_count());
-    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw_list(&item, 1));
 
     TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_restore_gpu());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_vertex_input_count());
+
     nt_skinned_mesh_renderer_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
@@ -659,16 +633,15 @@ int main(void) {
     RUN_TEST(test_packed_instances_keep_each_entity_world_and_binding);
     RUN_TEST(test_material_or_mesh_change_splits_runs_in_input_order);
     RUN_TEST(test_material_transition_reapplies_complete_surface_and_skin_set);
-    RUN_TEST(test_chunk_limit_splits_one_run_without_dropping_instances);
     RUN_TEST(test_indexed_and_nonindexed_meshes_use_matching_draw_paths);
     RUN_TEST(test_color_is_the_drawable_color_or_white);
-    RUN_TEST(test_runs_draw_at_their_base_within_one_bound_chunk);
-    RUN_TEST(test_chunks_split_at_block_capacity);
+    RUN_TEST(test_runs_draw_at_their_base_within_one_texture);
+    RUN_TEST(test_slices_split_at_texture_capacity);
     RUN_TEST(test_active_skin_sampler_must_be_declared_by_material);
     RUN_TEST(test_zero_deformation_texture_asserts);
     RUN_TEST(test_static_mesh_renderer_ignores_unmapped_skin_streams);
     RUN_TEST(test_unready_program_warns_once_and_rearms_after_success);
     RUN_TEST(test_failed_pipeline_and_vertex_input_creation_are_retryable);
-    RUN_TEST(test_init_and_restore_failures_leave_an_explicit_retry_path);
+    RUN_TEST(test_restore_drops_caches_and_the_next_draw_rebuilds);
     return UNITY_END();
 }

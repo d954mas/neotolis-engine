@@ -20,9 +20,8 @@ struct nt_skinned_instance_t {
 };
 
 nt_skinned_instance_t nt_skinned_instance() {
-    int i = nt_instance_index() * 6;
-    mat4 world = nt_instance_world(nt_instance_data[i], nt_instance_data[i + 1], nt_instance_data[i + 2]);
-    return nt_skinned_instance_t(world, nt_instance_data[i + 3], nt_instance_data[i + 4].x, nt_instance_data[i + 5]);
+    mat4 world = nt_instance_world(nt_instance_texel(6, 0), nt_instance_texel(6, 1), nt_instance_texel(6, 2));
+    return nt_skinned_instance_t(world, nt_instance_texel(6, 3), nt_instance_texel(6, 4).x, nt_instance_texel(6, 5));
 }
 
 const float NT_SKIN_VECTOR_EPSILON = 1e-12;

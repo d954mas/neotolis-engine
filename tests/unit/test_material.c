@@ -282,6 +282,13 @@ void test_create_asserts_out_of_range_key_lanes(void) {
     NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
 }
 
+void test_create_asserts_on_the_reserved_instances_sampler(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.textures[0].name = NT_MATERIAL_INSTANCES_SAMPLER;
+    d.texture_count = 1;
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&d));
+}
+
 /* ---- Test 7: attr_map stored correctly ---- */
 
 void test_create_stores_attr_map(void) {
@@ -613,6 +620,7 @@ int main(void) {
     RUN_TEST(test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha);
     RUN_TEST(test_create_stores_render_state);
     RUN_TEST(test_create_asserts_out_of_range_key_lanes);
+    RUN_TEST(test_create_asserts_on_the_reserved_instances_sampler);
     RUN_TEST(test_blend_reserved_byte_is_canonicalized);
     RUN_TEST(test_create_stores_attr_map);
     RUN_TEST(test_create_hashes_texture_names);

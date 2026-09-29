@@ -162,18 +162,22 @@ handle, and an exhausted program pool.
 to existing and future programs; registration may precede or follow linking.
 There is no per-program override. The registry borrows `name` without copying:
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registration
-survives context loss. Re-registering an identical (name, slot) pair is a no-op
-that ends `CACHE`, so every module using a shared block registers it itself; a
-known name on another slot, a known slot under another name, and a slot at or
-above `NT_GFX_MAX_UBO_SLOTS` (24, the WebGL2 guarantee) assert.
+survives context loss.
 
 `nt_gfx_bind_uniform_buffer_range` binds `[offset, offset + size)` of a uniform
 buffer. The offset is a multiple of `gpu_caps.uniform_buffer_offset_alignment`
 (re-probed at context restore), the size is nonzero and the range fits the
-buffer; each violation asserts, as do a non-uniform buffer and a slot out of
-range, and without asserts the bind is rejected with `INVALID_ARGUMENT`. WebGL additionally rejects a draw whose bound range is smaller than the
+buffer; each violation asserts, as does a non-uniform buffer, and without
+asserts the bind is rejected with `INVALID_ARGUMENT`. WebGL additionally rejects a draw whose bound range is smaller than the
 block's data size; gfx does not know block sizes, so the caller sizes the
 range.
+
+`nt_gfx_transient_texture` asserts on NULL texels, a zero count and a count
+above `nt_gfx_transient_texture_capacity()` (0 without transient textures); the
+texels must stay readable up to the end of the last row they touch. It returns
+INVALID only while the context is lost, and for a texture a failed restore could
+not recreate. `transient_texture_height` must be nonzero when
+`max_transient_textures` is, and at most `gpu_caps.max_texture_size`.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
