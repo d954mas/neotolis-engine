@@ -713,7 +713,12 @@ initialization and cost one instance per shape.
 Every flush draws filled instanced shapes by type, then triangles and meshes,
 then wire templates by type, connected segments and independent lines. Within
 one flush this kind order replaces submission order: outlines stay on top of
-fills, and interleaved submissions batch into at most one draw per kind. Flushes
+fills, and interleaved submissions of a kind batch into one draw per chunk of
+its queue. Instance data streams through one uniform-buffer ring bound as
+`NtInstances` ranges, as in the mesh renderers; a 16 KB chunk holds 256 filled
+or wire shapes, 204 connected segments or 341 independent lines, and each chunk
+draws alone, so its shaders index by `gl_InstanceID` without a base uniform.
+Connected segments carry their neighbours, so a chunk edge keeps the joins. Flushes
 are the only ordering barriers — explicit `flush`, a full queue and the state
 changes above. A game that needs a later layer over an earlier one, typically in
 overlay mode, calls `flush` between them.
