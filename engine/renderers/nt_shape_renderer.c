@@ -1,5 +1,4 @@
 #include "renderers/nt_shape_renderer.h"
-#include "renderers/nt_renderer_instance.h"
 
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
@@ -113,36 +112,33 @@ static const char *s_shape_fs_src = "precision mediump float;\n"
     "    return u_vp*vec4(biased(p+offset*(0.5*u_line_width)),1);\n"                                                                                                                                   \
     "}\n"
 
-/* Each chunk draws alone from offset 0 of its bound range, so gl_InstanceID is
- * the instance index; payload strides are in vec4s. */
-#define NT_SHAPE_INSTANCES_GLSL "layout(std140) uniform NtInstances { highp vec4 nt_instance_data[1024]; };\n"
-
-/* Connected polyline segment: prev, a, b, next, color. */
-static const char *s_line_vs_src = "precision highp float;\n"
-                                   "layout(location = 0) in vec2 a_corner;\n" NT_SHAPE_INSTANCES_GLSL "out mediump vec4 v_color;\n" NT_STROKE_GLSL
-                                   "void main(){int i=gl_InstanceID*5;vec3 prev=nt_instance_data[i].xyz,a=nt_instance_data[i+1].xyz,b=nt_instance_data[i+2].xyz,next=nt_instance_data[i+3].xyz;\n"
-                                   "bool s=a_corner.x<0.5;gl_Position=stroke_position(a_corner,s?prev:a,s?a:b,s?b:next);v_color=nt_instance_data[i+4];}\n";
-
-/* Independent segment: a, b, color; its own endpoints stand in for the neighbours. */
-static const char *s_segment_vs_src = "precision highp float;\n"
-                                      "layout(location = 0) in vec2 a_corner;\n" NT_SHAPE_INSTANCES_GLSL "out mediump vec4 v_color;\n" NT_STROKE_GLSL
-                                      "void main(){int i=gl_InstanceID*3;vec3 a=nt_instance_data[i].xyz,b=nt_instance_data[i+1].xyz;\n"
-                                      "gl_Position=stroke_position(a_corner,a,a_corner.x<0.5?a:b,b);v_color=nt_instance_data[i+2];}\n";
+static const char *s_line_vs_src =
+    "precision highp float;\n"
+    "layout(location = 0) in vec2 a_corner;\n"
+    "layout(location = 1) in vec3 i_prev;\n"
+    "layout(location = 2) in vec3 i_a;\n"
+    "layout(location = 3) in vec3 i_b;\n"
+    "layout(location = 4) in vec3 i_next;\n"
+    "layout(location = 5) in vec4 i_color;\n"
+    "out mediump vec4 v_color;\n" NT_STROKE_GLSL "void main(){bool s=a_corner.x<0.5;gl_Position=stroke_position(a_corner,s?i_prev:i_a,s?i_a:i_b,s?i_b:i_next);v_color=i_color;}\n";
 
 /* Template vertices already store their corner's (before, p, after) triple. */
-static const char *s_wire_vs_src =
-    "precision highp float;\n"
-    "layout(location=0) in vec2 a_corner;\n"
-    "layout(location=1) in vec4 a_before;\n"
-    "layout(location=2) in vec4 a_p;\n"
-    "layout(location=3) in vec4 a_after;\n" NT_SHAPE_INSTANCES_GLSL "out mediump vec4 v_color;\n"
-    "vec3 wire_point(vec4 p, int i) {\n"
-    "    vec3 scale=nt_instance_data[i+1].xyz; vec4 rot=nt_instance_data[i+2];\n"
-    "    vec3 v=p.xyz*scale.x;\n"
-    "    v.y+=p.w*scale.y;\n"
-    "    vec3 t=2.0*cross(rot.xyz,v);\n"
-    "    return nt_instance_data[i].xyz+v+rot.w*t+cross(rot.xyz,t);\n"
-    "}\n" NT_STROKE_GLSL "void main(){int i=gl_InstanceID*4;gl_Position=stroke_position(a_corner,wire_point(a_before,i),wire_point(a_p,i),wire_point(a_after,i));v_color=nt_instance_data[i+3];}\n";
+static const char *s_wire_vs_src = "precision highp float;\n"
+                                   "layout(location=0) in vec2 a_corner;\n"
+                                   "layout(location=1) in vec4 a_before;\n"
+                                   "layout(location=2) in vec4 a_p;\n"
+                                   "layout(location=3) in vec4 a_after;\n"
+                                   "layout(location=5) in vec3 i_center;\n"
+                                   "layout(location=6) in vec3 i_scale;\n"
+                                   "layout(location=7) in vec4 i_rot;\n"
+                                   "layout(location=8) in vec4 i_color;\n"
+                                   "out mediump vec4 v_color;\n"
+                                   "vec3 wire_point(vec4 p) {\n"
+                                   "    vec3 v=p.xyz*i_scale.x;\n"
+                                   "    v.y+=p.w*i_scale.y;\n"
+                                   "    vec3 t=2.0*cross(i_rot.xyz,v);\n"
+                                   "    return i_center+v+i_rot.w*t+cross(i_rot.xyz,t);\n"
+                                   "}\n" NT_STROKE_GLSL "void main(){gl_Position=stroke_position(a_corner,wire_point(a_before),wire_point(a_p),wire_point(a_after));v_color=i_color;}\n";
 
 /* Stroke corners: vertices 0-4 sit at the segment start (4 = joint center), 5-6 at its end.
  * The first 6 indices are the body quad; the last 6 are the start bevel. */
@@ -176,13 +172,6 @@ typedef struct {
 } nt_shape_instance_t;
 
 _Static_assert(sizeof(nt_shape_instance_t) == 44, "shape instance size");
-
-/* Queues stay compact; flush expands one chunk at a time into vec4 payloads
- * (center, scale, rot, color = 4; prev, a, b, next, color = 5; a, b, color = 3). */
-#define NT_SHAPE_PAYLOAD_VEC4S 4U
-#define NT_STROKE_PAYLOAD_VEC4S 5U
-#define NT_SEGMENT_PAYLOAD_VEC4S 3U
-#define NT_INSTANCE_BLOCK_VEC4S (NT_INSTANCE_BLOCK_SIZE / 16U)
 
 /* Shape types that use instanced rendering */
 enum {
@@ -222,33 +211,40 @@ typedef struct {
 /* ---- Instanced shape vertex shader ---- */
 
 static const char *s_inst_vs_src = "precision mediump float;\n"
-                                   "layout(location = 0) in vec3 a_position;\n" NT_SHAPE_INSTANCES_GLSL "uniform mat4 u_vp;\n"
+                                   "layout(location = 0) in vec3 a_position;\n"
+                                   "layout(location = 1) in vec3 i_center;\n"
+                                   "layout(location = 2) in vec3 i_scale;\n"
+                                   "layout(location = 3) in vec4 i_rot;\n"
+                                   "layout(location = 4) in vec4 i_color;\n"
+                                   "uniform mat4 u_vp;\n"
                                    "out vec4 v_color;\n"
                                    "void main() {\n"
-                                   "    int i = gl_InstanceID * 4;\n"
-                                   "    vec4 rot = nt_instance_data[i + 2];\n"
-                                   "    vec3 s = a_position * nt_instance_data[i + 1].xyz;\n"
-                                   "    vec3 t = 2.0 * cross(rot.xyz, s);\n"
-                                   "    vec3 r = s + rot.w * t + cross(rot.xyz, t);\n"
-                                   "    v_color = nt_instance_data[i + 3];\n"
-                                   "    gl_Position = u_vp * vec4(nt_instance_data[i].xyz + r, 1.0);\n"
+                                   "    vec3 s = a_position * i_scale;\n"
+                                   "    vec3 t = 2.0 * cross(i_rot.xyz, s);\n"
+                                   "    vec3 r = s + i_rot.w * t + cross(i_rot.xyz, t);\n"
+                                   "    v_color = i_color;\n"
+                                   "    gl_Position = u_vp * vec4(i_center + r, 1.0);\n"
                                    "}\n";
 
 /* ---- Capsule instanced vertex shader (vec4 template: xyz=unit sphere, w=hemisphere sign) ---- */
 
 static const char *s_cap_inst_vs_src = "precision mediump float;\n"
-                                       "layout(location = 0) in vec4 a_pos_tag;\n" NT_SHAPE_INSTANCES_GLSL "uniform mat4 u_vp;\n"
+                                       "layout(location = 0) in vec4 a_pos_tag;\n"
+                                       "layout(location = 1) in vec3 i_center;\n"
+                                       "layout(location = 2) in vec3 i_scale;\n"
+                                       "layout(location = 3) in vec4 i_rot;\n"
+                                       "layout(location = 4) in vec4 i_color;\n"
+                                       "uniform mat4 u_vp;\n"
                                        "out vec4 v_color;\n"
                                        "void main() {\n"
-                                       "    int i = gl_InstanceID * 4;\n"
-                                       "    vec3 scale = nt_instance_data[i + 1].xyz;\n"
-                                       "    vec4 rot = nt_instance_data[i + 2];\n"
-                                       "    vec3 p = a_pos_tag.xyz * scale.x;\n"
-                                       "    p.y += a_pos_tag.w * scale.y;\n"
-                                       "    vec3 t = 2.0 * cross(rot.xyz, p);\n"
-                                       "    vec3 r = p + rot.w * t + cross(rot.xyz, t);\n"
-                                       "    v_color = nt_instance_data[i + 3];\n"
-                                       "    gl_Position = u_vp * vec4(nt_instance_data[i].xyz + r, 1.0);\n"
+                                       "    float radius = i_scale.x;\n"
+                                       "    float body_half = i_scale.y;\n"
+                                       "    vec3 p = a_pos_tag.xyz * radius;\n"
+                                       "    p.y += a_pos_tag.w * body_half;\n"
+                                       "    vec3 t = 2.0 * cross(i_rot.xyz, p);\n"
+                                       "    vec3 r = p + i_rot.w * t + cross(i_rot.xyz, t);\n"
+                                       "    v_color = i_color;\n"
+                                       "    gl_Position = u_vp * vec4(i_center + r, 1.0);\n"
                                        "}\n";
 
 /* ---- Module state ---- */
@@ -275,8 +271,11 @@ static struct {
     nt_program_t inst_prog;
     nt_pipeline_t inst_pip_depth;
     nt_pipeline_t inst_pip_overlay;
+    nt_buffer_t inst_buf;      /* shared GPU instance buffer, reused per type */
+    uint32_t inst_ring_cursor; /* next free byte; disjoint writes avoid driver copies of in-flight data */
     nt_shape_template_t templates[NT_SHAPE_TYPE_COUNT];
-    /* One vertex input per template (depth/overlay pipeline pairs share it). */
+    /* One vertex input per template (depth/overlay pipeline pairs share it);
+     * instance pointers are re-specified into it by each flush. */
     nt_vertex_input_t template_vi[NT_SHAPE_TYPE_COUNT];
     nt_shape_instance_t inst_data[NT_SHAPE_TYPE_COUNT][NT_SHAPE_RENDERER_MAX_INSTANCES];
     uint32_t inst_counts[NT_SHAPE_TYPE_COUNT];
@@ -292,19 +291,16 @@ static struct {
     nt_program_t line_prog;
     nt_pipeline_t line_pip_depth;
     nt_pipeline_t line_pip_overlay;
-    nt_shader_t segment_vs;
-    nt_program_t segment_prog;
-    nt_pipeline_t segment_pip_depth;
-    nt_pipeline_t segment_pip_overlay;
     nt_buffer_t line_template_vbo;
     nt_buffer_t line_template_ibo;
-    nt_vertex_input_t line_vi; /* shared by connected strokes and independent segments */
+    nt_buffer_t line_instance_buf;
+    nt_vertex_input_t line_vi;
+    uint32_t line_ring_cursor;
     uint32_t line_count;
+    nt_buffer_t stroke_instance_buf;
+    nt_vertex_input_t stroke_vi;
+    uint32_t stroke_ring_cursor;
     uint32_t stroke_count;
-
-    /* Every instance kind streams through one ring; a chunk is expanded here first. */
-    nt_renderer_instance_ring_t ring;
-    float payload[NT_INSTANCE_BLOCK_VEC4S][4];
 
     nt_shader_t wire_vs;
     nt_program_t wire_prog;
@@ -370,12 +366,52 @@ static nt_vertex_layout_t cap_template_layout(void) {
     };
 }
 
+static nt_vertex_layout_t shape_instance_layout(void) {
+    return (nt_vertex_layout_t){
+        .attr_count = 4,
+        .stride = (uint16_t)sizeof(nt_shape_instance_t),
+        .attrs =
+            {
+                {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
+                {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 24},
+                {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 40},
+            },
+    };
+}
+
 static nt_vertex_layout_t line_template_layout(void) {
     return (nt_vertex_layout_t){
         .attr_count = 1,
         .stride = (uint16_t)(2 * sizeof(float)),
         .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0}},
     };
+}
+
+static nt_vertex_layout_t stroke_instance_layout(void) {
+    return (nt_vertex_layout_t){
+        .attr_count = 5,
+        .stride = sizeof(nt_shape_stroke_instance_t),
+        .attrs =
+            {
+                {.location = 1, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                {.location = 2, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 12},
+                {.location = 3, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 24},
+                {.location = 4, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 36},
+                {.location = 5, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 48},
+            },
+    };
+}
+
+static nt_vertex_layout_t line_instance_layout(void) {
+    nt_vertex_layout_t layout = stroke_instance_layout();
+    layout.stride = sizeof(nt_shape_line_instance_t);
+    /* Alias endpoint attributes: an independent edge needs no stored neighbors. */
+    layout.attrs[1].offset = 0;
+    layout.attrs[2].offset = 12;
+    layout.attrs[3].offset = 12;
+    layout.attrs[4].offset = 24;
+    return layout;
 }
 
 static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
@@ -849,13 +885,18 @@ static void emit_line(const float a[3], const float b[3], const uint8_t color[4]
 }
 
 static bool build_wire_vertex_inputs(void) {
+    nt_vertex_layout_t wire_instance_layout = shape_instance_layout();
+    for (uint32_t i = 0; i < wire_instance_layout.attr_count; i++) {
+        wire_instance_layout.attrs[i].location += 4;
+    }
     for (int type = 0; type < NT_WIRE_COUNT; type++) {
         build_wire_template(type);
         nt_shape_template_t *tpl = &s_shape.wire_templates[type];
         if (!tpl->vbo.id || !tpl->ibo.id) {
             return false;
         }
-        s_shape.wire_vi[type] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = wire_vertex_layout(), .vertex_buffer = tpl->vbo, .index_buffer = tpl->ibo, .label = "shape_wire_vi"});
+        s_shape.wire_vi[type] = nt_gfx_make_vertex_input(
+            &(nt_vertex_input_desc_t){.layout = wire_vertex_layout(), .instance_layout = wire_instance_layout, .vertex_buffer = tpl->vbo, .index_buffer = tpl->ibo, .label = "shape_wire_vi"});
         if (!s_shape.wire_vi[type].id) {
             return false;
         }
@@ -888,27 +929,22 @@ void nt_shape_renderer_init(void) {
     s_shape.inst_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_inst_vs_src, .label = "shape_inst_vs"});
     s_shape.cap_inst_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_cap_inst_vs_src, .label = "shape_cap_inst_vs"});
     s_shape.line_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_line_vs_src, .label = "shape_line_vs"});
-    s_shape.segment_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_segment_vs_src, .label = "shape_segment_vs"});
     s_shape.wire_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_wire_vs_src, .label = "shape_wire_vs"});
 
-    if (!s_shape.fs.id || !s_shape.batch_vs.id || !s_shape.inst_vs.id || !s_shape.cap_inst_vs.id || !s_shape.line_vs.id || !s_shape.segment_vs.id || !s_shape.wire_vs.id) {
+    if (!s_shape.fs.id || !s_shape.batch_vs.id || !s_shape.inst_vs.id || !s_shape.cap_inst_vs.id || !s_shape.line_vs.id || !s_shape.wire_vs.id) {
         NT_LOG_ERROR("init failed -- shader creation error");
         nt_shape_renderer_shutdown();
         return;
     }
-
-    /* Before linking: registration binds the block in programs linked afterwards too. */
-    nt_gfx_register_global_block(NT_INSTANCE_BLOCK_NAME, NT_INSTANCE_BLOCK_SLOT);
 
     /* Programs -- one per vertex shader, shared by the depth and overlay pipelines */
     s_shape.batch_prog = nt_gfx_make_program(s_shape.batch_vs, s_shape.fs);
     s_shape.inst_prog = nt_gfx_make_program(s_shape.inst_vs, s_shape.fs);
     s_shape.cap_inst_prog = nt_gfx_make_program(s_shape.cap_inst_vs, s_shape.fs);
     s_shape.line_prog = nt_gfx_make_program(s_shape.line_vs, s_shape.fs);
-    s_shape.segment_prog = nt_gfx_make_program(s_shape.segment_vs, s_shape.fs);
     s_shape.wire_prog = nt_gfx_make_program(s_shape.wire_vs, s_shape.fs);
     if (!nt_gfx_program_ready(s_shape.batch_prog) || !nt_gfx_program_ready(s_shape.inst_prog) || !nt_gfx_program_ready(s_shape.cap_inst_prog) || !nt_gfx_program_ready(s_shape.line_prog) ||
-        !nt_gfx_program_ready(s_shape.segment_prog) || !nt_gfx_program_ready(s_shape.wire_prog)) {
+        !nt_gfx_program_ready(s_shape.wire_prog)) {
         NT_LOG_ERROR("init failed -- program link error");
         nt_shape_renderer_shutdown();
         return;
@@ -923,8 +959,6 @@ void nt_shape_renderer_init(void) {
     s_shape.cap_inst_pip_overlay = make_cap_inst_pipeline(false);
     s_shape.line_pip_depth = make_stroke_pipeline(s_shape.line_prog, true, "shape_line_pipeline");
     s_shape.line_pip_overlay = make_stroke_pipeline(s_shape.line_prog, false, "shape_line_pipeline");
-    s_shape.segment_pip_depth = make_stroke_pipeline(s_shape.segment_prog, true, "shape_segment_pipeline");
-    s_shape.segment_pip_overlay = make_stroke_pipeline(s_shape.segment_prog, false, "shape_segment_pipeline");
     s_shape.wire_pip_depth = make_stroke_pipeline(s_shape.wire_prog, true, "shape_wire_pipeline");
     s_shape.wire_pip_overlay = make_stroke_pipeline(s_shape.wire_prog, false, "shape_wire_pipeline");
 
@@ -934,8 +968,9 @@ void nt_shape_renderer_init(void) {
     s_shape.batch_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_INDEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_INDICES * (uint32_t)sizeof(nt_shape_index_t), .index_type = NT_SHAPE_INDEX_TYPE, .label = "shape_batch_ibo"});
 
-    /* Sized for a flush of filled shapes per wrap; larger flushes wrap and the driver orders them. */
-    (void)nt_renderer_instance_ring_create(&s_shape.ring, NT_SHAPE_RENDERER_MAX_INSTANCES, NT_SHAPE_PAYLOAD_VEC4S * 16U, "shape_instances");
+    /* Instanced shape buffer (shared across types, reused per draw) */
+    s_shape.inst_buf = nt_gfx_make_buffer(
+        &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_INSTANCES * (uint32_t)sizeof(nt_shape_instance_t), .label = "shape_inst_buf"});
 
     /* Build template meshes (requires trig LUT) */
     build_trig_lut();
@@ -947,6 +982,10 @@ void nt_shape_renderer_init(void) {
         nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = line_template_verts, .size = sizeof(line_template_verts), .label = "shape_line_quad"});
     s_shape.line_template_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = s_stroke_indices, .size = sizeof(s_stroke_indices), .index_type = NT_INDEX_UINT16, .label = "shape_line_idx"});
+    s_shape.line_instance_buf = nt_gfx_make_buffer(
+        &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_LINES * (uint32_t)sizeof(nt_shape_line_instance_t), .label = "shape_line_inst"});
+    s_shape.stroke_instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS * (uint32_t)sizeof(nt_shape_stroke_instance_t), .label = "shape_stroke_inst"});
 
     /* Verify all buffers/pipelines were created successfully (the vertex
      * inputs below trap on invalid buffer handles instead of skipping). */
@@ -955,9 +994,8 @@ void nt_shape_renderer_init(void) {
         template_bufs_ok = template_bufs_ok && s_shape.templates[t].vbo.id != 0 && s_shape.templates[t].ibo.id != 0;
     }
     if (!template_bufs_ok || !s_shape.batch_pip_depth.id || !s_shape.batch_pip_overlay.id || !s_shape.inst_pip_depth.id || !s_shape.inst_pip_overlay.id || !s_shape.cap_inst_pip_depth.id ||
-        !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id || !s_shape.line_pip_overlay.id || !s_shape.segment_pip_depth.id || !s_shape.segment_pip_overlay.id ||
-        !s_shape.wire_pip_depth.id || !s_shape.wire_pip_overlay.id || !s_shape.batch_vbo.id || !s_shape.batch_ibo.id || !s_shape.ring.buffer.id || !s_shape.line_template_vbo.id ||
-        !s_shape.line_template_ibo.id) {
+        !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id || !s_shape.line_pip_overlay.id || !s_shape.wire_pip_depth.id || !s_shape.wire_pip_overlay.id || !s_shape.batch_vbo.id ||
+        !s_shape.batch_ibo.id || !s_shape.inst_buf.id || !s_shape.line_template_vbo.id || !s_shape.line_template_ibo.id || !s_shape.line_instance_buf.id || !s_shape.stroke_instance_buf.id) {
         NT_LOG_ERROR("init failed -- resource creation error");
         nt_shape_renderer_shutdown();
         return;
@@ -970,6 +1008,7 @@ void nt_shape_renderer_init(void) {
     for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
         s_shape.template_vi[t] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
             .layout = (t == NT_SHAPE_CAPSULE) ? cap_template_layout() : inst_template_layout(),
+            .instance_layout = shape_instance_layout(),
             .vertex_buffer = s_shape.templates[t].vbo,
             .index_buffer = s_shape.templates[t].ibo,
             .label = "shape_template_vi",
@@ -977,15 +1016,23 @@ void nt_shape_renderer_init(void) {
     }
     s_shape.line_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = line_template_layout(),
+        .instance_layout = line_instance_layout(),
         .vertex_buffer = s_shape.line_template_vbo,
         .index_buffer = s_shape.line_template_ibo,
         .label = "shape_line_vi",
+    });
+    s_shape.stroke_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = line_template_layout(),
+        .instance_layout = stroke_instance_layout(),
+        .vertex_buffer = s_shape.line_template_vbo,
+        .index_buffer = s_shape.line_template_ibo,
+        .label = "shape_stroke_vi",
     });
     bool template_vis_ok = true;
     for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
         template_vis_ok = template_vis_ok && s_shape.template_vi[t].id != 0;
     }
-    if (!s_shape.batch_vi.id || !template_vis_ok || !s_shape.line_vi.id) {
+    if (!s_shape.batch_vi.id || !template_vis_ok || !s_shape.line_vi.id || !s_shape.stroke_vi.id) {
         NT_LOG_ERROR("init failed -- vertex input creation error");
         nt_shape_renderer_shutdown();
         return;
@@ -1016,26 +1063,27 @@ void nt_shape_renderer_shutdown(void) {
     }
     nt_gfx_destroy_program(s_shape.wire_prog);
     nt_gfx_destroy_shader(s_shape.wire_vs);
+    nt_gfx_destroy_vertex_input(s_shape.stroke_vi);
+    nt_gfx_destroy_buffer(s_shape.stroke_instance_buf);
     nt_gfx_destroy_vertex_input(s_shape.line_vi);
     for (int t = NT_SHAPE_TYPE_COUNT - 1; t >= 0; t--) {
         nt_gfx_destroy_vertex_input(s_shape.template_vi[t]);
     }
     nt_gfx_destroy_vertex_input(s_shape.batch_vi);
+    nt_gfx_destroy_buffer(s_shape.line_instance_buf);
     nt_gfx_destroy_buffer(s_shape.line_template_ibo);
     nt_gfx_destroy_buffer(s_shape.line_template_vbo);
-    nt_renderer_instance_ring_destroy(&s_shape.ring);
+    nt_gfx_destroy_buffer(s_shape.inst_buf);
     for (int t = NT_SHAPE_TYPE_COUNT - 1; t >= 0; t--) {
         nt_gfx_destroy_buffer(s_shape.templates[t].ibo);
         nt_gfx_destroy_buffer(s_shape.templates[t].vbo);
     }
     nt_gfx_destroy_buffer(s_shape.batch_ibo);
     nt_gfx_destroy_buffer(s_shape.batch_vbo);
-    nt_gfx_destroy_program(s_shape.segment_prog);
     nt_gfx_destroy_program(s_shape.line_prog);
     nt_gfx_destroy_program(s_shape.cap_inst_prog);
     nt_gfx_destroy_program(s_shape.inst_prog);
     nt_gfx_destroy_program(s_shape.batch_prog);
-    nt_gfx_destroy_shader(s_shape.segment_vs);
     nt_gfx_destroy_shader(s_shape.line_vs);
     nt_gfx_destroy_shader(s_shape.cap_inst_vs);
     nt_gfx_destroy_shader(s_shape.inst_vs);
@@ -1081,131 +1129,26 @@ void nt_shape_renderer_restore_gpu(void) {
     s_shape.restore_pending = false;
 }
 
-static void set_payload(uint32_t vec4, const float *xyz, float w) {
-    s_shape.payload[vec4][0] = xyz[0];
-    s_shape.payload[vec4][1] = xyz[1];
-    s_shape.payload[vec4][2] = xyz[2];
-    s_shape.payload[vec4][3] = w;
-}
-
-static void set_payload_color(uint32_t vec4, const uint8_t color[4]) {
-    for (uint32_t c = 0; c < 4; c++) {
-        s_shape.payload[vec4][c] = (float)color[c] / 255.0F;
+/* Disjoint ring ranges avoid driver copies of in-flight data; after a wrap the driver copies. */
+static uint32_t ring_upload(nt_buffer_t buffer, uint32_t *cursor, uint32_t capacity, const void *data, uint32_t bytes) {
+    if (*cursor + bytes > capacity) {
+        *cursor = 0;
     }
+    uint32_t base = *cursor;
+    *cursor += bytes;
+    nt_gfx_update_buffer(buffer, base, data, bytes);
+    return base;
 }
 
-/* Expands up to one block of queued instances, uploads and binds it; returns how many. */
-static uint32_t push_shape_chunk(const nt_shape_instance_t *queue, uint32_t remaining) {
-    const uint32_t count = remaining < NT_INSTANCE_BLOCK_VEC4S / NT_SHAPE_PAYLOAD_VEC4S ? remaining : NT_INSTANCE_BLOCK_VEC4S / NT_SHAPE_PAYLOAD_VEC4S;
-    for (uint32_t i = 0; i < count; i++) {
-        const uint32_t v = i * NT_SHAPE_PAYLOAD_VEC4S;
-        set_payload(v, queue[i].center, 0.0F);
-        set_payload(v + 1, queue[i].scale, 0.0F);
-        memcpy(s_shape.payload[v + 2], queue[i].rot, sizeof(queue[i].rot));
-        set_payload_color(v + 3, queue[i].color);
-    }
-    nt_renderer_instance_ring_push(&s_shape.ring, s_shape.payload, count * NT_SHAPE_PAYLOAD_VEC4S * 16U);
-    return count;
-}
-
-static uint32_t push_stroke_chunk(const nt_shape_stroke_instance_t *queue, uint32_t remaining) {
-    const uint32_t count = remaining < NT_INSTANCE_BLOCK_VEC4S / NT_STROKE_PAYLOAD_VEC4S ? remaining : NT_INSTANCE_BLOCK_VEC4S / NT_STROKE_PAYLOAD_VEC4S;
-    for (uint32_t i = 0; i < count; i++) {
-        const uint32_t v = i * NT_STROKE_PAYLOAD_VEC4S;
-        set_payload(v, queue[i].prev, 1.0F);
-        set_payload(v + 1, queue[i].a, 1.0F);
-        set_payload(v + 2, queue[i].b, 1.0F);
-        set_payload(v + 3, queue[i].next, 1.0F);
-        set_payload_color(v + 4, queue[i].color);
-    }
-    nt_renderer_instance_ring_push(&s_shape.ring, s_shape.payload, count * NT_STROKE_PAYLOAD_VEC4S * 16U);
-    return count;
-}
-
-static uint32_t push_segment_chunk(const nt_shape_line_instance_t *queue, uint32_t remaining) {
-    const uint32_t count = remaining < NT_INSTANCE_BLOCK_VEC4S / NT_SEGMENT_PAYLOAD_VEC4S ? remaining : NT_INSTANCE_BLOCK_VEC4S / NT_SEGMENT_PAYLOAD_VEC4S;
-    for (uint32_t i = 0; i < count; i++) {
-        const uint32_t v = i * NT_SEGMENT_PAYLOAD_VEC4S;
-        set_payload(v, queue[i].a, 1.0F);
-        set_payload(v + 1, queue[i].b, 1.0F);
-        set_payload_color(v + 2, queue[i].color);
-    }
-    nt_renderer_instance_ring_push(&s_shape.ring, s_shape.payload, count * NT_SEGMENT_PAYLOAD_VEC4S * 16U);
-    return count;
-}
-
-static void draw_strokes(nt_pipeline_t pipeline, nt_vertex_input_t vi, uint32_t num_indices, uint32_t num_vertices, uint32_t count) {
+static void draw_strokes(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_buffer_t buffer, uint32_t base, uint32_t num_indices, uint32_t num_vertices, uint32_t count) {
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_instance_buffer(buffer, base);
     nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
     nt_gfx_set_uniform_vec4(s_u_eye, s_shape.eye);
     nt_gfx_set_uniform_float(s_u_line_width, s_shape.line_width);
     nt_gfx_set_uniform_vec4(s_u_pixel_scale, s_shape.pixel_scale);
     nt_gfx_draw_indexed_instanced(0, num_indices, num_vertices, count);
-}
-
-/* Instanced shapes (rect, cube, circle, sphere, cylinder, capsule), one draw per chunk. */
-static void flush_filled(bool depth) {
-    for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
-        for (uint32_t first = 0; first < s_shape.inst_counts[t];) {
-            const uint32_t count = push_shape_chunk(&s_shape.inst_data[t][first], s_shape.inst_counts[t] - first);
-            if (t == NT_SHAPE_CAPSULE) {
-                nt_gfx_bind_pipeline(depth ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay);
-            } else {
-                nt_gfx_bind_pipeline(depth ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay);
-            }
-            nt_gfx_bind_vertex_input(s_shape.template_vi[t]);
-            nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
-            nt_gfx_draw_indexed_instanced(0, s_shape.templates[t].num_indices, s_shape.templates[t].num_vertices, count);
-            first += count;
-        }
-        s_shape.inst_counts[t] = 0;
-    }
-}
-
-/* CPU-batched shapes (triangle, mesh). Batch vbo/ibo stay at offset 0: the
- * non-instanced draw path has no read-side offset plumbing, so the in-flight
- * rewrite (driver copy) is accepted here. */
-static void flush_batch(bool depth) {
-    if (s_shape.index_count > 0) {
-        nt_gfx_update_buffer(s_shape.batch_vbo, 0, s_shape.vertices, s_shape.vertex_count * (uint32_t)sizeof(nt_shape_renderer_vertex_t));
-        nt_gfx_update_buffer(s_shape.batch_ibo, 0, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(nt_shape_index_t));
-
-        nt_gfx_bind_pipeline(depth ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay);
-        nt_gfx_bind_vertex_input(s_shape.batch_vi);
-        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
-
-        nt_gfx_draw_indexed(0, s_shape.index_count, s_shape.vertex_count);
-
-        s_shape.vertex_count = 0;
-        s_shape.index_count = 0;
-    }
-}
-
-static void flush_strokes(bool depth) {
-    for (int type = 0; type < NT_WIRE_COUNT; type++) {
-        const nt_shape_template_t *tpl = &s_shape.wire_templates[type];
-        for (uint32_t first = 0; first < s_shape.wire_counts[type];) {
-            const uint32_t count = push_shape_chunk(&s_shape.wire_data[type][first], s_shape.wire_counts[type] - first);
-            draw_strokes(depth ? s_shape.wire_pip_depth : s_shape.wire_pip_overlay, s_shape.wire_vi[type], tpl->num_indices, tpl->num_vertices, count);
-            first += count;
-        }
-        s_shape.wire_counts[type] = 0;
-    }
-    /* Each connected segment carries its own neighbours, so a chunk edge keeps the joins. */
-    for (uint32_t first = 0; first < s_shape.stroke_count;) {
-        const uint32_t count = push_stroke_chunk(&s_shape.strokes[first], s_shape.stroke_count - first);
-        draw_strokes(depth ? s_shape.line_pip_depth : s_shape.line_pip_overlay, s_shape.line_vi, 12, 7, count);
-        first += count;
-    }
-    s_shape.stroke_count = 0;
-    for (uint32_t first = 0; first < s_shape.line_count;) {
-        const uint32_t count = push_segment_chunk(&s_shape.line_staging.lines[first], s_shape.line_count - first);
-        /* Independent lines skip the join triangles of the shared template. */
-        draw_strokes(depth ? s_shape.segment_pip_depth : s_shape.segment_pip_overlay, s_shape.line_vi, 6, 7, count);
-        first += count;
-    }
-    s_shape.line_count = 0;
 }
 
 void nt_shape_renderer_flush(void) {
@@ -1220,10 +1163,70 @@ void nt_shape_renderer_flush(void) {
         return;
     }
     const bool depth = s_shape.depth_enabled;
-    flush_filled(depth);
-    flush_batch(depth);
+    const uint32_t inst_capacity = NT_SHAPE_RENDERER_MAX_INSTANCES * (uint32_t)sizeof(nt_shape_instance_t);
+
+    /* Flush instanced shapes (rect, cube, circle, sphere, cylinder, capsule) */
+    for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
+        uint32_t cnt = s_shape.inst_counts[t];
+        if (cnt == 0) {
+            continue;
+        }
+        uint32_t inst_base = ring_upload(s_shape.inst_buf, &s_shape.inst_ring_cursor, inst_capacity, s_shape.inst_data[t], cnt * (uint32_t)sizeof(nt_shape_instance_t));
+        if (t == NT_SHAPE_CAPSULE) {
+            nt_gfx_bind_pipeline(depth ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay);
+        } else {
+            nt_gfx_bind_pipeline(depth ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay);
+        }
+        nt_gfx_bind_vertex_input(s_shape.template_vi[t]);
+        nt_gfx_bind_instance_buffer(s_shape.inst_buf, inst_base);
+        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
+
+        nt_gfx_draw_indexed_instanced(0, s_shape.templates[t].num_indices, s_shape.templates[t].num_vertices, cnt);
+        s_shape.inst_counts[t] = 0;
+    }
+
+    /* Flush CPU-batched shapes (triangle, mesh). Batch vbo/ibo stay at offset 0:
+     * the non-instanced draw path has no read-side offset plumbing, so the
+     * in-flight rewrite (driver copy) is accepted here. */
+    if (s_shape.index_count > 0) {
+        nt_gfx_update_buffer(s_shape.batch_vbo, 0, s_shape.vertices, s_shape.vertex_count * (uint32_t)sizeof(nt_shape_renderer_vertex_t));
+        nt_gfx_update_buffer(s_shape.batch_ibo, 0, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(nt_shape_index_t));
+
+        nt_gfx_bind_pipeline(depth ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay);
+        nt_gfx_bind_vertex_input(s_shape.batch_vi);
+        nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
+
+        nt_gfx_draw_indexed(0, s_shape.index_count, s_shape.vertex_count);
+
+        s_shape.vertex_count = 0;
+        s_shape.index_count = 0;
+    }
+
     /* Strokes last: within one flush, outlines stay on top of filled shapes. */
-    flush_strokes(depth);
+    for (int type = 0; type < NT_WIRE_COUNT; type++) {
+        uint32_t count = s_shape.wire_counts[type];
+        if (count == 0) {
+            continue;
+        }
+        uint32_t base = ring_upload(s_shape.inst_buf, &s_shape.inst_ring_cursor, inst_capacity, s_shape.wire_data[type], count * (uint32_t)sizeof(nt_shape_instance_t));
+        const nt_shape_template_t *tpl = &s_shape.wire_templates[type];
+        draw_strokes(depth ? s_shape.wire_pip_depth : s_shape.wire_pip_overlay, s_shape.wire_vi[type], s_shape.inst_buf, base, tpl->num_indices, tpl->num_vertices, count);
+        s_shape.wire_counts[type] = 0;
+    }
+    nt_pipeline_t line_pip = depth ? s_shape.line_pip_depth : s_shape.line_pip_overlay;
+    if (s_shape.stroke_count > 0) {
+        uint32_t base =
+            ring_upload(s_shape.stroke_instance_buf, &s_shape.stroke_ring_cursor, sizeof(s_shape.strokes), s_shape.strokes, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t));
+        draw_strokes(line_pip, s_shape.stroke_vi, s_shape.stroke_instance_buf, base, 12, 7, s_shape.stroke_count);
+        s_shape.stroke_count = 0;
+    }
+    if (s_shape.line_count > 0) {
+        uint32_t base = ring_upload(s_shape.line_instance_buf, &s_shape.line_ring_cursor, sizeof(s_shape.line_staging.lines), s_shape.line_staging.lines,
+                                    s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t));
+        /* Independent lines skip the join triangles of the shared template. */
+        draw_strokes(line_pip, s_shape.line_vi, s_shape.line_instance_buf, base, 6, 7, s_shape.line_count);
+        s_shape.line_count = 0;
+    }
 }
 
 /* ---- State setters ---- */

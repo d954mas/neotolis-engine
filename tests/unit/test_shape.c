@@ -671,32 +671,9 @@ static void test_polyline_overflow_preserves_all_segments(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_shape_renderer_polyline((const float(*)[3])points, NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS + 3, false, (float[4]){1, 1, 1, 1});
     nt_shape_renderer_flush();
-    /* The full queue flushes in block-sized chunks (204 connected segments), then the last two draw. */
-    uint32_t drawn = 0;
-    for (uint32_t i = 0; i < nt_gfx_fake_draw_trace_count(); i++) {
-        TEST_ASSERT_LESS_OR_EQUAL_UINT32(204, nt_gfx_fake_draw_trace_at(i).instance_count);
-        drawn += nt_gfx_fake_draw_trace_at(i).instance_count;
-    }
-    TEST_ASSERT_EQUAL_UINT32(NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS + 2, drawn);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(nt_gfx_fake_draw_trace_count() - 1).instance_count);
-}
-
-/* Filled shapes split at 256 per 16 KB block, each chunk a range of the one ring. */
-static void test_filled_shapes_split_at_block_capacity(void) {
-    const float color[4] = {1, 1, 1, 1};
-    for (uint32_t i = 0; i < 257; i++) {
-        nt_shape_renderer_rect((float[3]){(float)i, 0, 0}, (float[2]){1, 1}, color);
-    }
-    nt_gfx_fake_reset();
-    nt_gfx_fake_draw_trace_reset(true);
-    nt_shape_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(256, nt_gfx_fake_draw_trace_at(0).instance_count);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).instance_count);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
-    TEST_ASSERT_EQUAL_UINT32(15, nt_gfx_fake_ubo_bind_at(1).slot);
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_ubo_bind_at(0).buffer_backend, nt_gfx_fake_ubo_bind_at(1).buffer_backend);
-    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_ubo_bind_at(0).offset, nt_gfx_fake_ubo_bind_at(1).offset);
+    TEST_ASSERT_EQUAL_UINT32(NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS, nt_gfx_fake_draw_trace_at(0).instance_count);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(1).instance_count);
 }
 
 static void test_wire_instances_overflow_without_losing_shapes(void) {
@@ -753,7 +730,6 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_failed_restore_discards_new_stroke_queues);
     RUN_TEST(test_polyline_overflow_preserves_all_segments);
-    RUN_TEST(test_filled_shapes_split_at_block_capacity);
     RUN_TEST(test_wire_instances_overflow_without_losing_shapes);
     RUN_TEST(test_polyline_skips_repeated_points_and_closes_once);
     RUN_TEST(test_polyline_asserts_non_finite_points);

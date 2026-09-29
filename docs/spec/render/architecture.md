@@ -83,12 +83,12 @@ bound vertex input.
 Instance data has two paths, and a game renderer picks per workload. Instanced
 attributes cost one `glBindBuffer` plus a `glVertexAttribPointer` per instance
 attribute on every re-point and have no instance-count limit, so they suit a
-few large instanced draws (particles, foliage, big crowds in one batch). A
+few large instanced draws (particles, foliage, big crowds in one batch); the
+shape renderer, which draws once per shape kind per flush, uses them. A
 uniform-block range (`nt_gfx_bind_uniform_buffer_range`, indexed by
 `gl_InstanceID` plus a per-draw base uniform) binds once per chunk and costs one
 int uniform per draw, but a chunk is capped by the 16 KB block, so it suits many
-small runs; the engine's mesh, skinned mesh and shape renderers use it (see
-below).
+small runs; the engine's mesh and skinned mesh renderers use it (see below).
 
 A vertex attribute is the raw GL triple `(type, count 1-4,
 normalized)` plus location and byte offset (`nt_vertex_attr_t`) — no enum of
@@ -723,12 +723,7 @@ initialization and cost one instance per shape.
 Every flush draws filled instanced shapes by type, then triangles and meshes,
 then wire templates by type, connected segments and independent lines. Within
 one flush this kind order replaces submission order: outlines stay on top of
-fills, and interleaved submissions of a kind batch into one draw per chunk of
-its queue. Instance data streams through one uniform-buffer ring bound as
-`NtInstances` ranges, as in the mesh renderers; a 16 KB chunk holds 256 filled
-or wire shapes, 204 connected segments or 341 independent lines, and each chunk
-draws alone, so its shaders index by `gl_InstanceID` without a base uniform.
-Connected segments carry their neighbours, so a chunk edge keeps the joins. Flushes
+fills, and interleaved submissions batch into at most one draw per kind. Flushes
 are the only ordering barriers — explicit `flush`, a full queue and the state
 changes above. A game that needs a later layer over an earlier one, typically in
 overlay mode, calls `flush` between them.
