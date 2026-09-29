@@ -13,15 +13,11 @@ out vec3 v_world_pos;
 out vec4 v_color;
 
 void main() {
-    mat4 world = mat4(
-        vec4(a_world_row0.x, a_world_row1.x, a_world_row2.x, 0.0),
-        vec4(a_world_row0.y, a_world_row1.y, a_world_row2.y, 0.0),
-        vec4(a_world_row0.z, a_world_row1.z, a_world_row2.z, 0.0),
-        vec4(a_world_row0.w, a_world_row1.w, a_world_row2.w, 1.0)
-    );
+    nt_instance_t inst = nt_instance();
+    mat4 world = inst.world;
     v_world_normal = normalize(mat3(world) * a_normal);
     v_uv = a_uv;
     v_world_pos = (world * vec4(a_position, 1.0)).xyz;
-    v_color = a_color;
+    v_color = inst.color;
     gl_Position = view_proj * world * vec4(a_position, 1.0);
 }

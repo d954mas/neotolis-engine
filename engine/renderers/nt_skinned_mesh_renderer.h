@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 typedef struct {
-    uint16_t max_instances;
+    uint16_t max_instances; /* instances the uniform-buffer ring holds before it wraps */
     uint16_t max_pipelines;
     uint16_t max_mesh_layouts;
 } nt_skinned_mesh_renderer_desc_t;
@@ -27,14 +27,17 @@ nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t 
 void nt_skinned_mesh_renderer_shutdown(void);
 
 /* Retains CPU storage and initialization; drops GPU caches and recreates the
- * instance buffer. Failure must be retried before drawing. */
+ * instance ring. Failure must be retried before drawing. */
 nt_result_t nt_skinned_mesh_renderer_restore_gpu(void);
 
 /* Caller controls visibility/sorting; items and referenced bindings stay live
  * and unchanged until return. items may be NULL only when count is zero. */
 /* common/skin.glsl requires joints/weights mapped by material attr_map and
  * positive uniform joint/world scale. Declare u_skin_matrices in the material;
- * the renderer supplies its texture and default sampler from skin_comp. */
+ * the renderer supplies its texture and default sampler from skin_comp.
+ * Instances carry world transform, skin frames and the drawable colour (white
+ * without a drawable component), in chunks of up to 170; a run crossing a
+ * chunk edge draws twice. */
 void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access

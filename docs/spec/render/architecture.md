@@ -231,30 +231,44 @@ in between, so it also submits its complete set unconditionally.
 
 The material-driven mesh, skinned mesh, sprite, and text renderer caches build the
 `nt_pipeline_desc_t` from the material's render state and key on its
-`nt_gfx_pipeline_key_t`. Layouts and `color_mode` live on vertex-input
-objects, so materials differing only in layout or color mode share one
-pipeline. The sprite renderer resolves the pipeline once per material change
+`nt_gfx_pipeline_key_t`. Layouts live on vertex-input objects, so materials
+differing only in layout share one pipeline. The sprite renderer resolves the pipeline once per material change
 inside a `draw_list` call, not once per run: runs also split per atlas page,
 and nothing can replace a material's program inside the call.
 
 Vertex-input caches use exact identity for *derived* layouts too. The mesh and
 skinned mesh renderers each instantiate the shared internal per-mesh versions
-cache from `nt_renderer_shared.h`; the tables are independent because their
-instance layouts differ. Each row stores its mesh's full generation-checked
+cache from `nt_renderer_shared.h`, one table per renderer. Each row stores its mesh's full generation-checked
 handle. A different generation clears the entire row, including bufferless
 vertex inputs that have no destroy-cascade hook. Within the row the mesh's
 stream types, counts, offsets and stride are fixed, so entry identity packs only
 what varies: per stream a presence bit and the mapped location (mesh streams ×
 material attr_map — attr_map entries matching no stream do not split; a
 material mapping none of the streams derives an empty layout and takes the
-attribute-less gl_VertexID path) plus the color mode that selects the instance
-layout. The sprite renderer packs the attr_map count and every location the same
+attribute-less gl_VertexID path). The sprite renderer packs the attr_map count and every location the same
 way. Handles are revalidated on lookup because buffer destruction can invalidate
 cached versions. Exhausting a mesh's version row asserts, naming the knob —
 silent eviction would hide VAO re-creation thrash as an invisible perf
 regression. The default `max_vertex_inputs` budgets one mesh cache; a game using
 both mesh renderers adds
 `max_meshes * skinned.max_mesh_layouts` to that base budget explicitly.
+
+The mesh and skinned mesh renderers pass per-instance data through the
+`NtInstances` uniform block declared in `assets/shaders/common/instance.glsl`,
+not through instanced attributes, so their vertex inputs carry mesh streams
+only. Each renderer owns one uniform-buffer ring. Per chunk it packs the
+instances, uploads them, and binds a full 16 KB range at slot 15 with
+`nt_gfx_bind_uniform_buffer_range`, at an offset aligned to
+`gpu_caps.uniform_buffer_offset_alignment`; each run then sets the int uniform
+`nt_instance_base` to its first instance within the chunk, and the shader reads
+`nt_instance_base + gl_InstanceID`. The block is a flat `vec4[1024]` read at a
+per-renderer stride: mesh 4 vec4s (world rows, colour; 256 per chunk), skinned
+6 (world rows, frame origins, blend alpha, colour; 170 per chunk). Colour is
+always part of the payload: the drawable colour, or white for an entity without
+a drawable component. A run crossing a chunk edge draws once per chunk. The
+ring holds `max_instances` instances per wrap; a wrap overwrites ranges earlier
+draws may still read and leaves the ordering to the driver. GPU restore
+recreates the ring, which re-reads the alignment.
 
 The sprite renderer owns its vertex/index buffers and clears its entire
 vertex-input cache on shutdown or GPU restore before replacing those buffers.
@@ -717,8 +731,8 @@ Not all renderers carry the same weight. The engine ships three classes; copying
 
 **Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`,
 `nt_mesh_renderer`, optional `nt_skinned_mesh_renderer`). Single pipeline, fixed
-pattern, one or more instanced draws per compatible run — split at
-`max_instances` chunk boundaries (see items-sorting-batching.md). Use for 3D
+pattern, one or more instanced draws per compatible run — split where a chunk
+fills its instance-block range (see items-sorting-batching.md). Use for 3D
 meshes, custom geometry, anything where the game owns batching strategy. Stay
 minimal. The mesh renderers do state-delta tracking through the shared
 `static inline` helper, which costs them no cmd queue and no snapshot machinery.

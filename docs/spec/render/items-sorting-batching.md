@@ -161,16 +161,18 @@ SpriteRenderer ignores those flags.
 #### MeshRenderer
 
 MeshRenderer draws consecutive equal-key runs with GPU instancing. Each run
-shares one mesh and material; different meshes are not merged. Instance capacity
-splits the list into chunks and can split an otherwise compatible run.
+shares one mesh and material; different meshes are not merged. The instance
+block's capacity (256 mesh instances per 16 KB range) splits the list into
+chunks and can split an otherwise compatible run.
 
 ### Mesh instancing
 
-Each instance supplies its world transform and, when the material's color mode
-requires it, drawable color. The renderer packs and uploads these attributes
-per chunk, then draws each run with `nt_gfx_draw_indexed_instanced` for indexed
-meshes or `nt_gfx_draw_instanced` for non-indexed meshes. Material parameters
-remain shared by the run.
+Each instance supplies its world transform and colour (the drawable colour, or
+white without a drawable component). The renderer packs one chunk into the
+`NtInstances` uniform block, binds it as one range, then draws each run with
+`nt_gfx_draw_indexed_instanced` for indexed meshes or `nt_gfx_draw_instanced`
+for non-indexed meshes after setting `nt_instance_base` to the run's first
+instance in the chunk. Material parameters remain shared by the run.
 
 WebGL 2 provides native `drawArraysInstanced` / `drawElementsInstanced` — no extension management needed.
 

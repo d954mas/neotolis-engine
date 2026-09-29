@@ -22,12 +22,14 @@ static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mes
 }
 
 typedef struct {
-    uint16_t max_instances; /* max per single instanced draw call, default: 4096 */
+    /* Instances the uniform-buffer ring holds before it wraps, i.e. roughly one
+     * frame's worth; a wrap makes the driver order the overwrite. Default: 4096. */
+    uint16_t max_instances;
     uint16_t max_pipelines; /* pipeline cache capacity, default: 64 */
-    /* Vertex-input versions kept per mesh (one per distinct derived layout x
-     * color mode drawing that mesh). Exceeding it ASSERTS -- silent eviction
-     * would hide re-creation thrash as an invisible perf regression; raise the
-     * knob instead. Default: 4 (3-4 versions is the expected population). */
+    /* Vertex-input versions kept per mesh (one per distinct derived layout
+     * drawing that mesh). Exceeding it ASSERTS -- silent eviction would hide
+     * re-creation thrash as an invisible perf regression; raise the knob
+     * instead. Default: 4 (3-4 versions is the expected population). */
     uint16_t max_mesh_layouts;
 } nt_mesh_renderer_desc_t;
 
@@ -49,6 +51,9 @@ nt_result_t nt_mesh_renderer_restore_gpu(void);
 /* batch_key must come from each item's current material/mesh bindings. Entities,
  * bindings, and referenced resources stay live and unchanged through this call. */
 /* items may be NULL only when count is 0; otherwise it is borrowed for the call. */
+/* Instances reach the shader through common/instance.glsl: world transform and
+ * the drawable colour (white without a drawable component). Items are drawn in
+ * chunks of up to 256; a batch_key run crossing a chunk edge draws twice. */
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access

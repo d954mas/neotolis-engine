@@ -1497,7 +1497,6 @@ static nt_material_t make_mesh_material(nt_resource_t texture, bool skinned) {
         .attr_map_count = skinned ? 4 : 2,
         .blend = nt_blend_opaque(),
         .cull_mode = NT_CULL_NONE,
-        .color_mode = NT_COLOR_MODE_RGBA8,
         .depth_test = true,
         .depth_write = true,
         .label = "skeletal_surface",

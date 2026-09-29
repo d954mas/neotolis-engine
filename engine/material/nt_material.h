@@ -61,6 +61,7 @@ typedef struct {
 typedef struct {
     /* Borrowed: the material never links, destroys or checks the program. */
     nt_program_t program;
+    nt_cull_mode_t cull_mode;
     nt_material_texture_desc_t textures[NT_MATERIAL_MAX_TEXTURES];
     uint8_t texture_count;
     nt_material_param_desc_t params[NT_MATERIAL_MAX_PARAMS];
@@ -74,9 +75,7 @@ typedef struct {
     nt_blend_state_t blend;
     bool depth_test;
     bool depth_write;
-    nt_cull_mode_t cull_mode;
-    nt_color_mode_t color_mode; /* NT_COLOR_MODE_NONE (0) via zero-init */
-    const char *label;          /* debug name — must be string literal or static storage */
+    const char *label; /* debug name — must be string literal or static storage */
 } nt_material_create_desc_t;
 
 /* ---- Init descriptor ---- */
@@ -121,7 +120,6 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     nt_cull_mode_t cull_mode;
-    nt_color_mode_t color_mode;
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 
