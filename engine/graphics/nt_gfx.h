@@ -581,6 +581,7 @@ typedef enum {
     X(glGenVertexArrays)                                                                                                                                                                               \
     X(glGenerateMipmap)                                                                                                                                                                                \
     X(glGetActiveUniform)                                                                                                                                                                              \
+    X(glGetActiveUniformsiv)                                                                                                                                                                           \
     X(glGetError)                                                                                                                                                                                      \
     X(glGetIntegerv)                                                                                                                                                                                   \
     X(glGetProgramInfoLog)                                                                                                                                                                             \

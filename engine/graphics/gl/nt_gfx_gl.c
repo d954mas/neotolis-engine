@@ -1360,6 +1360,14 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
         if (ulen <= 0 || usize <= 0) {
             return false;
         }
+        /* Block members are fed by their buffer, not by location writes. Emscripten
+         * hands out a location for any active name, so the block index decides. */
+        const GLuint index = (GLuint)ui;
+        GLint block_index = -1;
+        NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_BLOCK_INDEX, &block_index);
+        if (block_index != -1) {
+            continue;
+        }
         NT_ASSERT(usize == 1 || (ulen >= 3 && strcmp(uname + ulen - 3, "[0]") == 0));
         for (GLint element = 0; element < usize; element++) {
             if (element > 0) {
