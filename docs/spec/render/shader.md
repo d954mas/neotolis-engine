@@ -64,8 +64,10 @@ slot's current bind costs no GL call.
 Slot 15 is reserved for `NtInstances`, the per-instance block of the mesh and
 skinned mesh renderers (`common/instance.glsl`); each of them registers it at
 init. Its int uniform `nt_instance_base` takes one of the 16 cached uniform
-entries of a program that declares it. A program that omits it reads base 0,
-because gfx ignores writes to inactive uniforms.
+entries of a program that declares it. Read instances through
+`nt_instance_index()`: a program indexing by `gl_InstanceID` alone, or omitting
+`nt_instance_base`, reads the chunk's first run for every run, because gfx
+ignores writes to inactive uniforms.
 
 The GL backend caches at most 16 active standalone non-sampler uniform locations
 per program. Each active array element consumes one entry; uniforms in blocks do

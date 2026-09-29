@@ -50,7 +50,7 @@ static struct {
 
 static const float s_white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
 
-static void pack_instance(nt_skinned_instance_t *dst, nt_entity_t entity, const nt_deformation_binding_t *binding) {
+static void pack_instance(nt_skinned_instance_t *dst, nt_entity_t entity, const nt_deformation_binding_t *binding, const nt_drawable_comp_view_t *drawables) {
     nt_renderer_pack_world(dst->world_rows, nt_transform_comp_world_matrix(entity));
     dst->frames[0] = (float)binding->x0;
     dst->frames[1] = (float)binding->y0;
@@ -60,7 +60,8 @@ static void pack_instance(nt_skinned_instance_t *dst, nt_entity_t entity, const 
     dst->skin[1] = 0.0F;
     dst->skin[2] = 0.0F;
     dst->skin[3] = 0.0F;
-    memcpy(dst->color, nt_drawable_comp_has(entity) ? nt_drawable_comp_color(entity) : s_white, sizeof(dst->color));
+    const bool has_drawable = drawables->sparse_indices != NULL && drawables->sparse_indices[nt_entity_index(entity)] != NT_INVALID_COMP_INDEX;
+    memcpy(dst->color, has_drawable ? nt_drawable_comp_color(entity) : s_white, sizeof(dst->color));
 }
 
 static bool run_compatible(const nt_render_item_t *items, uint32_t leader, uint32_t candidate, uint32_t texture_id) {
@@ -212,6 +213,7 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
     nt_renderer_bound_t bound = {0};
     nt_pipeline_t pipeline = {0};
     nt_vertex_input_t vertex_input = {0};
+    const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
 
     while (chunk_start < count) {
         uint32_t chunk_count = count - chunk_start;
@@ -223,7 +225,7 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             const nt_entity_t entity = {.id = items[chunk_start + i].entity};
             const nt_deformation_binding_t binding = *nt_skin_comp_handle(entity);
             NT_ASSERT(binding.texture.id != 0 && "skinned draw requires a deformation texture");
-            pack_instance(&s_skinned.staging[i], entity, &binding);
+            pack_instance(&s_skinned.staging[i], entity, &binding, &drawable_view);
         }
         nt_renderer_instance_ring_push(&s_skinned.ring, s_skinned.staging, chunk_count * (uint32_t)sizeof(nt_skinned_instance_t));
 

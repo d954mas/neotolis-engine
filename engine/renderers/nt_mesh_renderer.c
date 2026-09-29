@@ -196,6 +196,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     nt_renderer_bound_t bound = {0};
     nt_pipeline_t pip = {0};
     nt_vertex_input_t vi = {0};
+    const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
 
     while (chunk_start < count) {
         uint32_t chunk_count = count - chunk_start;
@@ -208,7 +209,8 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             const nt_entity_t e = {.id = items[chunk_start + i].entity};
             nt_mesh_instance_t *dst = &s_mesh_renderer.staging[i];
             nt_renderer_pack_world(dst->world_rows, nt_transform_comp_world_matrix(e));
-            memcpy(dst->color, nt_drawable_comp_has(e) ? nt_drawable_comp_color(e) : s_white, sizeof(dst->color));
+            const bool has_drawable = drawable_view.sparse_indices != NULL && drawable_view.sparse_indices[nt_entity_index(e)] != NT_INVALID_COMP_INDEX;
+            memcpy(dst->color, has_drawable ? nt_drawable_comp_color(e) : s_white, sizeof(dst->color));
         }
         nt_renderer_instance_ring_push(&s_mesh_renderer.ring, s_mesh_renderer.staging, chunk_count * (uint32_t)sizeof(nt_mesh_instance_t));
 

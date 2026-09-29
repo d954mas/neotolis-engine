@@ -276,9 +276,12 @@ per-renderer stride: mesh 4 vec4s (world rows, colour; 256 per chunk), skinned
 6 (world rows, frame origins, blend alpha, colour; 170 per chunk). Colour is
 always part of the payload: the drawable colour, or white for an entity without
 a drawable component. A run crossing a chunk edge draws once per chunk. The
-ring holds `max_instances` instances per wrap; a wrap overwrites ranges earlier
-draws may still read and leaves the ordering to the driver. GPU restore
-recreates the ring, which re-reads the alignment.
+ring holds `max_instances` instances packed in full chunks per wrap; each push
+starts at an aligned offset, so many small `draw_list` calls wrap sooner. A push
+packs right after the previous one, inside a range an earlier draw still binds
+but never reads, and a wrap overwrites bytes an earlier draw may read; the
+driver orders both. GPU restore recreates the ring, which re-reads the
+alignment.
 
 The sprite renderer owns its vertex/index buffers and clears its entire
 vertex-input cache on shutdown or GPU restore before replacing those buffers.
@@ -315,8 +318,9 @@ state. The backend deduplicates texture/sampler binds across passes, and
 uniform-buffer binds per slot on (buffer, offset, size): a whole-buffer bind and
 a ranged bind (`nt_gfx_bind_uniform_buffer_range`) are distinct entries.
 Grounding unbinds every slot, and destroying a buffer drops the slots that hold
-its GL name, which GL reuses. Uploads use the generic `GL_UNIFORM_BUFFER`
-binding, which is separate from the indexed slots. The clear forces the depth
+its GL name, which GL reuses. Indexed binds also set the generic
+`GL_UNIFORM_BUFFER` binding; uploads rebind it every time, so it is never
+cached. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
@@ -642,7 +646,8 @@ program name. Vertex-input creation copies each static/instance attribute with
 its divisor, layout, and known buffer. Inherited layouts unavailable in
 existing CPU state are explicitly unknown. The backend snapshots every
 uniform-buffer slot from its bind cache as `INITIAL/UBO`: `slot`, GL name in
-`secondary` (0: unbound), `offset` and `size` (0: whole buffer). The initial SCISSOR
+`secondary` (0: unbound), `offset` and `size` (0: whole buffer); while the
+context is lost the records are UNKNOWN, since grounding has not run. The initial SCISSOR
 rectangle is UNKNOWN because the frontend mirror is not authoritative after a
 context loss. Capture
 never adds a persistent GL-state mirror or queries GL to reconstruct them.

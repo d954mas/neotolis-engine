@@ -205,8 +205,9 @@ static struct {
     GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS];
     /* GL auto-unbinds a deleted sampler, so destroy_sampler mirrors that here. */
     GLuint bound_samplers[NT_GFX_MAX_TEXTURE_SLOTS];
-    /* Indexed GL_UNIFORM_BUFFER bindings; size 0 is a whole-buffer bind. The
-     * generic GL_UNIFORM_BUFFER binding used by uploads is separate GL state. */
+    /* Indexed GL_UNIFORM_BUFFER bindings; size 0 is a whole-buffer bind. Indexed
+     * binds also set the generic GL_UNIFORM_BUFFER binding, which uploads rebind
+     * every time, so the generic binding is never cached. */
     struct {
         GLuint buffer;
         uint32_t offset;
@@ -273,9 +274,12 @@ void nt_gfx_backend_capture_initial_state(void) {
         NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_TEXTURE, event->data.backend.args[0] = unit; event->data.backend.args[1] = s_gl_cache.bound_textures[unit];
                       event->data.backend.args[2] = s_gl_cache.bound_samplers[unit];);
     }
+    /* A lost context has not been grounded yet: the mirror describes the old one. */
     for (uint32_t slot = 0; slot < NT_GFX_MAX_UBO_SLOTS; slot++) {
-        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_UBO, event->data.binding.slot = slot; event->data.binding.secondary = s_gl_cache.uniform_buffers[slot].buffer;
-                      event->data.binding.offset = s_gl_cache.uniform_buffers[slot].offset; event->data.binding.size = s_gl_cache.uniform_buffers[slot].size;);
+        NT_GFX_RECORD(
+            NT_GFX_EVENT_INITIAL, NT_GFX_OP_UBO, event->data.binding.slot = slot; event->data.binding.secondary = s_gl_cache.uniform_buffers[slot].buffer;
+            event->data.binding.offset = s_gl_cache.uniform_buffers[slot].offset; event->data.binding.size = s_gl_cache.uniform_buffers[slot].size;
+            if (g_nt_gfx.context_lost) { event->result = NT_GFX_RESULT_UNKNOWN; });
     }
     for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
         const nt_gfx_gl_program_t *program = &s_programs[i];
@@ -364,6 +368,11 @@ uint32_t nt_gfx_gl_test_cached_program(void) { return s_gl_cache.program; }
 uint32_t nt_gfx_gl_test_cached_texture(uint32_t slot) {
     NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "cached_texture: slot out of range");
     return s_gl_cache.bound_textures[slot];
+}
+
+uint32_t nt_gfx_gl_test_cached_uniform_buffer(uint32_t slot) {
+    NT_ASSERT(slot < NT_GFX_MAX_UBO_SLOTS);
+    return s_gl_cache.uniform_buffers[slot].buffer;
 }
 
 uint32_t nt_gfx_gl_test_cached_sampler(uint32_t slot) {
@@ -1399,7 +1408,8 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
         }
     }
     NT_ASSERT(uniform_count <= NT_MAX_CACHED_UNIFORMS && "program exceeds standalone uniform cache capacity");
-    *out_count = (uint8_t)uniform_count;
+    /* Without asserts the overflow drops the extra uniforms instead of reading past the table. */
+    *out_count = (uint8_t)(uniform_count < NT_MAX_CACHED_UNIFORMS ? uniform_count : NT_MAX_CACHED_UNIFORMS);
     return true;
 }
 
@@ -1649,7 +1659,7 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
         /* GL reuses deleted names: a new buffer under this name must not hit the cache. */
         for (uint32_t slot = 0; slot < NT_GFX_MAX_UBO_SLOTS; slot++) {
             if (s_gl_cache.uniform_buffers[slot].buffer == buf) {
-                s_gl_cache.uniform_buffers[slot].buffer = 0;
+                memset(&s_gl_cache.uniform_buffers[slot], 0, sizeof(s_gl_cache.uniform_buffers[slot]));
             }
         }
     }

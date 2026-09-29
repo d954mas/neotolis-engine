@@ -171,7 +171,7 @@ above `NT_GFX_MAX_UBO_SLOTS` (24, the WebGL2 guarantee) assert.
 buffer. The offset is a multiple of `gpu_caps.uniform_buffer_offset_alignment`
 (re-probed at context restore), the size is nonzero and the range fits the
 buffer; each violation asserts, as do a non-uniform buffer and a slot out of
-range. WebGL additionally rejects a draw whose bound range is smaller than the
+range, and without asserts the bind is rejected with `INVALID_ARGUMENT`. WebGL additionally rejects a draw whose bound range is smaller than the
 block's data size; gfx does not know block sizes, so the caller sizes the
 range.
 

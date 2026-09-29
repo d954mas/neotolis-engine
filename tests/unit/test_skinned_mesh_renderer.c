@@ -518,11 +518,14 @@ void test_runs_draw_at_their_base_within_one_bound_chunk(void) {
 void test_chunks_split_at_block_capacity(void) {
     nt_mesh_t mesh = make_mesh();
     nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
-    const nt_render_item_t item = make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = make_deformation_texture()}), material, mesh);
+    const nt_texture_t texture = make_deformation_texture();
+    const nt_render_item_t item = make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture}), material, mesh);
     static nt_render_item_t items[171];
     for (uint32_t i = 0; i < 171; i++) {
         items[i] = item;
     }
+    /* The second chunk packs its own item, not the first chunk's. */
+    items[170] = make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture, .x0 = 9, .y0 = 7}), material, mesh);
 
     nt_gfx_fake_reset();
     nt_skinned_mesh_renderer_draw_list(items, 171);
@@ -531,6 +534,8 @@ void test_chunks_split_at_block_capacity(void) {
     TEST_ASSERT_EQUAL_UINT32(171, nt_skinned_mesh_renderer_test_instance_total());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
     TEST_ASSERT_EQUAL_UINT32(96, nt_gfx_fake_last_update_buffer_size());
+    const float frames[4] = {9.0F, 7.0F, 0.0F, 0.0F};
+    TEST_ASSERT_EQUAL_MEMORY(frames, (const float *)nt_gfx_fake_last_update_buffer_data() + 12, sizeof(frames));
 }
 
 void test_active_skin_sampler_must_be_declared_by_material(void) {

@@ -1303,6 +1303,7 @@ static void test_gl_name_reuse_after_destroying_bound_uniform_buffer(void) {
     nt_buffer_t first = make_ubo(align);
     nt_gfx_bind_uniform_buffer_range(first, 1, 0, align);
     nt_gfx_destroy_buffer(first);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_uniform_buffer(1));
 
     /* GL may hand the freed name to this buffer; the cache must not treat it as bound. */
     nt_buffer_t second = make_ubo(align);
@@ -1318,6 +1319,7 @@ static void test_ground_state_reissues_uniform_buffer_bind(void) {
 
     TEST_ASSERT_TRUE(nt_gfx_backend_recreate_all_resources());
     TEST_ASSERT_EQUAL_INT(0, ubo_indexed(GL_UNIFORM_BUFFER_BINDING, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_uniform_buffer(0));
 
     /* The zeroed backend tables orphan every old handle, so this needs its own. */
     nt_buffer_t fresh = make_ubo(256);

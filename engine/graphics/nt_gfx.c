@@ -2274,7 +2274,12 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 /* size 0 binds the whole buffer; the public range entry point rejects it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+    /* The backend indexes its bind cache by slot, so the bound holds without asserts too. */
     NT_ASSERT(slot < NT_GFX_MAX_UBO_SLOTS && "bind_uniform_buffer: slot out of range");
+    if (slot >= NT_GFX_MAX_UBO_SLOTS) {
+        NT_LOG_ERROR("bind_uniform_buffer: slot out of range");
+        return NT_GFX_RESULT_INVALID_ARGUMENT;
+    }
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2290,8 +2295,14 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint3
     }
     if (size != 0) {
         const uint32_t align = g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment;
-        NT_ASSERT(align != 0 && offset % align == 0 && "bind_uniform_buffer_range: offset is not a multiple of uniform_buffer_offset_alignment");
-        NT_ASSERT(size <= s_gfx.buffer_metas[idx].size && offset <= s_gfx.buffer_metas[idx].size - size && "bind_uniform_buffer_range: range exceeds the buffer");
+        const bool aligned = align != 0 && offset % align == 0;
+        const bool fits = size <= s_gfx.buffer_metas[idx].size && offset <= s_gfx.buffer_metas[idx].size - size;
+        NT_ASSERT(aligned && "bind_uniform_buffer_range: offset is not a multiple of uniform_buffer_offset_alignment");
+        NT_ASSERT(fits && "bind_uniform_buffer_range: range exceeds the buffer");
+        if (!aligned || !fits) {
+            NT_LOG_ERROR("bind_uniform_buffer_range: misaligned or out-of-bounds range");
+            return NT_GFX_RESULT_INVALID_ARGUMENT;
+        }
     }
     /* Buffers are never auto-restored: a zeroed backend means the owner skipped
      * the recreate contract, and binding it would feed the shader garbage. */

@@ -267,6 +267,7 @@ uint32_t nt_gfx_gl_test_cached_vao(void);
 uint32_t nt_gfx_gl_test_cached_program(void);
 uint32_t nt_gfx_gl_test_cached_texture(uint32_t slot);
 uint32_t nt_gfx_gl_test_cached_sampler(uint32_t slot);
+uint32_t nt_gfx_gl_test_cached_uniform_buffer(uint32_t slot);
 #endif
 
 #ifdef NT_TEST_ACCESS

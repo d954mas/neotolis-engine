@@ -1551,10 +1551,10 @@ void test_draw_list_packs_world_rows_and_drawable_color(void) {
 
     TEST_ASSERT_EQUAL_UINT32(2 * 64, nt_gfx_fake_last_update_buffer_size());
     const float *packed = (const float *)nt_gfx_fake_last_update_buffer_data();
-    const float row0[4] = {1.0F, 0.0F, 0.0F, 7.0F}; /* translation lands in each row's w */
+    const float rows[12] = {1.0F, 0.0F, 0.0F, 7.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F}; /* translation lands in each row's w */
     const float tint[4] = {0.25F, 0.5F, 0.75F, 0.5F};
     const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-    TEST_ASSERT_EQUAL_MEMORY(row0, packed, sizeof(float[4]));
+    TEST_ASSERT_EQUAL_MEMORY(rows, packed, sizeof(rows));
     TEST_ASSERT_EQUAL_MEMORY(tint, packed + 12, sizeof(float[4]));
     TEST_ASSERT_EQUAL_MEMORY(white, packed + 16 + 12, sizeof(float[4]));
 }
@@ -1595,6 +1595,11 @@ void test_draw_list_splits_chunks_at_block_capacity(void) {
     for (uint32_t i = 0; i < 257; i++) {
         items[i] = item;
     }
+    /* The second chunk packs its own item, not the first chunk's. */
+    const nt_entity_t last = create_test_entity(mesh, mat);
+    nt_transform_comp_set_position(last, 5.0F, 0.0F, 0.0F);
+    nt_transform_comp_update();
+    items[256] = item_for(last, mat, mesh);
 
     nt_gfx_fake_reset();
     nt_mesh_renderer_draw_list(items, 256);
@@ -1609,6 +1614,8 @@ void test_draw_list_splits_chunks_at_block_capacity(void) {
     TEST_ASSERT_EQUAL_INT(0, nt_gfx_fake_uniform_int_value_at(0));
     TEST_ASSERT_EQUAL_INT(0, nt_gfx_fake_uniform_int_value_at(1));
     TEST_ASSERT_EQUAL_UINT32(64, nt_gfx_fake_last_update_buffer_size());
+    const float last_row0[4] = {1.0F, 0.0F, 0.0F, 5.0F};
+    TEST_ASSERT_EQUAL_MEMORY(last_row0, nt_gfx_fake_last_update_buffer_data(), sizeof(last_row0));
 }
 
 /* Chunks start at the device's offset alignment, re-read when the ring is
@@ -1632,6 +1639,7 @@ void test_chunks_start_at_the_restored_offset_alignment(void) {
         const uint32_t second = (64 + alignments[a] - 1) / alignments[a] * alignments[a];
         TEST_ASSERT_EQUAL_UINT32(second, nt_gfx_fake_ubo_bind_at(1).offset);
     }
+    nt_gfx_fake_set_uniform_buffer_offset_alignment(256); /* tearDown keeps the fake: later tests init at the default */
 }
 
 /* One instance per chunk at 256 B alignment: the ring holds blocks at 0, 256

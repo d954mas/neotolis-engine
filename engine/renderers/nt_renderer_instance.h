@@ -31,12 +31,17 @@ typedef struct {
 
 static inline uint32_t nt_renderer_align_up(uint32_t value, uint32_t align) { return (value + align - 1U) / align * align; }
 
-/* Holds max_instances packed at stride per wrap, plus the alignment padding of
- * the chunks they split into and one full block, so a range bound at any
- * reserved offset fits. The alignment is re-read here, so restore recreates. */
+/* Holds max_instances packed at stride in full chunks per wrap, plus their
+ * alignment padding and one full block, so a range bound at any reserved offset
+ * fits. Every push starts aligned, so many small pushes wrap sooner. The
+ * alignment is re-read here, so restore recreates. */
 static inline nt_result_t nt_renderer_instance_ring_create(nt_renderer_instance_ring_t *ring, uint32_t max_instances, uint32_t stride, const char *label) {
     const uint32_t align = nt_gfx_gpu_caps()->uniform_buffer_offset_alignment;
-    NT_ASSERT(align != 0 && "instance ring needs a GL context: create it after nt_gfx_init");
+    /* 0 without a live context (stub backend, or lost again during restore): fail like buffer creation would. */
+    if (align == 0) {
+        *ring = (nt_renderer_instance_ring_t){0};
+        return NT_ERR_INIT_FAILED;
+    }
     const uint32_t per_chunk = NT_INSTANCE_BLOCK_SIZE / stride;
     const uint32_t chunks = (max_instances + per_chunk - 1U) / per_chunk;
     const uint32_t size = nt_renderer_align_up((max_instances * stride) + (chunks * (align - 1U)) + NT_INSTANCE_BLOCK_SIZE, align);
@@ -55,8 +60,9 @@ static inline void nt_renderer_instance_ring_destroy(nt_renderer_instance_ring_t
 
 /* Uploads one chunk and binds a full block at its offset: WebGL rejects a draw
  * whose bound range is smaller than the block, though only the packed bytes are
- * written. A wrap overwrites data an earlier draw may still read; the driver
- * orders it. */
+ * written. The next push packs right after them, inside a range an earlier draw
+ * still binds but never reads; a wrap overwrites bytes it may read. The driver
+ * orders both. */
 static inline void nt_renderer_instance_ring_push(nt_renderer_instance_ring_t *ring, const void *data, uint32_t bytes) {
     NT_ASSERT(bytes > 0 && bytes <= NT_INSTANCE_BLOCK_SIZE);
     uint32_t offset = nt_renderer_align_up(ring->cursor, ring->align);
