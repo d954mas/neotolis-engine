@@ -136,6 +136,13 @@ static struct {
     nt_pool_t mesh_pool;
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
 
+    /* Transient textures: created at init and after a restore, handed out in turn. */
+    nt_texture_t *transients; /* [transient_count] */
+    uint16_t transient_count;
+    uint16_t transient_height;
+    uint16_t transient_next;
+    uint32_t transient_used; /* handed out in the open frame */
+
     nt_gfx_render_state_t render_state;
     uint32_t active_render_target;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
@@ -323,7 +330,22 @@ static void capture_initial_state(void) {
 #endif
 
 /* The next frame starts at once: gfx work is always inside a frame between init and shutdown. */
-static void open_frame(void) { g_nt_gfx.counters = (nt_gfx_counters_t){.frame_sequence = g_nt_gfx.counters.frame_sequence + 1}; }
+static void open_frame(void) {
+    g_nt_gfx.counters = (nt_gfx_counters_t){.frame_sequence = g_nt_gfx.counters.frame_sequence + 1};
+    s_gfx.transient_used = 0;
+}
+
+/* A failed create leaves that entry INVALID; nt_gfx_transient_texture then returns INVALID for it. */
+static void create_transient_textures(void) {
+    for (uint16_t i = 0; i < s_gfx.transient_count; i++) {
+        s_gfx.transients[i] = nt_gfx_make_texture(&(nt_texture_desc_t){
+            .width = (uint16_t)NT_GFX_TRANSIENT_TEXTURE_WIDTH,
+            .height = s_gfx.transient_height,
+            .format = NT_TEXTURE_FORMAT_RGBA32F,
+            .label = "gfx_transient",
+        });
+    }
+}
 
 // #endregion
 
@@ -338,6 +360,12 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_vertex_inputs > 0 && "nt_gfx_desc_t.max_vertex_inputs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_render_targets > 0 && "nt_gfx_desc_t.max_render_targets is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT((desc->max_transient_textures == 0 || desc->transient_texture_height > 0) && "nt_gfx_desc_t.transient_texture_height is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT((uint32_t)desc->max_textures + desc->max_transient_textures <= UINT16_MAX && "max_textures + max_transient_textures exceeds the texture pool");
+    /* Transient textures live in the texture pool on top of the game's budget. */
+    nt_gfx_desc_t pooled = *desc;
+    pooled.max_textures = (uint16_t)(desc->max_textures + desc->max_transient_textures);
+    desc = &pooled;
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
@@ -389,6 +417,15 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 
     /* Detect GPU compressed texture capabilities */
     g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
+
+    NT_ASSERT(desc->transient_texture_height <= g_nt_gfx.gpu_caps.max_texture_size && "transient_texture_height exceeds GPU max_texture_size");
+    s_gfx.transient_count = desc->max_transient_textures;
+    s_gfx.transient_height = desc->transient_texture_height;
+    if (s_gfx.transient_count > 0) {
+        s_gfx.transients = (nt_texture_t *)calloc(s_gfx.transient_count, sizeof(nt_texture_t));
+        NT_ASSERT(s_gfx.transients && "gfx init: out of memory");
+        create_transient_textures();
+    }
 
     g_nt_gfx.initialized = true;
 }
@@ -461,6 +498,7 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.texture_metas);
     free(s_gfx.render_target_metas);
     free(s_gfx.mesh_table);
+    free(s_gfx.transients);
     free(s_stage_buf);
     s_stage_buf = NULL;
     s_stage_size = 0;
@@ -484,6 +522,9 @@ static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         NT_LOG_ERROR("destroy_texture: invalid handle");
         return NT_GFX_RESULT_INVALID_HANDLE;
+    }
+    for (uint16_t i = 0; i < s_gfx.transient_count; i++) {
+        NT_ASSERT(s_gfx.transients[i].id != tex.id && "destroy_texture: transient textures belong to gfx");
     }
     /* Pass-scoped draw state may still sample it; lifetime changes stay outside passes. */
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS && "destroy_texture called inside a pass");
@@ -539,6 +580,14 @@ static void wipe_backend_handles(void) {
     for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
         s_gfx.texture_backends[i] = 0;
     }
+    /* gfx owns the transient textures, so it frees their husks and recreates them on restore. */
+    for (uint16_t i = 0; i < s_gfx.transient_count; i++) {
+        if (nt_pool_valid(&s_gfx.texture_pool, s_gfx.transients[i].id)) {
+            memset(&s_gfx.texture_metas[nt_pool_slot_index(s_gfx.transients[i].id)], 0, sizeof(nt_gfx_texture_meta_t));
+            nt_pool_free(&s_gfx.texture_pool, s_gfx.transients[i].id);
+        }
+        s_gfx.transients[i] = (nt_texture_t){0};
+    }
     for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
         if (nt_pool_slot_alive(&s_gfx.render_target_pool, i)) {
             nt_pool_free(&s_gfx.render_target_pool, s_gfx.render_target_pool.slots[i].id);
@@ -579,6 +628,7 @@ static nt_gfx_result_t restore_context(void) {
     g_nt_gfx.context_lost = false;
     s_gfx.scissor_enabled = false;
     g_nt_gfx.context_restored = true;
+    create_transient_textures();
     NT_LOG_INFO("WebGL context restored -- game must re-create resources");
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -2260,8 +2310,9 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 
 /* ---- Uniform buffer ---- */
 
+/* size 0 binds the whole buffer; the public range entry point rejects it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
+static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2275,6 +2326,17 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         NT_LOG_ERROR("bind_uniform_buffer: buffer is not uniform type");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
+    if (size != 0) {
+        const uint32_t align = g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment;
+        const bool aligned = align != 0 && offset % align == 0;
+        const bool fits = size <= s_gfx.buffer_metas[idx].size && offset <= s_gfx.buffer_metas[idx].size - size;
+        NT_ASSERT(aligned && "bind_uniform_buffer_range: offset is not a multiple of uniform_buffer_offset_alignment");
+        NT_ASSERT(fits && "bind_uniform_buffer_range: range exceeds the buffer");
+        if (!aligned || !fits) {
+            NT_LOG_ERROR("bind_uniform_buffer_range: misaligned or out-of-bounds range");
+            return NT_GFX_RESULT_INVALID_ARGUMENT;
+        }
+    }
     /* Buffers are never auto-restored: a zeroed backend means the owner skipped
      * the recreate contract, and binding it would feed the shader garbage. */
     NT_ASSERT(s_gfx.buffer_backends[idx] != 0 && "bind_uniform_buffer: buffer has no live backend -- recreate it after context restore");
@@ -2282,13 +2344,19 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         NT_LOG_ERROR_ONCE("bind_uniform_buffer: buffer has no live backend");
         return NT_GFX_RESULT_UNREADY;
     }
-    nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
+    nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot, offset, size);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot);
-    NT_GFX_END(bind_uniform_buffer(buf, slot));
+    NT_GFX_END(bind_uniform_buffer(buf, slot, 0, 0));
+}
+
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
+    NT_ASSERT(size != 0 && "bind_uniform_buffer_range: empty range");
+    NT_GFX_END(size != 0 ? bind_uniform_buffer(buf, slot, offset, size) : NT_GFX_RESULT_INVALID_ARGUMENT);
 }
 
 /* ---- Buffer update ---- */
@@ -2435,6 +2503,36 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_TEXTURE_UPLOAD, NT_GFX_OBJECT_TEXTURE, tex.id, event->data.state.integers[0] = x; event->data.state.integers[1] = y; event->data.state.integers[2] = w;
                          event->data.state.integers[3] = h);
     NT_GFX_END(update_texture(tex, x, y, w, h, data));
+}
+
+/* ---- Transient textures ---- */
+
+uint32_t nt_gfx_transient_texture_capacity(void) { return s_gfx.transient_count != 0 ? NT_GFX_TRANSIENT_TEXTURE_WIDTH * s_gfx.transient_height : 0; }
+
+nt_texture_t nt_gfx_transient_texture(const void *texels, uint32_t texel_count) {
+    const bool valid = texels != NULL && texel_count > 0 && texel_count <= nt_gfx_transient_texture_capacity();
+    NT_ASSERT(valid && "transient_texture: needs 1..capacity texels");
+    if (!valid || g_nt_gfx.context_lost) {
+        return (nt_texture_t){0};
+    }
+    /* A texture whose create failed stays INVALID; skip it rather than stall the turn on it. */
+    nt_texture_t tex = {0};
+    for (uint16_t tries = 0; tries < s_gfx.transient_count && tex.id == 0; tries++) {
+        tex = s_gfx.transients[s_gfx.transient_next];
+        s_gfx.transient_next = (uint16_t)((s_gfx.transient_next + 1U) % s_gfx.transient_count);
+    }
+    if (tex.id == 0) {
+        return tex;
+    }
+    if (++s_gfx.transient_used > s_gfx.transient_count) {
+        g_nt_gfx.counters.transient_overflows++;
+        NT_LOG_WARN_ONCE("more transient textures in one frame than max_transient_textures (%u); raise it", (unsigned)s_gfx.transient_count);
+    }
+    const uint32_t rows = (texel_count + NT_GFX_TRANSIENT_TEXTURE_WIDTH - 1U) / NT_GFX_TRANSIENT_TEXTURE_WIDTH;
+    /* One rectangle: a single row carries only the used texels, taller uploads whole rows. */
+    const uint32_t width = rows == 1U ? texel_count : NT_GFX_TRANSIENT_TEXTURE_WIDTH;
+    nt_gfx_update_texture(tex, 0, 0, (uint16_t)width, (uint16_t)rows, texels);
+    return tex;
 }
 
 /* ---- Mesh side table helpers ---- */

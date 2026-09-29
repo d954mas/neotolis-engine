@@ -3,16 +3,26 @@
 precision highp float;
 precision highp int;
 
+#include "instance.glsl"
+
 layout(location = 8) in vec4 a_joints;
 layout(location = 9) in vec4 a_weights;
-layout(location = 10) in vec4 a_world_row0;
-layout(location = 11) in vec4 a_world_row1;
-layout(location = 12) in vec4 a_world_row2;
-layout(location = 13) in vec4 a_color;
-layout(location = 14) in vec4 a_skin_frames;
-layout(location = 15) in float a_skin_alpha;
 
 uniform highp sampler2D u_skin_matrices;
+
+/* Skinned renderer payload (nt_skinned_instance_t): affine world rows, the two
+ * frame origins in u_skin_matrices, their blend alpha, drawable colour. */
+struct nt_skinned_instance_t {
+    mat4 world;
+    vec4 frames;
+    float alpha;
+    vec4 color;
+};
+
+nt_skinned_instance_t nt_skinned_instance() {
+    mat4 world = nt_instance_world(nt_instance_texel(6, 0), nt_instance_texel(6, 1), nt_instance_texel(6, 2));
+    return nt_skinned_instance_t(world, nt_instance_texel(6, 3), nt_instance_texel(6, 4).x, nt_instance_texel(6, 5));
+}
 
 const float NT_SKIN_VECTOR_EPSILON = 1e-12;
 const float NT_SKIN_VECTOR_BIG = 1e30;
@@ -30,19 +40,17 @@ mat4x3 nt_skin_joint_matrix(int joint, ivec2 origin) {
     );
 }
 
-mat4x3 nt_skin_joint_pair(int joint) {
-    ivec2 frame0 = ivec2(a_skin_frames.xy);
-    ivec2 frame1 = ivec2(a_skin_frames.zw);
-    mat4x3 a = nt_skin_joint_matrix(joint, frame0);
-    mat4x3 b = nt_skin_joint_matrix(joint, frame1);
-    return a * (1.0 - a_skin_alpha) + b * a_skin_alpha;
+mat4x3 nt_skin_joint_pair(int joint, vec4 frames, float alpha) {
+    mat4x3 a = nt_skin_joint_matrix(joint, ivec2(frames.xy));
+    mat4x3 b = nt_skin_joint_matrix(joint, ivec2(frames.zw));
+    return a * (1.0 - alpha) + b * alpha;
 }
 
-mat4x3 nt_skin_blended_matrix() {
-    return a_weights.x * nt_skin_joint_pair(int(a_joints.x + 0.5)) +
-           a_weights.y * nt_skin_joint_pair(int(a_joints.y + 0.5)) +
-           a_weights.z * nt_skin_joint_pair(int(a_joints.z + 0.5)) +
-           a_weights.w * nt_skin_joint_pair(int(a_joints.w + 0.5));
+mat4x3 nt_skin_blended_matrix(nt_skinned_instance_t inst) {
+    return a_weights.x * nt_skin_joint_pair(int(a_joints.x + 0.5), inst.frames, inst.alpha) +
+           a_weights.y * nt_skin_joint_pair(int(a_joints.y + 0.5), inst.frames, inst.alpha) +
+           a_weights.z * nt_skin_joint_pair(int(a_joints.z + 0.5), inst.frames, inst.alpha) +
+           a_weights.w * nt_skin_joint_pair(int(a_joints.w + 0.5), inst.frames, inst.alpha);
 }
 
 mat3 nt_skin_linear(mat4x3 transform) {

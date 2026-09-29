@@ -2810,6 +2810,149 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     }
 }
 
+static nt_buffer_t make_test_ubo(uint32_t size) { return nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = size}); }
+
+void test_bind_uniform_buffer_range_reaches_backend(void) {
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_bind_uniform_buffer(ubo, 1);
+    nt_gfx_bind_uniform_buffer_range(ubo, 7, 768, 256); /* final legal range */
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    nt_gfx_fake_ubo_bind_t whole = nt_gfx_fake_ubo_bind_at(0);
+    nt_gfx_fake_ubo_bind_t range = nt_gfx_fake_ubo_bind_at(1);
+    TEST_ASSERT_EQUAL_UINT32(1, whole.slot);
+    TEST_ASSERT_EQUAL_UINT32(0, whole.size);
+    TEST_ASSERT_EQUAL_UINT32(whole.buffer_backend, range.buffer_backend);
+    TEST_ASSERT_EQUAL_UINT32(7, range.slot);
+    TEST_ASSERT_EQUAL_UINT32(768, range.offset);
+    TEST_ASSERT_EQUAL_UINT32(256, range.size);
+}
+
+void test_bind_uniform_buffer_range_asserts(void) {
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 1024});
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256));          /* off the 256 B alignment */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 0));             /* empty */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 512));         /* past the end */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0xFFFFFF00U, 512)); /* offset + size wraps */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 2048));          /* larger than the buffer */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(vbo, 0, 0, 256));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
+}
+
+// #region transient textures
+static float s_transient_texels[4096 * 4];
+
+static void init_with_transients(uint16_t count, uint16_t height) {
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.max_transient_textures = count;
+    desc.transient_texture_height = height;
+    nt_gfx_init(&desc);
+}
+
+void test_transient_textures_are_absent_by_request(void) {
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_transient_texture_capacity());
+    EXPECT_ASSERT(nt_gfx_transient_texture(s_transient_texels, 1));
+}
+
+/* Each upload takes the next texture and writes only the rows its texels reach. */
+void test_transient_textures_hand_out_in_turn_and_upload_used_rows(void) {
+    init_with_transients(3, 4);
+    TEST_ASSERT_EQUAL_UINT32(4096, nt_gfx_transient_texture_capacity());
+    nt_gfx_fake_reset();
+
+    const nt_texture_t a = nt_gfx_transient_texture(s_transient_texels, 1);
+    const nt_texture_t b = nt_gfx_transient_texture(s_transient_texels, 1025);
+    const nt_texture_t c = nt_gfx_transient_texture(s_transient_texels, 4096);
+    TEST_ASSERT_TRUE(a.id != 0 && b.id != 0 && c.id != 0);
+    TEST_ASSERT_TRUE(a.id != b.id && b.id != c.id && a.id != c.id);
+    TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA32F, nt_gfx_texture_format(a));
+    const nt_texture_t handed[3] = {a, b, c};
+    const uint16_t widths[3] = {1, NT_GFX_TRANSIENT_TEXTURE_WIDTH, NT_GFX_TRANSIENT_TEXTURE_WIDTH}; /* one row: only the used texels */
+    const uint16_t rows[3] = {1, 2, 4};
+    for (uint32_t i = 0; i < 3; i++) {
+        const nt_gfx_fake_update_texture_rect_t rect = nt_gfx_fake_update_texture_rect_at(i);
+        TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(handed[i]), rect.backend);
+        TEST_ASSERT_EQUAL_UINT16(0, rect.x);
+        TEST_ASSERT_EQUAL_UINT16(0, rect.y);
+        TEST_ASSERT_EQUAL_UINT16(widths[i], rect.w);
+        TEST_ASSERT_EQUAL_UINT16(rows[i], rect.h);
+    }
+    EXPECT_ASSERT(nt_gfx_transient_texture(s_transient_texels, 4097));
+    EXPECT_ASSERT(nt_gfx_transient_texture(s_transient_texels, 0));
+    EXPECT_ASSERT(nt_gfx_transient_texture(NULL, 1));
+    EXPECT_ASSERT(nt_gfx_destroy_texture(a));
+}
+
+/* A fourth upload in a frame of three reuses the oldest and is counted; the next
+ * frame starts the count again. */
+void test_transient_overflow_is_counted_per_frame(void) {
+    init_with_transients(3, 1);
+    const nt_texture_t first = nt_gfx_transient_texture(s_transient_texels, 1);
+    (void)nt_gfx_transient_texture(s_transient_texels, 1);
+    (void)nt_gfx_transient_texture(s_transient_texels, 1);
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.transient_overflows);
+    TEST_ASSERT_EQUAL_UINT32(first.id, nt_gfx_transient_texture(s_transient_texels, 1).id);
+    TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.counters.transient_overflows);
+
+    nt_gfx_begin_frame();
+    for (uint32_t i = 0; i < 3; i++) {
+        (void)nt_gfx_transient_texture(s_transient_texels, 1);
+    }
+    TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.transient_overflows);
+}
+
+/* A texture that failed to create is skipped; the others keep taking turns. */
+void test_transient_texture_that_failed_to_create_is_skipped(void) {
+    nt_gfx_shutdown();
+    nt_gfx_fake_fail_texture_creates(1U); /* the first create of the next init */
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.max_transient_textures = 2;
+    desc.transient_texture_height = 1;
+    nt_gfx_init(&desc);
+    const nt_texture_t first = nt_gfx_transient_texture(s_transient_texels, 1);
+    const nt_texture_t second = nt_gfx_transient_texture(s_transient_texels, 1);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, first.id);
+    TEST_ASSERT_EQUAL_UINT32(first.id, second.id);
+}
+
+/* gfx owns them: INVALID while lost, recreated by the restore itself; repeated
+ * cycles free their husks, so the pool never fills. */
+void test_transient_textures_come_back_after_restore(void) {
+    init_with_transients(2, 1);
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_transient_texture(s_transient_texels, 1).id);
+
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    const nt_texture_t restored = nt_gfx_transient_texture(s_transient_texels, 1);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, restored.id);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(restored));
+
+    for (uint32_t cycle = 0; cycle < 8; cycle++) {
+        nt_gfx_fake_lose_and_restore_context();
+        nt_gfx_begin_frame();
+    }
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_transient_texture(s_transient_texels, 1).id);
+}
+// #endregion
+
+/* The alignment is a device cap, re-read on every probe. */
+void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
+    nt_gfx_shutdown();
+    nt_gfx_fake_set_uniform_buffer_offset_alignment(16);
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    TEST_ASSERT_EQUAL_UINT32(16, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
+
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256);
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 8, 256));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
+}
+
 /* Buffers have no auto-restore path, so a husk means the owner skipped the
  * recreate contract -- the one case a bind cannot absorb. */
 void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
@@ -3220,6 +3363,14 @@ int main(void) {
     /* Uniform buffer tests */
     RUN_TEST(test_make_uniform_buffer);
     RUN_TEST(test_bind_uniform_buffer);
+    RUN_TEST(test_bind_uniform_buffer_range_reaches_backend);
+    RUN_TEST(test_bind_uniform_buffer_range_asserts);
+    RUN_TEST(test_bind_uniform_buffer_range_follows_probed_alignment);
+    RUN_TEST(test_transient_textures_are_absent_by_request);
+    RUN_TEST(test_transient_textures_hand_out_in_turn_and_upload_used_rows);
+    RUN_TEST(test_transient_overflow_is_counted_per_frame);
+    RUN_TEST(test_transient_texture_that_failed_to_create_is_skipped);
+    RUN_TEST(test_transient_textures_come_back_after_restore);
     RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_update_buffer_at_offset);
     RUN_TEST(test_update_buffer_rejects_out_of_range);

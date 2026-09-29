@@ -65,9 +65,20 @@ uint32_t nt_gfx_fake_update_texture_count(void);
 typedef struct {
     uint16_t x, y, w, h;
     const void *data; /* the caller's pointer, still readable while its owner keeps the staging alive */
+    uint32_t backend; /* compare with nt_gfx_fake_bound_texture_at */
 } nt_gfx_fake_update_texture_rect_t;
 /* Update i since the last reset (history capacity 16; zero past it). */
 nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t index);
+
+typedef struct {
+    uint32_t buffer_backend, slot, offset, size; /* size 0: whole-buffer bind */
+} nt_gfx_fake_ubo_bind_t;
+
+uint32_t nt_gfx_fake_ubo_bind_count(void);
+nt_gfx_fake_ubo_bind_t nt_gfx_fake_ubo_bind_at(uint32_t index);
+/* Reported as gpu_caps.uniform_buffer_offset_alignment by the next caps probe
+ * (init or restore); 256 after nt_gfx_fake_reset, the largest GL permits. */
+void nt_gfx_fake_set_uniform_buffer_offset_alignment(uint32_t alignment);
 uint32_t nt_gfx_fake_update_buffer_count(void);
 /* Borrowed bytes from the last update_buffer call. Valid only until the caller
  * reuses/frees its staging storage; renderer tests inspect it immediately. */

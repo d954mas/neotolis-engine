@@ -164,6 +164,25 @@ There is no per-program override. The registry borrows `name` without copying:
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registration
 survives context loss.
 
+`nt_gfx_bind_uniform_buffer_range` binds `[offset, offset + size)` of a uniform
+buffer. The offset is a multiple of `gpu_caps.uniform_buffer_offset_alignment`
+(re-probed at context restore), the size is nonzero and the range fits the
+buffer; each violation asserts, as does a non-uniform buffer, and without
+asserts the bind is rejected with `INVALID_ARGUMENT`. WebGL additionally rejects a draw whose bound range is smaller than the
+block's data size; gfx does not know block sizes, so the caller sizes the
+range.
+
+`nt_gfx_transient_texture` asserts on NULL texels, a zero count and a count
+above `nt_gfx_transient_texture_capacity()` (0 without transient textures). A
+count within one row uploads exactly those texels; past one row the upload is
+whole rows, so the texels must stay readable up to the end of the last row they
+touch; without
+asserts those violations return INVALID. It also returns INVALID while the
+context is lost and when no transient texture exists: none configured, or every
+one failed to create at init or restore (a failed one is skipped, and logged by
+its create). `transient_texture_height` must be nonzero when
+`max_transient_textures` is, and at most `gpu_caps.max_texture_size`.
+
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
 `nt_gfx_begin_frame` has synced, or a link the browser reports lost. The second

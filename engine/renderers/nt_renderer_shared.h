@@ -91,8 +91,7 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeli
 
 #define NT_RENDERER_MESH_VI_KEY_STREAM_BITS 5
 _Static_assert(NT_GFX_MAX_VERTEX_ATTRS <= 16, "mesh VI key packs a location in 4 bits");
-_Static_assert(NT_MESH_MAX_STREAMS *NT_RENDERER_MESH_VI_KEY_STREAM_BITS + 2 <= 64, "mesh VI key overflows uint64");
-_Static_assert(NT_COLOR_MODE_FLOAT4 < 4, "mesh VI key packs color_mode in 2 bits");
+_Static_assert(NT_MESH_MAX_STREAMS *NT_RENDERER_MESH_VI_KEY_STREAM_BITS <= 64, "mesh VI key overflows uint64");
 
 typedef struct {
     uint64_t key;
@@ -178,12 +177,12 @@ static inline uint32_t nt_renderer_mesh_vi_cache_live_count(const nt_renderer_me
 }
 
 /* The mesh fixes stream types/offsets/stride, so the exact row key needs only
- * presence + location per stream and color mode. Unmapped streams disappear. */
+ * presence + location per stream. Unmapped streams disappear. */
 static inline nt_vertex_layout_t nt_renderer_build_mesh_vertex_layout(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info, uint64_t *out_key) {
     nt_vertex_layout_t layout;
     memset(&layout, 0, sizeof(layout));
     layout.stride = mesh_info->stride;
-    uint64_t key = (uint64_t)mat_info->color_mode << (NT_MESH_MAX_STREAMS * NT_RENDERER_MESH_VI_KEY_STREAM_BITS);
+    uint64_t key = 0;
 
     uint16_t offset = 0;
     for (uint8_t si = 0; si < mesh_info->stream_count; si++) {
@@ -217,7 +216,7 @@ static inline nt_vertex_layout_t nt_renderer_build_mesh_vertex_layout(const nt_m
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_renderer_mesh_vi_cache_t *cache, nt_material_t mat, nt_mesh_t mesh, const nt_material_info_t *mat_info,
-                                                                         const nt_gfx_mesh_info_t *mesh_info, const nt_vertex_layout_t *instance_layouts, const char *label) {
+                                                                         const nt_gfx_mesh_info_t *mesh_info, const char *label) {
     const uint32_t slot = nt_pool_slot_index(mesh.id);
     NT_ASSERT(slot != 0 && slot <= cache->mesh_capacity);
     nt_renderer_mesh_vi_version_t *row = &cache->versions[(size_t)(slot - 1) * cache->max_layouts];
@@ -229,7 +228,7 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
         }
         cache->meshes[slot - 1] = mesh;
     }
-    /* The generational material id pins attr_map + color mode. */
+    /* The generational material id pins attr_map. */
     for (uint16_t i = 0; i < cache->max_layouts; i++) {
         if (row[i].last_mat == mat.id && nt_gfx_vertex_input_valid(row[i].vi)) {
             return row[i].vi;
@@ -261,7 +260,6 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
 
     const nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = layout,
-        .instance_layout = instance_layouts[mat_info->color_mode],
         /* Empty derived layouts support attribute-less gl_VertexID shaders. */
         .vertex_buffer = (layout.attr_count > 0) ? mesh_info->vbo : (nt_buffer_t){0},
         .index_buffer = mesh_info->ibo,
@@ -336,10 +334,17 @@ static inline void nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, u
     b->material = material_id;
 }
 
+/* Per-instance data is a transient texture bound under NT_MATERIAL_INSTANCES_SAMPLER;
+ * the shader reads it through common/instance.glsl, offset by this uniform. */
+#define NT_RENDERER_INSTANCE_BASE_UNIFORM "nt_instance_base"
+_Static_assert(NT_GFX_TRANSIENT_TEXTURE_WIDTH == 1024U, "common/instance.glsl addresses 1024 texels per row");
+_Static_assert(NT_MATERIAL_MAX_TEXTURES + 1 <= NT_GFX_MAX_TEXTURE_SLOTS, "material textures plus the instance texture must fit the sampler slots");
+
 /* Semantic set: gfx ignores inactive names, validates active coverage, then
- * resolves every texture and sampler before issuing backend binds. */
-static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_view_t *v) {
-    nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES];
+ * resolves every texture and sampler before issuing backend binds. extra is an
+ * engine binding outside the material (NULL for none). */
+static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_view_t *v, const nt_gfx_texture_binding_t *extra) {
+    nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES + 1];
     for (uint8_t t = 0; t < v->tex_count; t++) {
         bindings[t] = (nt_gfx_texture_binding_t){
             .name = {.value = v->tex_name_hashes[t]},
@@ -347,7 +352,11 @@ static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_vi
             .sampler = v->tex_samplers[t],
         };
     }
-    nt_gfx_apply_texture_bindings(bindings, v->tex_count);
+    uint8_t count = v->tex_count;
+    if (extra != NULL) {
+        bindings[count++] = *extra;
+    }
+    nt_gfx_apply_texture_bindings(bindings, count);
 }
 
 static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_material_info_t *mi) {

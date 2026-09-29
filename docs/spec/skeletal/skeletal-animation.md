@@ -256,12 +256,13 @@ both frame origins and interpolates by alpha; CPU palettes are the case
 `frame1 == frame0`, `alpha == 0` (the second fetch hits the same texels). There
 is no program kind, per-run mode uniform, material pair or kind↔program
 validator: every material submitted here implements the documented shader ABI.
-`assets/shaders/common/skin.glsl` declares the skin, world and color inputs and
-owns the shared fetch, blend and guarded-vector functions. Skinned vertex
-shaders include it instead of the static renderer's `common/instance.glsl`;
-the material maps the mesh's joints and weights streams to the locations
-declared there. The common shader and renderer implementation own their numeric
-attribute locations and instance offsets, which are not specification ABI.
+`assets/shaders/common/skin.glsl` declares the joints and weights inputs, reads
+the skinned instance payload (`nt_skinned_instance()`) from the instance texture
+of `common/instance.glsl`, which it includes, and owns the shared fetch, blend
+and guarded-vector functions. The material maps the mesh's joints and weights
+streams to the locations declared there. The common shader and renderer
+implementation own the numeric attribute locations and payload offsets, which
+are not specification ABI.
 `joints`/`weights` reach the program through the material `attr_map` like every
 other stream. Unmapped streams are skipped, so a skinned MESH still draws
 through `nt_mesh_renderer`. The program's non-sampler uniforms must fit the
@@ -272,20 +273,21 @@ variant; a second program appears only if that number justifies it.
 `highp sampler2D` within `NT_MATERIAL_MAX_TEXTURES` = 4. The renderer replaces
 that declared slot's resource and sampler with the current deformation texture
 and its default sampler, resolves the surface slots normally, and applies the
-complete combined set in one `nt_gfx_apply_texture_bindings` call. The declared
-placeholder resource and sampler have no effect in this renderer. Reapply when
-the material or deformation texture changes; reset tracking at each
-`draw_list`.
+complete combined set, plus the instance texture under `nt_instances`, in one
+`nt_gfx_apply_texture_bindings` call. The declared placeholder resource and
+sampler have no effect in this renderer. Reapply when the material or
+deformation texture changes and at each instance-texture slice; reset tracking
+at each `draw_list`.
 
 **Batching.** `nt_mesh_renderer_batch_key(material, mesh)` stays the exact
 two-slot packing. An equal key is a candidate run, and the run also requires an
 equal deformation texture. Frame origins, alpha, world and color are
 per-instance. Only adjacent compatible items merge; the game's order wins.
 
-**Instance layout** carries three world rows, four UINT16 frame origin
-coordinates and one float alpha, followed by optional color. Its renderer-owned
-stride is 60 B with no color, 64 B with normalized RGBA8, and 76 B with FLOAT4
-color; it is independent of the mesh renderer's 64-byte cap. `joints` arrive through float
+**Instance payload** is six texels in the instance texture: three world rows,
+the four frame origin coordinates as floats (exact below 2^24), the blend alpha
+in `x` of the fifth, and the colour. A 1024-texel row holds 170 instances, and a
+payload may straddle two rows. `joints` arrive through float
 attributes with shader integer conversion and `weights` normalized, in the
 stream layouts the builder chapter fixes (Skin streams, under Builder
 validation). FLOAT16 lane sums deviate from 1 by at most `4·2⁻¹¹`, and no

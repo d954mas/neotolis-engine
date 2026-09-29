@@ -105,6 +105,9 @@ static uint32_t s_fake_last_vertex_buffer_hash;
 static uint32_t s_fake_last_index_buffer_hash;
 static uint32_t s_fake_backend_restore_count;
 static uint32_t s_fake_gpu_caps_probe_count;
+static uint32_t s_fake_uniform_buffer_offset_alignment = 256;
+static uint32_t s_fake_ubo_bind_count;
+static nt_gfx_fake_ubo_bind_t s_fake_ubo_binds[NT_GFX_FAKE_HISTORY_CAPACITY];
 static uint16_t s_fake_last_pass_width;
 static uint16_t s_fake_last_pass_height;
 static nt_texture_desc_t s_fake_last_texture_desc;
@@ -183,6 +186,12 @@ uint32_t nt_gfx_fake_last_vertex_buffer_hash(void) { return s_fake_last_vertex_b
 uint32_t nt_gfx_fake_last_index_buffer_hash(void) { return s_fake_last_index_buffer_hash; }
 uint32_t nt_gfx_fake_backend_restore_count(void) { return s_fake_backend_restore_count; }
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void) { return s_fake_gpu_caps_probe_count; }
+uint32_t nt_gfx_fake_ubo_bind_count(void) { return s_fake_ubo_bind_count; }
+nt_gfx_fake_ubo_bind_t nt_gfx_fake_ubo_bind_at(uint32_t index) {
+    bool valid = index < s_fake_ubo_bind_count && index < NT_GFX_FAKE_HISTORY_CAPACITY;
+    return valid ? s_fake_ubo_binds[index] : (nt_gfx_fake_ubo_bind_t){0};
+}
+void nt_gfx_fake_set_uniform_buffer_offset_alignment(uint32_t alignment) { s_fake_uniform_buffer_offset_alignment = alignment; }
 uint16_t nt_gfx_fake_last_pass_width(void) { return s_fake_last_pass_width; }
 uint16_t nt_gfx_fake_last_pass_height(void) { return s_fake_last_pass_height; }
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void) { return s_fake_last_texture_desc; }
@@ -247,6 +256,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_index_buffer_hash = 0;
     s_fake_backend_restore_count = 0;
     s_fake_gpu_caps_probe_count = 0;
+    s_fake_uniform_buffer_offset_alignment = 256;
+    s_fake_ubo_bind_count = 0;
     s_fake_last_pass_width = 0;
     s_fake_last_pass_height = 0;
     s_fake_last_texture_desc = (nt_texture_desc_t){0};
@@ -621,10 +632,9 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
 
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
     if (s_fake_update_texture_count < NT_GFX_FAKE_HISTORY_CAPACITY) {
-        s_fake_update_texture_rects[s_fake_update_texture_count] = (nt_gfx_fake_update_texture_rect_t){.x = x, .y = y, .w = w, .h = h, .data = data};
+        s_fake_update_texture_rects[s_fake_update_texture_count] = (nt_gfx_fake_update_texture_rect_t){.x = x, .y = y, .w = w, .h = h, .data = data, .backend = backend_handle};
     }
     s_fake_update_texture_count++;
-    (void)backend_handle;
     (void)format;
     (void)data;
 }
@@ -647,10 +657,12 @@ void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y
     memcpy(s_fake_vertex_attrib_defaults[location], (float[4]){x, y, z, w}, sizeof(float[4]));
 }
 
-void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
+void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && "bind_uniform_buffer: requires a live handle");
-    (void)backend_handle;
-    (void)slot;
+    if (s_fake_ubo_bind_count < NT_GFX_FAKE_HISTORY_CAPACITY) {
+        s_fake_ubo_binds[s_fake_ubo_bind_count] = (nt_gfx_fake_ubo_bind_t){backend_handle, slot, offset, size};
+    }
+    s_fake_ubo_bind_count++;
 }
 
 void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
@@ -758,5 +770,5 @@ bool nt_gfx_backend_recreate_all_resources(void) {
 
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     s_fake_gpu_caps_probe_count++;
-    return (nt_gfx_gpu_caps_t){.max_texture_size = 4096, .has_float_render_target = true, .has_float_texture_linear = true};
+    return (nt_gfx_gpu_caps_t){.max_texture_size = 4096, .has_float_render_target = true, .has_float_texture_linear = true, .uniform_buffer_offset_alignment = s_fake_uniform_buffer_offset_alignment};
 }

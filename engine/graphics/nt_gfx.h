@@ -332,12 +332,18 @@ typedef struct {
      * raise the extra budget near the 64-layout sprite limit. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
-    uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
-    bool depth;                  /* request depth buffer (default: true) */
-    bool stencil;                /* request stencil buffer (default: false) */
-    bool antialias;              /* MSAA (default: false) */
-    bool alpha;                  /* transparent canvas/window (default: false) */
-    bool premultiplied_alpha;    /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
+    /* Transient textures: gfx-owned, created at init on top of max_textures.
+     * Count = uploads per frame before one repeats; each texture is
+     * NT_GFX_TRANSIENT_TEXTURE_WIDTH x height RGBA32F texels. The mesh
+     * renderers need them; 0 creates none. */
+    uint16_t max_transient_textures;   /* default: 16 */
+    uint16_t transient_texture_height; /* default: 8 -> 1024x8 texels, 128 KB */
+    uint32_t capture_capacity;         /* event records, default: 0; allocated once at init */
+    bool depth;                        /* request depth buffer (default: true) */
+    bool stencil;                      /* request stencil buffer (default: false) */
+    bool antialias;                    /* MSAA (default: false) */
+    bool alpha;                        /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha;          /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {
@@ -528,6 +534,7 @@ typedef enum {
     X(glBeginQuery)                                                                                                                                                                                    \
     X(glBindBuffer)                                                                                                                                                                                    \
     X(glBindBufferBase)                                                                                                                                                                                \
+    X(glBindBufferRange)                                                                                                                                                                               \
     X(glBindFramebuffer)                                                                                                                                                                               \
     X(glBindSampler)                                                                                                                                                                                   \
     X(glBindTexture)                                                                                                                                                                                   \
@@ -577,6 +584,7 @@ typedef enum {
     X(glGenVertexArrays)                                                                                                                                                                               \
     X(glGenerateMipmap)                                                                                                                                                                                \
     X(glGetActiveUniform)                                                                                                                                                                              \
+    X(glGetActiveUniformsiv)                                                                                                                                                                           \
     X(glGetError)                                                                                                                                                                                      \
     X(glGetIntegerv)                                                                                                                                                                                   \
     X(glGetProgramInfoLog)                                                                                                                                                                             \
@@ -634,6 +642,7 @@ typedef struct {
     uint64_t buffer_upload_bytes;
     uint64_t texture_upload_calls;
     uint64_t texture_upload_bytes;
+    uint64_t transient_overflows;       /* transient textures handed out twice in one frame */
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
@@ -711,7 +720,7 @@ typedef struct {
             float values[16];
         } uniform;
         struct {
-            uint32_t secondary, name, slot, offset;
+            uint32_t secondary, name, slot, offset, size;
         } binding;
         struct {
             uint32_t target;
@@ -758,12 +767,13 @@ nt_gfx_capture_view_t nt_gfx_capture_read(void);
 /* ---- GPU format capabilities ---- */
 
 typedef struct {
-    bool has_astc;                 /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
-    bool has_bc7;                  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
-    bool has_etc2;                 /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
-    bool has_float_render_target;  /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
-    bool has_float_texture_linear; /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
-    uint32_t max_texture_size;     /* GL_MAX_TEXTURE_SIZE, queried at init */
+    bool has_astc;                            /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;                             /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2;                            /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    bool has_float_render_target;             /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
+    bool has_float_texture_linear;            /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
+    uint32_t max_texture_size;                /* GL_MAX_TEXTURE_SIZE, queried at init */
+    uint32_t uniform_buffer_offset_alignment; /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: ranged UBO binds start at a multiple */
 } nt_gfx_gpu_caps_t;
 
 /* ---- Global state ---- */
@@ -791,6 +801,8 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_meshes = 128,
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
+        .max_transient_textures = 16,
+        .transient_texture_height = 8,
         .depth = true,
         .premultiplied_alpha = true,
     };
@@ -970,13 +982,20 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 /* Re-specifies instance attrib pointers at byte_offset into the bound vertex
  * input, which must declare a nonempty instance_layout; both asserted. The
  * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets);
- * asserted. Re-bind per draw to re-point. */
+ * asserted. Re-bind per draw to re-point. Suits few large instanced draws;
+ * many small runs read their data from a transient texture instead. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* ---- Uniform buffer ---- */
 
+/* Binds the whole buffer, or [offset, offset + size) of it. A range starts at a
+ * multiple of gpu_caps.uniform_buffer_offset_alignment, is nonempty and fits the
+ * buffer; WebGL also requires it to cover the block's full data size. Upload every
+ * range of a frame before the first draw that reads the buffer: Mali/ANGLE stall on
+ * a rewrite of any part of a buffer an earlier draw read. */
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Disjoint
@@ -1002,6 +1021,22 @@ bool nt_gfx_is_gpu_timing_supported(void);
 /* ---- Texture update (uncompressed, non-mipmapped, non-depth textures only, level 0) ---- */
 
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
+
+/* ---- Transient textures ---- */
+
+/* Texels per row; a shader finds texel i at (i % WIDTH, i / WIDTH). */
+#define NT_GFX_TRANSIENT_TEXTURE_WIDTH 1024U
+
+/* Texels one transient texture holds; 0 without transient textures. */
+uint32_t nt_gfx_transient_texture_capacity(void);
+/* Uploads texel_count RGBA32F texels into the next transient texture and returns
+ * it; valid until the next begin_frame, owned by gfx. Past one row the upload is
+ * whole rows, so texels must be readable up to the end of the last row it touches;
+ * texel_count <= nt_gfx_transient_texture_capacity().
+ * No texture repeats within a frame until max_transient_textures are used: a
+ * rewrite of one an earlier draw sampled makes the driver stall. INVALID while the
+ * context is lost or when no transient texture could be created. */
+nt_texture_t nt_gfx_transient_texture(const void *texels, uint32_t texel_count);
 
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */
 

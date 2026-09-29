@@ -257,6 +257,13 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
     (void)slot;
 }
 
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+    (void)buf;
+    (void)slot;
+    (void)offset;
+    (void)size;
+}
+
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     (void)buf;
     (void)offset;
@@ -327,3 +334,11 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh) {
 }
 
 uint16_t nt_gfx_max_meshes(void) { return 0; }
+
+uint32_t nt_gfx_transient_texture_capacity(void) { return 0; }
+
+nt_texture_t nt_gfx_transient_texture(const void *texels, uint32_t texel_count) {
+    (void)texels;
+    (void)texel_count;
+    return (nt_texture_t){0};
+}

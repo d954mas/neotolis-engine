@@ -279,7 +279,6 @@ int main(void) {
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_BACK,
-        .color_mode = NT_COLOR_MODE_FLOAT4,
         .label = "atlas_cube",
     });
 

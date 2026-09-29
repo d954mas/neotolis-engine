@@ -26,6 +26,7 @@
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+#include <glad/gl.h>
 
 enum { RT_W = 96, RT_H = 96, VERTEX_COUNT = 4, FRAME_BYTES = RT_W * RT_H * 4 };
 
@@ -203,42 +204,73 @@ static bool read_text(const char *path, char **out_text) {
     return true;
 }
 
-static bool compose_skin_vertex_source(char **out_source) {
-    static const char marker[] = "#include \"../../assets/shaders/common/skin.glsl\"";
-    static const char pragma[] = "#pragma once";
-    char *fixture = NULL;
-    char *skin = NULL;
-    if (!read_text("tests/fixtures/skinned_mesh_renderer_native.vert", &fixture) || !read_text("assets/shaders/common/skin.glsl", &skin)) {
-        free(fixture);
-        free(skin);
+/* The builder's include resolution in miniature: quoted includes relative to
+ * the including file, each file once, #pragma once lines dropped. */
+typedef struct {
+    char *text;
+    size_t size;
+    char included[8][256];
+    uint32_t included_count;
+} shader_source_t;
+
+static bool append_text(shader_source_t *out, const char *text, size_t size) {
+    char *grown = (char *)realloc(out->text, out->size + size + 1U);
+    if (grown == NULL) {
         return false;
     }
-    const char *insert = strstr(fixture, marker);
-    const char *line_end = strchr(skin, '\n');
-    const bool valid = insert != NULL && strstr(insert + sizeof(marker) - 1U, marker) == NULL && strncmp(skin, pragma, sizeof(pragma) - 1U) == 0 && line_end != NULL;
-    if (!valid) {
-        free(fixture);
-        free(skin);
+    memcpy(grown + out->size, text, size);
+    out->size += size;
+    grown[out->size] = '\0';
+    out->text = grown;
+    return true;
+}
+
+// NOLINTNEXTLINE(misc-no-recursion) -- include depth is bounded by the fixture files
+static bool append_shader_file(shader_source_t *out, const char *path) {
+    for (uint32_t i = 0; i < out->included_count; i++) {
+        if (strcmp(out->included[i], path) == 0) {
+            return true;
+        }
+    }
+    if (out->included_count == 8U || strlen(path) >= sizeof(out->included[0])) {
         return false;
     }
-    const char *body = line_end + 1;
-    const size_t prefix_size = (size_t)(insert - fixture);
-    const size_t suffix_size = strlen(insert + sizeof(marker) - 1U);
-    const size_t body_size = strlen(body);
-    char *combined = (char *)malloc(prefix_size + body_size + suffix_size + 1U);
-    if (combined == NULL) {
-        free(fixture);
-        free(skin);
+    (void)snprintf(out->included[out->included_count++], sizeof(out->included[0]), "%s", path);
+    char *text = NULL;
+    if (!read_text(path, &text)) {
         return false;
     }
-    memcpy(combined, fixture, prefix_size);
-    /* The suffix copy below writes the only terminator after the inserted body. */
-    // NOLINTNEXTLINE(bugprone-not-null-terminated-result)
-    memcpy(combined + prefix_size, body, body_size);
-    memcpy(combined + prefix_size + body_size, insert + sizeof(marker) - 1U, suffix_size + 1U);
-    free(fixture);
-    free(skin);
-    *out_source = combined;
+    const char *slash = strrchr(path, '/');
+    const size_t dir_size = slash != NULL ? (size_t)(slash - path) + 1U : 0U;
+    bool ok = true;
+    for (const char *line = text; ok && *line != '\0';) {
+        const char *end = strchr(line, '\n');
+        const size_t size = end != NULL ? (size_t)(end - line) + 1U : strlen(line);
+        if (strncmp(line, "#include \"", 10) == 0) {
+            const char *name = line + 10;
+            const char *close = strchr(name, '"');
+            char nested[256];
+            ok = close != NULL && dir_size + (size_t)(close - name) < sizeof(nested);
+            if (ok) {
+                (void)snprintf(nested, sizeof(nested), "%.*s%.*s", (int)dir_size, path, (int)(close - name), name);
+                ok = append_shader_file(out, nested);
+            }
+        } else if (strncmp(line, "#pragma once", 12) != 0) {
+            ok = append_text(out, line, size);
+        }
+        line += size;
+    }
+    free(text);
+    return ok;
+}
+
+static bool load_shader_source(const char *path, char **out_source) {
+    shader_source_t source = {0};
+    if (!append_shader_file(&source, path)) {
+        free(source.text);
+        return false;
+    }
+    *out_source = source.text;
     return true;
 }
 
@@ -268,7 +300,7 @@ static nt_mesh_t make_mesh(const test_vertex_t vertices[VERTEX_COUNT]) {
     return (nt_mesh_t){.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
 }
 
-static nt_material_t make_skinned_material(float probe_mode, nt_color_mode_t color_mode) {
+static nt_material_t make_skinned_material(float probe_mode) {
     return nt_material_create(&(nt_material_create_desc_t){
         .program = s_skin_program,
         .textures = {{.name = "u_skin_matrices"}},
@@ -285,7 +317,6 @@ static nt_material_t make_skinned_material(float probe_mode, nt_color_mode_t col
             },
         .attr_map_count = 5,
         .cull_mode = NT_CULL_NONE,
-        .color_mode = color_mode,
         .label = "native_skinned_probe",
     });
 }
@@ -303,7 +334,6 @@ static nt_material_t make_reference_material(float probe_mode) {
             },
         .attr_map_count = 3,
         .cull_mode = NT_CULL_NONE,
-        .color_mode = NT_COLOR_MODE_NONE,
         .label = "native_skin_cpu_reference",
     });
 }
@@ -467,6 +497,8 @@ void setUp(void) {
         .max_meshes = 16,
         .max_vertex_inputs = 64,
         .max_render_targets = 4,
+        .max_transient_textures = 4,
+        .transient_texture_height = 2, /* two rows: an instance can straddle */
     });
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 32});
@@ -477,10 +509,11 @@ void setUp(void) {
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 32});
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
     s_initialized = true;
-    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_instances = 8, .max_pipelines = 4, .max_mesh_layouts = 4}));
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 8, .max_pipelines = 4, .max_mesh_layouts = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
 
-    const bool sources_ready = compose_skin_vertex_source(&skin_source) && read_text("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
+    const bool sources_ready = load_shader_source("tests/fixtures/skinned_mesh_renderer_native.vert", &skin_source) &&
+                               load_shader_source("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
                                read_text("tests/fixtures/skinned_mesh_renderer_native.frag", &fragment_source);
     if (!sources_ready) {
         free(skin_source);
@@ -568,7 +601,7 @@ static void test_palette_frames_and_interpolation_match_cpu_reference(void) {
     nt_material_t skinned_material[3];
     nt_material_t reference_material[3];
     for (uint8_t mode = 0; mode < 3; mode++) {
-        skinned_material[mode] = make_skinned_material((float)mode, NT_COLOR_MODE_NONE);
+        skinned_material[mode] = make_skinned_material((float)mode);
         reference_material[mode] = make_reference_material((float)mode);
     }
     nt_deformation_binding_t initial = cases[0];
@@ -601,9 +634,9 @@ static void test_palette_frames_and_interpolation_match_cpu_reference(void) {
 static void test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic(void) {
     const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 0, .y1 = 0, .alpha = 0.0F};
     nt_mesh_t mesh = make_mesh(k_guard_bar);
-    nt_material_t position_material = make_skinned_material(0.0F, NT_COLOR_MODE_NONE);
-    nt_material_t normal_material = make_skinned_material(1.0F, NT_COLOR_MODE_NONE);
-    nt_material_t tangent_material = make_skinned_material(2.0F, NT_COLOR_MODE_NONE);
+    nt_material_t position_material = make_skinned_material(0.0F);
+    nt_material_t normal_material = make_skinned_material(1.0F);
+    nt_material_t tangent_material = make_skinned_material(2.0F);
     nt_entity_t entity = make_entity(mesh, position_material, &binding);
 
     render_entity(entity, position_material, mesh, true, s_expected);
@@ -616,7 +649,9 @@ static void test_degenerate_normal_and_tangent_guards_are_finite_and_determinist
     assert_probe_matches_mask(s_actual, 128, 128, 191); /* deterministic +Z tangent */
 }
 
-static void test_colored_then_none_restores_white_for_both_color_layouts(void) {
+/* The second run draws at base 1 inside the instance texture and reads its own colour:
+ * white, since that entity has no drawable component. */
+static void test_entity_without_drawable_reads_white_after_a_colored_one(void) {
     const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
     test_vertex_t reference_vertices[VERTEX_COUNT];
     deform_vertices(binding, false, reference_vertices);
@@ -625,24 +660,51 @@ static void test_colored_then_none_restores_white_for_both_color_layouts(void) {
     nt_entity_t reference_entity = make_entity(reference_mesh, reference_material, NULL);
     render_entity(reference_entity, reference_material, reference_mesh, false, s_expected);
 
-    const nt_color_mode_t modes[2] = {NT_COLOR_MODE_RGBA8, NT_COLOR_MODE_FLOAT4};
-    for (uint8_t i = 0; i < 2; i++) {
-        nt_mesh_t mesh = make_mesh(k_bar);
-        nt_material_t colored = make_skinned_material(3.0F, modes[i]);
-        nt_material_t none = make_skinned_material(3.0F, NT_COLOR_MODE_NONE);
-        nt_entity_t colored_entity = make_entity(mesh, colored, &binding);
-        nt_entity_t none_entity = make_entity(mesh, none, &binding);
-        nt_drawable_comp_set_color(colored_entity, 0.1F, 0.2F, 0.3F, 1.0F);
-        render_entity(colored_entity, colored, mesh, true, s_actual);
-        assert_probe_matches_mask(s_actual, 26, 51, 77);
-        const nt_render_item_t items[2] = {
-            {.entity = colored_entity.id, .batch_key = nt_mesh_renderer_batch_key(colored, mesh)},
-            {.entity = none_entity.id, .batch_key = nt_mesh_renderer_batch_key(none, mesh)},
-        };
+    nt_mesh_t mesh = make_mesh(k_bar);
+    nt_material_t colored = make_skinned_material(3.0F);
+    nt_material_t plain = make_skinned_material(3.0F);
+    nt_entity_t colored_entity = make_entity(mesh, colored, &binding);
+    nt_entity_t plain_entity = make_entity(mesh, plain, &binding);
+    nt_drawable_comp_remove(plain_entity);
+    nt_drawable_comp_set_color(colored_entity, 0.1F, 0.2F, 0.3F, 1.0F);
+    render_entity(colored_entity, colored, mesh, true, s_actual);
+    assert_probe_matches_mask(s_actual, 26, 51, 77);
+    const nt_render_item_t items[2] = {
+        {.entity = colored_entity.id, .batch_key = nt_mesh_renderer_batch_key(colored, mesh)},
+        {.entity = plain_entity.id, .batch_key = nt_mesh_renderer_batch_key(plain, mesh)},
+    };
 
-        render_skinned_list(items, 2, s_actual);
-        assert_cpu_gpu_frames_agree();
+    render_skinned_list(items, 2, s_actual);
+    assert_cpu_gpu_frames_agree();
+}
+
+/* Skinned payloads are six texels, so instance 170 spans texels 1020..1025 across
+ * the first row edge; it must still read all six of its own texels. */
+static void test_instance_straddling_a_texture_row_matches_cpu_reference(void) {
+    const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
+    test_vertex_t reference_vertices[VERTEX_COUNT];
+    deform_vertices(binding, false, reference_vertices);
+    nt_mesh_t reference_mesh = make_mesh(reference_vertices);
+    nt_material_t reference_material = make_reference_material(3.0F);
+    render_entity(make_entity(reference_mesh, reference_material, NULL), reference_material, reference_mesh, false, s_expected);
+
+    nt_mesh_t mesh = make_mesh(k_bar);
+    nt_material_t material = make_skinned_material(3.0F);
+    /* Its alpha and colour sit on row 1 for the probe, so the neighbours carry others. */
+    const nt_deformation_binding_t other = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.75F};
+    nt_entity_t hidden = make_entity(mesh, material, &other);
+    nt_drawable_comp_set_color(hidden, 0.2F, 0.4F, 0.6F, 1.0F);
+    nt_transform_comp_set_position(hidden, 1000.0F, 0.0F, 0.0F); /* off screen */
+    nt_entity_t probe = make_entity(mesh, material, &binding);
+    nt_transform_comp_update();
+    static nt_render_item_t items[171];
+    for (uint32_t i = 0; i < 170; i++) {
+        items[i] = (nt_render_item_t){.entity = hidden.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
     }
+    items[170] = (nt_render_item_t){.entity = probe.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
+
+    render_skinned_list(items, 171, s_actual);
+    assert_cpu_gpu_frames_agree();
 }
 
 int main(void) {
@@ -656,7 +718,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_palette_frames_and_interpolation_match_cpu_reference);
     RUN_TEST(test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic);
-    RUN_TEST(test_colored_then_none_restores_white_for_both_color_layouts);
+    RUN_TEST(test_entity_without_drawable_reads_white_after_a_colored_one);
+    RUN_TEST(test_instance_straddling_a_texture_row_matches_cpu_reference);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

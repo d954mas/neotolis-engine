@@ -1265,6 +1265,19 @@ static void test_ground_state_reissues_sampler_bind(void) {
 }
 // #endregion
 
+/* A block's array members are not standalone uniforms: linking must not look
+ * up a location per element, and they must not count toward the 16-entry cache. */
+static void test_block_members_skip_the_uniform_cache(void) {
+    const char *vs = "precision highp float;\n"
+                     "layout(std140) uniform Big { vec4 big_data[1024]; };\n"
+                     "uniform vec4 u_offset;\n"
+                     "void main() { gl_Position = big_data[gl_VertexID] + u_offset; }\n";
+    const uint32_t lookups = g_nt_gfx.counters.gl[NT_GFX_GL_glGetUniformLocation];
+    nt_pipeline_t pip = make_pipeline_ex(vs, s_fs_src, false, false, false);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glGetUniformLocation] - lookups);
+}
+
 static void test_vec4_repeat_skips_physical_upload(void) {
     const char *fs = "precision mediump float;\n"
                      "uniform vec4 u_color;\n"
@@ -1405,6 +1418,7 @@ int main(void) {
     g_nt_window = (nt_window_t){.max_dpr = 1.0F, .resizable = false, .width = 16, .height = 16};
     nt_window_init();
     UNITY_BEGIN();
+    RUN_TEST(test_block_members_skip_the_uniform_cache);
     RUN_TEST(test_vec4_repeat_skips_physical_upload);
     RUN_TEST(test_vec4_cache_follows_program_lifetime);
     RUN_TEST(test_vec4_array_entries_and_other_types);

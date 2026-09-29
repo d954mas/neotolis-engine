@@ -86,6 +86,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->texture_count; i++) {
         /* A slot with no uniform name is a declaration nothing can bind. */
         NT_ASSERT(desc->textures[i].name != NULL && "material texture slot needs a sampler uniform name");
+        NT_ASSERT(strcmp(desc->textures[i].name, NT_MATERIAL_INSTANCES_SAMPLER) != 0 && "nt_instances is reserved for the renderers' instance texture");
         info->tex_resources[i] = desc->textures[i].resource;
         info->tex_name_hashes[i] = nt_hash32_str(desc->textures[i].name).value;
         info->tex_samplers[i] = desc->textures[i].sampler;
@@ -132,8 +133,6 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     info->depth_test = desc->depth_test;
     info->depth_write = desc->depth_write;
     info->cull_mode = desc->cull_mode;
-    NT_ASSERT((uint32_t)desc->color_mode <= NT_COLOR_MODE_FLOAT4 && "invalid color_mode -- use NT_COLOR_MODE_NONE/RGBA8/FLOAT4");
-    info->color_mode = desc->color_mode;
 
     /* Debug label (caller must ensure static storage / string literal) */
     info->label = desc->label;
