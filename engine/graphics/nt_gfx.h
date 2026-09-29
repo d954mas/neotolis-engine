@@ -92,6 +92,9 @@ typedef struct {
 
 #define NT_GFX_MAX_GLOBAL_BLOCKS 8
 
+/* GL_MAX_UNIFORM_BUFFER_BINDINGS guaranteed by WebGL2 / GLES 3.0. */
+#define NT_GFX_MAX_UBO_SLOTS 24
+
 /* Samplers are deduplicated by their (filter/wrap/compare) descriptor; most apps
  * use 3-10 unique configs. 128 is headroom, not coverage — all 324 combinations
  * are constructible. Costs ~4 KB of BSS, not binary size; the linear scan
@@ -528,6 +531,7 @@ typedef enum {
     X(glBeginQuery)                                                                                                                                                                                    \
     X(glBindBuffer)                                                                                                                                                                                    \
     X(glBindBufferBase)                                                                                                                                                                                \
+    X(glBindBufferRange)                                                                                                                                                                               \
     X(glBindFramebuffer)                                                                                                                                                                               \
     X(glBindSampler)                                                                                                                                                                                   \
     X(glBindTexture)                                                                                                                                                                                   \
@@ -711,7 +715,7 @@ typedef struct {
             float values[16];
         } uniform;
         struct {
-            uint32_t secondary, name, slot, offset;
+            uint32_t secondary, name, slot, offset, size;
         } binding;
         struct {
             uint32_t target;
@@ -758,12 +762,13 @@ nt_gfx_capture_view_t nt_gfx_capture_read(void);
 /* ---- GPU format capabilities ---- */
 
 typedef struct {
-    bool has_astc;                 /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
-    bool has_bc7;                  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
-    bool has_etc2;                 /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
-    bool has_float_render_target;  /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
-    bool has_float_texture_linear; /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
-    uint32_t max_texture_size;     /* GL_MAX_TEXTURE_SIZE, queried at init */
+    bool has_astc;                            /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;                             /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2;                            /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    bool has_float_render_target;             /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
+    bool has_float_texture_linear;            /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
+    uint32_t max_texture_size;                /* GL_MAX_TEXTURE_SIZE, queried at init */
+    uint32_t uniform_buffer_offset_alignment; /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: ranged UBO binds start at a multiple */
 } nt_gfx_gpu_caps_t;
 
 /* ---- Global state ---- */
@@ -799,7 +804,10 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
 /* ---- Global UBO block registration ---- */
 
 /* Registers the block binding for existing and future programs.
- * name is required and borrowed unchanged until nt_gfx_shutdown; gfx never frees it. */
+ * name is required and borrowed unchanged until nt_gfx_shutdown; gfx never frees it.
+ * Re-registering the same (name, slot) pair is a no-op, so every user of a
+ * shared block may register it; a known name on another slot or a known slot
+ * under another name asserts. binding_slot < NT_GFX_MAX_UBO_SLOTS. */
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot);
 void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count);
 
@@ -976,7 +984,14 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 
 /* ---- Uniform buffer ---- */
 
+/* Binds the whole buffer, or [offset, offset + size) of it, to slot
+ * (< NT_GFX_MAX_UBO_SLOTS). A range starts at a multiple of
+ * gpu_caps.uniform_buffer_offset_alignment, is nonempty and fits the buffer;
+ * WebGL also requires it to cover the block's full data size. Both are context
+ * state that survives passes; the backend skips a bind identical to the slot's
+ * current one. */
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Disjoint

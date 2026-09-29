@@ -166,9 +166,21 @@ static const nt_gfx_texture_meta_t *render_target_size_meta(uint32_t rt_slot) {
 
 /* ---- Global UBO block registration ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
     NT_ASSERT(name != NULL);
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UNIFORM_BLOCK, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = nt_hash32_str(name).value; event->data.binding.slot = binding_slot);
+    NT_ASSERT(binding_slot < NT_GFX_MAX_UBO_SLOTS && "register_global_block: slot out of range");
+    for (uint32_t i = 0; i < s_global_block_count; i++) {
+        const bool same_name = strcmp(s_global_blocks[i].name, name) == 0;
+        const bool same_slot = s_global_blocks[i].binding_slot == binding_slot;
+        if (same_name && same_slot) {
+            NT_GFX_END(NT_GFX_RESULT_CACHE);
+            return;
+        }
+        NT_ASSERT(!same_name && "register_global_block: block already registered on another slot");
+        NT_ASSERT(!same_slot && "register_global_block: slot already holds another block");
+    }
     NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
     /* Borrowed until nt_gfx_shutdown; use a string literal or equally long-lived immutable storage. */
     s_global_blocks[s_global_block_count].name = name;
@@ -302,7 +314,6 @@ static void capture_initial_state(void) {
                   event->data.state.integers[4] = s_gfx.texture_set_state; event->data.state.integers[5] = g_nt_gfx.context_lost;);
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR_ENABLE, event->data.state.integers[0] = s_gfx.scissor_enabled);
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, event->result = NT_GFX_RESULT_UNKNOWN);
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_UBO, event->result = NT_GFX_RESULT_UNKNOWN);
     const nt_pool_t *pools[] = {&s_gfx.shader_pool, &s_gfx.program_pool, &s_gfx.pipeline_pool, &s_gfx.vertex_input_pool, &s_gfx.buffer_pool, &s_gfx.texture_pool, &s_gfx.render_target_pool};
     const nt_gfx_object_kind_t kinds[] = {NT_GFX_OBJECT_SHADER, NT_GFX_OBJECT_PROGRAM, NT_GFX_OBJECT_PIPELINE,     NT_GFX_OBJECT_VERTEX_INPUT,
                                           NT_GFX_OBJECT_BUFFER, NT_GFX_OBJECT_TEXTURE, NT_GFX_OBJECT_RENDER_TARGET};
@@ -2260,8 +2271,10 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 
 /* ---- Uniform buffer ---- */
 
+/* size 0 binds the whole buffer; the public range entry point rejects it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
+static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+    NT_ASSERT(slot < NT_GFX_MAX_UBO_SLOTS && "bind_uniform_buffer: slot out of range");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2275,6 +2288,11 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         NT_LOG_ERROR("bind_uniform_buffer: buffer is not uniform type");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
+    if (size != 0) {
+        const uint32_t align = g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment;
+        NT_ASSERT(align != 0 && offset % align == 0 && "bind_uniform_buffer_range: offset is not a multiple of uniform_buffer_offset_alignment");
+        NT_ASSERT(size <= s_gfx.buffer_metas[idx].size && offset <= s_gfx.buffer_metas[idx].size - size && "bind_uniform_buffer_range: range exceeds the buffer");
+    }
     /* Buffers are never auto-restored: a zeroed backend means the owner skipped
      * the recreate contract, and binding it would feed the shader garbage. */
     NT_ASSERT(s_gfx.buffer_backends[idx] != 0 && "bind_uniform_buffer: buffer has no live backend -- recreate it after context restore");
@@ -2282,13 +2300,19 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         NT_LOG_ERROR_ONCE("bind_uniform_buffer: buffer has no live backend");
         return NT_GFX_RESULT_UNREADY;
     }
-    nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
+    nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot, offset, size);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot);
-    NT_GFX_END(bind_uniform_buffer(buf, slot));
+    NT_GFX_END(bind_uniform_buffer(buf, slot, 0, 0));
+}
+
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
+    NT_ASSERT(size != 0 && "bind_uniform_buffer_range: empty range");
+    NT_GFX_END(size != 0 ? bind_uniform_buffer(buf, slot, offset, size) : NT_GFX_RESULT_INVALID_ARGUMENT);
 }
 
 /* ---- Buffer update ---- */

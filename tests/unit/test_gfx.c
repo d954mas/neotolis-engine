@@ -2545,13 +2545,33 @@ void test_register_global_block(void) {
 }
 
 void test_register_global_block_max(void) {
+    static const char *const names[NT_GFX_MAX_GLOBAL_BLOCKS] = {"B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"};
     for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS; i++) {
-        nt_gfx_register_global_block("Block", i);
+        nt_gfx_register_global_block(names[i], i);
     }
     const nt_global_block_t *blocks;
     uint32_t count;
     nt_gfx_get_global_blocks(&blocks, &count);
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_GLOBAL_BLOCKS, count);
+}
+
+/* Every user of a shared block registers it; the registry keeps one entry. */
+void test_register_global_block_repeat_is_noop(void) {
+    char copy[] = "Globals"; /* equal by content, not by pointer */
+    nt_gfx_register_global_block("Globals", 0);
+    nt_gfx_register_global_block(copy, 0);
+
+    const nt_global_block_t *blocks;
+    uint32_t count;
+    nt_gfx_get_global_blocks(&blocks, &count);
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+}
+
+void test_register_global_block_conflicts_assert(void) {
+    nt_gfx_register_global_block("Globals", 0);
+    EXPECT_ASSERT(nt_gfx_register_global_block("Globals", 1));
+    EXPECT_ASSERT(nt_gfx_register_global_block("Lighting", 0));
+    EXPECT_ASSERT(nt_gfx_register_global_block("Lighting", NT_GFX_MAX_UBO_SLOTS));
 }
 
 void test_register_global_block_cleared_on_shutdown(void) {
@@ -2808,6 +2828,51 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     for (uint32_t i = 0; i < 4; i++) {
         nt_gfx_destroy_pipeline(pips[i]);
     }
+}
+
+static nt_buffer_t make_test_ubo(uint32_t size) { return nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = size}); }
+
+void test_bind_uniform_buffer_range_reaches_backend(void) {
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_bind_uniform_buffer(ubo, 1);
+    nt_gfx_bind_uniform_buffer_range(ubo, NT_GFX_MAX_UBO_SLOTS - 1, 768, 256); /* last slot, final legal range */
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    nt_gfx_fake_ubo_bind_t whole = nt_gfx_fake_ubo_bind_at(0);
+    nt_gfx_fake_ubo_bind_t range = nt_gfx_fake_ubo_bind_at(1);
+    TEST_ASSERT_EQUAL_UINT32(1, whole.slot);
+    TEST_ASSERT_EQUAL_UINT32(0, whole.size);
+    TEST_ASSERT_EQUAL_UINT32(whole.buffer_backend, range.buffer_backend);
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_UBO_SLOTS - 1, range.slot);
+    TEST_ASSERT_EQUAL_UINT32(768, range.offset);
+    TEST_ASSERT_EQUAL_UINT32(256, range.size);
+}
+
+void test_bind_uniform_buffer_range_asserts(void) {
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 1024});
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256));          /* off the 256 B alignment */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 0));             /* empty */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 512));         /* past the end */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0xFFFFFF00U, 512)); /* offset + size wraps */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 2048));          /* larger than the buffer */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, NT_GFX_MAX_UBO_SLOTS, 0, 256));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, NT_GFX_MAX_UBO_SLOTS));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(vbo, 0, 0, 256));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
+}
+
+/* The alignment is a device cap, re-read on every probe. */
+void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
+    nt_gfx_shutdown();
+    nt_gfx_fake_set_uniform_buffer_offset_alignment(16);
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    TEST_ASSERT_EQUAL_UINT32(16, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
+
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256);
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 8, 256));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
 }
 
 /* Buffers have no auto-restore path, so a husk means the owner skipped the
@@ -3220,6 +3285,9 @@ int main(void) {
     /* Uniform buffer tests */
     RUN_TEST(test_make_uniform_buffer);
     RUN_TEST(test_bind_uniform_buffer);
+    RUN_TEST(test_bind_uniform_buffer_range_reaches_backend);
+    RUN_TEST(test_bind_uniform_buffer_range_asserts);
+    RUN_TEST(test_bind_uniform_buffer_range_follows_probed_alignment);
     RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_update_buffer_at_offset);
     RUN_TEST(test_update_buffer_rejects_out_of_range);
@@ -3228,6 +3296,8 @@ int main(void) {
     /* Global block registration tests */
     RUN_TEST(test_register_global_block);
     RUN_TEST(test_register_global_block_max);
+    RUN_TEST(test_register_global_block_repeat_is_noop);
+    RUN_TEST(test_register_global_block_conflicts_assert);
     RUN_TEST(test_register_global_block_cleared_on_shutdown);
     /* New pixel format tests */
     RUN_TEST(test_gfx_make_texture_rgba16f);

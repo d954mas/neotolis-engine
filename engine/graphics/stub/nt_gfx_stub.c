@@ -257,6 +257,13 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
     (void)slot;
 }
 
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+    (void)buf;
+    (void)slot;
+    (void)offset;
+    (void)size;
+}
+
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     (void)buf;
     (void)offset;

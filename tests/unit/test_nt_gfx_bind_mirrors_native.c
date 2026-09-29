@@ -1265,6 +1265,69 @@ static void test_ground_state_reissues_sampler_bind(void) {
 }
 // #endregion
 
+// #region uniform buffer bind cache
+static nt_buffer_t make_ubo(uint32_t size) { return nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = size}); }
+
+static GLint ubo_indexed(GLenum pname, GLuint slot) {
+    GLint value = -1;
+    glGetIntegeri_v(pname, slot, &value);
+    return value;
+}
+
+static uint32_t ubo_bind_calls(void) { return g_nt_gfx.counters.gl[NT_GFX_GL_glBindBufferBase] + g_nt_gfx.counters.gl[NT_GFX_GL_glBindBufferRange]; }
+
+static void test_uniform_buffer_binds_skip_repeats_per_slot(void) {
+    const uint32_t align = g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment;
+    TEST_ASSERT_TRUE(align != 0 && (align & (align - 1)) == 0);
+    nt_buffer_t ubo = make_ubo(2 * align);
+
+    uint32_t calls = ubo_bind_calls();
+    nt_gfx_bind_uniform_buffer_range(ubo, 2, align, align);
+    nt_gfx_bind_uniform_buffer_range(ubo, 2, align, align);
+    TEST_ASSERT_EQUAL_UINT32(1, ubo_bind_calls() - calls);
+    TEST_ASSERT_EQUAL_INT((GLint)align, ubo_indexed(GL_UNIFORM_BUFFER_START, 2));
+    TEST_ASSERT_EQUAL_INT((GLint)align, ubo_indexed(GL_UNIFORM_BUFFER_SIZE, 2));
+
+    calls = ubo_bind_calls();
+    nt_gfx_bind_uniform_buffer_range(ubo, 2, 0, align); /* same buffer, new range */
+    nt_gfx_bind_uniform_buffer(ubo, 2);                 /* same buffer, whole */
+    nt_gfx_bind_uniform_buffer(ubo, 2);
+    nt_gfx_bind_uniform_buffer(ubo, 3); /* slots are independent */
+    TEST_ASSERT_EQUAL_UINT32(3, ubo_bind_calls() - calls);
+    TEST_ASSERT_EQUAL_INT(0, ubo_indexed(GL_UNIFORM_BUFFER_START, 2));
+    TEST_ASSERT_EQUAL_INT(ubo_indexed(GL_UNIFORM_BUFFER_BINDING, 2), ubo_indexed(GL_UNIFORM_BUFFER_BINDING, 3));
+}
+
+static void test_gl_name_reuse_after_destroying_bound_uniform_buffer(void) {
+    const uint32_t align = g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment;
+    nt_buffer_t first = make_ubo(align);
+    nt_gfx_bind_uniform_buffer_range(first, 1, 0, align);
+    nt_gfx_destroy_buffer(first);
+
+    /* GL may hand the freed name to this buffer; the cache must not treat it as bound. */
+    nt_buffer_t second = make_ubo(align);
+    const uint32_t calls = ubo_bind_calls();
+    nt_gfx_bind_uniform_buffer_range(second, 1, 0, align);
+    TEST_ASSERT_EQUAL_UINT32(1, ubo_bind_calls() - calls);
+    TEST_ASSERT_NOT_EQUAL_INT(0, ubo_indexed(GL_UNIFORM_BUFFER_BINDING, 1));
+}
+
+static void test_ground_state_reissues_uniform_buffer_bind(void) {
+    nt_gfx_bind_uniform_buffer(make_ubo(256), 0);
+    TEST_ASSERT_NOT_EQUAL_INT(0, ubo_indexed(GL_UNIFORM_BUFFER_BINDING, 0));
+
+    TEST_ASSERT_TRUE(nt_gfx_backend_recreate_all_resources());
+    TEST_ASSERT_EQUAL_INT(0, ubo_indexed(GL_UNIFORM_BUFFER_BINDING, 0));
+
+    /* The zeroed backend tables orphan every old handle, so this needs its own. */
+    nt_buffer_t fresh = make_ubo(256);
+    const uint32_t calls = ubo_bind_calls();
+    nt_gfx_bind_uniform_buffer(fresh, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, ubo_bind_calls() - calls);
+    TEST_ASSERT_NOT_EQUAL_INT(0, ubo_indexed(GL_UNIFORM_BUFFER_BINDING, 0));
+}
+// #endregion
+
 static void test_vec4_repeat_skips_physical_upload(void) {
     const char *fs = "precision mediump float;\n"
                      "uniform vec4 u_color;\n"
@@ -1437,6 +1500,9 @@ int main(void) {
     RUN_TEST(test_same_sampler_on_a_slot_binds_once);
     RUN_TEST(test_override_binds_one_sampler);
     RUN_TEST(test_ground_state_reissues_sampler_bind);
+    RUN_TEST(test_uniform_buffer_binds_skip_repeats_per_slot);
+    RUN_TEST(test_gl_name_reuse_after_destroying_bound_uniform_buffer);
+    RUN_TEST(test_ground_state_reissues_uniform_buffer_bind);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;
