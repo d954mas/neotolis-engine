@@ -690,7 +690,10 @@ static void test_instance_straddling_a_texture_row_matches_cpu_reference(void) {
 
     nt_mesh_t mesh = make_mesh(k_bar);
     nt_material_t material = make_skinned_material(3.0F);
-    nt_entity_t hidden = make_entity(mesh, material, &binding);
+    /* Its alpha and colour sit on row 1 for the probe, so the neighbours carry others. */
+    const nt_deformation_binding_t other = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.75F};
+    nt_entity_t hidden = make_entity(mesh, material, &other);
+    nt_drawable_comp_set_color(hidden, 0.2F, 0.4F, 0.6F, 1.0F);
     nt_transform_comp_set_position(hidden, 1000.0F, 0.0F, 0.0F); /* off screen */
     nt_entity_t probe = make_entity(mesh, material, &binding);
     nt_transform_comp_update();

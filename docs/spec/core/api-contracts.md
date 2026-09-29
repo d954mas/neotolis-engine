@@ -173,10 +173,14 @@ block's data size; gfx does not know block sizes, so the caller sizes the
 range.
 
 `nt_gfx_transient_texture` asserts on NULL texels, a zero count and a count
-above `nt_gfx_transient_texture_capacity()` (0 without transient textures); the
-texels must stay readable up to the end of the last row they touch. It returns
-INVALID only while the context is lost, and for a texture a failed restore could
-not recreate. `transient_texture_height` must be nonzero when
+above `nt_gfx_transient_texture_capacity()` (0 without transient textures). A
+count within one row uploads exactly those texels; past one row the upload is
+whole rows, so the texels must stay readable up to the end of the last row they
+touch; without
+asserts those violations return INVALID. It also returns INVALID while the
+context is lost and when no transient texture exists: none configured, or every
+one failed to create at init or restore (a failed one is skipped, and logged by
+its create). `transient_texture_height` must be nonzero when
 `max_transient_textures` is, and at most `gpu_caps.max_texture_size`.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context

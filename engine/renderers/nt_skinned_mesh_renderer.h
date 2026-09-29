@@ -8,6 +8,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Texels one instance takes in a transient texture (see the mesh renderer). */
+#define NT_SKINNED_MESH_RENDERER_INSTANCE_TEXELS 6U
+
 typedef struct {
     uint16_t max_pipelines;
     uint16_t max_mesh_layouts;

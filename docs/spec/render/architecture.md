@@ -100,8 +100,11 @@ or any part of a buffer, that an earlier draw of the frame read stalls the GPU,
 so each upload goes to a texture no earlier draw of the frame sampled. More
 uploads in one frame than textures reuse the oldest: still correct, but the
 driver orders the rewrite; `counters.transient_overflows` counts them and gfx
-warns once. The count sizes uploads per frame, not frames in flight: a texture
-rewritten one frame after its last read showed no stall. The same rule applies
+warns once. Every mesh or skinned `draw_list` call takes one texture per slice,
+even for a single instance, so the count sizes uploads per frame, not frames in
+flight: a texture rewritten one frame after its last read showed no stall. A
+texture that failed to create is skipped; with none left the call returns
+INVALID. The textures are gfx's: destroying one asserts. The same rule applies
 to `nt_gfx_bind_uniform_buffer_range`: upload every range of a frame before the
 first draw that reads the buffer.
 
@@ -327,13 +330,9 @@ instance-buffer re-pointing, uniform writes and draws outside a pass assert.
 Destroying a texture or a live render target inside a pass asserts: pass-scoped
 draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
-state. The backend deduplicates texture/sampler binds across passes, and
-uniform-buffer binds per slot on (buffer, offset, size): a whole-buffer bind and
-a ranged bind (`nt_gfx_bind_uniform_buffer_range`) are distinct entries.
-Grounding unbinds every slot, and destroying a buffer drops the slots that hold
-its GL name, which GL reuses. Indexed binds also set the generic
-`GL_UNIFORM_BUFFER` binding; uploads rebind it every time, so it is never
-cached. The clear forces the depth
+state. The backend deduplicates texture/sampler binds across passes;
+uniform-buffer binding calls `glBindBufferBase` (`glBindBufferRange` for a
+range) on every request. The clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
@@ -656,11 +655,8 @@ pipeline definition carries the program handle in `related[0]`. Backend
 `DEFINITION/PIPELINE` and `DEFINITION/ATTRIBUTE` records carry the pipeline or
 vertex-input backend slot in `detail`; initial state uses the current raw
 program name. Vertex-input creation copies each static/instance attribute with
-its divisor, layout, and known buffer. Inherited layouts unavailable in
-existing CPU state are explicitly unknown. The backend snapshots every
-uniform-buffer slot from its bind cache as `INITIAL/UBO`: `slot`, GL name in
-`secondary` (0: unbound), `offset` and `size` (0: whole buffer); while the
-context is lost the records are UNKNOWN, since grounding has not run. The initial SCISSOR
+its divisor, layout, and known buffer. Inherited layouts and UBO bindings
+unavailable in existing CPU state are explicitly unknown. The initial SCISSOR
 rectangle is UNKNOWN because the frontend mirror is not authoritative after a
 context loss. Capture
 never adds a persistent GL-state mirror or queries GL to reconstruct them.

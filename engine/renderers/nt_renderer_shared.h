@@ -337,6 +337,7 @@ static inline void nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, u
 /* Per-instance data is a transient texture bound under NT_MATERIAL_INSTANCES_SAMPLER;
  * the shader reads it through common/instance.glsl, offset by this uniform. */
 #define NT_RENDERER_INSTANCE_BASE_UNIFORM "nt_instance_base"
+_Static_assert(NT_GFX_TRANSIENT_TEXTURE_WIDTH == 1024U, "common/instance.glsl addresses 1024 texels per row");
 _Static_assert(NT_MATERIAL_MAX_TEXTURES + 1 <= NT_GFX_MAX_TEXTURE_SLOTS, "material textures plus the instance texture must fit the sampler slots");
 
 /* Semantic set: gfx ignores inactive names, validates active coverage, then

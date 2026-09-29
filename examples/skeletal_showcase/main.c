@@ -2501,10 +2501,9 @@ static void ordering_draw(void) {
         nt_skinned_mesh_renderer_draw_list(items, count);
         s_order_stats.draws[pass] = nt_gfx_draw_calls(&g_nt_gfx.counters) - draws_before;
         s_order_stats.instances[pass] = (uint32_t)(g_nt_gfx.counters.instances - instances_before);
-        /* One run per instance texture when everything batches (a skinned payload is six
-         * texels); one draw per item when neighbours alternate. */
+        /* One run per instance texture when everything batches; one draw per item when neighbours alternate. */
         const bool batches = s_order_mode == 0 || (pass == 1 && s_order_mode == 2);
-        const uint32_t per_texture = nt_gfx_transient_texture_capacity() / 6U;
+        const uint32_t per_texture = nt_gfx_transient_texture_capacity() / NT_SKINNED_MESH_RENDERER_INSTANCE_TEXELS;
         s_order_stats.expected[pass] = batches ? (count + per_texture - 1U) / per_texture : count;
     }
 }

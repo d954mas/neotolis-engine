@@ -523,6 +523,9 @@ static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
         NT_LOG_ERROR("destroy_texture: invalid handle");
         return NT_GFX_RESULT_INVALID_HANDLE;
     }
+    for (uint16_t i = 0; i < s_gfx.transient_count; i++) {
+        NT_ASSERT(s_gfx.transients[i].id != tex.id && "destroy_texture: transient textures belong to gfx");
+    }
     /* Pass-scoped draw state may still sample it; lifetime changes stay outside passes. */
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS && "destroy_texture called inside a pass");
     if (s_gfx.render_state == NT_GFX_STATE_PASS) {
@@ -2507,21 +2510,28 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 uint32_t nt_gfx_transient_texture_capacity(void) { return s_gfx.transient_count != 0 ? NT_GFX_TRANSIENT_TEXTURE_WIDTH * s_gfx.transient_height : 0; }
 
 nt_texture_t nt_gfx_transient_texture(const void *texels, uint32_t texel_count) {
-    NT_ASSERT(texels != NULL && texel_count > 0 && texel_count <= nt_gfx_transient_texture_capacity() && "transient_texture: needs 1..capacity texels");
-    if (g_nt_gfx.context_lost) {
+    const bool valid = texels != NULL && texel_count > 0 && texel_count <= nt_gfx_transient_texture_capacity();
+    NT_ASSERT(valid && "transient_texture: needs 1..capacity texels");
+    if (!valid || g_nt_gfx.context_lost) {
         return (nt_texture_t){0};
     }
-    const nt_texture_t tex = s_gfx.transients[s_gfx.transient_next];
+    /* A texture whose create failed stays INVALID; skip it rather than stall the turn on it. */
+    nt_texture_t tex = {0};
+    for (uint16_t tries = 0; tries < s_gfx.transient_count && tex.id == 0; tries++) {
+        tex = s_gfx.transients[s_gfx.transient_next];
+        s_gfx.transient_next = (uint16_t)((s_gfx.transient_next + 1U) % s_gfx.transient_count);
+    }
     if (tex.id == 0) {
         return tex;
     }
-    s_gfx.transient_next = (uint16_t)((s_gfx.transient_next + 1U) % s_gfx.transient_count);
     if (++s_gfx.transient_used > s_gfx.transient_count) {
         g_nt_gfx.counters.transient_overflows++;
         NT_LOG_WARN_ONCE("more transient textures in one frame than max_transient_textures (%u); raise it", (unsigned)s_gfx.transient_count);
     }
     const uint32_t rows = (texel_count + NT_GFX_TRANSIENT_TEXTURE_WIDTH - 1U) / NT_GFX_TRANSIENT_TEXTURE_WIDTH;
-    nt_gfx_update_texture(tex, 0, 0, (uint16_t)NT_GFX_TRANSIENT_TEXTURE_WIDTH, (uint16_t)rows, texels);
+    /* One rectangle: a single row carries only the used texels, taller uploads whole rows. */
+    const uint32_t width = rows == 1U ? texel_count : NT_GFX_TRANSIENT_TEXTURE_WIDTH;
+    nt_gfx_update_texture(tex, 0, 0, (uint16_t)width, (uint16_t)rows, texels);
     return tex;
 }
 

@@ -20,8 +20,7 @@ typedef struct {
     float world_rows[12];
     float color[4];
 } nt_mesh_instance_t;
-#define NT_MESH_INSTANCE_TEXELS 4U
-_Static_assert(sizeof(nt_mesh_instance_t) == (size_t)NT_MESH_INSTANCE_TEXELS * 16U, "mesh instance payload is four texels");
+_Static_assert(sizeof(nt_mesh_instance_t) == (size_t)NT_MESH_RENDERER_INSTANCE_TEXELS * 16U, "mesh instance payload is four texels");
 
 /* ---- Module state ---- */
 
@@ -32,7 +31,7 @@ static struct {
 
     nt_renderer_mesh_vi_cache_t vi_cache;
 
-    nt_mesh_instance_t *staging; /* [slice_instances]: one transient texture */
+    nt_mesh_instance_t *staging; /* one transient texture of texels */
     uint32_t slice_instances;
     nt_hash32_t instance_base;
     nt_hash32_t instances_sampler;
@@ -96,7 +95,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
 
     /* 0 without transient textures, and on the stub backend. */
-    s_mesh_renderer.slice_instances = nt_gfx_transient_texture_capacity() / NT_MESH_INSTANCE_TEXELS;
+    s_mesh_renderer.slice_instances = nt_gfx_transient_texture_capacity() / NT_MESH_RENDERER_INSTANCE_TEXELS;
     if (s_mesh_renderer.slice_instances == 0) {
         NT_LOG_ERROR("instance data needs gfx transient textures -- set nt_gfx_desc_t.max_transient_textures");
         return NT_ERR_INIT_FAILED;
@@ -117,7 +116,8 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
-    s_mesh_renderer.staging = (nt_mesh_instance_t *)calloc(s_mesh_renderer.slice_instances, sizeof(nt_mesh_instance_t));
+    /* The whole texture, not slice_instances payloads: uploads read up to the end of the last row. */
+    s_mesh_renderer.staging = (nt_mesh_instance_t *)calloc(nt_gfx_transient_texture_capacity(), 16U);
     if (!s_mesh_renderer.staging) {
         nt_renderer_mesh_vi_cache_shutdown(&s_mesh_renderer.vi_cache);
         free(s_mesh_renderer.entries);
@@ -195,9 +195,10 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
         }
         const nt_gfx_texture_binding_t instances = {
             .name = s_mesh_renderer.instances_sampler,
-            .texture = nt_gfx_transient_texture(s_mesh_renderer.staging, slice_count * NT_MESH_INSTANCE_TEXELS),
+            .texture = nt_gfx_transient_texture(s_mesh_renderer.staging, slice_count * NT_MESH_RENDERER_INSTANCE_TEXELS),
         };
-        /* INVALID only while the context is lost, when every draw is a no-op anyway. */
+        /* INVALID while the context is lost (every draw is a no-op) or when gfx has no
+         * transient texture left, which its failed creates already logged. */
         if (instances.texture.id == 0) {
             return;
         }

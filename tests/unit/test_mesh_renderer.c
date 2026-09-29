@@ -1514,7 +1514,7 @@ void test_draw_list_packs_world_rows_and_drawable_color(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_update_texture_count());
     const nt_gfx_fake_update_texture_rect_t upload = nt_gfx_fake_update_texture_rect_at(0);
     TEST_ASSERT_EQUAL_UINT16(0, upload.y);
-    TEST_ASSERT_EQUAL_UINT16(NT_GFX_TRANSIENT_TEXTURE_WIDTH, upload.w);
+    TEST_ASSERT_EQUAL_UINT16(2 * NT_MESH_RENDERER_INSTANCE_TEXELS, upload.w); /* one row: only the used texels */
     TEST_ASSERT_EQUAL_UINT16(1, upload.h);
     const float *packed = (const float *)upload.data;
     const float rows[12] = {1.0F, 0.0F, 0.0F, 7.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F}; /* translation lands in each row's w */
@@ -1583,6 +1583,20 @@ void test_draw_list_slices_at_texture_capacity(void) {
     TEST_ASSERT_EQUAL_INT(0, nt_gfx_fake_uniform_int_value_at(1));
     const float last_row0[4] = {1.0F, 0.0F, 0.0F, 5.0F};
     TEST_ASSERT_EQUAL_MEMORY(last_row0, second.data, sizeof(last_row0));
+}
+
+/* Without transient textures there is nowhere to put instance data. */
+void test_init_fails_without_transient_textures(void) {
+    nt_gfx_end_pass();
+    nt_mesh_renderer_shutdown();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.max_transient_textures = 0;
+    nt_gfx_init(&desc);
+    nt_mesh_renderer_desc_t rdesc = nt_mesh_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_mesh_renderer_init(&rdesc));
+    TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* Consecutive calls never rewrite the texture an earlier call's draws sampled. */
@@ -1659,6 +1673,7 @@ int main(void) {
     RUN_TEST(test_draw_list_sets_each_run_base_within_the_texture);
     RUN_TEST(test_draw_list_slices_at_texture_capacity);
     RUN_TEST(test_consecutive_calls_use_distinct_instance_textures);
+    RUN_TEST(test_init_fails_without_transient_textures);
     RUN_TEST(test_restore_on_inactive_renderer_does_nothing);
     /* Stream format mapping */
     RUN_TEST(test_stream_to_vertex_type_total);

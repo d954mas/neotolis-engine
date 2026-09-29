@@ -21,6 +21,10 @@ static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mes
     return (material_slot << NT_POOL_SLOT_SHIFT) | mesh_slot;
 }
 
+/* Texels one instance takes in a transient texture: size
+ * nt_gfx_desc_t.transient_texture_height from it (1024 texels per row). */
+#define NT_MESH_RENDERER_INSTANCE_TEXELS 4U
+
 typedef struct {
     uint16_t max_pipelines; /* pipeline cache capacity, default: 64 */
     /* Vertex-input versions kept per mesh (one per distinct derived layout

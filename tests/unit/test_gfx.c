@@ -2545,9 +2545,8 @@ void test_register_global_block(void) {
 }
 
 void test_register_global_block_max(void) {
-    static const char *const names[NT_GFX_MAX_GLOBAL_BLOCKS] = {"B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"};
     for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS; i++) {
-        nt_gfx_register_global_block(names[i], i);
+        nt_gfx_register_global_block("Block", i);
     }
     const nt_global_block_t *blocks;
     uint32_t count;
@@ -2869,15 +2868,21 @@ void test_transient_textures_hand_out_in_turn_and_upload_used_rows(void) {
     TEST_ASSERT_TRUE(a.id != 0 && b.id != 0 && c.id != 0);
     TEST_ASSERT_TRUE(a.id != b.id && b.id != c.id && a.id != c.id);
     TEST_ASSERT_EQUAL(NT_TEXTURE_FORMAT_RGBA32F, nt_gfx_texture_format(a));
+    const nt_texture_t handed[3] = {a, b, c};
+    const uint16_t widths[3] = {1, NT_GFX_TRANSIENT_TEXTURE_WIDTH, NT_GFX_TRANSIENT_TEXTURE_WIDTH}; /* one row: only the used texels */
     const uint16_t rows[3] = {1, 2, 4};
     for (uint32_t i = 0; i < 3; i++) {
         const nt_gfx_fake_update_texture_rect_t rect = nt_gfx_fake_update_texture_rect_at(i);
+        TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(handed[i]), rect.backend);
         TEST_ASSERT_EQUAL_UINT16(0, rect.x);
         TEST_ASSERT_EQUAL_UINT16(0, rect.y);
-        TEST_ASSERT_EQUAL_UINT16(NT_GFX_TRANSIENT_TEXTURE_WIDTH, rect.w);
+        TEST_ASSERT_EQUAL_UINT16(widths[i], rect.w);
         TEST_ASSERT_EQUAL_UINT16(rows[i], rect.h);
     }
     EXPECT_ASSERT(nt_gfx_transient_texture(s_transient_texels, 4097));
+    EXPECT_ASSERT(nt_gfx_transient_texture(s_transient_texels, 0));
+    EXPECT_ASSERT(nt_gfx_transient_texture(NULL, 1));
+    EXPECT_ASSERT(nt_gfx_destroy_texture(a));
 }
 
 /* A fourth upload in a frame of three reuses the oldest and is counted; the next
@@ -2898,7 +2903,22 @@ void test_transient_overflow_is_counted_per_frame(void) {
     TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.transient_overflows);
 }
 
-/* gfx owns them: INVALID while lost, recreated by the restore itself. */
+/* A texture that failed to create is skipped; the others keep taking turns. */
+void test_transient_texture_that_failed_to_create_is_skipped(void) {
+    nt_gfx_shutdown();
+    nt_gfx_fake_fail_texture_creates(1U); /* the first create of the next init */
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.max_transient_textures = 2;
+    desc.transient_texture_height = 1;
+    nt_gfx_init(&desc);
+    const nt_texture_t first = nt_gfx_transient_texture(s_transient_texels, 1);
+    const nt_texture_t second = nt_gfx_transient_texture(s_transient_texels, 1);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, first.id);
+    TEST_ASSERT_EQUAL_UINT32(first.id, second.id);
+}
+
+/* gfx owns them: INVALID while lost, recreated by the restore itself; repeated
+ * cycles free their husks, so the pool never fills. */
 void test_transient_textures_come_back_after_restore(void) {
     init_with_transients(2, 1);
     nt_gfx_fake_set_context_lost(true);
@@ -2911,6 +2931,12 @@ void test_transient_textures_come_back_after_restore(void) {
     const nt_texture_t restored = nt_gfx_transient_texture(s_transient_texels, 1);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, restored.id);
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(restored));
+
+    for (uint32_t cycle = 0; cycle < 8; cycle++) {
+        nt_gfx_fake_lose_and_restore_context();
+        nt_gfx_begin_frame();
+    }
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_transient_texture(s_transient_texels, 1).id);
 }
 // #endregion
 
@@ -3343,6 +3369,7 @@ int main(void) {
     RUN_TEST(test_transient_textures_are_absent_by_request);
     RUN_TEST(test_transient_textures_hand_out_in_turn_and_upload_used_rows);
     RUN_TEST(test_transient_overflow_is_counted_per_frame);
+    RUN_TEST(test_transient_texture_that_failed_to_create_is_skipped);
     RUN_TEST(test_transient_textures_come_back_after_restore);
     RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_update_buffer_at_offset);

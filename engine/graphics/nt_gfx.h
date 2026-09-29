@@ -1030,11 +1030,12 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 /* Texels one transient texture holds; 0 without transient textures. */
 uint32_t nt_gfx_transient_texture_capacity(void);
 /* Uploads texel_count RGBA32F texels into the next transient texture and returns
- * it; valid until the next begin_frame. texels must be readable up to the end of
- * the last row it touches, texel_count <= nt_gfx_transient_texture_capacity().
+ * it; valid until the next begin_frame, owned by gfx. Past one row the upload is
+ * whole rows, so texels must be readable up to the end of the last row it touches;
+ * texel_count <= nt_gfx_transient_texture_capacity().
  * No texture repeats within a frame until max_transient_textures are used: a
  * rewrite of one an earlier draw sampled makes the driver stall. INVALID while the
- * context is lost. */
+ * context is lost or when no transient texture could be created. */
 nt_texture_t nt_gfx_transient_texture(const void *texels, uint32_t texel_count);
 
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */
