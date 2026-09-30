@@ -638,8 +638,35 @@ static void test_header_does_not_expose_target_bind_state_api(void) {
     }
 }
 
+// NOLINTBEGIN(clang-analyzer-optin.core.EnumCastOutOfRange) -- invalid enums exercise the public assertion contract
+static void test_pass_actions_assert_on_invalid_enums(void) {
+    nt_pass_desc_t pass = {0};
+    pass.color_load = (nt_load_action_t)-1;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&pass));
+    pass.color_load = (nt_load_action_t)3;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&pass));
+    pass.color_load = NT_LOAD_CLEAR;
+    pass.depth_load = (nt_load_action_t)3;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&pass));
+    pass.depth_load = NT_LOAD_CLEAR;
+    pass.color_store = (nt_store_action_t)2;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&pass));
+    pass.color_store = NT_STORE_STORE;
+    pass.depth_store = (nt_store_action_t)-1;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&pass));
+    pass.depth_store = NT_STORE_STORE;
+    pass.stencil_store = (nt_store_action_t)2;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&pass));
+    pass.stencil_store = NT_STORE_STORE;
+    nt_gfx_begin_pass(&pass);
+    nt_gfx_end_pass();
+}
+
+// NOLINTEND(clang-analyzer-optin.core.EnumCastOutOfRange)
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_pass_actions_assert_on_invalid_enums);
     RUN_TEST(test_color_only_target_borrows_its_texture);
     RUN_TEST(test_depth_only_target_passes_its_size_to_the_pass);
     RUN_TEST(test_color_depth_target_passes_both_backends);

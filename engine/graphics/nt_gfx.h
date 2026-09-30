@@ -468,12 +468,31 @@ typedef struct {
     const char *label;  /* debug name; static storage */
 } nt_render_target_desc_t;
 
+/* CLEAR initializes the full attachment; LOAD preserves it; DONT_CARE leaves
+ * previous contents undefined. Clear values matter only for CLEAR. */
+typedef enum {
+    NT_LOAD_CLEAR = 0,
+    NT_LOAD_LOAD,
+    NT_LOAD_DONT_CARE,
+} nt_load_action_t;
+
+/* DISCARD makes contents undefined after end_pass; the texture handle stays valid. */
+typedef enum {
+    NT_STORE_STORE = 0,
+    NT_STORE_DISCARD,
+} nt_store_action_t;
+
 typedef struct {
     nt_render_target_t target; /* zero selects the default framebuffer */
     float clear_color[4];
     /* Applied regardless of the previous pipeline's depth_write state.
      * Typically 1.0f; zero-init gives 0.0 which fails all depth tests. */
     float clear_depth;
+    nt_load_action_t color_load;     /* default CLEAR; clear values matter only for CLEAR */
+    nt_load_action_t depth_load;     /* default CLEAR */
+    nt_store_action_t color_store;   /* default STORE */
+    nt_store_action_t depth_store;   /* default STORE */
+    nt_store_action_t stencil_store; /* default STORE; stencil is never cleared by a pass */
 } nt_pass_desc_t;
 
 // #region frame counters and observation
@@ -587,6 +606,7 @@ typedef enum {
     X(glGetShaderiv)                                                                                                                                                                                   \
     X(glGetUniformBlockIndex)                                                                                                                                                                          \
     X(glGetUniformLocation)                                                                                                                                                                            \
+    X(glInvalidateFramebuffer)                                                                                                                                                                         \
     X(glLinkProgram)                                                                                                                                                                                   \
     X(glPixelStorei)                                                                                                                                                                                   \
     X(glPolygonOffset)                                                                                                                                                                                 \
@@ -716,6 +736,9 @@ typedef struct {
         struct {
             uint32_t target;
             float color[4], depth;
+            /* Actions are meaningful only in BEGIN records; INITIAL holds cached clear values. */
+            nt_load_action_t color_load, depth_load;
+            nt_store_action_t color_store, depth_store, stencil_store;
         } pass;
         struct {
             uint32_t buffer, offset, stride, location, type, count, normalized, divisor;

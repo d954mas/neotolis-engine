@@ -276,6 +276,29 @@ The game still owns pass order. Each pass selects its destination through
 backend framebuffer internally during `nt_gfx_begin_pass`; public code does not
 bind or unbind render-target state outside the pass descriptor.
 
+Pass color/depth load actions are `NT_LOAD_CLEAR` (zero/default), `NT_LOAD_LOAD`,
+and `NT_LOAD_DONT_CARE`. CLEAR initializes the entire attachment regardless of
+scissor; LOAD preserves its current contents; DONT_CARE makes the previous
+contents undefined. Clear values matter only for CLEAR. DONT_CARE permits a
+backend to clear or invalidate and does not promise a physical no-clear operation.
+
+Color, depth and stencil store actions are `NT_STORE_STORE` (zero/default) and
+`NT_STORE_DISCARD`. DISCARD ends the contents' lifetime at `end_pass`, before the
+framebuffer is unbound, without invalidating texture handles. A later reader must
+use contents written after the discard. Producer outputs sampled by later passes
+must STORE; a consuming pass's actions apply only to its own attachments.
+Absent attachments ignore actions. Stencil has store policy only and is never
+cleared by a pass. Invalid action enums assert even for absent attachments.
+The descriptor is borrowed only during `begin_pass`.
+
+LOAD/STORE do not preserve default-framebuffer contents across presentation when
+`preserveDrawingBuffer` is false, or restore contents after context loss.
+WebGL2 uses `glInvalidateFramebuffer` for DONT_CARE and DISCARD; native uses core
+GL 4.3 or ARB_invalidate_subdata when available and skips this optional hint on
+GL 3.3 without support. Call capture records attachment enums, not pointers.
+BEGIN/PASS records contain requested actions; INITIAL/PASS holds only cached
+clear values, with action fields having no meaning.
+
 Pass color and depth clears are pass-owned operations. In particular,
 `clear_depth` is applied independently of the previous pipeline's `depth_write`
 state; pipeline write masks affect draws, not the next pass initialization. Bound
@@ -288,7 +311,7 @@ Destroying a texture or a live render target inside a pass asserts: pass-scoped
 draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
-uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
+uniform-buffer binding calls `glBindBufferBase` on every request. A depth CLEAR forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color

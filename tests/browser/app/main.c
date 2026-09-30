@@ -464,6 +464,108 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_texture(color);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
+EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
+#if NT_GFX_CAPTURE_ENABLED
+    if (capture != 0) {
+        nt_gfx_capture_request();
+    }
+#else
+    (void)capture;
+#endif
+    nt_gfx_begin_frame();
+    const uint8_t original[8] = {17, 43, 89, 255, 211, 127, 31, 255};
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .data = original});
+    nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 1, .format = NT_TEXTURE_FORMAT_DEPTH24});
+    nt_render_target_t prepass = nt_gfx_make_render_target(&(nt_render_target_desc_t){.depth = depth});
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color, .depth = depth});
+    const char *vs_source = "uniform vec4 u_depth; void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, u_depth.x, 1.0); }";
+    const char *fs_source = "precision highp float; out vec4 color; void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_write = true, .depth_func = NT_DEPTH_LESS});
+    nt_pipeline_t overwrite = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    nt_hash32_t uniform = nt_hash32_str("u_depth");
+    float z[4] = {-0.5F, 0.0F, 0.0F, 0.0F};
+    nt_gfx_set_scissor_enabled(false);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = prepass, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+
+    uint32_t result = 0;
+    uint8_t pixels[8] = {0};
+    z[0] = 0.5F;
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .color_load = NT_LOAD_LOAD, .depth_load = NT_LOAD_LOAD});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, original, sizeof(pixels)) == 0) {
+        result |= 1U;
+    }
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .color_load = NT_LOAD_LOAD, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    const uint8_t green[8] = {0, 255, 0, 255, 0, 255, 0, 255};
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
+        result |= 2U;
+    }
+    nt_gfx_set_scissor(1, 0, 1, 1);
+    nt_gfx_set_scissor_enabled(true);
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .depth_load = NT_LOAD_LOAD});
+    const uint8_t red[8] = {255, 0, 0, 255, 255, 0, 0, 255};
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0 && nt_gfx_scissor_enabled()) {
+        result |= 4U;
+    }
+    nt_gfx_set_scissor_enabled(false);
+    nt_gfx_end_pass();
+    nt_pass_desc_t discard = {.target = target, .color_load = NT_LOAD_DONT_CARE, .depth_load = NT_LOAD_DONT_CARE, .depth_store = NT_STORE_DISCARD, .stencil_store = NT_STORE_DISCARD};
+    nt_gfx_begin_pass(&discard);
+    nt_gfx_bind_pipeline(overwrite);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
+        result |= 16U;
+    }
+    discard.depth_store = NT_STORE_STORE;
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .color_load = NT_LOAD_LOAD, .depth_load = NT_LOAD_LOAD});
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
+        result |= 32U;
+    }
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.color_load = NT_LOAD_DONT_CARE, .depth_load = NT_LOAD_DONT_CARE, .depth_store = NT_STORE_DISCARD, .stencil_store = NT_STORE_DISCARD});
+    nt_gfx_end_pass();
+    if (nt_gfx_texture_ready(color) && nt_gfx_texture_ready(depth)) {
+        result |= 8U;
+    }
+    nt_gfx_destroy_vertex_input(input);
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_pipeline(overwrite);
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_texture(color);
+    nt_gfx_destroy_texture(depth);
+    nt_gfx_begin_frame();
+    return result;
+}
+
 static double s_observe_values[40];
 /* Requests every other frame: a request consumed at begin_frame replaces the capture it
  * just finished, so the unrequested frame between keeps that capture readable. */
@@ -704,6 +806,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
             return { 'preset': UTF8ToString(_nt_test_diagnostics_preset()), 'log': _nt_test_diagnostics_config(0),
                 'ui': _nt_test_diagnostics_config(1), 'gpu': _nt_test_diagnostics_config(2), 'metrics': _nt_test_diagnostics_config(3) };
         },
+        'pass_actions_probe': function(mode) { return _nt_test_pass_actions_probe(mode); },
         'observe_probe': function(mode) { return _nt_test_observe_probe(mode); },
         'observe_value': function(index) { return _nt_test_observe_value(index); },
         'observe_record': function(enabled) { _nt_test_observe_record(enabled); },
@@ -1082,6 +1185,7 @@ int main(int argc, char *argv[]) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.capture_capacity = 16384;
+    gfx_desc.stencil = true;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 

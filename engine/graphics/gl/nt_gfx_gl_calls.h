@@ -191,6 +191,8 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
     }))
 #define NT_GL_GEN(fn, count, names) (NT_GL_NAMES_FIT_(count), NT_GL_OPEN_(NT_GFX_GL_##fn), fn((count), (names)), NT_GL_NAMES_(count, names), NT_GL_CLOSE_())
 #define NT_GL_DELETE(fn, count, names) (NT_GL_NAMES_FIT_(count), NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_NAMES_(count, names), NT_GL_CLOSE_(), fn((count), (names)))
+/* At most three attachment enums plus target/count fit backend.args. */
+#define NT_GL_ATTACHMENTS(fn, target, count, attachments) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_ARGS_(target), NT_GL_NAMES_(count, attachments), NT_GL_CLOSE_(), fn(target, count, attachments))
 #define NT_GL_UNIFORM(fn, float_count, location, ...) (NT_GL_OPEN_(NT_GFX_GL_##fn), NT_GL_UNIFORM_VALUES_(float_count, location, __VA_ARGS__), NT_GL_CLOSE_(), fn(location, __VA_ARGS__))
 #define NT_GL_ISSUED(name, ...) (NT_GL_OPEN_(NT_GFX_GL_##name), NT_GL_ARGS_(__VA_ARGS__), NT_GL_CLOSE_())
 

@@ -393,6 +393,47 @@ static void test_shutdown_while_recording_writes_no_record(void) {
     TEST_ASSERT_NULL(view.events);
 }
 
+static void test_pass_actions_capture_values_and_attachment_enums(void) {
+    TEST_ASSERT_EQUAL_UINT32(104, sizeof(nt_gfx_event_t));
+    nt_gfx_capture_request();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.color_load = NT_LOAD_DONT_CARE, .depth_load = NT_LOAD_LOAD, .depth_store = NT_STORE_DISCARD, .stencil_store = NT_STORE_DISCARD});
+    TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
+    nt_gfx_end_pass();
+    TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t begin = 0;
+    uint32_t invalidates = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_PASS) {
+            begin++;
+            TEST_ASSERT_EQUAL_INT(NT_LOAD_DONT_CARE, event->data.pass.color_load);
+            TEST_ASSERT_EQUAL_INT(NT_LOAD_LOAD, event->data.pass.depth_load);
+            TEST_ASSERT_EQUAL_INT(NT_STORE_STORE, event->data.pass.color_store);
+            TEST_ASSERT_EQUAL_INT(NT_STORE_DISCARD, event->data.pass.depth_store);
+            TEST_ASSERT_EQUAL_INT(NT_STORE_DISCARD, event->data.pass.stencil_store);
+        }
+        if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_glInvalidateFramebuffer) {
+            TEST_ASSERT_EQUAL_HEX32(GL_FRAMEBUFFER, event->data.backend.args[0]);
+            if (invalidates == 0) {
+                TEST_ASSERT_EQUAL_UINT32(1, event->data.backend.args[1]);
+                TEST_ASSERT_EQUAL_HEX32(GL_COLOR, event->data.backend.args[2]);
+            } else {
+                TEST_ASSERT_EQUAL_UINT32(2, event->data.backend.args[1]);
+                TEST_ASSERT_EQUAL_HEX32(GL_DEPTH, event->data.backend.args[2]);
+                TEST_ASSERT_EQUAL_HEX32(GL_STENCIL, event->data.backend.args[3]);
+            }
+            invalidates++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, begin);
+    TEST_ASSERT_EQUAL_UINT32(glad_glInvalidateFramebuffer != NULL ? 2 : 0, invalidates);
+    TEST_ASSERT_EQUAL_UINT32(invalidates, g_nt_gfx.last_frame.gl[NT_GFX_GL_glInvalidateFramebuffer]);
+}
+
 static void test_readback_is_recorded_as_issued_call(void) {
     nt_gfx_capture_request();
     nt_gfx_begin_frame();
@@ -610,6 +651,7 @@ int main(void) {
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
     RUN_TEST(test_complete_capture_matches_gl_counters);
     RUN_TEST(test_readback_is_recorded_as_issued_call);
+    RUN_TEST(test_pass_actions_capture_values_and_attachment_enums);
     RUN_TEST(test_shutdown_while_recording_writes_no_record);
 #endif
     RUN_TEST(test_payloads_before_render_land_in_their_frame);

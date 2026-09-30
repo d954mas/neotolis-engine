@@ -571,6 +571,7 @@ static void frame(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .clear_color = {0.529F, 0.808F, 0.922F, 1.0F}, /* sky blue */
         .clear_depth = 1.0F,
+        .depth_store = NT_STORE_DISCARD,
     });
 
     if (item_count > 0) {
