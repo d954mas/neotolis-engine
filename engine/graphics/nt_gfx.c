@@ -55,7 +55,8 @@ typedef struct {
     uint8_t usage;      /* nt_buffer_usage_t */
     uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
     uint8_t _pad;
-    uint32_t size;
+    uint32_t size; /* initial capacity, retained across orphaning */
+    uint32_t storage_size;
 } nt_gfx_buffer_meta_t;
 
 /* ---- Vertex input metadata (destroy cascade + draw-invariant checks) ---- */
@@ -1053,6 +1054,7 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *ou
     s_gfx.buffer_metas[slot].usage = (uint8_t)desc->usage;
     s_gfx.buffer_metas[slot].index_type = desc->index_type;
     s_gfx.buffer_metas[slot].size = desc->size;
+    s_gfx.buffer_metas[slot].storage_size = desc->size;
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_BUFFER, id);
@@ -2279,7 +2281,8 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint3
     if (size != 0) {
         const uint32_t align = g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment;
         const bool aligned = align != 0 && offset % align == 0;
-        const bool fits = size <= s_gfx.buffer_metas[idx].size && offset <= s_gfx.buffer_metas[idx].size - size;
+        const uint32_t storage_size = s_gfx.buffer_metas[idx].storage_size;
+        const bool fits = size <= storage_size && offset <= storage_size - size;
         NT_ASSERT(aligned && "bind_uniform_buffer_range: offset is not a multiple of uniform_buffer_offset_alignment");
         NT_ASSERT(fits && "bind_uniform_buffer_range: range exceeds the buffer");
         if (!aligned || !fits) {
@@ -2399,6 +2402,7 @@ static nt_gfx_result_t orphan_buffer(nt_buffer_t buf, const void *data, uint32_t
     NT_ASSERT(size <= s_gfx.buffer_metas[slot].size && "orphan_buffer: size exceeds buffer capacity");
     NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "orphan_buffer: buffer has no live backend -- recreate it after context restore");
     nt_gfx_backend_orphan_buffer(s_gfx.buffer_backends[slot], data, size);
+    s_gfx.buffer_metas[slot].storage_size = size;
     return NT_GFX_RESULT_ACCEPTED;
 }
 

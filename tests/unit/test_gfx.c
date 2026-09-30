@@ -3113,6 +3113,25 @@ void test_bind_uniform_buffer_range_asserts(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
 }
 
+void test_bind_uniform_buffer_range_follows_orphaned_storage(void) {
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_orphan_buffer(ubo, NULL, 256);
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 512));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 256);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
+
+    nt_gfx_orphan_buffer(ubo, NULL, 0);
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 16));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
+
+    nt_gfx_orphan_buffer(ubo, NULL, 1024);
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    EXPECT_ASSERT(nt_gfx_orphan_buffer(ubo, NULL, 1280));
+}
+
 /* The alignment is a device cap, re-read on every probe. */
 void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
     nt_gfx_shutdown();
@@ -3274,6 +3293,7 @@ int main(void) {
     RUN_TEST(test_register_global_block_cleared_on_shutdown);
     RUN_TEST(test_bind_uniform_buffer_range_reaches_backend);
     RUN_TEST(test_bind_uniform_buffer_range_asserts);
+    RUN_TEST(test_bind_uniform_buffer_range_follows_orphaned_storage);
     RUN_TEST(test_bind_uniform_buffer_range_follows_probed_alignment);
     /* New pixel format tests */
     RUN_TEST(test_gfx_make_texture_rgba16f);

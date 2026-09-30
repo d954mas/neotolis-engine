@@ -168,7 +168,9 @@ survives context loss.
 buffer. The offset is a multiple of `gpu_caps.uniform_buffer_offset_alignment`
 (re-probed at context restore), the size is nonzero and the range fits the
 buffer; each violation asserts, as does a non-uniform buffer, and without
-asserts the bind is rejected with `INVALID_ARGUMENT`. WebGL additionally rejects
+asserts the bind is rejected with `INVALID_ARGUMENT`. After `nt_gfx_orphan_buffer`,
+the range must fit the replacement storage; orphaning may shrink it and later
+grow it up to the original creation capacity. WebGL additionally rejects
 a draw whose bound range is smaller than the block's data size; gfx does not
 know block sizes, so the caller sizes the range. Upload every range of a frame
 before the first draw that reads the buffer: Mali/ANGLE track a buffer as a

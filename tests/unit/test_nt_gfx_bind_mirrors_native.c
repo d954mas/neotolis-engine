@@ -1278,6 +1278,48 @@ static void test_block_members_skip_the_uniform_cache(void) {
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glGetUniformLocation] - lookups);
 }
 
+static void test_uniform_buffer_ranges_render_after_orphan_and_regrow(void) {
+    const char *fs = "precision mediump float;\n"
+                     "layout(std140) uniform Color { vec4 color; };\n"
+                     "out vec4 frag_color;\n"
+                     "void main() { frag_color = color; }\n";
+    nt_gfx_register_global_block("Color", 0);
+    nt_pipeline_t pip = make_pipeline_ex(s_vertexid_vs_src, fs, false, false, false);
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
+    const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
+    const uint32_t offset = g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment * (uint32_t)sizeof(red);
+    const uint32_t capacity = offset + (uint32_t)sizeof(red);
+    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = capacity});
+
+    nt_gfx_orphan_buffer(ubo, red, sizeof(red));
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, sizeof(red));
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
+    nt_gfx_end_pass();
+
+    nt_gfx_orphan_buffer(ubo, NULL, capacity);
+    nt_gfx_update_buffer(ubo, 0, red, sizeof(red));
+    nt_gfx_update_buffer(ubo, offset, green, sizeof(green));
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, offset, sizeof(green));
+    nt_gfx_draw(0, 3);
+    uint8_t pixel[4] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(8, 8, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_UINT8_WITHIN(1, 0, pixel[0]);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, pixel[1]);
+    nt_gfx_bind_uniform_buffer(ubo, 0);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+    nt_gfx_end_pass();
+}
+
 static void test_vec4_repeat_skips_physical_upload(void) {
     const char *fs = "precision mediump float;\n"
                      "uniform vec4 u_color;\n"
@@ -1419,6 +1461,7 @@ int main(void) {
     nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_block_members_skip_the_uniform_cache);
+    RUN_TEST(test_uniform_buffer_ranges_render_after_orphan_and_regrow);
     RUN_TEST(test_vec4_repeat_skips_physical_upload);
     RUN_TEST(test_vec4_cache_follows_program_lifetime);
     RUN_TEST(test_vec4_array_entries_and_other_types);
