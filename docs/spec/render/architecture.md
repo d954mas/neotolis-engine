@@ -327,10 +327,11 @@ supported: the driver tracks the whole buffer, so a second upload would stall
 whatever range it writes. Prepare it before the first pass.
 
 One buffer, not a rotation: on the reference phone and on desktop Chrome,
-Firefox and native GL, one, two and three rotating buffers measured equal when
-each frame rewrote the whole buffer. A capacity sized from the peak makes most
-uploads partial; the `arena_headroom` arm of `examples/bench_stream` measures
-that shape, and it is unverified on the phone. `STREAM` is the usage: `DYNAMIC`
+Firefox and native GL, one, two and three rotating buffers measured equal. A
+capacity sized from the peak makes most uploads partial; on the phone that
+shape (`arena_headroom` in `examples/bench_stream`, half the capacity uploaded
+each frame) ran within noise of a full-buffer upload, so rewriting a buffer
+that only the previous frame read does not stall. `STREAM` is the usage: `DYNAMIC`
 was 25% slower in one phone case (one 64 KB upload per frame) and within noise
 elsewhere. Desktop native GL runs one 1.3 MB update 15% slower than many small
 ones into one buffer (about 0.1 ms per frame); desktop Chrome did not show it.
