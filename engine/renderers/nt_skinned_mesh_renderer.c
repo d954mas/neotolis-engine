@@ -303,18 +303,18 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info(mesh_handle);
             NT_ASSERT(material != NULL && mesh != NULL && "skinned draw references a destroyed material or mesh");
             const uint16_t stride = s_instance_layouts[material->color_mode].stride;
-            const nt_gfx_program_state_t program_state = nt_gfx_program_poll(material->program);
-            if (program_state != NT_GFX_PROGRAM_READY) {
-                nt_renderer_warn_program_not_ready(&s_skinned.warned_program_not_ready, material, program_state);
-                draw_offset += instance_count * stride;
-                run_start = run_end;
-                continue;
-            }
-
             const bool material_changed = material_handle.id != previous_material.id;
             const bool mesh_changed = mesh_handle.id != previous_mesh.id;
             const bool deformation_changed = deformation.texture.id != previous_deformation.id;
             if (material_changed) {
+                /* previous_material is set only after a READY draw, and readiness cannot drop within one call. */
+                const nt_gfx_program_state_t program_state = nt_gfx_program_poll(material->program);
+                if (program_state != NT_GFX_PROGRAM_READY) {
+                    nt_renderer_warn_program_not_ready(&s_skinned.warned_program_not_ready, material, program_state);
+                    draw_offset += instance_count * stride;
+                    run_start = run_end;
+                    continue;
+                }
                 pipeline = find_or_create_pipeline(material);
             }
             if (material_changed || mesh_changed) {

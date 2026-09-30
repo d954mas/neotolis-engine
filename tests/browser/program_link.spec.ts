@@ -5,6 +5,7 @@ type LinkControl = {
   completionQueries: number;
   deletedPendingPrograms: number;
   extensionRequests: number;
+  earlySyncCalls: number;
 };
 type LinkWindow = Window & {
   linkControl: LinkControl;
@@ -20,7 +21,7 @@ for (const parallel of [true, false]) {
       if (message.type() === 'error' || /\b(abort(?:ed)?|(?:GL_)?INVALID_\w+|(?:GL_)?OUT_OF_MEMORY)\b/i.test(message.text())) errors.push(message.text());
     });
     await page.addInitScript((parallel) => {
-      const control: LinkControl = { hold: true, completionQueries: 0, deletedPendingPrograms: 0, extensionRequests: 0 };
+      const control: LinkControl = { hold: true, completionQueries: 0, deletedPendingPrograms: 0, extensionRequests: 0, earlySyncCalls: 0 };
       (window as LinkWindow).linkControl = control;
       const proto = WebGL2RenderingContext.prototype;
       const getExtension = proto.getExtension;
@@ -36,23 +37,35 @@ for (const parallel of [true, false]) {
         }
         return getExtension.call(this, name);
       };
+      // Polled but not yet reported complete: any other query on it would block the main thread.
+      // Explicit waits never ask for completion, so their synchronous reads are not counted.
       const pending = new WeakSet<WebGLProgram>();
       const released = new WeakSet<WebGLProgram>();
       const getProgramParameter = proto.getProgramParameter;
       proto.getProgramParameter = function(program, name) {
         if (name === 0x91b1) { // COMPLETION_STATUS_KHR
           control.completionQueries++;
-          pending.add(program);
+          if (!released.has(program)) pending.add(program);
           if (control.hold) return false;
           // A final pending result puts completion between two successive polls.
           if (!released.has(program)) {
             released.add(program);
             return false;
           }
+          pending.delete(program);
           if (!nativeParallel) return getProgramParameter.call(this, program, this.LINK_STATUS);
+        } else if (pending.has(program)) {
+          control.earlySyncCalls++;
         }
         return getProgramParameter.call(this, program, name);
       };
+      for (const name of ['getProgramInfoLog', 'getActiveUniform', 'getUniformLocation', 'getUniformBlockIndex', 'getAttachedShaders'] as const) {
+        const original = proto[name] as (this: WebGL2RenderingContext, program: WebGLProgram, ...args: unknown[]) => unknown;
+        (proto as unknown as Record<string, unknown>)[name] = function(this: WebGL2RenderingContext, program: WebGLProgram, ...args: unknown[]) {
+          if (pending.has(program)) control.earlySyncCalls++;
+          return original.call(this, program, ...args);
+        };
+      }
       const deleteProgram = proto.deleteProgram;
       proto.deleteProgram = function(program) {
         if (program && pending.has(program)) control.deletedPendingPrograms++;
@@ -80,6 +93,7 @@ for (const parallel of [true, false]) {
         return { ready, drawn: state.__nt!.drawn_frames(), extraQueries: state.linkControl.completionQueries - before, deleted: state.linkControl.deletedPendingPrograms };
       });
       expect(pending).toEqual({ ready: false, drawn: 0, extraQueries: 0, deleted: 0 });
+      expect(await page.evaluate(() => (window as LinkWindow).linkControl.earlySyncCalls)).toBe(0);
       await page.evaluate(() => { (window as LinkWindow).linkControl.hold = false; });
     }
 
@@ -90,6 +104,7 @@ for (const parallel of [true, false]) {
     const control = await page.evaluate(() => (window as LinkWindow).linkControl);
     expect(control.extensionRequests).toBeGreaterThan(0);
     expect(control.deletedPendingPrograms).toBe(0);
+    expect(control.earlySyncCalls).toBe(0);
     if (!parallel) expect(control.completionQueries).toBe(0);
     expect(errors, 'unexpected browser/gfx errors').toEqual([]);
   });

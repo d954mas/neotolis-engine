@@ -223,9 +223,9 @@ static struct {
 
 // #region capture of authoritative backend mirrors
 #if NT_GFX_CAPTURE_ENABLED
-static void capture_program_definition(uint32_t i) {
+/* Empty while the program links; finish_program records it once reflection exists. */
+static void capture_program_reflection(uint32_t i) {
     const nt_gfx_gl_program_t *program = &s_programs[i];
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_PROGRAM; event->data.backend.args[0] = i; event->data.backend.args[1] = program->program;);
     for (uint32_t u = 0; u < program->uniform_count; u++) {
         if ((program->vec4_mask & (1U << u)) == 0) {
             continue;
@@ -241,6 +241,11 @@ static void capture_program_definition(uint32_t i) {
                       event->data.backend.args[2] = (uint32_t)program->sampler_units[u].location; event->data.backend.args[3] = u;
                       event->data.backend.args[4] = program->sampler_units[u].sampler_class;);
     }
+}
+
+static void capture_program_definition(uint32_t i) {
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_PROGRAM; event->data.backend.args[0] = i; event->data.backend.args[1] = s_programs[i].program;);
+    capture_program_reflection(i);
 }
 
 static void capture_pipeline_definition(uint32_t slot) {
@@ -1476,7 +1481,7 @@ nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) 
     }
     write_sampler_units(rec->program, rec);
 #if NT_GFX_CAPTURE_ENABLED
-    capture_program_definition(backend_handle);
+    capture_program_reflection(backend_handle);
 #endif
     return NT_GFX_LINK_DONE;
 }

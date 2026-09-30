@@ -171,8 +171,7 @@ does not advance the frame or change the currently bound pipeline.
 
 `nt_gfx_make_pipeline` requires an already READY program. It never polls, waits
 or finalizes a link. After the recoverable context-loss check, a LINKING or
-UNAVAILABLE program is a caller error and asserts; with assertions OFF it
-returns an invalid pipeline without backend allocation or changing the program.
+UNAVAILABLE program is a caller error and asserts.
 Shader stages may be destroyed after `nt_gfx_make_program`, including while it
 links. Deferred diagnostics log only stages whose engine-owned shader objects
 still exist.
@@ -457,8 +456,7 @@ follows the same split: a
 NULL descriptor, a program that is not READY, and an exhausted pipeline pool
 assert. For valid requests, a returned invalid pipeline handle means a lost
 context or a failed backend allocation — the two recoverable outcomes, both
-retried on a later frame. With assertions OFF, a non-ready program is rejected
-without backend allocation; this rejection does not complete its link.
+retried on a later frame.
 `nt_gfx_make_vertex_input` applies the same contract to the layout checks: an
 attribute count over `NT_GFX_MAX_VERTEX_ATTRS` (instance layouts over
 `NT_GFX_MAX_INSTANCE_ATTRS`), a stride over the WebGL2 cap of 255, misaligned

@@ -307,18 +307,18 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(run_mesh);
 
             NT_ASSERT(mat_info != NULL && mesh_info != NULL && "draw_list: a run's material or mesh was destroyed mid-call");
-            const nt_gfx_program_state_t program_state = nt_gfx_program_poll(mat_info->program);
-            if (program_state != NT_GFX_PROGRAM_READY) {
-                nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info, program_state);
-                /* Still need to advance byte offset for skipped runs */
-                draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
-                run_start = run_end;
-                continue;
-            }
-
             const bool mat_changed = run_mat.id != prev_mat.id;
             const bool mesh_changed = run_mesh.id != prev_mesh.id;
             if (mat_changed) {
+                /* prev_mat is set only after a READY draw, and readiness cannot drop within one call. */
+                const nt_gfx_program_state_t program_state = nt_gfx_program_poll(mat_info->program);
+                if (program_state != NT_GFX_PROGRAM_READY) {
+                    nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info, program_state);
+                    /* Still need to advance byte offset for skipped runs */
+                    draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
+                    run_start = run_end;
+                    continue;
+                }
                 pip = find_or_create_pipeline(mat_info);
             }
             /* VI identity is (mesh row, material-derived layout), so a mesh change re-resolves too. */

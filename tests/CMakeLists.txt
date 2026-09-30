@@ -335,17 +335,6 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx COMMAND test_gfx)
 
-    # The READY precondition has a hard guard even when frontend assertions are off.
-    add_executable(test_gfx_program_wait_off
-        unit/test_gfx_program_wait_off.c
-        unit/test_helpers/nt_gfx_assert_off_tu.c
-        unit/test_helpers/nt_gfx_fake.c
-    )
-    target_include_directories(test_gfx_program_wait_off PRIVATE unit)
-    target_link_libraries(test_gfx_program_wait_off PRIVATE nt_core nt_pool nt_hash nt_gfx_interface nt_basisu_transcoder_stub nt_meshwire_stub nt_log_stub unity)
-    target_compile_definitions(test_gfx_program_wait_off PRIVATE NT_LOG_DOMAIN_DEFAULT="gfx_fake")
-    nt_setup_test_target(test_gfx_program_wait_off)
-
     # --- Vertex-input object tests (lifecycle, cascade, bind mirrors) ---
     add_executable(test_gfx_vertex_input unit/test_gfx_vertex_input.c)
     target_link_libraries(test_gfx_vertex_input PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire)

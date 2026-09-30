@@ -114,8 +114,10 @@ The browser reports loss through `isContextLost` immediately; loss between a
 successful link-status query and reflection remains an accepted race rather
 than adding wrappers around Emscripten's helpers.
 
-A link failure is a developer error and traps (`NT_ASSERT`) rather than
-returning an invalid handle. `nt_gfx_make_program` returns an invalid handle on
+A link failure is a developer error and traps (`NT_ASSERT`) in the
+`nt_gfx_program_poll` or `nt_gfx_program_wait` call that finishes the link,
+often inside a renderer's draw, rather than returning an invalid handle.
+`nt_gfx_make_program` returns an invalid handle on
 a lost context, including a loss the browser reports before its lost event
 arrives and pending engine recovery after the browser has restored it, and for a live stage handle whose GPU object an earlier loss discarded --
 that stage is permanently unready, so the owner recreates it and links again.

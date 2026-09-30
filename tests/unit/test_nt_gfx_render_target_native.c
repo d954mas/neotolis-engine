@@ -1186,6 +1186,17 @@ static void assert_pending_poll_capture(nt_gfx_capture_view_t capture) {
     TEST_ASSERT_EQUAL_UINT32(20, completed_polls);
     TEST_ASSERT_EQUAL_UINT32(2, queries);
 }
+
+/* Finishing a captured link adds reflection only; the definition came from the snapshot. */
+static void assert_one_definition_per_program(nt_gfx_capture_view_t capture) {
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t definitions = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        definitions += (event->kind == NT_GFX_EVENT_DEFINITION && event->detail == NT_GFX_OBJECT_PROGRAM && event->object_kind == NT_GFX_OBJECT_NONE) ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, definitions);
+}
 #endif
 
 static void test_pending_program_polls_query_driver_once_per_frame(void) {
@@ -1221,6 +1232,9 @@ static void test_pending_program_polls_query_driver_once_per_frame(void) {
     const uint64_t frame = g_nt_gfx.counters.frame_sequence;
     const nt_gfx_program_state_t waited = nt_gfx_program_wait(first);
     const bool same_frame = g_nt_gfx.counters.frame_sequence == frame;
+#if NT_GFX_CAPTURE_ENABLED
+    assert_one_definition_per_program(nt_gfx_capture_read());
+#endif
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = first});
     glad_glGetProgramiv = s_saved_link_query;
 #if NT_GFX_CAPTURE_ENABLED

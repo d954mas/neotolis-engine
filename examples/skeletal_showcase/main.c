@@ -2617,8 +2617,10 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool ready = s_atlas_bound && s_font_bound && sprite_info != NULL && text_info != NULL && (nt_gfx_program_poll(sprite_info->program) == NT_GFX_PROGRAM_READY) &&
-                       (nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY);
+    /* Poll each program every frame; a short-circuit would leave the second link unfinished. */
+    const bool sprite_ready = sprite_info != NULL && nt_gfx_program_poll(sprite_info->program) == NT_GFX_PROGRAM_READY;
+    const bool text_ready = text_info != NULL && nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY;
+    const bool ready = s_atlas_bound && s_font_bound && sprite_ready && text_ready;
     if (ready) {
         const float css_w = g_nt_window.width > 0U ? (float)g_nt_window.width : fb_w;
         const float css_h = g_nt_window.height > 0U ? (float)g_nt_window.height : fb_h;
