@@ -181,6 +181,7 @@ static bool mesh_probe_create(void) {
     s_mesh_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_mesh_vs_src, .label = "mesh_probe_vs"});
     s_mesh_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_mesh_fs_src, .label = "mesh_probe_fs"});
     s_mesh_program = nt_gfx_make_program(s_mesh_vs, s_mesh_fs);
+    (void)nt_gfx_program_wait(s_mesh_program);
     s_mesh_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_mesh_program, .label = "mesh_probe_pipeline"});
     s_mesh_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
@@ -322,6 +323,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_program_t program = nt_gfx_make_program(vs, fs);
+    (void)nt_gfx_program_wait(program);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     if (target.id != 0) {
@@ -443,6 +445,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_program_t program = nt_gfx_make_program(vs, fs);
+    (void)nt_gfx_program_wait(program);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     /* Centre of texel (0,0) at the requested level (the single texel at level 7). */
@@ -516,6 +519,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_shader_t fs = nt_gfx_make_shader(
         &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float;uniform sampler2D tex;uniform vec4 tint;out vec4 color;void main(){color=texture(tex,vec2(0.5))*tint;}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
+    (void)nt_gfx_program_wait(program);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});

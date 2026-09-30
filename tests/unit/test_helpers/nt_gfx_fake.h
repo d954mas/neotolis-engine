@@ -42,6 +42,7 @@ uint32_t nt_gfx_fake_render_target_create_count(void);
 uint32_t nt_gfx_fake_render_target_destroy_count(void);
 uint32_t nt_gfx_fake_texture_create_count(void);
 uint32_t nt_gfx_fake_program_create_count(void);
+uint32_t nt_gfx_fake_program_finish_count(void);
 uint32_t nt_gfx_fake_pipeline_create_count(void);
 uint32_t nt_gfx_fake_bind_pipeline_count(void);
 uint32_t nt_gfx_fake_uniform_int_count(void);

@@ -397,6 +397,7 @@ static nt_sampler_t make_nearest_sampler(void) { return nt_gfx_make_sampler(&(nt
 /* Sampler compatibility is checked where a texture reaches a unit: the semantic set. */
 static void begin_single_sampler_pass(uint8_t sampler_class) {
     const nt_program_t program = nt_gfx_fake_make_program_typed((const char *const[]){"u_tex"}, &sampler_class, 1);
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
     const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
@@ -412,6 +413,7 @@ static void test_active_attachments_cannot_be_sampled(void) {
     nt_texture_t depth = make_depth();
     const nt_render_target_t rt = make_target(color, depth);
     const nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_tex"}, 1);
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
     const nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = color, .sampler = make_nearest_sampler()};
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});

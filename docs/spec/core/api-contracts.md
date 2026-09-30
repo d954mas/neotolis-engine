@@ -149,21 +149,33 @@ whether the handle still refers to a live slot. `nt_gfx_program_poll` returns
 one state: `NT_GFX_PROGRAM_LINKING`, `NT_GFX_PROGRAM_READY`, or
 `NT_GFX_PROGRAM_UNAVAILABLE` (invalid, destroyed, or a terminal live handle).
 
-`nt_gfx_make_program` starts the link. Polling completes it when possible:
-it reads the link result, binds registered global blocks, reflects uniforms and
-sets sampler units before reporting READY. With `KHR_parallel_shader_compile`
-(KHR or ARB on native), completion is queried at most once per program per frame;
+`nt_gfx_make_program` starts the link. `nt_gfx_program_poll` completes it when
+possible; `nt_gfx_program_wait` blocks until it finishes. Both use the same
+finalization path: read the link result, bind registered global blocks, reflect
+uniforms and set sampler units before reporting READY. With
+`KHR_parallel_shader_compile` (KHR or ARB on native), polling queries completion
+at most once per program per frame;
 a pending result is reused until the next `nt_gfx_begin_frame`. Completion may
 therefore become visible one frame later. Without the extension, polling defers
 completion until the frame after creation, then reads `GL_LINK_STATUS`, which
 can block until the driver finishes. Nonblocking polling requires the extension.
 WebGL diagnostic compiler checks may themselves block inside `glLinkProgram`.
 
-`nt_gfx_make_pipeline` waits for a linking program, bypassing the per-frame poll
-limit. This supports synchronous initialization; a caller avoiding that wait
-polls for READY before creating the pipeline. Shader stages may be destroyed
-after `nt_gfx_make_program`, including while it links. Deferred diagnostics log
-only stages whose engine-owned shader objects still exist.
+`nt_gfx_program_wait` bypasses the per-frame poll limit and creation-frame delay
+for synchronous initialization, including after a poll returned LINKING in the
+same frame. It returns only READY or UNAVAILABLE, never LINKING. Waiting on an
+already READY program issues no GL calls; invalid, destroyed and terminal
+handles return UNAVAILABLE without asserting or restarting the link. Independent
+programs can all start linking before their owner waits for each one. Waiting
+does not advance the frame or change the currently bound pipeline.
+
+`nt_gfx_make_pipeline` requires an already READY program. It never polls, waits
+or finalizes a link. After the recoverable context-loss check, a LINKING or
+UNAVAILABLE program is a caller error and asserts; with assertions OFF it
+returns an invalid pipeline without backend allocation or changing the program.
+Shader stages may be destroyed after `nt_gfx_make_program`, including while it
+links. Deferred diagnostics log only stages whose engine-owned shader objects
+still exist.
 
 Processing context loss leaves program handles valid but UNAVAILABLE. No API
 relinks that handle: the owner destroys it and creates a replacement. Owners
@@ -174,9 +186,9 @@ a stale non-zero handle. Clear the owner's variable to `NT_PROGRAM_INVALID`
 when destroying it.
 
 A link failure is a developer error and asserts when the link finishes, in
-`nt_gfx_program_poll` or the `nt_gfx_make_pipeline` that finishes it, alongside an
-invalid stage handle and an exhausted program pool. When asserts are off, the failed handle
-is terminal like one a loss left behind.
+`nt_gfx_program_poll` or `nt_gfx_program_wait`. An invalid stage handle and an
+exhausted program pool also assert. When asserts are off, the failed handle is
+terminal like one a loss left behind.
 
 `nt_gfx_register_global_block` applies the global name -> binding slot registry
 to existing and future programs; registration may precede or follow linking.
@@ -442,9 +454,11 @@ check runs first. A returned invalid target therefore means a lost context, a
 failed backend allocation, or an incomplete framebuffer, such as `RGBA16F`
 without float rendering. `nt_gfx_make_pipeline`
 follows the same split: a
-NULL descriptor, an unavailable program, and an exhausted pipeline pool assert, so a returned invalid
-pipeline handle means a lost context or a failed backend allocation — the two
-recoverable outcomes, both retried on a later frame.
+NULL descriptor, a program that is not READY, and an exhausted pipeline pool
+assert. For valid requests, a returned invalid pipeline handle means a lost
+context or a failed backend allocation — the two recoverable outcomes, both
+retried on a later frame. With assertions OFF, a non-ready program is rejected
+without backend allocation; this rejection does not complete its link.
 `nt_gfx_make_vertex_input` applies the same contract to the layout checks: an
 attribute count over `NT_GFX_MAX_VERTEX_ATTRS` (instance layouts over
 `NT_GFX_MAX_INSTANCE_ATTRS`), a stride over the WebGL2 cap of 255, misaligned

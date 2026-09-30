@@ -37,7 +37,9 @@ the compiled stages or the source text, because only the handles survive a
 context loss -- `nt_program_ref_drop` clears the program and the same gate links
 again once the stages re-activate. A shader embedded as a source string needs
 no resource gate: start its program at init, then poll for READY before drawing
-or create a pipeline to wait synchronously. Polling and stage lifetimes follow
+or call `nt_gfx_program_wait` to finish synchronously before creating a pipeline.
+Pipeline creation requires READY and never completes a link. Polling, waiting
+and stage lifetimes follow
 [Program handles](../core/api-contracts.md#program-handles).
 
 Pack priority does not reach a material's program. A material stores a linked

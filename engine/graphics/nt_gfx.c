@@ -865,7 +865,7 @@ static bool blend_constant_color_valid(const float color[4]) {
 
 /* Ranges hold whether or not blending is enabled; the WebGL combination rules
  * only matter for a blend that will run. */
-static bool blend_state_valid(const nt_blend_state_t *blend) {
+static inline bool blend_state_valid(const nt_blend_state_t *blend) {
     if (!(blend_factor_valid(blend->src_rgb) && blend_factor_valid(blend->dst_rgb) && blend_factor_valid(blend->src_alpha) && blend_factor_valid(blend->dst_alpha) &&
           blend->op_rgb <= NT_BLEND_OP_MAX && blend->op_alpha <= NT_BLEND_OP_MAX)) {
         return false;
@@ -882,7 +882,7 @@ static bool blend_state_valid(const nt_blend_state_t *blend) {
 
 /* A location used twice (within a layout or across vertex/instance layouts) means
  * glVertexAttribPointer runs twice on one slot -- last bind wins, silently wrong data. */
-static bool layout_locations_unique(const nt_vertex_layout_t *a, const nt_vertex_layout_t *b) {
+static inline bool layout_locations_unique(const nt_vertex_layout_t *a, const nt_vertex_layout_t *b) {
     uint32_t seen[8] = {0}; /* 256 bits, one per possible location */
     const nt_vertex_layout_t *layouts[2] = {a, b};
     for (int l = 0; l < 2; l++) {
@@ -904,6 +904,7 @@ static bool layout_locations_unique(const nt_vertex_layout_t *a, const nt_vertex
 static void assert_layout_webgl2_rules(const nt_vertex_layout_t *layout) {
     for (uint8_t i = 0; i < layout->attr_count; i++) {
         const nt_vertex_attr_t *attr = &layout->attrs[i];
+        (void)attr;
         NT_ASSERT(attr->location < NT_GFX_MAX_VERTEX_ATTRS && "WebGL2 guarantees only 16 vertex attribute locations");
         NT_ASSERT(attr->count >= 1 && attr->count <= 4);
         NT_ASSERT(nt_vertex_type_size(attr->type) != 0);
@@ -924,19 +925,21 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    /* Explicit pipeline creation waits even when this frame already polled pending. */
-    const bool linked = nt_pool_valid(&s_gfx.program_pool, desc->program.id) && (finish_program(nt_pool_slot_index(desc->program.id), true) == NT_GFX_PROGRAM_READY);
-    if (!linked && backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
+    const uint32_t program_backend = nt_pool_valid(&s_gfx.program_pool, desc->program.id) ? s_gfx.program_backends[nt_pool_slot_index(desc->program.id)] : 0;
+    const bool ready = program_backend != 0 && nt_gfx_backend_program_ready(program_backend);
+    if (!ready && backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(linked && "make_pipeline: program is not linked");
+    NT_ASSERT(ready && "make_pipeline: program must be READY; poll or wait before creating a pipeline");
+    if (!ready) {
+        return NT_GFX_RESULT_UNREADY;
+    }
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
     NT_ASSERT(id != 0 && "pipeline pool full -- raise nt_gfx_desc_t.max_pipelines");
 
     uint32_t slot = nt_pool_slot_index(id);
-    uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(desc->program.id)];
     uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend, slot);
     if (backend == 0) {
         NT_LOG_ERROR("backend pipeline creation failed");
@@ -1278,6 +1281,7 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
         NT_ASSERT((size == NULL || (meta->width == size->width && meta->height == size->height)) && "make_render_target: attachment sizes differ");
         size = meta;
     }
+    (void)size;
     /* Deliberately not gated on gpu_caps.has_float_render_target: the backend
        completeness check is the real gate, and it already returns invalid. */
     nt_texture_format_t color_format = nt_gfx_texture_format(desc->color);
@@ -1509,6 +1513,13 @@ nt_gfx_program_state_t nt_gfx_program_poll(nt_program_t prog) {
     return state;
 }
 
+nt_gfx_program_state_t nt_gfx_program_wait(nt_program_t prog) {
+    NT_GFX_BEGIN(NT_GFX_OP_STATE, NT_GFX_OBJECT_PROGRAM, prog.id);
+    const nt_gfx_program_state_t state = nt_pool_valid(&s_gfx.program_pool, prog.id) ? finish_program(nt_pool_slot_index(prog.id), true) : NT_GFX_PROGRAM_UNAVAILABLE;
+    NT_GFX_END(state == NT_GFX_PROGRAM_READY ? NT_GFX_RESULT_ACCEPTED : NT_GFX_RESULT_UNREADY);
+    return state;
+}
+
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         return NT_PROGRAM_INVALID;
@@ -1665,6 +1676,7 @@ static nt_gfx_result_t resolve_sampler_backend(uint32_t texture_slot, nt_sampler
         return NT_GFX_RESULT_UNREADY;
     }
     const bool class_ok = texture_matches_sampler_class(texture_slot, &e->desc, sampler_class);
+    (void)class_ok;
     NT_ASSERT(class_ok && "apply_texture_bindings: texture and sampler do not match the program sampler type");
     if (e->backend == 0) {
         /* Lazy recreate after context-loss recovery — desc was preserved. */
@@ -1683,7 +1695,7 @@ static nt_gfx_result_t resolve_sampler_backend(uint32_t texture_slot, nt_sampler
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-static bool texture_is_active_attachment(nt_texture_t texture) {
+static inline bool texture_is_active_attachment(nt_texture_t texture) {
     if (s_gfx.active_render_target == 0) {
         return false;
     }

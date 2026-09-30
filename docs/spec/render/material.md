@@ -71,9 +71,10 @@ two slots on one unit would fight over it at every draw.
 >
 > A material has no readiness field or version. Poll
 > `nt_gfx_program_poll(info->program)` for `NT_GFX_PROGRAM_READY` before building
-> a pipeline without waiting. LINKING is temporary; UNAVAILABLE means no assigned
-> program or a terminal handle after loss/destruction. The material survives
-> recovery and retains its old program handle until reassignment.
+> a pipeline, or explicitly wait with `nt_gfx_program_wait` during synchronous
+> initialization. Pipeline creation never completes a link. LINKING is temporary;
+> UNAVAILABLE means no assigned program or a terminal handle after loss/destruction.
+> The material survives recovery and retains its old program handle until reassignment.
 >
 > Pipeline cache keys include the program handle. Destroying the replaced
 > program frees its pipelines; dead cache records are removed during insertion

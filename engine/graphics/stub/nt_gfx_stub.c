@@ -133,6 +133,11 @@ nt_gfx_program_state_t nt_gfx_program_poll(nt_program_t prog) {
     return NT_GFX_PROGRAM_UNAVAILABLE;
 }
 
+nt_gfx_program_state_t nt_gfx_program_wait(nt_program_t prog) {
+    (void)prog;
+    return NT_GFX_PROGRAM_UNAVAILABLE;
+}
+
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
     (void)pip;
     return (nt_program_t){0};

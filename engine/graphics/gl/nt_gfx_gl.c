@@ -1481,6 +1481,10 @@ nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) 
     return NT_GFX_LINK_DONE;
 }
 
+bool nt_gfx_backend_program_ready(uint32_t backend_handle) {
+    return backend_handle != 0 && backend_handle <= s_init_desc.max_programs && s_programs[backend_handle].program != 0 && !s_programs[backend_handle].linking;
+}
+
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
     if (backend_handle == 0) {
         return;

@@ -144,7 +144,12 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     if (cached.id != 0) {
         return cached;
     }
-    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc, &s_text.warned_no_pipeline);
+    const nt_pipeline_t pipeline = nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc, &s_text.warned_no_pipeline);
+    if (pipeline.id == 0 && !s_text.warned_no_pipeline) {
+        NT_LOG_WARN("nt_text_renderer: pipeline creation failed -- discarding this batch");
+        s_text.warned_no_pipeline = true;
+    }
+    return pipeline;
 }
 // #endregion
 
@@ -276,7 +281,7 @@ void nt_text_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(info != NULL && "nt_text_renderer_set_material: invalid material handle");
     /* Assignment, not liveness: on the frame the context dies the program is
      * already dead here, and trapping on that would crash a recoverable event.
-     * make_pipeline polls the lost context and hands back an invalid pipeline. */
+     * The pipeline lookup returns an invalid handle until recovery replaces it. */
     NT_ASSERT(info->program.id != 0 && "nt_text_renderer_set_material: material has no program");
 
     if (s_text.material.id == mat.id) {
@@ -761,10 +766,11 @@ void nt_text_renderer_flush(void) {
      * the first glyph and here. The vertex input stays invalid when the retry
      * above failed (context still lost / backend failure). */
     const nt_pipeline_t pipeline = s_text.batch_pipeline;
-    if (!nt_gfx_pipeline_valid(pipeline) || !nt_gfx_vertex_input_valid(s_text.vertex_input)) {
-        /* Unready programs were reported at batch open; destruction of a captured
-         * pipeline or backend allocation failure still needs a warning. */
-        if (!s_text.warned_no_pipeline) {
+    const bool vertex_input_valid = nt_gfx_vertex_input_valid(s_text.vertex_input);
+    if (!nt_gfx_pipeline_valid(pipeline) || !vertex_input_valid) {
+        /* Pending links skip silently; missing materials, destroyed captured pipelines
+         * and vertex-input failures still need a warning. */
+        if (!s_text.warned_no_pipeline && (s_text.material.id == 0 || pipeline.id != 0 || !vertex_input_valid)) {
             NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline or vertex input -- discarding %u glyphs", s_text.glyph_count);
             s_text.warned_no_pipeline = true;
         }

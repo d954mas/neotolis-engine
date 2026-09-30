@@ -118,6 +118,7 @@ static uint8_t *s_blob;
 static uint32_t s_blob_size;
 static nt_font_t s_font;
 static uint32_t s_error_count;
+static uint32_t s_warning_count;
 
 static void capture_errors(nt_log_level_t level, const char *domain, const char *msg, void *user) {
     (void)domain;
@@ -125,6 +126,15 @@ static void capture_errors(nt_log_level_t level, const char *domain, const char 
     (void)user;
     if (level == NT_LOG_LEVEL_ERROR) {
         s_error_count++;
+    }
+}
+
+static void capture_warnings(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)domain;
+    (void)msg;
+    (void)user;
+    if (level == NT_LOG_LEVEL_WARN) {
+        s_warning_count++;
     }
 }
 
@@ -279,6 +289,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
+    s_warning_count = 0;
     nt_gfx_fake_reset();
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
     /* Band before curve: units the renderer must query, not the 0/1 a hardcode would use. */
@@ -309,6 +320,7 @@ void setUp(void) {
 
 void tearDown(void) {
     nt_log_remove_sink(capture_errors, NULL);
+    nt_log_remove_sink(capture_warnings, NULL);
     nt_text_renderer_shutdown();
     nt_font_destroy(s_font);
     free(s_blob);
@@ -589,6 +601,87 @@ void test_flush_stops_after_program_cleared(void) {
     nt_gfx_end_pass();
 }
 
+void test_flush_skips_linking_batches_without_warning(void) {
+    nt_log_add_sink(capture_warnings, NULL);
+    nt_gfx_fake_set_links_pending(true);
+    const nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    const nt_program_t program = nt_material_get_info(material)->program;
+    nt_text_renderer_set_material(material);
+    nt_gfx_fake_draw_trace_reset(true);
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, s_warning_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    /* Completion after batch open must neither redirect that batch nor warn. */
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_fake_set_links_pending(false);
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(program));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_flush();
+    nt_gfx_end_pass();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, s_warning_count);
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(program.id, nt_gfx_fake_draw_trace_at(0U).program.id);
+    TEST_ASSERT_EQUAL_UINT32(12U, nt_gfx_fake_draw_trace_at(0U).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_warning_count);
+}
+
+void test_flush_warns_once_without_a_material(void) {
+    nt_log_add_sink(capture_warnings, NULL);
+    nt_gfx_fake_draw_trace_reset(true);
+
+    draw_and_flush();
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+}
+
+void test_flush_warns_on_vertex_input_failure_while_program_links(void) {
+    nt_log_add_sink(capture_warnings, NULL);
+    nt_gfx_fake_set_links_pending(true);
+    nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_gfx_fake_fail_next_vertex_input_create();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
+
+    nt_gfx_fake_fail_next_vertex_input_create();
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+}
+
+void test_flush_warns_after_pipeline_creation_failure(void) {
+    nt_log_add_sink(capture_warnings, NULL);
+    nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_gfx_fake_fail_next_pipeline_create();
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+}
+
 /* A recoverable vertex-input creation failure must not disable text until the
  * next restore: flush retries the creation lazily, like the pipeline cache. */
 void test_flush_retries_vertex_input_after_backend_failure(void) {
@@ -862,6 +955,7 @@ void test_decoration_only_run_opens_its_pipeline(void) {
 }
 
 void test_destroyed_replaced_program_drops_staged_work(void) {
+    nt_log_add_sink(capture_warnings, NULL);
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     const nt_program_t first = nt_material_get_info(material)->program;
     const nt_program_t second = nt_gfx_make_program(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
@@ -876,12 +970,14 @@ void test_destroyed_replaced_program_drops_staged_work(void) {
     nt_gfx_destroy_program(first);
     nt_text_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     assert_text_draw(0U, second_draw, 2U);
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
 }
 
 void test_unready_font_skips_glyph_and_decoration_uploads(void) {
@@ -1551,6 +1647,10 @@ int main(void) {
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_flush_stops_after_program_cleared);
+    RUN_TEST(test_flush_skips_linking_batches_without_warning);
+    RUN_TEST(test_flush_warns_once_without_a_material);
+    RUN_TEST(test_flush_warns_on_vertex_input_failure_while_program_links);
+    RUN_TEST(test_flush_warns_after_pipeline_creation_failure);
     RUN_TEST(test_flush_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_failed_restore_releases_partial_buffers);
     RUN_TEST(test_flush_discards_glyphs_on_a_destroyed_program);

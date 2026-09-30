@@ -507,11 +507,11 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
     const nt_material_info_t *mat_info = nt_material_get_info(mat);
     /* Assignment, not liveness: on the frame the context dies the program is
      * already dead here, and trapping on that would crash a recoverable event.
-     * make_pipeline polls the lost context and hands back an invalid pipeline. */
+     * The pipeline lookup returns an invalid handle until recovery replaces it. */
     NT_ASSERT(mat_info != NULL && mat_info->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
 
-    /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
-    if (mat.id == s_sprite.current_mat.id && mat_info->program.id == s_sprite.current_program.id && s_sprite.cmd_count > 0) {
+    /* A command opened while linking must retry even when the handles match. */
+    if (mat.id == s_sprite.current_mat.id && mat_info->program.id == s_sprite.current_program.id && s_sprite.cmd_count > 0 && nt_gfx_pipeline_valid(s_sprite.cmds[s_sprite.cmd_count - 1].pipeline)) {
         return;
     }
 

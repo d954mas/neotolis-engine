@@ -170,6 +170,8 @@ typedef enum {
  * support, the first poll after creation frame can block. FAILED has logged
  * (unless the context is lost) and freed the backend slot. */
 nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait);
+/* Reads only the retained link state; never queries GL or finishes a link. */
+bool nt_gfx_backend_program_ready(uint32_t backend_handle);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 
 /* Sampler units and classes are immutable program state, recorded at link. */
