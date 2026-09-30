@@ -1,33 +1,33 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: a343d4f
+# Commit: 4dde51c
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 213 B
-Import               535 B
+Import               542 B
 Function             136 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  62 B
-Code               82467 B
-Data               10236 B
-Custom              4781 B
+Code               82530 B
+Data               10196 B
+Custom              4805 B
 ---------------- ----------
-TOTAL              98533 B
+TOTAL              98587 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-28784 B   frame
- 8106 B   main
+28861 B   frame
+ 8107 B   main
  5011 B   nt_gfx_activate_mesh
  3002 B   fmt_fp
- 2926 B   nt_gfx_make_texture
+ 2848 B   nt_gfx_make_texture
  2619 B   nt_http_request_ex
  2425 B   printf_core
  1845 B   __rem_pio2f
@@ -38,7 +38,7 @@ TOTAL              98533 B
   809 B   nt_input_web_on_pointer_move
   769 B   nt_gfx_gl_cache_ground_state
   769 B   nt_input_web_on_pointer_down
-  695 B   nt_gfx_make_buffer
+  704 B   nt_gfx_make_buffer
   692 B   nt_gfx_activate_texture
   690 B   pop_arg_long_double
   545 B   nt_gfx_activate_shader
@@ -55,7 +55,7 @@ TOTAL              98533 B
   388 B   nt_gfx_backend_create_sampler
 
 Total functions: 134
-Total code size: 82258 B
+Total code size: 82321 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              196228 B
-libnt_gfx.a                83352 B
-libnt_gfx_stub.a            5990 B
+libnt_gfx.a                83804 B
+libnt_gfx_stub.a            6090 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4402524 B
+TOTAL (archives)         4403076 B
 
 ## Data Segments Summary
 
 Segments: 26
-Total data size: 10058 B
+Total data size: 10018 B

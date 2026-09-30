@@ -634,5 +634,51 @@
       "raw": 2062244,
       "gzip": 583958
     }
+  },
+  {
+    "commit": "4dde51c",
+    "date": "2026-09-30T09:14:10Z",
+    "files": {
+      "index.html": {
+        "raw": 2451,
+        "gzip": 1239
+      },
+      "index_simd.wasm": {
+        "raw": 390444,
+        "gzip": 150238
+      },
+      "index.wasm": {
+        "raw": 380717,
+        "gzip": 150938
+      },
+      "index_simd.js": {
+        "raw": 21366,
+        "gzip": 8708
+      },
+      "index.js": {
+        "raw": 21366,
+        "gzip": 8703
+      },
+      "assets/skeletal_showcase.ntpack": {
+        "raw": 1440884,
+        "gzip": 271596
+      },
+      "assets/skeletal_showcase_clips.ntpack": {
+        "raw": 207328,
+        "gzip": 152288
+      }
+    },
+    "engine": {
+      "raw": 414261,
+      "gzip": 160185
+    },
+    "resources": {
+      "raw": 1648212,
+      "gzip": 423884
+    },
+    "total": {
+      "raw": 2062473,
+      "gzip": 584069
+    }
   }
 ]
