@@ -1345,6 +1345,14 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
         if (ulen <= 0 || usize <= 0) {
             return false;
         }
+        /* Block members are fed by their buffer, not by location writes. Emscripten
+         * hands out a location for any active name, so the block index decides. */
+        const GLuint index = (GLuint)ui;
+        GLint block_index = -1;
+        NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_BLOCK_INDEX, &block_index);
+        if (block_index != -1) {
+            continue;
+        }
         NT_ASSERT(usize == 1 || (ulen >= 3 && strcmp(uname + ulen - 3, "[0]") == 0));
         for (GLint element = 0; element < usize; element++) {
             if (element > 0) {
@@ -1689,10 +1697,14 @@ void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y
 
 /* ---- Uniform buffer ---- */
 
-void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
+void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
     GLuint buf = s_buffer_gl[backend_handle];
-    NT_GL(glBindBufferBase, GL_UNIFORM_BUFFER, slot, buf);
+    if (size != 0) {
+        NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, buf, (GLintptr)offset, (GLsizeiptr)size);
+    } else {
+        NT_GL(glBindBufferBase, GL_UNIFORM_BUFFER, slot, buf);
+    }
 }
 
 void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
