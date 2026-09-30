@@ -7,13 +7,14 @@
 /*
  * One frame's prepared per-draw vertex data (instance attributes) in a single
  * STREAM vertex buffer. Renderers reserve ranges while preparing; the game
- * uploads once before the first pass that draws them; draws bind the buffer at
+ * uploads once before the first draw that reads them; draws bind the buffer at
  * the reserved offset. Nothing writes the buffer after a draw of the frame read
  * it, which is the stall Mali/ANGLE charge for (see Dynamic data lifetime in
  * the render architecture spec).
  *
  * Frame order, owned by the game, once per gfx frame after nt_gfx_begin_frame:
  *   begin_frame -> reserve ... -> upload -> passes that draw reserved ranges.
+ * Reserve, upload and buffer access assert that begin_frame ran in this gfx frame.
  * An offset is valid until the next begin_frame or restore.
  */
 
@@ -41,6 +42,7 @@ void nt_frame_arena_begin_frame(void);
 
 /* Reserves `size` bytes (rounded up to NT_FRAME_ARENA_ALIGN) and returns the
  * staging pointer to fill; *out_offset receives its byte offset in the buffer.
+ * Alignment padding has unspecified contents and must not be read by consumers.
  * No GL call. Asserts: size > 0, fits the capacity (logs the need first),
  * called before this frame's upload. */
 void *nt_frame_arena_reserve(uint32_t size, uint32_t *out_offset);

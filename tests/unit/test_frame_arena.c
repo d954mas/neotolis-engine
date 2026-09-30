@@ -229,6 +229,34 @@ static void test_reserve_rejects_a_null_offset(void) {
     NT_TEST_EXPECT_ASSERT((void)nt_frame_arena_reserve(4, NULL));
 }
 
+static void test_reserve_before_begin_frame_asserts(void) {
+    arena_init(64);
+    nt_gfx_begin_frame();
+    nt_test_assert_install();
+    uint32_t offset = 0;
+    NT_TEST_EXPECT_ASSERT((void)nt_frame_arena_reserve(4, &offset));
+    expect_assert_message("begin_frame must run in this gfx frame");
+}
+
+static void test_upload_before_begin_frame_asserts(void) {
+    arena_init(64);
+    nt_gfx_begin_frame();
+    nt_test_assert_install();
+    NT_TEST_EXPECT_ASSERT(nt_frame_arena_upload());
+    expect_assert_message("begin_frame must run in this gfx frame");
+}
+
+static void test_buffer_from_previous_gfx_frame_asserts(void) {
+    arena_init(64);
+    next_frame();
+    (void)reserve_filled(4, 0xA1);
+    nt_frame_arena_upload();
+    nt_gfx_begin_frame();
+    nt_test_assert_install();
+    NT_TEST_EXPECT_ASSERT((void)nt_frame_arena_buffer());
+    expect_assert_message("begin_frame must run in this gfx frame");
+}
+
 static void test_reserve_asserts_past_the_capacity(void) {
     arena_init(32);
     next_frame();
@@ -307,6 +335,9 @@ int main(void) {
     RUN_TEST(test_init_rejects_a_capacity_not_multiple_of_the_alignment);
     RUN_TEST(test_reserve_rejects_zero_size);
     RUN_TEST(test_reserve_rejects_a_null_offset);
+    RUN_TEST(test_reserve_before_begin_frame_asserts);
+    RUN_TEST(test_upload_before_begin_frame_asserts);
+    RUN_TEST(test_buffer_from_previous_gfx_frame_asserts);
     RUN_TEST(test_reserve_asserts_past_the_capacity);
     RUN_TEST(test_reserve_asserts_when_rounding_wraps);
     RUN_TEST(test_reserve_after_upload_asserts);

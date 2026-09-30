@@ -281,9 +281,9 @@ the reference phone with `examples/bench_stream`:
   every call.
 
 Policy for engine renderers: data known before drawing is **prepared** — packed
-for the whole frame, uploaded once before the frame's first draw, and drawn by
-range in any pass, any number of times. Immediate-mode batches that flush
-between game passes (sprite, text, shape) choose a per-flush policy by
+for the whole frame, uploaded once before the first draw that reads the storage,
+and drawn by range in any pass, any number of times. Immediate-mode batches that
+flush between game passes (sprite, text, shape) choose a per-flush policy by
 measurement. The instance rings named above predate this rule; prepared data
 lives in the frame arena (see Prepared dynamic data).
 
@@ -307,14 +307,16 @@ The game owns the frame order, once per gfx frame after `nt_gfx_begin_frame`:
 2. Renderers `nt_frame_arena_reserve` ranges while preparing and fill the
    returned staging pointer. A reserve returns a byte offset aligned to
    `NT_FRAME_ARENA_ALIGN` (16 bytes: one RGBA32F texel, so the same offsets can
-   index a data texture later).
+   index a data texture later). Alignment padding has unspecified contents;
+   consumers read only the requested bytes.
 3. `nt_frame_arena_upload` sends every reserved byte in one buffer update,
-   after the last reserve and before the first pass that draws arena data.
+   after the last reserve and before the first draw that reads arena data.
 4. Draws bind `nt_frame_arena_buffer()` at a reserved offset, in any pass, any
    number of times.
 
-The order is asserted, not trusted: a second `begin_frame` in one gfx frame, a
-reserve after the frame's upload, a second upload, and taking the buffer before
+Reserve, upload and buffer access assert that `begin_frame` ran in the current
+gfx frame. The order is asserted, not trusted: a second `begin_frame` in one gfx
+frame, a reserve after the frame's upload, a second upload, and taking the buffer before
 the upload each assert. So no write lands in the buffer after a draw of the
 frame read it. An offset stays valid until the next `begin_frame` or restore; a
 restore empties the buffer, so draws assert until the next upload. Overflowing
@@ -322,9 +324,10 @@ the capacity logs the bytes needed and free, then asserts; the arena never grows
 or chains buffers. `nt_frame_arena_peak` reports the most bytes any frame
 uploaded since init, to size the capacity from a real scene.
 
-Data created after the first draw (for example 3D built while walking UI) is not
-supported: the driver tracks the whole buffer, so a second upload would stall
-whatever range it writes. Prepare it before the first pass.
+Data created after the first draw that reads arena data (for example 3D built
+while walking UI) is not supported: the driver tracks the whole buffer, so a
+second upload would stall whatever range it writes. Prepare it before the first
+draw that reads arena data.
 
 One buffer, not a rotation: on the reference phone and on desktop Chrome,
 Firefox and native GL, one, two and three rotating buffers measured equal. A
