@@ -842,6 +842,8 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
  * INVALID means context loss or backend allocation failure; caller errors assert. */
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
+/* A nonzero handle means upload commands were issued, not that GPU storage
+ * allocation or upload succeeded; creation does not poll GPU errors. */
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_render_target. The target
@@ -885,6 +887,8 @@ nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
  * destroy_texture cascade, or a context loss (loss frees every render-target
  * slot; the owner recreates its textures and targets after restore). */
 bool nt_gfx_render_target_valid(nt_render_target_t rt);
+/* Reports a backend object not discarded by engine loss synchronization;
+ * does not verify GPU storage allocation or upload success. */
 bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Reports a live stage backend. Readiness lost to context loss never returns for that handle;
  * re-read the new handle from its resource after reactivation. */

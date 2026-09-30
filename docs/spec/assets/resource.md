@@ -96,8 +96,10 @@ also fit the target address space. Unmount frees asset records, not requested sl
 
 Accessors reject zero and unallocated indices with their documented empty results.
 `nt_resource_get()` returns the current published runtime handle.
-`nt_resource_is_ready()` means the published winner is fully usable, not merely
-that a runtime handle exists somewhere in the stack.
+`nt_resource_is_ready()` means the published winner is usable under its asset
+type's contract, not merely that a runtime handle exists somewhere in the stack.
+For textures, READY does not verify GPU storage allocation or upload success;
+texture creation does not poll GPU errors.
 
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 

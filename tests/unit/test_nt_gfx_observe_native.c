@@ -465,8 +465,8 @@ static void test_texture_mips_storage_and_subrect_payloads(void) {
     nt_gfx_begin_frame();
 }
 
-/* Texture creation never reads GL errors (a blocking round trip on WebGL), so a
- * driver-rejected upload on a live context does not fail the create. */
+/* Injected GL_OUT_OF_MEMORY after a real upload verifies no glGetError polling
+ * during creation (a blocking round trip on WebGL), not actual VRAM exhaustion. */
 static void test_texture_create_reads_no_gl_error(void) {
     const uint8_t pixels[64] = {0};
     nt_gfx_begin_frame(); /* init drains errors; measure the create's frame alone */
