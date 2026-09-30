@@ -110,8 +110,9 @@ buffer is *not* cascade-destroyed, but destroying one clears the dependents'
 pointed flag: their next draw using that vertex input asserts until
 `nt_gfx_bind_instance_buffer` re-points it, and the GL attachment's storage
 lingers until that re-point or the vertex input's death.
-Buffer *contents* may change freely — `update`/`orphan`
-keep the GL name, so baked attachments survive per-flush orphaning — and
+Buffer *contents* may change at any time for correctness — `update`/`orphan`
+keep the GL name, so baked attachments survive per-flush orphaning; what a
+write costs depends on when it happens (see Dynamic data lifetime) — and
 index-buffer data ops run inside a service upload VAO in the backend,
 because the element-array binding is VAO state — it would otherwise be
 silently rewired into whichever vertex input is bound, and core-profile GL
@@ -263,6 +264,32 @@ vertex input died (context loss) is recreated in place, so repeated losses
 cannot grow the cache. A miss creates the vertex input and caches it only on
 success; recoverable creation failures leave the cache unchanged so the next
 lookup retries.
+
+### Dynamic data lifetime
+
+A write into a buffer that an earlier draw of the same frame read is correct
+but not free: Mali drivers under ANGLE track the whole buffer, not the written
+range, so the write waits for those draws or copies around them. Measured on
+the reference phone with `examples/bench_stream`:
+
+- appending per-draw data between draws of one frame (the mesh, skinned and
+  shape instance rings) costs 2-15x frame time when the frame is not GPU-bound;
+- a partial rewrite from offset 0 (the shape batch) stalls the same way;
+- a full-size rewrite does not stall: Chrome gives the buffer new storage;
+- rewriting a buffer one frame after its last read does not stall;
+- orphaning (`nt_gfx_orphan_buffer`) removes the wait but allocates storage on
+  every call.
+
+Policy for engine renderers: data known before drawing is **prepared** — packed
+for the whole frame, uploaded once before the frame's first draw, and drawn by
+range in any pass, any number of times. Immediate-mode batches that flush
+between game passes (sprite, text, shape) choose a per-flush policy by
+measurement. The instance rings named above predate this rule.
+
+A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
+waits did not raise GPU work per frame, and the phone's governor granted the
+waiting build a higher clock. Compare builds as described in
+[measuring performance on phones](../../perf-measurement.md).
 
 ### Render targets
 

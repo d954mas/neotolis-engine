@@ -258,6 +258,16 @@ Atlas benchmark scripts (`benchmark.sh`, `autoresearch-bench.sh`, `bench-vector.
 in `scripts/atlas/`) select INFO in `build/_cmake/native-release-atlas-bench`;
 `--no-build` uses that build's executable.
 
+`examples/bench_stream` measures dynamic-upload lifetime patterns (ring, per-upload
+buffers, orphaning, upload-before-first-draw) as JSON lines per window, in ABBA order.
+Native: `bench_stream <cfg> [out.jsonl]` after a `native-release` build. Web and
+phone: build it with `wasm-release`, then `python scripts/bench_stream.py serve
+--cfg examples/bench_stream/p40_inst.cfg --out build/bench_stream/<name>`; add
+`--adb` for a USB phone (port reverse, browser launch, GPU clock and temperature
+tags per window). The page caps at the display rate; raise `load` until the
+baseline arm runs below it, or the arms cannot be ranked. Read
+[measuring performance on phones](perf-measurement.md) before comparing builds on a device.
+
 ## Checks
 
 Run these from the repository root, with the SDK activated for WASM checks:
