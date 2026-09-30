@@ -267,19 +267,23 @@ measures `max(1, width >> L)` by `max(1, height >> L)` and occupies
 `nt_texture_level_bytes` of that size. Any count from 1 to the full chain
 (`1 + floor(log2(max(width, height)))`) is legal. `N > 1` requires `data` and
 excludes `gen_mipmaps`, which is the other way to fill a chain. Creation is one
-shot: the handle is published only after the last declared level uploaded and
-the default sampler was acquired. A failed upload or sampler creation leaves no
-texture and no pool slot. Filter and wrap state lives only on sampler objects:
+shot: the handle is published after all declared level uploads were issued and
+the default sampler was acquired. A detected context loss, failed texture-name
+allocation or failed sampler creation leaves no texture and no pool slot.
+Driver upload and mipmap-generation errors on a live context are not polled:
+a nonzero handle does not prove successful GPU storage allocation. Filter and
+wrap state lives only on sampler objects:
 every sampling bind carries one (the texture's default or an override), the
 texture object itself keeps GL defaults, and the backend asserts on a bind
 without a sampler.
 
-`GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
-every published texture is complete for every minification filter. A
-`glGenerateMipmap` that fails fails the creation: no texture is published. A
-mipmap filter over a single-level texture is therefore legal in both the descriptor and
-a sampler override; it samples level 0. `nt_gfx_update_texture` on a compressed
-or multi-level texture asserts, then returns without touching storage; whole
+`GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1`, matching the requested uploaded
+or generated chain. With successful storage allocation, the texture is complete
+for every minification filter. An undetected upload or mipmap-generation failure
+may leave it incomplete. A mipmap filter over a single-level texture is legal
+in both the descriptor and a sampler override; it samples level 0.
+`nt_gfx_update_texture` on a compressed or multi-level texture asserts, then
+returns without touching storage; whole
 levels are replaced by recreating the texture.
 
 `RGBA32F` requires `gpu_caps.has_float_texture_linear` for any linear filtering,
@@ -290,7 +294,9 @@ Creating mipmaps requires
 both `has_float_texture_linear` and `has_float_render_target`, because WebGL
 generation requires filterable, color-renderable storage. Unsupported combinations
 assert before creating storage or applying bindings; filters are never substituted.
-`RGBA16F` linear filtering is core and does not require the new capability.
+`RGBA16F` linear filtering is core and does not require the float-filtering
+capability. Its mipmap generation still requires `has_float_render_target`;
+requesting it without that capability asserts before creating storage.
 
 A sampler override passed in `nt_gfx_texture_binding_t` must obey the same
 format restrictions; it cannot replace the explicit texture state with an
@@ -358,10 +364,12 @@ otherwise selection continues with the next candidate of that order.
 The activator transcodes the whole chain into the shared staging buffer with one
 codec call and then creates the texture through `nt_gfx_make_texture`, which is
 the single path to storage — there is no internal create/upload pair. The codec
-call opens and closes its own transcoder session. Any failure — transcode,
-staging, storage creation, sampler creation — publishes nothing: no handle, no
-pool slot, no open transcoder session. Texture pool exhaustion during activation
-is an asserted precondition, exactly as in `nt_gfx_make_texture`, not a
+call opens and closes its own transcoder session. Any reported failure (transcode,
+staging, texture-name allocation, context loss or sampler creation) publishes
+nothing: no handle, no pool slot, no open transcoder session. Live-context upload
+errors remain unchecked, as in the public constructor. Texture pool exhaustion
+during activation is an asserted precondition, exactly as in
+`nt_gfx_make_texture`, not a
 rejection.
 
 ### Render-target handles
@@ -381,7 +389,8 @@ stale target handle is a no-op, as for vertex inputs.
 handle for a stale target or one without color. `nt_gfx_render_target_valid`
 reports a live target slot; it is `false` after destruction, the texture
 cascade, or a context loss. `nt_gfx_texture_ready` reports whether a texture
-handle has live backend storage. Both queries return `false` for invalid
+handle has a backend object that engine loss synchronization has not discarded;
+it does not verify upload success. Both queries return `false` for invalid
 handles, so callers can also use them after a failed resource-creation call.
 `nt_gfx_texture_size` writes a texture's logical dimensions to its two required
 outputs. Invalid handles write zero to both outputs and return `false`.
@@ -434,10 +443,11 @@ destruction may invalidate it through the documented cascade. The descriptor
 and label are borrowed only for the call. Creating a pipeline or a vertex input
 preserves both current bindings (the bound pipeline and the bound vertex
 input); the caller does not need to rebind after creating another object.
-Allocation failures from public GPU-resource operations, framebuffer
+Detected allocation failures from public GPU-resource operations, framebuffer
 completeness, and context restore remain runtime failures reported
-through invalid handles, `false`, or readiness queries. Mandatory backend
-setup objects are internal invariants: failure to create the GL service EBO
+through invalid handles, `false`, or readiness queries. Texture upload failures
+are unchecked as specified above. Mandatory backend setup objects are internal
+invariants: failure to create the GL service EBO
 upload VAO with a live context asserts.
 
 `nt_gfx_begin_pass` asserts on invalid sequencing and on an invalid or stale

@@ -2611,6 +2611,18 @@ void test_gfx_rgba32f_filters_require_capability(void) {
     nt_gfx_destroy_texture(linear);
 }
 
+void test_gfx_rgba16f_mipmap_generation_requires_render_capability(void) {
+    const nt_texture_desc_t desc = {.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA16F, .data = s_test_half_4x4, .gen_mipmaps = true, .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR};
+    g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+    g_nt_gfx.gpu_caps.has_float_render_target = false;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+    g_nt_gfx.gpu_caps.has_float_render_target = true;
+    nt_texture_t texture = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(texture));
+    TEST_ASSERT_TRUE(nt_gfx_fake_last_texture_desc().gen_mipmaps);
+    nt_gfx_destroy_texture(texture);
+}
+
 void test_gfx_rgba32f_mipmap_generation_requires_both_capabilities(void) {
     const float pixels[2 * 2 * 4] = {0};
     const nt_texture_desc_t desc = {.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA32F, .data = pixels, .gen_mipmaps = true};
@@ -3232,6 +3244,7 @@ int main(void) {
     /* New pixel format tests */
     RUN_TEST(test_gfx_make_texture_rgba16f);
     RUN_TEST(test_gfx_rgba32f_filters_require_capability);
+    RUN_TEST(test_gfx_rgba16f_mipmap_generation_requires_render_capability);
     RUN_TEST(test_gfx_rgba32f_mipmap_generation_requires_both_capabilities);
     RUN_TEST(test_gfx_rgba32f_sampler_overrides_require_capability);
     RUN_TEST(test_gfx_make_texture_rg16ui);

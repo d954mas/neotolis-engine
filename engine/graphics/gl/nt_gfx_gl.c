@@ -1790,20 +1790,6 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
     NT_GL(glBindTexture, GL_TEXTURE_2D, tex);
 }
 
-/* For upload paths that check glGetError afterwards — a stale error would be
- * misattributed to this upload. */
-static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
-    GLenum pending_error = NT_GL_RET0(glGetError);
-    /* A loss the browser confirms is a recoverable outcome the caller rolls back,
-       not a programmer error. */
-    if (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_query_lost()) {
-        return false;
-    }
-    NT_ASSERT(pending_error == GL_NO_ERROR && "pending GL error before texture upload");
-    nt_gfx_gl_bind_texture_for_upload(tex);
-    return true;
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     GLuint tex;
@@ -1811,10 +1797,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     if (tex == 0) {
         return 0;
     }
-    if (!nt_gfx_gl_begin_texture_upload(tex)) {
-        NT_GL_DELETE(glDeleteTextures, 1, &tex);
-        return 0;
-    }
+    nt_gfx_gl_bind_texture_for_upload(tex);
 
     /* Filter and wrap live on the sampler object every bind carries; the
        texture object keeps GL defaults, which no sampling path reads. */
@@ -1855,13 +1838,9 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     const uint8_t top_level = (desc->gen_mipmaps && desc->data) ? nt_texture_full_chain_levels(desc->width, desc->height) : levels;
     NT_GL(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)(top_level - 1));
 
-    const GLenum first_error = NT_GL_RET0(glGetError);
-    if (first_error != GL_NO_ERROR) {
-        nt_gfx_gl_drain_errors();
-        /* A loss is the caller's recoverable CONTEXT_LOST; the frontend reports it without a log. */
-        if (!nt_gfx_gl_ctx_query_lost()) {
-            NT_LOG_ERROR("texture creation failed: GL error 0x%04X", (unsigned)first_error);
-        }
+    /* A nonzero WebGL name can survive loss. Query it without waiting for uploads;
+     * glGetError would synchronize with the GPU process, so live upload errors stay unchecked. */
+    if (nt_gfx_gl_ctx_query_lost()) {
         NT_GL_DELETE(glDeleteTextures, 1, &tex);
         return 0;
     }

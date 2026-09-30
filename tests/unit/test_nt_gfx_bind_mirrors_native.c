@@ -51,13 +51,13 @@ void setUp(void) {
 }
 
 static void remove_state_counters(void);
-static void disarm_get_error_poison(void);
+static void disarm_get_error_counter(void);
 
 void tearDown(void) {
     /* A failed assert inside a counting window longjmps past the restore; leaked
      * glad pointers would then outlive this test's GL context. */
     remove_state_counters();
-    disarm_get_error_poison();
+    disarm_get_error_counter();
     nt_gfx_shutdown();
 }
 
@@ -532,40 +532,35 @@ static void backend_bind_texture_unit(nt_texture_t tex, nt_sampler_t sampler, ui
     nt_gfx_backend_bind_sampler(nt_gfx_test_sampler_backend_id(effective), unit);
 }
 
-/* Reports GL_INVALID_VALUE on one chosen glGetError call and forwards the rest,
- * so a texture upload fails exactly where a driver rejection would. */
+/* Counts glGetError calls; on WebGL each one is a blocking GPU-process round trip. */
 static uint32_t s_get_error_calls;
-static uint32_t s_poisoned_call;
 static PFNGLGETERRORPROC s_saved_get_error;
 
-static GLenum GLAD_API_PTR poisoned_get_error(void) {
+static GLenum GLAD_API_PTR counting_get_error(void) {
     s_get_error_calls++;
-    GLenum real = s_saved_get_error();
-    return s_get_error_calls == s_poisoned_call ? (GLenum)GL_INVALID_VALUE : real;
+    return s_saved_get_error();
 }
 
 /* nt_gfx_init reloads glad, so this must run after the init under test. */
-static void arm_get_error_poison(uint32_t nth_call) {
+static void arm_get_error_counter(void) {
     s_get_error_calls = 0;
-    s_poisoned_call = nth_call;
     s_saved_get_error = glad_glGetError;
-    glad_glGetError = poisoned_get_error;
+    glad_glGetError = counting_get_error;
 }
 
 /* Idempotent: tearDown undoes an arm that a failed assert jumped over. */
-static void disarm_get_error_poison(void) {
+static void disarm_get_error_counter(void) {
     if (s_saved_get_error == NULL) {
         return;
     }
     glad_glGetError = s_saved_get_error;
     s_saved_get_error = NULL;
-    s_poisoned_call = 0;
 }
 
-/* A compressed create that fails after the backend bound its own texture
- * uploads on the scratch unit, so slot 0 still holds A in GL and in the cache:
- * re-binding A costs nothing and a draw still samples A. */
-static void test_failed_compressed_create_keeps_texture_cache_truthful(void) {
+/* A compressed create uploads its levels on the scratch unit without reading GL
+ * errors, so slot 0 still holds A in GL and in the cache: re-binding A costs
+ * nothing and a draw still samples A. */
+static void test_compressed_create_keeps_texture_cache_truthful(void) {
     if (!nt_gfx_gpu_caps()->has_bc7) {
         TEST_IGNORE_MESSAGE("BC7 unsupported on this host");
     }
@@ -585,8 +580,8 @@ static void test_failed_compressed_create_keeps_texture_cache_truthful(void) {
 
     /* 8x8 BC7 = 4 blocks, then a 4x4 level of 1 block. */
     static const uint8_t bc7_chain[(4 * 16) + 16] = {0};
-    arm_get_error_poison(2); /* 1: pre-upload drain, 2: post-upload drain (poisoned, ends the create after both level uploads), 3: clean re-read */
-    nt_texture_t failed = nt_gfx_make_texture(&(nt_texture_desc_t){
+    arm_get_error_counter();
+    nt_texture_t created = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 8,
         .height = 8,
         .data = bc7_chain,
@@ -594,9 +589,9 @@ static void test_failed_compressed_create_keeps_texture_cache_truthful(void) {
         .level_count = 2,
     });
     uint32_t calls = s_get_error_calls;
-    disarm_get_error_poison();
-    TEST_ASSERT_EQUAL_UINT32(0, failed.id);
-    TEST_ASSERT_EQUAL_UINT32(3, calls);
+    disarm_get_error_counter();
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, created.id);
+    TEST_ASSERT_EQUAL_UINT32(0, calls);
 
     install_state_counters();
     backend_bind_texture_unit(tex_a, NT_SAMPLER_DEFAULT, 0);
@@ -1417,7 +1412,7 @@ int main(void) {
     RUN_TEST(test_rejected_pipeline_bind_preserves_vertex_input);
     RUN_TEST(test_creating_vertex_input_preserves_bound_one);
     RUN_TEST(test_failed_vao_creation_returns_invalid_and_preserves_binding);
-    RUN_TEST(test_failed_compressed_create_keeps_texture_cache_truthful);
+    RUN_TEST(test_compressed_create_keeps_texture_cache_truthful);
     RUN_TEST(test_ground_state_disables_scissor);
     RUN_TEST(test_identical_second_frame_issues_no_bind_calls);
     RUN_TEST(test_state_change_mid_frame_still_emits);

@@ -465,19 +465,21 @@ static void test_texture_mips_storage_and_subrect_payloads(void) {
     nt_gfx_begin_frame();
 }
 
-/* The error code alone never reports a loss: only the browser's isContextLost does, and native has none. */
-static void test_failed_upload_keeps_issued_bytes(void) {
+/* Injected GL_OUT_OF_MEMORY after a real upload verifies no glGetError polling
+ * during creation (a blocking round trip on WebGL), not actual VRAM exhaustion. */
+static void test_texture_create_reads_no_gl_error(void) {
     const uint8_t pixels[64] = {0};
-    const GLenum errors[] = {GL_OUT_OF_MEMORY, 0x9242U /* CONTEXT_LOST_WEBGL */};
-    for (uint32_t i = 0; i < 2; i++) {
-        s_upload_error = errors[i];
-        nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
-        TEST_ASSERT_EQUAL_UINT32(0, texture.id);
-        nt_gfx_begin_frame();
-        const nt_gfx_counters_t *snapshot = &g_nt_gfx.last_frame;
-        TEST_ASSERT_EQUAL_UINT64(1, snapshot->texture_upload_calls);
-        TEST_ASSERT_EQUAL_UINT64(64, snapshot->texture_upload_bytes);
-    }
+    nt_gfx_begin_frame(); /* init drains errors; measure the create's frame alone */
+    s_upload_error = GL_OUT_OF_MEMORY;
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
+    s_upload_error = s_pending_error = GL_NO_ERROR;
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, texture.id);
+    nt_gfx_begin_frame();
+    const nt_gfx_counters_t *snapshot = &g_nt_gfx.last_frame;
+    TEST_ASSERT_EQUAL_UINT32(0, snapshot->gl[NT_GFX_GL_glGetError]);
+    TEST_ASSERT_EQUAL_UINT64(1, snapshot->texture_upload_calls);
+    TEST_ASSERT_EQUAL_UINT64(64, snapshot->texture_upload_bytes);
+    nt_gfx_destroy_texture(texture);
 }
 
 static void test_repeated_frames_separate_requests_from_issued_calls(void) {
@@ -615,7 +617,7 @@ int main(void) {
     RUN_TEST(test_payloads_before_render_land_in_their_frame);
     RUN_TEST(test_texture_mips_storage_and_subrect_payloads);
     RUN_TEST(test_r8_odd_width_update_counts_exact_bytes);
-    RUN_TEST(test_failed_upload_keeps_issued_bytes);
+    RUN_TEST(test_texture_create_reads_no_gl_error);
     RUN_TEST(test_repeated_frames_separate_requests_from_issued_calls);
     RUN_TEST(test_compressed_mips_use_issued_block_sizes);
     RUN_TEST(test_attribute_pointer_calls_are_counted_per_issue);
