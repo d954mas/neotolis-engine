@@ -58,6 +58,8 @@ void nt_gfx_fake_fail_next_sampler_create(void);
 uint16_t nt_gfx_fake_last_pass_width(void);
 uint16_t nt_gfx_fake_last_pass_height(void);
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
+/* Desc of the last buffer create the backend saw, failed ones included; pointers are borrowed. */
+nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void);
 /* Texture backends passed to the last render-target create; 0 = absent. */
 uint32_t nt_gfx_fake_last_color_texture_backend(void);
 uint32_t nt_gfx_fake_last_depth_texture_backend(void);

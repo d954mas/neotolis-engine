@@ -259,7 +259,8 @@ in `scripts/atlas/`) select INFO in `build/_cmake/native-release-atlas-bench`;
 `--no-build` uses that build's executable.
 
 `examples/bench_stream` measures dynamic-upload lifetime patterns (ring, per-upload
-buffers, orphaning, upload-before-first-draw) as JSON lines per window, in ABBA order.
+buffers, orphaning, upload-before-first-draw) as JSON lines per window, in ABBA order;
+the `arena` arm (`p40_arena.cfg`) runs the real `nt_frame_arena`.
 Native: `bench_stream <cfg> [out.jsonl]` after a `native-release` build. Web and
 phone: build it with `wasm-release`, then `python scripts/bench_stream.py serve
 --cfg examples/bench_stream/p40_inst.cfg --out build/bench_stream/<name>`; add

@@ -284,12 +284,60 @@ Policy for engine renderers: data known before drawing is **prepared** — packe
 for the whole frame, uploaded once before the frame's first draw, and drawn by
 range in any pass, any number of times. Immediate-mode batches that flush
 between game passes (sprite, text, shape) choose a per-flush policy by
-measurement. The instance rings named above predate this rule.
+measurement. The instance rings named above predate this rule; prepared data
+lives in the frame arena (see Prepared dynamic data).
 
 A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
 waits did not raise GPU work per frame, and the phone's governor granted the
 waiting build a higher clock. Compare builds as described in
 [measuring performance on phones](../../perf-measurement.md).
+
+### Prepared dynamic data
+
+`nt_frame_arena` holds one frame's prepared per-draw vertex data (instance
+attributes) for every renderer that prepares: engine renderers and game-owned
+ones alike. It is a CPU staging copy plus one `STREAM` vertex buffer of the
+capacity the game passes to `nt_frame_arena_init` (nonzero, a multiple of
+`NT_FRAME_ARENA_ALIGN`, after `nt_gfx_init`); it sits over raw `nt_gfx`, which
+stays unaware of the arena.
+
+The game owns the frame order, once per gfx frame after `nt_gfx_begin_frame`:
+
+1. `nt_frame_arena_begin_frame` resets the cursor.
+2. Renderers `nt_frame_arena_reserve` ranges while preparing and fill the
+   returned staging pointer. A reserve returns a byte offset aligned to
+   `NT_FRAME_ARENA_ALIGN` (16 bytes: one RGBA32F texel, so the same offsets can
+   index a data texture later).
+3. `nt_frame_arena_upload` sends every reserved byte in one buffer update,
+   after the last reserve and before the first pass that draws arena data.
+4. Draws bind `nt_frame_arena_buffer()` at a reserved offset, in any pass, any
+   number of times.
+
+The order is asserted, not trusted: a second `begin_frame` in one gfx frame, a
+reserve after the frame's upload, a second upload, and taking the buffer before
+the upload each assert. So no write lands in the buffer after a draw of the
+frame read it. An offset stays valid until the next `begin_frame` or restore; a
+restore empties the buffer, so draws assert until the next upload. Overflowing
+the capacity logs the bytes needed and free, then asserts; the arena never grows
+or chains buffers. `nt_frame_arena_peak` reports the most bytes any frame
+uploaded since init, to size the capacity from a real scene.
+
+Data created after the first draw (for example 3D built while walking UI) is not
+supported: the driver tracks the whole buffer, so a second upload would stall
+whatever range it writes. Prepare it before the first pass.
+
+One buffer, not a rotation: on the reference phone and on desktop Chrome,
+Firefox and native GL, one, two and three rotating buffers measured equal when
+each frame rewrote the whole buffer. A capacity sized from the peak makes most
+uploads partial; the `arena_headroom` arm of `examples/bench_stream` measures
+that shape, and it is unverified on the phone. `STREAM` is the usage: `DYNAMIC`
+was 25% slower in one phone case (one 64 KB upload per frame) and within noise
+elsewhere. Desktop native GL runs one 1.3 MB update 15% slower than many small
+ones into one buffer (about 0.1 ms per frame); desktop Chrome did not show it.
+
+View and material uniforms are not arena data: pack them into a uniform buffer
+the game owns and bind ranges with `nt_gfx_bind_uniform_buffer_range`, uploaded
+under the same before-the-first-draw rule.
 
 ### Render targets
 

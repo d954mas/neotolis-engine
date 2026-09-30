@@ -132,6 +132,11 @@ Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
+Frame-scoped values are plain values with no generation: a frame arena offset
+(`nt_frame_arena_reserve`) and a deformation binding (`nt_skeletal_gpu_reserve`)
+stay valid until the owning module's next `begin_frame` or restore. Nothing
+stamps or checks them; the game's frame order keeps them current.
+
 ### Program handles
 
 `nt_program_t` is the linked (vertex, fragment) pair and has exactly one owner:

@@ -323,6 +323,9 @@ module initialized but unable to draw; the game must retry
 `nt_postfx_blur_restore_gpu` until it succeeds. `nt_mesh_renderer`,
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
 restore drops queued commands and pipeline caches, then the game relinks.
+`nt_frame_arena_restore_gpu` recreates the arena buffer empty and keeps the
+staging copy; draws assert until the next upload, and a failed restore asserts
+on that upload until a retry succeeds.
 
 `nt_mesh_renderer_restore_gpu()`, `nt_sprite_renderer_restore_gpu()`, and
 `nt_text_renderer_restore_gpu()` return `nt_result_t`. They retain CPU

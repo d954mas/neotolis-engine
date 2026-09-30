@@ -111,6 +111,7 @@ static nt_gfx_fake_ubo_bind_t s_fake_ubo_binds[NT_GFX_FAKE_HISTORY_CAPACITY];
 static uint16_t s_fake_last_pass_width;
 static uint16_t s_fake_last_pass_height;
 static nt_texture_desc_t s_fake_last_texture_desc;
+static nt_buffer_desc_t s_fake_last_buffer_desc;
 static uint32_t s_fake_last_color_texture_backend;
 static uint32_t s_fake_last_depth_texture_backend;
 static uint32_t s_fake_next_texture_backend;
@@ -195,6 +196,7 @@ void nt_gfx_fake_set_uniform_buffer_offset_alignment(uint32_t alignment) { s_fak
 uint16_t nt_gfx_fake_last_pass_width(void) { return s_fake_last_pass_width; }
 uint16_t nt_gfx_fake_last_pass_height(void) { return s_fake_last_pass_height; }
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void) { return s_fake_last_texture_desc; }
+nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void) { return s_fake_last_buffer_desc; }
 uint32_t nt_gfx_fake_last_color_texture_backend(void) { return s_fake_last_color_texture_backend; }
 uint32_t nt_gfx_fake_last_depth_texture_backend(void) { return s_fake_last_depth_texture_backend; }
 void nt_gfx_fake_fail_next_render_target_create(void) { s_fake_fail_next_render_target_create = true; }
@@ -261,6 +263,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_pass_width = 0;
     s_fake_last_pass_height = 0;
     s_fake_last_texture_desc = (nt_texture_desc_t){0};
+    s_fake_last_buffer_desc = (nt_buffer_desc_t){0};
     s_fake_last_color_texture_backend = 0;
     s_fake_last_depth_texture_backend = 0;
     s_fake_last_update_buffer_offset = 0;
@@ -505,6 +508,7 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
 }
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
+    s_fake_last_buffer_desc = *desc;
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }
