@@ -29,7 +29,7 @@ void tearDown(void) {
 
 static void draw_setup(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(program));
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -77,7 +77,7 @@ static void test_loss_is_wiped_at_begin_frame_and_pass_calls_are_no_ops(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_state(program));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
 
@@ -95,15 +95,15 @@ static void test_loss_is_wiped_at_begin_frame_and_pass_calls_are_no_ops(void) {
 /* A loss inside an iteration changes no state: its work is issued and does nothing, and the next begin_frame wipes. */
 static void test_loss_during_an_iteration_is_wiped_at_the_next_begin_frame(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(program));
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_state(program));
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_state(program));
 }
 
 /* Creates on a loss the browser has not reported yet and on a known loss end CONTEXT_LOST without error logs. */
@@ -133,7 +133,7 @@ static void test_loss_and_restore_between_iterations_restore_in_one_begin_frame(
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(program));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_state(program));
 }
 
 /* Loading after init lands in the first frame, so its creations are counted like any frame's. */
@@ -237,7 +237,7 @@ static void test_rejected_destroys_assert_inside_a_recorded_frame(void) {
  * shows the lost tables and one CONTEXT operation follows. */
 static void test_restore_is_one_context_operation_after_the_lost_snapshot(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(program));
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_fake_lose_and_restore_context();
     record_next_frame();
@@ -307,7 +307,7 @@ static void test_lazy_sampler_recreate_on_a_latched_loss_ends_context_lost(void)
     nt_gfx_begin_frame();
     nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
     nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_tex"}, 1);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(program));
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     record_next_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -483,7 +483,7 @@ static void test_depth_only_render_target_definition_has_no_color_fields(void) {
 
 static void test_draw_trace_preserves_arguments_and_live_prefix(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(program));
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     record_next_frame();

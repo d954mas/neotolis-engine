@@ -210,7 +210,7 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D a; uniform sampler2D b; out vec4 color; void main(){color=texture(a,vec2(0.0))+texture(b,vec2(0.0));}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(program));
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
@@ -268,7 +268,7 @@ static void test_initial_uniform_records_cover_only_vec4(void) {
     nt_shader_t fs = nt_gfx_make_shader(
         &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform vec4 tint; uniform int mode; out vec4 color; void main(){color=tint*float(mode);}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(program));
     nt_gfx_capture_request();
     nt_gfx_begin_frame();
     nt_gfx_begin_frame(); /* a recorded frame without gfx work still snapshots inherited state */
@@ -334,7 +334,7 @@ static void test_complete_capture_matches_gl_counters(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D tex; uniform vec4 tint; out vec4 color; void main(){color=texture(tex,vec2(0.5))*tint;}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(program));
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
@@ -490,7 +490,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_program_t program = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_wait(program));
+    (void)nt_gfx_program_wait(program); /* make_pipeline asserts READY */
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 64});

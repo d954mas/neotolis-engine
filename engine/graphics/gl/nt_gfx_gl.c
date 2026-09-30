@@ -107,8 +107,7 @@ typedef struct {
     GLuint program;
     /* Until finish_program: reflection, sampler units and UBO bindings wait for the link. */
     bool linking;
-    uint64_t link_frame; /* last pending poll; creation frame when completion cannot be queried */
-    uint32_t link_vs;    /* stages named in a failed link's log */
+    uint32_t link_vs; /* stages named in a failed link's log */
     uint32_t link_fs;
     nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
     uint8_t uniform_count;
@@ -1438,7 +1437,6 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     s_programs[slot] = (nt_gfx_gl_program_t){
         .program = program,
         .linking = true,
-        .link_frame = s_parallel_link ? 0 : g_nt_gfx.counters.frame_sequence,
         .link_vs = vs_backend,
         .link_fs = fs_backend,
     };
@@ -1455,21 +1453,13 @@ nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) 
     if (!rec->linking) {
         return NT_GFX_LINK_DONE;
     }
-    if (!wait) {
-        if (rec->link_frame == g_nt_gfx.counters.frame_sequence) {
+    if (!wait && s_parallel_link) {
+        GLint done = 0;
+        NT_GL(glGetProgramiv, rec->program, GL_COMPLETION_STATUS_KHR, &done);
+        if (!done) {
             return NT_GFX_LINK_PENDING;
         }
-        rec->link_frame = g_nt_gfx.counters.frame_sequence;
-        if (s_parallel_link) {
-            GLint done = 0;
-            NT_GL(glGetProgramiv, rec->program, GL_COMPLETION_STATUS_KHR, &done);
-            if (!done) {
-                return NT_GFX_LINK_PENDING;
-            }
-        }
-        /* Without the extension, finishing here may still wait for the driver. */
     }
-    rec->linking = false;
     const bool linked = nt_gfx_gl_finish_link(rec);
     if (!linked || !nt_gfx_gl_cache_uniforms(rec->program, rec)) {
         if (linked && !nt_gfx_gl_ctx_query_lost()) {
@@ -1479,6 +1469,7 @@ nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) 
         memset(rec, 0, sizeof(*rec));
         return NT_GFX_LINK_FAILED;
     }
+    rec->linking = false;
     write_sampler_units(rec->program, rec);
 #if NT_GFX_CAPTURE_ENABLED
     capture_program_reflection(backend_handle);

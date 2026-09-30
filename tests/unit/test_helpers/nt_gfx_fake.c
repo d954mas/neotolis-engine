@@ -36,13 +36,24 @@ void nt_gfx_fake_set_samplers_typed(const char *const *names, const uint8_t *sam
     }
 }
 
+static bool s_fake_links_pending;
+
 nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count) { return nt_gfx_fake_make_program_typed(names, NULL, count); }
 
 nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count) {
     nt_gfx_fake_set_samplers_typed(names, sampler_classes, count);
     const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    return nt_gfx_make_program(vs, fs);
+    return nt_gfx_fake_link(vs, fs);
+}
+
+nt_program_t nt_gfx_fake_link(nt_shader_t vs, nt_shader_t fs) {
+    const nt_program_t program = nt_gfx_make_program(vs, fs);
+    /* Helper programs start READY unless the test holds links pending. */
+    if (!s_fake_links_pending) {
+        (void)nt_gfx_program_wait(program);
+    }
+    return program;
 }
 
 static uint32_t fake_alloc_slot(nt_gfx_fake_program_t *table, uint32_t capacity) {
@@ -121,8 +132,6 @@ static uint32_t s_fake_last_destroyed_texture;
 static uint8_t s_fake_fail_buffer_creates;
 static bool s_fake_fail_next_program_create;
 static bool s_fake_lose_context_on_program_create;
-static bool s_fake_links_pending;
-static bool s_fake_delay_next_link_poll;
 static bool s_fake_fail_next_link;
 static bool s_fake_fail_next_pipeline_create;
 static bool s_fake_fail_next_sampler_create;
@@ -208,7 +217,6 @@ void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
 void nt_gfx_fake_fail_next_program_create(void) { s_fake_fail_next_program_create = true; }
 void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
 void nt_gfx_fake_set_links_pending(bool pending) { s_fake_links_pending = pending; }
-void nt_gfx_fake_delay_next_link_poll(void) { s_fake_delay_next_link_poll = true; }
 void nt_gfx_fake_fail_next_link(void) { s_fake_fail_next_link = true; }
 void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_create = true; }
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
@@ -282,7 +290,6 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_next_program_create = false;
     s_fake_lose_context_on_program_create = false;
     s_fake_links_pending = false;
-    s_fake_delay_next_link_poll = false;
     s_fake_fail_next_link = false;
     s_fake_fail_next_pipeline_create = false;
     s_fake_fail_next_sampler_create = false;
@@ -448,7 +455,7 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
 
 nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) {
     s_fake_program_finish_count++;
-    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && "finish_program: handle out of range");
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && s_fake_program_table[backend_handle].used && "finish_program: requires a live program");
     nt_gfx_fake_program_t *rec = &s_fake_program_table[backend_handle];
     if (rec->linked) {
         return NT_GFX_LINK_DONE;
@@ -457,10 +464,6 @@ nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) 
         s_fake_fail_next_link = false;
         memset(&s_fake_program_table[backend_handle], 0, sizeof(s_fake_program_table[backend_handle]));
         return NT_GFX_LINK_FAILED;
-    }
-    if (s_fake_delay_next_link_poll && !wait) {
-        s_fake_delay_next_link_poll = false;
-        return NT_GFX_LINK_PENDING;
     }
     if (s_fake_links_pending && !wait) {
         return NT_GFX_LINK_PENDING;

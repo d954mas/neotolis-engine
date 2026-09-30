@@ -114,7 +114,7 @@ static void assert_scene_programs(void) {
         const nt_material_info_t *info = nt_material_get_info(s_materials[i]);
         TEST_ASSERT_NOT_NULL(info);
         TEST_ASSERT_EQUAL_UINT32(s_programs[s_expected_types[i]].program.id, info->program.id);
-        TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(info->program));
+        TEST_ASSERT_TRUE(nt_gfx_program_wait(info->program));
         TEST_ASSERT_EQUAL_UINT32(s_materials[i].id, nt_material_comp_handle(s_entities[i])->id);
     }
 }
@@ -205,7 +205,7 @@ static void test_shader_pairs_arrive_in_separate_steps(void) {
     load_stage(SPONZA_SHADER_DIFFUSE, NT_SHADER_STAGE_VERTEX);
     nt_resource_step();
     link_programs();
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(nt_material_get_info(s_materials[0])->program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(nt_material_get_info(s_materials[0])->program));
     TEST_ASSERT_EQUAL_UINT32(0, nt_material_get_info(s_materials[1])->program.id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_material_get_info(s_materials[2])->program.id);
     assert_idle_link();
@@ -240,7 +240,7 @@ static void test_context_restore_reassigns_existing_material_handles(void) {
     nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     for (uint32_t i = 0; i < TEST_NODE_COUNT; i++) {
         TEST_ASSERT_EQUAL_UINT32(materials[i].id, s_materials[i].id);
-        TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_poll(nt_material_get_info(s_materials[i])->program));
+        TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_state(nt_material_get_info(s_materials[i])->program));
     }
     assert_idle_link();
 

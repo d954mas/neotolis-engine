@@ -910,10 +910,8 @@ static void frame(void) {
     /* UI: needs perspective VP in frame_uniforms for sprite/text material shaders. */
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    /* Poll each program every frame; a short-circuit would leave the second link unfinished. */
-    const bool sprite_ready = sprite_info != NULL && nt_gfx_program_poll(sprite_info->program) == NT_GFX_PROGRAM_READY;
-    const bool text_ready = text_info != NULL && nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY;
-    const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_ready && text_ready;
+    const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info != NULL && text_info != NULL && nt_gfx_program_state(sprite_info->program) == NT_GFX_PROGRAM_READY &&
+                               nt_gfx_program_state(text_info->program) == NT_GFX_PROGRAM_READY;
 
     if (ui_can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_3d, sizeof uniforms_3d);
@@ -958,7 +956,7 @@ static void frame(void) {
     }
 
     /* HUD: ortho VP. */
-    if (text_info && (nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY)) {
+    if (text_info && (nt_gfx_program_state(text_info->program) == NT_GFX_PROGRAM_READY)) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_2d, sizeof uniforms_2d);
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
         draw_hud(fb_w, fb_h);
@@ -968,9 +966,8 @@ static void frame(void) {
     /* The inspector sprite uses a separate program that may become ready after the UI's. */
     const nt_material_info_t *insp_sprite = nt_material_get_info(s_inspector_sprite_material);
     const nt_material_info_t *insp_text = nt_material_get_info(s_inspector_text_material);
-    const bool insp_sprite_ready = insp_sprite != NULL && nt_gfx_program_poll(insp_sprite->program) == NT_GFX_PROGRAM_READY;
-    const bool insp_text_ready = insp_text != NULL && nt_gfx_program_poll(insp_text->program) == NT_GFX_PROGRAM_READY;
-    const bool inspector_can_render = insp_sprite_ready && insp_text_ready;
+    const bool inspector_can_render =
+        insp_sprite && nt_gfx_program_state(insp_sprite->program) == NT_GFX_PROGRAM_READY && insp_text && nt_gfx_program_state(insp_text->program) == NT_GFX_PROGRAM_READY;
 
     if (ui_can_render && inspector_can_render && nt_ui_inspector_is_active(s_ctx)) {
         /* Sidebar tree is its own screen-space pass (ortho). */

@@ -181,8 +181,7 @@ static bool mesh_probe_create(void) {
     s_mesh_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_mesh_vs_src, .label = "mesh_probe_vs"});
     s_mesh_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_mesh_fs_src, .label = "mesh_probe_fs"});
     s_mesh_program = nt_gfx_make_program(s_mesh_vs, s_mesh_fs);
-    (void)nt_gfx_program_wait(s_mesh_program);
-    s_mesh_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_mesh_program, .label = "mesh_probe_pipeline"});
+    s_mesh_pipeline = nt_gfx_program_wait(s_mesh_program) ? nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_mesh_program, .label = "mesh_probe_pipeline"}) : (nt_pipeline_t){0};
     s_mesh_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
         .instance_layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 2}}},
@@ -214,7 +213,7 @@ static void mesh_probe_destroy(void) {
 }
 
 static void mesh_probe_draw(void) {
-    if (s_mesh_vi.id == 0 || nt_gfx_program_poll(s_mesh_program) != NT_GFX_PROGRAM_READY) {
+    if (s_mesh_vi.id == 0 || nt_gfx_program_state(s_mesh_program) != NT_GFX_PROGRAM_READY) {
         return;
     }
     /* Instance data at byte offset 8: proves the nonzero-offset re-pointing
@@ -285,7 +284,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_restore_frames(void) { return s_nt_res
 /* Both game programs linked and assigned -- false through the whole window
  * between the loss and the relink. */
 EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) {
-    return ((nt_gfx_program_poll(s_sprite_program.program) == NT_GFX_PROGRAM_READY) && (nt_gfx_program_poll(s_text_program.program) == NT_GFX_PROGRAM_READY)) ? 1 : 0;
+    return ((nt_gfx_program_state(s_sprite_program.program) == NT_GFX_PROGRAM_READY) && (nt_gfx_program_state(s_text_program.program) == NT_GFX_PROGRAM_READY)) ? 1 : 0;
 }
 EMSCRIPTEN_KEEPALIVE int nt_test_float_texture_linear(void) { return nt_gfx_gpu_caps()->has_float_texture_linear ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_diagnostics_config(int field) {
@@ -323,8 +322,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_program_t program = nt_gfx_make_program(vs, fs);
-    (void)nt_gfx_program_wait(program);
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_pipeline_t pipeline = nt_gfx_program_wait(program) ? nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program}) : (nt_pipeline_t){0};
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     if (target.id != 0) {
         nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.25F, 0.5F, 0.75F, 1.0F}});
@@ -445,8 +443,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_program_t program = nt_gfx_make_program(vs, fs);
-    (void)nt_gfx_program_wait(program);
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_pipeline_t pipeline = nt_gfx_program_wait(program) ? nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program}) : (nt_pipeline_t){0};
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     /* Centre of texel (0,0) at the requested level (the single texel at level 7). */
     const float texel = 0.5F / (BASIS_FIXTURE_SIZE / (float)(1 << level));
@@ -519,8 +516,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_shader_t fs = nt_gfx_make_shader(
         &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float;uniform sampler2D tex;uniform vec4 tint;out vec4 color;void main(){color=texture(tex,vec2(0.5))*tint;}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
-    (void)nt_gfx_program_wait(program);
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_pipeline_t pipeline = nt_gfx_program_wait(program) ? nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program}) : (nt_pipeline_t){0};
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
@@ -966,8 +962,8 @@ static void frame(void) {
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     /* A pending restore means renderer buffers may be missing; submitting
      * sprites then asserts by contract, so rendering waits it out. */
-    const bool can_render = !s_gpu_restore_pending && s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && (nt_gfx_program_poll(sprite_info->program) == NT_GFX_PROGRAM_READY) &&
-                            text_info && (nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY);
+    const bool can_render = !s_gpu_restore_pending && s_atlas_bound && s_font_bound && s_rich_font_bound && sprite_info && (nt_gfx_program_state(sprite_info->program) == NT_GFX_PROGRAM_READY) &&
+                            text_info && (nt_gfx_program_state(text_info->program) == NT_GFX_PROGRAM_READY);
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));

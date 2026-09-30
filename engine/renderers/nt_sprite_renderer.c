@@ -301,7 +301,7 @@ static uint64_t nt_sprite_layout_key(const nt_material_info_t *mat_info) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* A recovered context may still have materials awaiting a new program. */
-    const nt_gfx_program_state_t program_state = nt_gfx_program_poll(mat_info->program);
+    const nt_gfx_program_state_t program_state = nt_gfx_program_state(mat_info->program);
     if (program_state != NT_GFX_PROGRAM_READY) {
         /* The one choke point every caller passes through, so the immediate and
          * draw_list paths both get told. */
@@ -510,8 +510,8 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
      * The pipeline lookup returns an invalid handle until recovery replaces it. */
     NT_ASSERT(mat_info != NULL && mat_info->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
 
-    /* A command opened while linking must retry even when the handles match. */
-    if (mat.id == s_sprite.current_mat.id && mat_info->program.id == s_sprite.current_program.id && s_sprite.cmd_count > 0 && nt_gfx_pipeline_valid(s_sprite.cmds[s_sprite.cmd_count - 1].pipeline)) {
+    /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
+    if (mat.id == s_sprite.current_mat.id && mat_info->program.id == s_sprite.current_program.id && s_sprite.cmd_count > 0) {
         return;
     }
 

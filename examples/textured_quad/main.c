@@ -327,7 +327,7 @@ static void frame(void) {
     /* ---- Build render items ---- */
 
     const nt_material_info_t *mat_info = nt_material_get_info(s_cube_material);
-    bool can_render = mat_info && (nt_gfx_program_poll(mat_info->program) == NT_GFX_PROGRAM_READY) && nt_resource_is_ready(s_mesh_handle);
+    bool can_render = mat_info && (nt_gfx_program_state(mat_info->program) == NT_GFX_PROGRAM_READY) && nt_resource_is_ready(s_mesh_handle);
 
     /* ---- Render ---- */
 

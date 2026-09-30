@@ -186,7 +186,7 @@ static bool make_gpu_resources(void) {
         return false;
     }
     s_blur.program = nt_gfx_make_program(s_blur.vs, s_blur.fs);
-    if (nt_gfx_program_wait(s_blur.program) != NT_GFX_PROGRAM_READY) {
+    if (!nt_gfx_program_wait(s_blur.program)) {
         return false;
     }
     s_blur.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){

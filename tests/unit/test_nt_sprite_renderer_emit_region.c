@@ -258,6 +258,7 @@ static nt_material_t create_test_material(void) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.program = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(desc.program));
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;

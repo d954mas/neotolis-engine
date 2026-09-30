@@ -166,9 +166,9 @@ typedef enum {
 
 /* Completes a started link: caches its uniform locations and fixes one texture unit per
  * active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS).
- * Without wait it polls once per frame with parallel-link support; without that
- * support, the first poll after creation frame can block. FAILED has logged
- * (unless the context is lost) and freed the backend slot. */
+ * Without wait and with parallel-link support, returns PENDING while the driver links;
+ * otherwise finishes, possibly blocking. FAILED has logged (unless the context is
+ * lost) and freed the backend slot. */
 nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait);
 /* Reads only the retained link state; never queries GL or finishes a link. */
 bool nt_gfx_backend_program_ready(uint32_t backend_handle);

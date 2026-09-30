@@ -1972,7 +1972,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
     /* Custom images require a program assignment; skip declaration until the radial program is ready. */
     const nt_material_info_t *radial_info = nt_material_get_info(s_radial_material);
-    if (!radial_info || nt_gfx_program_poll(radial_info->program) != NT_GFX_PROGRAM_READY) {
+    if (!radial_info || nt_gfx_program_state(radial_info->program) != NT_GFX_PROGRAM_READY) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "radial materials not ready", g_current->caption);
         return;
     }
@@ -2562,7 +2562,7 @@ static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st) {
     rs.material = st->base_sdf ? s_base_material : s_radial_material;
     /* Custom images require a program assignment; skip declaration until it links. */
     const nt_material_info_t *rs_info = nt_material_get_info(rs.material);
-    if (!rs_info || nt_gfx_program_poll(rs_info->program) != NT_GFX_PROGRAM_READY) {
+    if (!rs_info || nt_gfx_program_state(rs_info->program) != NT_GFX_PROGRAM_READY) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "materials not ready", g_current->caption);
         return;
     }
@@ -3823,10 +3823,8 @@ static void frame(void) {
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    /* Poll each program every frame; a short-circuit would leave the second link unfinished. */
-    const bool sprite_ready = sprite_info != NULL && nt_gfx_program_poll(sprite_info->program) == NT_GFX_PROGRAM_READY;
-    const bool text_ready = text_info != NULL && nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY;
-    const bool can_render = s_atlas_bound && s_font_bound && sprite_ready && text_ready;
+    const bool can_render = s_atlas_bound && s_font_bound && sprite_info != NULL && text_info != NULL && nt_gfx_program_state(sprite_info->program) == NT_GFX_PROGRAM_READY &&
+                            nt_gfx_program_state(text_info->program) == NT_GFX_PROGRAM_READY;
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
@@ -3835,7 +3833,7 @@ static void frame(void) {
         ensure_ids();
 
         const nt_material_info_t *base_info = nt_material_get_info(s_base_material);
-        const bool base_on = g_tabs[s_active_tab].render == render_base_material && s_state.base_sdf && base_info && (nt_gfx_program_poll(base_info->program) == NT_GFX_PROGRAM_READY);
+        const bool base_on = g_tabs[s_active_tab].render == render_base_material && s_state.base_sdf && base_info && (nt_gfx_program_state(base_info->program) == NT_GFX_PROGRAM_READY);
         nt_ui_set_sprite_material(s_ctx, base_on ? s_base_material : s_sprite_material);
 
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */

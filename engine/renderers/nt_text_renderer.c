@@ -123,7 +123,7 @@ static void generate_quad_indices(void) {
  * not pipeline state. */
 static nt_pipeline_t find_or_create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
-    const nt_gfx_program_state_t program_state = info != NULL ? nt_gfx_program_poll(info->program) : NT_GFX_PROGRAM_UNAVAILABLE;
+    const nt_gfx_program_state_t program_state = info != NULL ? nt_gfx_program_state(info->program) : NT_GFX_PROGRAM_UNAVAILABLE;
     if (program_state != NT_GFX_PROGRAM_READY) {
         nt_renderer_warn_program_not_ready(&s_text.warned_no_pipeline, info, program_state);
         return (nt_pipeline_t){0};

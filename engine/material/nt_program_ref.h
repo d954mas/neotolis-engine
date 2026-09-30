@@ -16,7 +16,7 @@ typedef struct {
 } nt_program_ref_t;
 
 /* ref is required, with both stage resources assigned. Returns true only when a new program
- * was made; it may still be linking, and draws poll for NT_GFX_PROGRAM_READY.
+ * was made; it may still be linking, and draws wait for NT_GFX_PROGRAM_READY.
  * Reclaims a lost owned program before retrying; linking waits for both stages to be ready.
  *
  * May be called each frame; the caller assigns ref->program to materials when true. */
@@ -24,7 +24,7 @@ static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
     NT_ASSERT(ref != NULL && "nt_program_ref_update: ref is required");
     NT_ASSERT(ref->vs.id != 0 && ref->fs.id != 0 && "nt_program_ref: request both stage resources before update()");
     if (ref->program.id != 0) {
-        if (nt_gfx_program_poll(ref->program) != NT_GFX_PROGRAM_UNAVAILABLE) {
+        if (nt_gfx_program_state(ref->program) != NT_GFX_PROGRAM_UNAVAILABLE) {
             return false;
         }
         /* Lost readiness is terminal; reclaim before linking a replacement. */

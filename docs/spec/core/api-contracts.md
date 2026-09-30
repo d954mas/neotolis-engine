@@ -145,47 +145,40 @@ A program's linked executable and identity are immutable after
 Recovery requires the owner to destroy the old program and link a new handle.
 
 Handle validity and GPU liveness are separate. `nt_gfx_program_valid` reports
-whether the handle still refers to a live slot. `nt_gfx_program_poll` returns
-one state: `NT_GFX_PROGRAM_LINKING`, `NT_GFX_PROGRAM_READY`, or
-`NT_GFX_PROGRAM_UNAVAILABLE` (invalid, destroyed, or a terminal live handle).
+whether the handle still refers to a live slot. `nt_gfx_program_state` reads
+one state without a GL call: `NT_GFX_PROGRAM_LINKING`, `NT_GFX_PROGRAM_READY`,
+or `NT_GFX_PROGRAM_UNAVAILABLE` (invalid, destroyed, or a terminal live handle).
 
-`nt_gfx_make_program` starts the link. `nt_gfx_program_poll` completes it when
-possible; `nt_gfx_program_wait` blocks until it finishes. Both use the same
-finalization path: read the link result, bind registered global blocks, reflect
-uniforms and set sampler units before reporting READY. With
-`KHR_parallel_shader_compile` (KHR or ARB on native), polling queries completion
-at most once per program per frame;
-a pending result is reused until the next `nt_gfx_begin_frame`. Completion may
-therefore become visible one frame later. Without the extension, polling defers
-completion until the frame after creation, then reads `GL_LINK_STATUS`, which
-can block until the driver finishes. Nonblocking polling requires the extension.
-WebGL diagnostic compiler checks may themselves block inside `glLinkProgram`.
+`nt_gfx_make_program` starts the link. Each `nt_gfx_begin_frame` on a live
+context finishes pending links: read the link result, bind registered global
+blocks, reflect uniforms and set sampler units before the program is READY.
+With `KHR_parallel_shader_compile` (KHR or ARB on native) it queries completion
+once per pending program and leaves unfinished ones LINKING. Without the
+extension it finishes every pending program, which can block until the driver
+finishes; nonblocking linking requires the extension. WebGL diagnostic compiler
+checks may themselves block inside `glLinkProgram`. A program is therefore READY
+no earlier than the frame after creation, and its state changes only in
+`nt_gfx_begin_frame` or `nt_gfx_program_wait`.
 
-`nt_gfx_program_wait` bypasses the per-frame poll limit and creation-frame delay
-for synchronous initialization, including after a poll returned LINKING in the
-same frame. It returns only READY or UNAVAILABLE, never LINKING. Waiting on an
-already READY program issues no GL calls; invalid, destroyed and terminal
-handles return UNAVAILABLE without asserting or restarting the link. Independent
-programs can all start linking before their owner waits for each one. Waiting
-does not advance the frame or change the currently bound pipeline.
+`nt_gfx_program_wait` finishes the link now, for synchronous initialization, and
+returns true when the program is READY. It does not advance the frame or change
+the bound pipeline.
 
-`nt_gfx_make_pipeline` requires an already READY program. It never polls, waits
-or finalizes a link. After the recoverable context-loss check, a LINKING or
-UNAVAILABLE program is a caller error and asserts.
+`nt_gfx_make_pipeline` requires a READY program and never finishes a link; any
+other program asserts.
 Shader stages may be destroyed after `nt_gfx_make_program`, including while it
 links. Deferred diagnostics log only stages whose engine-owned shader objects
 still exist.
 
 Processing context loss leaves program handles valid but UNAVAILABLE. No API
-relinks that handle: the owner destroys it and creates a replacement. Owners
-retain LINKING and READY programs, deciding from a single poll result.
+relinks that handle: the owner destroys it and creates a replacement.
 
 `nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op and asserts on
 a stale non-zero handle. Clear the owner's variable to `NT_PROGRAM_INVALID`
 when destroying it.
 
 A link failure is a developer error and asserts when the link finishes, in
-`nt_gfx_program_poll` or `nt_gfx_program_wait`. An invalid stage handle and an
+`nt_gfx_begin_frame` or `nt_gfx_program_wait`. An invalid stage handle and an
 exhausted program pool also assert. When asserts are off, the failed handle is
 terminal like one a loss left behind.
 
@@ -221,8 +214,8 @@ the renderer's `set_material` before emitting more work. If the old program is
 destroyed rather than merely replaced, its pipelines go with it and the staged
 batch is dropped instead -- there is nothing left to draw it through.
 
-A material carries no readiness field. Callers poll
-`nt_gfx_program_poll(nt_material_get_info(mat)->program)` and draw only on READY.
+A material carries no readiness field. Callers read
+`nt_gfx_program_state(nt_material_get_info(mat)->program)` and draw only on READY.
 It returns LINKING during a pending link, and UNAVAILABLE before assignment,
 after context loss is processed, or after destruction. The ECS `draw_list` paths
 skip unready programs and warn once for UNAVAILABLE until a pipeline is built
@@ -267,8 +260,8 @@ or when resetting the cache. Lookup validates a matching pipeline but does not
 remove records. An unassigned program kept alive by its owner keeps its pipelines
 alive too. `nt_gfx_destroy_pipeline` accepts stale handles as a no-op because
 program destruction can invalidate a renderer's cached handles.
-Materials retain the stale program handle until reassignment; polling reports
-UNAVAILABLE without mutating the material.
+Materials retain the stale program handle until reassignment; its state is
+UNAVAILABLE.
 
 ### Texture descriptors
 

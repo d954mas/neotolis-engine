@@ -36,11 +36,9 @@ assigns on the frame it returns true. It stores the resource handles rather than
 the compiled stages or the source text, because only the handles survive a
 context loss -- `nt_program_ref_drop` clears the program and the same gate links
 again once the stages re-activate. A shader embedded as a source string needs
-no resource gate: start its program at init, then poll for READY before drawing
-or call `nt_gfx_program_wait` to finish synchronously before creating a pipeline.
-Pipeline creation requires READY and never completes a link. Polling, waiting
-and stage lifetimes follow
-[Program handles](../core/api-contracts.md#program-handles).
+no resource gate: start its program at init, then draw once it is READY, or call
+`nt_gfx_program_wait` before creating a pipeline at init. Link completion and
+stage lifetimes follow [Program handles](../core/api-contracts.md#program-handles).
 
 Pack priority does not reach a material's program. A material stores a linked
 `nt_program_t`, not the `NT_ASSET_SHADER_CODE` stages behind it, so a
@@ -114,9 +112,9 @@ The browser reports loss through `isContextLost` immediately; loss between a
 successful link-status query and reflection remains an accepted race rather
 than adding wrappers around Emscripten's helpers.
 
-A link failure is a developer error and traps (`NT_ASSERT`) in the
-`nt_gfx_program_poll` or `nt_gfx_program_wait` call that finishes the link,
-often inside a renderer's draw, rather than returning an invalid handle.
+A link failure is a developer error and traps (`NT_ASSERT`) where the link
+finishes, in `nt_gfx_begin_frame` or `nt_gfx_program_wait`, rather than
+returning an invalid handle.
 `nt_gfx_make_program` returns an invalid handle on
 a lost context, including a loss the browser reports before its lost event
 arrives and pending engine recovery after the browser has restored it, and for a live stage handle whose GPU object an earlier loss discarded --

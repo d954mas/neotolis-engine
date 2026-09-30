@@ -529,7 +529,7 @@ static void frame(void) {
             }
 
             const nt_material_info_t *mat_info = nt_material_get_info(s_materials[i]);
-            if (!mat_info || nt_gfx_program_poll(mat_info->program) != NT_GFX_PROGRAM_READY) {
+            if (!mat_info || nt_gfx_program_state(mat_info->program) != NT_GFX_PROGRAM_READY) {
 #if NT_LOG_MIN_LEVEL == 0
                 skip_mat++;
 #endif

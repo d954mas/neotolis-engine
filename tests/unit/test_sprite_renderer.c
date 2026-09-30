@@ -738,7 +738,7 @@ void test_sprite_renderer_same_material_reopens_after_program_links(void) {
     nt_gfx_fake_set_links_pending(true);
     const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    const nt_program_t program = nt_gfx_make_program(vs, fs);
+    const nt_program_t program = nt_gfx_fake_link(vs, fs);
     const nt_material_t mat = nt_material_create(&(nt_material_create_desc_t){
         .program = program,
         .textures = {{.name = "u_texture"}},
@@ -752,8 +752,11 @@ void test_sprite_renderer_same_material_reopens_after_program_links(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 
+    nt_sprite_renderer_flush();
     nt_gfx_fake_set_links_pending(false);
-    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_poll(program));
+    nt_gfx_end_pass();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_flush();

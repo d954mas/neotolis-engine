@@ -318,7 +318,7 @@ static void frame(void) {
      * set_material asserts on a material without one -- so gate on readiness, not
      * just on the restore flag. */
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    bool can_render = text_info != NULL && (nt_gfx_program_poll(text_info->program) == NT_GFX_PROGRAM_READY);
+    bool can_render = text_info != NULL && (nt_gfx_program_state(text_info->program) == NT_GFX_PROGRAM_READY);
 
     /* Restore GPU resources after WebGL context loss */
 
