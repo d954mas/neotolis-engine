@@ -60,7 +60,7 @@ typedef struct {
         } radial;
     };
     nt_ui_shape_paint_t paint;
-    nt_ui_shape_shadow_t shadow; /* BOX only; alpha zero disables. */
+    nt_ui_shape_shadow_t shadow; /* BOX only; alpha zero disables. World shadows use half a step of enabled element depth bias. */
 } nt_ui_shape_style_t;
 
 /* Opaque white BOX; the game must assign a shape material before use. */

@@ -98,12 +98,12 @@ vec4 nt_ui_shape_projective_shape(vec3 h, vec3 hx, vec3 hy, vec2 size, vec4 radi
             else {
                 vec2 first = vec2(cos(radial.x), sin(radial.x));
                 vec2 last = vec2(cos(radial.y), sin(radial.y));
-                float lead = nt_ui_shape_projective_coverage(first.y * angle_x - first.x * angle_y);
-                float trail = nt_ui_shape_projective_coverage(last.x * angle_y - last.y * angle_x);
-                wedge = abs(sweep - 0.5 * tau) < 1e-4 ? lead : sweep < 0.5 * tau ? lead * trail : lead + trail - lead * trail;
+                vec3 lead = first.y * angle_x - first.x * angle_y;
+                vec3 trail = last.x * angle_y - last.y * angle_x;
+                wedge = sweep <= 0.5 * tau ? nt_ui_radial_intersection(lead, trail) : 1.0 - nt_ui_radial_intersection(-lead, -trail);
             }
         }
-        return nt_ui_shape_projective_gradient(h, size, gradient, fill, endpoint) * min(outer * ring * wedge, rect_coverage);
+        return nt_ui_shape_projective_gradient(h, size, gradient, fill, endpoint) * min(max(outer + ring - 1.0, 0.0) * wedge, rect_coverage);
     }
     vec3 distance = nt_ui_shape_projective_box(x, y, q, size, radii);
     if (mode == 3) {

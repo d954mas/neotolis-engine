@@ -101,9 +101,10 @@ The radial full vertex is 64 bytes; basic sprites remain 20 bytes.
 **v1 limits:**
 
 - **slice9 is rejected.** The region source-coordinate producer does not cover
-  independently stretched slice9 patch vertices. The slice9 struct fields remain
-  for ABI parity with `nt_ui_image_style_t`; the widget asserts both style
-  overrides and baked atlas borders are unset.
+  independently stretched slice9 patch vertices. The radial-image style has no
+  slice9 fields. The widget rejects `NT_UI_IMAGE_SLICE9_OVERRIDE`; baked atlas
+  borders are rejected by the sprite renderer's source-UV contract at emit time.
+  Generic image and custom-image styles retain their slice9 controls.
 - **Angular convention follows local UI coordinates:** Y points down,
   `0` points right, `+π/2` points down, `π` points left, and `3π/2` points
   up. Increasing angles sweep clockwise on an unflipped, untransformed image,

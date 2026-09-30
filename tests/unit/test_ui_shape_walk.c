@@ -114,10 +114,12 @@ static void test_leaf_without_declaration_fills_parent_and_emits(void) {
     TEST_ASSERT_TRUE(attrs.layout[0] == 160.0F && attrs.layout[1] == 90.0F);
 }
 
-static void test_screen_shape_cull_uses_viewport_y_origin(void) {
+static void test_screen_shape_cull_uses_projection_y_extent(void) {
     const nt_ui_shape_style_t style = box_style();
+    nt_ui_transform_t transform = nt_ui_transform_defaults();
+    transform.offset_y = 500.0F;
     begin_frame();
-    nt_ui_shape(s_fx.ctx, NULL, &style, &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(20)}});
+    nt_ui_shape(s_fx.ctx, NT_UI_DATA_XFORM(0, &transform, 1.0F), &style, &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(20)}});
     nt_ui_end(s_fx.ctx);
     const nt_ui_target_t target = {.viewport = {101, 47, 640, 480}};
     nt_ui_walk(s_fx.ctx, &target);
@@ -125,7 +127,7 @@ static void test_screen_shape_cull_uses_viewport_y_origin(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     float top_left[3];
     nt_sprite_renderer_test_last_emit_position(0, top_left);
-    TEST_ASSERT_TRUE(top_left[1] > target.viewport[1] + target.viewport[3] - 2.0F);
+    TEST_ASSERT_TRUE(top_left[1] > 27.0F && top_left[1] < 29.0F);
 }
 
 static void test_radii_share_css_adjacent_edge_scale(void) {
@@ -427,12 +429,12 @@ static void test_affine_guard_matches_rounded_physical_framebuffer_offset(void) 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
 }
 
-static void export_projective_case(const char *name, const float view_proj[16], const nt_ui_target_t *target, bool visible, const char *step, const nt_ui_shape_attrs_t *expected) {
+static void export_gpu_vertices(const char *name, const float view_proj[16], const nt_ui_target_t *target, bool visible, const char *step, const nt_ui_shape_attrs_t *expected,
+                                const nt_ui_shape_vertex_t *vertices, uint32_t vertex_count, bool depth_test, const char *pixel_checks) {
     if (!s_export_gpu_cases) {
         return;
     }
-    printf("UI_SHAPE_GPU_CASE {\"schemaVersion\":2,\"name\":\"%s\",\"expectedPixelCoverage\":\"%s\",\"emittedQuads\":%u,\"viewProj\":[", name, visible ? "nonempty" : "empty",
-           (unsigned)nt_gfx_fake_draw_trace_count());
+    printf("UI_SHAPE_GPU_CASE {\"schemaVersion\":2,\"name\":\"%s\",\"expectedPixelCoverage\":\"%s\",\"emittedQuads\":%u,\"viewProj\":[", name, visible ? "nonempty" : "empty", vertex_count / 4U);
     for (int i = 0; i < 16; ++i) {
         printf("%s%.9g", i == 0 ? "" : ",", (double)view_proj[i]);
     }
@@ -451,22 +453,23 @@ static void export_projective_case(const char *name, const float view_proj[16], 
                attr->normalized ? "true" : "false", (unsigned)attr->offset);
     }
     printf("]},\"vertices\":[");
-    if (nt_gfx_fake_draw_trace_count() > 0U) {
-        for (uint32_t vertex = 0; vertex < 4U; ++vertex) {
-            nt_ui_shape_vertex_t actual;
-            nt_sprite_renderer_test_last_emit_position(vertex, actual.position);
-            nt_sprite_renderer_test_last_emit_texcoord(vertex, actual.texcoord);
-            nt_sprite_renderer_test_last_emit_color(vertex, actual.color);
-            nt_sprite_renderer_test_last_emit_attrs(vertex, &actual.attrs, sizeof(actual.attrs));
-            printf("%s{\"bytes\":[", vertex == 0U ? "" : ",");
-            const uint8_t *bytes = (const uint8_t *)&actual;
-            for (size_t i = 0; i < sizeof(actual); ++i) {
-                printf("%s%u", i == 0U ? "" : ",", (unsigned)bytes[i]);
-            }
-            printf("]}");
+    for (uint32_t vertex = 0; vertex < vertex_count; ++vertex) {
+        printf("%s{\"bytes\":[", vertex == 0U ? "" : ",");
+        const uint8_t *bytes = (const uint8_t *)&vertices[vertex];
+        for (size_t i = 0; i < sizeof(vertices[vertex]); ++i) {
+            printf("%s%u", i == 0U ? "" : ",", (unsigned)bytes[i]);
         }
+        printf("]}");
     }
-    printf("],\"indices\":[0,1,2,0,2,3]");
+    printf("],\"indices\":[");
+    for (uint32_t quad = 0; quad < vertex_count / 4U; ++quad) {
+        const uint32_t base = quad * 4U;
+        printf("%s%u,%u,%u,%u,%u,%u", quad == 0U ? "" : ",", base, base + 1U, base + 2U, base, base + 2U, base + 3U);
+    }
+    printf("],\"depthTest\":%s", depth_test ? "true" : "false");
+    if (pixel_checks != NULL) {
+        printf(",\"pixelChecks\":%s", pixel_checks);
+    }
     if (step != NULL) {
         printf(",\"lifecycle\":{\"sequence\":\"typed-uber\",\"step\":\"%s\",\"expectedTailBytes\":[", step);
         const uint8_t *bytes = (const uint8_t *)expected;
@@ -476,6 +479,27 @@ static void export_projective_case(const char *name, const float view_proj[16], 
         printf("]}");
     }
     printf("}\n");
+}
+
+static void read_last_quad(nt_ui_shape_vertex_t vertices[4]) {
+    for (uint32_t i = 0; i < 4U; ++i) {
+        nt_sprite_renderer_test_last_emit_position(i, vertices[i].position);
+        nt_sprite_renderer_test_last_emit_texcoord(i, vertices[i].texcoord);
+        nt_sprite_renderer_test_last_emit_color(i, vertices[i].color);
+        nt_sprite_renderer_test_last_emit_attrs(i, &vertices[i].attrs, sizeof(vertices[i].attrs));
+    }
+}
+
+static void export_projective_case(const char *name, const float view_proj[16], const nt_ui_target_t *target, bool visible, const char *step, const nt_ui_shape_attrs_t *expected) {
+    if (!s_export_gpu_cases) {
+        return;
+    }
+    nt_ui_shape_vertex_t vertices[4];
+    const uint32_t count = nt_gfx_fake_draw_trace_count() > 0U ? 4U : 0U;
+    if (count != 0U) {
+        read_last_quad(vertices);
+    }
+    export_gpu_vertices(name, view_proj, target, visible, step, expected, vertices, count, false, NULL);
 }
 
 static void test_screen_shape_culling_uses_projection_extent_with_offset_viewport(void) {
@@ -525,6 +549,103 @@ static void test_typed_paint_with_asymmetric_widths_and_gradient(void) {
     }
 }
 
+static void test_screen_y_offset_keeps_translated_body_and_shadow(void) {
+    const float projection[16] = {2.0F / 640.0F, 0, 0, 0, 0, 2.0F / 480.0F, 0, 0, 0, 0, -1, 0, -1, -1, 0, 1};
+    nt_ui_transform_t transform = nt_ui_transform_defaults();
+    transform.offset_y = 500.0F;
+    for (uint8_t scaled = 0; scaled < 2U; ++scaled) {
+        for (uint8_t shadow_only = 0; shadow_only < 2U; ++shadow_only) {
+            nt_ui_shape_style_t style = nt_ui_shape_style_defaults();
+            style.material = s_body_material;
+            if (shadow_only != 0U) {
+                style.paint.color0 = 0;
+                style.shadow = (nt_ui_shape_shadow_t){.color = UINT32_MAX, .spread = 2};
+            }
+            nt_gfx_fake_draw_trace_reset(true);
+            begin_frame();
+            nt_ui_shape(s_fx.ctx, NT_UI_DATA_XFORM(0, &transform, 1.0F), &style, &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(20)}});
+            nt_ui_end(s_fx.ctx);
+            nt_ui_target_t target = {.viewport = {101, 47, 640, 480}};
+            if (scaled != 0U) {
+                target.fb_size[0] = 1280;
+                target.fb_size[1] = 960;
+                target.fb_offset[0] = 0.6F;
+                target.fb_offset[1] = 2.6F;
+            }
+            nt_ui_walk(s_fx.ctx, &target);
+            TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+            const char *names[2][2] = {{"screen-direct-y-offset", "screen-direct-y-shadow"}, {"screen-scaled-y-offset", "screen-scaled-y-shadow"}};
+            export_projective_case(names[scaled][shadow_only], projection, &target, true, NULL, NULL);
+        }
+    }
+}
+
+static void declare_depth_shapes(uint32_t visible_part, bool translucent) {
+    nt_ui_shape_style_t styles[3];
+    const uint32_t colors[3] = {0xFF00C800U, translucent ? 0x800000FFU : 0xFF0000FFU, 0xFFFF0000U};
+    for (uint32_t i = 0; i < 3U; ++i) {
+        styles[i] = nt_ui_shape_style_defaults();
+        styles[i].material = s_body_material;
+        styles[i].box = (nt_ui_shape_radii_t){8, 8, 8, 8};
+        styles[i].paint.color0 = visible_part == (2U * i) + 1U ? colors[i] : 0U;
+        const uint32_t shadow_color = i == 0U ? 0xFF202020U : 0xFF000000U;
+        styles[i].shadow = (nt_ui_shape_shadow_t){.color = visible_part == 2U * i ? shadow_color : 0U, .spread = 8};
+    }
+    nt_ui_transform_t sibling = nt_ui_transform_defaults();
+    sibling.offset_x = -40;
+    nt_ui_shape_begin(s_fx.ctx, NULL, &styles[0],
+                      &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(100)}, .padding = {20, 20, 20, 20}, .layoutDirection = CLAY_LEFT_TO_RIGHT}});
+    nt_ui_shape(s_fx.ctx, NULL, &styles[1], &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}});
+    nt_ui_shape(s_fx.ctx, NT_UI_DATA_XFORM(0, &sibling, 1.0F), &styles[2], &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}});
+    nt_ui_shape_end(s_fx.ctx);
+}
+
+static void test_world_shadow_half_step_preserves_depth_hierarchy(void) {
+    setup_projective_context();
+    const nt_program_t program = nt_material_get_info(s_body_material)->program;
+    nt_material_destroy(s_body_material);
+    s_body_material = nt_material_create(&(nt_material_create_desc_t){.vertex_layout = NT_UI_SHAPE_VERTEX_LAYOUT,
+                                                                      .program = program,
+                                                                      .textures = {{.name = "u_texture"}},
+                                                                      .texture_count = 1,
+                                                                      .blend = nt_blend_alpha_premultiplied(),
+                                                                      .depth_test = true,
+                                                                      .depth_write = true});
+    float vp[16] = {0.006F, 0, 0.0008F, 0.0015F, 0, -0.012F, 0.0003F, 0.001F, 0, 0, 0.1F, 0, -0.6F, 0.6F, 0, 1};
+    const nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    for (uint32_t scenario = 0; scenario < 4U; ++scenario) {
+        vp[3] = scenario == 3U ? 0.015F : 0.0015F;
+        const float bias = scenario == 0U ? 0.0F : 0.004F;
+        const bool translucent = scenario == 2U;
+        nt_ui_set_element_depth_bias(s_fx.ctx, bias);
+        nt_ui_shape_vertex_t vertices[24];
+        /* Capture each real emitted quad without adding a renderer capture surface. */
+        for (uint32_t part = 0; part < 6U; ++part) {
+            nt_gfx_fake_draw_trace_reset(true);
+            begin_frame();
+            nt_ui_set_view_proj(s_fx.ctx, vp);
+            declare_depth_shapes(part, translucent);
+            nt_ui_end(s_fx.ctx);
+            nt_ui_walk(s_fx.ctx, &target);
+            TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+            read_last_quad(&vertices[(size_t)part * 4U]);
+            for (uint32_t i = 0; i < 4U; ++i) {
+                const nt_ui_shape_attrs_t *attrs = &vertices[(part * 4U) + i].attrs;
+                TEST_ASSERT_TRUE(attrs->widths[3] == 0.0F);
+                TEST_ASSERT_EQUAL_UINT8((part & 1U) == 0U ? 3U : 1U, attrs->control[1]);
+                TEST_ASSERT_TRUE((attrs->control[3] & 2U) != 0U);
+            }
+        }
+        const char *names[4] = {"depth-shadow-zero-bias", "depth-shadow-hierarchy", "depth-shadow-translucent", "depth-shadow-strong-perspective"};
+        const char *checks[4] = {"[{\"x\":491,\"y\":203,\"rgba\":[32,32,32,255],\"tolerance\":2},{\"x\":269,\"y\":332,\"rgba\":[32,32,32,255],\"tolerance\":2}]",
+                                 ("[{\"x\":491,\"y\":203,\"rgba\":[0,200,0,255],\"tolerance\":2},{\"x\":269,\"y\":332,\"rgba\":[255,0,0,255],\"tolerance\":2},"
+                                  "{\"x\":337,\"y\":331,\"rgba\":[255,0,0,255],\"tolerance\":2},{\"x\":448,\"y\":329,\"rgba\":[0,0,255,255],\"tolerance\":2}]"),
+                                 "[{\"x\":269,\"y\":332,\"rgba\":[128,0,0,255],\"tolerance\":2},{\"x\":337,\"y\":331,\"rgba\":[128,0,0,255],\"tolerance\":2}]",
+                                 "[{\"x\":390,\"y\":249,\"rgba\":[0,0,0,255],\"tolerance\":2},{\"x\":312,\"y\":321,\"rgba\":[255,0,0,255],\"tolerance\":2}]"};
+        export_gpu_vertices(names[scenario], vp, &target, true, NULL, NULL, vertices, 24U, true, checks[scenario]);
+    }
+}
+
 static void walk_projective_box(const char *name, const float view_proj[16], const nt_ui_transform_t *transform, const nt_ui_target_t *target, bool visible) {
     setup_projective_context();
     begin_frame();
@@ -534,6 +655,31 @@ static void walk_projective_box(const char *name, const float view_proj[16], con
     nt_ui_end(s_fx.ctx);
     nt_ui_walk(s_fx.ctx, target);
     export_projective_case(name, view_proj, target, visible, NULL, NULL);
+}
+
+static void test_shadow_half_step_is_included_in_near_far_depth(void) {
+    setup_projective_context();
+    nt_ui_set_element_depth_bias(s_fx.ctx, 0.04F);
+    const nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    const float depths[4] = {-0.97F, -0.99F, 1.01F, 1.03F};
+    const char *names[4] = {"depth-shadow-near-visible", "depth-shadow-near-clipped", "depth-shadow-far-visible", "depth-shadow-far-clipped"};
+    for (uint32_t i = 0; i < 4U; ++i) {
+        const float vp[16] = {0.005F, 0, 0, 0, 0, -0.02F, 0, 0, 0, 0, 0.1F, 0, -0.5F, 0.6F, depths[i], 1};
+        nt_gfx_fake_draw_trace_reset(true);
+        begin_frame();
+        nt_ui_set_view_proj(s_fx.ctx, vp);
+        nt_ui_shape_style_t style = box_style();
+        style.paint.color0 = 0;
+        style.shadow = (nt_ui_shape_shadow_t){.color = UINT32_MAX, .spread = 2};
+        emit_box(&style, NULL);
+        nt_ui_end(s_fx.ctx);
+        nt_ui_walk(s_fx.ctx, &target);
+        TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+        float position[3];
+        nt_sprite_renderer_test_last_emit_position(0U, position);
+        TEST_ASSERT_TRUE(fabsf(position[2] + 0.2F) < 0.00001F);
+        export_projective_case(names[i], vp, &target, (i & 1U) == 0U, NULL, NULL);
+    }
 }
 
 static void assert_projective_emit(void) {
@@ -718,10 +864,13 @@ int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_typed_paint_with_asymmetric_widths_and_gradient);
     RUN_TEST(test_screen_shape_culling_uses_projection_extent_with_offset_viewport);
+    RUN_TEST(test_screen_y_offset_keeps_translated_body_and_shadow);
+    RUN_TEST(test_world_shadow_half_step_preserves_depth_hierarchy);
+    RUN_TEST(test_shadow_half_step_is_included_in_near_far_depth);
     RUN_TEST(test_zero_tail_override_and_skip_own_exact_bytes);
     RUN_TEST(test_box_layout_and_asymmetric_radii);
     RUN_TEST(test_leaf_without_declaration_fills_parent_and_emits);
-    RUN_TEST(test_screen_shape_cull_uses_viewport_y_origin);
+    RUN_TEST(test_screen_shape_cull_uses_projection_y_extent);
     RUN_TEST(test_radii_share_css_adjacent_edge_scale);
     RUN_TEST(test_four_border_sides_keep_layout_order_and_full_precision);
     RUN_TEST(test_zero_sides_do_not_inherit_another_side);

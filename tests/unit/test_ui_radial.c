@@ -496,12 +496,15 @@ static void test_radial_image_reveal_mode_plumbed(void) {
     }
 }
 
-/* (d) style ABI guard + defaults sane + all four reveal modes distinct. */
-static void test_radial_image_style_abi(void) {
-    TEST_ASSERT_EQUAL_UINT32(44U, (uint32_t)sizeof(nt_ui_radial_image_style_t));
+/* Compact style, usable defaults and four distinct reveal modes. */
+static void test_radial_image_style_defaults(void) {
+    TEST_ASSERT_EQUAL_UINT32(32U, (uint32_t)sizeof(nt_ui_radial_image_style_t));
     nt_ui_radial_image_style_t d = nt_ui_radial_image_style_defaults();
     TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, d.color_packed);
-    TEST_ASSERT_TRUE(approx(d.slice9_scale, 1.0F));
+    TEST_ASSERT_TRUE(approx(d.inner_radius_norm, 0.0F));
+    TEST_ASSERT_TRUE(approx(d.origin_x, 0.5F) && approx(d.origin_y, 0.5F));
+    TEST_ASSERT_EQUAL_UINT8(0U, d.flags);
+    TEST_ASSERT_EQUAL_UINT8(0U, d.flip_bits);
     TEST_ASSERT_EQUAL_UINT32(0U, d.material.id);
     TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, d.tint_color_packed);
     TEST_ASSERT_TRUE(approx(d.tint_strength, 0.6F));
@@ -510,6 +513,17 @@ static void test_radial_image_style_abi(void) {
     TEST_ASSERT_EQUAL_INT(1, (int)NT_UI_RADIAL_REVEAL_DIM);
     TEST_ASSERT_EQUAL_INT(2, (int)NT_UI_RADIAL_REVEAL_HIDE);
     TEST_ASSERT_EQUAL_INT(3, (int)NT_UI_RADIAL_REVEAL_TINT);
+}
+
+static void test_radial_image_rejects_slice9_override(void) {
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material();
+    style.flags = NT_UI_IMAGE_SLICE9_OVERRIDE;
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    const nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800, 600, 0, &mouse, 1);
+    NT_TEST_EXPECT_ASSERT(nt_ui_radial_image(s_fx.ctx, NULL, &ref, 0.0F, 1.0F, &style, NULL));
+    nt_ui_end(s_fx.ctx);
 }
 
 static void test_radial_image_rejects_baked_slice9(void) {
@@ -714,7 +728,8 @@ int main(void) {
     RUN_TEST(test_radial_image_source_uv_ignores_atlas_d4_and_explicit_flips);
     RUN_TEST(test_radial_image_reveal_mode_plumbed);
     RUN_TEST(test_radial_image_packed_region_uses_source_uv);
-    RUN_TEST(test_radial_image_style_abi);
+    RUN_TEST(test_radial_image_style_defaults);
+    RUN_TEST(test_radial_image_rejects_slice9_override);
     RUN_TEST(test_radial_image_rejects_baked_slice9);
     RUN_TEST(test_source_uv_material_rejects_geometry_emit);
     RUN_TEST(test_radial_image_fill_emit);

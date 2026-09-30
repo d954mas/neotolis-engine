@@ -30,17 +30,15 @@ typedef enum {
     NT_UI_RADIAL_REVEAL_TINT = 3,       /* un-swept -> mixed toward tint_color */
 } nt_ui_radial_reveal_mode_t;
 
-/* Visual-only style. Mirrors nt_ui_image_style_t slice9/origin/flip for ABI parity,
- * but slice9 is rejected in v1. mode + dim_factor are baked on the material
+/* Visual-only style. Supports origin and flip overrides; slice9 is rejected.
+ * mode + dim_factor are baked on the material
  * (u_reveal_mode); tint is per-widget (a_tint), so differently-tinted radials still
  * share one material and batch. material .id==0 invalid. */
 typedef struct {
     uint32_t color_packed;      /* 0xAABBGGRR; 0xFFFFFFFF = no tint */
     float inner_radius_norm;    /* [0,1); 0 = solid sector, >0 = ring */
-    uint16_t slice9_lrtb[4];    /* ABI only — v1 asserts {0,0,0,0} + SLICE9 flag unset (region-only) */
     float origin_x;             /* 0..1; only used when ORIGIN_OVERRIDE set */
     float origin_y;             /* 0..1; only used when ORIGIN_OVERRIDE set */
-    float slice9_scale;         /* MUST be finite > 0 (helper asserts) */
     nt_material_t material;     /* radial-image material; .id==0 invalid */
     uint32_t tint_color_packed; /* 0xAABBGGRR; TINT mode target color (per-widget) */
     float tint_strength;        /* [0,1]; TINT mix strength (per-widget) */
@@ -48,10 +46,10 @@ typedef struct {
     uint8_t flags;              /* NT_UI_IMAGE_ORIGIN_OVERRIDE (SLICE9_OVERRIDE rejected in v1) */
     uint8_t _reserved[2];
 } nt_ui_radial_image_style_t;
-_Static_assert(sizeof(nt_ui_radial_image_style_t) == 44, "nt_ui_radial_image_style_t stable ABI (44 B)");
+_Static_assert(sizeof(nt_ui_radial_image_style_t) == 32, "nt_ui_radial_image_style_t size (32 B)");
 
-/* Use instead of bare {0} — color_packed=0 renders fully transparent, slice9_scale
- * must be positive. material stays .id==0 until the game assigns the radial-image
+/* Use instead of bare {0} — color_packed=0 renders fully transparent.
+ * material stays .id==0 until the game assigns the radial-image
  * material for the chosen reveal mode. tint defaults to white @ 0.6 strength. */
 static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void) {
     return (nt_ui_radial_image_style_t){
@@ -59,7 +57,6 @@ static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void)
         .inner_radius_norm = 0.0F,
         .origin_x = 0.5F,
         .origin_y = 0.5F,
-        .slice9_scale = 1.0F,
         .material = (nt_material_t){0},
         .tint_color_packed = 0xFFFFFFFFU, /* white */
         .tint_strength = 0.6F,

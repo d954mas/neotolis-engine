@@ -66,6 +66,15 @@ paint. Alpha zero disables its emit. The shadow quad uses the shape's own
 material, so shadow and body batch into one draw; the engine never globally
 groups shadows.
 
+For world UI, an enabled `element_depth_bias_ndc` places the shadow half a
+configured hierarchy step behind its body. Both use the same CPU bias calculation
+from the element's original world matrix: the body uses its hierarchy depth,
+the shadow uses depth minus 0.5. This keeps their spacing consistent under
+perspective before projected bounds and recovered fragment depth are prepared.
+Zero bias and screen UI retain coincident depths.
+Material depth-test/write settings are unchanged; depth-writing translucent
+paint still follows the game's ordinary transparency/order policy.
+
 Separate shadow/body quads are the chosen design; recorded measurements are in
 the [showcase comparison](../../../examples/ui_showcase/README.md#recorded-shapes-comparison).
 
@@ -73,7 +82,10 @@ The RADIAL mode preserves the angle/ring domain and intersects it
 with the original rectangle using screen-space AA. Equal start/end angles
 produce an empty shape. Its screen-space path uses the shared radial
 coverage; its world path uses homogeneous half-planes for screen-derivative
-angular AA. It does not support a border or shadow. `nt_ui_radial_image`
+angular AA. Angular AA integrates the linearized half-planes over a physical
+pixel square. Concentric radial edges share interval coverage as the ring
+narrows; ellipse/radial-contour AA remains derivative-based.
+It does not support a border or shadow. `nt_ui_radial_image`
 remains a separate textured reveal effect with its own API, shader layout and
 zero-sweep behavior.
 

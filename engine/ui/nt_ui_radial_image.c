@@ -32,12 +32,10 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
               "nt_ui_radial_image: material needs NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT and its source UV offset");
     NT_ASSERT(isfinite(angle_start) && isfinite(angle_end) && "nt_ui_radial_image: angles must be finite");
     NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial_image: inner_radius_norm must be finite in [0,1)");
-    NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_radial_image: style.slice9_scale must be finite > 0");
     NT_ASSERT(isfinite(style->tint_strength) && style->tint_strength >= 0.0F && style->tint_strength <= 1.0F && "nt_ui_radial_image: tint_strength must be finite in [0,1]");
     /* Slice9 patches use stretched geometry; the source-coordinate producer only
      * covers the original atlas region vertices. */
-    NT_ASSERT(!(style->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) && style->slice9_lrtb[0] == 0 && style->slice9_lrtb[1] == 0 && style->slice9_lrtb[2] == 0 && style->slice9_lrtb[3] == 0 &&
-              "nt_ui_radial_image: slice9 is unsupported; rectangular regions only");
+    NT_ASSERT(!(style->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) && "nt_ui_radial_image: slice9 is unsupported; rectangular regions only");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_radial_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
     }
@@ -73,7 +71,7 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         .flags = style->flags,
         .origin_x = style->origin_x,
         .origin_y = style->origin_y,
-        .slice9_scale = style->slice9_scale,
+        .slice9_scale = 1.0F,
         .color_packed = style->color_packed,
     };
     nt_ui_image_custom(ctx, data, &img, decl);

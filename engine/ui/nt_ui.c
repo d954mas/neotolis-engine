@@ -1823,12 +1823,40 @@ static bool shape_screen_visible(Clay_BoundingBox bb, float pad, const nt_ui_tar
         max_x = fmaxf(max_x, x);
         max_y = fmaxf(max_y, y);
     }
-    /* The screen Y-flip includes the viewport origin; X remains viewport-local. */
-    return !(max_x < 0.0F || min_x > target->viewport[2] || max_y < target->viewport[1] || min_y > target->viewport[1] + target->viewport[3]);
+    /* Projection bounds are viewport-local; GL applies the viewport origin later. */
+    return !(max_x < 0.0F || min_x > target->viewport[2] || max_y < 0.0F || min_y > target->viewport[3]);
+}
+
+static void apply_element_depth_bias(const nt_ui_context_t *ctx, float hierarchy_depth, float world_mat4[16]) {
+    if (ctx->element_depth_bias_ndc == 0.0F || hierarchy_depth == 0.0F) {
+        return;
+    }
+    NT_ASSERT(ctx->view_proj_set && "nt_ui_walk: element_depth_bias_ndc requires nt_ui_set_view_proj before nt_ui_walk");
+
+    const float origin[4] = {world_mat4[12], world_mat4[13], world_mat4[14], 1.0F};
+    float clip[4];
+    mat4_mul_vec4_flat(ctx->view_proj, origin, clip);
+    if (clip[3] == 0.0F) {
+        return;
+    }
+
+    clip[2] -= (hierarchy_depth * ctx->element_depth_bias_ndc) * clip[3];
+
+    float biased[4];
+    mat4_mul_vec4_flat(ctx->inv_view_proj, clip, biased);
+    if (biased[3] == 0.0F) {
+        return;
+    }
+
+    const float inv_w = 1.0F / biased[3];
+    world_mat4[12] += (biased[0] * inv_w) - origin[0];
+    world_mat4[13] += (biased[1] * inv_w) - origin[1];
+    world_mat4[14] += (biased[2] * inv_w) - origin[2];
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd, const nt_ui_target_t *target, const float world[16], nt_ui_sprite_bind_t *bind, float opacity, bool screen_space) {
+static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd, const nt_ui_target_t *target, const float world[16], const nt_ui_walker_state_t *ws, nt_ui_sprite_bind_t *bind,
+                       float opacity, bool screen_space) {
     const nt_ui_image_payload_t *payload = cmd->renderData.image.imageData;
     const nt_ui_shape_style_t *style = &payload->shape->style;
     const Clay_BoundingBox bb = cmd->boundingBox;
@@ -1880,7 +1908,14 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
         shadow.layout[2] += reach;
         shadow.control[0] = (uint8_t)(style->shadow.color >> 24U);
         shadow.control[1] = 3U;
-        emit_shape_quad(ctx, shadow_box, target, world, &shadow, (style->shadow.color & 0xFFFFFFU) | inherited_alpha, screen_space);
+        float biased_shadow[16];
+        const float *shadow_world = world;
+        if (!screen_space && ctx->element_depth_bias_ndc > 0.0F) {
+            memcpy(biased_shadow, ws->m, sizeof biased_shadow);
+            apply_element_depth_bias(ctx, (float)ws->hierarchy_depth - 0.5F, biased_shadow);
+            shadow_world = biased_shadow;
+        }
+        emit_shape_quad(ctx, shadow_box, target, shadow_world, &shadow, (style->shadow.color & 0xFFFFFFU) | inherited_alpha, screen_space);
     }
     if (!body_visible) {
         return;
@@ -1896,33 +1931,6 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
     emit_shape_quad(ctx, bb, target, world, &attrs, (style->paint.color0 & 0xFFFFFFU) | inherited_alpha, screen_space);
 }
 // #endregion
-
-static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierarchy_depth, float world_mat4[16]) {
-    if (ctx->element_depth_bias_ndc == 0.0F || hierarchy_depth == 0U) {
-        return;
-    }
-    NT_ASSERT(ctx->view_proj_set && "nt_ui_walk: element_depth_bias_ndc requires nt_ui_set_view_proj before nt_ui_walk");
-
-    const float origin[4] = {world_mat4[12], world_mat4[13], world_mat4[14], 1.0F};
-    float clip[4];
-    mat4_mul_vec4_flat(ctx->view_proj, origin, clip);
-    if (clip[3] == 0.0F) {
-        return;
-    }
-
-    clip[2] -= ((float)hierarchy_depth * ctx->element_depth_bias_ndc) * clip[3];
-
-    float biased[4];
-    mat4_mul_vec4_flat(ctx->inv_view_proj, clip, biased);
-    if (biased[3] == 0.0F) {
-        return;
-    }
-
-    const float inv_w = 1.0F / biased[3];
-    world_mat4[12] += (biased[0] * inv_w) - origin[0];
-    world_mat4[13] += (biased[1] * inv_w) - origin[1];
-    world_mat4[14] += (biased[2] * inv_w) - origin[2];
-}
 
 /* For 2D ctx: bake the screen Y-flip (Clay Y-down → GL Y-up) into world_mat4 = Y_flip · ws->m.
  * For 3D ctx (use_raycast_input): world_mat4 = ws->m verbatim; the game's view_proj handles screen
@@ -2000,7 +2008,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
          * boundary flushes exactly once. */
         const nt_ui_image_payload_t *ip = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
         if (ip != NULL && (ip->flags & NT_UI_IMAGE_ANALYTIC_SHAPE) != 0U) {
-            emit_shape(ctx, c, target, world_mat4, bind, ws->accum_opacity, !ctx->use_raycast_input || force_screen_space);
+            emit_shape(ctx, c, target, world_mat4, ws, bind, ws->accum_opacity, !ctx->use_raycast_input || force_screen_space);
             return;
         }
         const nt_material_t img_mat = (ip != NULL && ip->material.id != 0) ? ip->material : ctx->sprite_material;
