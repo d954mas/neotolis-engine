@@ -600,6 +600,7 @@ static void declare_depth_shapes(uint32_t visible_part, bool translucent) {
     nt_ui_shape_end(s_fx.ctx);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_world_shadow_half_step_preserves_depth_hierarchy(void) {
     setup_projective_context();
     const nt_program_t program = nt_material_get_info(s_body_material)->program;
@@ -615,6 +616,9 @@ static void test_world_shadow_half_step_preserves_depth_hierarchy(void) {
     const nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     for (uint32_t scenario = 0; scenario < 4U; ++scenario) {
         vp[3] = scenario == 3U ? 0.015F : 0.0015F;
+        /* Coplanar zero-bias ties need exact constant depth, not interpolated tilted depth. */
+        vp[2] = scenario == 0U ? 0.0F : 0.0008F;
+        vp[6] = scenario == 0U ? 0.0F : 0.0003F;
         const float bias = scenario == 0U ? 0.0F : 0.004F;
         const bool translucent = scenario == 2U;
         nt_ui_set_element_depth_bias(s_fx.ctx, bias);
@@ -634,6 +638,9 @@ static void test_world_shadow_half_step_preserves_depth_hierarchy(void) {
                 TEST_ASSERT_TRUE(attrs->widths[3] == 0.0F);
                 TEST_ASSERT_EQUAL_UINT8((part & 1U) == 0U ? 3U : 1U, attrs->control[1]);
                 TEST_ASSERT_TRUE((attrs->control[3] & 2U) != 0U);
+                if (bias == 0.0F) {
+                    TEST_ASSERT_TRUE(vertices[(part * 4U) + i].position[2] == 0.0F);
+                }
             }
         }
         const char *names[4] = {"depth-shadow-zero-bias", "depth-shadow-hierarchy", "depth-shadow-translucent", "depth-shadow-strong-perspective"};

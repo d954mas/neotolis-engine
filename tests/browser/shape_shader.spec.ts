@@ -399,8 +399,9 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
     else expect(coverage.nonzeroPixels, fixture.name).toBeGreaterThan(20);
   }
   for (const check of result.checkedPixels) {
-    expect(check.actual, check.name).toHaveLength(4);
-    for (let channel = 0; channel < 4; channel++) expect(Math.abs(check.actual[channel] - check.expected[channel]), `${check.name} channel ${channel}`).toBeLessThanOrEqual(check.tolerance);
+    const label = `${check.name}: actual ${JSON.stringify(check.actual)}, expected ${JSON.stringify(check.expected)}`;
+    expect(check.actual, label).toHaveLength(4);
+    for (let channel = 0; channel < 4; channel++) expect(Math.abs(check.actual[channel] - check.expected[channel]), `${label} channel ${channel}`).toBeLessThanOrEqual(check.tolerance);
   }
   for (const [step, difference] of Object.entries(result.lifecycleDifferences)) expect(difference, `${step} mode 0 pixels`).toBe(0);
   for (const name of ['defaults', 'override', 'defaults-after-skip']) {
