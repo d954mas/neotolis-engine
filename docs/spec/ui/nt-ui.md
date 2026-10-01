@@ -21,11 +21,11 @@ building blocks per the engine's "set of modules" principle.
 `nt_ui_shape` declares a leaf and defaults to GROW/GROW when `decl` is NULL;
 `nt_ui_shape_begin/end` declares the same paint with children and keeps Clay's
 FIT/FIT default when `decl` is NULL. `nt_ui_shape_style_t` is copied into frame
-scratch, while the game owns the material and program. Shapes use the ordinary
-sprite renderer and the bound atlas white region. They introduce no theme,
-interaction state, heap allocation or separate render pass. A button can
-compose its existing interaction with a shape child; atlas and slice9 skins
-remain available.
+scratch, while the game owns the material and program. Shapes draw through
+`nt_ui_shape_renderer`, which the game initializes like the sprite and text
+renderers. They introduce no theme, interaction state, heap allocation or
+separate render pass. A button can compose its existing interaction with a
+shape child; atlas and slice9 skins remain available.
 
 BOX describes a rectangle, rounded rectangle, pill or circle through four
 nonnegative corner radii in TL/TR/BR/BL order. One common CSS-style scale makes
@@ -36,154 +36,94 @@ zero width; all four zero widths contribute exactly zero border coverage.
 
 The inner contour combines inset straight edges with elliptical corner arcs:
 each ellipse axis is the outer radius minus its adjacent side width, clamped
-to zero. Only the applicable corner portions constrain the interior, which
-also stays inside the outer contour. Large widths can leave partial arcs, a
-narrow lens, or no interior. CPU preparation marks an empty interior so the
-border covers the full outer shape. Ellipse evaluation approximates distance
-near the contour; it is not an exact Euclidean ellipse distance function.
-Derivative AA estimates coverage rather than integrating the exact pixel area.
-Opposing edges share an AA footprint as the inset narrows. A vertex-prepared
-support strip bounds near-empty curved interiors; its direction is selected
-from six corner/edge candidates, not a global minimum-width search. This
-prevents a vanishing interior from retaining a constant half-covered fringe.
+to zero. Large widths can leave partial arcs, a narrow lens, or no interior.
+CPU preparation marks an empty interior so the border covers the full outer
+shape. Ellipse evaluation approximates distance near the contour, and
+derivative AA estimates coverage rather than integrating the exact pixel area.
 
 Within one BOX, premultiplied fill and border partition coverage:
-`fill * inner + border * (outer - inner)`. The border is not composited over
-the fill, so a translucent border does not reveal that BOX's fill underneath
-its band. Separate shape emits follow ordinary source-over blending and
-preserve declaration/layer order. Paint uses straight `0xAABBGGRR` inputs,
-including transparent black as a literal color. Horizontal and vertical
-two-color gradients span the original local bounding box. The vertex shader
-premultiplies each endpoint and applies inherited opacity once before
-interpolation. Border color is independent and does not inherit the fill
-gradient.
+`fill * inner + border * (outer - inner)`, so a translucent border does not
+reveal that BOX's fill underneath its band. Separate shapes follow ordinary
+source-over blending and preserve declaration/layer order. Paint uses straight
+`0xAABBGGRR` inputs. Horizontal and vertical two-color gradients span the local
+bounding box; endpoints are premultiplied and inherited opacity applies once.
+Border color does not inherit the fill gradient.
 
-The optional BOX shadow is a separate quad immediately before its body, under
-the same transform, layer and scissor. Offset, spread and softness use layout
-pixels. Softness has finite support and a cubic transition, not a Gaussian
-blur. The whole shadow silhouette remains visible through transparent body
-paint. Alpha zero disables its emit. The shadow quad uses the shape's own
-material, so shadow and body batch into one draw; the engine never globally
-groups shadows.
+The optional BOX shadow is a separate instance immediately before its body,
+under the same transform, layer and scissor. Offset, spread and softness use
+layout pixels; softness has finite support and a cubic transition, not a
+Gaussian blur. Alpha zero disables it. The shadow uses the shape's material, so
+shadow and body share one draw.
 
 For world UI, an enabled `element_depth_bias_ndc` places the shadow half a
-configured hierarchy step behind its body. Both use the same CPU bias calculation
-from the element's original world matrix: the body uses its hierarchy depth,
-the shadow uses depth minus 0.5. This keeps their spacing consistent under
-perspective before projected bounds and recovered fragment depth are prepared.
-Zero bias and screen UI retain coincident depths.
-Material depth-test/write settings are unchanged; depth-writing translucent
-paint still follows the game's ordinary transparency/order policy.
+hierarchy step behind its body: the body uses its hierarchy depth, the shadow
+depth minus 0.5, both from the element's original world matrix. A shadow drawn
+with a depth-writing material asserts unless the context is world UI with a
+nonzero bias, because a coincident shadow wins the depth test against its body.
 
-Separate shadow/body quads are the chosen design; recorded measurements are in
-the [showcase comparison](../../../examples/ui_showcase/README.md#recorded-shapes-comparison).
-
-The RADIAL mode preserves the angle/ring domain and intersects it
-with the original rectangle using screen-space AA. Equal start/end angles
-produce an empty shape. Its screen-space path uses the shared radial
-coverage; its world path uses homogeneous half-planes for screen-derivative
-angular AA. Angular AA integrates the linearized half-planes over a physical
-pixel square. Concentric radial edges share interval coverage as the ring
-narrows; ellipse/radial-contour AA remains derivative-based.
-It does not support a border or shadow. `nt_ui_radial_image`
-remains a separate textured reveal effect with its own API, shader layout and
-zero-sweep behavior.
+RADIAL fills the ellipse inscribed in the element box, restricted to an angular
+span and an optional ring. Equal start/end angles produce an empty shape. Angular
+AA integrates the linearized edge half-planes over a pixel square; concentric
+ring edges share interval coverage as the ring narrows. It does not support a
+border or shadow. `nt_ui_radial_image` remains a separate textured reveal effect.
 
 Radial angles use local UI coordinates before element transforms: Y points
-down, `0` points right, `+π/2` points down, `π` points left, and `3π/2`
-points up. Increasing angles sweep clockwise on an untransformed screen.
-The shader takes the positive wrapped span from `angle_start` to `angle_end`;
-swapping them selects the complementary span, not a short reverse sweep.
+down, `0` points right, `+π/2` points down. Increasing angles sweep clockwise
+on an untransformed screen. The span is `(angle_end - angle_start)` wrapped into
+`[0, 2π)`; swapping the angles selects the complementary span. A difference of
+at least `2π` in magnitude draws the full turn.
 
-The full shape vertex is the named `nt_ui_shape_vertex_t` (84 bytes), with
-a typed `nt_ui_shape_attrs_t` tail (64 bytes). The material uses the exported
-`NT_UI_SHAPE_VERTEX_LAYOUT`, which declares all ten physical fields using
-full-vertex offsets; the shape asserts layout equality. The semantic map is
-optional.
+### Shape renderer
 
-| Offset | Location | Storage | Meaning |
-|---:|---:|---|---|
-| 0 | 0 | FLOAT3 | Position |
-| 12 | 3 | USHORT2 normalized | Atlas UV |
-| 16 | 2 | UBYTE4 normalized | Fill RGB and inherited opacity |
-| 20 | 4 | FLOAT4 | Width, height, padding/expansion scale, center X |
-| 36 | 5 | FLOAT4 | BOX radii or radial start/end/inner radius |
-| 52 | 6 | FLOAT4 | BOX widths L/T/R/B, or shadow spread/softness/support/zero |
-| 68 | 7 | FLOAT | Projective center Y |
-| 72 | 8 | UBYTE4 normalized | Endpoint straight RGBA |
-| 76 | 9 | UBYTE4 normalized | Border straight RGBA |
-| 80 | 10 | UBYTE4 unnormalized | Fill alpha, mode, gradient, flags |
+Each body or shadow is one `nt_ui_shape_instance_t` (112 bytes). Its vertex
+shader derives the quad corner from `gl_VertexID` and places local point `p`
+at `origin + p.x * axis_x + p.y * axis_y`, for `p` in `[-pad, size + pad]`
+layout pixels. The walker fills the world placement from the element's composed
+matrix, so screen and world UI share the format.
 
-All lengths and projective metadata retain FLOAT32 precision. Screen emits
-use local padding and zero centers; world emits use a dimensionless expansion
-scale and an NDC center. Mode 0 selects ordinary sprites, 1 BOX, 2 RADIAL,
-3 shadow. Gradient is solid/horizontal/vertical (0/1/2); in the flags byte,
-bit 0 (value 1) marks an empty interior and bit 1 (value 2) projective
-evaluation. Control inputs are GLSL vec4,
-with unnormalized byte values 0..255. Fill alpha is divided by 255. Endpoint
-and border colors are premultiplied by their own alpha; inherited opacity is
-then applied once. Gradient interpolation remains premultiplied.
+| Offset | Location | Field |
+|---:|---:|---|
+| 0 | 0 | World origin XYZ, width |
+| 16 | 1 | World X axis per layout pixel, height |
+| 32 | 2 | World Y axis per layout pixel, AA/shadow pad |
+| 48 | 3 | BOX radii, or radial start/end/inner radius |
+| 64 | 4 | BOX widths L/T/R/B, or shadow spread/softness/reach |
+| 80 | 5 | `user`: four floats for game shaders |
+| 96 | 6 | UBYTE4 normalized: fill or shadow RGB, inherited opacity |
+| 100 | 7 | UBYTE4 normalized: gradient endpoint |
+| 104 | 8 | UBYTE4 normalized: border |
+| 108 | 9 | UBYTE4: fill alpha, mode (1 BOX, 2 RADIAL, 3 shadow), gradient, flags |
 
-One fragment shader, `assets/shaders/ui_shape.frag`, serves BOX, RADIAL and
-shadow by branching on the flat per-primitive mode; the mode is uniform within a
-quad, so derivative control flow stays uniform. `assets/shaders/ui_shape_uber.frag`
-adds mode 0 for ordinary textured sprites.
-Paint and shape parameters are flat varyings; local coordinates are perspective
-correct. Shape fragments with zero coverage discard instead of writing depth.
-Mode 0 retains ordinary sprite semantics. No float color/control codec is used.
+The renderer stages instances per material command, uploads them once per flush
+and issues one instanced draw per command. Consecutive shapes therefore share
+draws regardless of how many layers a skin stacks. A walker switch between the
+shape, sprite and text renderers flushes the previous renderer, so declaration
+order survives across renderers. A shape material supplies program, blend,
+depth, params and textures; it declares no vertex layout.
 
-World shapes require `nt_ui_set_view_proj` before walking, including shapes
-without interaction. The game must upload the same matrix to the shader's
-Globals block; the setter does not upload GPU state. CPU preparation uses the
-composed world matrix, including element depth bias, and the integer physical
-viewport dimensions used by the walker. Viewport origins cancel in its
-viewport-relative coordinates. Body and shadow support are prepared separately.
-It clips support against the positive homogeneous sheet, four source edges
-and a viewport expanded by two physical pixels. It does not clip near/far:
-a body outside a depth plane can still have a visible antialiasing fringe.
-A singular projection or empty clipped support emits nothing.
+`assets/shaders/ui_shape.vert` and `ui_shape.frag` are the engine program.
+`common/ui_shape.glsl` is the shape SDF and coverage library. A game shader
+can include it, read `v_user` (the style's `user` floats) and paint effects the
+engine does not provide; the engine shader ignores `user`. Layered skins such
+as a button lip, press offset, gloss or inner highlight compose several shapes
+instead of extending the instance. An inner highlight, for example, is a
+transparent-fill BOX with a thin light border emitted after the body.
 
-An interior screen center and scale `1 + 1.5 / minimum_edge_distance` expand
-the projected support by at least 1.5 physical pixels. The vertex shader
-preserves clip W while expanding XY and sets raster clip Z to zero. Fragment
-evaluation reconstructs original homogeneous local coordinates and depth at
-the actual sample. Explicit chain-rule derivatives evaluate the contour and
-AA without nested GLSL derivatives or division by the homogeneous coordinate
-for contour coverage. Gradient colors use bounded local-coordinate ratios.
-The fragment shader discards original NDC depth outside `[-1, 1]` and writes
-the recovered depth. These are paint bounds only; they do not enlarge layout,
-children or hit boxes.
-
-Uber is an explicit material choice. Ordinary images, slice9 and Clay geometry
-pass no tail, so the sprite renderer writes a zero 64-byte tail, which selects
-mode 0. Shape emits pass a complete typed tail override for that call. Prefix
-position/UV/color are always generated by the sprite renderer. Basic sprite
-materials declare 20-byte vertices; ordinary sprites in the mixed uber still use
-84 bytes. The walker calls `nt_sprite_renderer_align_next_vertex_to_4()` before
-each shape quad so the shader's corner derivation remains valid after trimmed
-atlas polygons.
+World shapes require `nt_ui_set_view_proj` before walking; the game uploads the
+same matrix to the shader's Globals block. Local coordinates interpolate
+perspective-correct, and AA uses their screen derivatives. The AA pad is the
+largest per-corner count of layout units covering one physical pixel, from the
+projected Jacobian, capped by the element size near the horizon. A support with
+every corner behind the camera emits nothing; GPU clipping owns near, far and
+camera-plane crossings. Shape shaders write no fragment depth.
 
 Shape declarations set the narrow vendored Clay IMAGE `nt_defer_culling`
-option. Clay preserves their IMAGE command even when the logical box is
-offscreen. For screen-space UI, the walker culls the body and shadow quads
-separately by their transformed paint bounds, including affine AA padding and
-shadow support, before per-shape CPU preparation. Layout, child placement and
-hit boxes do not expand.
-The image payload's private flag `NT_UI_IMAGE_ANALYTIC_SHAPE` (bit 2, declared in
-`nt_ui.h` next to the payload) selects a copied shape style rather than a generic
-custom-attribute block, without growing ordinary image payloads.
-Public image/panel constructors accept only their documented override bits.
-
-Ordinary Clay RECTANGLE/BORDER keep their existing tessellated renderer.
-Selecting an explicit shape does not change Clay rendering or force an uber
-material on every game.
-
-An inner highlight is skin composition, not a separate shader mode. Emit a
-transparent-fill BOX with a thin light border after the body; a uniform inset
-uses a smaller bounding box and reduced radii. A top-only highlight uses widths
-`{0, t, 0, 0}`. Each highlight adds one quad and may batch with the body when
-their material and other draw state match. No interaction or highlight state
-is stored by the shape module.
+option, so Clay keeps their IMAGE command even when the logical box is
+offscreen. For screen-space UI, the walker culls the body and shadow separately
+by their transformed paint bounds, including the AA pad and shadow reach.
+Layout, child placement and hit boxes do not expand. The image payload's
+engine-owned flag `NT_UI_IMAGE_ANALYTIC_SHAPE` selects a copied shape style.
+Ordinary Clay RECTANGLE/BORDER keep their tessellated sprite path.
 
 ## Clay as a public dependency
 
@@ -377,23 +317,6 @@ Both modes use the same `tree_baked[layout_idx]` + per-id mirror
 `hit_baked[slot]` (Clay's hashmap is persistent across frames;
 `hit_generation[slot]` rejects stale ids). Opacity is a separate
 `float` accumulator on the same struct.
-
-### Custom-attr base material
-
-The base sprite material may declare an extended typed `vertex_layout`
-([Full vertex layout](../render/material.md#full-vertex-layout)).
-Every emit without its own tail block writes a zero tail: RECTANGLE, BORDER,
-IMAGE, rich-text inline images and the debug overlays. The base shader must
-treat that zero tail as its plain mode. An `nt_ui_image_custom` block replaces
-the tail for its own emit. Custom widgets on the base handle
-can then batch with plain panels and icons instead of flushing at every
-boundary.
-
-A custom-attr base moves all base UI to the extended vertex stride
-([Sprite custom-attr block](../render/items-sorting-batching.md#sprite-custom-attr-block)).
-Its batches cap at the sprite renderer's `custom_max_vertices`. The largest base
-emit, a rounded BORDER, stages 56 vertices, so a custom-attr base needs
-`custom_max_vertices` ≥ 56.
 
 ## Interaction model
 

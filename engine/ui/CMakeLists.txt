@@ -168,6 +168,7 @@ target_link_libraries(nt_ui
         nt_gfx_interface
         nt_sprite_renderer
         nt_text_renderer
+        nt_ui_shape_renderer
         nt_time
         nt_math
         nt_utf8

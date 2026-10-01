@@ -4,29 +4,6 @@
 #include "clay.h"
 #include "ui/nt_ui.h"
 
-/* Typed tail shared by the shape shader and the mode-zero sprite uber shader. */
-typedef struct {
-    float layout[4]; /* Width, height, affine padding/projective scale, center X. */
-    float geometry[4];
-    float widths[4];
-    float center_y;
-    uint8_t endpoint[4];
-    uint8_t border[4];
-    uint8_t control[4]; /* Fill alpha, mode, gradient, empty-interior/projective flags. */
-} nt_ui_shape_attrs_t;
-
-typedef struct {
-    float position[3];
-    uint16_t texcoord[2];
-    uint8_t color[4];
-    nt_ui_shape_attrs_t attrs;
-} nt_ui_shape_vertex_t;
-
-_Static_assert(sizeof(nt_ui_shape_attrs_t) == 64, "shape tail is 64 bytes");
-_Static_assert(sizeof(nt_ui_shape_vertex_t) == 84, "shape vertex is 84 bytes");
-/* Material vertex_layout for shape materials (dedicated shape and sprite uber shaders). */
-extern const nt_vertex_layout_t NT_UI_SHAPE_VERTEX_LAYOUT;
-
 typedef enum { NT_UI_SHAPE_BOX = 1, NT_UI_SHAPE_RADIAL = 2 } nt_ui_shape_kind_t;
 typedef enum { NT_UI_SHAPE_SOLID = 0, NT_UI_SHAPE_HORIZONTAL = 1, NT_UI_SHAPE_VERTICAL = 2 } nt_ui_shape_gradient_t;
 
@@ -49,7 +26,7 @@ typedef struct {
     float offset_x, offset_y, spread, softness; /* Layout pixels; finite-support shadow. */
 } nt_ui_shape_shadow_t;
 
-typedef struct {
+typedef struct nt_ui_shape_style {
     nt_material_t material;
     nt_ui_shape_kind_t kind;
     union {
@@ -61,9 +38,11 @@ typedef struct {
     };
     nt_ui_shape_paint_t paint;
     nt_ui_shape_shadow_t shadow; /* BOX only; alpha zero disables. World shadows use half a step of enabled element depth bias. */
+    float user[4];               /* Passed to the material's shader unchanged; the engine shader ignores it. */
 } nt_ui_shape_style_t;
 
-/* Opaque white BOX; the game must assign a shape material before use. */
+/* Opaque white BOX; the game must assign a shape material before use. Shapes draw through
+ * nt_ui_shape_renderer, which the game initializes. */
 static inline nt_ui_shape_style_t nt_ui_shape_style_defaults(void) { return (nt_ui_shape_style_t){.kind = NT_UI_SHAPE_BOX, .paint = {.color0 = 0xFFFFFFFFU, .color1 = 0xFFFFFFFFU}}; }
 
 extern const nt_ui_widget_def_t NT_UI_SHAPE_DEF;

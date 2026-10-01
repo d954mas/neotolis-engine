@@ -91,10 +91,11 @@ int main(int argc, char *argv[]) {
     /* Radial image retains its own textured reveal vertex/fragment pair. */
     nt_builder_add_shader(ctx, "assets/shaders/sprite_radial.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/radial_image.frag", NT_BUILD_SHADER_FRAGMENT);
-    nt_builder_add_shader(ctx, "assets/shaders/sprite_ui_shape.vert", NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(ctx, "assets/shaders/ui_shape.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/ui_shape.frag", NT_BUILD_SHADER_FRAGMENT);
-    nt_builder_add_shader(ctx, "assets/shaders/ui_shape_uber.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 11 (sprite + slug_text + radial image + analytic shapes)\n");
+    /* Game-owned shape paint over the engine instance and SDF library. */
+    nt_builder_add_shader(ctx, "examples/ui_showcase/raw/shaders/ui_shape_checker.frag", NT_BUILD_SHADER_FRAGMENT);
+    (void)printf("  Shaders added: 9 (sprite + slug_text + radial image + analytic shapes + checker)\n");
     // #endregion
 
     // #region atlas: widget art + slice9 panels + white pixel

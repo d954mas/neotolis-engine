@@ -22,6 +22,7 @@
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
+#include "renderers/nt_ui_shape_renderer.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
@@ -76,6 +77,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
 
     nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
     nt_text_renderer_init();
+    (void)nt_ui_shape_renderer_init(256U);
     nt_ui_module_init();
 
     /* nt_debug_overlay is NOT init'd here -- nt_ui_walk does not depend on it.
@@ -138,6 +140,7 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     nt_ui_module_shutdown();
     nt_sprite_renderer_shutdown();
     nt_text_renderer_shutdown();
+    nt_ui_shape_renderer_shutdown();
 
     nt_material_shutdown();
     nt_font_shutdown();

@@ -125,65 +125,36 @@ const TextureAssetRef *material_get_textures(const MaterialAssetHeader *h) { ret
 
 ### Full vertex layout
 
-`nt_material_create_desc_t.vertex_layout` declares the complete physical vertex:
-storage type, component count, normalization, location, absolute byte offset and
-stride. Creation validates WebGL2 structural rules, copies the layout and sorts
-active attributes by location. Aliased byte ranges are allowed; duplicate
-locations are not. A missing layout has zero count/stride.
-Meshes and text may omit it. Mesh streams still define their own physical layout;
-the material's independent `attr_map` maps stream names to shader locations and
-does not change mesh storage or supply missing mesh values. Semantic map8 and
-physical layout16 are independent limits.
-
-Creation also stores `vertex_layout_key`, a hash of the whole canonical layout.
-`nt_material_vertex_layout_equals(info, expected)` compares the stored layout
-with an expected one whose attributes are listed in ascending location order,
-as creation canonicalizes them. Modules that own a fixed vertex format export
-it as a `nt_vertex_layout_t` constant (`NT_SPRITE_VERTEX_LAYOUT`,
-`NT_UI_SHAPE_VERTEX_LAYOUT`, `NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT`); games pass the
-constant, and the module asserts layout equality. WebGL2 limits the full stride
-to 255. Materials store no vertex bytes. Uniform params remain vec4 values,
-independent of vertex data.
+`nt_material_create_desc_t.vertex_layout` declares the complete physical vertex
+for renderers that stream vertices: storage type, component count,
+normalization, location, absolute byte offset and stride. Creation copies it and
+stores `vertex_layout_key`, a hash of the whole layout; `nt_gfx_make_vertex_input`
+validates the WebGL2 structural rules when a renderer first bakes it. A missing
+layout has zero count/stride. Meshes, text and UI shapes omit it: mesh streams
+define their own physical layout, and the material's independent `attr_map`
+maps stream names to shader locations. Modules that own a fixed vertex format
+export it as a constant (`NT_SPRITE_VERTEX_LAYOUT`,
+`NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT`); games pass the constant. Materials store no
+vertex bytes, and uniform params remain vec4 values.
 
 Sprite materials explicitly declare their full vertex. The sprite producer
 requires FLOAT3 position at location 0/offset 0, normalized USHORT2 UV at
 location 3/offset 12, and normalized UBYTE4 color at location 2/offset 16. Extra
 attributes start at offset 20. Its stride must be a multiple of 4 and fit
-`20 + NT_SPRITE_CUSTOM_STRIDE_MAX`; the default capacity 64 permits full 84,
-while a configured capacity 128 permits full 148. A valid generic layout with
-another prefix asserts when the sprite renderer first builds a vertex input for
-that layout, not during material create. `NT_SPRITE_VERTEX_LAYOUT` is the plain
-20-byte layout.
+`20 + NT_SPRITE_CUSTOM_STRIDE_MAX`. Another prefix asserts when the sprite
+renderer first builds a vertex input for that layout.
 
 Every region/slice9/geometry emit accepts a complete `const void *attrs,
-uint16_t bytes` tail override. NULL/0 writes a zero tail `[20,stride)`; a
-material that needs nonzero tail values takes them from every emit. Plain
-stride 20 requires NULL/0. Partial blocks, NULL/nonzero and non-NULL/zero
-assert. The renderer writes the prefix from ordinary emit arguments and copies
-the selected tail to each vertex word by word, then fills any renderer-owned
-source UV field. There is no tint multiply or merge. Override pointers are
-borrowed only during the emit, including skipped emits, and never affect later
-calls. ECS emits carry no tail override and therefore write a zero tail,
-without new item or component state. Materials stay alive through their last
-consuming emit.
+uint16_t bytes` tail. NULL/0 writes a zero tail `[20,stride)`; otherwise `bytes`
+equals `stride - 20`. The renderer writes the prefix from ordinary emit
+arguments and copies the tail to each vertex, borrowing the pointer only during
+the emit. ECS emits carry no tail and therefore write a zero tail.
 
-`source_uv_offset` is the full-vertex byte offset of a FLOAT2 tail field, or 0
-for none. For REGION geometry, the sprite renderer overwrites it per vertex from
-the region's source-space positions and original source dimensions, with Y
-down. Alpha trim, atlas placement and D4 packing do not change this coordinate;
-explicit sprite flips mirror the position and its source coordinate together.
-Geometry and slice9 emits assert if the bound material sets it. The offset is
-read once when a command opens; ordinary 20-byte sprites retain their existing
-path.
-
-Semantic names and `source_uv_offset` do not participate in vertex-input
-identity. The sprite renderer looks up its vertex-input cache by
-`vertex_layout_key`, which covers all canonical physical fields without padding
-or inactive entries, and validates the sprite prefix once per cache miss.
-Equal layouts reuse a vertex input across materials;
-same-stride layouts with different physical fields do not. Layout-only changes
-do not create another pipeline. Stride changes flush staging; changing override
-values alone does not split batches.
+The sprite renderer looks up its vertex-input cache by `vertex_layout_key`;
+equal layouts reuse a vertex input across materials, and a layout declared in a
+different attribute order is a different key. Layout-only changes do not create
+another pipeline. Stride changes flush staging; tail values alone do not split
+batches.
 
 ### Shared values
 

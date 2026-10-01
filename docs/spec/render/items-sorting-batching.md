@@ -192,18 +192,22 @@ draw splitting depend only on capacity and state changes.
 
 A sprite material declares its complete physical vertex layout. The producer
 writes the 20-byte position/UV/color prefix; typed fields after it form one
-tail block. Each non-ECS emit may replace that entire tail for its own vertices.
-An omitted block writes a zero tail
-([Full vertex layout](material.md#full-vertex-layout)). Plain and custom widgets
-can share a material and batch when its shader treats the zero tail as the plain
-mode. One staging batch has one stride, so changing stride flushes pending
-emits. ECS emits write a zero tail because render items carry no tail override.
+tail block. Each non-ECS emit may supply that entire tail for its own vertices;
+an omitted block writes a zero tail
+([Full vertex layout](material.md#full-vertex-layout)). One staging batch has
+one stride, so changing stride flushes pending emits.
 
-A shader that derives a quad corner from `gl_VertexID & 3` needs each quad to
-start at a multiple of four vertices. The caller requests this explicitly with
-`nt_sprite_renderer_align_next_vertex_to_4()`, which pads staging with up to
-three unreferenced vertices. If padding does not fit, the next emit flushes and
-starts at vertex zero.
+### UI shape instancing
+
+`nt_ui_shape_renderer` draws analytic UI shapes as one fixed 112-byte instance
+each, with corners from `gl_VertexID`
+([Analytic shapes](../ui/nt-ui.md#analytic-shapes)). It records one command per
+material run, uploads all staged instances once per flush and issues one
+instanced draw per command, so consecutive shapes batch independently of the
+number of layers a skin stacks. The UI walker flushes it when switching to the
+sprite or text renderer and back, which keeps declaration order across
+renderers. Uploads orphan the instance buffer with data, like sprite and text
+batches.
 
 ## UI draw ordering (nt_ui walker)
 

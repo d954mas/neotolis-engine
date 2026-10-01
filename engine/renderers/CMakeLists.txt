@@ -41,3 +41,10 @@ target_link_libraries(nt_sprite_renderer PUBLIC
     nt_transform_comp nt_material nt_entity nt_resource
 )
 # Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
+
+nt_add_module(nt_ui_shape_renderer LOG_DOMAIN "ui_shape_renderer"
+    nt_ui_shape_renderer.c
+    nt_ui_shape_renderer.h
+)
+target_link_libraries(nt_ui_shape_renderer PUBLIC nt_core nt_material nt_resource)
+# Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)

@@ -1675,83 +1675,6 @@ void test_sprite_renderer_draw_list_zero_tail_splits_different_strides(void) {
     TEST_ASSERT_EQUAL_MEMORY(zero, actual, sizeof(actual));
 }
 
-void test_sprite_renderer_custom_quads_align_after_triangles_and_overflow(void) {
-    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
-    desc.custom_max_vertices = 16;
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
-    s_atlas_res = register_test_atlas(0xADULL);
-    nt_sprite_renderer_set_material(create_radial_test_material("custom", 4));
-    const float custom[4] = {1, 2, 3, 4};
-    const float positions[4][2] = {{0, 0}, {10, 0}, {10, 10}, {0, 10}};
-    const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
-    for (unsigned i = 0; i < 3; ++i) {
-        nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 3, indices, 3, NT_MATH_MAT4_IDENTITY, UINT32_MAX, custom, sizeof(custom));
-    }
-
-    nt_sprite_renderer_align_next_vertex_to_4();
-    nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 4, indices, 6, NT_MATH_MAT4_IDENTITY, UINT32_MAX, custom, sizeof(custom));
-    TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_draw_call_count());
-    float actual[4];
-    nt_sprite_renderer_test_last_emit_attrs(0, actual, 16);
-    TEST_ASSERT_EQUAL_MEMORY(custom, actual, sizeof(actual));
-
-    nt_sprite_renderer_align_next_vertex_to_4();
-    nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 4, indices, 6, NT_MATH_MAT4_IDENTITY, UINT32_MAX, custom, sizeof(custom));
-    TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
-    nt_sprite_renderer_set_material(create_test_material());
-    nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 3, indices, 3, NT_MATH_MAT4_IDENTITY, UINT32_MAX, NULL, 0);
-    nt_sprite_renderer_emit_geometry(s_atlas_res, 0, positions, 4, indices, 6, NT_MATH_MAT4_IDENTITY, UINT32_MAX, NULL, 0);
-    TEST_ASSERT_EQUAL_UINT32(7, nt_sprite_renderer_test_vertex_count());
-}
-
-void test_sprite_renderer_custom_quad_aligns_after_trimmed_atlas_page_change(void) {
-    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
-    uint8_t atlas_blob[1024];
-    const uint32_t atlas_size = build_test_atlas_blob(atlas_blob, sizeof(atlas_blob), 0);
-    NtAtlasHeader *header = (NtAtlasHeader *)atlas_blob;
-    NtAtlasRegion *regions = (NtAtlasRegion *)(atlas_blob + sizeof(NtAtlasHeader) + ((size_t)header->page_count * sizeof(uint64_t)));
-    regions[2].vertex_count = 3;
-    regions[2].index_count = 3;
-    regions[2].trim_offset_x = 5;
-    regions[2].trim_offset_y = 7;
-    uint32_t pack_size;
-    uint8_t *pack = build_pack_blob_for_atlas_ppu(0xAEULL, atlas_blob, atlas_size, 0, &pack_size);
-    s_pack_blobs[s_pack_blob_count++] = pack;
-    const nt_hash32_t pack_id = nt_hash32_str("trimmed_triangle");
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack_id, pack, pack_size));
-    s_atlas_res = nt_resource_request((nt_hash64_t){.value = 0xAEULL}, NT_ASSET_ATLAS);
-    nt_resource_step();
-    nt_resource_step();
-    const nt_material_create_desc_t material = {
-        .vertex_layout = {.stride = 36,
-                          .attr_count = 4,
-                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
-                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16},
-                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20}}},
-        .program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1),
-        .textures = {{.name = "u_texture"}},
-        .texture_count = 1,
-        .attr_map = {{.stream_name = "custom", .location = 4}},
-        .attr_map_count = 1,
-    };
-    nt_sprite_renderer_set_material(nt_material_create(&material));
-    nt_sprite_renderer_emit_region(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_RPOLY_HASH), NT_MATH_MAT4_IDENTITY, 0, 0, UINT32_MAX, 0, NULL, 0);
-    TEST_ASSERT_EQUAL_UINT32(3, nt_sprite_renderer_test_vertex_count());
-    const float positions[4][2] = {{0, 0}, {10, 0}, {10, 10}, {0, 10}};
-    const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_align_next_vertex_to_4();
-    nt_sprite_renderer_emit_geometry(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_R1_HASH), positions, 4, indices, 6, NT_MATH_MAT4_IDENTITY, UINT32_MAX, NULL, 0);
-    TEST_ASSERT_EQUAL_UINT32(8, nt_sprite_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_cmd_count());
-    nt_sprite_renderer_flush();
-    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
-}
-
 /* ---- Test: FLIP_X / FLIP_Y mirror around the region pivot ---- */
 
 static void assert_pos_close(float ex, float ey, const float pos[3], const char *msg) {
@@ -2456,9 +2379,6 @@ void test_sprite_full_layout_cache_distinguishes_physical_fields(void) {
         TEST_ASSERT_EQUAL_UINT32(variant + 1U, nt_sprite_renderer_test_vertex_input_cache_count());
     }
     desc.vertex_layout = layout;
-    const nt_vertex_attr_t swap = desc.vertex_layout.attrs[0];
-    desc.vertex_layout.attrs[0] = desc.vertex_layout.attrs[3];
-    desc.vertex_layout.attrs[3] = swap;
     desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "unrelated", .location = 9};
     desc.attr_map_count = 1;
     nt_sprite_renderer_set_material(nt_material_create(&desc));
@@ -2592,8 +2512,6 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_zero_tail_survives_page_overflow_and_rebinding);
     RUN_TEST(test_sprite_renderer_skipped_emits_consume_custom_override);
     RUN_TEST(test_sprite_renderer_draw_list_zero_tail_splits_different_strides);
-    RUN_TEST(test_sprite_renderer_custom_quads_align_after_triangles_and_overflow);
-    RUN_TEST(test_sprite_renderer_custom_quad_aligns_after_trimmed_atlas_page_change);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_intrinsic_scale_emit_positions_and_uvs);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);

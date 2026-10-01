@@ -592,34 +592,23 @@ void test_set_program_on_a_destroyed_material_asserts(void) {
     TEST_PASS();
 }
 
-void test_vertex_layout_is_copied_canonicalized_and_keyed(void) {
+void test_vertex_layout_is_copied_and_keyed(void) {
     nt_material_create_desc_t desc = make_test_desc();
     desc.vertex_layout = (nt_vertex_layout_t){
         .stride = 148,
         .attr_count = 2,
-        .attrs = {{.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 144}, {.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0}},
-    };
-    const nt_material_info_t *info = nt_material_get_info(nt_material_create(&desc));
-    TEST_ASSERT_EQUAL_UINT16(148, info->vertex_layout.stride);
-    TEST_ASSERT_EQUAL_UINT8(0, info->vertex_layout.attrs[0].location);
-    TEST_ASSERT_EQUAL_UINT8(9, info->vertex_layout.attrs[1].location);
-    desc.vertex_layout.attrs[1].count = 4;
-    TEST_ASSERT_EQUAL_UINT8(2, info->vertex_layout.attrs[0].count);
-
-    const nt_vertex_layout_t sorted = {
-        .stride = 148,
-        .attr_count = 2,
         .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0}, {.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 144}},
     };
-    TEST_ASSERT_TRUE(nt_material_vertex_layout_equals(info, &sorted));
-    nt_material_create_desc_t same = make_test_desc();
-    same.vertex_layout = sorted;
-    const nt_material_info_t *same_info = nt_material_get_info(nt_material_create(&same));
-    TEST_ASSERT_TRUE(same_info->vertex_layout_key == info->vertex_layout_key);
+    const nt_material_info_t *info = nt_material_get_info(nt_material_create(&desc));
+    desc.vertex_layout.attrs[1].count = 3;
+    TEST_ASSERT_EQUAL_UINT16(148, info->vertex_layout.stride);
+    TEST_ASSERT_EQUAL_UINT8(4, info->vertex_layout.attrs[1].count);
+    desc.vertex_layout.attrs[1].count = 4;
+    TEST_ASSERT_TRUE(nt_material_get_info(nt_material_create(&desc))->vertex_layout_key == info->vertex_layout_key);
 
-    /* Each single-field change must change both equality and the whole-layout key. */
+    /* Each single-field change must change the whole-layout key. */
     for (uint32_t field = 0; field < 6U; ++field) {
-        nt_material_create_desc_t changed = same;
+        nt_material_create_desc_t changed = desc;
         nt_vertex_attr_t *attr = &changed.vertex_layout.attrs[1];
         switch (field) {
         case 0:
@@ -641,96 +630,13 @@ void test_vertex_layout_is_copied_canonicalized_and_keyed(void) {
             changed.vertex_layout.stride = 152;
             break;
         }
-        const nt_material_info_t *changed_info = nt_material_get_info(nt_material_create(&changed));
-        TEST_ASSERT_FALSE(nt_material_vertex_layout_equals(changed_info, &sorted));
-        TEST_ASSERT_TRUE(changed_info->vertex_layout_key != info->vertex_layout_key);
+        TEST_ASSERT_TRUE(nt_material_get_info(nt_material_create(&changed))->vertex_layout_key != info->vertex_layout_key);
     }
 }
 
-void test_source_uv_offset_is_copied_and_bounded(void) {
-    nt_material_create_desc_t desc = make_test_desc();
-    desc.vertex_layout = (nt_vertex_layout_t){.stride = 28, .attr_count = 1, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}};
-    desc.source_uv_offset = 20;
-    TEST_ASSERT_EQUAL_UINT8(20, nt_material_get_info(nt_material_create(&desc))->source_uv_offset);
-    desc.source_uv_offset = 24;
+void test_vertex_layout_rejects_too_many_attributes(void) {
+    nt_material_create_desc_t desc = {.vertex_layout = {.stride = 20, .attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1}};
     NT_TEST_EXPECT_ASSERT(nt_material_create(&desc));
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_vertex_layout_rejects_invalid_physical_descriptors(void) {
-    const nt_vertex_layout_t valid = {.stride = 20, .attr_count = 1, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}};
-    for (uint32_t variant = 0; variant < 12; ++variant) {
-        nt_material_create_desc_t desc = {.vertex_layout = valid};
-        switch (variant) {
-        case 0:
-            desc.vertex_layout.attr_count = 17;
-            break;
-        case 1:
-            desc.vertex_layout.stride = 256;
-            break;
-        case 2:
-            desc.vertex_layout.stride = 0;
-            break;
-        case 3:
-            desc.vertex_layout.attr_count = 0;
-            break;
-        case 4:
-            desc.vertex_layout.attrs[0].location = 16;
-            break;
-        case 5:
-            desc.vertex_layout.attrs[0].count = 0;
-            break;
-        case 6:
-            desc.vertex_layout.attrs[0].count = 5;
-            break;
-        case 7:
-            desc.vertex_layout.attrs[0].type = (nt_vertex_type_t)99;
-            break;
-        case 8:
-            desc.vertex_layout.attrs[0].normalized = true;
-            break;
-        case 9:
-            desc.vertex_layout.attrs[0].offset = 2;
-            break;
-        case 10:
-            desc.vertex_layout.attrs[0].offset = 12;
-            break;
-        default:
-            desc.vertex_layout.attrs[1] = desc.vertex_layout.attrs[0];
-            desc.vertex_layout.attr_count = 2;
-            break;
-        }
-        NT_TEST_EXPECT_ASSERT(nt_material_create(&desc));
-    }
-}
-
-void test_full_layout_accepts_aliases_and_independent_semantic_map(void) {
-    const nt_material_create_desc_t desc = {
-        .vertex_layout = {.stride = 255,
-                          .attr_count = 2,
-                          .attrs = {{.location = 5, .type = NT_VERTEX_UINT8, .count = 4, .offset = 251}, {.location = 7, .type = NT_VERTEX_UINT8, .count = 2, .offset = 252}}},
-        .attr_map = {{.stream_name = "mesh_position", .location = 0}},
-        .attr_map_count = 1,
-    };
-    const nt_material_info_t *info = nt_material_get_info(nt_material_create(&desc));
-    TEST_ASSERT_EQUAL_UINT8(2, info->vertex_layout.attr_count);
-    TEST_ASSERT_EQUAL_UINT16(255, info->vertex_layout.stride);
-    TEST_ASSERT_EQUAL_UINT8(1, info->attr_map_count);
-}
-
-void test_physical_sixteen_fields_do_not_expand_semantic_map_eight(void) {
-    nt_material_create_desc_t desc = {.vertex_layout = {.stride = 16, .attr_count = 16}, .attr_map_count = 8};
-    const char *names[] = {"a", "b", "c", "d", "e", "f", "g", "h"};
-    for (uint8_t i = 0; i < 16U; ++i) {
-        desc.vertex_layout.attrs[i] = (nt_vertex_attr_t){.location = i, .type = NT_VERTEX_UINT8, .count = 1, .offset = i};
-    }
-    for (uint8_t i = 0; i < 8U; ++i) {
-        desc.attr_map[i] = (nt_material_attr_desc_t){.stream_name = names[i], .location = (uint8_t)(15U - i)};
-    }
-    const nt_material_info_t *info = nt_material_get_info(nt_material_create(&desc));
-    TEST_ASSERT_EQUAL_UINT8(16, info->vertex_layout.attr_count);
-    TEST_ASSERT_EQUAL_UINT8(8, info->attr_map_count);
-    TEST_ASSERT_EQUAL_UINT8(15, info->attr_map_locations[0]);
 }
 
 /* ---- main ---- */
@@ -740,11 +646,8 @@ int main(void) {
 
     /* Init / shutdown */
     RUN_TEST(test_init_shutdown);
-    RUN_TEST(test_physical_sixteen_fields_do_not_expand_semantic_map_eight);
-    RUN_TEST(test_vertex_layout_rejects_invalid_physical_descriptors);
-    RUN_TEST(test_full_layout_accepts_aliases_and_independent_semantic_map);
-    RUN_TEST(test_vertex_layout_is_copied_canonicalized_and_keyed);
-    RUN_TEST(test_source_uv_offset_is_copied_and_bounded);
+    RUN_TEST(test_vertex_layout_rejects_too_many_attributes);
+    RUN_TEST(test_vertex_layout_is_copied_and_keyed);
 
     /* Create / query */
     RUN_TEST(test_create_basic);

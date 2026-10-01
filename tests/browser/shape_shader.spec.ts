@@ -12,22 +12,18 @@ function shaderSource(name: string): string {
   return '#version 300 es\n' + expand(name);
 }
 
-test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) => {
+test('shape shaders render synthetic and CPU-emitted instances', async ({ page }) => {
   type GpuFixture = {
     name: string;
     schemaVersion: number;
-    emittedQuads: number;
     viewProj: number[];
     viewport: number[];
     fbSize: number[];
     fbOffset: number[];
     expectedPixelCoverage: 'empty' | 'nonempty';
-    depthTest?: boolean;
+    depthTest: boolean;
     pixelChecks?: Array<{ x: number; y: number; rgba: number[]; tolerance: number }>;
-    lifecycle?: { sequence: string; step: string; expectedTailBytes: number[] };
-    layout: { stride: number; attributes: Array<{ location: number; type: 'FLOAT' | 'USHORT' | 'UBYTE'; count: number; normalized: boolean; offset: number }> };
-    vertices: Array<{ bytes: number[] }>;
-    indices: number[];
+    instances: number[][];
   };
   const executable = join(__dirname, '..', '..', 'build', 'tests', 'native-debug', `test_ui_shape_walk${process.platform === 'win32' ? '.exe' : ''}`);
   const output = execFileSync(executable, ['--gpu-fixtures'], { encoding: 'utf8' });
@@ -35,24 +31,14 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
   const fixtures = output.split(/\r?\n/).filter(line => line.startsWith(marker)).map(line => JSON.parse(line.slice(marker.length)) as GpuFixture);
   expect(fixtures.map(fixture => fixture.name)).toEqual(expect.arrayContaining([
     'typed-horizontal-paint', 'typed-vertical-transparent-paint', 'radial-perspective',
-    'screen-direct-viewport-offset', 'screen-scaled-viewport-offset', 'viewport-offset',
-    'world-xy-singular', 'near-far-crossing', 'camera-crossing', 'beyond-far', 'behind-camera',
-    'shadow-only-perspective', 'defaults', 'override', 'defaults-after-skip',
-    'screen-direct-y-offset', 'screen-scaled-y-offset', 'screen-direct-y-shadow', 'screen-scaled-y-shadow',
-    'depth-shadow-hierarchy', 'depth-shadow-zero-bias', 'depth-shadow-translucent', 'depth-shadow-strong-perspective',
+    'viewport-offset', 'world-xy-singular', 'near-far-crossing', 'camera-crossing', 'beyond-far', 'behind-camera',
+    'shadow-only-perspective', 'screen-direct-y-offset', 'screen-scaled-y-offset', 'screen-direct-y-shadow', 'screen-scaled-y-shadow',
+    'depth-shadow-hierarchy', 'depth-shadow-translucent', 'depth-shadow-strong-perspective',
     'depth-shadow-near-visible', 'depth-shadow-near-clipped', 'depth-shadow-far-visible', 'depth-shadow-far-clipped',
   ]));
   for (const fixture of fixtures) {
-    expect(fixture.schemaVersion).toBe(2);
-    expect(fixture.vertices.length % 4, fixture.name).toBe(0);
-    expect(fixture.vertices.length > 0, fixture.name).toBe(fixture.emittedQuads > 0);
-    for (const vertex of fixture.vertices) {
-      expect(vertex.bytes, fixture.name).toHaveLength(fixture.layout.stride);
-      if (fixture.lifecycle) expect(vertex.bytes.slice(20), `${fixture.name} copied tail`).toEqual(fixture.lifecycle.expectedTailBytes);
-    }
-    if (fixture.vertices.length > 0) {
-      for (const index of fixture.indices) expect(index, `${fixture.name} index`).toBeLessThan(fixture.vertices.length);
-    }
+    expect(fixture.schemaVersion).toBe(3);
+    for (const instance of fixture.instances) expect(instance, fixture.name).toHaveLength(112);
     if (fixture.depthTest) expect(fixture.pixelChecks?.length, `${fixture.name} depth oracle`).toBeGreaterThan(0);
   }
   await page.goto('about:blank');
@@ -83,15 +69,6 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
     }
 
     gl.disable(gl.DITHER);
-    const texture = gl.createTexture()!;
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.useProgram(programs.uber);
-    gl.uniform1i(gl.getUniformLocation(programs.uber, 'u_texture'), 0);
-
     const globals = new Float32Array(64);
     globals[0] = globals[5] = globals[10] = globals[15] = 1;
     const uniformBuffer = gl.createBuffer()!;
@@ -100,25 +77,22 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
     gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, uniformBuffer);
     for (const program of Object.values(programs)) gl.uniformBlockBinding(program, gl.getUniformBlockIndex(program, 'Globals'), 0);
 
+    // nt_ui_shape_instance_t: one record per instance, corners from gl_VertexID.
+    const stride = 112;
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
-    const indices = gl.createBuffer()!;
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indices);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 1, 2, 0, 2, 3]), gl.STATIC_DRAW);
-    const vertices = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertices);
-    const stride = 84;
+    const instances = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, instances);
     for (const [location, count, type, normalized, offset] of [
-      [0, 3, gl.FLOAT, 0, 0], [3, 2, gl.UNSIGNED_SHORT, 1, 12], [2, 4, gl.UNSIGNED_BYTE, 1, 16],
-      [4, 4, gl.FLOAT, 0, 20], [5, 4, gl.FLOAT, 0, 36], [6, 4, gl.FLOAT, 0, 52],
-      [7, 1, gl.FLOAT, 0, 68], [8, 4, gl.UNSIGNED_BYTE, 1, 72], [9, 4, gl.UNSIGNED_BYTE, 1, 76],
-      [10, 4, gl.UNSIGNED_BYTE, 0, 80],
+      [0, 4, gl.FLOAT, 0, 0], [1, 4, gl.FLOAT, 0, 16], [2, 4, gl.FLOAT, 0, 32], [3, 4, gl.FLOAT, 0, 48], [4, 4, gl.FLOAT, 0, 64], [5, 4, gl.FLOAT, 0, 80],
+      [6, 4, gl.UNSIGNED_BYTE, 1, 96], [7, 4, gl.UNSIGNED_BYTE, 1, 100], [8, 4, gl.UNSIGNED_BYTE, 1, 104], [9, 4, gl.UNSIGNED_BYTE, 0, 108],
     ]) {
       gl.enableVertexAttribArray(location);
       gl.vertexAttribPointer(location, count, type, normalized !== 0, stride, offset);
+      gl.vertexAttribDivisor(location, 1);
     }
 
-    type ShapeCase = { name: string; mode: number; projective: boolean; padding: number; geometry: number[]; widths: number[]; color: number[]; size?: [number, number]; center?: [number, number]; warp?: number; affine?: [number, number, number, number]; };
+    type ShapeCase = { name: string; mode: number; projective: boolean; padding: number; geometry: number[]; widths: number[]; color: number[]; size?: [number, number]; center?: [number, number]; warp?: number; affine?: [number, number, number, number]; user?: number[]; program?: string; };
     const cases: ShapeCase[] = [
       { name: 'box', mode: 1, projective: false, padding: 0, geometry: [12, 3, 16, 5], widths: [8, 2, 4, 10], color: [230, 30, 10, 255] },
       { name: 'box-projective', mode: 1, projective: true, padding: 0, geometry: [12, 3, 16, 5], widths: [8, 2, 4, 10], color: [230, 30, 10, 255] },
@@ -133,7 +107,8 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
       { name: 'radial-270-center', mode: 2, projective: false, padding: 0, geometry: [0, 3 * Math.PI / 2, 0, 0], widths: [0, 0, 0, 0], color: [255, 255, 255, 255], center: [48.5, 48.5] },
       { name: 'radial-270-center-projective', mode: 2, projective: true, padding: 0, geometry: [0, 3 * Math.PI / 2, 0, 0], widths: [0, 0, 0, 0], color: [255, 255, 255, 255], center: [48.5, 48.5] },
       { name: 'shadow', mode: 3, projective: false, padding: 8, geometry: [8, 3, 12, 5], widths: [2, 5, 8, 0], color: [70, 100, 220, 255] },
-      { name: 'shadow-projective', mode: 3, projective: true, padding: 0, geometry: [8, 3, 12, 5], widths: [2, 5, 8, 0], color: [70, 100, 220, 255] },
+      { name: 'shadow-projective', mode: 3, projective: true, padding: 8, geometry: [8, 3, 12, 5], widths: [2, 5, 8, 0], color: [70, 100, 220, 255] },
+      { name: 'checker', mode: 1, projective: false, padding: 0, geometry: [0, 0, 0, 0], widths: [0, 0, 0, 0], color: [40, 40, 40, 255], user: [8, 1, 0, 0], program: 'checker' },
     ];
     const coords: Record<string, Array<[number, number]>> = {
       box: [[48, 48], [18, 48], [78, 48], [48, 79], [48, 19], [18, 78], [78, 78], [78, 18], [18, 18]],
@@ -150,6 +125,8 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
       'radial-270-center-projective': [[48, 48]],
       shadow: [[48, 48], [13, 48], [8, 48]],
       'shadow-projective': [[48, 48]],
+      // Neighbouring checker cells inside the 64x64 box (top-left at pixel 16,80; cell side 8).
+      checker: [[20, 76], [28, 76]],
     };
     const tau = 2 * Math.PI;
     const variants = [
@@ -219,6 +196,27 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
       return sectorArea(32) - sectorArea(32 * shape.geometry[2]);
     }
 
+    // Local (x right, y down) maps to GL pixels (y up) around the case center, then to NDC.
+    function instanceBytes(shape: ShapeCase): Uint8Array {
+      const data = new DataView(new ArrayBuffer(stride));
+      const [width, height] = shape.size ?? [64, 64];
+      const [centerX, centerY] = shape.center ?? [48, 48];
+      const [a, b, c, d] = shape.affine ?? [1, 0, 0, 1];
+      const [ox, oy] = sourcePoint(shape, centerX - width / 2, centerY + height / 2);
+      const fields = [ox / 48 - 1, oy / 48 - 1, 0, width, a / 48, b / 48, 0, height, -c / 48, -d / 48, 0, shape.mode === 3 ? shape.widths[2] : shape.padding];
+      fields.forEach((value, i) => data.setFloat32(i * 4, value, true));
+      for (let i = 0; i < 4; i++) {
+        data.setFloat32(48 + i * 4, shape.geometry[i], true);
+        data.setFloat32(64 + i * 4, shape.widths[i], true);
+        data.setFloat32(80 + i * 4, shape.user?.[i] ?? 0, true);
+        data.setUint8(96 + i, shape.color[i]);
+        data.setUint8(100 + i, shape.color[i]);
+      }
+      [10, 210, 30, 255].forEach((value, i) => data.setUint8(104 + i, value));
+      [shape.mode === 3 ? 160 : 255, shape.mode, 0, 0].forEach((value, i) => data.setUint8(108 + i, value));
+      return new Uint8Array(data.buffer);
+    }
+
     function framebuffer(): Uint8Array {
       const pixels = new Uint8Array(canvas.width * canvas.height * 4);
       gl!.readPixels(0, 0, canvas.width, canvas.height, gl!.RGBA, gl!.UNSIGNED_BYTE, pixels);
@@ -229,62 +227,26 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
       return Array.from(pixels.subarray(4 * (y * canvas.width + x), 4 * (y * canvas.width + x + 1)));
     }
 
-    function difference(first: Uint8Array, second: Uint8Array): number {
-      if (first.length !== second.length) throw new Error('framebuffer dimensions differ');
-      let differingBytes = 0;
-      for (let i = 0; i < first.length; i++) if (first[i] !== second[i]) differingBytes++;
-      return differingBytes;
-    }
-
     const samples: Record<string, number[][]> = {};
-    const parity: Record<string, number> = {};
     const buffers = new Map<string, Uint8Array>();
     const radial: Record<string, { alphaArea: number; expectedArea: number; oppositeMax: number; missingArea: number; oppositeDeficit: number }> = {};
-    // Compare the entire target, including AA fringes and discarded fragments.
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     for (const shape of cases) {
-      for (const fragment of ['shape', 'uber']) {
-        gl.useProgram(programs[fragment]);
-        globals[3] = shape.projective ? shape.warp ?? 0.08 : 0;
-        gl.bindBuffer(gl.UNIFORM_BUFFER, uniformBuffer);
-        gl.bufferSubData(gl.UNIFORM_BUFFER, 0, globals);
-        const data = new DataView(new ArrayBuffer(4 * stride));
-        for (let i = 0; i < 4; i++) {
-          const [width, height] = shape.size ?? [64, 64];
-          const [centerX, centerY] = shape.center ?? [48, 48];
-          const padding = shape.projective ? (shape.mode === 3 ? shape.widths[2] : 0) : shape.padding;
-          const [x, y] = sourcePoint(shape,
-            centerX + (i === 1 || i === 2 ? width / 2 + padding : -width / 2 - padding),
-            centerY + (i >= 2 ? -height / 2 - padding : height / 2 + padding));
-          const base = i * stride;
-          data.setFloat32(base, x / 48 - 1, true);
-          data.setFloat32(base + 4, y / 48 - 1, true);
-          data.setFloat32(base + 8, 0, true);
-          for (let c = 0; c < 4; c++) data.setUint8(base + 16 + c, shape.color[c]);
-          data.setFloat32(base + 20, width, true);
-          data.setFloat32(base + 24, height, true);
-          data.setFloat32(base + 28, shape.projective ? 1.1 : shape.padding, true);
-          data.setFloat32(base + 32, shape.projective ? centerX / 48 - 1 : 0, true);
-          for (let c = 0; c < 4; c++) data.setFloat32(base + 36 + c * 4, shape.geometry[c], true);
-          for (let c = 0; c < 4; c++) data.setFloat32(base + 52 + c * 4, shape.widths[c], true);
-          data.setFloat32(base + 68, shape.projective ? centerY / 48 - 1 : 0, true);
-          for (let c = 0; c < 4; c++) data.setUint8(base + 72 + c, shape.color[c]);
-          data.setUint8(base + 76, 10); data.setUint8(base + 77, 210); data.setUint8(base + 78, 30); data.setUint8(base + 79, 255);
-          data.setUint8(base + 80, shape.mode === 3 ? 160 : 255);
-          data.setUint8(base + 81, shape.mode);
-          data.setUint8(base + 82, 0);
-          data.setUint8(base + 83, shape.projective ? 2 : 0);
-        }
-        gl.bufferData(gl.ARRAY_BUFFER, data.buffer, gl.STREAM_DRAW);
-        gl.viewport(0, 0, 96, 96);
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
-        const pixels = framebuffer();
-        if (fragment === 'shape') {
-          buffers.set(shape.name, pixels);
-          samples[shape.name] = coords[shape.name].map(([x, y]) => pixelAt(pixels, x, y));
-        } else parity[shape.name] = difference(buffers.get(shape.name)!, pixels);
-      }
+      gl.useProgram(programs[shape.program ?? 'shape']);
+      globals.fill(0);
+      globals[0] = globals[5] = globals[10] = globals[15] = 1;
+      globals[3] = shape.projective ? shape.warp ?? 0.08 : 0;
+      gl.bindBuffer(gl.UNIFORM_BUFFER, uniformBuffer);
+      gl.bufferSubData(gl.UNIFORM_BUFFER, 0, globals);
+      gl.bufferData(gl.ARRAY_BUFFER, instanceBytes(shape), gl.STREAM_DRAW);
+      gl.viewport(0, 0, 96, 96);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, 1);
+      const pixels = framebuffer();
+      buffers.set(shape.name, pixels);
+      samples[shape.name] = coords[shape.name].map(([x, y]) => pixelAt(pixels, x, y));
     }
     for (const shape of radialCases) {
       const pixels = buffers.get(shape.name)!;
@@ -314,19 +276,14 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
       'viewport-offset': [[421, 287], [201, 287]],
       'world-xy-singular': [[400, 300], [100, 300]],
       'shadow-only-perspective': [[267, 300], [650, 300]],
-      'screen-direct-viewport-offset': [[125, 575], [75, 575]],
-      'screen-scaled-viewport-offset': [[50, 1150], [150, 1150]],
       'screen-direct-y-offset': [[151, 64], [151, 84]],
       'screen-direct-y-shadow': [[151, 64], [151, 84]],
       'screen-scaled-y-offset': [[101, 37], [101, 70]],
       'screen-scaled-y-shadow': [[101, 37], [101, 70]],
-      defaults: [[400, 300], [100, 300]], override: [[400, 300], [100, 300]],
-      'defaults-after-skip': [[400, 300], [100, 300]],
     };
     const fixtureCoverage: Record<string, { nonzeroPixels: number; outsideViewport: number }> = {};
     const checkedPixels: Array<{ name: string; actual: number[]; expected: number[]; tolerance: number }> = [];
-    let lifecycleBaseline: Uint8Array | undefined;
-    const lifecycleDifferences: Record<string, number> = {};
+    gl.useProgram(programs.shape);
     for (const fixture of fixtures) {
       const scaled = fixture.fbSize[0] > 0;
       const viewport = scaled
@@ -339,59 +296,38 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
       globals.set(fixture.viewProj);
       gl.bindBuffer(gl.UNIFORM_BUFFER, uniformBuffer);
       gl.bufferSubData(gl.UNIFORM_BUFFER, 0, globals);
-      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(fixture.indices), gl.STREAM_DRAW);
-      gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(fixture.vertices.flatMap(vertex => vertex.bytes)), gl.STREAM_DRAW);
-      for (const attr of fixture.layout.attributes) {
-        const type = { FLOAT: gl.FLOAT, USHORT: gl.UNSIGNED_SHORT, UBYTE: gl.UNSIGNED_BYTE }[attr.type];
-        gl.vertexAttribPointer(attr.location, attr.count, type, attr.normalized, fixture.layout.stride, attr.offset);
-      }
+      gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(fixture.instances.flat()), gl.STREAM_DRAW);
       gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(true);
       gl.depthFunc(gl.LESS);
       if (fixture.depthTest) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST);
-      const containsSprite = fixture.vertices.some(vertex => vertex.bytes[81] === 0);
-      let first: Uint8Array | undefined;
-      for (const fragment of containsSprite ? ['uber'] : ['shape', 'uber']) {
-        gl.useProgram(programs[fragment]);
-        gl.clearDepth(1);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        if (fixture.vertices.length > 0) gl.drawElements(gl.TRIANGLES, fixture.indices.length, gl.UNSIGNED_SHORT, 0);
-        const pixels = framebuffer();
-        if (first) parity[fixture.name] = difference(first, pixels);
-        else {
-          first = pixels;
-          samples[fixture.name] = (fixtureCoords[fixture.name] ?? []).map(([x, y]) => pixelAt(pixels, x, y));
-          let nonzeroPixels = 0, outsideViewport = 0;
-          for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-              if (pixels[4 * (y * canvas.width + x) + 3] === 0) continue;
-              nonzeroPixels++;
-              if (x < viewport[0] || y < viewport[1] || x >= viewport[0] + viewport[2] || y >= viewport[1] + viewport[3]) outsideViewport++;
-            }
-          }
-          fixtureCoverage[fixture.name] = { nonzeroPixels, outsideViewport };
-          for (const check of fixture.pixelChecks ?? []) checkedPixels.push({ name: fixture.name, actual: pixelAt(pixels, check.x, check.y), expected: check.rgba, tolerance: check.tolerance });
-          if (fixture.lifecycle) {
-            if (!lifecycleBaseline) lifecycleBaseline = pixels;
-            lifecycleDifferences[fixture.lifecycle.step] = difference(lifecycleBaseline, pixels);
-          }
+      gl.clearDepth(1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      if (fixture.instances.length > 0) gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, fixture.instances.length);
+      const pixels = framebuffer();
+      samples[fixture.name] = (fixtureCoords[fixture.name] ?? []).map(([x, y]) => pixelAt(pixels, x, y));
+      let nonzeroPixels = 0, outsideViewport = 0;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          if (pixels[4 * (y * canvas.width + x) + 3] === 0) continue;
+          nonzeroPixels++;
+          if (x < viewport[0] || y < viewport[1] || x >= viewport[0] + viewport[2] || y >= viewport[1] + viewport[3]) outsideViewport++;
         }
       }
+      fixtureCoverage[fixture.name] = { nonzeroPixels, outsideViewport };
+      for (const check of fixture.pixelChecks ?? []) checkedPixels.push({ name: fixture.name, actual: pixelAt(pixels, check.x, check.y), expected: check.rgba, tolerance: check.tolerance });
     }
-    return { samples, parity, radial, fixtureCoverage, checkedPixels, lifecycleDifferences, error: gl.getError() };
+    return { samples, radial, fixtureCoverage, checkedPixels, error: gl.getError() };
   }, {
-    vertex: shaderSource('sprite_ui_shape.vert'),
+    vertex: shaderSource('ui_shape.vert'),
     fragments: {
       shape: shaderSource('ui_shape.frag'),
-      uber: shaderSource('ui_shape_uber.frag'),
+      checker: shaderSource('../../examples/ui_showcase/raw/shaders/ui_shape_checker.frag'),
     },
     fixtures,
   });
 
   expect(result.error).toBe(0);
-  for (const [name, difference] of Object.entries(result.parity)) expect(difference, `${name} full framebuffer parity`).toBe(0);
   for (const fixture of fixtures) {
     const coverage = result.fixtureCoverage[fixture.name];
     expect(coverage.outsideViewport, `${fixture.name} viewport`).toBe(0);
@@ -402,11 +338,6 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
     const label = `${check.name}: actual ${JSON.stringify(check.actual)}, expected ${JSON.stringify(check.expected)}`;
     expect(check.actual, label).toHaveLength(4);
     for (let channel = 0; channel < 4; channel++) expect(Math.abs(check.actual[channel] - check.expected[channel]), `${label} channel ${channel}`).toBeLessThanOrEqual(check.tolerance);
-  }
-  for (const [step, difference] of Object.entries(result.lifecycleDifferences)) expect(difference, `${step} mode 0 pixels`).toBe(0);
-  for (const name of ['defaults', 'override', 'defaults-after-skip']) {
-    expect(result.samples[name][0], `${name} white texture and premultiplied tint`).toEqual([34, 68, 102, 128]);
-    expect(result.samples[name][1][3], `${name} outside sprite`).toBe(0);
   }
   const [fill, left, right, top, bottom, topLeft, topRight, bottomRight, bottomLeft] = result.samples.box;
   expect(fill[0]).toBeGreaterThan(200);
@@ -434,6 +365,10 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
   expect(result.samples.shadow[1][3]).toBeGreaterThan(10);
   expect(result.samples.shadow[2][3]).toBeLessThan(10);
   expect(result.samples['shadow-projective'][0][3]).toBeGreaterThan(80);
+  // The game shader paints white cells over the engine BOX from the instance user field.
+  const [darkCell, whiteCell] = result.samples.checker;
+  expect(darkCell[3]).toBe(255);
+  expect(Math.abs(whiteCell[0] - darkCell[0]), 'checker cell from user field').toBeGreaterThan(150);
   expect(result.samples['typed-horizontal-paint'][0][3]).toBeGreaterThan(20);
   expect(result.samples['typed-horizontal-paint'][0][0]).toBeGreaterThan(result.samples['typed-horizontal-paint'][1][0]);
   expect(result.samples['typed-horizontal-paint'][1][1]).toBeGreaterThan(result.samples['typed-horizontal-paint'][0][1]);
@@ -442,8 +377,7 @@ test('shape shaders render synthetic and CPU-emitted quads', async ({ page }) =>
   const [opaqueTop, transparentBottom] = result.samples['typed-vertical-transparent-paint'];
   expect(opaqueTop[3]).toBeGreaterThan(transparentBottom[3] + 20);
   for (const pixel of [opaqueTop, transparentBottom]) expect(Math.abs(pixel[0] - pixel[3])).toBeLessThanOrEqual(1);
-  for (const name of ['viewport-offset', 'world-xy-singular', 'screen-direct-viewport-offset', 'screen-scaled-viewport-offset',
-    'screen-direct-y-offset', 'screen-scaled-y-offset', 'screen-direct-y-shadow', 'screen-scaled-y-shadow']) {
+  for (const name of ['viewport-offset', 'world-xy-singular', 'screen-direct-y-offset', 'screen-scaled-y-offset', 'screen-direct-y-shadow', 'screen-scaled-y-shadow']) {
     expect(result.samples[name][0][3], `${name} interior`).toBeGreaterThan(220);
     expect(result.samples[name][1][3], `${name} outside`).toBe(0);
   }

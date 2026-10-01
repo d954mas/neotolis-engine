@@ -18,8 +18,12 @@
 #include "ui/nt_ui_shape.h"
 #include "ui/nt_ui_state.h"
 
-struct nt_ui_shape_payload {
-    nt_ui_shape_style_t style;
+/* nt_ui_radial_image parameters; the walker adds the bbox aspect and the atlas-to-source map. */
+struct nt_ui_radial_reveal {
+    float angle_start;
+    float angle_end;
+    float inner_radius_norm;
+    float tint[4]; /* RGB 0..1 and TINT-mode strength */
 };
 
 /* Depth (not count) — independent of max_elements; deep nests are rare. */

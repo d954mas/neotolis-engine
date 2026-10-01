@@ -5,7 +5,7 @@ precision highp float;
 // one of four modes while the SWEPT sector stays full color. Region-local UV
 // has Y down: 0 right, +pi/2 down, clockwise+.
 //
-// Wedge local coord is source-image [-1,1] from the sprite renderer; raw atlas UV
+// Wedge local coord is source-image [-1,1], mapped from atlas UV per emit; raw atlas UV
 // only samples texture. Trim and packing orientation do not move the wedge.
 //
 // TINT is per-vertex (a_tint via v_tint): rgb=target color, w=mix strength. Many
@@ -20,7 +20,6 @@ in vec4 v_color;
 in vec4 v_radial;
 in vec4 v_tint;
 in vec2 v_local_uv;
-in float v_aspect;
 
 out vec4 frag_color;
 
@@ -30,7 +29,7 @@ void main() {
     float angle_start = v_radial.x;
     float angle_end = v_radial.y;
     float inner = v_radial.z;
-    float aspect = v_aspect; // walker-injected bbox w/h
+    float aspect = v_radial.w; // bbox width/height
 
     vec2 p = v_local_uv;
     float r = length(p);

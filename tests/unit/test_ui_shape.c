@@ -16,21 +16,7 @@ static nt_material_t s_shape_material;
 
 void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
-    const nt_material_create_desc_t desc = {
-        .vertex_layout = {.stride = sizeof(nt_ui_shape_vertex_t),
-                          .attr_count = 10,
-                          .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, position)},
-                                    {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, texcoord)},
-                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, color)},
-                                    {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.layout)},
-                                    {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.geometry)},
-                                    {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.widths)},
-                                    {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.center_y)},
-                                    {.location = 8, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.endpoint)},
-                                    {.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.border)},
-                                    {.location = 10, .type = NT_VERTEX_UINT8, .count = 4, .normalized = false, .offset = offsetof(nt_ui_shape_vertex_t, attrs.control)}}},
-        .program = nt_material_get_info(s_fx.sprite_material)->program,
-    };
+    const nt_material_create_desc_t desc = {.program = nt_material_get_info(s_fx.sprite_material)->program};
     s_shape_material = nt_material_create(&desc);
 }
 
@@ -61,12 +47,12 @@ static void test_shape_copies_style_and_keeps_children(void) {
         const Clay_RenderCommand *cmd = &s_fx.ctx->frozen_cmds.internalArray[i];
         if (cmd->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE) {
             const nt_ui_image_payload_t *payload = cmd->renderData.image.imageData;
-            TEST_ASSERT_EQUAL_UINT32(0x00112233U, payload->shape->style.paint.color0);
-            TEST_ASSERT_TRUE(payload->shape->style.box.top_left == 40.0F);
-            TEST_ASSERT_TRUE(payload->shape->style.paint.border_widths.left == 8.0F);
-            TEST_ASSERT_TRUE(payload->shape->style.paint.border_widths.top == 1.0F);
-            TEST_ASSERT_TRUE(payload->shape->style.paint.border_widths.right == 2.0F);
-            TEST_ASSERT_TRUE(payload->shape->style.paint.border_widths.bottom == 4.0F);
+            TEST_ASSERT_EQUAL_UINT32(0x00112233U, payload->shape->paint.color0);
+            TEST_ASSERT_TRUE(payload->shape->box.top_left == 40.0F);
+            TEST_ASSERT_TRUE(payload->shape->paint.border_widths.left == 8.0F);
+            TEST_ASSERT_TRUE(payload->shape->paint.border_widths.top == 1.0F);
+            TEST_ASSERT_TRUE(payload->shape->paint.border_widths.right == 2.0F);
+            TEST_ASSERT_TRUE(payload->shape->paint.border_widths.bottom == 4.0F);
             TEST_ASSERT_TRUE(cmd->boundingBox.width == 200.0F && cmd->boundingBox.height == 60.0F);
             ++images;
         }

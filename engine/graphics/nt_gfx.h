@@ -301,7 +301,7 @@ typedef enum {
 #define NT_GFX_MAX_VERTEX_ATTRS 16
 /* Instance layouts are capped tighter: the backend keeps a per-vertex-input
  * copy for per-draw re-pointing, and max_vertex_inputs slots exist. */
-#define NT_GFX_MAX_INSTANCE_ATTRS 8
+#define NT_GFX_MAX_INSTANCE_ATTRS 10
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
 
 typedef struct {

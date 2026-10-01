@@ -9,19 +9,6 @@
 
 const nt_ui_widget_def_t NT_UI_SHAPE_DEF = {.name = "nt_shape", .pill_color = 0xFF6B8DBCU};
 
-const nt_vertex_layout_t NT_UI_SHAPE_VERTEX_LAYOUT = {.stride = sizeof(nt_ui_shape_vertex_t),
-                                                      .attr_count = 10,
-                                                      .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = offsetof(nt_ui_shape_vertex_t, position)},
-                                                                {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, color)},
-                                                                {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, texcoord)},
-                                                                {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = offsetof(nt_ui_shape_vertex_t, attrs.layout)},
-                                                                {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = offsetof(nt_ui_shape_vertex_t, attrs.geometry)},
-                                                                {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = offsetof(nt_ui_shape_vertex_t, attrs.widths)},
-                                                                {.location = 7, .type = NT_VERTEX_FLOAT, .count = 1, .offset = offsetof(nt_ui_shape_vertex_t, attrs.center_y)},
-                                                                {.location = 8, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.endpoint)},
-                                                                {.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_ui_shape_vertex_t, attrs.border)},
-                                                                {.location = 10, .type = NT_VERTEX_UINT8, .count = 4, .offset = offsetof(nt_ui_shape_vertex_t, attrs.control)}}};
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_shape_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const nt_ui_shape_style_t *style, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx());
@@ -33,7 +20,6 @@ void nt_ui_shape_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
     NT_ASSERT(isfinite(style->paint.border_widths.right) && style->paint.border_widths.right >= 0.0F);
     NT_ASSERT(isfinite(style->paint.border_widths.bottom) && style->paint.border_widths.bottom >= 0.0F);
     NT_ASSERT(nt_material_valid(style->material) && nt_material_get_info(style->material)->program.id != 0U && "nt_ui_shape: material needs a program");
-    NT_ASSERT(nt_material_vertex_layout_equals(nt_material_get_info(style->material), &NT_UI_SHAPE_VERTEX_LAYOUT) && "nt_ui_shape: material needs NT_UI_SHAPE_VERTEX_LAYOUT");
     if (style->kind == NT_UI_SHAPE_BOX) {
         NT_ASSERT(isfinite(style->box.top_left) && style->box.top_left >= 0.0F);
         NT_ASSERT(isfinite(style->box.top_right) && style->box.top_right >= 0.0F);
@@ -52,10 +38,10 @@ void nt_ui_shape_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && decl->image.imageData == NULL && decl->backgroundColor.a == 0.0F && decl->userData == NULL);
     }
-    struct nt_ui_shape_payload *shape = NT_MEM_SCRATCH_ALLOC(struct nt_ui_shape_payload);
+    nt_ui_shape_style_t *shape = NT_MEM_SCRATCH_ALLOC(nt_ui_shape_style_t);
     nt_ui_image_payload_t *payload = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
     NT_ASSERT(shape != NULL && payload != NULL);
-    shape->style = *style;
+    *shape = *style;
     *payload = (nt_ui_image_payload_t){.atlas = ctx->atlas, .region_index = ctx->white_region, .slice9_scale = 1.0F, .flags = NT_UI_IMAGE_ANALYTIC_SHAPE, .material = style->material, .shape = shape};
     Clay_ElementDeclaration final = decl != NULL ? *decl : (Clay_ElementDeclaration){0};
     final.image = (Clay_ImageElementConfig){.imageData = payload, .nt_defer_culling = true};

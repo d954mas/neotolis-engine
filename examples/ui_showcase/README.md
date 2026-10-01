@@ -58,14 +58,9 @@ lighten and writes the index on click).
     (desaturate / dim / hide / tint) on a textured radial-image, and a **dense
     batched grid** that proves N radials sharing one material stay one draw call;
     see the **Radial controls** + **Radial visual-QA protocol** below.
-14. **Shapes** - analytic BOX/RADIAL shapes, asymmetric borders, gradients and
-    shadows with a dedicated shape material or a shared uber material; see the
-    **Shapes tab** below.
-15. **Base Material** - the same typed shape uber material for the whole UI:
-    plain images get the renderer's zero tail (mode 0), while SDF shapes provide
-    their own attributes. The checkbox switches to a plain image material plus a
-    separate radial shape material; the `draw calls` readout shows the difference.
-16. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
+14. **Shapes** - analytic BOX/RADIAL shapes, asymmetric borders, gradients,
+    shadows and a game-shader checker card; see the **Shapes tab** below.
+15. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
     block (`nt_ui_rich_text` + `nt_ui_rich_text_markup`), authored **two ways**:
     the code-first push/pop builder AND the runtime `<markup>` parser. Demos
     **real** bold / italic / bold-italic faces (DejaVu R/B/I/BI baked into the
@@ -75,21 +70,21 @@ lighten and writes the index on click).
     off the game clock), and an **interactive link** that brightens + grows on
     hover and flips to a green "Accepted" latch on click; see the **Rich Text
     controls** + **Rich Text visual-QA protocol** below.
-17. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
+16. **Dropdown** - the **immediate** combo (`nt_ui_combo_begin`/`selectable`/`end`):
     a short list (icon gutter), a long scrolling list (more than `max_visible_rows`)
     that flips up near the window bottom, and a custom swatch-trigger combo
     (`nt_ui_combo_preview_begin`/`end`).
-18. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
+17. **Tooltip** - timed hover-reveal tooltips on popup-core (no catcher, so they
     never block clicks on the targets underneath).
-19. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
+18. **Menu** - the **immediate** context menu (`nt_ui_menu_begin`/`item`/`item_ex`/
     `submenu_begin`/`separator`/`item_begin`/`end`) on a right-click / long-press: a
     rich row (icon + `Ctrl+N` shortcut), a checkmark-toggle row, a disabled item, a
     nested **submenu**, and a custom `activatable=false` row whose inner button owns
     the click. Mouse-aim hover-intent, per-level edge-flip, nested dismiss, keyboard nav.
-20. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
+19. **Tabs** - the reusable `nt_ui_tabbar` begin/end **core** dogfooded: icon+text
     tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
     list, which uses the one-call `labels[]` wrapper with a LEFT accent).
-21. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+20. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
 
 ## Shapes tab
 
@@ -101,13 +96,12 @@ hover, press, drag outside to cancel, scale, press offset and disabled opacity.
 The gallery includes sharp/rounded/asymmetric corners, pill, circle, thin/thick
 borders, four different side widths, zero-width sides, empty interior,
 horizontal/vertical gradients, transparent paint, soft shadow, a radial ring,
-and an inner highlight composed from an inset transparent-fill BOX. Scroll down for mixed atlas/slice9/Clay/shape ordering and a rotated,
-nonuniformly scaled shape container with inherited opacity and child text.
-
-**Mixed sprite + shape material** switches between a plain sprite material plus
-one dedicated shape material (`ui_shape.frag`, serving BOX, RADIAL and shadow)
-and one uber material for everything. Ordinary sprites on the uber material get
-a zero tail, which selects mode 0. The change takes effect on the next frame.
+an inner highlight composed from an inset transparent-fill BOX, and a **Game
+checker** card. The checker uses the example's own fragment shader
+(`raw/shaders/ui_shape_checker.frag`): it includes the engine SDF library and
+reads the cell size and alpha from `nt_ui_shape_style_t.user`. Scroll down for
+mixed atlas/slice9/Clay/shape ordering and a rotated, nonuniformly scaled shape
+container with inherited opacity and child text.
 
 **Measurement grid (256 cards)** replaces the gallery with a 16×16 grid of
 28×20 layout-pixel cards at 2-pixel spacing. **Clay** and **SDF** use the same
@@ -117,8 +111,8 @@ adds a horizontal gradient; **+ shadow** adds a separate shadow to that same
 border/gradient workload. Unsupported effects are disabled for Clay and atlas.
 **Atlas** shows the existing ornamental slice9 path
 and is a reference workload, not a pixel-equivalent baseline. Keep the whole
-grid visible and preserve viewport, DPR, theme, scroll position and material
-selection when comparing runs.
+grid visible and preserve viewport, DPR, theme and scroll position when
+comparing runs.
 
 The existing overlay reports whole-frame CPU/GPU/draw data. The grid readout
 reports the preceding whole UI walk: draws, submitted vertices/indices and

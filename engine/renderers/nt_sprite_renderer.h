@@ -97,7 +97,7 @@ nt_result_t nt_sprite_renderer_restore_gpu(void);
  *      declared resource is never sampled: the renderer substitutes the page texture
  *      per command and the material may override the sampler. Every declared slot must
  *      resolve to a texture (register a placeholder for async loads; an override does not
- *      exempt it), asserted at flush. No textures = no page, e.g. an analytic shape shader.
+ *      exempt it), asserted at flush. No textures = no page, e.g. a flat-color shader.
  *   2. Caller pre-filters invisible, unresolved, and tombstoned sprites;
  *      renderer draws every entry.
  *   3. Frame UBOs (e.g. view_proj) are shader-specific — register and bind
@@ -122,9 +122,7 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
 
 /* Every emit accepts one complete tail block, copied during the call to each vertex.
  * attrs/bytes must be NULL/0 or exactly material.vertex_layout.stride - 20 bytes; NULL/0
- * writes a zero tail. Prefix position/UV/color always come from emit arguments.
- * A material source_uv_offset makes REGION emits overwrite that FLOAT2 per vertex with
- * source-image UV (x right, y down, before alpha trim); geometry and slice9 emits reject it. */
+ * writes a zero tail. Prefix position/UV/color always come from emit arguments. */
 
 /* Emit one atlas region at one mat4 transform.
  *
@@ -190,11 +188,6 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
  * Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
                                       const float *world_matrix, uint32_t color_packed, const void *attrs, uint16_t bytes);
-
-/* Pad staging with up to 3 unindexed vertices so the next quad starts at a multiple of 4,
- * for shaders that derive the corner from gl_VertexID & 3. Without room the next emit
- * flushes and starts at vertex 0. Call set_material first. */
-void nt_sprite_renderer_align_next_vertex_to_4(void);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

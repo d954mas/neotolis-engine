@@ -66,10 +66,7 @@ typedef struct {
     uint8_t param_count;
     nt_material_attr_desc_t attr_map[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_count;
-    /* Sprite renderer: vertex byte offset of a FLOAT2 it fills per REGION vertex with
-     * source-image UV; 0 = none. */
-    uint8_t source_uv_offset;
-    nt_vertex_layout_t vertex_layout; /* Full physical layout, copied and canonicalized at create. */
+    nt_vertex_layout_t vertex_layout; /* Full physical vertex layout for renderers that stream vertices. */
     nt_material_entity_param_desc_t entity_params[NT_MAX_PER_ENTITY_PARAMS];
     uint8_t entity_param_count;
     nt_blend_state_t blend;
@@ -114,9 +111,8 @@ typedef struct {
     uint32_t attr_map_hashes[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_locations[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_count;
-    nt_vertex_layout_t vertex_layout; /* attrs sorted by location */
-    uint64_t vertex_layout_key;       /* hash of the whole canonical layout */
-    uint8_t source_uv_offset;
+    nt_vertex_layout_t vertex_layout;
+    uint64_t vertex_layout_key; /* hash of the whole layout */
     uint32_t entity_param_hashes[NT_MAX_PER_ENTITY_PARAMS];
     uint8_t entity_param_count;
     nt_blend_state_t blend;
@@ -137,8 +133,6 @@ void nt_material_shutdown(void);
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc);
 void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
-/* expected lists attrs in ascending location, as create canonicalizes them. */
-bool nt_material_vertex_layout_equals(const nt_material_info_t *info, const nt_vertex_layout_t *expected);
 /* Replaces the borrowed program; INVALID clears it and assigning the same handle changes nothing.
  * Neither program is owned or destroyed here. mat must be valid.
  * Query readiness with

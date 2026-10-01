@@ -2,15 +2,11 @@
 #define NT_UI_RADIAL_IMAGE_H
 
 /* Dedicated TEXTURED radial widget — textures a real atlas region and reveals the
- * un-swept sector via four reveal modes (swept sector = full color). Separate from
- * nt_ui_image; rides the custom-attr image path (REGION geom). Works with any
- * rectangular region (full-bleed or packed, including atlas D4 orientations).
- * slice9 is rejected in v1 (patch geometry needs separate source coordinates). Before explicit
- * flips/transforms, 0 points right and +pi/2 down in local UI space; positive
- * angles sweep clockwise. The renderer supplies source-image UV regardless of
- * atlas D4; explicit flips mirror the reveal with the art.
- * design + reveal modes + v1 limits: docs/spec/ui/radial-widgets.md
- * "Radial widgets & the custom-attr image path" */
+ * un-swept sector via four reveal modes (swept sector = full color). Works with any
+ * region, including trimmed and atlas D4 orientations; a baked nine-patch draws as a
+ * plain quad and the slice9 override is rejected. Before explicit flips/transforms,
+ * 0 points right and +pi/2 down in local UI space; positive angles sweep clockwise.
+ * Explicit flips mirror the reveal with the art. Spec: docs/spec/ui/radial-widgets.md */
 
 #include <stdint.h>
 
@@ -63,11 +59,18 @@ static inline nt_ui_radial_image_style_t nt_ui_radial_image_style_defaults(void)
     };
 }
 
-/* Radial-image material vertex_layout: sprite prefix, a_radial (loc 4, @20), a_tint (loc 5, @36),
- * a_source_uv (loc 6, @56, renderer-written) and a_aspect (loc 7, @52, walker-written). The
- * material also sets source_uv_offset = NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET. */
+/* Per-vertex tail after the 20-byte sprite prefix, written by the walker. Source-image
+ * coordinates (x right, y down, before alpha trim) are dot(source_u|v, vec3(atlas uv, 1)). */
+typedef struct {
+    float radial[4];   /* a_radial (loc 4): start, end, inner radius, bbox width/height */
+    float tint[4];     /* a_tint (loc 5): RGB, TINT strength */
+    float source_u[3]; /* a_source_u (loc 6) */
+    float source_v[3]; /* a_source_v (loc 7) */
+} nt_ui_radial_image_tail_t;
+_Static_assert(sizeof(nt_ui_radial_image_tail_t) == 56, "radial-image tail is 56 bytes");
+
+/* The radial-image material's vertex_layout: the sprite prefix plus the tail above. */
 extern const nt_vertex_layout_t NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT;
-#define NT_UI_RADIAL_IMAGE_SOURCE_UV_OFFSET 56U
 
 /* Material param the shader reads, set once on the material by the game at creation
  * (one material per reveal mode). u_reveal_mode = {mode, dim_factor, 0, 0}. TINT is

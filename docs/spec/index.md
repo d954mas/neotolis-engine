@@ -64,7 +64,7 @@ The chapters below define engine behavior.
 | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) | Logging, asserts, errors, debug overlay, and the dev-only devapi |
 | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) | Skeletal animation: NSKL/NANM/NSKN assets, pose ABI, tracks, FK, GPU staging, `skinned_mesh_renderer`, bounds, `mix`/`override` composition; runtime banks planned, additive after v1 |
 | [ui/nt-ui.md](ui/nt-ui.md) | `nt_ui`: Clay dependency contract, transforms, interaction, widgets, scroll, popups, menus |
-| [ui/radial-widgets.md](ui/radial-widgets.md) | Radial widgets and the custom-attr image path rationale |
+| [ui/radial-widgets.md](ui/radial-widgets.md) | Textured radial reveal widget rationale |
 | [ui/rich-text.md](ui/rich-text.md) | Rich text: run-list, solver, decoration, effects, z-layers |
 | [meta/open-questions.md](meta/open-questions.md) | Open, non-blocking future questions |
 | [meta/architecture-snapshot.md](meta/architecture-snapshot.md) | Final architecture snapshot: game / engine / builder |

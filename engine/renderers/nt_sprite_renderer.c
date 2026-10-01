@@ -74,7 +74,6 @@ static struct {
     /* Byte stride of the current batch, owned by the full material layout. Set per-flush
      * in open_cmd, so the plain path stays a constant 20. */
     uint32_t cur_stride;
-    uint8_t source_uv_offset; /* 0 unless the material requests source-image UV */
 
     /* Recorded per-state draw commands. Last entry is the "currently open"
      * cmd that emit_one writes into; closed by close_current_cmd() before a
@@ -149,7 +148,6 @@ static void destroy_gpu_resources(void) {
     s_sprite.vertex_count = 0;
     s_sprite.index_count = 0;
     s_sprite.cur_stride = 0;
-    s_sprite.source_uv_offset = 0;
     s_sprite.current_mat = (nt_material_t){0};
     s_sprite.current_program = NT_PROGRAM_INVALID;
     s_sprite.last_draw_list_calls = 0;
@@ -365,9 +363,6 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     c->material = mat;
     s_sprite.current_mat = mat;
     s_sprite.current_program = mi->program;
-
-    NT_ASSERT((mi->source_uv_offset == 0U || mi->source_uv_offset >= NT_SPRITE_BASE_STRIDE) && "source UV must live in the sprite tail");
-    s_sprite.source_uv_offset = mi->source_uv_offset;
     /* The whole batch opened here uploads at this stride (set per-flush, not
      * per-emit, so the plain fast path stays a constant 20). */
     s_sprite.cur_stride = stride;
@@ -441,20 +436,8 @@ static inline const void *select_custom_attrs(const void *attrs, uint16_t bytes)
     return attrs != NULL ? attrs : s_zero_tail;
 }
 
-/* Atlas positions are y-up source-space; local UI Y grows down. */
-static inline void bake_source_uvs(uint32_t base, uint32_t count, const nt_texture_region_t *region, const float (*positions)[2], float ipu) {
-    NT_ASSERT(region != NULL && positions != NULL && "a_source_uv requires atlas REGION geometry");
-    NT_ASSERT(region->source_w > 0U && region->source_h > 0U && ipu > 0.0F && "a_source_uv requires positive source dimensions and atlas scale");
-    const float inv_w = 1.0F / ((float)region->source_w * ipu);
-    const float inv_h = 1.0F / ((float)region->source_h * ipu);
-    for (uint32_t i = 0; i < count; ++i) {
-        const float uv[2] = {positions[i][0] * inv_w, 1.0F - (positions[i][1] * inv_h)};
-        memcpy(s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride) + s_sprite.source_uv_offset, uv, sizeof uv);
-    }
-}
-
 /* Out of line: inlined into every emit kind it costs ~0.8-1 KB of wasm; plain sprites skip the call. */
-static NT_NOINLINE void bake_custom_tail(uint32_t base, uint32_t count, const void *src, const nt_texture_region_t *region, const float (*positions)[2], float ipu) {
+static NT_NOINLINE void bake_custom_tail(uint32_t base, uint32_t count, const void *src) {
     const uint32_t tail = s_sprite.cur_stride - NT_SPRITE_BASE_STRIDE;
     NT_ASSERT(base + count <= s_sprite.custom_max_vertices);
     for (uint32_t i = 0; i < count; ++i) {
@@ -464,14 +447,11 @@ static NT_NOINLINE void bake_custom_tail(uint32_t base, uint32_t count, const vo
             memcpy(dst + w, (const uint8_t *)src + w, 4U);
         }
     }
-    if (s_sprite.source_uv_offset != 0U) {
-        bake_source_uvs(base, count, region, positions, ipu);
-    }
 }
 
-static inline void bake_custom_attrs(uint32_t base, uint32_t count, const void *src, const nt_texture_region_t *region, const float (*positions)[2], float ipu) {
+static inline void bake_custom_attrs(uint32_t base, uint32_t count, const void *src) {
     if (s_sprite.cur_stride > NT_SPRITE_BASE_STRIDE) {
-        bake_custom_tail(base, count, src, region, positions, ipu);
+        bake_custom_tail(base, count, src);
     }
 }
 // #endregion
@@ -625,7 +605,7 @@ static NT_ALWAYS_INLINE void emit_region_resolved(const nt_texture_region_t *r, 
             v->color[3] = ca;
         }
     }
-    bake_custom_attrs(base, r->vertex_count, src, r, positions, ipu);
+    bake_custom_attrs(base, r->vertex_count, src);
     s_sprite.vertex_count += r->vertex_count;
 
     /* Emit indices (rebase to staging base). Each flush chunk is capped to
@@ -769,7 +749,6 @@ static void slice9_assert_region(const slice9_grid_t *g) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_slice9_grid(const slice9_grid_t *g, const void *src) {
-    NT_ASSERT(s_sprite.source_uv_offset == 0U && "source UV requires atlas REGION geometry");
     slice9_assert_region(g);
     const uint32_t vcap = (s_sprite.cur_stride > NT_SPRITE_BASE_STRIDE) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
     if (s_sprite.vertex_count + 16U > vcap || s_sprite.index_count + 54U > s_sprite.max_indices) {
@@ -808,7 +787,7 @@ static void emit_slice9_grid(const slice9_grid_t *g, const void *src) {
         }
     }
 
-    bake_custom_attrs(base, 16U, src, NULL, NULL, 0.0F);
+    bake_custom_attrs(base, 16U, src);
     s_sprite.vertex_count += 16U;
     s_sprite.index_count += 54U;
 
@@ -823,7 +802,7 @@ static void emit_slice9_grid(const slice9_grid_t *g, const void *src) {
 // #region emit_one
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
-    const void *src = select_custom_attrs(NULL, 0);
+    const void *src = s_zero_tail;
     nt_entity_t e = {.id = item->entity};
     uint16_t eidx = nt_entity_index(e);
 
@@ -902,21 +881,10 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
 // #endregion
 
 // #region emit_geometry
-void nt_sprite_renderer_align_next_vertex_to_4(void) {
-    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_align_next_vertex_to_4: call nt_sprite_renderer_set_material first");
-    const uint32_t pad = (4U - (s_sprite.vertex_count & 3U)) & 3U;
-    const uint32_t vcap = (s_sprite.cur_stride > NT_SPRITE_BASE_STRIDE) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
-    /* Without room the next emit flushes and starts at vertex 0. Pad vertices are never indexed. */
-    if (s_sprite.vertex_count + pad <= vcap) {
-        s_sprite.vertex_count += pad;
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
                                       const float *world_matrix, uint32_t color_packed, const void *attrs, uint16_t bytes) {
     NT_ASSERT(s_sprite.initialized);
-    NT_ASSERT(s_sprite.source_uv_offset == 0U && "source UV requires atlas REGION geometry");
     const void *src = select_custom_attrs(attrs, bytes);
     NT_ASSERT(positions != NULL && indices != NULL && world_matrix != NULL);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_geometry: invalid atlas handle");
@@ -986,7 +954,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
         v->color[2] = cb;
         v->color[3] = ca;
     }
-    bake_custom_attrs(base, vertex_count, src, NULL, NULL, 0.0F);
+    bake_custom_attrs(base, vertex_count, src);
     s_sprite.vertex_count += vertex_count;
 
     uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
