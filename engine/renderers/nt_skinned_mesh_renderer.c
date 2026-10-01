@@ -175,7 +175,7 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
     // #region resolve runs
     /* A run's offset holds its first item index until the reserve places it. */
     uint32_t run_count = 0;
-    uint32_t size = 0;
+    uint64_t size = 0;
     nt_material_t previous_material = {0};
     nt_mesh_t previous_mesh = {0};
     nt_pipeline_t pipeline = {0};
@@ -229,7 +229,7 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
             .color_mode = (uint8_t)material->color_mode,
             .color_location = 13,
         };
-        size += instance_count * s_instance_layouts[material->color_mode].stride;
+        size += (uint64_t)instance_count * s_instance_layouts[material->color_mode].stride;
     }
     // #endregion
     if (run_count == 0) {
@@ -237,8 +237,9 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
     }
 
     // #region pack instances
+    NT_ASSERT(size <= UINT32_MAX && "skinned_mesh_renderer_prepare: instance data exceeds the arena address range");
     uint32_t offset = 0;
-    uint8_t *const base = (uint8_t *)nt_frame_arena_reserve(size, &offset);
+    uint8_t *const base = (uint8_t *)nt_frame_arena_reserve((uint32_t)size, &offset);
     uint8_t *dst = base;
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
     for (uint32_t r = 0; r < run_count; r++) {

@@ -15,15 +15,12 @@ static inline void nt_mesh_runs_draw(const nt_mesh_run_t *runs, uint32_t run_cou
     }
     const nt_buffer_t instances = nt_frame_arena_buffer();
     nt_renderer_bound_t bound = {0};
-    /* Texture units follow the bound program, so a pipeline change rebinds them too. */
-    uint32_t textured_material = 0;
-    uint32_t textured_pipeline = 0;
     uint32_t textured_supplied = 0;
     for (uint32_t r = 0; r < run_count; r++) {
         const nt_mesh_run_t *run = &runs[r];
         nt_renderer_bind_pipeline(&bound, run->pipeline);
-        /* A pipeline change also clears bound.material, so this covers the uniform replay rule. */
-        if (run->material.id != textured_material || run->pipeline.id != textured_pipeline || run->supplied_texture.id != textured_supplied) {
+        /* A pipeline change clears bound.material, replaying textures with uniforms. */
+        if (run->material.id != bound.material || run->supplied_texture.id != textured_supplied) {
             const nt_material_info_t *mat_info = nt_material_get_info(run->material);
             NT_ASSERT(mat_info != NULL && "mesh run: material destroyed after prepare");
             nt_renderer_material_view_t view = nt_renderer_material_view(mat_info);
@@ -36,8 +33,6 @@ static inline void nt_mesh_runs_draw(const nt_mesh_run_t *runs, uint32_t run_cou
             }
             nt_renderer_apply_material_uniforms(&bound, run->material.id, &view);
             nt_renderer_apply_texture_slots(&view);
-            textured_material = run->material.id;
-            textured_pipeline = run->pipeline.id;
             textured_supplied = run->supplied_texture.id;
         }
         nt_renderer_bind_vertex_input(&bound, run->vertex_input);

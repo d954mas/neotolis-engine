@@ -44,7 +44,7 @@ Entity / components
 
 ### RenderItem model
 
-Minimal render item — sorted draw record, not a fat data carrier. Renderer reads per-entity data (world matrix, color) from components at draw time.
+Minimal render item — sorted draw record, not a fat data carrier. Renderers read per-entity data (world matrix, color) from components when consuming items: mesh renderers during `prepare`, the sprite renderer during `draw_list`.
 
 ```c
 typedef struct nt_render_item_t {

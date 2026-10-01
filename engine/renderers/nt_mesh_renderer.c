@@ -166,7 +166,7 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
     // #region resolve runs
     /* A run's offset holds its first item index until the reserve places it. */
     uint32_t run_count = 0;
-    uint32_t size = 0;
+    uint64_t size = 0;
     nt_material_t prev_mat = {0};
     nt_mesh_t prev_mesh = {0};
     nt_pipeline_t pip = {0};
@@ -216,7 +216,7 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
             .color_mode = (uint8_t)mat_info->color_mode,
             .color_location = 7,
         };
-        size += instance_count * s_instance_layouts[mat_info->color_mode].stride;
+        size += (uint64_t)instance_count * s_instance_layouts[mat_info->color_mode].stride;
     }
     // #endregion
     if (run_count == 0) {
@@ -224,8 +224,9 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
     }
 
     // #region pack instances
+    NT_ASSERT(size <= UINT32_MAX && "mesh_renderer_prepare: instance data exceeds the arena address range");
     uint32_t offset = 0;
-    uint8_t *const base = (uint8_t *)nt_frame_arena_reserve(size, &offset);
+    uint8_t *const base = (uint8_t *)nt_frame_arena_reserve((uint32_t)size, &offset);
     uint8_t *dst = base;
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
     for (uint32_t r = 0; r < run_count; r++) {
