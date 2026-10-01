@@ -1,29 +1,29 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: fe42288
+# Commit: 3436248
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 213 B
-Import               542 B
+Import               549 B
 Function             136 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  62 B
-Code               82530 B
+Code               82916 B
 Data               10196 B
-Custom              4805 B
+Custom              4831 B
 ---------------- ----------
-TOTAL              98587 B
+TOTAL              99006 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-28861 B   frame
+29234 B   frame
  8107 B   main
  5011 B   nt_gfx_activate_mesh
  3002 B   fmt_fp
@@ -36,7 +36,7 @@ TOTAL              98587 B
   888 B   nt_hash64_str
   848 B   nt_resource_unmount
   809 B   nt_input_web_on_pointer_move
-  769 B   nt_gfx_gl_cache_ground_state
+  778 B   nt_gfx_gl_cache_ground_state
   769 B   nt_input_web_on_pointer_down
   704 B   nt_gfx_make_buffer
   692 B   nt_gfx_activate_texture
@@ -55,7 +55,7 @@ TOTAL              98587 B
   388 B   nt_gfx_backend_create_sampler
 
 Total functions: 134
-Total code size: 82321 B
+Total code size: 82707 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              196228 B
-libnt_gfx.a                83804 B
-libnt_gfx_stub.a            6090 B
+libnt_gfx.a                85352 B
+libnt_gfx_stub.a            6144 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,7 +122,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4403076 B
+TOTAL (archives)         4404678 B
 
 ## Data Segments Summary
 

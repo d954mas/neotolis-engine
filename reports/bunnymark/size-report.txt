@@ -1,30 +1,30 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: fe42288
+# Commit: 3436248
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 258 B
-Import               563 B
+Import               570 B
 Function             203 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  97 B
-Code              216641 B
+Code              217032 B
 Data              208754 B
-Custom             11347 B
+Custom             11373 B
 ---------------- ----------
-TOTAL             437967 B
+TOTAL             438391 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
 31590 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
-29297 B   frame
+29675 B   frame
 27353 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17733 B   nt_gfx_activate_texture
  7737 B   nt_font_lookup_glyph_offset
@@ -55,7 +55,7 @@ TOTAL             437967 B
  1100 B   nt_hash32_str
 
 Total functions: 201
-Total code size: 216312 B
+Total code size: 216703 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              196228 B
-libnt_gfx.a                83804 B
-libnt_gfx_stub.a            6090 B
+libnt_gfx.a                85352 B
+libnt_gfx_stub.a            6144 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,7 +122,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4403076 B
+TOTAL (archives)         4404678 B
 
 ## Data Segments Summary
 

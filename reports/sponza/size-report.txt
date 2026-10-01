@@ -1,29 +1,29 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: fe42288
+# Commit: 3436248
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 243 B
-Import               570 B
+Import               577 B
 Function             168 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                83 B
 Elem                  78 B
-Code              195530 B
+Code              195907 B
 Data              212301 B
-Custom             10552 B
+Custom             10578 B
 ---------------- ----------
-TOTAL             419545 B
+TOTAL             419955 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-32040 B   frame
+32404 B   frame
 31497 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27324 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17617 B   nt_gfx_activate_texture
@@ -49,13 +49,13 @@ TOTAL             419545 B
  1024 B   nt_input_web_on_blur
   999 B   basist::determine_unique_pbits(unsigned int, unsigned int, float*, float*, basist::color_quad_u8&, basist::color_quad_u8&, unsigned int*)
   809 B   nt_input_web_on_pointer_move
+  778 B   nt_gfx_gl_cache_ground_state
   770 B   __cxx_global_array_dtor
-  769 B   nt_gfx_gl_cache_ground_state
   769 B   nt_input_web_on_pointer_down
   738 B   emmalloc_aligned_realloc
 
 Total functions: 166
-Total code size: 195260 B
+Total code size: 195637 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              196228 B
-libnt_gfx.a                83804 B
-libnt_gfx_stub.a            6090 B
+libnt_gfx.a                85352 B
+libnt_gfx_stub.a            6144 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,7 +122,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4403076 B
+TOTAL (archives)         4404678 B
 
 ## Data Segments Summary
 

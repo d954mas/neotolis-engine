@@ -1,29 +1,29 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: fe42288
+# Commit: 3436248
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 349 B
-Import               563 B
+Import               570 B
 Function             203 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                  55 B
-Code              242046 B
+Code              242444 B
 Data               20685 B
-Custom              6789 B
+Custom              6815 B
 ---------------- ----------
-TOTAL             270800 B
+TOTAL             271231 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-63590 B   frame
+63976 B   frame
 17650 B   dispatch_command
 16266 B   nt_shape_renderer_init
 10194 B   main
@@ -55,7 +55,7 @@ TOTAL             270800 B
  1366 B   ui_hit_test
 
 Total functions: 201
-Total code size: 241701 B
+Total code size: 242099 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a              196228 B
-libnt_gfx.a                83804 B
-libnt_gfx_stub.a            6090 B
+libnt_gfx.a                85352 B
+libnt_gfx_stub.a            6144 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,7 +122,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4403076 B
+TOTAL (archives)         4404678 B
 
 ## Data Segments Summary
 
