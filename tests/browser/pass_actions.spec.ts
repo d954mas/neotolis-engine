@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 type Hooks = { ready: boolean; programs_ready(): boolean; pass_actions_probe(mode: number): number; restore_frames(): number };
 type Probe = { active: boolean; calls: { name: string; args: number[]; fbo: boolean }[]; errors: number[] };
 
-test('pass actions preserve shared depth, clear fully and invalidate before unbind across restore', async ({ page }) => {
+test('pass actions preserve shared depth, clear fully, clear under scissor and invalidate before unbind across restore', async ({ page }) => {
   test.setTimeout(120_000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -45,15 +45,15 @@ test('pass actions preserve shared depth, clear fully and invalidate before unbi
       });
     });
     for (const run of runs) {
-      expect(run.result).toBe(55);
+      expect(run.result).toBe(247);
       expect(run.errors).toEqual([]);
       const invalidates = run.calls.filter(call => call.name === 'invalidateFramebuffer');
       expect(invalidates).toEqual([
         { name: 'invalidateFramebuffer', args: [0x8d00, 0x8d20], fbo: true },
         { name: 'invalidateFramebuffer', args: [0x1801, 0x1802], fbo: false },
       ]);
-      expect(run.calls.filter(call => call.name === 'clear').map(call => call.args[0])).toEqual([0x4100, 0x100, 0x4000]);
-      expect(run.calls.filter(call => call.name === 'drawArrays')).toHaveLength(4);
+      expect(run.calls.filter(call => call.name === 'clear').map(call => call.args[0])).toEqual([0x4100, 0x100, 0x4000, 0x4000, 0x100, 0x4000]);
+      expect(run.calls.filter(call => call.name === 'drawArrays')).toHaveLength(6);
       const firstDiscard = run.calls.findIndex(call => call.name === 'invalidateFramebuffer');
       expect(run.calls.slice(firstDiscard - 1, firstDiscard + 2).map(call => call.name)).toEqual([
         'drawArrays', 'invalidateFramebuffer', 'bindFramebuffer',

@@ -372,6 +372,8 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
 
 void nt_gfx_backend_end_pass(void) {}
 
+void nt_gfx_backend_clear(const nt_clear_desc_t *desc) { (void)desc; }
+
 /* Scissor and viewport fake no-ops. State is cached in shared nt_gfx.c
  * so NT_TEST_ACCESS probes can read it back without GL. */
 void nt_gfx_backend_set_scissor(int x, int y, int w, int h) {

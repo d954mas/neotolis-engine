@@ -759,6 +759,29 @@ void nt_gfx_end_pass(void) {
     NT_GFX_END(end_pass());
 }
 
+static nt_gfx_result_t clear(const nt_clear_desc_t *desc) {
+    if (g_nt_gfx.context_lost) {
+        return NT_GFX_RESULT_CONTEXT_LOST;
+    }
+    NT_ASSERT(desc != NULL);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "clear requires an open pass");
+    if (desc->color || desc->depth) {
+        nt_gfx_backend_clear(desc);
+    }
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
+void nt_gfx_clear(const nt_clear_desc_t *desc) {
+    NT_GFX_BEGIN_REQUEST(
+        NT_GFX_OP_CLEAR, NT_GFX_OBJECT_RENDER_TARGET, s_gfx.active_render_target, if (desc != NULL) {
+            memcpy(event->data.clear.clear_color, desc->clear_color, sizeof(event->data.clear.clear_color));
+            event->data.clear.clear_depth = desc->clear_depth;
+            event->data.clear.color = desc->color;
+            event->data.clear.depth = desc->depth;
+        });
+    NT_GFX_END(clear(desc));
+}
+
 /* ---- Resource creation ---- */
 
 static nt_gfx_result_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *out) {

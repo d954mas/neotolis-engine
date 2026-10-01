@@ -308,6 +308,18 @@ attachment's current contents. A clear initializes the entire attachment
 regardless of scissor; clear values matter only for a cleared attachment.
 Stencil is never cleared by a pass.
 
+`nt_gfx_clear` is an explicit operation inside an open pass. Its borrowed
+`nt_clear_desc_t` selects color and depth independently with `color`/`depth`
+and supplies `clear_color`/`clear_depth`; unselected values are ignored.
+It clears the current target under the current scissor, or the entire attachment
+when scissor is disabled. It does not use the viewport as a clear rectangle.
+It preserves the pipeline, vertex input, texture set, uniforms, viewport and
+scissor. Depth clear temporarily enables depth writes and restores the bound
+pipeline's mask before returning. Selecting neither attachment does no GPU work;
+a lost context skips the operation. Stencil has no clear API.
+Capture records a CLEAR request, its copied values and selections, its target,
+and the actual GL calls without growing the event record.
+
 `discard_color`/`discard_depth` end the contents' lifetime at `end_pass`, before
 the framebuffer is unbound, without invalidating texture handles;
 `discard_depth` also discards stencil. A later reader must use contents written

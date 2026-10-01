@@ -484,7 +484,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_program_t program = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_write = true, .depth_func = NT_DEPTH_LESS});
-    nt_pipeline_t overwrite = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_pipeline_t overwrite = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_func = NT_DEPTH_ALWAYS});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_hash32_t uniform = nt_hash32_str("u_depth");
     float z[4] = {-0.5F, 0.0F, 0.0F, 0.0F};
@@ -531,6 +531,34 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
         result |= 4U;
     }
     nt_gfx_set_scissor_enabled(false);
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
+    nt_gfx_bind_pipeline(overwrite);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_set_scissor(0, 0, 1, 1);
+    nt_gfx_set_scissor_enabled(true);
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {0, 0, 1, 1}});
+    const uint8_t blue_red[8] = {0, 0, 255, 255, 255, 0, 0, 255};
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, blue_red, sizeof(pixels)) == 0) {
+        result |= 64U;
+    }
+    nt_gfx_clear(&(nt_clear_desc_t){.depth = true, .clear_depth = 0.2F});
+    nt_gfx_clear(&(nt_clear_desc_t){0});
+    nt_gfx_set_scissor_enabled(false);
+    /* This draw must keep the pipeline's disabled depth writes after the clear. */
+    nt_gfx_draw(0, 3);
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {1, 0, 0, 1}});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    z[0] = 0.0F;
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    const uint8_t red_green[8] = {255, 0, 0, 255, 0, 255, 0, 255};
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red_green, sizeof(pixels)) == 0) {
+        result |= 128U;
+    }
     nt_gfx_end_pass();
     nt_pass_desc_t discard = {.target = target, .load_color = true, .load_depth = true, .discard_depth = true};
     nt_gfx_begin_pass(&discard);

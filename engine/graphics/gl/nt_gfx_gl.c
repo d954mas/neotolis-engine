@@ -975,6 +975,36 @@ void nt_gfx_backend_end_pass(void) {
     }
 }
 
+void nt_gfx_backend_clear(const nt_clear_desc_t *desc) {
+    GLbitfield mask = 0;
+    if (desc->color) {
+        mask |= GL_COLOR_BUFFER_BIT;
+        if (!float4_equal(s_gl_cache.clear_color, desc->clear_color)) {
+            memcpy(s_gl_cache.clear_color, desc->clear_color, sizeof(s_gl_cache.clear_color));
+            NT_GL(glClearColor, desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
+        }
+    }
+    if (desc->depth) {
+        mask |= GL_DEPTH_BUFFER_BIT;
+        if (s_gl_cache.clear_depth != desc->clear_depth) {
+            s_gl_cache.clear_depth = desc->clear_depth;
+            nt_gl_clear_depth(desc->clear_depth);
+        }
+    }
+    if (mask == 0) {
+        return;
+    }
+    /* Unlike pass initialization, an in-pass clear must preserve the bound pipeline's mask. */
+    const bool restore_depth_mask = desc->depth && !s_gl_cache.depth_write_enabled;
+    if (restore_depth_mask) {
+        NT_GL(glDepthMask, GL_TRUE);
+    }
+    NT_GL(glClear, mask);
+    if (restore_depth_mask) {
+        NT_GL(glDepthMask, GL_FALSE);
+    }
+}
+
 /* ---- Scissor and viewport ----
  *
  * Raw GL bottom-left convention. Callers are expected to y-flip if they

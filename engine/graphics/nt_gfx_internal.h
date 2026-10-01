@@ -151,6 +151,7 @@ void nt_gfx_backend_check_timer_disjoint(void);
 /* width/height size the viewport of a render target; the default framebuffer uses the window size. */
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend, uint16_t width, uint16_t height);
 void nt_gfx_backend_end_pass(void);
+void nt_gfx_backend_clear(const nt_clear_desc_t *desc);
 
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);

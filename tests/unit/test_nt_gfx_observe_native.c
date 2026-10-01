@@ -443,6 +443,43 @@ static void test_pass_actions_capture_values_and_attachment_enums(void) {
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.gl[NT_GFX_GL_glInvalidateFramebuffer]);
 }
 
+static void test_explicit_clear_records_issued_calls_and_skips_empty_selections(void) {
+    nt_gfx_capture_request();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    const nt_clear_desc_t expected = {.color = true, .depth = true, .clear_color = {0.25F, 0.5F, 0.75F, 1}, .clear_depth = 0.5F};
+    nt_clear_desc_t desc = expected;
+    nt_gfx_clear(&desc);
+    memset(&desc, 0, sizeof(desc));
+    nt_gfx_clear(&expected);
+    uint32_t before[NT_GFX_GL_COUNT];
+    memcpy(before, g_nt_gfx.counters.gl, sizeof(before));
+    nt_gfx_clear(&(nt_clear_desc_t){.clear_color = {1, 0, 0, 1}, .clear_depth = 0.25F});
+    TEST_ASSERT_EQUAL_MEMORY(before, g_nt_gfx.counters.gl, sizeof(before));
+    nt_gfx_end_pass();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CLEAR]);
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.gl[NT_GFX_GL_glClear]);
+    TEST_ASSERT_EQUAL_UINT32(3, captured_calls(NT_GFX_GL_glClear));
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    uint32_t selected = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_glClear) {
+            TEST_ASSERT_EQUAL_HEX32(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, event->data.backend.args[0]);
+        }
+        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_CLEAR && event->data.clear.color) {
+            TEST_ASSERT_EQUAL_UINT32(NT_GFX_OBJECT_RENDER_TARGET, event->object_kind);
+            TEST_ASSERT_EQUAL_UINT32(0, event->object);
+            TEST_ASSERT_TRUE(event->data.clear.depth);
+            TEST_ASSERT_EQUAL_MEMORY(expected.clear_color, event->data.clear.clear_color, sizeof(expected.clear_color));
+            TEST_ASSERT_EQUAL_MEMORY(&expected.clear_depth, &event->data.clear.clear_depth, sizeof(float));
+            selected++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, selected);
+}
+
 static void test_readback_is_recorded_as_issued_call(void) {
     nt_gfx_capture_request();
     nt_gfx_begin_frame();
@@ -662,6 +699,7 @@ int main(void) {
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
     RUN_TEST(test_complete_capture_matches_gl_counters);
     RUN_TEST(test_readback_is_recorded_as_issued_call);
+    RUN_TEST(test_explicit_clear_records_issued_calls_and_skips_empty_selections);
     RUN_TEST(test_pass_actions_capture_values_and_attachment_enums);
     RUN_TEST(test_shutdown_while_recording_writes_no_record);
 #endif
