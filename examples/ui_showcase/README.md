@@ -109,6 +109,10 @@ solid color and radius 6. **4 sides** adds left/top/right/bottom widths
 1/2/3/4 with an opaque white border to either Clay or SDF. For SDF, **+ gradient**
 adds a horizontal gradient; **+ shadow** adds a separate shadow to that same
 border/gradient workload. Unsupported effects are disabled for Clay and atlas.
+**SDF+icon** puts a 12×12 atlas icon inside every
+SDF card. By default card and icon share a layer, so the walker alternates
+between the shape and sprite renderers in every cell; **Icons on their own
+layer** moves the icons one layer up, which draws all cards and then all icons.
 **Atlas** shows the existing ornamental slice9 path
 and is a reference workload, not a pixel-equivalent baseline. Keep the whole
 grid visible and preserve viewport, DPR, theme and scroll position when
@@ -184,6 +188,30 @@ every SDF workload (3.3-4.0 ms) and uploaded 84-byte vertices for every plain
 sprite. Release WASM on the same base: `ui_showcase` 432795 -> 431059 bytes,
 `bunnymark` 428204 -> 427442 bytes. These windows are one integrated GPU, not
 a mobile or cross-device result.
+
+**Interleaved shapes and icons on a phone.** On 2026-10-01 the **SDF+icon**
+grid (solid cards) ran on the reference phone of
+[measuring performance on phones](../../docs/perf-measurement.md): Huawei P40,
+Mali-G76, Chromium 156, wasm-release, vsync uncapped, 1080x2211 framebuffer.
+The uber arm is `7d1c5955` with **Mixed sprite + shape material**, one
+per-vertex material for cards and icons; the instanced arms are `b25cfdfe`.
+FPS, p95 and draws per frame come from `requestAnimationFrame` and wrapped
+WebGL draw calls; the GPU clock is sampled every 10 seconds.
+
+| Arm | Draws/frame | FPS | p95 ms | GPU MHz | FPS/MHz |
+|---|---:|---:|---:|---:|---:|
+| Uber, one batch | 15 | 333 | 5.3 | 274 | 1.23 |
+| Instanced, icons on the card layer | 527 | 105 | 20.5 | 294 | 0.36 |
+| Uber, one batch | 15 | 340 | 5.3 | 274 | 1.24 |
+| Instanced, icons on their own layer | 16 | 368 | 5.0 | 166 | 2.22 |
+
+The first pair is a sustained ABBA (3-minute pre-heat, four 2-minute windows
+per arm, ±2% between windows); the second is a short ABBA (four 1-minute
+windows per arm) on the warm phone. Alternating renderers on one layer is
+CPU-bound: each extra draw costs about 13 µs, so 20 switches a frame cost
+about 0.25 ms. With the icons on their own layer the instanced renderer beats
+the uber material at the GPU's lowest clock, because the uber material runs
+the shape branch for every sprite pixel.
 
 ## Controls
 

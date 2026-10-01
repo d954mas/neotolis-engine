@@ -99,7 +99,10 @@ The renderer stages instances per material command, uploads them once per flush
 and issues one instanced draw per command. Consecutive shapes with one material
 therefore share a draw, however many layers a skin stacks. A walker switch between the
 shape, sprite and text renderers flushes the previous renderer, so declaration
-order survives across renderers. A shape material supplies program, blend,
+order survives across renderers. Shapes and sprites that alternate within one
+layer therefore cost a draw per switch; the walker emits layer by layer, so a
+list or grid keeps its shape backgrounds on one layer and its icons and text on
+a higher one to draw each as one batch. A shape material supplies program, blend,
 depth, params and textures; it declares no vertex layout.
 
 `assets/shaders/ui_shape.vert` and `ui_shape.frag` are the engine program.

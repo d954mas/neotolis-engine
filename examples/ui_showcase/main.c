@@ -405,6 +405,7 @@ struct tab_state {
     struct {
         bool enabled;
         bool workload;
+        bool icon_layer;
         int workload_kind;
         int workload_effect;
         uint32_t atlas_clicks, shape_clicks;
@@ -1325,9 +1326,12 @@ static void render_shapes(nt_ui_context_t *ctx, tab_state_t *st) {
             (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/atlas"), "Atlas", &st->shapes.workload_kind, 0, g_current->radio, NULL, true);
             (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/clay"), "Clay", &st->shapes.workload_kind, 1, g_current->radio, NULL, true);
             (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/sdf"), "SDF", &st->shapes.workload_kind, 2, g_current->radio, NULL, true);
+            (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/sdf_icon"), "SDF+icon", &st->shapes.workload_kind, 3, g_current->radio, NULL, true);
         }
+        (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/icon_layer"), "Icons on their own layer", &st->shapes.icon_layer, g_current->check, &row,
+                             st->shapes.workload_kind == 3);
         int max_effect = 0;
-        if (st->shapes.workload_kind == 2) {
+        if (st->shapes.workload_kind >= 2) {
             max_effect = 3;
         } else if (st->shapes.workload_kind == 1) {
             max_effect = 1;
@@ -1354,8 +1358,8 @@ static void render_shapes(nt_ui_context_t *ctx, tab_state_t *st) {
             nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/shapes/snapshot"), g_current->btn_primary, &metric_button, true, NULL);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Log snapshot", &g_seg_label);
             if (nt_ui_button_end(ctx)) {
-                nt_log_info("shape benchmark: backend=%d effect=%d viewport=%dx%d window=%d", st->shapes.workload_kind, st->shapes.workload_effect, g_nt_window.fb_width, g_nt_window.fb_height,
-                            NT_METRICS_WINDOW);
+                nt_log_info("shape benchmark: backend=%d effect=%d icon_layer=%d viewport=%dx%d window=%d", st->shapes.workload_kind, st->shapes.workload_effect, st->shapes.icon_layer ? 1 : 0,
+                            g_nt_window.fb_width, g_nt_window.fb_height, NT_METRICS_WINDOW);
                 nt_metrics_stats_t sample;
                 nt_metrics_channel_stats(NT_METRICS_CPU_MS, &sample);
                 nt_log_info("frame_cpu_ms: n=%u median=%.6f p95=%.6f", sample.samples, sample.median, sample.p95);
@@ -1395,6 +1399,13 @@ static void render_shapes(nt_ui_context_t *ctx, tab_state_t *st) {
                                   .cornerRadius = CLAY_CORNER_RADIUS(6),
                                   .border = {.color = {255, 255, 255, 255}, .width = widths},
                                   .userData = NT_UI_CLAY_DATA(LAYER_IMG)}) {}
+                        } else if (st->shapes.workload_kind == 3) {
+                            /* One layer alternates shape and sprite draws per cell; a higher icon layer batches each. */
+                            nt_ui_shape_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &card,
+                                              &(Clay_ElementDeclaration){.layout = {.sizing = cell.layout.sizing, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}});
+                            nt_ui_image(ctx, NT_UI_DATA_LAYER(st->shapes.icon_layer ? LAYER_TEXT : LAYER_IMG), &s_panel_blue_ref, &g_panel_img_style,
+                                        &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(12), CLAY_SIZING_FIXED(12)}});
+                            nt_ui_shape_end(ctx);
                         } else {
                             nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &card, &cell);
                         }
