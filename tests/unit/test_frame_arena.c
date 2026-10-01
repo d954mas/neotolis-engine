@@ -203,6 +203,16 @@ static void test_shutdown_then_init_starts_clean(void) {
     next_frame();
     TEST_ASSERT_EQUAL_UINT32(0, reserve_filled(32, 0xB2));
 }
+/* A frame that skips prepare keeps drawing the last upload: nothing rewrote the buffer. */
+static void test_buffer_stays_drawable_until_the_next_begin_frame(void) {
+    arena_init(64);
+    next_frame();
+    (void)reserve_filled(4, 0xA1);
+    nt_frame_arena_upload();
+    nt_buffer_t uploaded = nt_frame_arena_buffer();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(uploaded.id, nt_frame_arena_buffer().id);
+}
 // #endregion
 
 // #region asserts
@@ -227,34 +237,6 @@ static void test_reserve_rejects_a_null_offset(void) {
     next_frame();
     nt_test_assert_install();
     NT_TEST_EXPECT_ASSERT((void)nt_frame_arena_reserve(4, NULL));
-}
-
-static void test_reserve_before_begin_frame_asserts(void) {
-    arena_init(64);
-    nt_gfx_begin_frame();
-    nt_test_assert_install();
-    uint32_t offset = 0;
-    NT_TEST_EXPECT_ASSERT((void)nt_frame_arena_reserve(4, &offset));
-    expect_assert_message("begin_frame must run in this gfx frame");
-}
-
-static void test_upload_before_begin_frame_asserts(void) {
-    arena_init(64);
-    nt_gfx_begin_frame();
-    nt_test_assert_install();
-    NT_TEST_EXPECT_ASSERT(nt_frame_arena_upload());
-    expect_assert_message("begin_frame must run in this gfx frame");
-}
-
-static void test_buffer_from_previous_gfx_frame_asserts(void) {
-    arena_init(64);
-    next_frame();
-    (void)reserve_filled(4, 0xA1);
-    nt_frame_arena_upload();
-    nt_gfx_begin_frame();
-    nt_test_assert_install();
-    NT_TEST_EXPECT_ASSERT((void)nt_frame_arena_buffer());
-    expect_assert_message("begin_frame must run in this gfx frame");
 }
 
 static void test_reserve_asserts_past_the_capacity(void) {
@@ -331,13 +313,11 @@ int main(void) {
     RUN_TEST(test_failed_restore_is_retried_before_the_next_upload);
     RUN_TEST(test_failed_init_leaves_the_module_down);
     RUN_TEST(test_shutdown_then_init_starts_clean);
+    RUN_TEST(test_buffer_stays_drawable_until_the_next_begin_frame);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_init_rejects_a_capacity_not_multiple_of_the_alignment);
     RUN_TEST(test_reserve_rejects_zero_size);
     RUN_TEST(test_reserve_rejects_a_null_offset);
-    RUN_TEST(test_reserve_before_begin_frame_asserts);
-    RUN_TEST(test_upload_before_begin_frame_asserts);
-    RUN_TEST(test_buffer_from_previous_gfx_frame_asserts);
     RUN_TEST(test_reserve_asserts_past_the_capacity);
     RUN_TEST(test_reserve_asserts_when_rounding_wraps);
     RUN_TEST(test_reserve_after_upload_asserts);

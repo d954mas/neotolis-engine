@@ -314,12 +314,13 @@ The game owns the frame order, once per gfx frame after `nt_gfx_begin_frame`:
 4. Draws bind `nt_frame_arena_buffer()` at a reserved offset, in any pass, any
    number of times.
 
-Reserve, upload and buffer access assert that `begin_frame` ran in the current
-gfx frame. The order is asserted, not trusted: a second `begin_frame` in one gfx
-frame, a reserve after the frame's upload, a second upload, and taking the buffer before
+The order is asserted, not trusted: a second `begin_frame` in one gfx frame, a
+reserve after the frame's upload, a second upload, and taking the buffer before
 the upload each assert. So no write lands in the buffer after a draw of the
-frame read it. An offset stays valid until the next `begin_frame` or restore; a
-restore empties the buffer, so draws assert until the next upload. Overflowing
+frame read it. Only `begin_frame` reads the gfx frame; a frame that skips
+`begin_frame` keeps drawing the last upload. An offset stays valid until the
+next `begin_frame`. A restore empties the buffer but keeps staging and offsets:
+`nt_frame_arena_buffer` asserts until the frame uploads again. Overflowing
 the capacity logs the bytes needed and free, then asserts; the arena never grows
 or chains buffers. `nt_frame_arena_peak` reports the most bytes any frame
 uploaded since init, to size the capacity from a real scene.

@@ -55,7 +55,8 @@ void nt_skeletal_gpu_shutdown(void);
  * before reserving, or shut down. Inactive module returns NT_OK. */
 nt_result_t nt_skeletal_gpu_restore_gpu(void);
 
-/* Resets the frame cursor; every earlier binding and reserved pointer is invalid. */
+/* Resets the frame cursor; every earlier binding and reserved pointer is invalid.
+ * Once per gfx frame after nt_gfx_begin_frame; a second call in one gfx frame asserts. */
 void nt_skeletal_gpu_begin_frame(void);
 
 /* Reserves a frame of `count` palette entries and returns the staging pointer

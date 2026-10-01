@@ -134,8 +134,9 @@ runtime object represented by that handle.
 
 Frame-scoped values are plain values with no generation: a frame arena offset
 (`nt_frame_arena_reserve`) and a deformation binding (`nt_skeletal_gpu_reserve`)
-stay valid until the owning module's next `begin_frame` or restore. Nothing
-stamps or checks them; the game's frame order keeps them current.
+stay valid until the owning module's next `begin_frame`; a restore invalidates
+a binding, and an arena offset needs a new upload. The values carry no stamp;
+each module asserts only its frame order (one `begin_frame` per gfx frame).
 
 ### Program handles
 

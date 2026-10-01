@@ -14,8 +14,8 @@
  *
  * Frame order, owned by the game, once per gfx frame after nt_gfx_begin_frame:
  *   begin_frame -> reserve ... -> upload -> passes that draw reserved ranges.
- * Reserve, upload and buffer access assert that begin_frame ran in this gfx frame.
- * An offset is valid until the next begin_frame or restore.
+ * An offset is valid until the next begin_frame; after a restore, upload again
+ * before drawing it.
  */
 
 /* Reserve offsets are multiples of this: a whole RGBA32F texel, so the same
@@ -30,14 +30,16 @@ typedef struct {
  * no other allocation afterwards. */
 nt_result_t nt_frame_arena_init(const nt_frame_arena_desc_t *desc);
 void nt_frame_arena_shutdown(void);
-/* Destroys and recreates the buffer after a context loss; staging survives and
- * the next frame rewrites it. Draws assert until the next upload. Failure
+/* Destroys and recreates the buffer after a context loss; staging and this
+ * frame's offsets survive. nt_frame_arena_buffer asserts until the next upload,
+ * which this frame may repeat into the new buffer. Failure
  * returns NT_ERR_INIT_FAILED: retry before uploading, or shut down. Inactive
  * module returns NT_OK. */
 nt_result_t nt_frame_arena_restore_gpu(void);
 
 /* Resets the cursor; every earlier offset and reserved pointer is invalid.
- * Asserts a second call inside one gfx frame. */
+ * Asserts a second call inside one gfx frame: its upload would land after
+ * draws read the buffer. */
 void nt_frame_arena_begin_frame(void);
 
 /* Reserves `size` bytes (rounded up to NT_FRAME_ARENA_ALIGN) and returns the

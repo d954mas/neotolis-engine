@@ -91,8 +91,6 @@ void nt_frame_arena_begin_frame(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void *nt_frame_arena_reserve(uint32_t size, uint32_t *out_offset) {
-    NT_ASSERT(s_frame_arena.initialized);
-    NT_ASSERT(s_frame_arena.gfx_frame == g_nt_gfx.counters.frame_sequence && "frame_arena: begin_frame must run in this gfx frame");
     NT_ASSERT(out_offset != NULL);
     NT_ASSERT(size > 0);
     NT_ASSERT(!s_frame_arena.uploaded && "frame_arena: reserve after upload; begin_frame first");
@@ -109,8 +107,6 @@ void *nt_frame_arena_reserve(uint32_t size, uint32_t *out_offset) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void nt_frame_arena_upload(void) {
-    NT_ASSERT(s_frame_arena.initialized);
-    NT_ASSERT(s_frame_arena.gfx_frame == g_nt_gfx.counters.frame_sequence && "frame_arena: begin_frame must run in this gfx frame");
     NT_ASSERT(s_frame_arena.buffer.id != 0 && "retry failed GPU restore before uploading");
     NT_ASSERT(!s_frame_arena.uploaded && "frame_arena: second upload in one frame");
     s_frame_arena.uploaded = true;
@@ -123,8 +119,6 @@ void nt_frame_arena_upload(void) {
 }
 
 nt_buffer_t nt_frame_arena_buffer(void) {
-    NT_ASSERT(s_frame_arena.initialized);
-    NT_ASSERT(s_frame_arena.gfx_frame == g_nt_gfx.counters.frame_sequence && "frame_arena: begin_frame must run in this gfx frame");
     NT_ASSERT(s_frame_arena.uploaded && "frame_arena: draw before upload");
     return s_frame_arena.buffer;
 }

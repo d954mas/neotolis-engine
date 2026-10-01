@@ -13,7 +13,8 @@
 _Static_assert(sizeof(nt_skeletal_mat34_t) == (size_t)3 * NT_SKELETAL_GPU_TEXEL_FLOATS * sizeof(float), "one palette entry is three RGBA32F texels");
 
 static struct {
-    float *staging; /* width * height texels, 4 floats each */
+    float *staging;     /* width * height texels, 4 floats each */
+    uint64_t gfx_frame; /* gfx frame_sequence of the last begin_frame */
     nt_texture_t texture;
     uint16_t width;
     uint16_t height;
@@ -98,6 +99,9 @@ nt_result_t nt_skeletal_gpu_restore_gpu(void) {
 // #region frame
 void nt_skeletal_gpu_begin_frame(void) {
     NT_ASSERT(s_skeletal_gpu.initialized);
+    /* A second palette frame inside one gfx frame would flush after draws read the texture. */
+    NT_ASSERT(s_skeletal_gpu.gfx_frame != g_nt_gfx.counters.frame_sequence && "skeletal_gpu: begin_frame twice in one gfx frame");
+    s_skeletal_gpu.gfx_frame = g_nt_gfx.counters.frame_sequence;
     s_skeletal_gpu.cursor_x = 0;
     s_skeletal_gpu.cursor_y = 0;
 }
