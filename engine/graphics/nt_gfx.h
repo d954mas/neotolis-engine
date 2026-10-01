@@ -474,7 +474,19 @@ typedef struct {
     /* Applied regardless of the previous pipeline's depth_write state.
      * Typically 1.0f; zero-init gives 0.0 which fails all depth tests. */
     float clear_depth;
+    /* false clears the full attachment regardless of scissor; true keeps its contents */
+    bool load_color, load_depth;
+    /* Contents are undefined after end_pass; texture handles stay valid.
+     * discard_depth also discards stencil; discard_color requires a render target. */
+    bool discard_color, discard_depth;
 } nt_pass_desc_t;
+
+/* Select attachments independently; unselected values are ignored. */
+typedef struct {
+    float clear_color[4];
+    float clear_depth;
+    bool color, depth;
+} nt_clear_desc_t;
 
 // #region frame counters and observation
 /* Public operations (BEGIN/END pairs) and the record-only STATE marker. */
@@ -515,6 +527,7 @@ typedef enum {
     NT_GFX_OP_SEGMENT_POLL,
     NT_GFX_OP_GPU_TIMING,
     NT_GFX_OP_TIMER_DISJOINT,
+    NT_GFX_OP_CLEAR,
     NT_GFX_OP_COUNT
 } nt_gfx_operation_t;
 
@@ -589,6 +602,7 @@ typedef enum {
     X(glGetShaderiv)                                                                                                                                                                                   \
     X(glGetUniformBlockIndex)                                                                                                                                                                          \
     X(glGetUniformLocation)                                                                                                                                                                            \
+    X(glInvalidateFramebuffer)                                                                                                                                                                         \
     X(glLinkProgram)                                                                                                                                                                                   \
     X(glPixelStorei)                                                                                                                                                                                   \
     X(glPolygonOffset)                                                                                                                                                                                 \
@@ -718,7 +732,10 @@ typedef struct {
         struct {
             uint32_t target;
             float color[4], depth;
+            /* Flags are meaningful only in BEGIN records; INITIAL holds cached clear values. */
+            bool load_color, load_depth, discard_color, discard_depth;
         } pass;
+        nt_clear_desc_t clear;
         struct {
             uint32_t buffer, offset, stride, location, type, count, normalized, divisor;
         } attribute;
@@ -830,6 +847,10 @@ void nt_gfx_begin_frame(void);
 /* Passes do not nest; on a lost context both calls are no-ops. */
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_end_pass(void);
+/* Requires an open pass and a non-NULL desc, borrowed only for this call.
+ * Clears selected attachments under the current scissor (or fully when disabled).
+ * Preserves draw state, including depth write mask. No selections or a lost context do no GPU work. */
+void nt_gfx_clear(const nt_clear_desc_t *desc);
 
 /* ---- Resource creation ---- */
 

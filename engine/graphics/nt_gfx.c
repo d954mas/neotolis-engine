@@ -694,6 +694,8 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
 
+    NT_ASSERT((desc->target.id != 0 || !desc->discard_color) && "begin_pass: discarding the window color loses the presented frame");
+
     uint32_t render_target_backend = 0;
     uint16_t width = 0;
     uint16_t height = 0;
@@ -727,6 +729,10 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
             event->data.pass.target = desc->target.id;
             memcpy(event->data.pass.color, desc->clear_color, sizeof(event->data.pass.color));
             event->data.pass.depth = desc->clear_depth;
+            event->data.pass.load_color = desc->load_color;
+            event->data.pass.load_depth = desc->load_depth;
+            event->data.pass.discard_color = desc->discard_color;
+            event->data.pass.discard_depth = desc->discard_depth;
         });
     NT_GFX_END(begin_pass(desc));
 }
@@ -751,6 +757,29 @@ static nt_gfx_result_t end_pass(void) {
 void nt_gfx_end_pass(void) {
     NT_GFX_BEGIN(NT_GFX_OP_END_PASS, NT_GFX_OBJECT_NONE, 0);
     NT_GFX_END(end_pass());
+}
+
+static nt_gfx_result_t clear(const nt_clear_desc_t *desc) {
+    if (g_nt_gfx.context_lost) {
+        return NT_GFX_RESULT_CONTEXT_LOST;
+    }
+    NT_ASSERT(desc != NULL);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "clear requires an open pass");
+    if (desc->color || desc->depth) {
+        nt_gfx_backend_clear(desc);
+    }
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
+void nt_gfx_clear(const nt_clear_desc_t *desc) {
+    NT_GFX_BEGIN_REQUEST(
+        NT_GFX_OP_CLEAR, NT_GFX_OBJECT_RENDER_TARGET, s_gfx.active_render_target, if (desc != NULL) {
+            memcpy(event->data.clear.clear_color, desc->clear_color, sizeof(event->data.clear.clear_color));
+            event->data.clear.clear_depth = desc->clear_depth;
+            event->data.clear.color = desc->color;
+            event->data.clear.depth = desc->depth;
+        });
+    NT_GFX_END(clear(desc));
 }
 
 /* ---- Resource creation ---- */

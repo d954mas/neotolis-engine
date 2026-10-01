@@ -303,6 +303,38 @@ The game still owns pass order. Each pass selects its destination through
 backend framebuffer internally during `nt_gfx_begin_pass`; public code does not
 bind or unbind render-target state outside the pass descriptor.
 
+Each pass clears color and depth unless `load_color`/`load_depth` keeps the
+attachment's current contents. A clear initializes the entire attachment
+regardless of scissor; clear values matter only for a cleared attachment.
+Stencil is never cleared by a pass.
+
+`nt_gfx_clear` is an explicit operation inside an open pass. Its borrowed
+`nt_clear_desc_t` selects color and depth independently with `color`/`depth`
+and supplies `clear_color`/`clear_depth`; unselected values are ignored.
+It clears the current target under the current scissor, or the entire attachment
+when scissor is disabled. It does not use the viewport as a clear rectangle.
+It preserves the pipeline, vertex input, texture set, uniforms, viewport and
+scissor. Depth clear temporarily enables depth writes and restores the bound
+pipeline's mask before returning. Selecting neither attachment does no GPU work;
+a lost context skips the operation. Stencil has no clear API.
+Capture records a CLEAR request, its copied values and selections, its target,
+and the actual GL calls without growing the event record.
+
+`discard_color`/`discard_depth` end the contents' lifetime at `end_pass`, before
+the framebuffer is unbound, without invalidating texture handles;
+`discard_depth` also discards stencil. A later reader must use contents written
+after the discard. Producer outputs sampled by later passes must not discard; a
+consuming pass's flags apply only to its own attachments. Absent attachments
+ignore the flags. Discarding the default framebuffer's color asserts, because
+it is the presented frame. The descriptor is borrowed only during `begin_pass`.
+
+Loading does not preserve default-framebuffer contents across presentation
+(`preserveDrawingBuffer` is false) or restore contents after context loss.
+Discard maps to `glInvalidateFramebuffer`; native skips this optional hint when
+the driver lacks ARB_invalidate_subdata. Call capture records attachment enums,
+not pointers. BEGIN/PASS records contain the requested flags; INITIAL/PASS holds
+only cached clear values, with flag fields having no meaning.
+
 Pass color and depth clears are pass-owned operations. In particular,
 `clear_depth` is applied independently of the previous pipeline's `depth_write`
 state; pipeline write masks affect draws, not the next pass initialization. Bound
@@ -316,7 +348,7 @@ draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
 uniform-buffer binding calls `glBindBufferBase` (`glBindBufferRange` for a
-range) on every request. The clear forces the depth
+range) on every request. A depth clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color

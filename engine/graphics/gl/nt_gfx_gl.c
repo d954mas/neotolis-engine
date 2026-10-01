@@ -134,6 +134,7 @@ static GLenum *s_buffer_targets;                  /* GL_ARRAY_BUFFER or GL_ELEME
 static GLuint *s_texture_gl;                      /* GL texture names, indexed by slot */
 static GLuint *s_render_target_gl;                /* GL framebuffer names, indexed by slot */
 static GLuint s_bound_framebuffer;
+static GLbitfield s_pass_discard;
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
@@ -408,6 +409,7 @@ static void nt_gfx_gl_cache_ground_state(void) {
     nt_gl_clear_depth(1.0F);
 
     s_bound_framebuffer = 0;
+    s_pass_discard = 0;
     s_gl_cache.vao = 0;
     s_gl_cache.program = 0;
     s_gl_cache.depth_test_enabled = false;
@@ -886,6 +888,30 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 #endif
 // #endregion
 
+/* Attachment enums differ between the window framebuffer and user FBOs. Missing attachments are ignored by GL. */
+static void invalidate_attachments(GLbitfield mask) {
+    if (mask == 0) {
+        return;
+    }
+#ifndef NT_PLATFORM_WEB
+    if (glad_glInvalidateFramebuffer == NULL) {
+        return;
+    }
+#endif
+    GLenum attachments[3];
+    GLsizei count = 0;
+    if ((mask & GL_COLOR_BUFFER_BIT) != 0) {
+        attachments[count++] = s_bound_framebuffer != 0 ? GL_COLOR_ATTACHMENT0 : GL_COLOR;
+    }
+    if ((mask & GL_DEPTH_BUFFER_BIT) != 0) {
+        attachments[count++] = s_bound_framebuffer != 0 ? GL_DEPTH_ATTACHMENT : GL_DEPTH;
+    }
+    if ((mask & GL_STENCIL_BUFFER_BIT) != 0) {
+        attachments[count++] = s_bound_framebuffer != 0 ? GL_STENCIL_ATTACHMENT : GL_STENCIL;
+    }
+    NT_GL_ATTACHMENTS(glInvalidateFramebuffer, GL_FRAMEBUFFER, count, attachments);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend, uint16_t width, uint16_t height) {
     NT_ASSERT(desc != NULL);
@@ -906,27 +932,76 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
         s_bound_framebuffer = fbo;
     }
     gl_set_viewport(0, 0, (int)viewport_w, (int)viewport_h);
-    if (!float4_equal(s_gl_cache.clear_color, desc->clear_color)) {
-        memcpy(s_gl_cache.clear_color, desc->clear_color, sizeof(s_gl_cache.clear_color));
-        NT_GL(glClearColor, desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
+    /* Stencil has no pass API; it shares the depth lifetime so a packed depth-stencil buffer is dropped whole. */
+    s_pass_discard = (desc->discard_color ? GL_COLOR_BUFFER_BIT : 0U) | (desc->discard_depth ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT : 0U);
+    GLbitfield clear = 0;
+    if (!desc->load_color) {
+        clear |= GL_COLOR_BUFFER_BIT;
+        if (!float4_equal(s_gl_cache.clear_color, desc->clear_color)) {
+            memcpy(s_gl_cache.clear_color, desc->clear_color, sizeof(s_gl_cache.clear_color));
+            NT_GL(glClearColor, desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
+        }
     }
-    if (s_gl_cache.clear_depth != desc->clear_depth) {
-        s_gl_cache.clear_depth = desc->clear_depth;
-        nt_gl_clear_depth(desc->clear_depth);
+    if (!desc->load_depth) {
+        clear |= GL_DEPTH_BUFFER_BIT;
+        if (s_gl_cache.clear_depth != desc->clear_depth) {
+            s_gl_cache.clear_depth = desc->clear_depth;
+            nt_gl_clear_depth(desc->clear_depth);
+        }
+        /* Depth clear ignores the previous draw's write mask; the next pipeline restores its own. */
+        if (!s_gl_cache.depth_write_enabled) {
+            NT_GL(glDepthMask, GL_TRUE);
+            s_gl_cache.depth_write_enabled = true;
+        }
     }
-    /* The clear must not inherit the previous pipeline's depth-write mask, and
-     * leaves it on: the pass's first pipeline bind re-applies its own. */
-    if (!s_gl_cache.depth_write_enabled) {
-        NT_GL(glDepthMask, GL_TRUE);
-        s_gl_cache.depth_write_enabled = true;
+    if (clear != 0) {
+        bool scissor = nt_gfx_scissor_enabled();
+        if (scissor) {
+            NT_GL(glDisable, GL_SCISSOR_TEST);
+        }
+        NT_GL(glClear, clear);
+        if (scissor) {
+            NT_GL(glEnable, GL_SCISSOR_TEST);
+        }
     }
-    NT_GL(glClear, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
 void nt_gfx_backend_end_pass(void) {
+    invalidate_attachments(s_pass_discard);
+    s_pass_discard = 0;
     if (s_bound_framebuffer != 0) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
         s_bound_framebuffer = 0;
+    }
+}
+
+void nt_gfx_backend_clear(const nt_clear_desc_t *desc) {
+    GLbitfield mask = 0;
+    if (desc->color) {
+        mask |= GL_COLOR_BUFFER_BIT;
+        if (!float4_equal(s_gl_cache.clear_color, desc->clear_color)) {
+            memcpy(s_gl_cache.clear_color, desc->clear_color, sizeof(s_gl_cache.clear_color));
+            NT_GL(glClearColor, desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
+        }
+    }
+    if (desc->depth) {
+        mask |= GL_DEPTH_BUFFER_BIT;
+        if (s_gl_cache.clear_depth != desc->clear_depth) {
+            s_gl_cache.clear_depth = desc->clear_depth;
+            nt_gl_clear_depth(desc->clear_depth);
+        }
+    }
+    if (mask == 0) {
+        return;
+    }
+    /* Unlike pass initialization, an in-pass clear must preserve the bound pipeline's mask. */
+    const bool restore_depth_mask = desc->depth && !s_gl_cache.depth_write_enabled;
+    if (restore_depth_mask) {
+        NT_GL(glDepthMask, GL_TRUE);
+    }
+    NT_GL(glClear, mask);
+    if (restore_depth_mask) {
+        NT_GL(glDepthMask, GL_FALSE);
     }
 }
 

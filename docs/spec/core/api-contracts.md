@@ -462,10 +462,18 @@ are unchecked as specified above. Mandatory backend setup objects are internal
 invariants: failure to create the GL service EBO
 upload VAO with a live context asserts.
 
-`nt_gfx_begin_pass` asserts on invalid sequencing and on an invalid or stale
-target. Callers check `nt_gfx_render_target_valid` before a pass on a target
+`nt_gfx_begin_pass` asserts on invalid sequencing, on discarding the default
+framebuffer color, and on an invalid or stale target. Callers check `nt_gfx_render_target_valid` before a pass on a target
 that a loss or a cascade may have freed; there is no non-asserting pass-begin
 variant.
+
+`nt_gfx_clear` requires an open pass and a non-NULL descriptor; violations assert
+on a live context. The descriptor is borrowed only for the call, with no retained
+pointer. `color` and `depth` select independent clears; unselected values are
+ignored. The current scissor limits the clear, while a disabled scissor clears
+the whole attachment. Clear preserves draw state and restores the depth write
+mask after a depth clear. No selections is an accepted operation without GPU
+work. On a known lost context clear does nothing, as pass calls do.
 
 ## Hot Path Rule
 

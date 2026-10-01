@@ -38,6 +38,8 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 
 void nt_gfx_end_pass(void) {}
 
+void nt_gfx_clear(const nt_clear_desc_t *desc) { (void)desc; }
+
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
     (void)desc;
     return (nt_shader_t){0};
