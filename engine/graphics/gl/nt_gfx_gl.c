@@ -665,7 +665,6 @@ void nt_gfx_backend_shutdown(void) {
     s_render_target_gl = NULL;
 
     s_bound_framebuffer = 0;
-    s_pass_discard = 0;
     /* A dead context already reclaimed the name; a GL call here would run
      * without a current context on web. */
     if (s_ebo_upload_vao != 0 && !nt_gfx_gl_ctx_query_lost()) {
@@ -933,18 +932,17 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
         s_bound_framebuffer = fbo;
     }
     gl_set_viewport(0, 0, (int)viewport_w, (int)viewport_h);
-    s_pass_discard = (desc->color_store == NT_STORE_DISCARD ? GL_COLOR_BUFFER_BIT : 0U) | (desc->depth_store == NT_STORE_DISCARD ? GL_DEPTH_BUFFER_BIT : 0U) |
-                     (desc->stencil_store == NT_STORE_DISCARD ? GL_STENCIL_BUFFER_BIT : 0U);
-    invalidate_attachments((desc->color_load == NT_LOAD_DONT_CARE ? GL_COLOR_BUFFER_BIT : 0U) | (desc->depth_load == NT_LOAD_DONT_CARE ? GL_DEPTH_BUFFER_BIT : 0U));
+    /* Stencil has no pass API; it shares the depth lifetime so a packed depth-stencil buffer is dropped whole. */
+    s_pass_discard = (desc->discard_color ? GL_COLOR_BUFFER_BIT : 0U) | (desc->discard_depth ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT : 0U);
     GLbitfield clear = 0;
-    if (desc->color_load == NT_LOAD_CLEAR) {
+    if (!desc->load_color) {
         clear |= GL_COLOR_BUFFER_BIT;
         if (!float4_equal(s_gl_cache.clear_color, desc->clear_color)) {
             memcpy(s_gl_cache.clear_color, desc->clear_color, sizeof(s_gl_cache.clear_color));
             NT_GL(glClearColor, desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
         }
     }
-    if (desc->depth_load == NT_LOAD_CLEAR) {
+    if (!desc->load_depth) {
         clear |= GL_DEPTH_BUFFER_BIT;
         if (s_gl_cache.clear_depth != desc->clear_depth) {
             s_gl_cache.clear_depth = desc->clear_depth;

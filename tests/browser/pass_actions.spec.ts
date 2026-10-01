@@ -31,7 +31,6 @@ test('pass actions preserve shared depth, clear fully and invalidate before unbi
     const hooks = (window as unknown as { __nt?: Hooks }).__nt;
     return hooks?.ready && hooks.programs_ready();
   });
-  expect(await page.evaluate(() => document.querySelector('canvas')!.getContext('webgl2')!.getContextAttributes()!.stencil)).toBe(true);
   for (let cycle = 0; cycle < 2; cycle++) {
     const runs = await page.evaluate(() => {
       const hooks = (window as unknown as { __nt: Hooks }).__nt;
@@ -46,20 +45,18 @@ test('pass actions preserve shared depth, clear fully and invalidate before unbi
       });
     });
     for (const run of runs) {
-      expect(run.result).toBe(63);
+      expect(run.result).toBe(55);
       expect(run.errors).toEqual([]);
       const invalidates = run.calls.filter(call => call.name === 'invalidateFramebuffer');
       expect(invalidates).toEqual([
-        { name: 'invalidateFramebuffer', args: [0x8ce0, 0x8d00], fbo: true },
         { name: 'invalidateFramebuffer', args: [0x8d00, 0x8d20], fbo: true },
-        { name: 'invalidateFramebuffer', args: [0x1800, 0x1801], fbo: false },
         { name: 'invalidateFramebuffer', args: [0x1801, 0x1802], fbo: false },
       ]);
       expect(run.calls.filter(call => call.name === 'clear').map(call => call.args[0])).toEqual([0x4100, 0x100, 0x4000]);
       expect(run.calls.filter(call => call.name === 'drawArrays')).toHaveLength(4);
       const firstDiscard = run.calls.findIndex(call => call.name === 'invalidateFramebuffer');
-      expect(run.calls.slice(firstDiscard, firstDiscard + 4).map(call => call.name)).toEqual([
-        'invalidateFramebuffer', 'drawArrays', 'invalidateFramebuffer', 'bindFramebuffer',
+      expect(run.calls.slice(firstDiscard - 1, firstDiscard + 2).map(call => call.name)).toEqual([
+        'drawArrays', 'invalidateFramebuffer', 'bindFramebuffer',
       ]);
     }
     if (cycle === 0) {

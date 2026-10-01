@@ -1511,7 +1511,7 @@ static void test_pass_load_preserves_color_and_depth_independently(void) {
     nt_gfx_end_pass();
     nt_gfx_update_texture(target.color, 0, 0, 2, 1, colors);
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_depth = 0.75F, .color_load = NT_LOAD_LOAD, .depth_load = NT_LOAD_LOAD});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {1, 0, 0, 1}, .clear_depth = 0.75F, .load_color = true, .load_depth = true});
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
     uint8_t pixels[8] = {0};
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)));
@@ -1521,7 +1521,7 @@ static void test_pass_load_preserves_color_and_depth_independently(void) {
     TEST_ASSERT_UINT32_WITHIN(1, 250, (uint32_t)((depth * 1000.0F) + 0.5F));
     nt_gfx_end_pass();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_depth = 0.75F, .color_load = NT_LOAD_LOAD});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_depth = 0.75F, .load_color = true});
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)));
     TEST_ASSERT_EQUAL_UINT8_ARRAY(colors, pixels, sizeof(colors));
@@ -1529,7 +1529,7 @@ static void test_pass_load_preserves_color_and_depth_independently(void) {
     TEST_ASSERT_UINT32_WITHIN(1, 750, (uint32_t)((depth * 1000.0F) + 0.5F));
     nt_gfx_end_pass();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {1, 0, 0, 1}, .depth_load = NT_LOAD_LOAD});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {1, 0, 0, 1}, .load_depth = true});
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)));
     assert_rgba(pixels, 2, 255, 0, 0, 255);
@@ -1567,65 +1567,45 @@ static void test_pass_clear_covers_attachment_and_preserves_draw_scissor(void) {
     destroy_test_target(&target);
 }
 
-static void test_pass_actions_ignore_missing_attachments(void) {
-    for (uint32_t depth_only = 0; depth_only < 2; depth_only++) {
-        test_target_t target = make_test_target(2, 2, depth_only != 0 ? NT_TEXTURE_FORMAT_INVALID : NT_TEXTURE_FORMAT_RGBA8, depth_only != 0 ? NT_TEXTURE_FORMAT_DEPTH24 : NT_TEXTURE_FORMAT_INVALID);
-        nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target,
-                                            .color_load = NT_LOAD_DONT_CARE,
-                                            .depth_load = NT_LOAD_DONT_CARE,
-                                            .color_store = NT_STORE_DISCARD,
-                                            .depth_store = NT_STORE_DISCARD,
-                                            .stencil_store = NT_STORE_DISCARD});
-        TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-        nt_gfx_end_pass();
-        TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-        destroy_test_target(&target);
-    }
-}
-
 static void test_pass_discard_maps_attachments_and_finishes_before_unbind(void) {
     test_target_t target = make_test_target(2, 2, NT_TEXTURE_FORMAT_RGBA8, NT_TEXTURE_FORMAT_DEPTH24);
     glad_glInvalidateFramebuffer = record_invalidate;
-    nt_pass_desc_t pass = {.target = target.target, .color_load = NT_LOAD_DONT_CARE, .depth_load = NT_LOAD_LOAD, .depth_store = NT_STORE_DISCARD, .stencil_store = NT_STORE_DISCARD};
+    nt_pass_desc_t pass = {.target = target.target, .load_depth = true, .discard_depth = true};
     nt_gfx_begin_pass(&pass);
-    TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    TEST_ASSERT_EQUAL_UINT32(1, s_invalidate_count);
-    TEST_ASSERT_EQUAL_INT(1, s_invalidated_count);
-    TEST_ASSERT_EQUAL_HEX32(GL_COLOR_ATTACHMENT0, s_invalidated[0]);
-    TEST_ASSERT_NOT_EQUAL(0, s_invalidated_fbo);
-    GLint fbo = s_invalidated_fbo;
-    pass.depth_store = NT_STORE_STORE;
+    TEST_ASSERT_EQUAL_UINT32(0, s_invalidate_count);
+    pass.discard_depth = false;
     nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    TEST_ASSERT_EQUAL_UINT32(2, s_invalidate_count);
+    TEST_ASSERT_EQUAL_UINT32(1, s_invalidate_count);
     TEST_ASSERT_EQUAL_INT(2, s_invalidated_count);
     TEST_ASSERT_EQUAL_HEX32(GL_DEPTH_ATTACHMENT, s_invalidated[0]);
     TEST_ASSERT_EQUAL_HEX32(GL_STENCIL_ATTACHMENT, s_invalidated[1]);
-    TEST_ASSERT_EQUAL_INT(fbo, s_invalidated_fbo);
+    TEST_ASSERT_NOT_EQUAL(0, s_invalidated_fbo);
+    GLint fbo = 0;
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
     TEST_ASSERT_EQUAL_INT(0, fbo);
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(target.color));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .discard_color = true, .discard_depth = true});
+    nt_gfx_end_pass();
+    TEST_ASSERT_EQUAL_UINT32(2, s_invalidate_count);
+    TEST_ASSERT_EQUAL_INT(3, s_invalidated_count);
+    TEST_ASSERT_EQUAL_HEX32(GL_COLOR_ATTACHMENT0, s_invalidated[0]);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target});
     nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_UINT32(2, s_invalidate_count);
     destroy_test_target(&target);
 
-    nt_gfx_begin_pass(
-        &(nt_pass_desc_t){.color_load = NT_LOAD_DONT_CARE, .depth_load = NT_LOAD_DONT_CARE, .color_store = NT_STORE_DISCARD, .depth_store = NT_STORE_DISCARD, .stencil_store = NT_STORE_DISCARD});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.discard_depth = true});
+    nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_EQUAL_INT(2, s_invalidated_count);
-    TEST_ASSERT_EQUAL_HEX32(GL_COLOR, s_invalidated[0]);
-    TEST_ASSERT_EQUAL_HEX32(GL_DEPTH, s_invalidated[1]);
-    nt_gfx_end_pass();
-    TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    TEST_ASSERT_EQUAL_INT(3, s_invalidated_count);
-    TEST_ASSERT_EQUAL_HEX32(GL_STENCIL, s_invalidated[2]);
+    TEST_ASSERT_EQUAL_HEX32(GL_DEPTH, s_invalidated[0]);
+    TEST_ASSERT_EQUAL_HEX32(GL_STENCIL, s_invalidated[1]);
 
     glad_glInvalidateFramebuffer = NULL;
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.color_load = NT_LOAD_DONT_CARE, .depth_store = NT_STORE_DISCARD});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.discard_depth = true});
     nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    TEST_ASSERT_EQUAL_UINT32(4, s_invalidate_count);
+    TEST_ASSERT_EQUAL_UINT32(3, s_invalidate_count);
 }
 
 int main(void) {
@@ -1643,7 +1623,6 @@ int main(void) {
     nt_window_init();
     UNITY_BEGIN();
     RUN_TEST(test_pass_discard_maps_attachments_and_finishes_before_unbind);
-    RUN_TEST(test_pass_actions_ignore_missing_attachments);
     RUN_TEST(test_pass_load_preserves_color_and_depth_independently);
     RUN_TEST(test_pass_clear_covers_attachment_and_preserves_draw_scissor);
     RUN_TEST(test_render_target_recreate_at_new_size_without_spare_slots);

@@ -694,11 +694,7 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
 
-    NT_ASSERT(desc->color_load >= NT_LOAD_CLEAR && desc->color_load <= NT_LOAD_DONT_CARE);
-    NT_ASSERT(desc->depth_load >= NT_LOAD_CLEAR && desc->depth_load <= NT_LOAD_DONT_CARE);
-    NT_ASSERT(desc->color_store >= NT_STORE_STORE && desc->color_store <= NT_STORE_DISCARD);
-    NT_ASSERT(desc->depth_store >= NT_STORE_STORE && desc->depth_store <= NT_STORE_DISCARD);
-    NT_ASSERT(desc->stencil_store >= NT_STORE_STORE && desc->stencil_store <= NT_STORE_DISCARD);
+    NT_ASSERT((desc->target.id != 0 || !desc->discard_color) && "begin_pass: discarding the window color loses the presented frame");
 
     uint32_t render_target_backend = 0;
     uint16_t width = 0;
@@ -733,11 +729,10 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
             event->data.pass.target = desc->target.id;
             memcpy(event->data.pass.color, desc->clear_color, sizeof(event->data.pass.color));
             event->data.pass.depth = desc->clear_depth;
-            event->data.pass.color_load = desc->color_load;
-            event->data.pass.depth_load = desc->depth_load;
-            event->data.pass.color_store = desc->color_store;
-            event->data.pass.depth_store = desc->depth_store;
-            event->data.pass.stencil_store = desc->stencil_store;
+            event->data.pass.load_color = desc->load_color;
+            event->data.pass.load_depth = desc->load_depth;
+            event->data.pass.discard_color = desc->discard_color;
+            event->data.pass.discard_depth = desc->discard_depth;
         });
     NT_GFX_END(begin_pass(desc));
 }

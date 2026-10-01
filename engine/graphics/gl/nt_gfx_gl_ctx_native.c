@@ -10,21 +10,13 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     (void)desc;
     /* Window + GL context already created by nt_window_init().
        Load GL function pointers via glad. */
-    glad_glInvalidateFramebuffer = NULL;
-    int version = gladLoadGL(glfwGetProcAddress);
-    if (version == 0) {
-        glad_glInvalidateFramebuffer = NULL;
+    if (!gladLoadGL(glfwGetProcAddress)) {
         return false;
     }
-    /* GLAD's 3.3 loader only loads the extension path; core 4.3 also supports it. */
-    glad_glInvalidateFramebuffer = (version >= GLAD_MAKE_VERSION(4, 3) || GLAD_GL_ARB_invalidate_subdata != 0) ? (PFNGLINVALIDATEFRAMEBUFFERPROC)glfwGetProcAddress("glInvalidateFramebuffer") : NULL;
     return true;
 }
 
-void nt_gfx_gl_ctx_destroy(void) {
-    /* The window owns the context; optional entry points must not outlive it. */
-    glad_glInvalidateFramebuffer = NULL;
-}
+void nt_gfx_gl_ctx_destroy(void) { /* GL context destroyed with GLFW window in nt_window_shutdown() */ }
 
 /* Desktop GL contexts do not suffer context loss like WebGL */
 bool nt_gfx_gl_ctx_take_loss(void) { return false; }

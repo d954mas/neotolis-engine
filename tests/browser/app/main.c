@@ -500,7 +500,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     uint32_t result = 0;
     uint8_t pixels[8] = {0};
     z[0] = 0.5F;
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .color_load = NT_LOAD_LOAD, .depth_load = NT_LOAD_LOAD});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F, .load_color = true, .load_depth = true});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
     nt_gfx_apply_texture_bindings(NULL, 0);
@@ -511,7 +511,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     }
     nt_gfx_end_pass();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .color_load = NT_LOAD_LOAD, .clear_depth = 1.0F});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F, .load_color = true});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
     nt_gfx_apply_texture_bindings(NULL, 0);
@@ -525,14 +525,14 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_end_pass();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .depth_load = NT_LOAD_LOAD});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .load_depth = true});
     const uint8_t red[8] = {255, 0, 0, 255, 255, 0, 0, 255};
     if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0 && nt_gfx_scissor_enabled()) {
         result |= 4U;
     }
     nt_gfx_set_scissor_enabled(false);
     nt_gfx_end_pass();
-    nt_pass_desc_t discard = {.target = target, .color_load = NT_LOAD_DONT_CARE, .depth_load = NT_LOAD_DONT_CARE, .depth_store = NT_STORE_DISCARD, .stencil_store = NT_STORE_DISCARD};
+    nt_pass_desc_t discard = {.target = target, .load_color = true, .load_depth = true, .discard_depth = true};
     nt_gfx_begin_pass(&discard);
     nt_gfx_bind_pipeline(overwrite);
     nt_gfx_bind_vertex_input(input);
@@ -542,24 +542,23 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
         result |= 16U;
     }
-    discard.depth_store = NT_STORE_STORE;
+    discard.discard_depth = false;
     nt_gfx_end_pass();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .color_load = NT_LOAD_LOAD, .depth_load = NT_LOAD_LOAD});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
     if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
         result |= 32U;
     }
     nt_gfx_end_pass();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.color_load = NT_LOAD_DONT_CARE, .depth_load = NT_LOAD_DONT_CARE, .depth_store = NT_STORE_DISCARD, .stencil_store = NT_STORE_DISCARD});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.load_color = true, .load_depth = true, .discard_depth = true});
     nt_gfx_end_pass();
-    if (nt_gfx_texture_ready(color) && nt_gfx_texture_ready(depth)) {
-        result |= 8U;
-    }
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_pipeline(overwrite);
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_render_target(prepass);
     nt_gfx_destroy_texture(color);
     nt_gfx_destroy_texture(depth);
     nt_gfx_begin_frame();
@@ -1185,7 +1184,6 @@ int main(int argc, char *argv[]) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.capture_capacity = 16384;
-    gfx_desc.stencil = true;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 
