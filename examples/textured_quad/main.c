@@ -2,7 +2,7 @@
  * Textured Cube Demo -- Neotolis Engine
  *
  * Full mesh rendering pipeline demo:
- *   Entity/components → render items → nt_mesh_renderer_draw_list → GPU
+ *   Entity/components → render items → nt_mesh_renderer_prepare → frame arena → nt_mesh_renderer_draw → GPU
  *
  * Shows: asset packs, material system, entity system, instanced mesh rendering,
  * UBO frame uniforms, texture hot-swap via resource priorities.
@@ -29,6 +29,7 @@
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
+#include "frame_arena/nt_frame_arena.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
@@ -188,7 +189,8 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         /* Materials keep their handles and draw again once their programs relink. */
-        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
+        nt_mesh_renderer_restore_gpu();
+        const nt_result_t restore_result = nt_frame_arena_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         (void)restore_result;
         nt_program_ref_drop(&s_cube_program);
@@ -331,21 +333,11 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    /* Restore GPU resources after WebGL context loss */
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});
-
+    /* ---- Collect: build render items from entities ---- */
+    nt_render_item_t items[NUM_CUBES];
+    uint32_t item_count = 0;
     if (can_render) {
-        /* Upload frame uniforms and bind to slot 0 */
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-
         nt_mesh_t mesh = {.id = nt_resource_get(s_mesh_handle)};
-
-        /* ---- Collect: build render items from entities ---- */
-        nt_render_item_t items[NUM_CUBES];
-        uint32_t item_count = 0;
-
         for (int i = 0; i < NUM_CUBES; i++) {
             /* Update mesh handle (may change when resource resolves) */
             *nt_mesh_comp_handle(s_cubes[i]) = mesh;
@@ -358,9 +350,23 @@ static void frame(void) {
 
         /* ---- Sort: order by sort_key (material+mesh grouping) ---- */
         nt_sort_by_key(items, item_count, s_sort_scratch);
+    }
+
+    /* ---- Prepare: pack instance data and upload it once, before the first draw ---- */
+    nt_frame_arena_begin_frame();
+    nt_mesh_run_t runs[NUM_CUBES];
+    const uint32_t run_count = nt_mesh_renderer_prepare(items, item_count, runs, NUM_CUBES);
+    nt_frame_arena_upload();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});
+
+    if (can_render) {
+        /* Upload frame uniforms and bind to slot 0 */
+        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
+        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         /* ---- Draw: mesh renderer handles pipeline, instancing, batching ---- */
-        nt_mesh_renderer_draw_list(items, item_count);
+        nt_mesh_renderer_draw(runs, run_count);
 
         /* One-time log to verify batching */
         static bool s_stats_logged;
@@ -429,6 +435,7 @@ int main(void) {
     /* Init mesh renderer */
     nt_mesh_renderer_desc_t mr_desc = nt_mesh_renderer_desc_defaults();
     nt_mesh_renderer_init(&mr_desc);
+    nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = NUM_CUBES * NT_INSTANCE_STRIDE_MAX});
 
     /* Request resource handles (instanced shaders) */
     s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
@@ -513,6 +520,7 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+    nt_frame_arena_shutdown();
     nt_mesh_renderer_shutdown();
     nt_drawable_comp_shutdown();
     nt_material_comp_shutdown();

@@ -26,6 +26,7 @@
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
+#include "frame_arena/nt_frame_arena.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
@@ -1522,10 +1523,12 @@ static void init_mesh_scene(void) {
     result = nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 3 * SKELETAL_SHOWCASE_MAX_PALETTE, .height = SKELETAL_SHOWCASE_MAX_INSTANCES});
     NT_ASSERT(result == NT_OK);
     /* Static meshes are only the CPU reference: one body and one shirt. */
-    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_instances = 2, .max_pipelines = 8, .max_mesh_layouts = 4});
+    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
-    /* The instance ring has room for both ordering passes, so a frame wraps it at most once. */
-    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 2 * SKELETAL_SHOWCASE_MAX_INSTANCES, .max_pipelines = 8, .max_mesh_layouts = 4});
+    /* Both ordering passes at the largest skinned stride (76 B) fit one frame. */
+    result = nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = 2U * SKELETAL_SHOWCASE_MAX_INSTANCES * 80U});
+    NT_ASSERT(result == NT_OK);
+    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
     for (uint32_t i = 0; i < SHOWCASE_ENTITY_COUNT; ++i) {
         const nt_entity_t e = nt_entity_create();
@@ -1590,9 +1593,9 @@ static void init_mesh_scene(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void restore_mesh_scene(void) {
-    nt_result_t result = nt_skinned_mesh_renderer_restore_gpu();
-    NT_ASSERT(result == NT_OK);
-    result = nt_mesh_renderer_restore_gpu();
+    nt_skinned_mesh_renderer_restore_gpu();
+    nt_mesh_renderer_restore_gpu();
+    nt_result_t result = nt_frame_arena_restore_gpu();
     NT_ASSERT(result == NT_OK);
     result = nt_skeletal_gpu_restore_gpu();
     NT_ASSERT(result == NT_OK);
@@ -1617,6 +1620,7 @@ static void restore_mesh_scene(void) {
 
 #ifndef NT_PLATFORM_WEB
 static void shutdown_mesh_scene(void) {
+    nt_frame_arena_shutdown();
     nt_skinned_mesh_renderer_shutdown();
     nt_mesh_renderer_shutdown();
     nt_skeletal_gpu_shutdown();
@@ -2367,11 +2371,15 @@ static void skinned_draw(void) {
             nt_skin_palette_build(skins[i], models[i], p->skel->joint_count, palette, skins[i]->palette_count);
         }
     }
+    /* Every reserve of the frame precedes its single upload; the stage's draws read it afterwards. */
+    nt_mesh_run_t runs[2];
+    const uint32_t run_count = cpu ? nt_mesh_renderer_prepare(items, ready, runs, 2) : nt_skinned_mesh_renderer_prepare(items, ready, runs, 2);
+    nt_frame_arena_upload();
     if (cpu) {
-        nt_mesh_renderer_draw_list(items, ready);
+        nt_mesh_renderer_draw(runs, run_count);
     } else {
         nt_skeletal_gpu_flush();
-        nt_skinned_mesh_renderer_draw_list(items, ready);
+        nt_skinned_mesh_renderer_draw(runs, run_count);
     }
     if (s_show_bones) {
         nt_shape_renderer_set_depth(false); /* bones are an overlay: most sit inside the mesh */
@@ -2458,7 +2466,10 @@ static void mixing_draw(void) {
         }
     }
     nt_skeletal_gpu_flush();
-    nt_skinned_mesh_renderer_draw_list(items, ready);
+    nt_mesh_run_t runs[MIX_ENTITY_COUNT];
+    const uint32_t run_count = nt_skinned_mesh_renderer_prepare(items, ready, runs, MIX_ENTITY_COUNT);
+    nt_frame_arena_upload();
+    nt_skinned_mesh_renderer_draw(runs, run_count);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2486,7 +2497,9 @@ static void ordering_draw(void) {
             ++s_order_stats.palettes;
         }
     }
-    nt_skeletal_gpu_flush();
+    /* Each pass rebinds the entities' materials; its runs keep what its prepare resolved. */
+    static nt_mesh_run_t runs[2][SKELETAL_SHOWCASE_MAX_INSTANCES];
+    uint32_t run_counts[2] = {0, 0};
     for (uint32_t pass = 0; pass < passes; ++pass) {
         nt_render_item_t items[SKELETAL_SHOWCASE_MAX_INSTANCES];
         for (uint32_t i = 0; i < count; ++i) {
@@ -2497,10 +2510,15 @@ static void ordering_draw(void) {
             *nt_material_comp_handle(e) = material;
             items[i] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
         }
+        run_counts[pass] = nt_skinned_mesh_renderer_prepare(items, count, runs[pass], SKELETAL_SHOWCASE_MAX_INSTANCES);
+    }
+    nt_skeletal_gpu_flush();
+    nt_frame_arena_upload();
+    for (uint32_t pass = 0; pass < passes; ++pass) {
         stage_viewport(pass, passes);
         const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
         const uint64_t instances_before = g_nt_gfx.counters.instances;
-        nt_skinned_mesh_renderer_draw_list(items, count);
+        nt_skinned_mesh_renderer_draw(runs[pass], run_counts[pass]);
         s_order_stats.draws[pass] = nt_gfx_draw_calls(&g_nt_gfx.counters) - draws_before;
         s_order_stats.instances[pass] = (uint32_t)(g_nt_gfx.counters.instances - instances_before);
         s_order_stats.expected[pass] = s_order_mode == 0 || (pass == 1 && s_order_mode == 2) ? 1U : count;
@@ -2582,6 +2600,8 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
     }
+    /* The active stage prepares its runs and uploads them once before drawing them. */
+    nt_frame_arena_begin_frame();
 #ifdef NT_DEVAPI_ENABLED
     nt_devapi_update();
 #endif

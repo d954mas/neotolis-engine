@@ -142,6 +142,7 @@ It consumes the existing render components plus `skin_comp`; it does not sample
 animation or select a graphics implementation. Its current `PUBLIC` CMake
 dependencies include the chain
 `nt_skinned_mesh_renderer → nt_skin_comp → nt_skeletal_gpu → nt_skeletal`.
+Both mesh renderers link `nt_frame_arena` publicly: prepared runs live in it.
 Static archive linking can still discard unused CPU kernel objects. The
 composition-symbol checks that prove the intended variants without LTO remain
 #488 scope.

@@ -3,6 +3,7 @@
 #include <string.h>
 
 /* clang-format off */
+#include "frame_arena/nt_frame_arena.h"
 #include "renderers/nt_skinned_mesh_renderer.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
@@ -213,6 +214,38 @@ static nt_render_item_t make_item(nt_entity_t entity, nt_material_t material, nt
     };
 }
 
+#define TEST_MAX_RUNS 16
+static nt_mesh_run_t s_runs[TEST_MAX_RUNS];
+
+/* One gfx frame of the prepared path, ending inside a fresh pass the tests draw in. */
+/* The arena uploads whole aligned reserves. */
+static uint32_t arena_bytes(uint32_t packed) { return (packed + NT_FRAME_ARENA_ALIGN - 1U) & ~(NT_FRAME_ARENA_ALIGN - 1U); }
+
+static void begin_arena_frame(void) {
+    nt_gfx_end_pass();
+    nt_gfx_begin_frame();
+    nt_frame_arena_begin_frame();
+}
+
+static void upload_and_begin_pass(void) {
+    nt_frame_arena_upload();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
+static void skinned_draw_list(const nt_render_item_t *items, uint32_t count) {
+    begin_arena_frame();
+    const uint32_t run_count = nt_skinned_mesh_renderer_prepare(items, count, s_runs, TEST_MAX_RUNS);
+    upload_and_begin_pass();
+    nt_skinned_mesh_renderer_draw(s_runs, run_count);
+}
+
+static void mesh_draw_list(const nt_render_item_t *items, uint32_t count) {
+    begin_arena_frame();
+    const uint32_t run_count = nt_mesh_renderer_prepare(items, count, s_runs, TEST_MAX_RUNS);
+    upload_and_begin_pass();
+    nt_mesh_renderer_draw(s_runs, run_count);
+}
+
 void setUp(void) {
     s_surface_pack_created = false;
     s_program_warnings = 0;
@@ -240,6 +273,7 @@ void setUp(void) {
     nt_skinned_mesh_renderer_desc_t desc = nt_skinned_mesh_renderer_desc_defaults();
     desc.max_pipelines = 8;
     TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&desc));
+    TEST_ASSERT_EQUAL(NT_OK, nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = 4096}));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
 }
@@ -247,6 +281,7 @@ void setUp(void) {
 void tearDown(void) {
     nt_log_remove_sink(capture_program_warning, NULL);
     nt_gfx_end_pass();
+    nt_frame_arena_shutdown();
     nt_skinned_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_skin_comp_shutdown();
@@ -271,7 +306,7 @@ void test_one_compatible_item_draws_with_supplied_deformation_texture(void) {
         .batch_key = nt_mesh_renderer_batch_key(material, mesh),
     };
 
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
@@ -291,7 +326,7 @@ void test_compatible_items_share_one_instanced_draw(void) {
         items[i] = make_item(entity, material, mesh);
     }
 
-    nt_skinned_mesh_renderer_draw_list(items, 3);
+    skinned_draw_list(items, 3);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(0).instance_count);
@@ -311,7 +346,7 @@ void test_deformation_texture_splits_runs_but_origins_do_not(void) {
         make_item(entity_b, material, mesh),
     };
 
-    nt_skinned_mesh_renderer_draw_list(items, 3);
+    skinned_draw_list(items, 3);
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(0).instance_count);
@@ -340,7 +375,7 @@ void test_a_b_a_textures_reapply_complete_set_and_ignore_skin_override(void) {
     };
 
     nt_gfx_fake_reset();
-    nt_skinned_mesh_renderer_draw_list(items, 3);
+    skinned_draw_list(items, 3);
 
     const uint32_t surface_backend = nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(surface)});
     const uint32_t a_backend = nt_gfx_test_texture_backend_id(texture_a);
@@ -362,9 +397,9 @@ void test_separate_draw_lists_replay_supplied_texture_set(void) {
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     nt_gfx_fake_reset();
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture), nt_gfx_fake_bound_texture_at(0));
@@ -383,11 +418,11 @@ void test_packed_instances_keep_each_entity_world_and_binding(void) {
     nt_transform_comp_update();
     nt_render_item_t items[2] = {make_item(entity1, material, mesh), make_item(entity0, material, mesh)};
 
-    nt_skinned_mesh_renderer_draw_list(items, 2);
+    skinned_draw_list(items, 2);
 
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
     TEST_ASSERT_NOT_NULL(bytes);
-    TEST_ASSERT_EQUAL_UINT32(120, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(arena_bytes(120), nt_gfx_fake_last_update_buffer_size());
     uint32_t world_x_bits[2];
     uint16_t origins[2][4];
     const uint16_t expected_origins[2][4] = {{11, 12, 13, 14}, {1, 2, 3, 4}};
@@ -426,7 +461,7 @@ void test_material_or_mesh_change_splits_runs_in_input_order(void) {
         make_item(entities[3], material_a, mesh_a),
     };
 
-    nt_skinned_mesh_renderer_draw_list(items, 4);
+    skinned_draw_list(items, 4);
 
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_draw_trace_count());
     for (uint32_t i = 0; i < 4; i++) {
@@ -447,36 +482,13 @@ void test_material_transition_reapplies_complete_surface_and_skin_set(void) {
     nt_render_item_t items[2] = {make_item(entity_a, material_a, mesh), make_item(entity_b, material_b, mesh)};
 
     nt_gfx_fake_reset();
-    nt_skinned_mesh_renderer_draw_list(items, 2);
+    skinned_draw_list(items, 2);
 
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(2));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(3));
-}
-
-void test_chunk_limit_splits_one_run_without_dropping_instances(void) {
-    nt_skinned_mesh_renderer_shutdown();
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 2, .max_pipelines = 4, .max_mesh_layouts = 2}));
-    nt_mesh_t mesh = make_mesh();
-    nt_texture_t texture = make_deformation_texture();
-    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
-    nt_render_item_t items[3];
-    for (uint32_t i = 0; i < 3; i++) {
-        nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
-        items[i] = make_item(entity, material, mesh);
-    }
-
-    nt_gfx_fake_reset();
-    nt_gfx_fake_draw_trace_reset(true);
-    nt_skinned_mesh_renderer_draw_list(items, 3);
-
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_at(0).instance_count);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).instance_count);
-    TEST_ASSERT_EQUAL_UINT32(3, nt_skinned_mesh_renderer_test_instance_total());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_update_buffer_count());
 }
 
 void test_indexed_and_nonindexed_meshes_use_matching_draw_paths(void) {
@@ -488,7 +500,7 @@ void test_indexed_and_nonindexed_meshes_use_matching_draw_paths(void) {
     nt_entity_t nonindexed_entity = make_entity(nonindexed, material, (nt_deformation_binding_t){.texture = texture});
     nt_render_item_t items[2] = {make_item(indexed_entity, material, indexed), make_item(nonindexed_entity, material, nonindexed)};
 
-    nt_skinned_mesh_renderer_draw_list(items, 2);
+    skinned_draw_list(items, 2);
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(0).num_indices);
@@ -506,9 +518,9 @@ void test_rgba8_and_float4_colors_keep_skin_fields_at_their_layout_offsets(void)
     nt_drawable_comp_set_color(rgba8_entity, -0.25F, 0.5F, 1.25F, 1.0F);
     nt_drawable_comp_set_alpha(rgba8_entity, 0.25F);
     nt_render_item_t item = make_item(rgba8_entity, rgba8, mesh);
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
-    TEST_ASSERT_EQUAL_UINT32(64, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(arena_bytes(64), nt_gfx_fake_last_update_buffer_size());
     const uint8_t expected_rgba8[4] = {0, 128, 255, 64};
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_rgba8, bytes + 60, 4);
     uint16_t origins[4];
@@ -523,9 +535,9 @@ void test_rgba8_and_float4_colors_keep_skin_fields_at_their_layout_offsets(void)
     nt_entity_t float4_entity = make_entity(mesh, float4, binding);
     nt_drawable_comp_set_color(float4_entity, 0.25F, 1.5F, 0.75F, 1.0F);
     item = make_item(float4_entity, float4, mesh);
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
-    TEST_ASSERT_EQUAL_UINT32(76, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(arena_bytes(76), nt_gfx_fake_last_update_buffer_size());
     uint32_t color_bits[4];
     memcpy(color_bits, bytes + 60, sizeof(color_bits));
     TEST_ASSERT_EQUAL_HEX32(0x3E800000U, color_bits[0]);
@@ -548,10 +560,10 @@ void test_mixed_color_modes_pack_canonical_strides_and_offsets(void) {
         items[i] = make_item(entity, material, mesh);
     }
 
-    nt_skinned_mesh_renderer_draw_list(items, 3);
+    skinned_draw_list(items, 3);
 
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
-    TEST_ASSERT_EQUAL_UINT32(60U + 64U + 76U, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(arena_bytes(60U + 64U + 76U), nt_gfx_fake_last_update_buffer_size());
     TEST_ASSERT_EQUAL_UINT32(3, nt_skinned_mesh_renderer_test_draw_call_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_update_buffer_offset() + 60U + 64U, nt_gfx_fake_last_instance_offset());
     uint16_t origin;
@@ -575,7 +587,7 @@ void test_active_skin_sampler_must_be_declared_by_material(void) {
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw_list(&item, 1));
+    NT_TEST_EXPECT_ASSERT(skinned_draw_list(&item, 1));
 }
 
 void test_zero_deformation_texture_asserts(void) {
@@ -584,7 +596,9 @@ void test_zero_deformation_texture_asserts(void) {
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){0});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw_list(&item, 1));
+    begin_arena_frame();
+    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
+    upload_and_begin_pass();
 }
 
 void test_skinned_mesh_stream_cannot_overlap_active_color_location(void) {
@@ -597,12 +611,14 @@ void test_skinned_mesh_stream_cannot_overlap_active_color_location(void) {
         nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
         nt_render_item_t item = make_item(entity, material, mesh);
 
-        NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw_list(&item, 1));
+        begin_arena_frame();
+        NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
+        upload_and_begin_pass();
     }
 }
 
 void test_static_mesh_stream_cannot_overlap_active_color_location(void) {
-    nt_mesh_renderer_desc_t desc = {.max_instances = 2, .max_pipelines = 4, .max_mesh_layouts = 2};
+    nt_mesh_renderer_desc_t desc = {.max_pipelines = 4, .max_mesh_layouts = 2};
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&desc));
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
     const nt_color_mode_t modes[2] = {NT_COLOR_MODE_RGBA8, NT_COLOR_MODE_FLOAT4};
@@ -618,7 +634,9 @@ void test_static_mesh_stream_cannot_overlap_active_color_location(void) {
         nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){0});
         nt_render_item_t item = make_item(entity, material, mesh);
 
-        NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(&item, 1));
+        begin_arena_frame();
+        NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
+        upload_and_begin_pass();
     }
     nt_mesh_renderer_shutdown();
 }
@@ -639,13 +657,13 @@ void test_skinned_none_color_allows_mesh_attribute_at_inactive_color_location(vo
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
 }
 
 void test_static_none_color_allows_mesh_attribute_at_inactive_color_location(void) {
-    nt_mesh_renderer_desc_t desc = {.max_instances = 2, .max_pipelines = 2, .max_mesh_layouts = 2};
+    nt_mesh_renderer_desc_t desc = {.max_pipelines = 2, .max_mesh_layouts = 2};
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&desc));
     nt_mesh_t mesh = make_mesh();
     nt_material_t material = nt_material_create(&(nt_material_create_desc_t){
@@ -658,7 +676,7 @@ void test_static_none_color_allows_mesh_attribute_at_inactive_color_location(voi
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){0});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    nt_mesh_renderer_draw_list(&item, 1);
+    mesh_draw_list(&item, 1);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
     nt_mesh_renderer_shutdown();
@@ -677,7 +695,7 @@ void test_skinned_none_color_restores_white_after_colored_run(void) {
         make_item(none_entity, none, mesh),
     };
 
-    nt_skinned_mesh_renderer_draw_list(items, 2);
+    skinned_draw_list(items, 2);
 
     float color[4];
     const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
@@ -686,7 +704,7 @@ void test_skinned_none_color_restores_white_after_colored_run(void) {
 }
 
 void test_static_none_color_restores_white_after_colored_run(void) {
-    nt_mesh_renderer_desc_t desc = {.max_instances = 2, .max_pipelines = 2, .max_mesh_layouts = 2};
+    nt_mesh_renderer_desc_t desc = {.max_pipelines = 2, .max_mesh_layouts = 2};
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&desc));
     nt_mesh_t mesh = make_mesh();
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
@@ -711,7 +729,7 @@ void test_static_none_color_restores_white_after_colored_run(void) {
         make_item(none_entity, none, mesh),
     };
 
-    nt_mesh_renderer_draw_list(items, 2);
+    mesh_draw_list(items, 2);
 
     float color[4];
     const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
@@ -721,14 +739,14 @@ void test_static_none_color_restores_white_after_colored_run(void) {
 }
 
 void test_static_mesh_renderer_ignores_unmapped_skin_streams(void) {
-    nt_mesh_renderer_desc_t desc = {.max_instances = 2, .max_pipelines = 2, .max_mesh_layouts = 2};
+    nt_mesh_renderer_desc_t desc = {.max_pipelines = 2, .max_mesh_layouts = 2};
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&desc));
     nt_mesh_t mesh = make_skin_stream_mesh();
     nt_material_t material = make_material_without_skin(nt_gfx_fake_make_program(NULL, 0));
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){0});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    nt_mesh_renderer_draw_list(&item, 1);
+    mesh_draw_list(&item, 1);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
     nt_mesh_renderer_shutdown();
@@ -741,18 +759,18 @@ void test_unready_program_warns_once_and_rearms_after_success(void) {
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_program_warnings);
 
     nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1);
     nt_material_set_program(material, program);
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
 
     nt_gfx_destroy_program(program);
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 2U : 0U, s_program_warnings);
 }
 
@@ -764,52 +782,80 @@ void test_failed_pipeline_and_vertex_input_creation_are_retryable(void) {
     nt_render_item_t item = make_item(entity, material, mesh);
 
     nt_gfx_fake_fail_next_pipeline_create();
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_draw_call_count());
 
     nt_gfx_fake_fail_next_vertex_input_create();
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_draw_call_count());
 
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
 }
 
-void test_init_and_restore_failures_leave_an_explicit_retry_path(void) {
-    nt_skinned_mesh_renderer_shutdown();
-    nt_skinned_mesh_renderer_desc_t desc = {.max_instances = 2, .max_pipelines = 2, .max_mesh_layouts = 2};
-    nt_gfx_fake_fail_buffer_creates(1);
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_skinned_mesh_renderer_init(&desc));
-    TEST_ASSERT_FALSE(nt_skinned_mesh_renderer_test_initialized());
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_restore_gpu());
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&desc));
-
+void test_restore_drops_caches_and_the_next_draw_rebuilds_them(void) {
     nt_mesh_t mesh = make_mesh();
     nt_texture_t texture = make_deformation_texture();
     nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
     nt_render_item_t item = make_item(entity, material, mesh);
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
 
-    nt_gfx_fake_set_context_lost(true);
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_skinned_mesh_renderer_restore_gpu());
-    nt_gfx_fake_set_context_lost(false);
+    nt_skinned_mesh_renderer_restore_gpu();
     TEST_ASSERT_TRUE(nt_skinned_mesh_renderer_test_initialized());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_vertex_input_count());
-    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw_list(&item, 1));
 
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_restore_gpu());
-    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
+
+    nt_skinned_mesh_renderer_shutdown();
+    nt_skinned_mesh_renderer_restore_gpu();
+    TEST_ASSERT_FALSE(nt_skinned_mesh_renderer_test_initialized());
+    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 2, .max_mesh_layouts = 2}));
+}
+
+/* Two lists share one upload, and a list drawn in two passes reads its own range both times. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_prepared_lists_draw_their_own_range_from_one_upload(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_texture_t texture = make_deformation_texture();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_render_item_t first[1] = {make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture}), material, mesh)};
+    nt_render_item_t second[1] = {make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture, .x0 = 3}), material, mesh)};
+
+    begin_arena_frame();
+    nt_mesh_run_t a[1];
+    nt_mesh_run_t b[1];
+    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(first, 1, a, 1));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(second, 1, b, 1));
+    const uint32_t updates = nt_gfx_fake_update_buffer_count();
+    upload_and_begin_pass();
+    TEST_ASSERT_EQUAL_UINT32(0, a[0].offset);
+    TEST_ASSERT_EQUAL_UINT32(64, b[0].offset); /* 60 bytes rounded up to NT_FRAME_ARENA_ALIGN */
+    uint16_t x0 = 0;
+    memcpy(&x0, (const uint8_t *)nt_gfx_fake_last_update_buffer_data() + b[0].offset + 48, sizeof(x0));
+    TEST_ASSERT_EQUAL_UINT16(3, x0);
+
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass > 0) {
+            nt_gfx_end_pass();
+            nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+        }
+        nt_skinned_mesh_renderer_draw(b, 1);
+        TEST_ASSERT_EQUAL_UINT32(b[0].offset, nt_gfx_fake_last_instance_offset());
+        nt_skinned_mesh_renderer_draw(a, 1);
+        TEST_ASSERT_EQUAL_UINT32(a[0].offset, nt_gfx_fake_last_instance_offset());
+    }
+    TEST_ASSERT_EQUAL_UINT32(updates + 1, nt_gfx_fake_update_buffer_count());
 }
 
 int main(void) {
@@ -822,7 +868,6 @@ int main(void) {
     RUN_TEST(test_packed_instances_keep_each_entity_world_and_binding);
     RUN_TEST(test_material_or_mesh_change_splits_runs_in_input_order);
     RUN_TEST(test_material_transition_reapplies_complete_surface_and_skin_set);
-    RUN_TEST(test_chunk_limit_splits_one_run_without_dropping_instances);
     RUN_TEST(test_indexed_and_nonindexed_meshes_use_matching_draw_paths);
     RUN_TEST(test_rgba8_and_float4_colors_keep_skin_fields_at_their_layout_offsets);
     RUN_TEST(test_mixed_color_modes_pack_canonical_strides_and_offsets);
@@ -837,6 +882,7 @@ int main(void) {
     RUN_TEST(test_static_mesh_renderer_ignores_unmapped_skin_streams);
     RUN_TEST(test_unready_program_warns_once_and_rearms_after_success);
     RUN_TEST(test_failed_pipeline_and_vertex_input_creation_are_retryable);
-    RUN_TEST(test_init_and_restore_failures_leave_an_explicit_retry_path);
+    RUN_TEST(test_restore_drops_caches_and_the_next_draw_rebuilds_them);
+    RUN_TEST(test_prepared_lists_draw_their_own_range_from_one_upload);
     return UNITY_END();
 }

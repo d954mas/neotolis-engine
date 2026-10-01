@@ -20,7 +20,7 @@ target_link_libraries(skeletal_showcase PRIVATE
     nt_sprite_renderer nt_text_renderer nt_font nt_ui nt_shape_renderer
     nt_render nt_hash nt_mem_scratch
     nt_entity nt_transform_comp nt_drawable_comp nt_mesh_comp nt_material_comp
-    nt_skin_comp nt_skeletal_gpu nt_mesh_renderer nt_skinned_mesh_renderer
+    nt_skin_comp nt_skeletal_gpu nt_frame_arena nt_mesh_renderer nt_skinned_mesh_renderer
 )
 target_include_directories(skeletal_showcase PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 

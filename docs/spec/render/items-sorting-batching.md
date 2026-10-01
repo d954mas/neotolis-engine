@@ -83,16 +83,19 @@ Equality is authoritative for the state encoded by the token: it allows the
 renderer to reuse that state from the run leader. Equal tokens for incompatible
 encoded state violate the caller contract and may draw with the wrong state.
 Store renderer-helper tokens unchanged. To force a boundary between otherwise
-compatible items, split them across separate `draw_list()` calls.
+compatible items, split them across separate lists (`prepare` or `draw_list()` calls).
 
 `nt_mesh_renderer_batch_key(material, mesh)` packs the two 16-bit pool slot
 indices as `material_slot << 16 | mesh_slot`. This is exact for simultaneously
 live handles without widening the render item. Generation bits are omitted
 because the list has a bounded lifetime: each key is built from the current
 material and mesh bindings of that same `item.entity`; until
-`nt_mesh_renderer_draw_list()` returns, the entity and required components stay
+`nt_mesh_renderer_prepare()` returns, the entity and required components stay
 alive, neither binding changes, and neither referenced live resource is
-destroyed or has its slot reused.
+destroyed or has its slot reused. The resolved runs it writes no longer read
+the items or the bindings; the material, its textures and the mesh stay live
+until the runs are last drawn (see
+[Prepared mesh runs](architecture.md#prepared-mesh-runs)).
 
 `nt_skinned_mesh_renderer` uses the same material/mesh token, then additionally
 splits runs when the deformation texture changes. Frame origins and alpha stay

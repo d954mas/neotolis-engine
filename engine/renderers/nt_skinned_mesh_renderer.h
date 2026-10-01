@@ -9,14 +9,12 @@
 #include <stdint.h>
 
 typedef struct {
-    uint16_t max_instances;
     uint16_t max_pipelines;
     uint16_t max_mesh_layouts;
 } nt_skinned_mesh_renderer_desc_t;
 
 static inline nt_skinned_mesh_renderer_desc_t nt_skinned_mesh_renderer_desc_defaults(void) {
     return (nt_skinned_mesh_renderer_desc_t){
-        .max_instances = 4096,
         .max_pipelines = 64,
         .max_mesh_layouts = 4,
     };
@@ -26,16 +24,28 @@ static inline nt_skinned_mesh_renderer_desc_t nt_skinned_mesh_renderer_desc_defa
 nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t *desc);
 void nt_skinned_mesh_renderer_shutdown(void);
 
-/* Retains CPU storage and initialization; drops GPU caches and recreates the
- * instance buffer. Failure must be retried before drawing. */
-nt_result_t nt_skinned_mesh_renderer_restore_gpu(void);
+/* Retains CPU storage and initialization; drops pipeline and vertex-input
+ * caches. Inactive modules are unchanged. */
+void nt_skinned_mesh_renderer_restore_gpu(void);
 
-/* Caller controls visibility/sorting; items and referenced bindings stay live
- * and unchanged until return. items may be NULL only when count is zero. */
+/* Caller controls visibility/sorting. items may be NULL only when count is
+ * zero; it is borrowed for the call, and bindings may change after it returns. */
 /* common/skin.glsl requires joints/weights mapped by material attr_map and
  * positive uniform joint/world scale. Declare u_skin_matrices in the material;
- * the renderer supplies its texture and default sampler from skin_comp. */
-void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
+ * the run supplies the entity's deformation texture and its default sampler. */
+/* Splits items into runs of equal batch_key and deformation texture, resolves
+ * pipeline and vertex input per run (creating them on a cache miss), packs
+ * world, deformation binding and color of drawable runs into one
+ * nt_frame_arena reserve and writes the runs; returns their count. Runs whose
+ * program is not ready or whose pipeline/vertex input failed are skipped.
+ * Writes no buffer. Call after the items' nt_skeletal_gpu_reserve, between
+ * nt_frame_arena_begin_frame and nt_frame_arena_upload.
+ * max_runs >= count always suffices; fewer asserts when exceeded. */
+uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count, nt_mesh_run_t *runs, uint32_t max_runs);
+/* Executes runs in order in the current pass after nt_frame_arena_upload and
+ * nt_skeletal_gpu_flush, any number of times. runs may be NULL only when
+ * run_count is 0. */
+void nt_skinned_mesh_renderer_draw(const nt_mesh_run_t *runs, uint32_t run_count);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

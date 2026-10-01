@@ -321,25 +321,28 @@ untouched, so a game may call all of them without activating unused renderers.
 sources inside their restore entry points. A failed blur restore leaves the
 module initialized but unable to draw; the game must retry
 `nt_postfx_blur_restore_gpu` until it succeeds. `nt_mesh_renderer`,
+`nt_skinned_mesh_renderer`,
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
-restore drops queued commands and pipeline caches, then the game relinks.
+restore drops queued commands and pipeline caches, then the game relinks. The
+mesh renderers own no buffer: their restore only drops the pipeline and
+vertex-input caches and returns void, and runs prepared before it are stale.
 `nt_frame_arena_restore_gpu` recreates the arena buffer empty and keeps the
 staging copy and the frame's offsets; `nt_frame_arena_buffer` asserts until
 the next upload, and a failed restore asserts on that upload until a retry
 succeeds.
 
-`nt_mesh_renderer_restore_gpu()`, `nt_sprite_renderer_restore_gpu()`, and
+`nt_sprite_renderer_restore_gpu()` and
 `nt_text_renderer_restore_gpu()` return `nt_result_t`. They retain CPU
 allocations, configured capacities, and module initialization; only GPU
 buffers, cached pipelines/vertex inputs, and queued draw state are reset.
 Every restore entry point is an inactive no-op. The `nt_result_t`-returning
-mesh, sprite, text, and blur functions return `NT_OK` in that case;
-`nt_shape_renderer_restore_gpu` returns void. Failed GPU creation
+sprite, text, and blur functions return `NT_OK` in that case;
+`nt_shape_renderer_restore_gpu` and the mesh renderers return void. Failed GPU creation
 returns `NT_ERR_INIT_FAILED` after releasing partial GPU resources. The module
 stays initialized, so the game can call restore again or shut it down. There
 is no automatic retry, with one narrow exception: the text renderer's vertex
 input bakes over buffers it owns, so a recoverable backend failure there is
-retried lazily in flush and does not fail the restore. After a mesh or sprite
+retried lazily in flush and does not fail the restore. After a sprite
 failure, the game must not submit draws or sprite materials until a restore
 succeeds; violating that precondition asserts. The text renderer instead
 discards staged glyphs while its buffers are missing. Examples may explicitly
@@ -367,7 +370,7 @@ an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
 re-activate on the next step within the activation budget; an evicted pack must
 re-download first. Rebuild resource-dependent render state after publication.
 
-Both ECS `draw_list` paths skip a material whose program is not ready and warn
+The mesh renderers' `prepare` and the sprite `draw_list` skip a material whose program is not ready and warn
 once until a pipeline is built again. The skip is normal runtime state, not a
 caller error. The immediate-mode
 `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
