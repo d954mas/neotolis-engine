@@ -1,5 +1,5 @@
 add_executable(bench_stream main.c)
-target_link_libraries(bench_stream PRIVATE nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_hash)
+target_link_libraries(bench_stream PRIVATE nt_core nt_frame_arena nt_app nt_input nt_window nt_math nt_log nt_time nt_hash)
 if(EMSCRIPTEN)
     target_link_libraries(bench_stream PRIVATE nt_platform_web nt_gfx nt_http nt_basisu_transcoder_stub nt_meshwire_stub)
 else()

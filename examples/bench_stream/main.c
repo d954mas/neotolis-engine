@@ -13,6 +13,7 @@
 #include "app/nt_app.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "frame_arena/nt_frame_arena.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
@@ -71,10 +72,12 @@ typedef enum {
     INST_FRAME8,
     INST_FRAME1_SYNC_START, /* frame1 + a deliberate wait on the previous frame at frame start */
     INST_FRAME1_SYNC_MID,   /* frame1 + the same wait after the load draws, where ring's first upload waits */
+    INST_ARENA,             /* frame1 through nt_frame_arena; unlike frame1 it copies every episode per frame, as a renderer packs */
+    INST_ARENA_HEADROOM,    /* arena with twice the frame's bytes: every upload is partial, the shape a peak-sized game runs */
     INST_ARM_COUNT
 } inst_arm_t;
-static const char *const s_inst_arm_names[INST_ARM_COUNT] = {"ring",   "ring_dyn", "pool",   "pool_stream", "orphan", "upfront",           "ring_persist",
-                                                             "frame1", "frame2",   "frame3", "frame3_dyn",  "frame8", "frame1_sync_start", "frame1_sync_mid"};
+static const char *const s_inst_arm_names[INST_ARM_COUNT] = {"ring",   "ring_dyn",   "pool",   "pool_stream",       "orphan",          "upfront", "ring_persist",  "frame1", "frame2",
+                                                             "frame3", "frame3_dyn", "frame8", "frame1_sync_start", "frame1_sync_mid", "arena",   "arena_headroom"};
 
 /* Batch arms over a vertex input with baked VBO+IBO. ZERO rewrites a buffer sized to one upload; ZERO_PART rewrites
  * the start of a large one, like the shape batch; ORPHAN = sprite/text. */
@@ -149,7 +152,7 @@ static uint32_t s_vi_count;
 /* CPU payloads: every episode uploads the same bytes; only where they land differs per arm.
  * Indices are per episode because the append arms rebase them into one shared VBO. */
 static inst_t s_inst_data[MAX_INSTANCES];
-static inst_t s_frame_arena[MAX_EPISODES * MAX_INSTANCES];
+static inst_t s_frame_data[MAX_EPISODES * MAX_INSTANCES];
 static uint32_t s_ring_persist_cursor;
 /* SYNC arms: the frame's last draw reads this buffer; a partial write to it waits for that draw (a full-size
  * write would be renamed by Chrome and wait for nothing). */
@@ -300,9 +303,7 @@ static uint32_t clamp_u32(uint32_t v, uint32_t lo, uint32_t hi) {
 }
 
 static void push_window(family_t family, uint32_t arm, uint32_t episodes, uint32_t size, uint32_t rep) {
-    if (s_window_count == MAX_WINDOWS) {
-        return;
-    }
+    NT_ASSERT(s_window_count < MAX_WINDOWS && "bench_stream: schedule capacity exceeded");
     s_windows[s_window_count++] = (window_t){.family = family, .arm = arm, .episodes = episodes, .size = size, .rep = rep};
 }
 
@@ -460,6 +461,7 @@ static void destroy_window_objects(void) {
     }
     s_vi_count = 0;
     s_buf_count = 0;
+    nt_frame_arena_shutdown();
 }
 
 static nt_vertex_input_t make_cube_vi(void) {
@@ -478,6 +480,12 @@ static uint32_t frame_buffers(inst_arm_t arm) {
         return 8U;
     }
     return arm == INST_FRAME2 ? 2U : 3U;
+}
+
+static void init_arena(uint32_t capacity) {
+    const nt_result_t r = nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = capacity});
+    NT_ASSERT(r == NT_OK && "frame arena init");
+    (void)r;
 }
 
 static void create_inst_objects(inst_arm_t arm, uint32_t episodes, uint32_t instances) {
@@ -515,8 +523,14 @@ static void create_inst_objects(inst_arm_t arm, uint32_t episodes, uint32_t inst
             s_bufs[s_buf_count++] = make_dynamic(NT_BUFFER_VERTEX, arm == INST_FRAME3_DYN ? NT_USAGE_DYNAMIC : NT_USAGE_STREAM, slice * episodes);
         }
         for (uint32_t e = 0; e < episodes; e++) {
-            memcpy(&s_frame_arena[(size_t)e * instances], s_inst_data, slice);
+            memcpy(&s_frame_data[(size_t)e * instances], s_inst_data, slice);
         }
+        break;
+    case INST_ARENA:
+        init_arena(slice * episodes);
+        break;
+    case INST_ARENA_HEADROOM:
+        init_arena(slice * episodes * 2U);
         break;
     default:
         NT_ASSERT(0 && "inst arm");
@@ -558,17 +572,36 @@ static void fence_wait(void) {
     nt_gfx_update_buffer(s_fence_buf, 0, zero_row, sizeof zero_row);
 }
 
+static void run_inst_arena(uint32_t episodes, uint32_t instances) {
+    const uint32_t slice = instances * INST_STRIDE;
+    uint32_t base[MAX_EPISODES];
+    nt_frame_arena_begin_frame();
+    for (uint32_t e = 0; e < episodes; e++) {
+        touch_payload(FAMILY_INST, e);
+        memcpy(nt_frame_arena_reserve(slice, &base[e]), s_inst_data, slice);
+    }
+    nt_frame_arena_upload();
+    const nt_buffer_t buf = nt_frame_arena_buffer();
+    for (uint32_t e = 0; e < episodes; e++) {
+        draw_inst_episode(buf, base[e], instances);
+    }
+}
+
 /* FRAMEn arms: the whole frame in one upload before its first draw. */
 static void run_inst_frame(inst_arm_t arm, uint32_t episodes, uint32_t instances) {
+    if (arm == INST_ARENA || arm == INST_ARENA_HEADROOM) {
+        run_inst_arena(episodes, instances);
+        return;
+    }
     const uint32_t slice = instances * INST_STRIDE;
     const nt_buffer_t buf = s_bufs[s_frame_counter % frame_buffers(arm)];
     for (uint32_t e = 0; e < episodes; e++) {
-        s_frame_arena[(size_t)e * instances].color[1] = (float)((s_frame_counter + e) & 255U) * (1.0F / 255.0F);
+        s_frame_data[(size_t)e * instances].color[1] = (float)((s_frame_counter + e) & 255U) * (1.0F / 255.0F);
     }
     if (arm == INST_FRAME1_SYNC_MID) {
         fence_wait();
     }
-    nt_gfx_update_buffer(buf, 0, s_frame_arena, slice * episodes);
+    nt_gfx_update_buffer(buf, 0, s_frame_data, slice * episodes);
     for (uint32_t e = 0; e < episodes; e++) {
         draw_inst_episode(buf, e * slice, instances);
     }
