@@ -273,7 +273,7 @@ static void test_transparent_container_draws_only_children(void) {
     end_and_walk();
     TEST_ASSERT_EQUAL_UINT32(0, nt_ui_shape_renderer_test_emit_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_ui_shape_renderer_test_draw_count());
 }
 
 /* Declaration order survives the renderer switch; adjacent shapes share one draw across materials. */
@@ -289,12 +289,13 @@ static void test_shapes_and_sprites_keep_declaration_order(void) {
         emit_box(&style, NULL);
     }
     end_and_walk();
-    /* Instanced shape draws are non-indexed; the sprite draw indexes its quad. */
+    const nt_program_t sprite = nt_material_get_info(s_fx.sprite_material)->program;
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(0).num_indices);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(1).num_indices);
-    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(2).num_indices);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(3).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_ui_shape_renderer_test_draw_count());
+    TEST_ASSERT_NOT_EQUAL(sprite.id, nt_gfx_fake_draw_trace_at(0).program.id);
+    TEST_ASSERT_NOT_EQUAL(sprite.id, nt_gfx_fake_draw_trace_at(1).program.id);
+    TEST_ASSERT_EQUAL_UINT32(sprite.id, nt_gfx_fake_draw_trace_at(2).program.id);
+    TEST_ASSERT_NOT_EQUAL(sprite.id, nt_gfx_fake_draw_trace_at(3).program.id);
     nt_material_destroy(other.material);
 }
 

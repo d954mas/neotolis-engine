@@ -75,8 +75,9 @@ at least `2π` in magnitude draws the full turn.
 
 ### Shape renderer
 
-Each body or shadow is one `nt_ui_shape_instance_t` (112 bytes). Its vertex
-shader derives the quad corner from `gl_VertexID` and places local point `p`
+Each body or shadow is one `nt_ui_shape_instance_t` (112 bytes), drawn as a
+static indexed quad whose `gl_VertexID` is the corner, so the vertex shader runs
+four times per shape. It places local point `p`
 at `origin + p.x * axis_x + p.y * axis_y`, for `p` in `[-pad, size + pad]`
 layout pixels. The walker fills the world placement from the element's composed
 matrix, so screen and world UI share the format.

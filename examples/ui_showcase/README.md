@@ -154,48 +154,36 @@ identify the measured sources: vertex `5e579c5acac85857`, vertex helper
 projective transport and the later shader changes. The integrated engine
 measurement below does not repeat this combined-shadow experiment.
 
-**Integrated engine workloads.**
+**Instanced renderer against the per-vertex tail.** On 2026-10-01 the profiling
+build (wasm-release with metrics, UI and GPU timing ON) of `7d1c5955` (shape
+attributes replicated into every sprite vertex, dedicated shape material)
+was compared with the instanced renderer on the same base, in headless
+Chromium on Intel UHD through ANGLE D3D11 at 1440x1000, DPR 1. Each row is
+the median of five ABBA windows of 256 frames; draws, vertices and upload bytes
+cover the whole UI walk and are deterministic.
 
-On 2026-09-27, the optimized profiling build of baseline `2a46fbd7`, before
-full material layouts and typed SDF transport, ran all 14 workloads in Chrome
-153.0.8010.53, WebGL2 / Intel UHD ANGLE D3D11, at 1440x1000 and DPR 1.
-Each row contains 256 samples after Reset and a three-second steady interval.
-CPU/GPU are whole-frame medians; geometry and uploads cover the entire UI,
-including fixed controls and text. No console or GL errors were observed.
-
-| Material | Workload | CPU ms | GPU ms | UI draws | Vertices | Indices | Upload bytes |
+| Workload | Renderer | CPU ms | GPU ms | Walk ms | UI draws | Vertices | Upload bytes |
 |---|---|---:|---:|---:|---:|---:|---:|
-| Dedicated | Atlas solid | 0.370 | 3.044 | 13 | 7284 | 19620 | 308204 |
-| Dedicated | Clay solid | 0.370 | 2.890 | 13 | 10616 | 27306 | 390412 |
-| Dedicated | Clay border | 0.445 | 3.042 | 14 | 24952 | 70314 | 763148 |
-| Dedicated | SDF solid | 0.375 | 3.076 | 14 | 4208 | 7326 | 287436 |
-| Dedicated | SDF border | 0.420 | 3.155 | 14 | 4208 | 7326 | 287436 |
-| Dedicated | SDF gradient | 0.440 | 3.170 | 14 | 4208 | 7326 | 287436 |
-| Dedicated | SDF shadow | 0.765 | 2.765 | 525 | 5240 | 8874 | 377100 |
-| Uber | Atlas solid | 0.385 | 3.826 | 14 | 7288 | 19626 | 613704 |
-| Uber | Clay solid | 0.675 | 3.526 | 14 | 10620 | 27312 | 908904 |
-| Uber | Clay border | 0.695 | 3.773 | 18 | 24960 | 70326 | 2199432 |
-| Uber | SDF solid | 0.480 | 3.719 | 13 | 4212 | 7332 | 330792 |
-| Uber | SDF border | 0.495 | 3.620 | 13 | 4212 | 7332 | 330792 |
-| Uber | SDF gradient | 0.635 | 3.488 | 13 | 4212 | 7332 | 330792 |
-| Uber | SDF shadow | 0.495 | 3.702 | 13 | 5236 | 8868 | 419880 |
+| Clay solid | per-vertex | 0.415 | 2.251 | 0.180 | 13 | 10648 | 392716 |
+| Clay solid | instanced | 0.410 | 2.450 | 0.165 | 13 | 10512 | 383120 |
+| SDF solid | per-vertex | 0.395 | 1.527 | 0.150 | 14 | 4240 | 289740 |
+| SDF solid | instanced | 0.400 | 1.490 | 0.150 | 14 | 4104 | 219728 |
+| SDF 4 sides | per-vertex | 0.465 | 2.905 | 0.180 | 14 | 4240 | 289740 |
+| SDF 4 sides | instanced | 0.430 | 2.734 | 0.155 | 14 | 4104 | 219728 |
+| SDF gradient | per-vertex | 0.415 | 1.681 | 0.165 | 14 | 4240 | 289740 |
+| SDF gradient | instanced | 0.390 | 2.158 | 0.150 | 14 | 4104 | 219728 |
+| SDF shadow | per-vertex | 0.460 | 3.260 | 0.195 | 14 | 5264 | 378828 |
+| SDF shadow | instanced | 0.410 | 2.977 | 0.160 | 14 | 5128 | 248400 |
 
-The matched solid/border subset compares Clay geometry with SDF. Atlas has
-different art; gradient/shadow have no fabricated old-path equivalent. SDF
-border reduces geometry and upload bytes here, but GPU medians are not
-uniformly lower. In that baseline, alternating dedicated body/shadow materials
-required 525 draws; the same uber material retained 13. Shadows now always use
-the shape's own material, so this alternation no longer occurs. These are individual steady windows on one
-integrated GPU, not a cross-device speed guarantee or isolated effect cost.
-
-Measured release WASM: 440984 bytes, SHA256 prefix `efac7a8bf2ebd4c0`;
-pack: 1288296 bytes, `06687fa720576b46`; common shape shader:
-`a6ef8f8b0b63c138`. This includes projective transport and final affine edge
-corrections. Actual debug/release captures also cover DPR 1/2, browser zoom
-125%, resize, hover/press/click, disabled click and drag-off cancellation for
-both button skins. Five solid-shape half-coverage contours differ by at most
-0.335 logical pixels between DPR 1 and 2 under the sampled-contour check.
-This does not establish exact pixel-area filtering or mobile performance.
+Uploads fall by 24% for SDF grids and 34% with shadows: a shape is one
+112-byte instance instead of four 84-byte vertices plus six indices. GPU
+samples are bimodal in both arms (about 1.3-1.6 and 2.5-3.3 ms, the integrated
+GPU's clock states), so GPU time shows no difference beyond that noise. A
+sprite+shape uber material measured in the same run was slower on the GPU in
+every SDF workload (3.3-4.0 ms) and uploaded 84-byte vertices for every plain
+sprite. Release WASM on the same base: `ui_showcase` 432795 -> 431059 bytes,
+`bunnymark` 428204 -> 427442 bytes. These windows are one integrated GPU, not
+a mobile or cross-device result.
 
 ## Controls
 

@@ -81,6 +81,9 @@ test('shape shaders render synthetic and CPU-emitted instances', async ({ page }
     const stride = 112;
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
+    // nt_ui_shape_renderer's static quad: gl_VertexID is the corner TL, TR, BR, BL.
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 1, 2, 0, 2, 3]), gl.STATIC_DRAW);
     const instances = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, instances);
     for (const [location, count, type, normalized, offset] of [
@@ -243,7 +246,7 @@ test('shape shaders render synthetic and CPU-emitted instances', async ({ page }
       gl.viewport(0, 0, 96, 96);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, 1);
+      gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, 1);
       const pixels = framebuffer();
       buffers.set(shape.name, pixels);
       samples[shape.name] = coords[shape.name].map(([x, y]) => pixelAt(pixels, x, y));
@@ -303,7 +306,7 @@ test('shape shaders render synthetic and CPU-emitted instances', async ({ page }
       if (fixture.depthTest) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST);
       gl.clearDepth(1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      if (fixture.instances.length > 0) gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, fixture.instances.length);
+      if (fixture.instances.length > 0) gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, fixture.instances.length);
       const pixels = framebuffer();
       samples[fixture.name] = (fixtureCoords[fixture.name] ?? []).map(([x, y]) => pixelAt(pixels, x, y));
       let nonzeroPixels = 0, outsideViewport = 0;

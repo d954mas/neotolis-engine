@@ -28,8 +28,8 @@ flat out vec4 v_inner_strip;
 flat out vec4 v_user;
 
 void main() {
-    // Two triangles: TL,TR,BR and TL,BR,BL.
-    int corner = gl_VertexID == 3 ? 0 : (gl_VertexID == 4 ? 2 : (gl_VertexID == 5 ? 3 : gl_VertexID));
+    // Indexed quad: gl_VertexID is the corner TL, TR, BR, BL.
+    int corner = gl_VertexID;
     vec2 corner_uv = vec2((corner == 1 || corner == 2) ? 1.0 : 0.0, corner >= 2 ? 1.0 : 0.0);
     vec2 size = vec2(a_origin_width.w, a_axis_x_height.w);
     float pad = a_axis_y_pad.w;

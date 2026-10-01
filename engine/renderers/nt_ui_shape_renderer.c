@@ -9,8 +9,8 @@
 #include "log/nt_log.h"
 #include "renderers/nt_renderer_shared.h"
 
-/* Two triangles per instance; the vertex shader maps gl_VertexID 0..5 to TL,TR,BR,TL,BR,BL. */
-#define NT_UI_SHAPE_VERTICES_PER_INSTANCE 6U
+/* Corners TL,TR,BR,BL come from gl_VertexID; indexing reuses them so the vertex shader runs four times per quad. */
+static const uint16_t s_quad_indices[6] = {0, 1, 2, 0, 2, 3};
 
 // #region module state
 typedef struct {
@@ -26,6 +26,7 @@ static struct {
     nt_renderer_pipeline_entry_t pipelines[NT_UI_SHAPE_RENDERER_MAX_PIPELINES];
     uint16_t pipeline_count;
     nt_buffer_t instance_buf;
+    nt_buffer_t quad_ibo;
     nt_vertex_input_t vertex_input;
     nt_ui_shape_instance_t *staging;
     uint32_t max_instances;
@@ -71,12 +72,21 @@ static nt_result_t create_gpu_resources(void) {
         .size = s_ui_shape.max_instances * (uint32_t)sizeof(nt_ui_shape_instance_t),
         .label = "ui_shape_instances",
     });
-    if (s_ui_shape.instance_buf.id == 0) {
-        return NT_ERR_INIT_FAILED;
+    s_ui_shape.quad_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_INDEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .data = s_quad_indices,
+        .size = sizeof(s_quad_indices),
+        .index_type = NT_INDEX_UINT16,
+        .label = "ui_shape_quad_ibo",
+    });
+    if (s_ui_shape.instance_buf.id != 0 && s_ui_shape.quad_ibo.id != 0) {
+        s_ui_shape.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.instance_layout = s_instance_layout, .index_buffer = s_ui_shape.quad_ibo, .label = "ui_shape_vi"});
     }
-    s_ui_shape.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.instance_layout = s_instance_layout, .label = "ui_shape_vi"});
     if (s_ui_shape.vertex_input.id == 0) {
+        nt_gfx_destroy_buffer(s_ui_shape.quad_ibo);
         nt_gfx_destroy_buffer(s_ui_shape.instance_buf);
+        s_ui_shape.quad_ibo = (nt_buffer_t){0};
         s_ui_shape.instance_buf = (nt_buffer_t){0};
         return NT_ERR_INIT_FAILED;
     }
@@ -90,8 +100,10 @@ static void destroy_gpu_resources(void) {
     s_ui_shape.pipeline_count = 0;
     nt_gfx_destroy_vertex_input(s_ui_shape.vertex_input);
     nt_gfx_destroy_buffer(s_ui_shape.instance_buf);
+    nt_gfx_destroy_buffer(s_ui_shape.quad_ibo);
     s_ui_shape.vertex_input = (nt_vertex_input_t){0};
     s_ui_shape.instance_buf = (nt_buffer_t){0};
+    s_ui_shape.quad_ibo = (nt_buffer_t){0};
     /* Queued commands reference the discarded GPU objects; never flush them. */
     s_ui_shape.instance_count = 0;
     s_ui_shape.cmd_count = 0;
@@ -232,7 +244,7 @@ void nt_ui_shape_renderer_flush(void) {
         const nt_renderer_material_view_t view = nt_renderer_material_view(mi);
         nt_renderer_apply_material_uniforms(&bound, c->material.id, &view);
         nt_renderer_apply_texture_slots(&view);
-        nt_gfx_draw_instanced(0, NT_UI_SHAPE_VERTICES_PER_INSTANCE, c->instance_count);
+        nt_gfx_draw_indexed_instanced(0, 6, 4, c->instance_count);
 #ifdef NT_TEST_ACCESS
         s_ui_shape.test_draw_count++;
 #endif
