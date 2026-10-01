@@ -1392,6 +1392,14 @@ static bool nt_gfx_gl_cache_uniforms(GLuint program, nt_gfx_gl_program_t *rec) {
         if (ulen <= 0 || usize <= 0) {
             return false;
         }
+        /* Block members are fed by their buffer, not by location writes. Emscripten
+         * hands out a location for any active name, so the block index decides. */
+        const GLuint index = (GLuint)ui;
+        GLint block_index = -1;
+        NT_GL(glGetActiveUniformsiv, program, 1, &index, GL_UNIFORM_BLOCK_INDEX, &block_index);
+        if (block_index != -1) {
+            continue;
+        }
         NT_ASSERT(usize == 1 || (ulen >= 3 && strcmp(uname + ulen - 3, "[0]") == 0));
         for (GLint element = 0; element < usize; element++) {
             if (element > 0) {
@@ -1736,10 +1744,14 @@ void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y
 
 /* ---- Uniform buffer ---- */
 
-void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
+void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
     GLuint buf = s_buffer_gl[backend_handle];
-    NT_GL(glBindBufferBase, GL_UNIFORM_BUFFER, slot, buf);
+    if (size != 0) {
+        NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, buf, (GLintptr)offset, (GLsizeiptr)size);
+    } else {
+        NT_GL(glBindBufferBase, GL_UNIFORM_BUFFER, slot, buf);
+    }
 }
 
 void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
@@ -1837,20 +1849,6 @@ static void nt_gfx_gl_bind_texture_for_upload(GLuint tex) {
     NT_GL(glBindTexture, GL_TEXTURE_2D, tex);
 }
 
-/* For upload paths that check glGetError afterwards — a stale error would be
- * misattributed to this upload. */
-static bool nt_gfx_gl_begin_texture_upload(GLuint tex) {
-    GLenum pending_error = NT_GL_RET0(glGetError);
-    /* A loss the browser confirms is a recoverable outcome the caller rolls back,
-       not a programmer error. */
-    if (pending_error != GL_NO_ERROR && nt_gfx_gl_ctx_query_lost()) {
-        return false;
-    }
-    NT_ASSERT(pending_error == GL_NO_ERROR && "pending GL error before texture upload");
-    nt_gfx_gl_bind_texture_for_upload(tex);
-    return true;
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     GLuint tex;
@@ -1858,10 +1856,7 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     if (tex == 0) {
         return 0;
     }
-    if (!nt_gfx_gl_begin_texture_upload(tex)) {
-        NT_GL_DELETE(glDeleteTextures, 1, &tex);
-        return 0;
-    }
+    nt_gfx_gl_bind_texture_for_upload(tex);
 
     /* Filter and wrap live on the sampler object every bind carries; the
        texture object keeps GL defaults, which no sampling path reads. */
@@ -1902,13 +1897,9 @@ static GLuint nt_gfx_gl_create_texture_name(const nt_texture_desc_t *desc) {
     const uint8_t top_level = (desc->gen_mipmaps && desc->data) ? nt_texture_full_chain_levels(desc->width, desc->height) : levels;
     NT_GL(glTexParameteri, GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)(top_level - 1));
 
-    const GLenum first_error = NT_GL_RET0(glGetError);
-    if (first_error != GL_NO_ERROR) {
-        nt_gfx_gl_drain_errors();
-        /* A loss is the caller's recoverable CONTEXT_LOST; the frontend reports it without a log. */
-        if (!nt_gfx_gl_ctx_query_lost()) {
-            NT_LOG_ERROR("texture creation failed: GL error 0x%04X", (unsigned)first_error);
-        }
+    /* A nonzero WebGL name can survive loss. Query it without waiting for uploads;
+     * glGetError would synchronize with the GPU process, so live upload errors stay unchecked. */
+    if (nt_gfx_gl_ctx_query_lost()) {
         NT_GL_DELETE(glDeleteTextures, 1, &tex);
         return 0;
     }

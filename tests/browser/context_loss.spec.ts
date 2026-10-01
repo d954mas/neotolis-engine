@@ -484,8 +484,37 @@ for (const nullCreates of [false, true]) {
     await page.goto('/index.html');
     await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.basis_ready(), null, { timeout: 30_000 });
     expect(await createInLossWindow(page, [3]), 'the texture reports the loss').toEqual([1, 0]);
-    // Restore re-uploads every texture; a GL error left from the dead context would trip the first one.
+    // Restore must rebuild the textures and draw without errors from the dead context.
     await restoreAndDraw(page, errors);
     expect(errors, 'unexpected browser/gfx errors').toEqual([]);
   });
 }
+
+test('context loss: texture creation rejects loss during upload', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = trackErrors(page);
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.basis_ready(), null, { timeout: 30_000 });
+  const result = await page.evaluate(() => {
+    const gl = document.querySelector('canvas')!.getContext('webgl2')!;
+    const loss = gl.getExtension('WEBGL_lose_context');
+    if (!loss) throw new Error('WEBGL_lose_context unavailable');
+    window.__ntLossExtension = loss;
+    const upload = gl.texImage2D;
+    let injected = false;
+    gl.texImage2D = function(...args: Parameters<typeof upload>) {
+      injected = true;
+      loss.loseContext();
+      return upload.apply(this, args);
+    };
+    try {
+      const texture = window.__nt!.loss_window(3);
+      return { texture, injected, synced: window.__nt!.loss_seen() };
+    } finally {
+      gl.texImage2D = upload;
+    }
+  });
+  expect(result).toEqual({ texture: 0, injected: true, synced: false });
+  await restoreAndDraw(page, errors);
+  expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+});

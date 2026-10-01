@@ -547,6 +547,7 @@ typedef enum {
     X(glBeginQuery)                                                                                                                                                                                    \
     X(glBindBuffer)                                                                                                                                                                                    \
     X(glBindBufferBase)                                                                                                                                                                                \
+    X(glBindBufferRange)                                                                                                                                                                               \
     X(glBindFramebuffer)                                                                                                                                                                               \
     X(glBindSampler)                                                                                                                                                                                   \
     X(glBindTexture)                                                                                                                                                                                   \
@@ -596,6 +597,7 @@ typedef enum {
     X(glGenVertexArrays)                                                                                                                                                                               \
     X(glGenerateMipmap)                                                                                                                                                                                \
     X(glGetActiveUniform)                                                                                                                                                                              \
+    X(glGetActiveUniformsiv)                                                                                                                                                                           \
     X(glGetError)                                                                                                                                                                                      \
     X(glGetIntegerv)                                                                                                                                                                                   \
     X(glGetProgramInfoLog)                                                                                                                                                                             \
@@ -731,7 +733,7 @@ typedef struct {
             float values[16];
         } uniform;
         struct {
-            uint32_t secondary, name, slot, offset;
+            uint32_t secondary, name, slot, offset, size;
         } binding;
         struct {
             uint32_t target;
@@ -781,12 +783,13 @@ nt_gfx_capture_view_t nt_gfx_capture_read(void);
 /* ---- GPU format capabilities ---- */
 
 typedef struct {
-    bool has_astc;                 /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
-    bool has_bc7;                  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
-    bool has_etc2;                 /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
-    bool has_float_render_target;  /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
-    bool has_float_texture_linear; /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
-    uint32_t max_texture_size;     /* GL_MAX_TEXTURE_SIZE, queried at init */
+    bool has_astc;                            /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;                             /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2;                            /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    bool has_float_render_target;             /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
+    bool has_float_texture_linear;            /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
+    uint32_t max_texture_size;                /* GL_MAX_TEXTURE_SIZE, queried at init */
+    uint32_t uniform_buffer_offset_alignment; /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: ranged UBO binds start at a multiple */
 } nt_gfx_gpu_caps_t;
 
 /* ---- Global state ---- */
@@ -865,6 +868,8 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
  * INVALID means context loss or backend allocation failure; caller errors assert. */
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
+/* A nonzero handle means upload commands were issued, not that GPU storage
+ * allocation or upload succeeded; creation does not poll GPU errors. */
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_render_target. The target
@@ -908,6 +913,8 @@ nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
  * destroy_texture cascade, or a context loss (loss frees every render-target
  * slot; the owner recreates its textures and targets after restore). */
 bool nt_gfx_render_target_valid(nt_render_target_t rt);
+/* Reports a backend object not discarded by engine loss synchronization;
+ * does not verify GPU storage allocation or upload success. */
 bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Reports a live stage backend. Readiness lost to context loss never returns for that handle;
  * re-read the new handle from its resource after reactivation. */
@@ -999,7 +1006,13 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 
 /* ---- Uniform buffer ---- */
 
+/* Binds the whole buffer, or [offset, offset + size) of it. A range starts at a
+ * multiple of gpu_caps.uniform_buffer_offset_alignment, is nonempty and fits the
+ * buffer; WebGL also requires it to cover the block's full data size. Upload every
+ * range of a frame before the first draw that reads the buffer: Mali/ANGLE stall on
+ * a rewrite of any part of a buffer an earlier draw read. */
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Disjoint

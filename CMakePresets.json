@@ -169,6 +169,22 @@
             }
         },
         {
+            "name": "native-release-linux-openssl",
+            "displayName": "Linux Release (OpenSSL CA cache)",
+            "inherits": "native-release",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "binaryDir": "${sourceDir}/build/_cmake/native-release-linux-openssl",
+            "cacheVariables": {
+                "CURL_USE_OPENSSL": "ON",
+                "CURL_CA_PATH": "none",
+                "CURL_CA_FALLBACK": "ON"
+            }
+        },
+        {
             "name": "native-debug-test",
             "displayName": "Native Debug Test (FULL asserts)",
             "inherits": "native-debug",
@@ -259,6 +275,10 @@
         {
             "name": "native-release",
             "configurePreset": "native-release"
+        },
+        {
+            "name": "native-release-linux-openssl",
+            "configurePreset": "native-release-linux-openssl"
         },
         {
             "name": "native-debug-test",

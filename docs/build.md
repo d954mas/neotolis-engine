@@ -92,7 +92,7 @@ is no longer a valid configuration.
 | `NT_INTROSPECT_WRITE_ENABLED` | OFF | Debug/release-test presets select ON; production Release selects OFF. |
 | `NT_GFX_NATIVE_GL_DEBUG` | OFF | Requests a native GL debug context and installs the KHR_debug callback when available. `native-debug` selects ON; native Release presets select OFF. Can be enabled explicitly in Release. |
 | `NT_GFX_WEB_GL_DEBUG` | OFF | Opt-in Emscripten GL parameter checks and per-call logging. |
-| `NT_HTTP_CURL` | OFF | Native presets select ON. Plain CMake and subproject builds require explicit ON for the libcurl backend; OFF uses the HTTP stub. |
+| `NT_HTTP_CURL` | OFF | Native presets select ON. Plain CMake and subproject builds require explicit ON for the libcurl backend; OFF uses the HTTP stub. CA sources follow the curl configuration; the engine does not override them. See [Linux OpenSSL CA cache](#linux-openssl-ca-cache). |
 | `NT_HTTP_WEBSOCKETS` | OFF | Effective only when `NT_HTTP_CURL=ON` and Neotolis configures the vendored `CURL::libcurl`; otherwise configuration reports that it is ignored. ON keeps only HTTP(S) and WS(S), then publishes the global `NT_HTTP_WEBSOCKETS` property for consumers after `add_subdirectory(<engine>)`. A pre-provided curl target remains consumer-owned. |
 | `NT_HYBRID_HPG` | ON | Windows hybrid-GPU preference hint; per-app Windows graphics preferences override it. |
 | `NT_FONT_EMBOLDEN_ENABLED` | OFF | Explicit opt-in, including Debug. |
@@ -111,6 +111,35 @@ Contracts and less common options:
 - [Resource measurements and resident bytes](spec/assets/resource.md#optional-measurements-and-resident-bytes).
 - [Font synthesis and rich markup](spec/ui/rich-text.md), [Clay debug view](spec/ui/nt-ui.md).
 - [WASM build variants](../README.md#wasm-requires-emsdk-activated).
+
+### Linux OpenSSL CA cache
+
+The `native-release-linux-openssl` preset explicitly selects OpenSSL,
+`CURL_CA_PATH=none` and `CURL_CA_FALLBACK=ON` for the vendored curl:
+
+```bash
+cmake --preset native-release-linux-openssl
+cmake --build --preset native-release-linux-openssl
+```
+
+A game embedding the engine selects these same cache values in its own
+Linux/OpenSSL preset or toolchain before configuring the engine. Other presets
+and consumer-provided `CURL::libcurl` targets retain their own CA configuration.
+The engine does not infer the TLS backend or migrate existing curl cache values.
+
+Without a CA directory, curl caches the parsed CA store on the multi handle
+from the first TLS connection until its 24-hour cache timeout or
+`nt_http_shutdown`. The CA bundle is auto-detected at configure time. If no
+bundle is found, the explicit fallback uses OpenSSL's default CA paths.
+A binary run on a host missing its configured bundle fails certificate checks;
+with a bundle, certificates present only in `/etc/ssl/certs` are not trusted.
+Include private CAs in the selected bundle, or explicitly configure
+`-DCURL_CA_PATH=<dir>` and accept that a CA directory disables this cache.
+
+Use the preset's separate build directory, or explicitly reconfigure an older
+build with `-DCURL_CA_PATH=none -DCURL_CA_FALLBACK=ON`. When switching that build
+to a non-OpenSSL backend, explicitly set `-DCURL_CA_FALLBACK=OFF` and its intended
+CA sources; selecting a different backend does not clear CMake cache values.
 
 ### Basis Universal admission
 
@@ -228,6 +257,16 @@ stub source through `nt_log`; `nt_log_stub` remains a separate link-time choice.
 Atlas benchmark scripts (`benchmark.sh`, `autoresearch-bench.sh`, `bench-vector.sh`
 in `scripts/atlas/`) select INFO in `build/_cmake/native-release-atlas-bench`;
 `--no-build` uses that build's executable.
+
+`examples/bench_stream` measures dynamic-upload lifetime patterns (ring, per-upload
+buffers, orphaning, upload-before-first-draw) as JSON lines per window, in ABBA order.
+Native: `bench_stream <cfg> [out.jsonl]` after a `native-release` build. Web and
+phone: build it with `wasm-release`, then `python scripts/bench_stream.py serve
+--cfg examples/bench_stream/p40_inst.cfg --out build/bench_stream/<name>`; add
+`--adb` for a USB phone (port reverse, browser launch, GPU clock and temperature
+tags per window). The page caps at the display rate; raise `load` until the
+baseline arm runs below it, or the arms cannot be ranked. Read
+[measuring performance on phones](perf-measurement.md) before comparing builds on a device.
 
 ## Checks
 

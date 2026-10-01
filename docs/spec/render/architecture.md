@@ -110,8 +110,9 @@ buffer is *not* cascade-destroyed, but destroying one clears the dependents'
 pointed flag: their next draw using that vertex input asserts until
 `nt_gfx_bind_instance_buffer` re-points it, and the GL attachment's storage
 lingers until that re-point or the vertex input's death.
-Buffer *contents* may change freely — `update`/`orphan`
-keep the GL name, so baked attachments survive per-flush orphaning — and
+Buffer *contents* may change at any time for correctness — `update`/`orphan`
+keep the GL name, so baked attachments survive per-flush orphaning; what a
+write costs depends on when it happens (see Dynamic data lifetime) — and
 index-buffer data ops run inside a service upload VAO in the backend,
 because the element-array binding is VAO state — it would otherwise be
 silently rewired into whichever vertex input is bound, and core-profile GL
@@ -264,6 +265,32 @@ cannot grow the cache. A miss creates the vertex input and caches it only on
 success; recoverable creation failures leave the cache unchanged so the next
 lookup retries.
 
+### Dynamic data lifetime
+
+A write into a buffer that an earlier draw of the same frame read is correct
+but not free: Mali drivers under ANGLE track the whole buffer, not the written
+range, so the write waits for those draws or copies around them. Measured on
+the reference phone with `examples/bench_stream`:
+
+- appending per-draw data between draws of one frame (the mesh, skinned and
+  shape instance rings) costs 2-15x frame time when the frame is not GPU-bound;
+- a partial rewrite from offset 0 (the shape batch) stalls the same way;
+- a full-size rewrite does not stall: Chrome gives the buffer new storage;
+- rewriting a buffer one frame after its last read does not stall;
+- orphaning (`nt_gfx_orphan_buffer`) removes the wait but allocates storage on
+  every call.
+
+Policy for engine renderers: data known before drawing is **prepared** — packed
+for the whole frame, uploaded once before the frame's first draw, and drawn by
+range in any pass, any number of times. Immediate-mode batches that flush
+between game passes (sprite, text, shape) choose a per-flush policy by
+measurement. The instance rings named above predate this rule.
+
+A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
+waits did not raise GPU work per frame, and the phone's governor granted the
+waiting build a higher clock. Compare builds as described in
+[measuring performance on phones](../../perf-measurement.md).
+
 ### Render targets
 
 Render targets are a general backend capability for offscreen passes, not a
@@ -311,7 +338,8 @@ Destroying a texture or a live render target inside a pass asserts: pass-scoped
 draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
-uniform-buffer binding calls `glBindBufferBase` on every request. A depth CLEAR forces the depth
+uniform-buffer binding calls `glBindBufferBase` (`glBindBufferRange` for a
+range) on every request. A depth CLEAR forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
@@ -383,10 +411,10 @@ proportionality but not on specific weights. Comparison itself is core in
 GLES 3.0, WebGL 2, and desktop GL 3.0+, so it needs no capability bit.
 
 Mip completeness needs no bind-time gate: `GL_TEXTURE_MAX_LEVEL` is set to
-`mip_count - 1` when the storage is created, so a texture's levels `0..MAX_LEVEL`
-all exist by the time its handle is published. A sampler override with a mipmap
-minification filter is therefore always valid, and over a single-level texture
-it samples level 0.
+`mip_count - 1` when storage commands are issued, matching the uploaded or generated
+chain. A sampler override may therefore use a mipmap minification filter even
+for a single-level texture, where it samples level 0. Driver upload failures
+are not polled, so a published handle does not guarantee complete GPU storage.
 
 Block-compressed storage (`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`,
 `ASTC_4x4_RGBA`) is normalized color for the sampler classes: it satisfies
@@ -402,6 +430,8 @@ both allow `NEAREST` or `NEAREST_MIPMAP_NEAREST` minification and require
 changing the requested sampler.
 RGBA32F mipmap generation additionally requires `has_float_render_target`:
 WebGL requires the source storage to be both filterable and color-renderable.
+RGBA16F mipmap generation requires `has_float_render_target` as well; its
+filtering is core and needs no float-filtering extension.
 This does not add RGBA32F render-target support to the engine.
 
 This capability supplies low-level targets and depth textures only. It does not
@@ -463,14 +493,22 @@ operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
 failure reason and error log. The backend asks only where the answer prevents a crash or a
 misleading log: before shader and program creation, because Emscripten throws on
 the null object some browsers return on a lost context; error logs for link,
-uniform reflection, framebuffer completeness and texture creation, which a loss
-suppresses; a GL error pending before a texture upload, which a loss turns from
-an assert into a rolled-back failure; and the vertex array made at context
-setup, whose name 0 asserts only on a live context. A GPU timer query named 0
-leaves its segment unallocated and skipped, because `beginQuery` throws on it. A
-fresh context (init or restore) first drains GL errors: Emscripten keeps a
-recorded error across contexts, so a call that reached the dead context must not
-fail the fresh one's first check.
+uniform reflection and framebuffer completeness, which a loss suppresses;
+after texture upload, because a nonzero WebGL name does not establish context
+liveness; and the vertex array made at context setup, whose name 0 asserts only
+on a live context. A GPU timer query named 0 leaves its segment unallocated and
+skipped, because `beginQuery` throws on it. A fresh context (init or restore) first
+drains GL errors: Emscripten keeps a recorded error across contexts, so a call
+that reached the dead context must not fail the fresh one's first check.
+
+Texture creation reads no GL error: on WebGL `glGetError` is a blocking
+round trip to the GPU process that waits for the queued uploads. After upload,
+the backend asks whether the context is lost without waiting for GPU completion;
+a confirmed loss deletes the name and ends the create `CONTEXT_LOST`, including
+when the browser returned a non-null texture object during loss. GL misuse is
+reported under `NT_GFX_WEB_GL_DEBUG` / `NT_GFX_NATIVE_GL_DEBUG`. An upload or mipmap
+generation the driver rejects on a live context (out of memory) is not detected:
+the create ends `ACCEPTED` but GPU storage may be incomplete.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
