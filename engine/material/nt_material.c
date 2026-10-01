@@ -56,7 +56,7 @@ static uint64_t vertex_layout_key(const nt_vertex_layout_t *layout) {
         const nt_vertex_attr_t *attr = &layout->attrs[i];
         uint8_t *dst = bytes + 3U + ((size_t)i * 6U);
         dst[0] = attr->location;
-        dst[1] = (uint8_t)attr->type;
+        dst[1] = attr->type;
         dst[2] = attr->count;
         dst[3] = attr->normalized ? 1U : 0U;
         dst[4] = (uint8_t)attr->offset;

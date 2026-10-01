@@ -202,7 +202,7 @@ static inline nt_vertex_layout_t nt_renderer_build_mesh_vertex_layout(const nt_m
             key |= (1ULL | (uint64_t)location << 1) << (si * NT_RENDERER_MESH_VI_KEY_STREAM_BITS);
             layout.attrs[layout.attr_count] = (nt_vertex_attr_t){
                 .location = location,
-                .type = nt_renderer_stream_to_vertex_type(stream->type),
+                .type = (uint8_t)nt_renderer_stream_to_vertex_type(stream->type),
                 .count = stream->count,
                 .normalized = stream->normalized != 0,
                 .offset = offset,

@@ -306,11 +306,12 @@ typedef enum {
 
 typedef struct {
     uint8_t location;
-    nt_vertex_type_t type;
+    uint8_t type;    /* nt_vertex_type_t; a byte keeps the attribute 6 bytes in every layout copy */
     uint8_t count;   /* components per attribute, 1-4 */
     bool normalized; /* integer types only: map to [0,1] / [-1,1] */
     uint16_t offset;
 } nt_vertex_attr_t;
+_Static_assert(sizeof(nt_vertex_attr_t) == 6, "vertex attribute stays packed");
 
 typedef struct {
     nt_vertex_attr_t attrs[NT_GFX_MAX_VERTEX_ATTRS];
