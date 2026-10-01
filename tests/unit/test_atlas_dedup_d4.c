@@ -164,6 +164,7 @@ static void pack_file_free(pack_file_t *f) {
 /* clang-format off */
 static const uint8_t k_f_rotations[4] = {NT_ATLAS_XFORM_IDENTITY, NT_ATLAS_XFORM_ROT90, NT_ATLAS_XFORM_ROT180, NT_ATLAS_XFORM_ROT270};
 static const uint8_t k_f_mirrors[4]   = {NT_ATLAS_XFORM_IDENTITY, NT_ATLAS_XFORM_FLIP_H, NT_ATLAS_XFORM_FLIP_V, NT_ATLAS_XFORM_ROT180};
+static const uint8_t k_f_all_d4[8]   = {0, 1, 2, 3, 4, 5, 6, 7};
 /* clang-format on */
 
 /* One mask for both the atlas and every sprite, so each sprite's effective mask
@@ -433,7 +434,8 @@ static void assert_texel_round_trip(const uv_probe_t *probe, const uint8_t *src,
 
 /* Every opaque texel of ONE image must sample back its own colour through that
  * region's own local->UV map. The colour encodes the source texel, so a wrong
- * relative, a missed dimension swap or an inverted direction all fail here. */
+ * relative, a missed dimension swap or
+ * an inverted direction all fail here. */
 static void assert_region_samples_image(const pack_file_t *pack, const atlas_view_t *view, uint32_t r, uint8_t label, const uint8_t *img, uint32_t iw, uint32_t ih) {
     const NtAtlasRegion *reg = &view->regions[r];
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(4, reg->vertex_count, "a RECT sprite must emit a 4-vertex quad");
@@ -466,8 +468,8 @@ static void assert_region_samples_its_own_image(const pack_file_t *pack, const a
     assert_region_samples_image(pack, view, r, transform, img, (uint32_t)iw, (uint32_t)ih);
 }
 
-static void assert_uv_decode_for_images(const char *path, const char *name, uint8_t mask, const uint8_t *images) {
-    TEST_ASSERT_TRUE_MESSAGE(build_f_pack(path, name, mask, images, 4, false), "UV-decode pack build failed");
+static void assert_uv_decode_for_images(const char *path, const char *name, uint8_t mask, const uint8_t *images, uint32_t count) {
+    TEST_ASSERT_TRUE_MESSAGE(build_f_pack(path, name, mask, images, count, false), "UV-decode pack build failed");
     pack_file_t pack;
     pack_file_load(path, &pack);
     atlas_view_t view;
@@ -477,26 +479,31 @@ static void assert_uv_decode_for_images(const char *path, const char *name, uint
         TEST_FAIL_MESSAGE("open the produced atlas blob");
         return;
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4, view.region_count, "one region per image");
-    /* Non-vacuity: 4 unfolded regions would each trivially sample their own
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(count, view.region_count, "one region per image");
+    /* Non-vacuity: unfolded regions would each trivially sample their own
      * standalone pixels, passing this oracle without any D4 fold happening. */
-    nt_atlas_dedup_region_t folded[4] = {0};
+    nt_atlas_dedup_region_t folded[F_MAX_IMAGES] = {0};
     uint32_t folded_count = 0;
-    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_collect_regions(pack.bytes, pack.len, folded, 4, &folded_count), "collect regions from produced pack");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(folded, 4), "the images must fold before UV decode proves anything");
-    for (uint32_t r = 0; r < 4; ++r) {
+    TEST_ASSERT_TRUE_MESSAGE(atlas_dedup_collect_regions(pack.bytes, pack.len, folded, count, &folded_count), "collect regions from produced pack");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, atlas_dedup_distinct_placements(folded, count), "the images must fold before UV decode proves anything");
+    uint8_t seen = 0;
+    for (uint32_t r = 0; r < count; ++r) {
+        seen |= (uint8_t)(1U << view.regions[r].transform);
         assert_region_samples_its_own_image(&pack, &view, r, images[r]);
     }
+    TEST_ASSERT_EQUAL_HEX8_MESSAGE(mask, seen, "all admitted D4 orientations must reach the UV decode");
     pack_file_free(&pack);
 }
 
-void test_alias_uv_decode_samples_its_own_source_pixel(void) { assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode.ntpack", "dedup_f_uv", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations); }
+void test_alias_uv_decode_samples_its_own_source_pixel(void) { assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode.ntpack", "dedup_f_uv", NT_ATLAS_TRANSFORMS_ROTATIONS, k_f_rotations, 4); }
 
 /* Mirrors are where the texel mapping (w-1-x) and the corner mapping (w-x) diverge,
  * so the one oracle that reads real texels has to run on them too. */
 void test_mirror_alias_uv_decode_samples_its_own_source_pixel(void) {
-    assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode_flip.ntpack", "dedup_f_uv_flip", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors);
+    assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode_flip.ntpack", "dedup_f_uv_flip", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors, 4);
 }
+
+void test_all_d4_aliases_sample_their_own_source_pixel(void) { assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode_all.ntpack", "dedup_f_uv_all", NT_ATLAS_TRANSFORMS_ALL, k_f_all_d4, 8); }
 
 /* The UV write quantizes with +0.5 truncation, so the round decode is exact
  * for any page dimension up to 65535. */
@@ -1162,6 +1169,7 @@ int main(void) {
     RUN_TEST(test_fold_admission_follows_the_alias_mask);
     RUN_TEST(test_alias_uv_decode_samples_its_own_source_pixel);
     RUN_TEST(test_mirror_alias_uv_decode_samples_its_own_source_pixel);
+    RUN_TEST(test_all_d4_aliases_sample_their_own_source_pixel);
     RUN_TEST(test_extruded_ring_replicates_the_shared_placement_edge);
     RUN_TEST(test_mixed_mask_run_keeps_two_roots_and_folds_onto_the_first);
     RUN_TEST(test_transposed_placement_composes_with_the_relative);

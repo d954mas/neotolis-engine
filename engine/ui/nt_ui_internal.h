@@ -15,7 +15,16 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
+#include "ui/nt_ui_shape.h"
 #include "ui/nt_ui_state.h"
+
+/* nt_ui_radial_image parameters; the walker adds the bbox aspect and the atlas-to-source map. */
+struct nt_ui_radial_reveal {
+    float angle_start;
+    float angle_end;
+    float inner_radius_norm;
+    float tint[4]; /* RGB 0..1 and TINT-mode strength */
+};
 
 /* Depth (not count) — independent of max_elements; deep nests are rare. */
 #ifndef NT_UI_TREE_DFS_DEPTH_CAP

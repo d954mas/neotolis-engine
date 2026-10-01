@@ -50,10 +50,10 @@ set(NT_UI_SOURCES
     nt_ui_fit.h
     nt_ui_image.c
     nt_ui_image.h
+    nt_ui_shape.c
+    nt_ui_shape.h
     nt_ui_fill.c
     nt_ui_fill.h
-    nt_ui_radial.c
-    nt_ui_radial.h
     nt_ui_radial_image.c
     nt_ui_radial_image.h
     nt_ui_panel.c
@@ -168,6 +168,7 @@ target_link_libraries(nt_ui
         nt_gfx_interface
         nt_sprite_renderer
         nt_text_renderer
+        nt_ui_shape_renderer
         nt_time
         nt_math
         nt_utf8

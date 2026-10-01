@@ -592,6 +592,53 @@ void test_set_program_on_a_destroyed_material_asserts(void) {
     TEST_PASS();
 }
 
+void test_vertex_layout_is_copied_and_keyed(void) {
+    nt_material_create_desc_t desc = make_test_desc();
+    desc.vertex_layout = (nt_vertex_layout_t){
+        .stride = 148,
+        .attr_count = 2,
+        .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0}, {.location = 9, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 144}},
+    };
+    const nt_material_info_t *info = nt_material_get_info(nt_material_create(&desc));
+    desc.vertex_layout.attrs[1].count = 3;
+    TEST_ASSERT_EQUAL_UINT16(148, info->vertex_layout.stride);
+    TEST_ASSERT_EQUAL_UINT8(4, info->vertex_layout.attrs[1].count);
+    desc.vertex_layout.attrs[1].count = 4;
+    TEST_ASSERT_TRUE(nt_material_get_info(nt_material_create(&desc))->vertex_layout_key == info->vertex_layout_key);
+
+    /* Each single-field change must change the whole-layout key. */
+    for (uint32_t field = 0; field < 6U; ++field) {
+        nt_material_create_desc_t changed = desc;
+        nt_vertex_attr_t *attr = &changed.vertex_layout.attrs[1];
+        switch (field) {
+        case 0:
+            attr->location = 10;
+            break;
+        case 1:
+            attr->type = NT_VERTEX_INT8;
+            break;
+        case 2:
+            attr->count = 3;
+            break;
+        case 3:
+            attr->normalized = false;
+            break;
+        case 4:
+            attr->offset = 140;
+            break;
+        default:
+            changed.vertex_layout.stride = 152;
+            break;
+        }
+        TEST_ASSERT_TRUE(nt_material_get_info(nt_material_create(&changed))->vertex_layout_key != info->vertex_layout_key);
+    }
+}
+
+void test_vertex_layout_rejects_too_many_attributes(void) {
+    nt_material_create_desc_t desc = {.vertex_layout = {.stride = 20, .attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1}};
+    NT_TEST_EXPECT_ASSERT(nt_material_create(&desc));
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -599,6 +646,8 @@ int main(void) {
 
     /* Init / shutdown */
     RUN_TEST(test_init_shutdown);
+    RUN_TEST(test_vertex_layout_rejects_too_many_attributes);
+    RUN_TEST(test_vertex_layout_is_copied_and_keyed);
 
     /* Create / query */
     RUN_TEST(test_create_basic);

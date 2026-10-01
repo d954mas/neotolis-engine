@@ -6,6 +6,7 @@
 #include "atlas/nt_atlas.h"
 #include "clay.h"
 #include "renderers/nt_sprite_renderer.h"
+#include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
@@ -267,6 +268,59 @@ static void test_layer_sort_overrides_declaration_order(void) {
     TEST_ASSERT_EQUAL_INT32(0, (int32_t)pos[0]);
 }
 
+/* A base material with a vertex tail still batches rect, border, image and slice9; each emit gets a zero tail. */
+static void test_custom_layout_base_material_batches_every_base_emit(void) {
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof desc);
+    desc.program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
+    nt_gfx_fake_set_samplers(NULL, 0);
+    desc.cull_mode = NT_CULL_NONE;
+    desc.textures[0].name = "u_texture";
+    desc.texture_count = 1;
+    desc.vertex_layout = NT_SPRITE_VERTEX_LAYOUT;
+    desc.vertex_layout.attrs[desc.vertex_layout.attr_count++] = (nt_vertex_attr_t){.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20};
+    desc.vertex_layout.stride = 36;
+    const nt_material_t mat = nt_material_create(&desc);
+    nt_ui_set_sprite_material(s_fx.ctx, mat);
+
+    nt_atlas_region_ref_t plain_ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
+    nt_atlas_region_ref_t slice_ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.packed_region_idx);
+    const nt_ui_image_style_t plain = nt_ui_image_style_defaults();
+    nt_ui_image_style_t sliced = nt_ui_image_style_defaults();
+    sliced.flags |= NT_UI_IMAGE_SLICE9_OVERRIDE;
+    sliced.slice9_lrtb[0] = 2;
+    sliced.slice9_lrtb[1] = 2;
+    sliced.slice9_lrtb[2] = 2;
+    sliced.slice9_lrtb[3] = 2;
+    const Clay_ElementDeclaration box = {.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(30)}}};
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
+        CLAY({.layout = box.layout, .backgroundColor = {255, 0, 0, 255}}) {}
+        CLAY({.layout = box.layout, .border = {.color = {0, 255, 0, 255}, .width = {.left = 2, .right = 2, .top = 2, .bottom = 2}}}) {}
+        nt_ui_image(s_fx.ctx, NULL, &plain_ref, &plain, &box);
+        nt_ui_image(s_fx.ctx, NULL, &slice_ref, &sliced, &box);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_walk(s_fx.ctx, &(nt_ui_target_t){.viewport = {0, 0, 800, 600}});
+
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_border_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_image_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+    /* The slice9 emit is last: every one of its vertices carries a zero tail. */
+    const uint32_t vertices = nt_sprite_renderer_test_last_emit_vertex_count();
+    TEST_ASSERT_EQUAL_UINT32(16U, vertices);
+    const uint8_t zero[16] = {0};
+    for (uint32_t v = 0; v < vertices; ++v) {
+        uint8_t tail[16];
+        memset(tail, 0xA5, sizeof tail);
+        nt_sprite_renderer_test_last_emit_attrs(v, tail, sizeof tail);
+        TEST_ASSERT_EQUAL_MEMORY(zero, tail, sizeof tail);
+    }
+    nt_material_destroy(mat);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_same_z_rect_text_batches);
@@ -278,5 +332,6 @@ int main(void) {
     RUN_TEST(test_unlayered_count_tracks_null_userdata);
     RUN_TEST(test_layer_sort_overrides_declaration_order);
     RUN_TEST(test_layer_sort_sparse_layers);
+    RUN_TEST(test_custom_layout_base_material_batches_every_base_emit);
     return UNITY_END();
 }

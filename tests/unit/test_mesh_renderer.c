@@ -270,6 +270,7 @@ void setUp(void) {
     nt_log_add_sink(capture_program_warning, NULL);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&(nt_gfx_desc_t){
+        .capture_capacity = 512,
         .max_shaders = 32,
         .max_programs = 64,
         .max_pipelines = 64,
@@ -1737,8 +1738,60 @@ void test_ring_upload_and_draw_base_agree(void) {
 
 /* ---- main ---- */
 
+#if NT_GFX_CAPTURE_ENABLED
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_mesh_streams_own_types_despite_full_material_layout(void) {
+    uint8_t blob[sizeof(NtMeshAssetHeader) + (3 * sizeof(NtStreamDesc)) + 84] = {0};
+    NtMeshAssetHeader *header = (NtMeshAssetHeader *)blob;
+    *header = (NtMeshAssetHeader){.magic = NT_MESH_MAGIC, .version = NT_MESH_VERSION, .stream_count = 3, .vertex_count = 3, .vertex_data_size = 84};
+    NtStreamDesc *streams = (NtStreamDesc *)(blob + sizeof(*header));
+    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 2};
+    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("color").value, .type = NT_STREAM_FLOAT32, .count = 4};
+    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("uv").value, .type = NT_STREAM_UINT16, .count = 2};
+    const nt_mesh_t mesh = {.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
+    const nt_material_t material =
+        nt_material_create(&(nt_material_create_desc_t){.program = create_test_program(),
+                                                        .vertex_layout = {.stride = 20,
+                                                                          .attr_count = 3,
+                                                                          .attrs = {{.location = 0, .type = NT_VERTEX_UINT8, .count = 1},
+                                                                                    {.location = 2, .type = NT_VERTEX_UINT8, .count = 1, .offset = 1},
+                                                                                    {.location = 3, .type = NT_VERTEX_UINT8, .count = 1, .offset = 2}}},
+                                                        .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "color", .location = 2}, {.stream_name = "uv", .location = 3}},
+                                                        .attr_map_count = 3});
+    const nt_entity_t entity = create_test_entity(mesh, material);
+    const nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
+    nt_gfx_end_pass();
+    nt_gfx_capture_request();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_mesh_renderer_draw_list(&item, 1);
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint8_t found = 0;
+    for (uint32_t i = 0; i < capture.count; ++i) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind != NT_GFX_EVENT_DEFINITION || event->operation != NT_GFX_OP_ATTRIBUTE || event->data.attribute.divisor != 0U) {
+            continue;
+        }
+        const uint32_t location = event->data.attribute.location;
+        TEST_ASSERT_TRUE(location == 0U || location == 2U || location == 3U);
+        TEST_ASSERT_EQUAL_UINT32(28, event->data.attribute.stride);
+        TEST_ASSERT_EQUAL_UINT32(location == 3U ? NT_VERTEX_UINT16 : NT_VERTEX_FLOAT, event->data.attribute.type);
+        TEST_ASSERT_EQUAL_UINT32(location == 2U ? 4 : 2, event->data.attribute.count);
+        const uint32_t offsets[] = {0, 0, 8, 24};
+        TEST_ASSERT_EQUAL_UINT32(offsets[location], event->data.attribute.offset);
+        TEST_ASSERT_EQUAL_UINT32(0, event->data.attribute.normalized);
+        found |= (uint8_t)(1U << location);
+    }
+    TEST_ASSERT_EQUAL_UINT8(13, found);
+}
+#endif
+
 int main(void) {
     UNITY_BEGIN();
+#if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_mesh_streams_own_types_despite_full_material_layout);
+#endif
 
     RUN_TEST(test_init_shutdown);
     RUN_TEST(test_init_retries_after_buffer_creation_failure);

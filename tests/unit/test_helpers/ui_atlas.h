@@ -11,21 +11,16 @@
 extern "C" {
 #endif
 
-/* Min/max atlas UV (0..1) of the packed sub-region (index 2). Tests assert the
- * walker-baked a_uvrect against these. Raw u16: u in [0.25,0.5], v in [0.5,0.75]. */
+/* Raw atlas V bounds of packed sub-region (index 2), used by image/slice9 tests. */
 #define MINIMAL_UI_ATLAS_PACKED_V0_RAW 0x8000U
 #define MINIMAL_UI_ATLAS_PACKED_V1_RAW 0xC000U
-#define MINIMAL_UI_ATLAS_PACKED_U0 (0x4000 / 65535.0F)
-#define MINIMAL_UI_ATLAS_PACKED_V0 (MINIMAL_UI_ATLAS_PACKED_V0_RAW / 65535.0F)
-#define MINIMAL_UI_ATLAS_PACKED_U1 (0x8000 / 65535.0F)
-#define MINIMAL_UI_ATLAS_PACKED_V1 (MINIMAL_UI_ATLAS_PACKED_V1_RAW / 65535.0F)
 
 /* Mounts a virtual pack with a synthetic atlas blob and parses it
  * through the full atlas activator, yielding a real READY resource
  * handle with a 1x1 white region at index 0 (4 verts), a 6-vertex
  * polygon region at index 1 (for polygon-hull preservation tests), and
  * a 4-vert PACKED sub-region at index 2 whose atlas UV does NOT span
- * [0,1] (for region-local radial-image reveal tests).
+ * [0,1] (for packed-image and source-coordinate tests).
  *
  * Caller must have init'd nt_hash, nt_gfx, nt_resource, nt_atlas before
  * calling create. Lifetime: valid until destroy.
@@ -47,6 +42,8 @@ typedef struct {
 } minimal_ui_atlas_t;
 
 minimal_ui_atlas_t minimal_ui_atlas_create(void);
+/* Same atlas with another intrinsic scale; region positions are not rescaled. */
+minimal_ui_atlas_t minimal_ui_atlas_create_ipu(float inverse_pixels_per_unit);
 void minimal_ui_atlas_destroy(minimal_ui_atlas_t *atlas);
 
 #ifdef __cplusplus

@@ -7,6 +7,7 @@
 #include "material/nt_material.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
+#include "renderers/nt_ui_shape_renderer.h"
 #include "time/nt_time.h"
 
 /* Clay private surface lives in nt_ui_clay_impl.c. */
@@ -36,6 +37,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_radial_image.h"
 #include "ui/nt_ui_state.h"
 
 // #region module_state
@@ -789,7 +791,7 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
 static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, const float world_mat4[16]) {
     float m[16];
     nt_ui_sprite_mat4(world_mat4, x, y + h, w, h, m);
-    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U, NULL, 0);
 }
 // #endregion
 
@@ -909,7 +911,7 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
     }
 
     /* Vertices are in Clay layout-space; world_mat4 maps layout → world directly. */
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0U);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0);
 }
 // #endregion
 
@@ -1034,7 +1036,7 @@ static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_
         return;
     }
     /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, col, NULL, 0U);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, col, NULL, 0);
     // #endregion
 }
 
@@ -1104,7 +1106,7 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
     }
 
     /* Positions are in Clay layout-space; world_mat4 maps layout → world directly. */
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0U);
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, world_mat4, color_packed, NULL, 0);
 }
 
 static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16]) {
@@ -1133,8 +1135,66 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 // #endregion
 
 // #region helper_emit_image
+/* One region's atlas placement is rigid (D4, trim, packing), so source-image coordinates are
+ * affine in atlas UV; the largest triangle of the region fixes the map. */
+static void radial_image_tail(const nt_ui_image_payload_t *p, Clay_BoundingBox bb, nt_ui_radial_image_tail_t *out) {
+    nt_atlas_region_handles_t h;
+    nt_atlas_get_region_handles(p->atlas, p->region_index, &h);
+    const double sw = (double)h.region->source_w * (double)h.ipu;
+    const double sh = (double)h.region->source_h * (double)h.ipu;
+    NT_ASSERT(sw > 0.0 && sh > 0.0 && "nt_ui_radial_image: region needs positive source dimensions");
+    double best_area = 0.0;
+    uint16_t tri[3] = {0, 0, 0};
+    for (uint8_t i = 0; i + 2U < h.region->index_count; i += 3U) {
+        const nt_atlas_uv_t *a = &h.uvs[h.indices[i]];
+        const nt_atlas_uv_t *b = &h.uvs[h.indices[i + 1U]];
+        const nt_atlas_uv_t *c = &h.uvs[h.indices[i + 2U]];
+        const double area = fabs((((double)b->atlas_u - a->atlas_u) * ((double)c->atlas_v - a->atlas_v)) - (((double)b->atlas_v - a->atlas_v) * ((double)c->atlas_u - a->atlas_u)));
+        if (area > best_area) {
+            best_area = area;
+            tri[0] = h.indices[i];
+            tri[1] = h.indices[i + 1U];
+            tri[2] = h.indices[i + 2U];
+        }
+    }
+    NT_ASSERT(best_area > 0.0 && "nt_ui_radial_image: region has no non-degenerate triangle");
+    double u[3];
+    double v[3];
+    double sx[3];
+    double sy[3];
+    for (int k = 0; k < 3; ++k) {
+        u[k] = (double)h.uvs[tri[k]].atlas_u / 65535.0;
+        v[k] = (double)h.uvs[tri[k]].atlas_v / 65535.0;
+        /* Atlas positions are y-up source space; local UI Y grows down. */
+        sx[k] = (double)h.positions[tri[k]][0] / sw;
+        sy[k] = 1.0 - ((double)h.positions[tri[k]][1] / sh);
+    }
+    const double du1 = u[1] - u[0];
+    const double dv1 = v[1] - v[0];
+    const double du2 = u[2] - u[0];
+    const double dv2 = v[2] - v[0];
+    const double inv_det = 1.0 / ((du1 * dv2) - (dv1 * du2));
+    const double *targets[2] = {sx, sy};
+    float *rows[2] = {out->source_u, out->source_v};
+    for (int r = 0; r < 2; ++r) {
+        const double d1 = targets[r][1] - targets[r][0];
+        const double d2 = targets[r][2] - targets[r][0];
+        const double a = ((d1 * dv2) - (d2 * dv1)) * inv_det;
+        const double b = ((du1 * d2) - (du2 * d1)) * inv_det;
+        rows[r][0] = (float)a;
+        rows[r][1] = (float)b;
+        rows[r][2] = (float)(targets[r][0] - (a * u[0]) - (b * v[0]));
+    }
+    const struct nt_ui_radial_reveal *rv = p->radial;
+    out->radial[0] = rv->angle_start;
+    out->radial[1] = rv->angle_end;
+    out->radial[2] = rv->inner_radius_norm;
+    out->radial[3] = (bb.height > 0.0F) ? (bb.width / bb.height) : 1.0F;
+    memcpy(out->tint, rv->tint, sizeof out->tint);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16], const float *custom, uint8_t custom_bytes) {
+static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16]) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
@@ -1154,6 +1214,14 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16], 
     const nt_texture_region_t *r = nt_atlas_get_region(p->atlas, p->region_index);
     if (r->vertex_count == 0U) {
         return;
+    }
+    nt_ui_radial_image_tail_t tail;
+    const void *custom = NULL;
+    uint16_t custom_bytes = 0U;
+    if ((p->flags & NT_UI_IMAGE_RADIAL_REVEAL) != 0U) {
+        radial_image_tail(p, bb, &tail);
+        custom = &tail;
+        custom_bytes = (uint16_t)sizeof tail;
     }
 
     /* The flag or a non-zero lrtb selects the override; the flag with zeros turns a baked
@@ -1189,95 +1257,6 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16], 
         return;
     }
     nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, origin_x, origin_y, col, p->flip_bits, custom, custom_bytes);
-}
-
-/* Float-offset (i*4) of attr `name_hash` in the block, or -1 if absent.
- * Linear scan: attr_map_count <= 8. */
-static int custom_attr_float_offset(const nt_material_info_t *mi, uint32_t name_hash) {
-    for (uint8_t ai = 0; ai < mi->attr_map_count; ++ai) {
-        if (mi->attr_map_hashes[ai] == name_hash) {
-            return (int)ai * 4;
-        }
-    }
-    return -1;
-}
-
-/* Write a_uvrect = region min/max atlas UV (0..1) at `off` so a custom-attr fs
- * can re-center over any rectangular packed sub-region. */
-static void inject_uvrect(nt_resource_t atlas, uint32_t region_index, float *out, int off) {
-    nt_atlas_region_handles_t rh;
-    nt_atlas_get_region_handles(atlas, region_index, &rh);
-    float u0 = 1.0F;
-    float v0 = 1.0F;
-    float u1 = 0.0F;
-    float v1 = 0.0F;
-    for (uint8_t vi = 0; vi < rh.region->vertex_count; ++vi) {
-        const float u = (float)rh.uvs[vi].atlas_u / 65535.0F;
-        const float v = (float)rh.uvs[vi].atlas_v / 65535.0F;
-        u0 = (u < u0) ? u : u0;
-        v0 = (v < v0) ? v : v0;
-        u1 = (u > u1) ? u : u1;
-        v1 = (v > v1) ? v : v1;
-    }
-    out[off] = u0;
-    out[off + 1] = v0;
-    out[off + 2] = u1;
-    out[off + 3] = v1;
-}
-
-/* Copy the widget's custom_attrs verbatim, then the walker fills a_layout/a_uvrect
- * by attr_map offset (attr_map = single source of truth, no magic slots). Radial widgets fade via
- * color_packed/a_color (the walker's backgroundColor fold), never via a_tint -- a_tint.w is a reveal
- * strength, not alpha. Returns float count. */
-static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_image_custom_block_t *blk, const Clay_BoundingBox *bb, float out[16]) {
-    NT_ASSERT(blk->custom_bytes > 0 && blk->custom_bytes <= NT_SPRITE_CUSTOM_STRIDE_MAX && "nt_ui custom: bad custom_bytes");
-    const uint8_t fcount = (uint8_t)(blk->custom_bytes / sizeof(float));
-    memcpy(out, blk->custom_attrs, blk->custom_bytes);
-
-    const nt_material_info_t *mi = nt_material_get_info(p->material);
-    /* Declaration path -- no GL here, so this asks about assignment, not liveness. */
-    NT_ASSERT(mi != NULL && mi->program.id != 0 && "nt_ui custom: material must have a program");
-    /* Cache the injection-attr name hashes once (runtime hash; same fn the material used). */
-    static uint32_t s_hash_layout;
-    static uint32_t s_hash_uvrect;
-    if (s_hash_layout == 0U) {
-        s_hash_layout = nt_hash32_str("a_layout").value;
-        s_hash_uvrect = nt_hash32_str("a_uvrect").value;
-    }
-
-    /* a_layout = {aspect = w/h, bbox_width_px, bbox_height_px, 0}. Bbox-derived at emit
-     * so the shape stays correct under GROW/FIT/PERCENT/null-decl, not just FIXED w/h.
-     * px size opens rounded/outline/shadow/blur effects to wrappers. */
-    const int lo = custom_attr_float_offset(mi, s_hash_layout);
-    if (lo >= 0) {
-        out[lo] = (bb->height > 0.0F) ? (bb->width / bb->height) : 1.0F;
-        out[lo + 1] = bb->width;
-        out[lo + 2] = bb->height;
-        out[lo + 3] = 0.0F;
-    }
-    const int uo = custom_attr_float_offset(mi, s_hash_uvrect);
-    if (uo >= 0) {
-        inject_uvrect(p->atlas, p->region_index, out, uo);
-    }
-    return fcount;
-}
-
-/* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel.
- *
- * INVARIANT (load-bearing): the vertex shader's gl_VertexID&3 corner derivation requires each
- * quad's base vertex index to be a multiple of 4. The align call enforces it, so the
- * quad may share a batch with emits of any vertex count; it emits EXACTLY 4 verts. */
-static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16], const float *custom, uint8_t custom_bytes) {
-    const Clay_BoundingBox bb = c->boundingBox;
-    if (bb.width <= 0.0F || bb.height <= 0.0F) {
-        return;
-    }
-    /* Corners TL/TR/BR/BL in Clay layout-space; the vert shader maps gl_VertexID
-     * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
-    const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
-    const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_align_next_vertex_to_4();
-    nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col, custom, custom_bytes);
 }
 // #endregion
 
@@ -1457,6 +1436,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     /* Flush BEFORE scissor switch so staging keeps prior clip. */
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
+    nt_ui_shape_renderer_flush();
     sprite_bind_barrier(bind);
 
     stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
@@ -1469,6 +1449,7 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
     NT_ASSERT(*depth > 0 && "scissor underflow");
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
+    nt_ui_shape_renderer_flush();
     sprite_bind_barrier(bind);
     (*depth)--;
     if (*depth == 0) {
@@ -1528,6 +1509,7 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     }
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
+    nt_ui_shape_renderer_flush();
     /* Handler binds its OWN material; reset the cache so the next dispatch rebinds. */
     sprite_bind_barrier(bind);
 
@@ -1614,10 +1596,11 @@ static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mod
 
 /* desired = ctx->sprite_material or a per-element override (radial reveal). Skip
  * set_material (does get_info+validation even on its no-op) across a same-material run;
- * a barrier (dirty) or material switch rebinds. The text flush is a DIFFERENT (TEXT)
- * pipeline — it never closes the sprite cmd, so can't invalidate the cache. */
+ * a barrier (dirty) or material switch rebinds. Text and shape flushes belong to other
+ * renderers — they never close the sprite cmd, so can't invalidate the cache. */
 static inline void prep_sprite_dispatch_mat(nt_material_t desired, nt_ui_sprite_bind_t *bind) {
     nt_text_renderer_flush();
+    nt_ui_shape_renderer_flush();
     if (desired.id != bind->last_mat_id || bind->dirty) {
         nt_sprite_renderer_set_material(desired);
         bind->last_mat_id = desired.id;
@@ -1632,8 +1615,132 @@ static inline void mat4_mul_vec4_flat(const float m[16], const float v[4], float
     out[3] = (m[3] * v[0]) + (m[7] * v[1]) + (m[11] * v[2]) + (m[15] * v[3]);
 }
 
-static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierarchy_depth, float world_mat4[16]) {
-    if (ctx->element_depth_bias_ndc == 0.0F || hierarchy_depth == 0U) {
+// #region analytic_shapes
+static void shape_normalize_radii(const nt_ui_shape_radii_t *r, float width, float height, float out[4]) {
+    const double radii[4] = {(double)r->top_left, (double)r->top_right, (double)r->bottom_right, (double)r->bottom_left};
+    const double sums[4] = {radii[0] + radii[1], radii[1] + radii[2], radii[2] + radii[3], radii[3] + radii[0]};
+    const double edges[4] = {(double)width, (double)height, (double)width, (double)height};
+    double scale = 1.0;
+    for (int i = 0; i < 4; ++i) {
+        if (sums[i] > edges[i]) {
+            scale = fmin(scale, edges[i] / sums[i]);
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        out[i] = (float)(radii[i] * scale);
+    }
+}
+
+/* The GL viewport nt_ui_walk binds, in physical pixels. */
+static void ui_physical_viewport(const nt_ui_target_t *target, int out[4]) {
+    if (target->fb_size[0] > 0.0F) {
+        /* Derive width from int offset to avoid rounding asymmetry (1px bar). */
+        const int ox = (int)roundf(target->fb_offset[0]);
+        const int oy = (int)roundf(target->fb_offset[1]);
+        out[0] = ox;
+        out[1] = oy;
+        out[2] = (int)target->fb_size[0] - (2 * ox);
+        out[3] = (int)target->fb_size[1] - (2 * oy);
+        return;
+    }
+    out[0] = (int)target->viewport[0];
+    out[1] = (int)target->viewport[1];
+    out[2] = (int)target->viewport[2];
+    out[3] = (int)target->viewport[3];
+}
+
+/* Layout units that cover one physical pixel square: the inverse-Jacobian row sums. */
+static double shape_pixel_guard(double a, double b, double c, double d) {
+    const double determinant = (a * d) - (b * c);
+    return determinant == 0.0 ? 0.0 : fmax(fabs(d) + fabs(b), fabs(c) + fabs(a)) / fabs(determinant);
+}
+
+static float shape_affine_guard(const nt_ui_target_t *target, const float world[16]) {
+    int physical[4];
+    ui_physical_viewport(target, physical);
+    if (physical[2] <= 0 || physical[3] <= 0) {
+        return 0.0F;
+    }
+    const double sx = (double)physical[2] / (double)target->viewport[2];
+    const double sy = (double)physical[3] / (double)target->viewport[3];
+    return (float)shape_pixel_guard((double)world[0] * sx, (double)world[4] * sx, (double)world[1] * sy, (double)world[5] * sy);
+}
+
+/* Projected guard: the largest over the support corners in front of the camera. 0 culls a support
+ * behind the camera or seen edge-on; the element size caps the fringe near the horizon. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static float shape_world_guard(const nt_ui_context_t *ctx, const nt_ui_target_t *target, const float world[16], Clay_BoundingBox bb) {
+    NT_ASSERT(ctx->view_proj_set && "analytic world UI requires nt_ui_set_view_proj");
+    int physical[4];
+    ui_physical_viewport(target, physical);
+    if (physical[2] <= 0 || physical[3] <= 0) {
+        return 0.0F;
+    }
+    const float axis_x[4] = {world[0], world[1], world[2], 0.0F};
+    const float axis_y[4] = {world[4], world[5], world[6], 0.0F};
+    float dx[4];
+    float dy[4];
+    mat4_mul_vec4_flat(ctx->view_proj, axis_x, dx);
+    mat4_mul_vec4_flat(ctx->view_proj, axis_y, dy);
+    const float corners[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
+    const double half_w = 0.5 * (double)physical[2];
+    const double half_h = 0.5 * (double)physical[3];
+    double guard = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        const float local[4] = {corners[i][0], corners[i][1], 0.0F, 1.0F};
+        float point[4];
+        float clip[4];
+        mat4_mul_vec4_flat(world, local, point);
+        mat4_mul_vec4_flat(ctx->view_proj, point, clip);
+        const double w = (double)clip[3];
+        if (w <= 0.0) {
+            continue;
+        }
+        /* Quotient rule: d(clip.xy / w) per layout unit, scaled to pixels. */
+        const double inv_w2 = 1.0 / (w * w);
+        const double a = half_w * (((double)dx[0] * w) - ((double)clip[0] * (double)dx[3])) * inv_w2;
+        const double b = half_w * (((double)dy[0] * w) - ((double)clip[0] * (double)dy[3])) * inv_w2;
+        const double c = half_h * (((double)dx[1] * w) - ((double)clip[1] * (double)dx[3])) * inv_w2;
+        const double d = half_h * (((double)dy[1] * w) - ((double)clip[1] * (double)dy[3])) * inv_w2;
+        guard = fmax(guard, shape_pixel_guard(a, b, c, d));
+    }
+    return (float)fmin(guard, (double)fmaxf(bb.width, bb.height));
+}
+
+/* World corner p is origin + p.x * axis_x + p.y * axis_y, the transform the sprite path applies per vertex. */
+static void emit_shape_instance(Clay_BoundingBox bb, float pad, const float world[16], nt_ui_shape_instance_t *instance) {
+    for (int k = 0; k < 3; ++k) {
+        instance->origin[k] = (world[k] * bb.x) + (world[4 + k] * bb.y) + world[12 + k];
+        instance->axis_x[k] = world[k];
+        instance->axis_y[k] = world[4 + k];
+    }
+    instance->width = bb.width;
+    instance->height = bb.height;
+    instance->pad = pad;
+    nt_ui_shape_renderer_emit(instance);
+}
+
+/* Screen cull of one quad's transformed paint bounds, before any per-shape preparation. */
+static bool shape_screen_visible(Clay_BoundingBox bb, float pad, const nt_ui_target_t *target, const float world[16]) {
+    const float corners[4][2] = {{bb.x - pad, bb.y - pad}, {bb.x + bb.width + pad, bb.y - pad}, {bb.x + bb.width + pad, bb.y + bb.height + pad}, {bb.x - pad, bb.y + bb.height + pad}};
+    float min_x = INFINITY;
+    float min_y = INFINITY;
+    float max_x = -INFINITY;
+    float max_y = -INFINITY;
+    for (int i = 0; i < 4; ++i) {
+        const float x = (world[0] * corners[i][0]) + (world[4] * corners[i][1]) + world[12];
+        const float y = (world[1] * corners[i][0]) + (world[5] * corners[i][1]) + world[13];
+        min_x = fminf(min_x, x);
+        min_y = fminf(min_y, y);
+        max_x = fmaxf(max_x, x);
+        max_y = fmaxf(max_y, y);
+    }
+    /* Projection bounds are viewport-local; GL applies the viewport origin later. */
+    return !(max_x < 0.0F || min_x > target->viewport[2] || max_y < 0.0F || min_y > target->viewport[3]);
+}
+
+static void apply_element_depth_bias(const nt_ui_context_t *ctx, float hierarchy_depth, float world_mat4[16]) {
+    if (ctx->element_depth_bias_ndc == 0.0F || hierarchy_depth == 0.0F) {
         return;
     }
     NT_ASSERT(ctx->view_proj_set && "nt_ui_walk: element_depth_bias_ndc requires nt_ui_set_view_proj before nt_ui_walk");
@@ -1645,7 +1752,7 @@ static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierar
         return;
     }
 
-    clip[2] -= ((float)hierarchy_depth * ctx->element_depth_bias_ndc) * clip[3];
+    clip[2] -= (hierarchy_depth * ctx->element_depth_bias_ndc) * clip[3];
 
     float biased[4];
     mat4_mul_vec4_flat(ctx->inv_view_proj, clip, biased);
@@ -1658,6 +1765,104 @@ static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierar
     world_mat4[13] += (biased[1] * inv_w) - origin[1];
     world_mat4[14] += (biased[2] * inv_w) - origin[2];
 }
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd, const nt_ui_target_t *target, const float world[16], const nt_ui_walker_state_t *ws, nt_ui_sprite_bind_t *bind,
+                       float opacity, bool screen_space) {
+    const nt_ui_image_payload_t *payload = cmd->renderData.image.imageData;
+    const nt_ui_shape_style_t *style = payload->shape;
+    const Clay_BoundingBox bb = cmd->boundingBox;
+    if (bb.width <= 0.0F || bb.height <= 0.0F || opacity <= 0.0F) {
+        return;
+    }
+    const uint8_t inherited_alpha = (uint8_t)lrintf(opacity * 255.0F);
+    if (inherited_alpha == 0U) {
+        return;
+    }
+    const uint32_t end = style->paint.gradient == NT_UI_SHAPE_SOLID ? style->paint.color0 : style->paint.color1;
+    const float reach = fmaxf(style->shadow.spread + style->shadow.softness, 0.0F);
+    const Clay_BoundingBox shadow_box = {bb.x + style->shadow.offset_x, bb.y + style->shadow.offset_y, bb.width, bb.height};
+    const nt_ui_shape_border_widths_t *bw = &style->paint.border_widths;
+    const bool has_border = style->kind == NT_UI_SHAPE_BOX && (bw->left > 0.0F || bw->top > 0.0F || bw->right > 0.0F || bw->bottom > 0.0F);
+    bool body_visible = ((style->paint.color0 | end | (has_border ? style->paint.border_color : 0U)) >> 24U) != 0U;
+    bool shadow_visible = (style->shadow.color >> 24U) != 0U;
+    float guard = 0.0F;
+    float shadow_guard = 0.0F;
+    if (screen_space) {
+        guard = shape_affine_guard(target, world);
+        shadow_guard = guard;
+        body_visible = body_visible && guard > 0.0F && shape_screen_visible(bb, guard, target, world);
+        shadow_visible = shadow_visible && guard > 0.0F && shape_screen_visible(shadow_box, guard + reach, target, world);
+    } else {
+        /* An offset shadow can face the camera while its body is behind it. */
+        guard = body_visible ? shape_world_guard(ctx, target, world, bb) : 0.0F;
+        shadow_guard = shadow_visible ? shape_world_guard(ctx, target, world, shadow_box) : 0.0F;
+        body_visible = body_visible && guard > 0.0F;
+        shadow_visible = shadow_visible && shadow_guard > 0.0F;
+    }
+    if (!body_visible && !shadow_visible) {
+        return;
+    }
+    /* A shadow drawn at the body's depth wins the depth test against the body. */
+    NT_ASSERT((!shadow_visible || !nt_material_get_info(style->material)->depth_write || (!screen_space && ctx->element_depth_bias_ndc > 0.0F)) &&
+              "nt_ui_shape: a shadow with a depth-writing material needs world UI with element_depth_bias_ndc > 0");
+    nt_sprite_renderer_flush();
+    nt_text_renderer_flush();
+    sprite_bind_barrier(bind);
+    nt_ui_shape_renderer_set_material(style->material);
+
+    nt_ui_shape_instance_t instance = {0};
+    memcpy(instance.user, style->user, sizeof instance.user);
+    if (style->kind == NT_UI_SHAPE_BOX) {
+        shape_normalize_radii(&style->box, bb.width, bb.height, instance.geometry);
+        instance.widths[0] = bw->left;
+        instance.widths[1] = bw->top;
+        instance.widths[2] = bw->right;
+        instance.widths[3] = bw->bottom;
+    } else {
+        instance.geometry[0] = style->radial.angle_start;
+        instance.geometry[1] = style->radial.angle_end;
+        instance.geometry[2] = style->radial.inner_radius_norm;
+    }
+    if (shadow_visible) {
+        nt_ui_shape_instance_t shadow = instance;
+        shadow.widths[0] = style->shadow.spread;
+        shadow.widths[1] = style->shadow.softness;
+        shadow.widths[2] = reach;
+        shadow.widths[3] = 0.0F;
+        for (uint8_t i = 0; i < 3U; ++i) {
+            shadow.color[i] = (uint8_t)(style->shadow.color >> (i * 8U));
+        }
+        shadow.color[3] = inherited_alpha;
+        shadow.control[0] = (uint8_t)(style->shadow.color >> 24U);
+        shadow.control[1] = NT_UI_SHAPE_MODE_SHADOW;
+        float biased_shadow[16];
+        const float *shadow_world = world;
+        if (!screen_space && ctx->element_depth_bias_ndc > 0.0F) {
+            memcpy(biased_shadow, ws->m, sizeof biased_shadow);
+            apply_element_depth_bias(ctx, (float)ws->hierarchy_depth - 0.5F, biased_shadow);
+            shadow_world = biased_shadow;
+        }
+        emit_shape_instance(shadow_box, shadow_guard + reach, shadow_world, &shadow);
+    }
+    if (!body_visible) {
+        return;
+    }
+    for (uint8_t i = 0; i < 4U; ++i) {
+        instance.endpoint[i] = (uint8_t)(end >> (i * 8U));
+        instance.border[i] = (uint8_t)(style->paint.border_color >> (i * 8U));
+    }
+    for (uint8_t i = 0; i < 3U; ++i) {
+        instance.color[i] = (uint8_t)(style->paint.color0 >> (i * 8U));
+    }
+    instance.color[3] = inherited_alpha;
+    instance.control[0] = (uint8_t)(style->paint.color0 >> 24U);
+    _Static_assert(NT_UI_SHAPE_BOX == NT_UI_SHAPE_MODE_BOX && NT_UI_SHAPE_RADIAL == NT_UI_SHAPE_MODE_RADIAL, "shape kind doubles as the shader mode");
+    instance.control[1] = (uint8_t)style->kind;
+    instance.control[2] = (uint8_t)style->paint.gradient;
+    emit_shape_instance(bb, guard, world, &instance);
+}
+// #endregion
 
 /* For 2D ctx: bake the screen Y-flip (Clay Y-down → GL Y-up) into world_mat4 = Y_flip · ws->m.
  * For 3D ctx (use_raycast_input): world_mat4 = ws->m verbatim; the game's view_proj handles screen
@@ -1708,6 +1913,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_TEXT: {
         counters->text_command_count++;
         nt_sprite_renderer_flush();
+        nt_ui_shape_renderer_flush();
         sprite_bind_barrier(bind);
         Clay_RenderCommand local = *c;
         /* Round-to-nearest to match RECT's apply_opacity. */
@@ -1734,6 +1940,10 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
          * Routed through prep so a shared override batches and the base<->override
          * boundary flushes exactly once. */
         const nt_ui_image_payload_t *ip = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+        if (ip != NULL && (ip->flags & NT_UI_IMAGE_ANALYTIC_SHAPE) != 0U) {
+            emit_shape(ctx, c, target, world_mat4, ws, bind, ws->accum_opacity, !ctx->use_raycast_input || force_screen_space);
+            return;
+        }
         const nt_material_t img_mat = (ip != NULL && ip->material.id != 0) ? ip->material : ctx->sprite_material;
         prep_sprite_dispatch_mat(img_mat, bind);
         Clay_RenderCommand local = *c;
@@ -1748,23 +1958,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
             }
         }
-        /* One generic custom-attr branch (no per-widget identity): custom_bytes>0 → bake
-         * the widget block (a_layout/a_uvrect injected by name) and dispatch by geom_mode. */
-        float blk[16];
-        uint8_t blk_bytes = 0U;
-        if (ip != NULL && ip->custom != NULL) {
-            blk_bytes = (uint8_t)(build_custom_block(ip, ip->custom, &c->boundingBox, blk) * sizeof(float));
-            if (ip->custom->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
-                const Clay_Color rt = local.renderData.image.backgroundColor;
-                const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
-                const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
-                emit_custom_geometry(ctx, &local, rcol, world_mat4, blk, blk_bytes);
-                return;
-            }
-            /* REGION mode: emit_image rasterizes the textured region (origin/flip/slice9
-             * honored), baking the widget block across all verts. */
-        }
-        emit_image(&local, world_mat4, blk, blk_bytes);
+        emit_image(&local, world_mat4);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
@@ -1836,6 +2030,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     /* Walker owns GL scissor across the call; drain BEFORE early returns so leaked staging dies with the frame. */
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
+    nt_ui_shape_renderer_flush();
     nt_gfx_set_scissor_enabled(false);
     // #endregion
 
@@ -1918,14 +2113,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
 
     // #region viewport-bind
     /* glViewport needs PHYSICAL pixels. */
-    if (scaled) {
-        /* Derive width from int offset to avoid rounding asymmetry (1px bar). */
-        const int ox = (int)roundf(target->fb_offset[0]);
-        const int oy = (int)roundf(target->fb_offset[1]);
-        nt_gfx_set_viewport(ox, oy, (int)target->fb_size[0] - (2 * ox), (int)target->fb_size[1] - (2 * oy));
-    } else {
-        nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
-    }
+    int physical[4];
+    ui_physical_viewport(target, physical);
+    nt_gfx_set_viewport(physical[0], physical[1], physical[2], physical[3]);
 
 #if NT_UI_DEBUG_TOOLS
     /* DEBUG_INSPECTOR: render with the inspector's own overlay materials (typically depth-off) when the
@@ -2053,6 +2243,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     // #region exit-flush + metrics
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
+    nt_ui_shape_renderer_flush();
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
     nt_gfx_set_scissor_enabled(false);
 

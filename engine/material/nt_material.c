@@ -47,6 +47,24 @@ void nt_material_shutdown(void) {
 
 /* ---- Create / Destroy / Query ---- */
 
+static uint64_t vertex_layout_key(const nt_vertex_layout_t *layout) {
+    uint8_t bytes[3 + (NT_GFX_MAX_VERTEX_ATTRS * 6)];
+    bytes[0] = (uint8_t)layout->stride;
+    bytes[1] = (uint8_t)(layout->stride >> 8U);
+    bytes[2] = layout->attr_count;
+    for (uint8_t i = 0; i < layout->attr_count; ++i) {
+        const nt_vertex_attr_t *attr = &layout->attrs[i];
+        uint8_t *dst = bytes + 3U + ((size_t)i * 6U);
+        dst[0] = attr->location;
+        dst[1] = attr->type;
+        dst[2] = attr->count;
+        dst[3] = attr->normalized ? 1U : 0U;
+        dst[4] = (uint8_t)attr->offset;
+        dst[5] = (uint8_t)(attr->offset >> 8U);
+    }
+    return nt_hash64(bytes, 3U + ((uint32_t)layout->attr_count * 6U)).value;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(s_mat.initialized); /* create before init */
@@ -66,6 +84,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         NT_ASSERT(desc->attr_map[i].location < NT_GFX_MAX_VERTEX_ATTRS && "attr_map location out of range");
     }
 
+    /* nt_gfx_make_vertex_input validates attributes when a renderer bakes the layout. */
+    NT_ASSERT(desc->vertex_layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS);
+
     uint32_t id = nt_pool_alloc(&s_mat.pool);
     if (id == 0) {
         NT_LOG_ERROR("pool full -- increase max_materials");
@@ -79,6 +100,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     memset(info, 0, sizeof(*info));
 
     info->program = desc->program;
+
+    info->vertex_layout = desc->vertex_layout;
+    info->vertex_layout_key = vertex_layout_key(&info->vertex_layout);
 
     /* Textures */
     NT_ASSERT(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
@@ -109,9 +133,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->attr_map_count; i++) {
         info->attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
         info->attr_map_locations[i] = desc->attr_map[i].location;
-        memcpy(info->attr_map_defaults[i], desc->attr_map[i].default_value, sizeof(float) * 4);
     }
-    info->has_attr_defaults = desc->has_attr_defaults;
 
     /* Entity params */
     NT_ASSERT(desc->entity_param_count <= NT_MAX_PER_ENTITY_PARAMS);

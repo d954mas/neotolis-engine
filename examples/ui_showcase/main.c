@@ -22,6 +22,7 @@
 #include "renderers/nt_shape_renderer.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
+#include "renderers/nt_ui_shape_renderer.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_button.h"
@@ -35,13 +36,13 @@
 #include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_panel.h"
 #include "ui/nt_ui_progress.h"
-#include "ui/nt_ui_radial.h"
 #include "ui/nt_ui_radial_image.h"
 #include "ui/nt_ui_rich_fx.h"
 #include "ui/nt_ui_rich_tagset.h"
 #include "ui/nt_ui_rich_text.h"
 #include "ui/nt_ui_scale.h"
 #include "ui/nt_ui_scroll.h"
+#include "ui/nt_ui_shape.h"
 #include "ui/nt_ui_slider.h"
 #include "ui/nt_ui_state.h"
 #include "ui/nt_ui_tabbar.h"
@@ -57,6 +58,7 @@
 
 #include "ui_showcase_assets.h"
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -319,7 +321,7 @@ typedef struct {
 /* Radial tab: a game-owned cooldown timer (ramps 0->1 then resets) drives the cooldown wedge;
  * the hold-to-confirm radial reads the events hold_progress; the rest are static demos. */
 typedef struct {
-    float cooldown;      /* 0..1, ramps over cooldown_secs then loops (drives nt_ui_radial_fill) */
+    float cooldown;      /* 0..1, ramps over cooldown_secs then loops */
     float cooldown_secs; /* full sweep duration */
     uint32_t hold_fires; /* hold-to-confirm fire count (long_pressed) */
     float hold_progress; /* latched hold_progress for the radial fill display */
@@ -400,19 +402,24 @@ struct tab_state {
     /* Interaction-events + app-widget tabs. */
     events_params_t events;
     radial_params_t radial;
+    struct {
+        bool enabled;
+        bool workload;
+        bool icon_layer;
+        int workload_kind;
+        int workload_effect;
+        uint32_t atlas_clicks, shape_clicks;
+    } shapes;
     dropdown_params_t dropdown;
     menu_params_t menu;
     /* Tabs tab: the begin/end-core demo strip's game-owned active index. */
     int tabs_demo_active;
-    /* Base Material tab: draw the whole UI with the one SDF+sprite base material. */
-    bool base_sdf;
     /* Rich Text tab state (game-owned effect clock + link latches; see rich_params_t). */
     rich_params_t rich;
 };
 
 static struct tab_state s_state = {
     .cb_value = true,
-    .base_sdf = true,
     .cb_locked = true, /* demos a locked-ON feature; disabled so it stays fixed. */
     .radio_sel = 1,
     .toggle_value = false,
@@ -431,6 +438,7 @@ static struct tab_state s_state = {
     .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
     .events = {.confirms = 0, .dbl_clicks = 0, .last_progress = 0.0F},
     .radial = {.cooldown = 0.0F, .cooldown_secs = 3.0F, .hold_fires = 0, .hold_progress = 0.0F},
+    .shapes = {.enabled = true},
     .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false, .color_sel = -1, .color_open = false},
     .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = NULL, .show_grid = false, .opacity_pct = 60}, /* non-100 start so "reset" visibly changes it */
     .rich = {.time = 0.0F, .last_link = 0U, .link_clicks = 0U, .hover_a = 0U, .hover_b = 0U, .latch_a = 0.0F, .latch_b = 0.0F},
@@ -530,24 +538,23 @@ static nt_resource_t s_atlas_tex_handle;
 static nt_resource_t s_font_resource;
 /* Rich-text family resources: DejaVu R/B/I/BI faces baked into the pack (variant slots). */
 static nt_resource_t s_rich_font_resource[4];
-/* Radial: shared extended-layout VS + flat SDF FS + textured reveal FS. */
+/* Radial image keeps a separate textured reveal shader. */
 /* Dedicated single-sprite atlas for the radial-image reveal: its lone region's UV spans [0,1]
  * over the quad, so the wedge stays centered. */
 static nt_resource_t s_radial_art_atlas_handle;
 static nt_resource_t s_radial_art_tex_handle;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
-/* One base radial material (nt_ui_radial) + one radial-image material per reveal mode so each
- * mode's u_reveal_mode param stays stable and same-mode radials batch to one draw. */
-static nt_material_t s_radial_material;
+/* One radial-image material per reveal mode keeps u_reveal_mode stable. */
+static nt_material_t s_shape_material;
+/* A game fragment shader over the engine shape instance: a checker read from style.user. */
+static nt_material_t s_shape_checker_material;
 static nt_material_t s_radial_image_material[4];     /* indexed by nt_ui_radial_reveal_mode_t */
 static nt_material_t s_radial_image_packed_material; /* radial-image on the SHARED atlas (packed sub-region proof) */
-static nt_material_t s_base_material;                /* Base Material tab: sprites + flat radials, one batch */
 static nt_program_ref_t s_sprite_program;
 static nt_program_ref_t s_text_program;
-static nt_program_ref_t s_radial_program;
+static nt_program_ref_t s_shape_program, s_shape_checker_program;
 static nt_program_ref_t s_radial_image_program; /* shared by all five radial-image materials */
-static nt_program_ref_t s_base_program;
 
 /* Links each pair once both its stages are ready. The programs are ours:
  * materials only borrow the handles, and context loss forces a relink. */
@@ -558,17 +565,17 @@ static void link_programs(void) {
     if (nt_program_ref_update(&s_text_program)) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
-    if (nt_program_ref_update(&s_radial_program)) {
-        nt_material_set_program(s_radial_material, s_radial_program.program);
+    if (nt_program_ref_update(&s_shape_program)) {
+        nt_material_set_program(s_shape_material, s_shape_program.program);
+    }
+    if (nt_program_ref_update(&s_shape_checker_program)) {
+        nt_material_set_program(s_shape_checker_material, s_shape_checker_program.program);
     }
     if (nt_program_ref_update(&s_radial_image_program)) {
         for (int m = 0; m < 4; ++m) {
             nt_material_set_program(s_radial_image_material[m], s_radial_image_program.program);
         }
         nt_material_set_program(s_radial_image_packed_material, s_radial_image_program.program);
-    }
-    if (nt_program_ref_update(&s_base_program)) {
-        nt_material_set_program(s_base_material, s_base_program.program);
     }
 }
 static nt_atlas_region_ref_t s_radial_art_ref;
@@ -605,6 +612,11 @@ static nt_atlas_region_ref_t s_tabs_icon_idle_ref;
 static nt_atlas_region_ref_t s_tabs_icon_sel_ref;
 
 static int s_active_tab;
+static struct {
+    uint32_t draws;
+    uint64_t vertices, indices, upload_bytes;
+    float layout_ms, build_tree_ms, walk_ms;
+} s_shape_walk_stats;
 // #endregion
 
 // #region focused-panel title
@@ -625,7 +637,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_input(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_events(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st);
-static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st);
+static void render_shapes(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_rich(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_deco(nt_ui_context_t *ctx, tab_state_t *st);
 static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st);
@@ -659,8 +671,7 @@ static const showcase_entry_t g_tabs[] = {
     {"Input", "Plain / numeric-filtered / password-masked / Cyrillic text fields; selection + Ctrl+C/X/V + Tab focus.", "examples/ui_showcase/main.c:render_input", render_input, NULL},
     {"Events", "Hold-to-confirm (events hold_progress fill + long_pressed) + a double-click readout.", "examples/ui_showcase/main.c:render_events", render_events, NULL},
     {"Radial", "SDF radial feedback: cooldown wedge + hold-to-confirm + four-mode image reveal + a batched dense grid.", "examples/ui_showcase/main.c:render_radial", render_radial, NULL},
-    {"Base Material", "One custom-attr base material for the whole UI: plain emits bake its attr defaults, so panels, icons and SDF radials share one batch.",
-     "examples/ui_showcase/main.c:render_base_material", render_base_material, NULL},
+    {"Shapes", "Analytic corners, borders, gradients and shadows. Atlas and procedural buttons share the same interaction.", "examples/ui_showcase/main.c:render_shapes", render_shapes, NULL},
     {"Rich Text", "Styled multi-run text + inline icons + bold/italic + wave/typewriter effects + a clickable link, via BOTH the code-first builder AND the runtime markup parser.",
      "examples/ui_showcase/main.c:render_rich", render_rich, NULL},
     {"Dropdown", "Combobox on popup-core: a short list + a long scrolling list with edge-flip near the bottom.", "examples/ui_showcase/main.c:render_dropdown", render_dropdown, NULL},
@@ -1249,6 +1260,300 @@ static void render_buttons(nt_ui_context_t *ctx, tab_state_t *st) {
         labelled_button_cell(ctx, "Disabled", "enabled=false short-circuits + dims", nt_ui_id("showcase/btn_disabled"), g_current->btn_primary, "Locked", false, true);
     }
 }
+
+// #region analytic shapes
+/* One interaction owner; only the child background changes between atlas and procedural skins. */
+static bool shape_demo_button(nt_ui_context_t *ctx, uint32_t id, bool procedural, bool enabled) {
+    nt_ui_button_style_t style = *g_current->btn_scale;
+    style.pressed.offset_y = 3.0F;
+    if (procedural) {
+        style.idle.bg = style.hover.bg = style.pressed.bg = style.disabled.bg = (nt_atlas_region_ref_t){0};
+        style.idle.bg_tint = style.hover.bg_tint = style.pressed.bg_tint = style.disabled.bg_tint = 0xFFFFFFFFU;
+    } else {
+        style.idle.bg = s_panel_blue_ref;
+    }
+    nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), id, &style,
+                       &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(210), CLAY_SIZING_FIXED(56)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}, enabled, NULL);
+    if (procedural) {
+        const nt_ui_interaction_t in = nt_ui_query_interaction_padded(ctx, id, style.hit_padding_lrtb);
+        uint32_t color = 0xFFE59C42U;
+        if (!enabled) {
+            color = 0xFF766C61U;
+        } else if (in.pressed && in.hovered) {
+            color = 0xFF976B28U;
+        } else if (in.hovered) {
+            color = 0xFFFFBC65U;
+        }
+        const nt_ui_shape_style_t skin = {
+            .material = s_shape_material,
+            .kind = NT_UI_SHAPE_BOX,
+            .box = {12, 12, 12, 12},
+            .paint = {.color0 = color, .color1 = 0xFF734319U, .border_color = 0xFFF4D4AAU, .border_widths = {1, 1, 1, 1}, .gradient = NT_UI_SHAPE_VERTICAL},
+            .shadow = {.color = 0x70000000U, .offset_y = 4, .softness = 5},
+        };
+        nt_ui_shape_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &skin,
+                          &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}});
+    }
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), procedural ? "Procedural" : "Atlas / slice9", &g_body_dark);
+    if (procedural) {
+        nt_ui_shape_end(ctx);
+    }
+    return nt_ui_button_end(ctx);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void render_shapes(nt_ui_context_t *ctx, tab_state_t *st) {
+    const nt_material_info_t *info = nt_material_get_info(s_shape_material);
+    if (info == NULL || !nt_gfx_program_ready(info->program)) {
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Loading shape shaders...", g_current->caption);
+        return;
+    }
+    const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24}};
+    (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/workload"), "Measurement grid (256 cards)", &st->shapes.workload, g_current->check, &row, true);
+    if (st->shapes.workload) {
+        char stats[144];
+        (void)snprintf(stats, sizeof stats, "Last UI walk: %u draws, %" PRIu64 " vertices, %" PRIu64 " indices, %" PRIu64 " upload bytes", s_shape_walk_stats.draws, s_shape_walk_stats.vertices,
+                       s_shape_walk_stats.indices, s_shape_walk_stats.upload_bytes);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), stats, g_current->caption);
+#if NT_UI_TIMING_ENABLED
+        (void)snprintf(stats, sizeof stats, "Layout %.3f ms | tree %.3f ms | walk %.3f ms", (double)s_shape_walk_stats.layout_ms, (double)s_shape_walk_stats.build_tree_ms,
+                       (double)s_shape_walk_stats.walk_ms);
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), stats, g_current->caption);
+#else
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "UI timing disabled in this build", g_current->caption);
+#endif
+        CLAY(row) {
+            (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/atlas"), "Atlas", &st->shapes.workload_kind, 0, g_current->radio, NULL, true);
+            (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/clay"), "Clay", &st->shapes.workload_kind, 1, g_current->radio, NULL, true);
+            (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/sdf"), "SDF", &st->shapes.workload_kind, 2, g_current->radio, NULL, true);
+            (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/sdf_icon"), "SDF+icon", &st->shapes.workload_kind, 3, g_current->radio, NULL, true);
+        }
+        (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/icon_layer"), "Icons on their own layer", &st->shapes.icon_layer, g_current->check, &row,
+                             st->shapes.workload_kind == 3);
+        int max_effect = 0;
+        if (st->shapes.workload_kind >= 2) {
+            max_effect = 3;
+        } else if (st->shapes.workload_kind == 1) {
+            max_effect = 1;
+        }
+        if (st->shapes.workload_effect > max_effect) {
+            st->shapes.workload_effect = max_effect;
+        }
+        CLAY(row) {
+            (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/solid"), "Solid", &st->shapes.workload_effect, 0, g_current->radio, NULL, true);
+            (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/border"), "4 sides", &st->shapes.workload_effect, 1, g_current->radio, NULL, max_effect >= 1);
+            (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/gradient"), "+ gradient", &st->shapes.workload_effect, 2, g_current->radio, NULL,
+                              max_effect >= 2);
+            (void)nt_ui_radio(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/shadow"), "+ shadow", &st->shapes.workload_effect, 3, g_current->radio, NULL, max_effect >= 3);
+        }
+#if NT_METRICS_ENABLED
+        CLAY(row) {
+            const Clay_ElementDeclaration metric_button = {.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(28)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}};
+            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/shapes/reset"), g_current->btn_primary, &metric_button, true, NULL);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Reset metrics", &g_seg_label);
+            if (nt_ui_button_end(ctx)) {
+                nt_metrics_reset();
+            }
+#if NT_LOG_MIN_LEVEL == 0
+            nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), nt_ui_id("showcase/shapes/snapshot"), g_current->btn_primary, &metric_button, true, NULL);
+            nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Log snapshot", &g_seg_label);
+            if (nt_ui_button_end(ctx)) {
+                nt_log_info("shape benchmark: backend=%d effect=%d icon_layer=%d viewport=%dx%d window=%d", st->shapes.workload_kind, st->shapes.workload_effect, st->shapes.icon_layer ? 1 : 0,
+                            g_nt_window.fb_width, g_nt_window.fb_height, NT_METRICS_WINDOW);
+                nt_metrics_stats_t sample;
+                nt_metrics_channel_stats(NT_METRICS_CPU_MS, &sample);
+                nt_log_info("frame_cpu_ms: n=%u median=%.6f p95=%.6f", sample.samples, sample.median, sample.p95);
+                nt_metrics_channel_stats(NT_METRICS_GPU_MS, &sample);
+                nt_log_info("frame_gpu_ms: n=%u median=%.6f p95=%.6f (n=0 means unavailable)", sample.samples, sample.median, sample.p95);
+                for (uint16_t channel = 0; channel < nt_metrics_user_count(); ++channel) {
+                    nt_metrics_user_stats(channel, &sample);
+                    nt_log_info("%s: n=%u median=%.6f p95=%.6f", nt_metrics_user_name(channel), sample.samples, sample.median, sample.p95);
+                }
+            }
+#endif
+        }
+#endif
+        nt_ui_shape_style_t card = {.material = s_shape_material, .kind = NT_UI_SHAPE_BOX, .box = {6, 6, 6, 6}, .paint = {.color0 = 0xFFE59C42U}};
+        if (st->shapes.workload_effect >= 1) {
+            card.paint.border_widths = (nt_ui_shape_border_widths_t){1, 2, 3, 4};
+            card.paint.border_color = 0xFFFFFFFFU;
+        }
+        if (st->shapes.workload_effect >= 2) {
+            card.paint.gradient = NT_UI_SHAPE_HORIZONTAL;
+            card.paint.color1 = 0xFFBA63E9U;
+        }
+        if (st->shapes.workload_effect >= 3) {
+            card.shadow = (nt_ui_shape_shadow_t){.color = 0x90000000U, .offset_x = 1, .offset_y = 1, .softness = 2};
+        }
+        CLAY({.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 2}}) {
+            for (int y = 0; y < 16; ++y) {
+                CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 2}}) {
+                    for (int x = 0; x < 16; ++x) {
+                        const Clay_ElementDeclaration cell = {.layout = {.sizing = {CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(20)}}};
+                        if (st->shapes.workload_kind == 0) {
+                            nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_blue_ref, &g_panel_img_style, &cell);
+                        } else if (st->shapes.workload_kind == 1) {
+                            const Clay_BorderWidth widths = st->shapes.workload_effect == 1 ? (Clay_BorderWidth){.left = 1, .top = 2, .right = 3, .bottom = 4} : (Clay_BorderWidth){0};
+                            CLAY({.layout = cell.layout,
+                                  .backgroundColor = {66, 156, 229, 255},
+                                  .cornerRadius = CLAY_CORNER_RADIUS(6),
+                                  .border = {.color = {255, 255, 255, 255}, .width = widths},
+                                  .userData = NT_UI_CLAY_DATA(LAYER_IMG)}) {}
+                        } else if (st->shapes.workload_kind == 3) {
+                            /* One layer alternates shape and sprite draws per cell; a higher icon layer batches each. */
+                            nt_ui_shape_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &card,
+                                              &(Clay_ElementDeclaration){.layout = {.sizing = cell.layout.sizing, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}});
+                            nt_ui_image(ctx, NT_UI_DATA_LAYER(st->shapes.icon_layer ? LAYER_TEXT : LAYER_IMG), &s_panel_blue_ref, &g_panel_img_style,
+                                        &(Clay_ElementDeclaration){.layout.sizing = {CLAY_SIZING_FIXED(12), CLAY_SIZING_FIXED(12)}});
+                            nt_ui_shape_end(ctx);
+                        } else {
+                            nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &card, &cell);
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
+    (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/shapes/enabled"), "Buttons enabled", &st->shapes.enabled, g_current->check, &row, true);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Same hover / press easing, scale and inherited opacity. Drag off to cancel.", g_current->caption);
+    CLAY(row) {
+        if (shape_demo_button(ctx, nt_ui_id("showcase/shapes/atlas_button"), false, st->shapes.enabled)) {
+            ++st->shapes.atlas_clicks;
+        }
+        if (shape_demo_button(ctx, nt_ui_id("showcase/shapes/procedural_button"), true, st->shapes.enabled)) {
+            ++st->shapes.shape_clicks;
+        }
+    }
+    char counts[80];
+    (void)snprintf(counts, sizeof counts, "Atlas clicks: %u     Procedural clicks: %u", st->shapes.atlas_clicks, st->shapes.shape_clicks);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), counts, g_current->caption);
+
+    static const char *const names[] = {"Rectangle",   "Small radii",      "Asymmetric",  "Pill",        "Circle",     "Thin border",    "Thick border",    "Horizontal",  "Vertical / alpha",
+                                        "Soft shadow", "Transparent body", "Radial ring", "Four widths", "Zero sides", "Empty interior", "Inner highlight", "Game checker"};
+    for (int r = 0; r < 6; ++r) {
+        CLAY(row) {
+            for (int c = 0; c < 3; ++c) {
+                const int index = (r * 3) + c;
+                if ((size_t)index >= sizeof names / sizeof names[0]) {
+                    break;
+                }
+                nt_ui_shape_style_t shape = {.material = s_shape_material, .kind = NT_UI_SHAPE_BOX, .box = {16, 16, 16, 16}, .paint = {.color0 = 0xFFE59C42U}};
+                float width = 140.0F;
+                switch (index) {
+                case 0:
+                    shape.box = (nt_ui_shape_radii_t){0};
+                    break;
+                case 1:
+                    shape.box = (nt_ui_shape_radii_t){3, 3, 3, 3};
+                    break;
+                case 2:
+                    shape.box = (nt_ui_shape_radii_t){32, 3, 22, 10};
+                    break;
+                case 3:
+                    shape.box = (nt_ui_shape_radii_t){100, 100, 100, 100};
+                    break;
+                case 4:
+                    shape.box = (nt_ui_shape_radii_t){100, 100, 100, 100};
+                    width = 64.0F;
+                    break;
+                case 5:
+                    shape.paint.border_widths = (nt_ui_shape_border_widths_t){0.75F, 0.75F, 0.75F, 0.75F};
+                    shape.paint.border_color = 0xFFFFFFFFU;
+                    break;
+                case 6:
+                    shape.paint.border_widths = (nt_ui_shape_border_widths_t){10, 10, 10, 10};
+                    shape.paint.border_color = 0xFF83E8EEU;
+                    break;
+                case 7:
+                    shape.paint.gradient = NT_UI_SHAPE_HORIZONTAL;
+                    shape.paint.color1 = 0xFFBA63E9U;
+                    break;
+                case 8:
+                    shape.paint.gradient = NT_UI_SHAPE_VERTICAL;
+                    shape.paint.color1 = 0x007A40FFU;
+                    break;
+                case 9:
+                case 10:
+                    shape.shadow = (nt_ui_shape_shadow_t){.color = 0xB0000000U, .offset_x = 5, .offset_y = 6, .spread = 2, .softness = 8};
+                    if (index == 10) {
+                        shape.paint.color0 = 0x6060E8E0U;
+                    }
+                    break;
+                case 11:
+                    shape.kind = NT_UI_SHAPE_RADIAL;
+                    shape.radial.angle_start = 0.0F;
+                    shape.radial.angle_end = 4.7F;
+                    shape.radial.inner_radius_norm = 0.65F;
+                    width = 96.0F;
+                    break;
+                case 12:
+                    shape.paint.border_widths = (nt_ui_shape_border_widths_t){2, 6, 12, 18};
+                    shape.paint.border_color = 0xFFFFFFFFU;
+                    break;
+                case 13:
+                    shape.paint.border_widths = (nt_ui_shape_border_widths_t){0, 6, 12, 0};
+                    shape.paint.border_color = 0xFFFFFFFFU;
+                    break;
+                case 14:
+                    shape.paint.border_widths = (nt_ui_shape_border_widths_t){8, 32, 16, 32};
+                    shape.paint.border_color = 0xFF83E8EEU;
+                    break;
+                case 15:
+                    shape.paint.border_widths = (nt_ui_shape_border_widths_t){2, 2, 2, 2};
+                    shape.paint.border_color = 0xFF734319U;
+                    break;
+                case 16:
+                    /* user = {cell px, checker alpha}; only the game shader reads it. */
+                    shape.material = s_shape_checker_material;
+                    shape.paint.border_widths = (nt_ui_shape_border_widths_t){3, 3, 3, 3};
+                    shape.paint.border_color = 0xFF734319U;
+                    shape.user[0] = 7.0F;
+                    shape.user[1] = 0.25F;
+                    break;
+                default:
+                    break;
+                }
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
+                    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), names[index], g_current->caption);
+                    if (index == 15) {
+                        nt_ui_shape_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &shape,
+                                          &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(width), CLAY_SIZING_FIXED(64)}, .padding = CLAY_PADDING_ALL(2)}});
+                        const nt_ui_shape_style_t highlight = {
+                            .material = s_shape_material, .kind = NT_UI_SHAPE_BOX, .box = {14, 14, 14, 14}, .paint = {.color0 = 0, .border_color = 0x90FFFFFFU, .border_widths = {1, 1, 1, 1}}};
+                        nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &highlight, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}});
+                        nt_ui_shape_end(ctx);
+                    } else {
+                        nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &shape, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(width), CLAY_SIZING_FIXED(64)}}});
+                    }
+                }
+            }
+        }
+    }
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Mixed order: sprite / slice9 / Clay border / shape / sprite", g_current->caption);
+    const nt_ui_shape_style_t mixed_shape = {.material = s_shape_material, .kind = NT_UI_SHAPE_BOX, .box = {16, 2, 16, 2}, .paint = {.color0 = 0xFFFFB070U}};
+    const Clay_ElementDeclaration small = {.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(48)}}};
+    CLAY(row) {
+        nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, &small);
+        nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_panel_beige_ref, &g_panel_img_style, &small);
+        CLAY({.layout = small.layout,
+              .backgroundColor = {60, 130, 180, 255},
+              .cornerRadius = CLAY_CORNER_RADIUS(12),
+              .border = {.color = {240, 180, 80, 255}, .width = {3, 3, 3, 3, 0}},
+              .userData = NT_UI_CLAY_DATA(LAYER_IMG)}) {}
+        nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &mixed_shape, &small);
+        nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, &small);
+    }
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Rotated, nonuniform scale, parent opacity 0.5", g_current->caption);
+    const nt_ui_transform_t transform = {.scale_x = 1.4F, .scale_y = 0.7F, .scale_z = 1, .rotation_z = 0.18F};
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(240), CLAY_SIZING_FIXED(100)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        nt_ui_shape_begin(ctx, NT_UI_DATA_XFORM(LAYER_IMG, &transform, 0.5F), &mixed_shape,
+                          &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(64)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}});
+        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Content", &g_body_dark);
+        nt_ui_shape_end(ctx);
+    }
+}
+// #endregion
 
 /* Buttons: Transform tab. Proves inverse-affine hit-test: the button still clicks while transformed. */
 static void render_button_transform(nt_ui_context_t *ctx, tab_state_t *st) {
@@ -1855,20 +2160,20 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
-/* Radial tab: the two radial widgets driven by game-owned feedback state.
- *   1. COOLDOWN wedge        — nt_ui_radial_fill from a looping timer (game-owned fill).
- *   2. HOLD-TO-CONFIRM wedge — nt_ui_radial_fill from the events hold_progress.
- *   3. FOUR REVEAL MODES     — nt_ui_radial_image (desat/dim/hide/tint) on the [0,1]-UV art.
- *   4. DENSE GRID            — N radials sharing ONE material => one batched draw;
- *      the header's draw-call readout proves the count does NOT scale with radial count.
- * The flat radials carve a ring (inner_radius_norm) + an oval variant. */
+/* Radial tab: analytic shape and textured reveal driven by game-owned feedback state.
+ * Cooldown and hold-to-confirm wedges use NT_UI_SHAPE_RADIAL from game-owned state.
+ * Four reveal modes use
+ * nt_ui_radial_image on the full-UV art.
+ * The dense grid shares one shape material, so draw calls do not scale with its cells.
+ * The flat shape carves a ring (inner_radius_norm) + an oval variant.
+ */
 #define RADIAL_TAU (2.0F * NT_PI)
 #define RADIAL_GRID_COLS 12
 #define RADIAL_GRID_ROWS 8
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — four side-by-side demos, not deep nesting
-/* HSV(h,1,1) -> 0xAABBGGRR. The dense grid colors each radial per-widget through this
- * (standard sprite color rides v_color), so many distinct colors still batch to one draw. */
+/* HSV(h,1,1) -> 0xAABBGGRR. The dense grid colors each radial per-widget, so many
+ * distinct colors still batch to one draw. */
 /* Pack a Clay_Color (0..255 floats) into 0xAABBGGRR, the convention rich-text color_abgr expects. */
 static uint32_t showcase_pack_clay_abgr(Clay_Color c) {
     const uint32_t r = (uint32_t)(c.r + 0.5F);
@@ -1932,35 +2237,66 @@ static void render_radial_tint_row(nt_ui_context_t *ctx) {
                 tstyle.material = s_radial_image_material[NT_UI_RADIAL_REVEAL_TINT];
                 tstyle.tint_color_packed = tint_colors[t];
                 tstyle.tint_strength = 0.85F;
-                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, 0.5F * NT_PI, 0.35F, RADIAL_TAU, &tstyle, &timg_decl);
+                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, -0.5F * NT_PI, 0.35F, RADIAL_TAU, &tstyle, &timg_decl);
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), tint_labels[t], g_current->caption);
             }
         }
     }
 }
 
-/* Two independent angles: each edge of the sector moves on its own. Shows CW, CCW,
+/* Two independent angles: each edge of the sector moves on its own. Shows CW and CCW edge motion,
  * symmetric open from the top, a spinning fixed-width arc, and a pac-man mouth. */
 static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t *st) {
-    static const char *const labels[5] = {"clockwise", "counter-cw", "both sides", "spin arc", "mouth"};
+    static const char *const labels[5] = {"CCW edge", "CW edge", "both sides", "spin arc", "mouth"};
     static const Clay_ElementDeclaration cell = {.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(72)}}};
     static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}};
-    nt_ui_radial_style_t rs = nt_ui_radial_style_defaults();
-    rs.material = s_radial_material;
+    nt_ui_shape_style_t rs = nt_ui_shape_style_defaults();
+    rs.kind = NT_UI_SHAPE_RADIAL;
+    rs.material = s_shape_material;
     const float c = st->radial.cooldown;                             /* 0..1 looping */
-    const float top = 0.5F * NT_PI;                                  /* 12 o'clock */
+    const float top = -0.5F * NT_PI;                                 /* 12 o'clock in Y-down UI */
     const float tri = (c < 0.5F) ? (c * 2.0F) : (2.0F - (c * 2.0F)); /* 0..1..0 */
     const float mouth = (0.05F + (0.4F * tri)) * NT_PI;
-    /* {start,end} per variant: CW fixes end + sweeps start back; CCW fixes start; both
-     * opens symmetrically; spin keeps a 90deg span rotating; mouth gaps at angle 0. */
+    /* {start,end}: first moves the start edge CCW, second moves the end edge CW;
+     * both opens symmetrically; spin keeps a 90deg span; mouth gaps at angle 0. */
     const float starts[5] = {top - (c * RADIAL_TAU), top, top - (c * NT_PI), c * RADIAL_TAU, mouth};
     const float ends[5] = {top, top + (c * RADIAL_TAU), top + (c * NT_PI), (c * RADIAL_TAU) + (0.5F * NT_PI), RADIAL_TAU - mouth};
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Two independent angles -- each edge moves on its own:", g_current->caption);
     CLAY(row) {
         for (int i = 0; i < 5; ++i) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                rs.color_packed = showcase_hue_abgr((float)i / 5.0F);
-                nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), starts[i], ends[i], &rs, &cell);
+                rs.paint.color0 = showcase_hue_abgr((float)i / 5.0F);
+                rs.radial.angle_start = starts[i];
+                rs.radial.angle_end = ends[i];
+                nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &rs, &cell);
+                nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), labels[i], g_current->caption);
+            }
+        }
+    }
+}
+
+/* Fixed quadrants make the Y-down angle contract visible beside the animated examples. */
+static void render_radial_cardinal_row(nt_ui_context_t *ctx) {
+    static const char *const labels[4] = {"0 right", "+90 down", "+180 left", "+270 up"};
+    static const Clay_ElementDeclaration cell = {.layout = {.sizing = {CLAY_SIZING_FIXED(56), CLAY_SIZING_FIXED(56)}}};
+    static const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16}};
+    static const Clay_ElementDeclaration pair = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 4}};
+    nt_ui_shape_style_t shape = nt_ui_shape_style_defaults();
+    shape.kind = NT_UI_SHAPE_RADIAL;
+    shape.material = s_shape_material;
+    nt_ui_radial_image_style_t image = nt_ui_radial_image_style_defaults();
+    image.material = s_radial_image_material[NT_UI_RADIAL_REVEAL_HIDE];
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cardinal starts: shape (left) + image (right), each sweeping 90 degrees clockwise.", g_current->caption);
+    CLAY(row) {
+        for (int i = 0; i < 4; ++i) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                const float start = (float)i * 0.5F * NT_PI;
+                shape.radial.angle_start = start;
+                shape.radial.angle_end = start + 0.5F * NT_PI;
+                CLAY(pair) {
+                    nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &shape, &cell);
+                    nt_ui_radial_image(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, shape.radial.angle_start, shape.radial.angle_end, &image, &cell);
+                }
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), labels[i], g_current->caption);
             }
         }
@@ -1970,18 +2306,18 @@ static void render_radial_two_angle_row(nt_ui_context_t *ctx, const tab_state_t 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo render aggregates several CLAY regions
 static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[96];
-    /* Custom images require a program assignment; skip declaration until the radial program is ready. */
-    const nt_material_info_t *radial_info = nt_material_get_info(s_radial_material);
+    const nt_material_info_t *radial_info = nt_material_get_info(s_shape_material);
     if (!radial_info || !nt_gfx_program_ready(radial_info->program)) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "radial materials not ready", g_current->caption);
         return;
     }
 
-    nt_ui_radial_style_t rstyle = nt_ui_radial_style_defaults();
-    rstyle.material = s_radial_material;
+    nt_ui_shape_style_t rstyle = nt_ui_shape_style_defaults();
+    rstyle.kind = NT_UI_SHAPE_RADIAL;
+    rstyle.material = s_shape_material;
 
-    nt_ui_radial_style_t ring_style = rstyle;
-    ring_style.inner_radius_norm = 0.55F; /* carve a ring (cooldown-meter look) */
+    nt_ui_shape_style_t ring_style = rstyle;
+    ring_style.radial.inner_radius_norm = 0.55F; /* carve a ring (cooldown-meter look) */
 
     static const Clay_ElementDeclaration disc_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}};
     static const Clay_ElementDeclaration oval_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(80)}}}; /* aspect != 1 -> oval */
@@ -1991,20 +2327,27 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     /* #region 1: cooldown + 2: hold-to-confirm + ring + oval */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Cooldown sweep (looping timer) + hold-to-confirm (events hold_progress); ring + oval variants.", g_current->caption);
     CLAY(row_decl) {
-        /* Cooldown: fill ramps 0->1 over ~3s; start at +90deg (top), sweep a full turn. */
-        nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &rstyle, &disc_decl);
+        /* Cooldown: fill ramps 0->1 over ~3s; start at -90deg (top), sweep a full turn. */
+        rstyle.radial.angle_start = -0.5F * NT_PI;
+        rstyle.radial.angle_end = rstyle.radial.angle_start + st->radial.cooldown * RADIAL_TAU;
+        nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &rstyle, &disc_decl);
         /* Ring (inner cut) cooldown variant. */
-        nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &ring_style, &disc_decl);
+        ring_style.radial.angle_start = rstyle.radial.angle_start;
+        ring_style.radial.angle_end = rstyle.radial.angle_end;
+        nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &ring_style, &disc_decl);
         /* Oval: aspect comes from the FIXED w/h decl; a static 270deg sector to show the squash. */
-        nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.0F, 1.5F * NT_PI, &rstyle, &oval_decl);
-        /* Animated color: a full disc whose per-widget color_packed (RGBA8) cycles the hue wheel
-         * every cooldown loop — the standard sprite color is full-color and animates per-frame, free. */
-        nt_ui_radial_style_t cstyle = rstyle;
-        cstyle.color_packed = showcase_hue_abgr(st->radial.cooldown);
-        nt_ui_radial(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.0F, RADIAL_TAU, &cstyle, &disc_decl);
+        rstyle.radial.angle_start = 0.0F;
+        rstyle.radial.angle_end = 1.5F * NT_PI;
+        nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &rstyle, &oval_decl);
+        /* Animated color: the full disc changes hue each frame. */
+        nt_ui_shape_style_t cstyle = rstyle;
+        cstyle.paint.color0 = showcase_hue_abgr(st->radial.cooldown);
+        cstyle.radial.angle_end = RADIAL_TAU;
+        nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &cstyle, &disc_decl);
         /* Hold-to-confirm: a button drives the events cell; its hold_progress fills the radial. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 6, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, st->radial.hold_progress, RADIAL_TAU, &ring_style, &disc_decl);
+            ring_style.radial.angle_end = ring_style.radial.angle_start + st->radial.hold_progress * RADIAL_TAU;
+            nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &ring_style, &disc_decl);
             static const nt_ui_events_cfg_t hold_cfg = {.long_press_secs = 1.5F, .double_click = false};
             nt_ui_button_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_radial_hold, g_current->btn_primary,
                                &(Clay_ElementDeclaration){
@@ -2026,6 +2369,8 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
     render_radial_two_angle_row(ctx, st);
     // #endregion
 
+    render_radial_cardinal_row(ctx);
+
     /* #region 3: four reveal modes on the [0,1]-UV radial_art (swept = full color) */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Radial-image reveal (swept = full color; un-swept = desaturate / dim / hide / tint), driven by the cooldown fill.", g_current->caption);
     static const char *const mode_labels[4] = {"desaturate", "dim", "hide", "tint"};
@@ -2038,7 +2383,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
                 /* mode + dim baked on the per-mode material; tint is per-widget (gold here). */
                 istyle.tint_color_packed = 0xFF33BFFFU; /* 0xAABBGGRR gold (r255 g191 b51) */
                 istyle.tint_strength = 0.85F;
-                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &istyle, &img_decl);
+                nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_radial_art_ref, -0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &istyle, &img_decl);
                 nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), mode_labels[m], g_current->caption);
             }
         }
@@ -2053,7 +2398,7 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
             nt_ui_radial_image_style_t pstyle = nt_ui_radial_image_style_defaults();
             pstyle.material = s_radial_image_packed_material;
-            nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_icon_bunny_ref, 0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &pstyle, &img_decl);
+            nt_ui_radial_image_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL_IMG), &s_icon_bunny_ref, -0.5F * NT_PI, st->radial.cooldown, RADIAL_TAU, &pstyle, &img_decl);
             nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "packed (bunny)", g_current->caption);
         }
     }
@@ -2073,15 +2418,16 @@ static void render_radial(nt_ui_context_t *ctx, tab_state_t *st) {
         for (int r = 0; r < RADIAL_GRID_ROWS; ++r) {
             CLAY(grid_row) {
                 for (int c = 0; c < RADIAL_GRID_COLS; ++c) {
-                    /* Each cell sweeps to a different phase so the grid animates, but ALL share
-                     * s_radial_material -> the walker binds the material once and batches them. */
+                    /* Each cell sweeps to a different phase, but all share one material. */
                     float phase = (float)((r * RADIAL_GRID_COLS) + c) / (float)(RADIAL_GRID_COLS * RADIAL_GRID_ROWS);
                     float f = st->radial.cooldown + phase;
                     if (f > 1.0F) {
                         f -= 1.0F;
                     }
-                    rstyle.color_packed = showcase_hue_abgr(phase);
-                    nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), 0.5F * NT_PI, f, RADIAL_TAU, &rstyle, &cell_decl);
+                    rstyle.paint.color0 = showcase_hue_abgr(phase);
+                    rstyle.radial.angle_start = -0.5F * NT_PI;
+                    rstyle.radial.angle_end = rstyle.radial.angle_start + f * RADIAL_TAU;
+                    nt_ui_shape(ctx, NT_UI_DATA_LAYER(LAYER_RADIAL), &rstyle, &cell_decl);
                 }
             }
         }
@@ -2193,8 +2539,8 @@ static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float 
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
     /* Emit THROUGH world_mat4 (byte-identical to emit_custom_geometry) so the bar lands under the
      * UI transform incl. the Y-flip. */
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, world_mat4, track_col, NULL, 0U);
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, world_mat4, value_col, NULL, 0U);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, track_pos, 4, idx, 6, world_mat4, track_col, NULL, 0);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, fill_pos, 4, idx, 6, world_mat4, value_col, NULL, 0);
 }
 
 /* SPINNING ICON: a white quad rotated about its own center (the icon texture was intentionally
@@ -2224,7 +2570,7 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
         pos[i][1] = cy + (dx[i] * sn) + (dy[i] * cs);
     }
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color), NULL, 0U);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color), NULL, 0);
 }
 
 /* Perspective cube remapped into the box's NDC sub-rect (no glViewport/scissor touch); the walker's
@@ -2544,43 +2890,6 @@ static void render_rich_builder_block(nt_ui_context_t *ctx, rich_link_look_t loo
     }
 
     nt_ui_rich_end(ctx);
-}
-
-/* The frame loop makes s_base_material the ctx base while this tab shows with base_sdf on, so the
- * whole UI -- nav, panels, icons -- bakes its attr defaults and the radials below join that batch. */
-static void render_base_material(nt_ui_context_t *ctx, tab_state_t *st) {
-    char buf[96];
-    static const Clay_ElementDeclaration check_row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(44)}, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
-    static const Clay_ElementDeclaration row = {
-        .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
-    static const Clay_ElementDeclaration cell = {.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(64)}}};
-    (void)nt_ui_checkbox(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, nt_ui_id("showcase/base_sdf"), "One base material (off: plain base + a radial material)", &st->base_sdf, g_current->check,
-                         &check_row, true);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Panels, icons and radials interleaved -- one batch when they share the base:", g_current->caption);
-
-    nt_ui_radial_style_t rs = nt_ui_radial_style_defaults();
-    rs.material = st->base_sdf ? s_base_material : s_radial_material;
-    /* Custom images require a program assignment; skip declaration until it links. */
-    const nt_material_info_t *rs_info = nt_material_get_info(rs.material);
-    if (!rs_info || !nt_gfx_program_ready(rs_info->program)) {
-        nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "materials not ready", g_current->caption);
-        return;
-    }
-    rs.inner_radius_norm = 0.5F;
-    const float c = st->radial.cooldown;
-    CLAY(row) {
-        for (int i = 0; i < 4; ++i) {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(72)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-                  .backgroundColor = {60, 70, 90, 255},
-                  .cornerRadius = CLAY_CORNER_RADIUS(12)}) {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) { nt_ui_image(ctx, NT_UI_DATA_LAYER(LAYER_IMG), &s_icon_bunny_ref, &g_panel_img_style, NULL); }
-            }
-            rs.color_packed = showcase_hue_abgr((float)i / 4.0F);
-            nt_ui_radial_fill(ctx, NT_UI_DATA_LAYER(LAYER_IMG), 0.5F * NT_PI, c, RADIAL_TAU, &rs, &cell);
-        }
-    }
-    (void)snprintf(buf, sizeof buf, "draw calls: %u", nt_ui_get_last_walk_draw_calls(ctx));
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), buf, g_current->body);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- demo aggregates two fronts + a readout
@@ -3691,13 +4000,15 @@ static void frame(void) {
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         restore_result = nt_text_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
+        restore_result = nt_ui_shape_renderer_restore_gpu();
+        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         (void)restore_result;
         nt_shape_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
-        nt_program_ref_drop(&s_radial_program);
+        nt_program_ref_drop(&s_shape_program);
+        nt_program_ref_drop(&s_shape_checker_program);
         nt_program_ref_drop(&s_radial_image_program);
-        nt_program_ref_drop(&s_base_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         /* Force a style re-init so memoized atlas region indices refresh after GL restore. */
         s_atlas_bound = false;
@@ -3831,10 +4142,6 @@ static void frame(void) {
 
         ensure_ids();
 
-        const nt_material_info_t *base_info = nt_material_get_info(s_base_material);
-        const bool base_on = g_tabs[s_active_tab].render == render_base_material && s_state.base_sdf && base_info && nt_gfx_program_ready(base_info->program);
-        nt_ui_set_sprite_material(s_ctx, base_on ? s_base_material : s_sprite_material);
-
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
@@ -3873,7 +4180,33 @@ static void frame(void) {
         }
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
+        const uint32_t draws_before_ui = nt_gfx_draw_calls(&g_nt_gfx.counters);
+        const uint64_t vertices_before_ui = g_nt_gfx.counters.vertices;
+        const uint64_t indices_before_ui = g_nt_gfx.counters.indices;
+        const uint64_t uploads_before_ui = g_nt_gfx.counters.buffer_upload_bytes;
         nt_ui_walk(s_ctx, &target);
+        if (g_tabs[s_active_tab].render == render_shapes) {
+            s_shape_walk_stats.draws = nt_gfx_draw_calls(&g_nt_gfx.counters) - draws_before_ui;
+            s_shape_walk_stats.vertices = g_nt_gfx.counters.vertices - vertices_before_ui;
+            s_shape_walk_stats.indices = g_nt_gfx.counters.indices - indices_before_ui;
+            s_shape_walk_stats.upload_bytes = g_nt_gfx.counters.buffer_upload_bytes - uploads_before_ui;
+            s_shape_walk_stats.layout_ms = nt_ui_get_last_layout_ms(s_ctx);
+            s_shape_walk_stats.build_tree_ms = nt_ui_get_last_build_tree_ms(s_ctx);
+            s_shape_walk_stats.walk_ms = nt_ui_get_last_walk_ms(s_ctx);
+#if NT_METRICS_ENABLED
+            if (s_state.shapes.workload) {
+                nt_metrics_count("shape_ui_draws", s_shape_walk_stats.draws);
+                nt_metrics_count("shape_ui_vertices", s_shape_walk_stats.vertices);
+                nt_metrics_count("shape_ui_indices", s_shape_walk_stats.indices);
+                nt_metrics_count("shape_ui_upload_bytes", s_shape_walk_stats.upload_bytes);
+#if NT_UI_TIMING_ENABLED
+                nt_metrics_count_f("shape_ui_layout_ms", (double)s_shape_walk_stats.layout_ms);
+                nt_metrics_count_f("shape_ui_tree_ms", (double)s_shape_walk_stats.build_tree_ms);
+                nt_metrics_count_f("shape_ui_walk_ms", (double)s_shape_walk_stats.walk_ms);
+#endif
+            }
+#endif
+        }
 
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
 
@@ -3962,7 +4295,7 @@ int main(int argc, char *argv[]) {
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_atlas_init();
 
-    /* sprite + text + base radial + 4 radial-image reveal-mode + packed-region + UI base = 9. */
+    /* sprite + text + 5 radial-image + shape + checker shape = 9. */
     nt_material_init(&(nt_material_desc_t){.max_materials = 9});
     /* base showcase font + 4 rich-text family faces (R/B/I/BI) = 5. */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});
@@ -3971,6 +4304,7 @@ int main(int argc, char *argv[]) {
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
+    nt_ui_shape_renderer_init(1024U);
 
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
@@ -4011,12 +4345,12 @@ int main(int argc, char *argv[]) {
     s_rich_font_resource[2] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, NT_ASSET_FONT);
     s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
     /* Radial shaders + the dedicated radial-art atlas + its full-bleed texture. */
-    s_radial_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
-    s_radial_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG, NT_ASSET_SHADER_CODE);
-    s_radial_image_program.vs = s_radial_program.vs; /* shares the radial vertex stage */
+    s_shape_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_VERT, NT_ASSET_SHADER_CODE);
+    s_shape_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_FRAG, NT_ASSET_SHADER_CODE);
+    s_shape_checker_program.vs = s_shape_program.vs;
+    s_shape_checker_program.fs = nt_resource_request(ASSET_SHADER_EXAMPLES_UI_SHOWCASE_RAW_SHADERS_UI_SHAPE_CHECKER_FRAG, NT_ASSET_SHADER_CODE);
+    s_radial_image_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
     s_radial_image_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG, NT_ASSET_SHADER_CODE);
-    s_base_program.vs = s_radial_program.vs;
-    s_base_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_UI_BASE_FRAG, NT_ASSET_SHADER_CODE);
     s_radial_art_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_RADIAL_ART, NT_ASSET_ATLAS);
     s_radial_art_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0, NT_ASSET_TEXTURE);
     s_radial_art_ref = nt_atlas_ref(s_radial_art_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_RADIAL_ART_RADIAL_ART.value);
@@ -4027,6 +4361,7 @@ int main(int argc, char *argv[]) {
     s_rich_gold_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_UI_SHOWCASE_ATLAS_GOLD.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = NT_SPRITE_VERTEX_LAYOUT,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
@@ -4045,54 +4380,30 @@ int main(int argc, char *argv[]) {
         .label = "ui_showcase_text",
     });
 
-    /* Base radial material (nt_ui_radial): the extended sprite layout (a_radial @ loc 4 +
-     * a_layout @ loc 7, walker-filled by name) + the flat SDF FS. No texture — the shape is
-     * per-pixel. Declares the custom per-vertex attrs so the renderer builds the extended layout. */
-    s_radial_material = nt_material_create(&(nt_material_create_desc_t){
+    s_shape_material = nt_material_create(&(nt_material_create_desc_t){
         .blend = nt_blend_alpha_premultiplied(),
-        .depth_test = false,
-        .depth_write = false,
         .cull_mode = NT_CULL_NONE,
-        .attr_map[0] = {.stream_name = "a_radial", .location = 4},
-        .attr_map[1] = {.stream_name = "a_layout", .location = 7},
-        .attr_map_count = 2,
-        .label = "ui_showcase_radial",
+        .label = "ui_showcase_shape",
     });
-
-    /* The radial's attr layout plus the atlas texture. Plain emits bake the defaults: a_layout = 0
-     * is the shader's "plain sprite" (a radial always carries its bbox size there). */
-    s_base_material = nt_material_create(&(nt_material_create_desc_t){
-        .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
-        .texture_count = 1,
+    s_shape_checker_material = nt_material_create(&(nt_material_create_desc_t){
         .blend = nt_blend_alpha_premultiplied(),
-        .depth_test = false,
-        .depth_write = false,
         .cull_mode = NT_CULL_NONE,
-        .attr_map[0] = {.stream_name = "a_radial", .location = 4, .default_value = {0.0F, 0.0F, 0.0F, 0.0F}},
-        .attr_map[1] = {.stream_name = "a_layout", .location = 7, .default_value = {0.0F, 0.0F, 0.0F, 0.0F}},
-        .attr_map_count = 2,
-        .has_attr_defaults = true,
-        .label = "ui_showcase_base",
+        .label = "ui_showcase_shape_checker",
     });
 
     /* One radial-image material per reveal mode: u_reveal_mode (mode + dim_factor) is baked at
-     * creation. The TINT is per-widget (a_tint @ loc 5), so the TINT material serves every
-     * tint color from one batch. attr_map declares all four custom attrs (a_radial + a_tint +
-     * a_uvrect @ loc 6 + a_layout @ loc 7; the walker fills a_uvrect + a_layout by name). */
+     * creation. The TINT is per-widget now (a_tint @ loc 5), so the TINT material serves every
+     * tint color from one batch. The walker fills the whole tail, including the source-image map. */
     static const char *const k_radial_image_labels[4] = {"ui_showcase_radial_img_desat", "ui_showcase_radial_img_dim", "ui_showcase_radial_img_hide", "ui_showcase_radial_img_tint"};
     for (int m = 0; m < 4; ++m) {
         s_radial_image_material[m] = nt_material_create(&(nt_material_create_desc_t){
+            .vertex_layout = NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT,
             .textures = {{.name = "u_texture", .resource = s_radial_art_tex_handle}},
             .texture_count = 1,
             .blend = nt_blend_alpha_premultiplied(),
             .depth_test = false,
             .depth_write = false,
             .cull_mode = NT_CULL_NONE,
-            .attr_map[0] = {.stream_name = "a_radial", .location = 4},
-            .attr_map[1] = {.stream_name = "a_tint", .location = 5},
-            .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
-            .attr_map[3] = {.stream_name = "a_layout", .location = 7},
-            .attr_map_count = 4,
             .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)m, 0.4F, 0.0F, 0.0F}},
             .param_count = 1,
             .label = k_radial_image_labels[m],
@@ -4101,19 +4412,15 @@ int main(int argc, char *argv[]) {
 
     /* Packed-region proof: a radial-image material bound to the SHARED ui_showcase atlas
      * texture (not the full-bleed radial_art). Reveals a real packed sub-region (the bunny
-     * icon), exercising the region-local wedge remap (a_uvrect). DESATURATE mode. */
+     * icon), exercising source-local wedge coordinates. DESATURATE mode. */
     s_radial_image_packed_material = nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),
         .depth_test = false,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
-        .attr_map[0] = {.stream_name = "a_radial", .location = 4},
-        .attr_map[1] = {.stream_name = "a_tint", .location = 5},
-        .attr_map[2] = {.stream_name = "a_uvrect", .location = 6},
-        .attr_map[3] = {.stream_name = "a_layout", .location = 7},
-        .attr_map_count = 4,
         .params[0] = {.name = NT_UI_RADIAL_IMAGE_PARAM_MODE, .value = {(float)NT_UI_RADIAL_REVEAL_DESATURATE, 0.4F, 0.0F, 0.0F}},
         .param_count = 1,
         .label = "ui_showcase_radial_img_packed",
@@ -4160,6 +4467,7 @@ int main(int argc, char *argv[]) {
     nt_text_renderer_shutdown();
     nt_sprite_renderer_shutdown();
     nt_shape_renderer_shutdown();
+    nt_ui_shape_renderer_shutdown();
     nt_font_destroy(s_font);
     for (uint32_t i = 0; i < 4U; i++) {
         nt_font_destroy(s_rich_font[i]);
@@ -4167,17 +4475,17 @@ int main(int argc, char *argv[]) {
     nt_font_shutdown();
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
-    nt_material_destroy(s_radial_material);
+    nt_material_destroy(s_shape_material);
+    nt_material_destroy(s_shape_checker_material);
     for (int m = 0; m < 4; ++m) {
         nt_material_destroy(s_radial_image_material[m]);
     }
     nt_material_destroy(s_radial_image_packed_material);
-    nt_material_destroy(s_base_material);
     nt_program_ref_drop(&s_sprite_program);
     nt_program_ref_drop(&s_text_program);
-    nt_program_ref_drop(&s_radial_program);
+    nt_program_ref_drop(&s_shape_program);
+    nt_program_ref_drop(&s_shape_checker_program);
     nt_program_ref_drop(&s_radial_image_program);
-    nt_program_ref_drop(&s_base_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();

@@ -22,6 +22,7 @@
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
+#include "renderers/nt_ui_shape_renderer.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
@@ -41,6 +42,11 @@ static nt_material_t make_material(bool with_page_sampler) {
     /* Sprite materials name the atlas page's sampler; text materials declare nothing --
      * the font textures are the text renderer's own binds. */
     if (with_page_sampler) {
+        desc.vertex_layout = (nt_vertex_layout_t){.stride = 20,
+                                                  .attr_count = 3,
+                                                  .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                                            {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                                            {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16}}};
         desc.textures[0].name = "u_texture";
         desc.texture_count = 1;
     }
@@ -71,6 +77,9 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
 
     nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
     nt_text_renderer_init();
+    const nt_result_t shape_init = nt_ui_shape_renderer_init(UI_WALKER_FX_SHAPE_INSTANCES);
+    NT_ASSERT(shape_init == NT_OK);
+    (void)shape_init;
     nt_ui_module_init();
 
     /* nt_debug_overlay is NOT init'd here -- nt_ui_walk does not depend on it.
@@ -133,6 +142,7 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     nt_ui_module_shutdown();
     nt_sprite_renderer_shutdown();
     nt_text_renderer_shutdown();
+    nt_ui_shape_renderer_shutdown();
 
     nt_material_shutdown();
     nt_font_shutdown();

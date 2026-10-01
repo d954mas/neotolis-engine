@@ -329,6 +329,10 @@ Browser diagnostics use `tests/browser/diagnostics.spec.ts`. Set
 above 32 bits to exercise the 64-bit bridge. General browser smoke tests drive
 `tests/browser/app` (`window.__nt` hooks), not the showcase.
 
+`shape_shader.spec.ts` and `radial_shader.spec.ts` render the vertex layouts and
+CPU-emitted shape instances that `test_ui_shape_walk --gpu-fixtures` prints from
+`build/tests/native-debug`; rebuild that target before running them by hand.
+
 That app reuses the prebuilt `ui_showcase.ntpack` (target `ui_showcase_packs`)
 and builds its own Basis fixture, `basis_fixture.ntpack` (target
 `browser_smoke_packs`, producer `tests/browser/app/build_fixture_pack.c`): one

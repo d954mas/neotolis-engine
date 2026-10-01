@@ -616,6 +616,7 @@ int main(void) {
     s_white_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = NT_SPRITE_VERTEX_LAYOUT,
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),

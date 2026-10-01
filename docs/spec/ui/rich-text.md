@@ -155,20 +155,20 @@ subsystem — decoration reuses the text pipeline and the `slug_text` shader.
   member → faux-italic oblique ([Design — synthetic italic](#design-flat-run-list--solver--one-fixed-block)); underline/strike are decoration toggles needing no family
   member. A label's BOLD variant bit requests synthetic weight; a real bold `font_id` needs no BOLD bit.
 
-## Inline images ride the standard u8 sprite path
+## Inline images ride the sprite path
 
 An `<img>` atom is **NOT** a Clay child. It emits **immediately** in the rich
 block's CUSTOM self-emit (`rich_emit_images`) via
 `nt_sprite_renderer_emit_region`, positioned at the solver's solved `(x, y)`.
 The composed tint (the run's `<color>` × any per-atom effect tint) is packed to
-the standard **u8** sprite tint, the block's **image material** (plain, or a
-custom-attr material with attr defaults — the emit passes no block) textures the
-region, and the self-emit folds the parent opacity into the tint alpha exactly
-like rich TEXT — there is **no** engine-provided rich material, float4 `a_tint`,
-or per-image custom-attr block. The composed tint is invisible at u8 on an 8-bit
-display, so a float4 tint would add nothing. An unset style text or image
-material resolves to the ctx default at each walk, not at declaration, so a base
-swapped between two walks of one frame is the one drawn. `set_material` is bound **once per band** (the
+the standard **u8** sprite tint. The block's **image material** textures the
+region and the self-emit folds parent opacity into tint alpha exactly like rich
+TEXT. The material may have the plain 20-byte sprite layout or an extended typed
+layout; inline images pass no tail override, so their tail is zero. There is no
+engine-provided rich material, float4 `a_tint`, or per-image custom block. An
+unset style text or image material resolves to the ctx default at each walk, so
+swapping the base between walks changes the material drawn. `set_material` is
+bound **once per band** (the
 `bound` guard), so **all** of a band's inline images **coalesce into one sprite
 batch** — no per-image flush. Because the sprite renderer emits while the active
 **scroll scissor is GL-live** during the walk, the images are clipped to the

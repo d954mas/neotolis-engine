@@ -21,6 +21,8 @@ typedef struct {
     nt_program_t program;
     uint32_t num_indices; /* 0 on a non-indexed draw: the backend gets no vertex count */
     uint32_t instance_count;
+    uint32_t instance_offset; /* last nt_gfx_bind_instance_buffer byte offset */
+    bool scissor_enabled;
 } nt_gfx_fake_draw_t;
 
 void nt_gfx_fake_draw_trace_reset(bool enabled);
@@ -109,6 +111,8 @@ void nt_gfx_fake_set_context_lost(bool lost);
 void nt_gfx_fake_lose_and_restore_context(void);
 uint32_t nt_gfx_fake_last_update_buffer_offset(void);
 uint32_t nt_gfx_fake_last_instance_offset(void);
+/* The last created vertex input's description, as the backend received it. */
+nt_vertex_input_desc_t nt_gfx_fake_last_vertex_input_desc(void);
 uint32_t nt_gfx_fake_last_instance_vertex_input(void);
 nt_blend_state_t nt_gfx_fake_last_pipeline_blend(void);
 uint32_t nt_gfx_fake_vertex_input_create_count(void);

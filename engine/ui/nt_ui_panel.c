@@ -25,6 +25,7 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
     NT_ASSERT(ctx != NULL && "nt_ui_panel_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_panel_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(style != NULL && "nt_ui_panel_begin: style must be non-NULL");
+    NT_ASSERT((style->flags & ~(NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE)) == 0U);
     NT_ASSERT(region != NULL && region->atlas.id != 0 && "nt_ui_panel_begin: invalid atlas handle");
     NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_panel_begin: style.slice9_scale must be finite > 0");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {

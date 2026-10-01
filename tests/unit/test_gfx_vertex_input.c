@@ -180,9 +180,10 @@ void test_vi_creation_asserts_webgl2_rules(void) {
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_INSTANCE_ATTRS"));
     /* Exactly NT_GFX_MAX_INSTANCE_ATTRS is accepted and survives the
      * backend's compact per-slot copy. */
-    nt_vertex_layout_t inst_full = {.attr_count = NT_GFX_MAX_INSTANCE_ATTRS, .stride = 32};
+    /* Instance attrs take the locations above the static position attribute. */
+    nt_vertex_layout_t inst_full = {.attr_count = NT_GFX_MAX_INSTANCE_ATTRS, .stride = NT_GFX_MAX_INSTANCE_ATTRS * 4};
     for (uint8_t i = 0; i < NT_GFX_MAX_INSTANCE_ATTRS; i++) {
-        inst_full.attrs[i] = (nt_vertex_attr_t){.location = (uint8_t)(8 + i), .type = NT_VERTEX_FLOAT, .count = 1, .offset = (uint16_t)(i * 4)};
+        inst_full.attrs[i] = (nt_vertex_attr_t){.location = (uint8_t)(NT_GFX_MAX_VERTEX_ATTRS - NT_GFX_MAX_INSTANCE_ATTRS + i), .type = NT_VERTEX_FLOAT, .count = 1, .offset = (uint16_t)(i * 4)};
     }
     nt_vertex_input_t max_inst = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_full, .vertex_buffer = vbo});
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(max_inst));

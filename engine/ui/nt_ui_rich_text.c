@@ -2096,7 +2096,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
             nt_sprite_renderer_set_material(image_mat); /* bind ONCE: all images coalesce into one batch */
             bound = true;
         }
-        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, nt_color_pack(fx.color), 0U, NULL, 0U);
+        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, nt_color_pack(fx.color), 0U, NULL, 0);
 #ifdef NT_TEST_ACCESS
         st->image_emit_count++;
 #endif

@@ -257,6 +257,11 @@ static nt_material_t create_test_material(void) {
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
+    desc.vertex_layout = (nt_vertex_layout_t){.stride = 20,
+                                              .attr_count = 3,
+                                              .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+                                                        {.location = 3, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 12},
+                                                        {.location = 2, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 16}}};
     desc.program = nt_gfx_make_program(vs, fs);
     desc.depth_test = false;
     desc.depth_write = false;
@@ -338,7 +343,7 @@ static void test_emit_region_direct_call(void) {
     const float m[16] = {
         32.0F, 0.0F, 0.0F, 0.0F, 0.0F, 32.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 10.0F, 20.0F, 0.0F, 1.0F,
     };
-    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, /*flip_bits=*/0U, NULL, 0U);
+    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, /*flip_bits=*/0U, NULL, 0);
 
     /* Probe captured BEFORE flush resets vertex_count. */
     TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_last_emit_vertex_count());
@@ -368,7 +373,7 @@ static void test_emit_region_capacity_guard(void) {
     const uint32_t quad_capacity = NT_SPRITE_RENDERER_MAX_VERTICES / 4U;
     const uint32_t emit_count = quad_capacity + 2U;
     for (uint32_t i = 0; i < emit_count; ++i) {
-        nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+        nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0);
     }
     /* Final explicit flush so the per-renderer counter captures the trailing chunk. */
     nt_sprite_renderer_flush();
@@ -391,7 +396,7 @@ static void test_emit_region_polygon_hull_vertex_count_preserved(void) {
     const float m[16] = {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
     };
-    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_POLYGON_REGION_IDX, m, 0.5F, 0.5F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_POLYGON_REGION_IDX, m, 0.5F, 0.5F, 0xFFFFFFFFU, 0U, NULL, 0);
 
     TEST_ASSERT_EQUAL_UINT32(6, nt_sprite_renderer_test_last_emit_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(12, nt_sprite_renderer_test_last_emit_index_count());
@@ -415,13 +420,13 @@ static void test_set_material_auto_flush_on_change(void) {
     };
 
     nt_sprite_renderer_set_material(mat_a);
-    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0);
 
     /* Same handle re-binding does NOT flush (current_mat still .id of mat_a,
      * cmd_count > 0 after the emit above so the no-op branch fires). */
     const uint32_t calls_before_same = nt_sprite_renderer_test_draw_call_count();
     nt_sprite_renderer_set_material(mat_a);
-    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(calls_before_same, nt_sprite_renderer_test_draw_call_count());
 
     /* Different .id triggers auto-flush (one extra draw call recorded). */
@@ -430,7 +435,7 @@ static void test_set_material_auto_flush_on_change(void) {
     TEST_ASSERT_EQUAL_UINT32(calls_before_same + 1U, calls_after_change);
 
     /* Subsequent emit on mat_b still works (cmd reopened). */
-    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_last_emit_vertex_count());
 
     nt_sprite_renderer_flush();
@@ -514,7 +519,7 @@ static void test_slice9_basic(void) {
     nt_sprite_renderer_set_material(mat);
 
     const uint16_t b4[4] = {4, 4, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0);
 
     TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_last_emit_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(54, nt_sprite_renderer_test_last_emit_index_count());
@@ -535,7 +540,7 @@ static void test_slice9_positions(void) {
 
     /* Target: (0,0,100,80), borders: (4,4,4,4) */
     const uint16_t b4[4] = {4, 4, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0);
 
     /* Expected x splits: [0, 4, 96, 100] */
     /* Expected y splits: [0, 4, 76, 80]  */
@@ -585,7 +590,7 @@ static void test_slice9_flip_x(void) {
 
     /* Asymmetric borders: L=4, R=8. */
     const uint16_t b_flipx[4] = {4, 8, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b_flipx, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X, NULL, 0U);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b_flipx, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X, NULL, 0);
 
     /* Pivot (0,0) with a mirror puts the footprint in [-100, 0]. Columns keep
      * their own band and UV: the 4-wide L band still samples 4 source px
@@ -623,7 +628,7 @@ static void test_slice9_flip_y(void) {
 
     /* Asymmetric: T=4, B=8. */
     const uint16_t b_flipy[4] = {4, 4, 4, 8};
-    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b_flipy, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_Y, NULL, 0U);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b_flipy, 1.0F, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_Y, NULL, 0);
 
     /* Row 0 is the local bottom: B=8 wide, sampling 8 source rows down from
      * v_max (v_min=2000, v_max=6000, source_h=64 -> 62.5 v per row). */
@@ -664,7 +669,7 @@ static void test_slice9_tombstone_noop(void) {
     /* Emit a normal slice9 — should work and advance vertex_count by 16. */
     nt_resource_t atlas = register_slice9_atlas(0xC6ULL);
     const uint16_t b2[4] = {2, 2, 2, 2};
-    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 50.0F, 50.0F, 0.0F, 0.0F, b2, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 50.0F, 50.0F, 0.0F, 0.0F, b2, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(vc_before + 16U, nt_sprite_renderer_test_vertex_count());
 
     nt_sprite_renderer_flush();
@@ -686,7 +691,7 @@ static void test_slice9_mat4_translation(void) {
     m[13] = 30.0F;
 
     const uint16_t b4[4] = {4, 4, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, m, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_slice9(atlas, 0, m, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0);
 
     /* Vertex 0 (bbox top-left in layout) = (0, 0) → (50, 30). */
     float pos[3];
@@ -722,7 +727,7 @@ static void test_slice9_mat4_rotation_90(void) {
     m[5] = 0.0F;
 
     const uint16_t b4[4] = {4, 4, 4, 4};
-    nt_sprite_renderer_emit_slice9(atlas, 0, m, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    nt_sprite_renderer_emit_slice9(atlas, 0, m, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0);
 
     float pos[3];
     /* Vertex 0 = layout (0, 0) → (0, 0). */

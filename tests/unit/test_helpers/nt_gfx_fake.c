@@ -132,6 +132,8 @@ static uint32_t s_fake_last_update_buffer_offset;
 static const void *s_fake_last_update_buffer_data;
 static uint32_t s_fake_last_update_buffer_size;
 static uint32_t s_fake_last_instance_offset;
+static bool s_fake_scissor_enabled;
+static nt_vertex_input_desc_t s_fake_last_vertex_input_desc;
 static uint32_t s_fake_last_instance_vertex_input; /* recorder: last VI handle bind_instance_buffer named */
 static nt_blend_state_t s_fake_last_pipeline_blend;
 static uint32_t s_fake_vertex_input_create_count;
@@ -223,6 +225,7 @@ void nt_gfx_fake_set_context_lost(bool lost) {
 void nt_gfx_fake_lose_and_restore_context(void) { s_fake_loss_pending = true; }
 uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update_buffer_offset; }
 uint32_t nt_gfx_fake_last_instance_offset(void) { return s_fake_last_instance_offset; }
+nt_vertex_input_desc_t nt_gfx_fake_last_vertex_input_desc(void) { return s_fake_last_vertex_input_desc; }
 uint32_t nt_gfx_fake_last_instance_vertex_input(void) { return s_fake_last_instance_vertex_input; }
 nt_blend_state_t nt_gfx_fake_last_pipeline_blend(void) { return s_fake_last_pipeline_blend; }
 uint32_t nt_gfx_fake_vertex_input_create_count(void) { return s_fake_vertex_input_create_count; }
@@ -270,6 +273,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_update_buffer_data = NULL;
     s_fake_last_update_buffer_size = 0;
     s_fake_last_instance_offset = 0;
+    s_fake_scissor_enabled = false;
+    s_fake_last_vertex_input_desc = (nt_vertex_input_desc_t){0};
     s_fake_last_instance_vertex_input = 0;
     s_fake_last_pipeline_blend = (nt_blend_state_t){0};
     s_fake_vertex_input_create_count = 0;
@@ -331,6 +336,8 @@ static void fake_record_draw(uint32_t num_indices, uint32_t instance_count) {
         .program = nt_gfx_pipeline_program(pipeline),
         .num_indices = num_indices,
         .instance_count = instance_count,
+        .instance_offset = s_fake_last_instance_offset,
+        .scissor_enabled = s_fake_scissor_enabled,
     };
 }
 
@@ -387,7 +394,7 @@ void nt_gfx_backend_set_scissor(int x, int y, int w, int h) {
 }
 
 void nt_gfx_backend_set_scissor_enabled(bool enabled) {
-    (void)enabled;
+    s_fake_scissor_enabled = enabled;
     s_fake_set_scissor_enabled_count++;
 }
 
@@ -477,6 +484,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     (void)vbo_backend;
     (void)ibo_backend;
     s_fake_vertex_input_create_count++;
+    s_fake_last_vertex_input_desc = *desc;
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }

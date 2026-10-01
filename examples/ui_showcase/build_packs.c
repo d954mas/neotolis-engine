@@ -88,14 +88,14 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/sprite.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.frag", NT_BUILD_SHADER_FRAGMENT);
-    /* Radial: shared extended-layout VS (a_radial @ loc 4) + the flat SDF FS
-     * (nt_ui_radial) + the textured reveal FS (nt_ui_radial_image). */
+    /* Radial image retains its own textured reveal vertex/fragment pair. */
     nt_builder_add_shader(ctx, "assets/shaders/sprite_radial.vert", NT_BUILD_SHADER_VERTEX);
-    nt_builder_add_shader(ctx, "assets/shaders/radial.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/radial_image.frag", NT_BUILD_SHADER_FRAGMENT);
-    /* Base Material tab: plain sprites + flat radials from one material (radial VS). */
-    nt_builder_add_shader(ctx, "assets/shaders/ui_base.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 8 (sprite + slug_text + radial vs/fs + radial_image fs + ui_base fs)\n");
+    nt_builder_add_shader(ctx, "assets/shaders/ui_shape.vert", NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(ctx, "assets/shaders/ui_shape.frag", NT_BUILD_SHADER_FRAGMENT);
+    /* Game-owned shape paint over the engine instance and SDF library. */
+    nt_builder_add_shader(ctx, "examples/ui_showcase/raw/shaders/ui_shape_checker.frag", NT_BUILD_SHADER_FRAGMENT);
+    (void)printf("  Shaders added: 9 (sprite + slug_text + radial image + analytic shapes + checker)\n");
     // #endregion
 
     // #region atlas: widget art + slice9 panels + white pixel
@@ -292,7 +292,7 @@ int main(int argc, char *argv[]) {
     // #endregion
 
     // #region atlas: radial-image art (single full-bleed sprite -> UV spans [0,1])
-    /* The reveal now centers on ANY rectangular region (region-local UV via a_uvrect), so a
+    /* The reveal uses source-image coordinates for any rectangular region, so a
      * packed sub-region works too — the showcase proves that on the shared atlas's bunny. This
      * DEDICATED full-bleed single-sprite atlas (no padding/margin/extrude, non-POT, RECT,
      * fully-OPAQUE so the trimmer strips nothing) is kept for the A/B [0,1]-UV reference cell. */

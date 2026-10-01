@@ -17,7 +17,7 @@ The left tab list itself **dogfoods the reusable `nt_ui_tabbar`** widget (the ga
 owns the active-tab index; the widget draws the accent bar + selected fill + hover
 lighten and writes the index on click).
 
-## Tabs (20 entries)
+## Tabs (21 entries)
 
 1. **Labels** - h1 / body / caption variants, themed via the palette.
 2. **Decoration** - type specimen: R/B/I/BI styles, inline faces, synthetic-weight ramp,
@@ -52,16 +52,14 @@ lighten and writes the index on click).
 12. **Events** - a hold-to-confirm button (`nt_ui_events` gesture cfg) whose
     `hold_progress` drives a fill bar and confirms on `long_pressed`, plus a
     double-click target with a readout; see the **Interaction-events controls** below.
-13. **Radial** - SDF radial feedback (`nt_ui_radial` + `nt_ui_radial_image`): a
+13. **Radial** - SDF radial feedback (`nt_ui_shape` RADIAL + `nt_ui_radial_image`): a
     looping **cooldown** wedge, a **hold-to-confirm** wedge driven by the events
     `hold_progress`, ring + oval shape variants, the **four reveal modes**
     (desaturate / dim / hide / tint) on a textured radial-image, and a **dense
     batched grid** that proves N radials sharing one material stay one draw call;
     see the **Radial controls** + **Radial visual-QA protocol** below.
-14. **Base Material** - one custom-attr base material (`ui_base.frag`) for the whole
-    UI: plain emits bake its attr defaults, so rounded panels, icons and SDF radials
-    share one batch. The checkbox swaps back to a plain base + a separate radial
-    material; the `draw calls` readout shows the difference.
+14. **Shapes** - analytic BOX/RADIAL shapes, asymmetric borders, gradients,
+    shadows and a game-shader checker card; see the **Shapes tab** below.
 15. **Rich Text** - styled, wrapped, inline-illustrated text under one measured
     block (`nt_ui_rich_text` + `nt_ui_rich_text_markup`), authored **two ways**:
     the code-first push/pop builder AND the runtime `<markup>` parser. Demos
@@ -87,6 +85,133 @@ lighten and writes the index on click).
     tabs with a distinct selected-tab icon + a BOTTOM accent (contrast the LEFT nav
     list, which uses the one-call `labels[]` wrapper with a LEFT accent).
 20. **Stress** - N labels @14pt + the frame `gpu_ms` / draw-call readout.
+
+## Shapes tab
+
+**Shapes**, immediately after **Radial**, compares procedural controls with atlas
+art. The two buttons use the existing `nt_ui_button` interaction and animation:
+hover, press, drag outside to cancel, scale, press offset and disabled opacity.
+**Buttons enabled** toggles both. Each has a separate click counter.
+
+The gallery includes sharp/rounded/asymmetric corners, pill, circle, thin/thick
+borders, four different side widths, zero-width sides, empty interior,
+horizontal/vertical gradients, transparent paint, soft shadow, a radial ring,
+an inner highlight composed from an inset transparent-fill BOX, and a **Game
+checker** card. The checker uses the example's own fragment shader
+(`raw/shaders/ui_shape_checker.frag`): it includes the engine SDF library and
+reads the cell size and alpha from `nt_ui_shape_style_t.user`. Scroll down for
+mixed atlas/slice9/Clay/shape ordering and a rotated, nonuniformly scaled shape
+container with inherited opacity and child text.
+
+**Measurement grid (256 cards)** replaces the gallery with a 16×16 grid of
+28×20 layout-pixel cards at 2-pixel spacing. **Clay** and **SDF** use the same
+solid color and radius 6. **4 sides** adds left/top/right/bottom widths
+1/2/3/4 with an opaque white border to either Clay or SDF. For SDF, **+ gradient**
+adds a horizontal gradient; **+ shadow** adds a separate shadow to that same
+border/gradient workload. Unsupported effects are disabled for Clay and atlas.
+**SDF+icon** puts a 12×12 atlas icon inside every
+SDF card. By default card and icon share a layer, so the walker alternates
+between the shape and sprite renderers in every cell; **Icons on their own
+layer** moves the icons one layer up, which draws all cards and then all icons.
+**Atlas** shows the existing ornamental slice9 path
+and is a reference workload, not a pixel-equivalent baseline. Keep the whole
+grid visible and preserve viewport, DPR, theme and scroll position when
+comparing runs.
+
+The existing overlay reports whole-frame CPU/GPU/draw data. The grid readout
+reports the preceding whole UI walk: draws, submitted vertices/indices and
+buffer upload bytes, including the surrounding showcase controls. It excludes
+the later inspector/debug overlay. Detailed layout/build-tree/walk timings use
+the existing UI getters; a build without UI timing says so explicitly. Geometry
+counts and uploads use existing gfx counter deltas around `nt_ui_walk`.
+These controls prepare a comparison; they do not establish a
+performance result. Build/profiling flags and GPU timer validation are described
+in [docs/build.md](../../docs/build.md).
+
+For recorded samples, enable metrics, UI/GPU timing and INFO logging explicitly
+on the optimized profiling build. Select a workload, leave the pointer outside
+the cards and warm up for at least two seconds. Click **Reset metrics**, wait for
+at least `NT_METRICS_WINDOW` rendered frames (256 by default), then click **Log
+snapshot**. The ordinary application/browser console receives the selected
+backend/material mode, framebuffer dimensions, sample counts, median and p95
+for whole-frame CPU/GPU and the whole-UI counters/timings. A GPU sample count of
+zero is unavailable data, not zero GPU cost. Repeat after every setting change;
+these windows do not label samples with scene identities automatically.
+
+### Recorded Shapes comparison
+
+**Shadow/body quad split (artifact-only WebGL2 comparison).** On 2026-09-27,
+separate shadow and body quads were compared with one combined quad using the
+historical affine shader baseline: Chrome 153.0.8010.53, Intel UHD through
+ANGLE D3D11, 1024x1024, 20 warmups and 30 valid non-disjoint timer samples,
+each averaging eight repetitions. At 256 shapes, separate/combined GPU medians
+were 0.750/1.123 ms; at 1024 shapes, 1.061/2.112 ms. Corresponding p95 values
+were 0.798/1.196 ms and 1.130/2.350 ms. The maximum image-channel difference was
+1/255. Separate used two 348-byte quads per shape; combined used one enlarged
+quad and an artifact-only shader with fixed shadow uniforms. Timings include GPU
+clear and batched draws, not engine CPU submission or uploads. They do not
+establish an engine-wide speedup or performance on other GPUs. SHA-256 prefixes
+identify the measured sources: vertex `5e579c5acac85857`, vertex helper
+`c18812c6afb1d4b2`, shared fragment math `a80e9e64d3af675e`, shared radial
+`fdc098ea276e05196`, uber fragment `20b41bb1d0711de2`, combined prototype
+`5193653aad462aae`, runner `7e2770b98c3d355d6`. These measurements predate
+projective transport and the later shader changes. The integrated engine
+measurement below does not repeat this combined-shadow experiment.
+
+**Instanced renderer against the per-vertex tail.** On 2026-10-01 the profiling
+build (wasm-release with metrics, UI and GPU timing ON) of `7d1c5955` (shape
+attributes replicated into every sprite vertex, dedicated shape material)
+was compared with the instanced renderer on the same base, in headless
+Chromium on Intel UHD through ANGLE D3D11 at 1440x1000, DPR 1. Each row is
+the median of five ABBA windows of 256 frames; draws, vertices and upload bytes
+cover the whole UI walk and are deterministic.
+
+| Workload | Renderer | CPU ms | GPU ms | Walk ms | UI draws | Vertices | Upload bytes |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Clay solid | per-vertex | 0.415 | 2.251 | 0.180 | 13 | 10648 | 392716 |
+| Clay solid | instanced | 0.410 | 2.450 | 0.165 | 13 | 10512 | 383120 |
+| SDF solid | per-vertex | 0.395 | 1.527 | 0.150 | 14 | 4240 | 289740 |
+| SDF solid | instanced | 0.400 | 1.490 | 0.150 | 14 | 4104 | 219728 |
+| SDF 4 sides | per-vertex | 0.465 | 2.905 | 0.180 | 14 | 4240 | 289740 |
+| SDF 4 sides | instanced | 0.430 | 2.734 | 0.155 | 14 | 4104 | 219728 |
+| SDF gradient | per-vertex | 0.415 | 1.681 | 0.165 | 14 | 4240 | 289740 |
+| SDF gradient | instanced | 0.390 | 2.158 | 0.150 | 14 | 4104 | 219728 |
+| SDF shadow | per-vertex | 0.460 | 3.260 | 0.195 | 14 | 5264 | 378828 |
+| SDF shadow | instanced | 0.410 | 2.977 | 0.160 | 14 | 5128 | 248400 |
+
+Uploads fall by 24% for SDF grids and 34% with shadows: a shape is one
+112-byte instance instead of four 84-byte vertices plus six indices. GPU
+samples are bimodal in both arms (about 1.3-1.6 and 2.5-3.3 ms, the integrated
+GPU's clock states), so GPU time shows no difference beyond that noise. A
+sprite+shape uber material measured in the same run was slower on the GPU in
+every SDF workload (3.3-4.0 ms) and uploaded 84-byte vertices for every plain
+sprite. Release WASM on the same base: `ui_showcase` 432795 -> 431059 bytes,
+`bunnymark` 428204 -> 427442 bytes. These windows are one integrated GPU, not
+a mobile or cross-device result.
+
+**Interleaved shapes and icons on a phone.** On 2026-10-01 the **SDF+icon**
+grid (solid cards) ran on the reference phone of
+[measuring performance on phones](../../docs/perf-measurement.md): Huawei P40,
+Mali-G76, Chromium 156, wasm-release, vsync uncapped, 1080x2211 framebuffer.
+The uber arm is `7d1c5955` with **Mixed sprite + shape material**, one
+per-vertex material for cards and icons; the instanced arms are `b25cfdfe`.
+FPS, p95 and draws per frame come from `requestAnimationFrame` and wrapped
+WebGL draw calls; the GPU clock is sampled every 10 seconds.
+
+| Arm | Draws/frame | FPS | p95 ms | GPU MHz | FPS/MHz |
+|---|---:|---:|---:|---:|---:|
+| Uber, one batch | 15 | 333 | 5.3 | 274 | 1.23 |
+| Instanced, icons on the card layer | 527 | 105 | 20.5 | 294 | 0.36 |
+| Uber, one batch | 15 | 340 | 5.3 | 274 | 1.24 |
+| Instanced, icons on their own layer | 16 | 368 | 5.0 | 166 | 2.22 |
+
+The first pair is a sustained ABBA (3-minute pre-heat, four 2-minute windows
+per arm, ±2% between windows); the second is a short ABBA (four 1-minute
+windows per arm) on the warm phone. Alternating renderers on one layer is
+CPU-bound: each extra draw costs about 13 µs, so 20 switches a frame cost
+about 0.25 ms. With the icons on their own layer the instanced renderer beats
+the uber material at the GPU's lowest clock, because the uber material runs
+the shape branch for every sprite pixel.
 
 ## Controls
 
@@ -190,16 +315,21 @@ These tabs wire the interaction events + app-widgets. All widget state is
 ## Radial controls (Radial tab)
 
 The radial widgets are **Model D**: the game owns the `fill` (a looping cooldown timer or the
-events `hold_progress`); the engine draws an SDF arc/sector/ring/oval per pixel (crisp AA, no
-vertex-pie facets) and bakes the angles into a per-vertex custom attribute so many radials batch.
+events `hold_progress`); the engine draws a flat `nt_ui_shape` RADIAL arc/sector/ring/oval per
+pixel (crisp AA, no vertex-pie facets). `nt_ui_radial_image` remains a textured reveal effect.
+Both paths bake angles into vertices so same-material elements can batch.
+Angles use local UI coordinates with Y down: `0` points right, `+π/2` down,
+and positive angles sweep clockwise. The top is `-π/2`; explicit image flips
+mirror the reveal with the art. Atlas D4 packing does not change the wedge.
 
 | Element | Behavior |
 |---------|----------|
-| **Cooldown** disc + ring | a looping timer ramps `fill` 0→1 over ~3 s; `nt_ui_radial_fill` sweeps a full turn from the top |
+| **Cooldown** disc + ring | a looping timer ramps `fill` 0→1 over ~3 s; the game maps it to a RADIAL sweep from the top |
 | **Oval** sector | a static 270° sector on a non-square (140×80) bbox — the `aspect` (w/h) keeps 0° at +X with no distortion |
 | **Hold** disc | press and HOLD the button; the events `hold_progress` fills the ring and confirms at the long-press threshold |
 | **Reveal** row (desaturate / dim / hide / tint) | `nt_ui_radial_image` on a full-bleed (UV [0,1]) textured swatch; the **swept** sector is full color, the **un-swept** sector gets the per-mode composite |
-| **Dense grid** (12×8) | every cell sweeps to a different phase but shares ONE `s_radial_material` — the header `draw calls` count stays flat as the grid count grows (batched) |
+| **Cardinal starts** | four fixed 90° sectors show 0° right, +90° down, +180° left and +270° up; each pair compares flat shape with textured HIDE reveal |
+| **Dense grid** (12×8) | every cell sweeps to a different phase but shares one active RADIAL material — the header `draw calls` count stays flat as the grid count grows (batched) |
 
 ## Radial visual-QA protocol
 
@@ -210,7 +340,8 @@ regression. Build + run the native showcase, open the **Radial** tab, and confir
 1. **Arc/sector crispness + AA** — at the small grid cells AND the large discs the arc edge is
    smooth, NOT a Defold-style vertex-pie of flat facets; the AA width reads consistent along the radius.
 2. **Oval shape** — the 140×80 oval sector has the correct aspect, no distortion at the angular edges.
-3. **Two-angle animation + seam** — drive the cooldown + hold radials; the 0°/360° boundary crosses
+3. **Angle directions + seam** — the fixed cardinal pairs agree for shape/image; the cooldown
+   begins at the top and sweeps clockwise. Drive cooldown + hold; the 0°/360° boundary crosses
    each quadrant with NO hairline seam or flicker as `fill` sweeps.
 4. **Four reveal modes** — desaturate / dim / hide / tint each apply ONLY to the un-swept sector;
    the swept sector stays full color; no premultiply halos at the swept boundary.

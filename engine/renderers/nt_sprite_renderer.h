@@ -41,9 +41,11 @@ typedef struct {
 } nt_sprite_vertex_t;
 _Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes");
 
+/* Material vertex_layout for plain sprites; custom layouts keep this prefix. */
+extern const nt_vertex_layout_t NT_SPRITE_VERTEX_LAYOUT;
+
 /* Byte cap for a material's appended custom per-vertex attribute block (opt-in).
- * Headroom for four FLOAT4 blocks (a_radial + a_tint + a_uvrect + a_layout) = 64 B,
- * spent in full by the radial-image material. Only custom-attr materials pay this;
+ * Four FLOAT4 blocks fit. Only custom-attr materials pay this;
  * plain sprites keep the locked 20 B vertex. */
 #ifndef NT_SPRITE_CUSTOM_STRIDE_MAX
 #define NT_SPRITE_CUSTOM_STRIDE_MAX 64
@@ -57,8 +59,8 @@ typedef struct {
     uint32_t max_indices;         /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_INDICES */
     uint32_t custom_max_vertices; /* custom-attr staging cap; sizes the custom/interleave
                                    * heap so plain-sprite games don't carry a big custom
-                                   * buffer. Every batch of a custom-attr material stages
-                                   * under it. Default 4096. */
+                                   * buffer. Every batch of a custom-attr (stride > 20)
+                                   * material stages under it. Default 4096. */
 } nt_sprite_renderer_desc_t;
 
 static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
@@ -95,7 +97,7 @@ nt_result_t nt_sprite_renderer_restore_gpu(void);
  *      declared resource is never sampled: the renderer substitutes the page texture
  *      per command and the material may override the sampler. Every declared slot must
  *      resolve to a texture (register a placeholder for async loads; an override does not
- *      exempt it), asserted at flush. No textures = no page, e.g. nt_ui_radial's flat SDF.
+ *      exempt it), asserted at flush. No textures = no page, e.g. a flat-color shader.
  *   2. Caller pre-filters invisible, unresolved, and tombstoned sprites;
  *      renderer draws every entry.
  *   3. Frame UBOs (e.g. view_proj) are shader-specific — register and bind
@@ -113,14 +115,14 @@ void nt_sprite_renderer_flush(void);
 
 /* Requires a valid material with an assigned program; rechecks program identity even for the same material.
  * May flush the open command. An unready program opens a command that flush skips.
- *
+ * Borrows mat through the last emit using this binding; destroying it ends further emits.
+ * Already staged vertices retain their copied attributes until flush.
  * Numeric params remain mutable and are read at flush. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
-/* Every emit below takes an optional custom block (custom, custom_bytes), baked into each of
- * its vertices like color. A custom-attr material (attr_map_count > 0) needs custom_bytes ==
- * attr_map_count*16 (asserted), or 0 to bake the material's attr defaults; with neither it
- * asserts. A plain material takes NULL, 0. */
+/* Every emit accepts one complete tail block, copied during the call to each vertex.
+ * attrs/bytes must be NULL/0 or exactly material.vertex_layout.stride - 20 bytes; NULL/0
+ * writes a zero tail. Prefix position/UV/color always come from emit arguments. */
 
 /* Emit one atlas region at one mat4 transform.
  *
@@ -135,8 +137,8 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  *
  * Caller MUST have called set_material first so a cmd is open. Capacity
  * overflow is handled internally (auto flush + reopen, state preserved). */
-void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits,
-                                    const float *custom, uint8_t custom_bytes);
+void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits, const void *attrs,
+                                    uint16_t bytes);
 
 /* Emit a 9-quad slice9 image. Same vertex format, local space and pipeline as
  * emit_region: the grid is built Y-up around the pivot and flip_bits mirror it
@@ -162,7 +164,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  * Emits 16 vertices + 54 indices (4x4 shared grid). Staging overflow handled
  * internally. Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float w, float h, float origin_x, float origin_y, const uint16_t src_lrtb[4],
-                                    float slice9_scale, uint32_t color_packed, uint8_t flip_bits, const float *custom, uint8_t custom_bytes);
+                                    float slice9_scale, uint32_t color_packed, uint8_t flip_bits, const void *attrs, uint16_t bytes);
 
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a
@@ -185,31 +187,13 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
  * Capacity overflow handled internally (snapshot + flush + reopen).
  * Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
-                                      const float *world_matrix, uint32_t color_packed, const float *custom, uint8_t custom_bytes);
-
-/* Pad staging with up to 3 unreferenced vertices so the next quad starts at a multiple of 4, for a
- * shader that derives the corner from gl_VertexID & 3. Without room that quad flushes and starts
- * at vertex 0. Caller MUST have called set_material first. */
-void nt_sprite_renderer_align_next_vertex_to_4(void);
+                                      const float *world_matrix, uint32_t color_packed, const void *attrs, uint16_t bytes);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
-/* Resolved vertex layout snapshot for a material: stride + per-attr GL
- * location/offset. attr_count==3 for a plain material (base 20 B), 3+N for a
- * custom-attr material (extended stride). */
-typedef struct {
-    uint32_t stride;
-    uint32_t attr_count;
-    uint32_t locations[16]; /* NT_GFX_MAX_VERTEX_ATTRS */
-    uint32_t offsets[16];
-} nt_sprite_layout_info_t;
-void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *out);
 /* Read back the custom per-vertex attr block of the v_idx-th vertex of the last
- * emit, from the byte-staging path. float_count floats written. */
-void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
-/* Same readback by batch vertex index: 0 .. last_emit_first_vertex + last_emit_vertex_count - 1. */
-void nt_sprite_renderer_test_batch_custom(uint32_t vertex, float *out, uint8_t float_count);
-uint32_t nt_sprite_renderer_test_last_emit_first_vertex(void);
+ * emit, from the byte-staging path. Copies exactly bytes from the tail. */
+void nt_sprite_renderer_test_last_emit_attrs(uint32_t v_idx, void *out, uint16_t bytes);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void);
 /* Draw commands staged but not yet flushed. */

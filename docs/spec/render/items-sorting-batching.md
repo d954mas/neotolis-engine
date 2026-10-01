@@ -190,21 +190,24 @@ draw splitting depend only on capacity and state changes.
 
 ### Sprite custom-attr block
 
-A material with an `attr_map` extends the sprite vertex by one FLOAT4 per attr.
-Each non-ECS emit takes an optional block (`custom`, `custom_bytes`) baked into
-all its vertices, like color. The source per emit is: the emit's block, else the
-material's attr defaults ([Attr defaults](material.md#attr-defaults)), else an
-assert. So plain and custom-attr emits can share one custom-attr material and
-one batch. One staging batch keeps one vertex stride: opening a command
-whose material changes the stride flushes the pending emits first, so immediate
-emits and `draw_list` runs of plain and custom-attr materials mix freely. ECS
-emits pass no block, so a custom-attr material there needs attr defaults.
+A sprite material declares its complete physical vertex layout. The producer
+writes the 20-byte position/UV/color prefix; typed fields after it form one
+tail block. Each non-ECS emit may supply that entire tail for its own vertices;
+an omitted block writes a zero tail
+([Full vertex layout](material.md#full-vertex-layout)). One staging batch has
+one stride, so changing stride flushes pending emits.
 
-A shader that derives a quad corner from `gl_VertexID & 3` needs each quad to
-start at a multiple of four vertices. `nt_sprite_renderer_align_next_vertex_to_4`
-pads the staging with up to 3 unreferenced vertices instead of flushing, so such
-a quad shares the batch with emits of any vertex count. When the padding does
-not fit, the next emit flushes and starts at vertex 0 anyway.
+### UI shape instancing
+
+`nt_ui_shape_renderer` draws analytic UI shapes as one fixed 112-byte instance
+each, with corners from `gl_VertexID`
+([Analytic shapes](../ui/nt-ui.md#analytic-shapes)). It records one command per
+material run, uploads all staged instances once per flush and issues one
+instanced draw per command, so consecutive shapes batch independently of the
+number of layers a skin stacks. The UI walker flushes it when switching to the
+sprite or text renderer and back, which keeps declaration order across
+renderers. Uploads orphan the instance buffer with data, like sprite and text
+batches.
 
 ## UI draw ordering (nt_ui walker)
 

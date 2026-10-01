@@ -5,28 +5,24 @@ precision highp int;
 // at slot 0 and update + bind the frame UBO every frame before draw_list.
 #include "common/globals.glsl"
 
-// Base locations match nt_attr_location_t in engine/graphics/nt_gfx.h. The custom
-// attrs below are bound per-material by attr_map presence (NOT a flag) — a material
-// that omits one leaves its location unbound, reading the disabled-attr default.
+// Base locations match nt_attr_location_t in engine/graphics/nt_gfx.h; the tail is
+// nt_ui_radial_image_tail_t, written by the UI walker.
 layout(location = 0) in vec3 a_position;
 layout(location = 2) in vec4 a_color;
 layout(location = 3) in vec2 a_texcoord;
-// loc 4 (a_radial): x=angle_start y=angle_end z=inner_radius_norm w=0. All materials on this VS.
+// x=angle_start y=angle_end z=inner_radius_norm w=bbox width/height.
 layout(location = 4) in vec4 a_radial;
-// loc 5 (a_tint): rgb=reveal tint, w=tint_strength, 0..1. radial_image only.
+// rgb=reveal tint, w=tint_strength, 0..1.
 layout(location = 5) in vec4 a_tint;
-// loc 6 (a_uvrect): region min/max atlas UV {u0,v0,u1,v1}. radial_image only.
-layout(location = 6) in vec4 a_uvrect;
-// loc 7 (a_layout): walker-injected x=aspect (w/h), yz=bbox px size, w=0. All materials on this VS.
-layout(location = 7) in vec4 a_layout;
+// Atlas UV -> source-image coordinates (x right, y down), independent of trim and D4 packing.
+layout(location = 6) in vec3 a_source_u;
+layout(location = 7) in vec3 a_source_v;
 
 out vec2 v_texcoord;
 out vec4 v_color;
 out vec4 v_radial;
 out vec4 v_tint;
-out vec4 v_uvrect;
-out vec4 v_layout;
-out vec2 v_local;
+out vec2 v_local_uv;
 
 void main() {
     gl_Position = view_proj * vec4(a_position, 1.0);
@@ -34,15 +30,6 @@ void main() {
     v_color = a_color;
     v_radial = a_radial;
     v_tint = a_tint;
-    v_uvrect = a_uvrect;
-    v_layout = a_layout;
-    // The widget emits a 4-corner quad TL/TR/BR/BL; derive the [-1,1] local coord
-    // from gl_VertexID so the flat-radial path needs no extra per-vertex coord attr.
-    // A GEOMETRY-mode quad starts at a multiple of 4 vertices (the walker aligns it), so
-    // gl_VertexID & 3 is its corner. REGION-mode users ignore v_local.
-    int corner = gl_VertexID & 3;
-    // 0:TL(-1,-1) 1:TR(+1,-1) 2:BR(+1,+1) 3:BL(-1,+1)
-    float lx = (corner == 1 || corner == 2) ? 1.0 : -1.0;
-    float ly = (corner == 2 || corner == 3) ? 1.0 : -1.0;
-    v_local = vec2(lx, ly);
+    vec3 uv1 = vec3(a_texcoord, 1.0);
+    v_local_uv = vec2(dot(a_source_u, uv1), dot(a_source_v, uv1)) * 2.0 - 1.0;
 }

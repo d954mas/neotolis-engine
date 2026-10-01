@@ -1,85 +1,51 @@
-# Radial widgets & the custom-attr image path
+# Radial image widget
 
-Design rationale for `nt_ui_radial` / `nt_ui_radial_image` and the generic
-custom-attr atlas-region emit they ride (`nt_ui_image_custom`): Route B (Clay
-IMAGE + per-element material) chosen for batching, name-bound attr injection,
-REGION vs GEOMETRY modes, the four hard boundaries of the path, and reveal
-modes with their v1 limits.
+Design rationale for `nt_ui_radial_image`: a textured reveal drawn through the
+walker's IMAGE path with a per-element material, its walker-written vertex tail,
+and its reveal modes and limits. Flat radial shapes use `nt_ui_shape` instead.
 
 Related: [Scope](../core/scope.md), [Rich Text](rich-text.md), [Material System](../render/material.md)
 
-This section holds the design rationale behind the radial widgets
-(`nt_ui_radial`, `nt_ui_radial_image`) and the generic custom-attr atlas-region
-emit they ride (`nt_ui_image_custom`). The headers carry only the short
-caller-facing contract; the reasoning lives here.
+The analytic flat RADIAL is specified in [Analytic shapes](nt-ui.md#analytic-shapes).
 
 ## Route A (Clay CUSTOM) vs Route B (IMAGE + material)
 
-A radial could be drawn two ways:
+A textured radial reveal could be drawn two ways:
 
 - **Route A — Clay CUSTOM element.** The game gets a bbox and a raw draw
   callback and emits geometry itself.
 - **Route B — Clay IMAGE element + a per-element material.** The widget rides
-  the existing UI walker image path; the walker emits a textured/white-region
-  quad through the sprite renderer and binds the widget's material.
+  the existing UI walker image path; the walker emits the atlas region through
+  the sprite renderer and binds the widget's material.
 
-Neotolis uses **Route B**. The reason is batching: Route A drops out of the
-walker's image emit and cannot share draw state, so every CUSTOM widget is its
-own draw. Route B keeps every radial on the sprite renderer's emit path, so many
-radials that share one material batch into a single draw. The per-element
-material override (`nt_ui_image_payload_t.material`) carries the SDF fragment
-shader and extended vertex layout; the walker only re-binds it when the `.id`
-differs from the currently bound material, so a screen full of identical-material
-radials still collapses to one `set_material` and one draw.
+Neotolis uses **Route B**. Route A drops out of the walker's image emit and
+cannot share draw state, so every CUSTOM widget is its own draw. Route B keeps
+every reveal on the sprite renderer's emit path, so reveals that share one
+material batch into a single draw. The walker re-binds the per-element material
+(`nt_ui_image_payload_t.material`) only when its `.id` differs from the bound
+material.
 
-## Name-bound injection vocabulary
+## Vertex tail
 
-The per-vertex custom block is **untyped**. The bound material's `attr_map` is
-the single source of truth for what the floats mean. The widget supplies its
-data block with zero placeholders where walker-derived attrs sit; the walker
-scans the `attr_map` and fills any attr it recognizes **by name**:
+The widget stores its parameters in a typed payload (engine-owned flag
+`NT_UI_IMAGE_RADIAL_REVEAL`). At walk time the walker writes one
+`nt_ui_radial_image_tail_t` per emit, after the 20-byte sprite prefix:
 
-- `a_layout` vec4 = `{aspect = bbox w/h, bbox_width_px, bbox_height_px, 0}`
-- `a_uvrect` vec4 = `{u0, v0, u1, v1}` = the region's min/max atlas UV
+| Offset | Location | Field |
+|---:|---:|---|
+| 20 | 4 | FLOAT4 `a_radial`: start, end, inner radius, bbox width/height |
+| 36 | 5 | FLOAT4 `a_tint`: RGB 0..1, TINT strength |
+| 52 | 6 | FLOAT3 `a_source_u` |
+| 64 | 7 | FLOAT3 `a_source_v` |
 
-The block float-offset of attr *i* is `i*4` (attr_map declaration order; each
-attr is one FLOAT4). Everything the walker does not recognize by name is baked
-verbatim from the widget's block.
-
-**To add a new injected value:** pick a new attr name, fill it in the walker,
-and name it in a material's `attr_map`. No payload struct change and no public
-API change. There are deliberately no per-widget flags or branches in the
-walker — it has one generic custom-emit branch keyed on `payload.custom != NULL`.
-
-## geom_mode: REGION vs GEOMETRY
-
-`geom_mode` selects how the walker rasterizes the element's bbox when the block
-is present:
-
-- **`NT_UI_IMAGE_GEOM_REGION`** — the textured `emit_region` / `emit_slice9`
-  path. Real atlas art; origin, flip, and slice9 are honored. Used by
-  `nt_ui_radial_image`, which reveals a real texture.
-- **`NT_UI_IMAGE_GEOM_GEOMETRY`** — a clean 4-corner bbox quad (TL/TR/BR/BL)
-  against the white region via `emit_geometry`. Required by SDF shaders that
-  derive a local `[-1,1]` coordinate from `gl_VertexID & 3`; a packed region's
-  own winding would break that derivation. Used by `nt_ui_radial` (flat SDF
-  shape on the white pixel). The walker aligns each such quad to four vertices
-  ([Sprite custom-attr block](../render/items-sorting-batching.md#sprite-custom-attr-block)),
-  so it may share a batch with emits of any vertex count.
-
-## The four walls (what this path does NOT do)
-
-The custom-attr block is **uniform across a widget's verts** — it behaves like
-the per-emit color, passed with each emit and baked into every vertex. This gives four hard
-boundaries:
-
-1. **No per-vertex data.** A composite widget (segmented bar, sparkline, minimap
-   blips) is N separate emit calls, not one call with a vertex stream.
-2. **16-float cap.** Four FLOAT4 attrs at `NT_SPRITE_CUSTOM_STRIDE_MAX` (64 B).
-3. **Time / animation is not a walker injection.** A widget that needs a time-driven
-   shader writes the current time into `custom_attrs` itself each frame — no shipped
-   widget does this (the demo animates via `color_packed`); the walker injects only layout.
-4. **A second texture rides the material** (`textures[]`), not the custom block.
+The radial-image material uses the exported `NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT`
+(76-byte vertex); basic sprites remain 20 bytes. `a_source_u/v` map the vertex's
+atlas UV to source-image coordinates (x right, y down, before alpha trim):
+`source = (dot(a_source_u, (uv, 1)), dot(a_source_v, (uv, 1)))`. One region's
+atlas placement is rigid — trim, packing and D4 orientation — so the map is
+affine; the walker solves it once per emit from the region's largest triangle.
+The bbox aspect needs final layout, so the walker writes it too. The sprite
+renderer copies the tail verbatim and knows nothing about radial images.
 
 ## Reveal modes and v1 limits (`nt_ui_radial_image`)
 
@@ -100,21 +66,29 @@ reveal in the same mode. The **tint is per-widget** (`tint_color_packed` +
 `tint_strength` → baked into `a_tint`), so many differently-tinted radials share
 one TINT-mode material and still batch to a single draw.
 
-The reveal fragment shader normalizes `v_texcoord` into region-local `[-1,1]`,
-so the wedge centers on the region wherever it sits in the atlas page; this works
-with any rectangular region (full-bleed `[0,1]` texture or a packed sub-region).
+The wedge uses source-image coordinates; the fragment shader samples the
+original packed atlas UV. Packing placement and all D4 orientations therefore
+leave the wedge fixed to the source image. Explicit sprite flips mirror the art
+and wedge together.
 
 **v1 limits:**
 
-- **slice9 is rejected.** The UV is non-linear across slice9 patches, so the
-  ring/reveal would deform. The slice9 struct fields remain for ABI parity with
-  `nt_ui_image_style_t` but the widget asserts they are unset. A real
-  geometry-local coordinate is the future path that would lift this.
-- **Angular convention is mathematical:** `0 = +X` axis, CCW positive. Two
-  independent `angle_start` / `angle_end` drive the sweep; there is no CW/CCW
-  flag — direction is implicit in the start/end order, and **swapping the two
-  angles reverses the sweep** (flip is API-layer, no shader branch).
+- **No slice9.** Slice9 stretches patches independently, which would distort
+  angles measured in source-image space. The radial-image style has no slice9
+  fields and rejects `NT_UI_IMAGE_SLICE9_OVERRIDE`; a region with baked borders
+  draws as a plain quad.
+- **Angular convention follows local UI coordinates:** Y points down,
+  `0` points right, `+π/2` points down, `π` points left, and `3π/2` points
+  up. Increasing angles sweep clockwise on an unflipped, untransformed image,
+  independent of its atlas packing orientation.
+  The span is `(angle_end - angle_start)` wrapped into `[0, 2π)`; swapping the
+  angles selects the complementary span, and a difference of at least `2π` in
+  magnitude reveals the full turn.
+  Explicit image flips mirror the wedge with the art. Atlas D4 packing is
+  inverted before the angular test and does not alter the visible wedge.
 - **`fill` 0..1** is a thin convenience mapping `angle_end = angle_start +
-  clamp(fill,0,1) * sweep_total` for cooldown / hold_progress idioms.
+  clamp(fill,0,1) * sweep_total` for cooldown / hold_progress idioms. Equal
+  start/end angles have zero swept coverage, including the start ray, so HIDE
+  leaves no seam at `fill=0`.
 - **`inner_radius_norm` `[0,1)`** carves a ring (0 = full disc); aspect from the
   bbox lets the same shape render as an oval.

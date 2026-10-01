@@ -26,7 +26,7 @@ if(NOT EMSCRIPTEN)
         nt_atlas nt_ui nt_ui_rich nt_gfx nt_gfx_fake nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_debug_overlay
         nt_skinned_mesh_renderer
-        nt_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
+        nt_shape_renderer nt_ui_shape_renderer nt_postfx_blur nt_mem_scratch nt_metrics nt_devapi_net
         nt_builder
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
@@ -1372,7 +1372,7 @@ if(NOT EMSCRIPTEN)
     # every nt_ui-test binary depends on -- now compiles unconditionally
     # under the unified NT_TEST_ACCESS define.
     target_link_libraries(test_nt_sprite_renderer_emit_region PRIVATE
-        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_ui nt_sprite_renderer nt_text_renderer nt_ui_shape_renderer nt_font nt_material
         nt_resource nt_hash nt_pool nt_atlas nt_gfx_fake nt_basisu_transcoder_stub nt_core nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
      nt_meshwire_stub)
     target_compile_definitions(test_nt_sprite_renderer_emit_region PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -1382,7 +1382,7 @@ if(NOT EMSCRIPTEN)
     # backend; nt_debug_overlay (+ nt_metrics, the perf source of truth it consumes) included for
     # walker tests that publish draw_calls / element_count into nt_metrics and read the HUD back.
     set(_nt_ui_test_libs
-        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_ui nt_sprite_renderer nt_text_renderer nt_ui_shape_renderer nt_font nt_material
         nt_resource nt_hash nt_pool nt_atlas nt_debug_overlay nt_metrics nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_core
         nt_input_stub nt_http_stub nt_fs_stub nt_log_stub unity
     )
@@ -1463,7 +1463,8 @@ if(NOT EMSCRIPTEN)
         test_ui_tabbar
         test_ui_tooltip
         test_ui_radial
-        test_nt_ui_base_custom_attrs
+        test_ui_shape
+        test_ui_shape_walk
         test_nt_ui_clay_debug_view
         test_nt_ui_rich_build
         test_nt_ui_rich_custom

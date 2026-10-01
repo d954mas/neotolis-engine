@@ -7,8 +7,7 @@
 
 #include "atlas/nt_atlas.h" /* nt_atlas_region_ref_t */
 #include "clay.h"
-#include "material/nt_material.h" /* nt_material_t (custom-attr path) */
-#include "ui/nt_ui.h"             /* nt_ui_element_data_t, nt_ui_image_payload_t */
+#include "ui/nt_ui.h" /* nt_ui_element_data_t, nt_ui_image_payload_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -17,6 +16,7 @@ extern const nt_ui_widget_def_t NT_UI_IMAGE_DEF;
 /* Style flag bits. */
 #define NT_UI_IMAGE_SLICE9_OVERRIDE (1U << 0) /* use slice9_lrtb; with {0,0,0,0} a baked nine-patch draws as a plain quad */
 #define NT_UI_IMAGE_ORIGIN_OVERRIDE (1U << 1) /* use origin_x/y instead of atlas default */
+/* Bits 2-3 are engine-owned payload flags (nt_ui.h). */
 
 typedef struct {
     uint32_t color_packed;   /* 0xAABBGGRR; 0xFFFFFFFF = no tint */
@@ -35,31 +35,5 @@ static inline nt_ui_image_style_t nt_ui_image_style_defaults(void) { return (nt_
 /* decl may be NULL (GROW/GROW); engine owns image/backgroundColor/userData.
  * region is by-pointer: the engine resolves it lazily and memoizes the index into *region. */
 void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_atlas_region_ref_t *region, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
-
-/* Generic custom-attr atlas-region emit (radial/radial_image/SDF). Injection is name-bound:
- * the material attr_map names the floats; the walker fills a_layout/a_uvrect by name, bakes
- * the rest verbatim. Contract: material ready, custom_bytes == attr_map_count*16 (asserted)
- * <= NT_SPRITE_CUSTOM_STRIDE_MAX. data/decl may be NULL.
- * spec: docs/spec/ui/radial-widgets.md */
-typedef struct {
-    nt_resource_t atlas;
-    uint32_t region_index;
-    nt_material_t material;
-    const float *custom_attrs;
-    uint8_t custom_bytes;
-    uint8_t geom_mode; /* NT_UI_IMAGE_GEOM_REGION | NT_UI_IMAGE_GEOM_GEOMETRY */
-    uint8_t flip_bits;
-    uint8_t flags; /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
-    uint16_t slice9_lrtb[4];
-    float origin_x;
-    float origin_y;
-    float slice9_scale;    /* MUST be finite > 0 */
-    uint32_t color_packed; /* 0xAABBGGRR; tint/opacity */
-    /* OPTIONAL: expected attr names in block order, NULL-terminated. Debug-asserts the
-     * material's attr_map matches so verbatim data attrs can't bake at wrong offsets. NULL = skip. */
-    const char *const *attr_names;
-} nt_ui_image_custom_t;
-
-void nt_ui_image_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const nt_ui_image_custom_t *img, const Clay_ElementDeclaration *decl);
 
 #endif /* NT_UI_IMAGE_H */

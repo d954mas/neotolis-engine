@@ -10,14 +10,15 @@
 #define ASSET_TEXTURE_UI_SHOWCASE_RADIAL_ART_TEX0 ((nt_hash64_t){0x086706E397DD0EE1ULL}) /* ui_showcase_radial_art/tex0 */
 
 /* --- SHADER --- */
-#define ASSET_SHADER_ASSETS_SHADERS_RADIAL_FRAG ((nt_hash64_t){0x1CBD5703DB548D54ULL}) /* assets/shaders/radial.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_RADIAL_IMAGE_FRAG ((nt_hash64_t){0x6117F8B5C957DCF7ULL}) /* assets/shaders/radial_image.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG ((nt_hash64_t){0x96ED6312E7B10087ULL}) /* assets/shaders/sprite.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT ((nt_hash64_t){0x75A9EEA4D1472026ULL}) /* assets/shaders/sprite.vert */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT ((nt_hash64_t){0x54AB053A2ADAE2D0ULL}) /* assets/shaders/sprite_radial.vert */
-#define ASSET_SHADER_ASSETS_SHADERS_UI_BASE_FRAG ((nt_hash64_t){0xB494CA99DC82D5C8ULL}) /* assets/shaders/ui_base.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_FRAG ((nt_hash64_t){0xDDFD139FE91956FDULL}) /* assets/shaders/ui_shape.frag */
+#define ASSET_SHADER_ASSETS_SHADERS_UI_SHAPE_VERT ((nt_hash64_t){0xF8FA39E51B6D9D90ULL}) /* assets/shaders/ui_shape.vert */
+#define ASSET_SHADER_EXAMPLES_UI_SHOWCASE_RAW_SHADERS_UI_SHAPE_CHECKER_FRAG ((nt_hash64_t){0xDC2D4F138AA39AACULL}) /* examples/ui_showcase/raw/shaders/ui_shape_checker.frag */
 
 /* --- FONT --- */
 #define ASSET_FONT_UI_SHOWCASE_FONT ((nt_hash64_t){0xA3FFF9B020E5CAD5ULL}) /* ui_showcase/font */
@@ -61,14 +62,15 @@
 
 #if NT_HASH_LABELS
 static inline void ui_showcase_assets_register_labels(void) {
-    (void)nt_hash64_str("assets/shaders/radial.frag");
     (void)nt_hash64_str("assets/shaders/radial_image.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.vert");
     (void)nt_hash64_str("assets/shaders/sprite.frag");
     (void)nt_hash64_str("assets/shaders/sprite.vert");
     (void)nt_hash64_str("assets/shaders/sprite_radial.vert");
-    (void)nt_hash64_str("assets/shaders/ui_base.frag");
+    (void)nt_hash64_str("assets/shaders/ui_shape.frag");
+    (void)nt_hash64_str("assets/shaders/ui_shape.vert");
+    (void)nt_hash64_str("examples/ui_showcase/raw/shaders/ui_shape_checker.frag");
     (void)nt_hash64_str("ui_showcase/font");
     (void)nt_hash64_str("ui_showcase/font_rich_b");
     (void)nt_hash64_str("ui_showcase/font_rich_bi");

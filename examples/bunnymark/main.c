@@ -640,6 +640,7 @@ int main(void) {
 
     /* Material — premultiplied-alpha blend, depth off. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
+        .vertex_layout = NT_SPRITE_VERTEX_LAYOUT,
         .textures = {{.name = "u_texture", .resource = atlas_tex_handle}},
         .texture_count = 1,
         .blend = nt_blend_alpha_premultiplied(),

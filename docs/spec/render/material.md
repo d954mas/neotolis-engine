@@ -123,20 +123,46 @@ const TextureAssetRef *material_get_textures(const MaterialAssetHeader *h) { ret
 
 ## One material, one copy
 
+### Full vertex layout
+
+`nt_material_create_desc_t.vertex_layout` declares the complete physical vertex
+for renderers that stream vertices: storage type, component count,
+normalization, location, absolute byte offset and stride. Creation copies it and
+stores `vertex_layout_key`, a hash of the whole layout; `nt_gfx_make_vertex_input`
+validates the WebGL2 structural rules when a renderer first bakes it. A missing
+layout has zero count/stride. Meshes, text and UI shapes omit it: mesh streams
+define their own physical layout, and the material's independent `attr_map`
+maps stream names to shader locations. Modules that own a fixed vertex format
+export it as a constant (`NT_SPRITE_VERTEX_LAYOUT`,
+`NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT`); games pass the constant. Materials store no
+vertex bytes, and uniform params remain vec4 values.
+
+Sprite materials explicitly declare their full vertex. The sprite producer
+requires FLOAT3 position at location 0/offset 0, normalized USHORT2 UV at
+location 3/offset 12, and normalized UBYTE4 color at location 2/offset 16. Extra
+attributes start at offset 20 and end within the stride. Its stride must be a
+multiple of 4 and fit `20 + NT_SPRITE_CUSTOM_STRIDE_MAX`. Another prefix asserts when the sprite
+renderer first builds a vertex input for that layout.
+
+Every region/slice9/geometry emit accepts a complete `const void *attrs,
+uint16_t bytes` tail. NULL/0 writes a zero tail `[20,stride)`; otherwise `bytes`
+equals `stride - 20`. The renderer writes the prefix from ordinary emit
+arguments and copies the tail to each vertex, borrowing the pointer only during
+the emit. ECS emits carry no tail and therefore write a zero tail.
+
+The sprite renderer looks up its vertex-input cache by `vertex_layout_key`;
+equal layouts reuse a vertex input across materials, and a layout declared in a
+different attribute order is a different key. Layout-only changes do not create
+another pipeline. Stride changes flush staging; tail values alone do not split
+batches.
+
+### Shared values
+
 No duplicated material data. Material is created once (either from code via descriptor or loaded from pack asset in the future) and lives in a single pool slot. Multiple entities reference the same material handle.
 
 Per-entity variation (e.g. per-character color, dissolve progress) goes through entity param components, not material mutation — each entity carries its own values, the material stays shared.
 
 Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame, so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
-
-## Attr defaults
-
-`has_attr_defaults` opts a material into per-attr defaults:
-`attr_map[i].default_value` is the vec4 a sprite emit without its own custom
-block bakes for attr *i* ([Sprite custom-attr block](items-sorting-batching.md#sprite-custom-attr-block)).
-Zero-init means no defaults. What the values mean is the shader's contract. Defaults are values: they
-never enter pipeline or vertex-input keys. Only the sprite renderer reads them;
-mesh renderers ignore them.
 
 ## Texture resolve
 
