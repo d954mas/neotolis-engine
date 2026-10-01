@@ -303,9 +303,7 @@ static uint32_t clamp_u32(uint32_t v, uint32_t lo, uint32_t hi) {
 }
 
 static void push_window(family_t family, uint32_t arm, uint32_t episodes, uint32_t size, uint32_t rep) {
-    if (s_window_count == MAX_WINDOWS) {
-        return;
-    }
+    NT_ASSERT(s_window_count < MAX_WINDOWS && "bench_stream: schedule capacity exceeded");
     s_windows[s_window_count++] = (window_t){.family = family, .arm = arm, .episodes = episodes, .size = size, .rep = rep};
 }
 

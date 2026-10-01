@@ -7,20 +7,9 @@
 #include "graphics/nt_gfx.h"
 #include "skeletal/nt_skeletal.h"
 
-/*
- * Frame-scoped upload of CPU skinning palettes into one shared RGBA32F
- * texture. Per frame: begin_frame -> reserve* -> flush -> all passes.
- *
- * Texel layout (skeletal spec, "Baked playback: runtime banks", texel layout):
- * a frame of P palette entries is 3*P contiguous texels in one texture row
- * starting at (x, y); texel (x + 3p + r, y) holds row r of the 3x4 matrix
- * B[p]. Frames never span a row; a frame that does not fit the current row
- * starts the next one.
- *
- * A binding is valid until the next begin_frame or a graphics invalidation.
- * The game's frame order keeps it current; nothing here stamps or checks a
- * frame counter.
- */
+/* CPU palettes share one RGBA32F texture: begin_frame -> reserve* -> flush -> consuming passes.
+ * Each P-entry palette occupies 3*P contiguous texels in one row; texel (x + 3p + r, y) holds row r of B[p].
+ * Bindings expire at begin_frame or graphics invalidation; they carry no stamp. begin_frame asserts once per gfx frame. */
 
 /* Borrowed texture + two frame origins; CPU palettes have x1 == x0, y1 == y0,
  * alpha 0; bank lookups fill both origins. Origins are x/y pairs, not a linear

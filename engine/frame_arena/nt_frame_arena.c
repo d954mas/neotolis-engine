@@ -82,7 +82,7 @@ nt_result_t nt_frame_arena_restore_gpu(void) {
 // #region frame
 void nt_frame_arena_begin_frame(void) {
     NT_ASSERT(s_frame_arena.initialized);
-    /* A second arena frame inside one gfx frame would upload after draws read the buffer. */
+    /* Repeated preparation can overwrite ranges already used by this frame's draws. */
     NT_ASSERT(s_frame_arena.gfx_frame != g_nt_gfx.counters.frame_sequence && "frame_arena: begin_frame twice in one gfx frame");
     s_frame_arena.gfx_frame = g_nt_gfx.counters.frame_sequence;
     s_frame_arena.cursor = 0;

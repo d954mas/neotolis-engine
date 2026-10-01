@@ -99,7 +99,7 @@ nt_result_t nt_skeletal_gpu_restore_gpu(void) {
 // #region frame
 void nt_skeletal_gpu_begin_frame(void) {
     NT_ASSERT(s_skeletal_gpu.initialized);
-    /* A second palette frame inside one gfx frame would flush after draws read the texture. */
+    /* Repeated preparation can overwrite ranges already used by this frame's draws. */
     NT_ASSERT(s_skeletal_gpu.gfx_frame != g_nt_gfx.counters.frame_sequence && "skeletal_gpu: begin_frame twice in one gfx frame");
     s_skeletal_gpu.gfx_frame = g_nt_gfx.counters.frame_sequence;
     s_skeletal_gpu.cursor_x = 0;

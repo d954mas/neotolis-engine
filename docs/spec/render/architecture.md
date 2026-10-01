@@ -314,30 +314,33 @@ The game owns the frame order, once per gfx frame after `nt_gfx_begin_frame`:
 4. Draws bind `nt_frame_arena_buffer()` at a reserved offset, in any pass, any
    number of times.
 
-The order is asserted, not trusted: a second `begin_frame` in one gfx frame, a
-reserve after the frame's upload, a second upload, and taking the buffer before
-the upload each assert. So no write lands in the buffer after a draw of the
-frame read it. Only `begin_frame` reads the gfx frame; a frame that skips
-`begin_frame` keeps drawing the last upload. An offset stays valid until the
-next `begin_frame`. A restore empties the buffer but keeps staging and offsets:
+Assertions reject a second `begin_frame` in one gfx frame, a reserve after
+upload, a second upload, and taking the buffer before upload. They do not track
+draws: the game must prepare and upload before any draw reads the arena buffer
+in that gfx frame, including draws using the previous upload. A frame that skips
+`begin_frame` may reuse the last upload for the whole frame. An offset stays
+valid until the next `begin_frame`. A restore empties the buffer but keeps
+staging and offsets:
 `nt_frame_arena_buffer` asserts until the frame uploads again. Overflowing
 the capacity logs the bytes needed and free, then asserts; the arena never grows
 or chains buffers. `nt_frame_arena_peak` reports the most bytes any frame
 uploaded since init, to size the capacity from a real scene.
 
 Data created after the first draw that reads arena data (for example 3D built
-while walking UI) is not supported: the driver tracks the whole buffer, so a
-second upload would stall whatever range it writes. Prepare it before the first
-draw that reads arena data.
+while walking UI) is not supported: updating the same buffer between draws can
+wait on earlier reads even when the written ranges are disjoint. Prepare it
+before the first draw that reads arena data.
 
-One `STREAM` buffer, not a rotation: rewriting a buffer that only the
-previous frame read does not stall, also for the partial uploads a peak-sized
-capacity produces (`arena` and `arena_headroom` in `examples/bench_stream`;
-measurements in #590).
+One `STREAM` buffer is the policy selected from the measurements in #590:
+rotation showed no consistent benefit in the tested workloads. The P40 runs
+also compared full and partial per-frame uploads (`arena` and `arena_headroom`
+in `examples/bench_stream`). The API does not guarantee a stall-free upload.
 
-View and material uniforms are not arena data: pack them into a uniform buffer
-the game owns and bind ranges with `nt_gfx_bind_uniform_buffer_range`, uploaded
-under the same before-the-first-draw rule.
+View uniform buffers remain game-owned: upload all their blocks before the
+first draw that reads the buffer, then select ranges with
+`nt_gfx_bind_uniform_buffer_range`.
+Standalone material `vec4` parameters still use the existing per-material
+uniform setters; they are not arena data.
 
 ### Render targets
 
