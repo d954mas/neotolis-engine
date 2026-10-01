@@ -33,9 +33,10 @@ static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { ret
 
 /* One resolved instanced draw, written by a mesh renderer's prepare: draw reads
  * no entity component. Valid until the next nt_frame_arena_begin_frame or GPU
- * restore; the referenced material, its textures and the mesh stay live until
- * the last draw. Fields are renderer-filled; copy, filter or concatenate runs
- * of one renderer, never build them by hand. */
+ * restore (skinned runs also until the next nt_skeletal_gpu_begin_frame); the
+ * referenced material, its program and textures, and the mesh stay live until
+ * the last draw. Fields are renderer-filled; copy, filter or concatenate runs,
+ * never build them by hand. */
 typedef struct {
     nt_pipeline_t pipeline;
     nt_vertex_input_t vertex_input;
@@ -46,7 +47,8 @@ typedef struct {
     uint32_t index_count; /* 0 = non-indexed */
     uint32_t vertex_count;
     uint8_t supplied_slot;
-    uint8_t color_mode; /* nt_color_mode_t */
+    uint8_t color_mode;     /* nt_color_mode_t */
+    uint8_t color_location; /* the instance color attribute, white for NT_COLOR_MODE_NONE */
 } nt_mesh_run_t;
 
 /* desc is required, non-NULL and borrowed for the duration of the call. */
@@ -80,8 +82,6 @@ void nt_mesh_renderer_draw(const nt_mesh_run_t *runs, uint32_t run_count);
 uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
 /* Live entries across the whole vertex-input versions table. */
 uint32_t nt_mesh_renderer_test_vertex_input_count(void);
-uint32_t nt_mesh_renderer_test_draw_call_count(void);
-uint32_t nt_mesh_renderer_test_instance_total(void);
 bool nt_mesh_renderer_test_initialized(void);
 #endif
 // #endregion

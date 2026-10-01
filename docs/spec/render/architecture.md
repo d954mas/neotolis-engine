@@ -360,22 +360,24 @@ items; a smaller `max_runs` that runs out asserts.
 
 A run holds everything its draw needs: pipeline, vertex input, material, an
 optional supplied texture with its material slot (the skinned deformation
-texture), the arena offset, the instance count, and the mesh's index and
-vertex counts. `draw(runs, run_count)` executes runs in order through one
-executor shared by both renderers and binds only what changed. It never merges
-or reorders runs and reads no entity component. Consequences:
+texture), the arena offset, the instance count, the mesh's index and vertex
+counts, and the color mode with its attribute location. `draw(runs, run_count)`
+executes runs in order through one executor shared by both renderers and binds
+only what changed. It never merges or reorders runs and reads no entity
+component. Consequences:
 
 - Batching happens at prepare, so the game's item order decides what merges.
 - One list draws in any number of passes (shadow cascades) from one upload.
 - Entity bindings may change after prepare, so one entity can enter several
   lists with different materials (multipass) before the single upload.
 - Runs are frame-scoped values without a stamp: valid until the next
-  `nt_frame_arena_begin_frame` or GPU restore. The material, its textures and
-  the mesh stay live until the last draw; material params and texture
-  publications are read at draw.
+  `nt_frame_arena_begin_frame` or GPU restore. Skinned runs embed deformation
+  bindings, so they also expire at the next `nt_skeletal_gpu_begin_frame`.
+- The material, its program and textures, and the mesh stay live until the
+  last draw: replacing and destroying the program also destroys the pipeline a
+  run holds. Material params and texture publications are read at draw.
 
-Runs of one renderer may be copied, filtered or concatenated, never built by
-hand, and are drawn by the renderer that prepared them.
+Runs may be copied, filtered or concatenated, never built by hand.
 
 ### Frame order
 
@@ -389,7 +391,8 @@ nt_gfx_begin_frame();
 nt_skeletal_gpu_begin_frame();
 nt_frame_arena_begin_frame();
 
-/* Record: CPU only. Palettes before the skinned prepare that packs their bindings. */
+/* Record: no buffer writes (a cache miss creates a pipeline or vertex input).
+ * Palettes before the skinned prepare that packs their bindings. */
 for (uint32_t i = 0; i < character_count; i++) {
     nt_skeletal_mat34_t *palette = nt_skeletal_gpu_reserve(palette_count, nt_skin_comp_handle(characters[i]));
     nt_skin_palette_build(skin, model[i], joint_count, palette, palette_count);

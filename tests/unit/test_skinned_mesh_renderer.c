@@ -216,6 +216,21 @@ static nt_render_item_t make_item(nt_entity_t entity, nt_material_t material, nt
 
 #define TEST_MAX_RUNS 16
 static nt_mesh_run_t s_runs[TEST_MAX_RUNS];
+static uint32_t s_draw_mark; /* fake draw trace length when the last draw began */
+
+/* Counts come from the backend trace, so a run the executor skips is not counted. */
+static uint32_t drawn_calls(void) {
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
+    return nt_gfx_fake_draw_trace_count() - s_draw_mark;
+}
+
+static uint32_t drawn_instances(void) {
+    uint32_t total = 0;
+    for (uint32_t i = s_draw_mark; i < nt_gfx_fake_draw_trace_count(); i++) {
+        total += nt_gfx_fake_draw_trace_at(i).instance_count;
+    }
+    return total;
+}
 
 /* One gfx frame of the prepared path, ending inside a fresh pass the tests draw in. */
 /* The arena uploads whole aligned reserves. */
@@ -236,6 +251,7 @@ static void skinned_draw_list(const nt_render_item_t *items, uint32_t count) {
     begin_arena_frame();
     const uint32_t run_count = nt_skinned_mesh_renderer_prepare(items, count, s_runs, TEST_MAX_RUNS);
     upload_and_begin_pass();
+    s_draw_mark = nt_gfx_fake_draw_trace_count();
     nt_skinned_mesh_renderer_draw(s_runs, run_count);
 }
 
@@ -243,6 +259,7 @@ static void mesh_draw_list(const nt_render_item_t *items, uint32_t count) {
     begin_arena_frame();
     const uint32_t run_count = nt_mesh_renderer_prepare(items, count, s_runs, TEST_MAX_RUNS);
     upload_and_begin_pass();
+    s_draw_mark = nt_gfx_fake_draw_trace_count();
     nt_mesh_renderer_draw(s_runs, run_count);
 }
 
@@ -276,6 +293,7 @@ void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = 4096}));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
+    s_draw_mark = 0;
 }
 
 void tearDown(void) {
@@ -310,8 +328,8 @@ void test_one_compatible_item_draws_with_supplied_deformation_texture(void) {
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_instance_total());
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_instances());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture), nt_gfx_fake_bound_texture_at(0));
 }
@@ -564,7 +582,7 @@ void test_mixed_color_modes_pack_canonical_strides_and_offsets(void) {
 
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
     TEST_ASSERT_EQUAL_UINT32(arena_bytes(60U + 64U + 76U), nt_gfx_fake_last_update_buffer_size());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_skinned_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_update_buffer_offset() + 60U + 64U, nt_gfx_fake_last_instance_offset());
     uint16_t origin;
     memcpy(&origin, bytes + 48, sizeof(origin));
@@ -659,7 +677,7 @@ void test_skinned_none_color_allows_mesh_attribute_at_inactive_color_location(vo
 
     skinned_draw_list(&item, 1);
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 }
 
 void test_static_none_color_allows_mesh_attribute_at_inactive_color_location(void) {
@@ -678,7 +696,7 @@ void test_static_none_color_allows_mesh_attribute_at_inactive_color_location(voi
 
     mesh_draw_list(&item, 1);
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     nt_mesh_renderer_shutdown();
 }
 
@@ -748,7 +766,7 @@ void test_static_mesh_renderer_ignores_unmapped_skin_streams(void) {
 
     mesh_draw_list(&item, 1);
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     nt_mesh_renderer_shutdown();
 }
 
@@ -766,7 +784,7 @@ void test_unready_program_warns_once_and_rearms_after_success(void) {
     nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1);
     nt_material_set_program(material, program);
     skinned_draw_list(&item, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 
     nt_gfx_destroy_program(program);
     skinned_draw_list(&item, 1);
@@ -784,17 +802,17 @@ void test_failed_pipeline_and_vertex_input_creation_are_retryable(void) {
     nt_gfx_fake_fail_next_pipeline_create();
     skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
 
     nt_gfx_fake_fail_next_vertex_input_create();
     skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
 
     skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 }
 
 void test_restore_drops_caches_and_the_next_draw_rebuilds_them(void) {
@@ -815,7 +833,7 @@ void test_restore_drops_caches_and_the_next_draw_rebuilds_them(void) {
     skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 
     nt_skinned_mesh_renderer_shutdown();
     nt_skinned_mesh_renderer_restore_gpu();
@@ -832,12 +850,12 @@ void test_prepared_lists_draw_their_own_range_from_one_upload(void) {
     nt_render_item_t first[1] = {make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture}), material, mesh)};
     nt_render_item_t second[1] = {make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture, .x0 = 3}), material, mesh)};
 
+    const uint32_t updates = nt_gfx_fake_update_buffer_count(); /* prepare writes no buffer */
     begin_arena_frame();
     nt_mesh_run_t a[1];
     nt_mesh_run_t b[1];
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(first, 1, a, 1));
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(second, 1, b, 1));
-    const uint32_t updates = nt_gfx_fake_update_buffer_count();
     upload_and_begin_pass();
     TEST_ASSERT_EQUAL_UINT32(0, a[0].offset);
     TEST_ASSERT_EQUAL_UINT32(64, b[0].offset); /* 60 bytes rounded up to NT_FRAME_ARENA_ALIGN */
@@ -856,6 +874,49 @@ void test_prepared_lists_draw_their_own_range_from_one_upload(void) {
         TEST_ASSERT_EQUAL_UINT32(a[0].offset, nt_gfx_fake_last_instance_offset());
     }
     TEST_ASSERT_EQUAL_UINT32(updates + 1, nt_gfx_fake_update_buffer_count());
+}
+
+/* A run keeps the deformation texture its prepare saw, even after the entity is rebound. */
+void test_runs_keep_the_deformation_texture_resolved_at_prepare(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_texture_t texture_a = make_deformation_texture();
+    nt_texture_t texture_b = make_deformation_texture();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture_a});
+    nt_render_item_t item = make_item(entity, material, mesh);
+
+    begin_arena_frame();
+    nt_mesh_run_t first[1];
+    nt_mesh_run_t second[1];
+    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(&item, 1, first, 1));
+    nt_skin_comp_handle(entity)->texture = texture_b;
+    TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(&item, 1, second, 1));
+    upload_and_begin_pass();
+
+    nt_gfx_fake_reset();
+    nt_skinned_mesh_renderer_draw(first, 1);
+    nt_skinned_mesh_renderer_draw(second, 1);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_a), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_b), nt_gfx_fake_bound_texture_at(1));
+}
+
+void test_prepare_asserts_when_runs_run_out_and_empty_lists_reserve_nothing(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_render_item_t items[2] = {
+        make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = make_deformation_texture()}), material, mesh),
+        make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = make_deformation_texture()}), material, mesh),
+    };
+
+    begin_arena_frame();
+    nt_mesh_run_t runs[1];
+    TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_prepare(NULL, 0, runs, 1));
+    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_prepare(items, 2, runs, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "runs exhausted"));
+    /* Nothing reserved before the assert: an empty run list draws without an upload. */
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_skinned_mesh_renderer_draw(runs, 0);
 }
 
 int main(void) {
@@ -884,5 +945,7 @@ int main(void) {
     RUN_TEST(test_failed_pipeline_and_vertex_input_creation_are_retryable);
     RUN_TEST(test_restore_drops_caches_and_the_next_draw_rebuilds_them);
     RUN_TEST(test_prepared_lists_draw_their_own_range_from_one_upload);
+    RUN_TEST(test_runs_keep_the_deformation_texture_resolved_at_prepare);
+    RUN_TEST(test_prepare_asserts_when_runs_run_out_and_empty_lists_reserve_nothing);
     return UNITY_END();
 }

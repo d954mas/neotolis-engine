@@ -2600,7 +2600,9 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
     }
-    /* The active stage prepares its runs and uploads them once before drawing them. */
+    /* Each stage records and uploads inside the stage pass, before its first arena
+     * draw: legal, since nothing earlier reads the arena. A game with several passes
+     * records before the first pass (render architecture, Frame order). */
     nt_frame_arena_begin_frame();
 #ifdef NT_DEVAPI_ENABLED
     nt_devapi_update();

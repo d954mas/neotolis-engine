@@ -28,10 +28,6 @@ static struct {
     nt_renderer_mesh_vi_cache_t vi_cache;
     uint32_t skin_sampler_hash;
     bool warned_program_not_ready;
-#ifdef NT_TEST_ACCESS
-    uint32_t frame_draw_calls;
-    uint32_t frame_instance_total;
-#endif
     bool initialized;
 } s_skinned;
 
@@ -114,10 +110,6 @@ static void reset_gpu_caches(void) {
     }
     s_skinned.pipeline_count = 0;
     nt_renderer_mesh_vi_cache_reset(&s_skinned.vi_cache);
-#ifdef NT_TEST_ACCESS
-    s_skinned.frame_draw_calls = 0;
-    s_skinned.frame_instance_total = 0;
-#endif
     s_skinned.warned_program_not_ready = false;
 }
 
@@ -235,6 +227,7 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
             .vertex_count = mesh->vertex_count,
             .supplied_slot = supplied_slot,
             .color_mode = (uint8_t)material->color_mode,
+            .color_location = 13,
         };
         size += instance_count * s_instance_layouts[material->color_mode].stride;
     }
@@ -252,20 +245,23 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
         nt_mesh_run_t *run = &runs[r];
         const uint32_t first = run->offset;
         run->offset = offset + (uint32_t)(dst - base);
-        for (uint32_t i = first; i < first + run->instance_count; i++) {
+        const uint32_t end = first + run->instance_count;
+        const uint8_t color_mode = run->color_mode;
+        const uint16_t stride = s_instance_layouts[color_mode].stride;
+        for (uint32_t i = first; i < end; i++) {
             nt_entity_t entity = {.id = items[i].entity};
             const nt_deformation_binding_t binding = *nt_skin_comp_handle(entity);
             NT_ASSERT(binding.texture.id != 0 && "skinned draw requires a deformation texture");
             nt_renderer_pack_world((float *)dst, nt_transform_comp_world_matrix(entity));
             pack_skin_binding(dst + 48, &binding);
-            if (run->color_mode == NT_COLOR_MODE_RGBA8) {
+            if (color_mode == NT_COLOR_MODE_RGBA8) {
                 const uint16_t drawable_index = drawable_view.sparse_indices[nt_entity_index(entity)];
                 NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no drawable component");
                 memcpy(dst + 60, &drawable_view.colors_packed[drawable_index], sizeof(uint32_t));
-            } else if (run->color_mode == NT_COLOR_MODE_FLOAT4) {
+            } else if (color_mode == NT_COLOR_MODE_FLOAT4) {
                 memcpy(dst + 60, nt_drawable_comp_color(entity), 16);
             }
-            dst += s_instance_layouts[run->color_mode].stride;
+            dst += stride;
         }
     }
     // #endregion
@@ -275,20 +271,11 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
 void nt_skinned_mesh_renderer_draw(const nt_mesh_run_t *runs, uint32_t run_count) {
     NT_ASSERT(s_skinned.initialized);
     NT_ASSERT(run_count == 0 || runs != NULL);
-#ifdef NT_TEST_ACCESS
-    s_skinned.frame_draw_calls = run_count;
-    s_skinned.frame_instance_total = 0;
-    for (uint32_t r = 0; r < run_count; r++) {
-        s_skinned.frame_instance_total += runs[r].instance_count;
-    }
-#endif
-    nt_mesh_runs_draw(runs, run_count, 13);
+    nt_mesh_runs_draw(runs, run_count);
 }
 
 #ifdef NT_TEST_ACCESS
 uint32_t nt_skinned_mesh_renderer_test_pipeline_cache_count(void) { return s_skinned.pipeline_count; }
 uint32_t nt_skinned_mesh_renderer_test_vertex_input_count(void) { return nt_renderer_mesh_vi_cache_live_count(&s_skinned.vi_cache); }
-uint32_t nt_skinned_mesh_renderer_test_draw_call_count(void) { return s_skinned.frame_draw_calls; }
-uint32_t nt_skinned_mesh_renderer_test_instance_total(void) { return s_skinned.frame_instance_total; }
 bool nt_skinned_mesh_renderer_test_initialized(void) { return s_skinned.initialized; }
 #endif

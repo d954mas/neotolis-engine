@@ -51,8 +51,6 @@ void nt_skinned_mesh_renderer_draw(const nt_mesh_run_t *runs, uint32_t run_count
 #ifdef NT_TEST_ACCESS
 uint32_t nt_skinned_mesh_renderer_test_pipeline_cache_count(void);
 uint32_t nt_skinned_mesh_renderer_test_vertex_input_count(void);
-uint32_t nt_skinned_mesh_renderer_test_draw_call_count(void);
-uint32_t nt_skinned_mesh_renderer_test_instance_total(void);
 bool nt_skinned_mesh_renderer_test_initialized(void);
 #endif
 // #endregion

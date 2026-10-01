@@ -7,10 +7,9 @@
 
 /* Internal to the mesh renderers -- not a public header, not installed. */
 
-/* Executes prepared runs in order: binds only what changed, never merges or reorders.
- * color_location receives white for NT_COLOR_MODE_NONE runs. */
+/* Executes prepared runs in order: binds only what changed, never merges or reorders. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static inline void nt_mesh_runs_draw(const nt_mesh_run_t *runs, uint32_t run_count, uint8_t color_location) {
+static inline void nt_mesh_runs_draw(const nt_mesh_run_t *runs, uint32_t run_count) {
     if (run_count == 0) {
         return;
     }
@@ -23,8 +22,8 @@ static inline void nt_mesh_runs_draw(const nt_mesh_run_t *runs, uint32_t run_cou
     for (uint32_t r = 0; r < run_count; r++) {
         const nt_mesh_run_t *run = &runs[r];
         nt_renderer_bind_pipeline(&bound, run->pipeline);
-        const bool rebind_textures = run->material.id != textured_material || run->pipeline.id != textured_pipeline || run->supplied_texture.id != textured_supplied;
-        if (rebind_textures || run->material.id != bound.material) {
+        /* A pipeline change also clears bound.material, so this covers the uniform replay rule. */
+        if (run->material.id != textured_material || run->pipeline.id != textured_pipeline || run->supplied_texture.id != textured_supplied) {
             const nt_material_info_t *mat_info = nt_material_get_info(run->material);
             NT_ASSERT(mat_info != NULL && "mesh run: material destroyed after prepare");
             nt_renderer_material_view_t view = nt_renderer_material_view(mat_info);
@@ -36,17 +35,15 @@ static inline void nt_mesh_runs_draw(const nt_mesh_run_t *runs, uint32_t run_cou
                 view.resolved_tex[run->supplied_slot] = run->supplied_texture.id;
             }
             nt_renderer_apply_material_uniforms(&bound, run->material.id, &view);
-            if (rebind_textures) {
-                nt_renderer_apply_texture_slots(&view);
-                textured_material = run->material.id;
-                textured_pipeline = run->pipeline.id;
-                textured_supplied = run->supplied_texture.id;
-            }
+            nt_renderer_apply_texture_slots(&view);
+            textured_material = run->material.id;
+            textured_pipeline = run->pipeline.id;
+            textured_supplied = run->supplied_texture.id;
         }
         nt_renderer_bind_vertex_input(&bound, run->vertex_input);
         if (run->color_mode == NT_COLOR_MODE_NONE) {
             /* Native GL leaves a generic value unspecified after drawing with an enabled array there. */
-            nt_gfx_set_vertex_attrib_default(color_location, 1.0F, 1.0F, 1.0F, 1.0F);
+            nt_gfx_set_vertex_attrib_default(run->color_location, 1.0F, 1.0F, 1.0F, 1.0F);
         }
         nt_gfx_bind_instance_buffer(instances, run->offset);
         if (run->index_count > 0) {
