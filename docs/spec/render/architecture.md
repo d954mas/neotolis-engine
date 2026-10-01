@@ -291,8 +291,8 @@ the reference phone with `examples/bench_stream`:
 Policy for engine renderers: data known before drawing is **prepared** — packed
 for the whole frame, uploaded once before the first draw that reads the storage,
 and drawn by range in any pass, any number of times. Immediate-mode batches that
-flush between game passes (sprite, text, shape) choose a per-flush policy by
-measurement. The instance rings named above predate this rule; prepared data
+flush between game passes (sprite, text, debug shape, UI shape) choose a
+per-flush policy by measurement; UI shapes orphan with data, like sprite and text. The instance rings named above predate this rule; prepared data
 lives in the frame arena (see Prepared dynamic data).
 
 A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
