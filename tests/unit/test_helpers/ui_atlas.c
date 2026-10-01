@@ -62,6 +62,7 @@
 static uint32_t s_helper_counter;
 
 static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
+static float s_next_ipu = 1.0F;
 
 static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
     memset(out_blob, 0, UI_ATLAS_BLOB_SIZE);
@@ -77,7 +78,7 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
         .total_vertex_count = UI_ATLAS_VERTEX_COUNT,
         .index_offset = UI_ATLAS_INDEX_OFFSET,
         .total_index_count = UI_ATLAS_INDEX_COUNT,
-        .inverse_pixels_per_unit = 1.0F,
+        .inverse_pixels_per_unit = s_next_ipu,
     };
     memcpy(out_blob + 0, &hdr, sizeof hdr);
 
@@ -299,6 +300,13 @@ minimal_ui_atlas_t minimal_ui_atlas_create(void) {
     out.white_region_idx = 0;
     out.polygon_region_idx = 1;
     out.packed_region_idx = 2;
+    return out;
+}
+
+minimal_ui_atlas_t minimal_ui_atlas_create_ipu(float inverse_pixels_per_unit) {
+    s_next_ipu = inverse_pixels_per_unit;
+    const minimal_ui_atlas_t out = minimal_ui_atlas_create();
+    s_next_ipu = 1.0F;
     return out;
 }
 

@@ -1631,83 +1631,6 @@ static void shape_normalize_radii(const nt_ui_shape_radii_t *r, float width, flo
     }
 }
 
-typedef struct {
-    double cx;
-    double cy;
-    double rx;
-    double ry;
-    double sx;
-    double sy;
-} shape_inner_arc_t;
-
-static void shape_inner_arcs(double width, double height, const float radii[4], const float sides[4], shape_inner_arc_t arcs[8]) {
-    const double sx[4] = {-1.0, 1.0, 1.0, -1.0};
-    const double sy[4] = {-1.0, -1.0, 1.0, 1.0};
-    for (int set = 0; set < 2; ++set) {
-        const double left = set != 0 ? (double)sides[0] : 0.0;
-        const double top = set != 0 ? (double)sides[1] : 0.0;
-        const double right = set != 0 ? (double)sides[2] : 0.0;
-        const double bottom = set != 0 ? (double)sides[3] : 0.0;
-        const double widths_x[4] = {left, right, right, left};
-        const double widths_y[4] = {top, top, bottom, bottom};
-        const double x[4] = {left, width - right, width - right, left};
-        const double y[4] = {top, top, height - bottom, height - bottom};
-        for (int corner = 0; corner < 4; ++corner) {
-            const double rx = fmax((double)radii[corner] - widths_x[corner], 0.0);
-            const double ry = fmax((double)radii[corner] - widths_y[corner], 0.0);
-            arcs[(set * 4) + corner] = (shape_inner_arc_t){x[corner] - (sx[corner] * rx), y[corner] - (sy[corner] * ry), rx, ry, sx[corner], sy[corner]};
-        }
-    }
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool shape_inner_nonempty(float width, float height, const float radii[4], const float sides[4]) {
-    double left = (double)sides[0];
-    double right = (double)width - (double)sides[2];
-    if (right <= left || (double)height - (double)sides[3] <= (double)sides[1]) {
-        return false;
-    }
-    shape_inner_arc_t arcs[8];
-    shape_inner_arcs((double)width, (double)height, radii, sides, arcs);
-    /* Each vertical slice is an interval; its width is concave over x. */
-    for (int iteration = 0; iteration < 64; ++iteration) {
-        const double x = left + ((right - left) * 0.5);
-        double top = (double)sides[1];
-        double bottom = (double)height - (double)sides[3];
-        double top_slope = 0.0;
-        double bottom_slope = 0.0;
-        for (int corner = 0; corner < 8; ++corner) {
-            const shape_inner_arc_t *arc = &arcs[corner];
-            if (arc->rx <= 0.0 || arc->ry <= 0.0 || arc->sx * (x - arc->cx) <= 0.0) {
-                continue;
-            }
-            const double u = fmax(-1.0, fmin(1.0, (x - arc->cx) / arc->rx));
-            const double root = sqrt(fmax(0.0, 1.0 - (u * u)));
-            const double edge = arc->cy + (arc->sy * arc->ry * root);
-            const double slope = root > 0.0 ? (-arc->sy * arc->ry * u) / (arc->rx * root) : copysign((double)INFINITY, -arc->sy * u);
-            if (arc->sy < 0.0 && edge > top) {
-                top = edge;
-                top_slope = slope;
-            } else if (arc->sy > 0.0 && edge < bottom) {
-                bottom = edge;
-                bottom_slope = slope;
-            }
-        }
-        if (bottom > top) {
-            return true;
-        }
-        if (x == left || x == right) {
-            return false;
-        }
-        if (bottom_slope > top_slope) {
-            left = x;
-        } else {
-            right = x;
-        }
-    }
-    return false;
-}
-
 /* The GL viewport nt_ui_walk binds, in physical pixels. */
 static void ui_physical_viewport(const nt_ui_target_t *target, int out[4]) {
     if (target->fb_size[0] > 0.0F) {
@@ -1890,16 +1813,12 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
 
     nt_ui_shape_instance_t instance = {0};
     memcpy(instance.user, style->user, sizeof instance.user);
-    uint8_t interior_flags = 0U;
     if (style->kind == NT_UI_SHAPE_BOX) {
         shape_normalize_radii(&style->box, bb.width, bb.height, instance.geometry);
         instance.widths[0] = bw->left;
         instance.widths[1] = bw->top;
         instance.widths[2] = bw->right;
         instance.widths[3] = bw->bottom;
-        if (body_visible && has_border && !shape_inner_nonempty(bb.width, bb.height, instance.geometry, instance.widths)) {
-            interior_flags = NT_UI_SHAPE_FLAG_EMPTY_INTERIOR;
-        }
     } else {
         instance.geometry[0] = style->radial.angle_start;
         instance.geometry[1] = style->radial.angle_end;
@@ -1941,7 +1860,6 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
     _Static_assert(NT_UI_SHAPE_BOX == NT_UI_SHAPE_MODE_BOX && NT_UI_SHAPE_RADIAL == NT_UI_SHAPE_MODE_RADIAL, "shape kind doubles as the shader mode");
     instance.control[1] = (uint8_t)style->kind;
     instance.control[2] = (uint8_t)style->paint.gradient;
-    instance.control[3] = interior_flags;
     emit_shape_instance(bb, guard, world, &instance);
 }
 // #endregion

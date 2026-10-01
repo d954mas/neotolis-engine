@@ -21,6 +21,9 @@ extern "C" {
  * is well-defined (an enum type would trip EnumCastOutOfRange). */
 typedef uint32_t ui_walker_fx_bind_t;
 
+/* Shape renderer staging capacity; overflow tests and the renderer's 256-entry test log rely on it. */
+#define UI_WALKER_FX_SHAPE_INSTANCES 256U
+
 #define UI_WALKER_FX_BIND_NONE ((ui_walker_fx_bind_t)0U)
 #define UI_WALKER_FX_BIND_ATLAS ((ui_walker_fx_bind_t)(1U << 0))
 #define UI_WALKER_FX_BIND_SPRITE_MATERIAL ((ui_walker_fx_bind_t)(1U << 1))

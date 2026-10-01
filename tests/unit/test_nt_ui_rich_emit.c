@@ -20,6 +20,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
@@ -537,11 +538,22 @@ static void assert_inline_image_zero_tail(uint16_t tail_bytes) {
     }
 }
 
-/* A style image_material wins over the ctx base. */
+/* A style image_material wins over the ctx base: the image draws with the style's own program. */
 static void test_inline_image_uses_style_material(void) {
     nt_ui_set_sprite_material(s_fx.ctx, make_rich_custom_material(16U));
-    frame_text_image_text(make_rich_custom_material(32U), NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
+    const nt_material_t style = make_rich_custom_material(32U);
+    const nt_program_t style_program = nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1);
+    nt_gfx_fake_set_samplers(NULL, 0);
+    nt_material_set_program(style, style_program);
+    nt_gfx_fake_draw_trace_reset(true);
+    frame_text_image_text(style, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
+    nt_sprite_renderer_flush();
     assert_inline_image_zero_tail(32U);
+    uint32_t style_draws = 0;
+    for (uint32_t i = 0; i < nt_gfx_fake_draw_trace_count(); ++i) {
+        style_draws += nt_gfx_fake_draw_trace_at(i).program.id == style_program.id ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1U, style_draws);
 }
 
 /* The default resolves per walk: a base swapped between two walks of one frame is the one drawn. */

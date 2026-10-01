@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { uiGpuLayout, uiGpuOutput } from './ui_gpu_layouts';
 
 const shaderDir = join(__dirname, '..', '..', 'assets', 'shaders');
 
@@ -25,8 +25,8 @@ test('shape shaders render synthetic and CPU-emitted instances', async ({ page }
     pixelChecks?: Array<{ x: number; y: number; rgba: number[]; tolerance: number }>;
     instances: number[][];
   };
-  const executable = join(__dirname, '..', '..', 'build', 'tests', 'native-debug', `test_ui_shape_walk${process.platform === 'win32' ? '.exe' : ''}`);
-  const output = execFileSync(executable, ['--gpu-fixtures'], { encoding: 'utf8' });
+  const output = uiGpuOutput();
+  const layout = uiGpuLayout(output, 'ui_shape_instance');
   const marker = 'UI_SHAPE_GPU_CASE ';
   const fixtures = output.split(/\r?\n/).filter(line => line.startsWith(marker)).map(line => JSON.parse(line.slice(marker.length)) as GpuFixture);
   expect(fixtures.map(fixture => fixture.name)).toEqual(expect.arrayContaining([
@@ -38,11 +38,11 @@ test('shape shaders render synthetic and CPU-emitted instances', async ({ page }
   ]));
   for (const fixture of fixtures) {
     expect(fixture.schemaVersion).toBe(3);
-    for (const instance of fixture.instances) expect(instance, fixture.name).toHaveLength(112);
+    for (const instance of fixture.instances) expect(instance, fixture.name).toHaveLength(layout.stride);
     if (fixture.depthTest) expect(fixture.pixelChecks?.length, `${fixture.name} depth oracle`).toBeGreaterThan(0);
   }
   await page.goto('about:blank');
-  const result = await page.evaluate(({ vertex, fragments, fixtures }) => {
+  const result = await page.evaluate(({ vertex, fragments, fixtures, layout }) => {
     const canvas = document.createElement('canvas');
     canvas.width = 96;
     canvas.height = 96;
@@ -77,8 +77,10 @@ test('shape shaders render synthetic and CPU-emitted instances', async ({ page }
     gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, uniformBuffer);
     for (const program of Object.values(programs)) gl.uniformBlockBinding(program, gl.getUniformBlockIndex(program, 'Globals'), 0);
 
-    // nt_ui_shape_instance_t: one record per instance, corners from gl_VertexID.
-    const stride = 112;
+    // nt_ui_shape_instance_t as the renderer declares it: one record per instance, corners from gl_VertexID.
+    const stride = layout.stride;
+    const glType = [gl.FLOAT, gl.HALF_FLOAT, gl.UNSIGNED_BYTE, gl.BYTE, gl.UNSIGNED_SHORT, gl.SHORT];
+    const at = (location: number): number => layout.attrs.find(attr => attr[0] === location)![4];
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
     // nt_ui_shape_renderer's static quad: gl_VertexID is the corner TL, TR, BR, BL.
@@ -86,12 +88,9 @@ test('shape shaders render synthetic and CPU-emitted instances', async ({ page }
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 1, 2, 0, 2, 3]), gl.STATIC_DRAW);
     const instances = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, instances);
-    for (const [location, count, type, normalized, offset] of [
-      [0, 4, gl.FLOAT, 0, 0], [1, 4, gl.FLOAT, 0, 16], [2, 4, gl.FLOAT, 0, 32], [3, 4, gl.FLOAT, 0, 48], [4, 4, gl.FLOAT, 0, 64], [5, 4, gl.FLOAT, 0, 80],
-      [6, 4, gl.UNSIGNED_BYTE, 1, 96], [7, 4, gl.UNSIGNED_BYTE, 1, 100], [8, 4, gl.UNSIGNED_BYTE, 1, 104], [9, 4, gl.UNSIGNED_BYTE, 0, 108],
-    ]) {
+    for (const [location, count, type, normalized, offset] of layout.attrs) {
       gl.enableVertexAttribArray(location);
-      gl.vertexAttribPointer(location, count, type, normalized !== 0, stride, offset);
+      gl.vertexAttribPointer(location, count, glType[type], normalized !== 0, stride, offset);
       gl.vertexAttribDivisor(location, 1);
     }
 
@@ -206,17 +205,17 @@ test('shape shaders render synthetic and CPU-emitted instances', async ({ page }
       const [centerX, centerY] = shape.center ?? [48, 48];
       const [a, b, c, d] = shape.affine ?? [1, 0, 0, 1];
       const [ox, oy] = sourcePoint(shape, centerX - width / 2, centerY + height / 2);
-      const fields = [ox / 48 - 1, oy / 48 - 1, 0, width, a / 48, b / 48, 0, height, -c / 48, -d / 48, 0, shape.mode === 3 ? shape.widths[2] : shape.padding];
-      fields.forEach((value, i) => data.setFloat32(i * 4, value, true));
+      const placement = [[ox / 48 - 1, oy / 48 - 1, 0, width], [a / 48, b / 48, 0, height], [-c / 48, -d / 48, 0, shape.mode === 3 ? shape.widths[2] : shape.padding]];
+      placement.forEach((values, location) => values.forEach((value, i) => data.setFloat32(at(location) + i * 4, value, true)));
       for (let i = 0; i < 4; i++) {
-        data.setFloat32(48 + i * 4, shape.geometry[i], true);
-        data.setFloat32(64 + i * 4, shape.widths[i], true);
-        data.setFloat32(80 + i * 4, shape.user?.[i] ?? 0, true);
-        data.setUint8(96 + i, shape.color[i]);
-        data.setUint8(100 + i, shape.color[i]);
+        data.setFloat32(at(3) + i * 4, shape.geometry[i], true);
+        data.setFloat32(at(4) + i * 4, shape.widths[i], true);
+        data.setFloat32(at(5) + i * 4, shape.user?.[i] ?? 0, true);
+        data.setUint8(at(6) + i, shape.color[i]);
+        data.setUint8(at(7) + i, shape.color[i]);
       }
-      [10, 210, 30, 255].forEach((value, i) => data.setUint8(104 + i, value));
-      [shape.mode === 3 ? 160 : 255, shape.mode, 0, 0].forEach((value, i) => data.setUint8(108 + i, value));
+      [10, 210, 30, 255].forEach((value, i) => data.setUint8(at(8) + i, value));
+      [shape.mode === 3 ? 160 : 255, shape.mode, 0, 0].forEach((value, i) => data.setUint8(at(9) + i, value));
       return new Uint8Array(data.buffer);
     }
 
@@ -328,6 +327,7 @@ test('shape shaders render synthetic and CPU-emitted instances', async ({ page }
       checker: shaderSource('../../examples/ui_showcase/raw/shaders/ui_shape_checker.frag'),
     },
     fixtures,
+    layout,
   });
 
   expect(result.error).toBe(0);

@@ -15,8 +15,6 @@
 #define NT_UI_SHAPE_MODE_BOX 1U
 #define NT_UI_SHAPE_MODE_RADIAL 2U
 #define NT_UI_SHAPE_MODE_SHADOW 3U
-/* control[3] bit: the border consumes the whole BOX interior. */
-#define NT_UI_SHAPE_FLAG_EMPTY_INTERIOR 1U
 
 /* One analytic UI quad. The vertex shader places local point p at
  * origin + p.x * axis_x + p.y * axis_y for p in [-pad, size + pad] layout pixels.

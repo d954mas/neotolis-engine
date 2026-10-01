@@ -37,7 +37,8 @@ zero width; all four zero widths contribute exactly zero border coverage.
 The inner contour combines inset straight edges with elliptical corner arcs:
 each ellipse axis is the outer radius minus its adjacent side width, clamped
 to zero. Large widths can leave partial arcs, a narrow lens, or no interior.
-CPU preparation marks an empty interior so the border covers the full outer
+The vertex shader bounds the interior by its narrowest strip across the inset
+contour; an empty strip leaves no fill, so the border covers the full outer
 shape. Ellipse evaluation approximates distance near the contour, and
 derivative AA estimates coverage rather than integrating the exact pixel area.
 
@@ -93,7 +94,7 @@ matrix, so screen and world UI share the format.
 | 96 | 6 | UBYTE4 normalized: fill or shadow RGB, inherited opacity |
 | 100 | 7 | UBYTE4 normalized: gradient endpoint |
 | 104 | 8 | UBYTE4 normalized: border |
-| 108 | 9 | UBYTE4: fill alpha, mode (1 BOX, 2 RADIAL, 3 shadow), gradient, flags |
+| 108 | 9 | UBYTE4: fill alpha, mode (1 BOX, 2 RADIAL, 3 shadow), gradient, unused |
 
 The renderer stages instances per material command, uploads them once per flush
 and issues one instanced draw per command. Consecutive shapes with one material
@@ -124,7 +125,9 @@ camera-plane crossings. Shape shaders write no fragment depth.
 Shape declarations set the narrow vendored Clay IMAGE `nt_defer_culling`
 option, so Clay keeps their IMAGE command even when the logical box is
 offscreen. For screen-space UI, the walker culls the body and shadow separately
-by their transformed paint bounds, including the AA pad and shadow reach.
+by their transformed paint bounds, including the AA pad and shadow reach,
+against the viewport-local rectangle `[0, width] x [0, height]` that
+`nt_ui_make_screen_view_proj` maps onto the target viewport.
 Layout, child placement and hit boxes do not expand. The image payload's
 engine-owned flag `NT_UI_IMAGE_ANALYTIC_SHAPE` selects a copied shape style.
 Ordinary Clay RECTANGLE/BORDER keep their tessellated sprite path.
@@ -155,6 +158,8 @@ is invalidated by `nt_mem_scratch_reset`; the engine never frees user data.
 Repeated walks may invoke the callback again. A callback must not re-enter walk,
 change the layout tree, or reset scratch. It preserves active clipping and owns
 the GPU state it touches; the walker retains its existing flush/material barriers.
+The walker flushes every UI renderer before the callback; a callback that emits
+through more than one renderer flushes each before switching to keep its order.
 The supplied frame contains the composed world matrix, opacity, context and
 layout-space Clay command.
 

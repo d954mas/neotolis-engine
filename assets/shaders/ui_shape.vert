@@ -45,10 +45,7 @@ void main() {
     v_paint = vec2(0.0);
     v_inner_strip = vec4(0.0);
     if (mode == 1u) {
-        v_paint.x = float(uint(a_control.w) & 1u);
-        if (v_paint.x == 0.0) {
-            v_inner_strip = nt_ui_shape_inner_strip(size, a_geometry, a_widths);
-        }
+        v_inner_strip = nt_ui_shape_inner_strip(size, a_geometry, a_widths);
     } else if (mode == 3u) {
         v_paint = a_widths.xy;
     }

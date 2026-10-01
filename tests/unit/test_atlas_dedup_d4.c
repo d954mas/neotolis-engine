@@ -491,7 +491,7 @@ static void assert_uv_decode_for_images(const char *path, const char *name, uint
         seen |= (uint8_t)(1U << view.regions[r].transform);
         assert_region_samples_its_own_image(&pack, &view, r, images[r]);
     }
-    TEST_ASSERT_EQUAL_HEX8_MESSAGE(mask, seen, "all admitted D4 orientations must reach the radial UV probe");
+    TEST_ASSERT_EQUAL_HEX8_MESSAGE(mask, seen, "all admitted D4 orientations must reach the UV decode");
     pack_file_free(&pack);
 }
 
@@ -503,7 +503,7 @@ void test_mirror_alias_uv_decode_samples_its_own_source_pixel(void) {
     assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode_flip.ntpack", "dedup_f_uv_flip", NT_ATLAS_TRANSFORMS_FLIPS, k_f_mirrors, 4);
 }
 
-void test_all_d4_aliases_recover_radial_local_coordinates(void) { assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode_all.ntpack", "dedup_f_uv_all", NT_ATLAS_TRANSFORMS_ALL, k_f_all_d4, 8); }
+void test_all_d4_aliases_sample_their_own_source_pixel(void) { assert_uv_decode_for_images(TMP_DIR "/dedup_f_uv_decode_all.ntpack", "dedup_f_uv_all", NT_ATLAS_TRANSFORMS_ALL, k_f_all_d4, 8); }
 
 /* The UV write quantizes with +0.5 truncation, so the round decode is exact
  * for any page dimension up to 65535. */
@@ -1169,7 +1169,7 @@ int main(void) {
     RUN_TEST(test_fold_admission_follows_the_alias_mask);
     RUN_TEST(test_alias_uv_decode_samples_its_own_source_pixel);
     RUN_TEST(test_mirror_alias_uv_decode_samples_its_own_source_pixel);
-    RUN_TEST(test_all_d4_aliases_recover_radial_local_coordinates);
+    RUN_TEST(test_all_d4_aliases_sample_their_own_source_pixel);
     RUN_TEST(test_extruded_ring_replicates_the_shared_placement_edge);
     RUN_TEST(test_mixed_mask_run_keeps_two_roots_and_folds_onto_the_first);
     RUN_TEST(test_transposed_placement_composes_with_the_relative);

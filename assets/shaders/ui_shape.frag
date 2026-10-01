@@ -23,7 +23,7 @@ void main() {
     } else if (mode == 2u) {
         frag_color = nt_ui_shape_radial(v_local, v_layout, v_geometry, v_fill, v_endpoint);
     } else {
-        frag_color = nt_ui_shape_box(v_local, v_layout, v_geometry, v_widths, v_paint.x, v_inner_strip, v_fill, v_endpoint, v_border);
+        frag_color = nt_ui_shape_box(v_local, v_layout, v_geometry, v_widths, v_inner_strip, v_fill, v_endpoint, v_border);
     }
     if (frag_color.a <= 0.0) {
         discard;

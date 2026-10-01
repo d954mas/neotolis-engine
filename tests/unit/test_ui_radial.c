@@ -435,9 +435,61 @@ static void test_radial_image_source_uv_ignores_atlas_d4_and_explicit_flips(void
     memcpy(uvs, packed, sizeof packed);
 }
 
+/* Every vertex of a polygon hull maps to its own source point, not only the fitted triangle's. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_radial_image_polygon_region_maps_every_vertex(void) {
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material();
+    const uint32_t index = s_fx.atlas.polygon_region_idx;
+    nt_texture_region_t *region = (nt_texture_region_t *)nt_atlas_get_region(s_fx.atlas.handle, index);
+    TEST_ASSERT_EQUAL_UINT8(6, region->vertex_count);
+    region->source_w = 40;
+    region->source_h = 30;
+    float(*positions)[2] = (float(*)[2])nt_atlas_get_region_positions(s_fx.atlas.handle, index);
+    nt_atlas_uv_t *uvs = (nt_atlas_uv_t *)nt_atlas_get_region_uvs(s_fx.atlas.handle, index);
+    const float hull[6][2] = {{4, 2}, {30, 1}, {38, 12}, {33, 28}, {9, 29}, {1, 15}};
+    for (uint32_t k = 0; k < 6U; ++k) {
+        positions[k][0] = hull[k][0];
+        positions[k][1] = hull[k][1];
+        /* Packed rotated a quarter turn into a sub-rectangle of the page. */
+        uvs[k].atlas_u = (uint16_t)(8192U + ((uint32_t)hull[k][1] * 512U));
+        uvs[k].atlas_v = (uint16_t)(4096U + ((uint32_t)hull[k][0] * 256U));
+    }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, index);
+    radial_image_walk(&ref, &style, 64.0F, 48.0F);
+    TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_renderer_test_last_emit_vertex_count());
+    for (uint32_t k = 0; k < 6U; ++k) {
+        TEST_ASSERT_TRUE(approx_source(k, hull[k][0] / 40.0F, 1.0F - (hull[k][1] / 30.0F)));
+    }
+}
+
+/* Positions carry the atlas intrinsic scale; the source map divides it back out. */
+static void test_radial_image_source_map_divides_atlas_scale(void) {
+    minimal_ui_atlas_t scaled = minimal_ui_atlas_create_ipu(0.5F);
+    nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
+    style.material = make_radial_image_material();
+    nt_texture_region_t *region = (nt_texture_region_t *)nt_atlas_get_region(scaled.handle, scaled.packed_region_idx);
+    region->source_w = 20;
+    region->source_h = 16;
+    float(*positions)[2] = (float(*)[2])nt_atlas_get_region_positions(scaled.handle, scaled.packed_region_idx);
+    const float source_xy[4][2] = {{3, 2}, {11, 2}, {11, 10}, {3, 10}};
+    for (uint32_t k = 0; k < 4U; ++k) {
+        positions[k][0] = source_xy[k][0] * 0.5F;
+        positions[k][1] = source_xy[k][1] * 0.5F;
+    }
+    nt_atlas_region_ref_t ref = nt_atlas_ref_idx(scaled.handle, 0, scaled.packed_region_idx);
+    radial_image_walk(&ref, &style, 64.0F, 64.0F);
+    for (uint32_t k = 0; k < 4U; ++k) {
+        TEST_ASSERT_TRUE(approx_source(k, source_xy[k][0] / 20.0F, 1.0F - (source_xy[k][1] / 16.0F)));
+    }
+    /* Texture destruction is pass-forbidden, as in the fixture teardown. */
+    nt_gfx_end_pass();
+    minimal_ui_atlas_destroy(&scaled);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 /* (c) mode stays a MATERIAL-level look (u_reveal_mode.x == mode), but the TINT is now
- * PER-WIDGET: tint_color_packed + tint_strength bake into the a_tint block (floats 4..7
- * of the 44 B custom block). Verify both: material mode intact + per-vertex tint baked. */
+ * PER-WIDGET: tint_color_packed + tint_strength bake into a_tint (`nt_ui_radial_image_tail_t.tint`). Verify both: material mode intact + per-vertex tint baked. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_radial_image_reveal_mode_plumbed(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
@@ -561,6 +613,21 @@ static void test_radial_image_fill_emit(void) {
     nt_sprite_renderer_test_last_emit_attrs(0, out, 16);
     TEST_ASSERT_TRUE(approx(out[0], start));
     TEST_ASSERT_TRUE(approx(out[1], start + (fill * sweep))); /* fill->angle */
+
+    /* Fill clamps to [0, 1]: below empties the wedge, above closes the full sweep. */
+    const float fills[2] = {-0.5F, 1.7F};
+    const float ends[2] = {start, start + sweep};
+    for (uint32_t i = 0; i < 2U; ++i) {
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {
+            const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}};
+            nt_ui_radial_image_fill(s_fx.ctx, NULL, &ref, start, fills[i], sweep, &style, &decl);
+        }
+        nt_ui_end(s_fx.ctx);
+        nt_ui_walk(s_fx.ctx, &target);
+        nt_sprite_renderer_test_last_emit_attrs(0, out, 16);
+        TEST_ASSERT_TRUE(approx(out[1], ends[i]));
+    }
 }
 
 /* Drive a radial_image nested under a parent CLAY carrying `opacity`, so the walker's accum_opacity
@@ -617,6 +684,8 @@ int main(void) {
     RUN_TEST(test_walker_material_cache_resets_on_text_barrier);
     RUN_TEST(test_radial_image_region_bakes_payload);
     RUN_TEST(test_radial_image_source_uv_ignores_atlas_d4_and_explicit_flips);
+    RUN_TEST(test_radial_image_polygon_region_maps_every_vertex);
+    RUN_TEST(test_radial_image_source_map_divides_atlas_scale);
     RUN_TEST(test_radial_image_reveal_mode_plumbed);
     RUN_TEST(test_radial_image_packed_region_uses_source_uv);
     RUN_TEST(test_radial_image_style_defaults);

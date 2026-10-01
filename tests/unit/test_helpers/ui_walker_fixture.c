@@ -77,7 +77,9 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
 
     nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
     nt_text_renderer_init();
-    (void)nt_ui_shape_renderer_init(256U);
+    const nt_result_t shape_init = nt_ui_shape_renderer_init(UI_WALKER_FX_SHAPE_INSTANCES);
+    NT_ASSERT(shape_init == NT_OK);
+    (void)shape_init;
     nt_ui_module_init();
 
     /* nt_debug_overlay is NOT init'd here -- nt_ui_walk does not depend on it.

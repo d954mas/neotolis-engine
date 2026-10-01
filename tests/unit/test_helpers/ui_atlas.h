@@ -42,6 +42,8 @@ typedef struct {
 } minimal_ui_atlas_t;
 
 minimal_ui_atlas_t minimal_ui_atlas_create(void);
+/* Same atlas with another intrinsic scale; region positions are not rescaled. */
+minimal_ui_atlas_t minimal_ui_atlas_create_ipu(float inverse_pixels_per_unit);
 void minimal_ui_atlas_destroy(minimal_ui_atlas_t *atlas);
 
 #ifdef __cplusplus

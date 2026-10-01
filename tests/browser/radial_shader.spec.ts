@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { uiGpuLayout, uiGpuOutput } from './ui_gpu_layouts';
 
 const shaderDir = join(__dirname, '..', '..', 'assets', 'shaders');
 
@@ -12,8 +13,9 @@ function shaderSource(name: string): string {
 }
 
 test('radial image uses source coordinates through atlas D4 and explicit flips', async ({ page }) => {
+  const layout = uiGpuLayout(uiGpuOutput(), 'radial_image_vertex');
   await page.goto('about:blank');
-  const result = await page.evaluate(({ vertex, fragment }) => {
+  const result = await page.evaluate(({ vertex, fragment, layout }) => {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 64;
     const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true });
@@ -56,14 +58,14 @@ test('radial image uses source coordinates through atlas D4 and explicit flips',
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indices);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 1, 2, 0, 2, 3]), gl.STATIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, vertices);
-    // Sprite prefix + nt_ui_radial_image_tail_t.
-    const stride = 76;
-    for (const [location, count, type, normalized, offset] of [
-      [0, 3, gl.FLOAT, 0, 0], [2, 4, gl.UNSIGNED_BYTE, 1, 16], [3, 2, gl.UNSIGNED_SHORT, 1, 12],
-      [4, 4, gl.FLOAT, 0, 20], [5, 4, gl.FLOAT, 0, 36], [6, 3, gl.FLOAT, 0, 52], [7, 3, gl.FLOAT, 0, 64],
-    ]) {
+    // NT_UI_RADIAL_IMAGE_VERTEX_LAYOUT: sprite prefix + nt_ui_radial_image_tail_t.
+    const stride = layout.stride;
+    const glType = [gl.FLOAT, gl.HALF_FLOAT, gl.UNSIGNED_BYTE, gl.BYTE, gl.UNSIGNED_SHORT, gl.SHORT];
+    const at = (location: number): number => layout.attrs.find(attr => attr[0] === location)![4];
+    const [POSITION, COLOR, TEXCOORD, RADIAL, TINT, SOURCE_U, SOURCE_V] = [at(0), at(2), at(3), at(4), at(5), at(6), at(7)];
+    for (const [location, count, type, normalized, offset] of layout.attrs) {
       gl.enableVertexAttribArray(location);
-      gl.vertexAttribPointer(location, count, type, normalized !== 0, stride, offset);
+      gl.vertexAttribPointer(location, count, glType[type], normalized !== 0, stride, offset);
     }
 
     // The walker's atlas-UV -> source map, solved from three corners like radial_image_tail.
@@ -77,10 +79,10 @@ test('radial image uses source coordinates through atlas D4 and explicit flips',
       });
     }
     function writeTail(data: DataView, base: number, radial: number[], map: number[][]): void {
-      radial.forEach((value, c) => data.setFloat32(base + 20 + c * 4, value, true));
-      [1, 1, 1, 0].forEach((value, c) => data.setFloat32(base + 36 + c * 4, value, true));
-      map[0].forEach((value, c) => data.setFloat32(base + 52 + c * 4, value, true));
-      map[1].forEach((value, c) => data.setFloat32(base + 64 + c * 4, value, true));
+      radial.forEach((value, c) => data.setFloat32(base + RADIAL + c * 4, value, true));
+      [1, 1, 1, 0].forEach((value, c) => data.setFloat32(base + TINT + c * 4, value, true));
+      map[0].forEach((value, c) => data.setFloat32(base + SOURCE_U + c * 4, value, true));
+      map[1].forEach((value, c) => data.setFloat32(base + SOURCE_V + c * 4, value, true));
     }
 
     const failures: string[] = [];
@@ -110,12 +112,12 @@ test('radial image uses source coordinates through atlas D4 and explicit flips',
           const base = i * stride;
           const x = (2 * sourceX - 1) * (flip & 1 ? -1 : 1);
           const y = (1 - 2 * sourceY) * (flip & 2 ? -1 : 1);
-          data.setFloat32(base, x, true);
-          data.setFloat32(base + 4, y, true);
-          data.setFloat32(base + 8, 0, true);
-          data.setUint16(base + 12, uvs[i][0], true);
-          data.setUint16(base + 14, uvs[i][1], true);
-          for (let c = 0; c < 4; c++) data.setUint8(base + 16 + c, 255);
+          data.setFloat32(base + POSITION, x, true);
+          data.setFloat32(base + POSITION + 4, y, true);
+          data.setFloat32(base + POSITION + 8, 0, true);
+          data.setUint16(base + TEXCOORD, uvs[i][0], true);
+          data.setUint16(base + TEXCOORD + 2, uvs[i][1], true);
+          for (let c = 0; c < 4; c++) data.setUint8(base + COLOR + c, 255);
           writeTail(data, base, [0, Math.PI / 2, 0, 1], map);
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, vertices);
@@ -134,7 +136,7 @@ test('radial image uses source coordinates through atlas D4 and explicit flips',
       }
     }
     const empty = new DataView(lastData!);
-    for (let i = 0; i < 4; i++) empty.setFloat32(i * stride + 24, 0, true);
+    for (let i = 0; i < 4; i++) empty.setFloat32(i * stride + RADIAL + 4, 0, true);
     gl.bufferData(gl.ARRAY_BUFFER, empty.buffer, gl.STREAM_DRAW);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
@@ -147,11 +149,11 @@ test('radial image uses source coordinates through atlas D4 and explicit flips',
     for (let i = 0; i < 4; i++) {
       const [sourceX, sourceY] = sourceCorners[i];
       const base = i * stride;
-      rectangular.setFloat32(base, 2 * sourceX - 1, true);
-      rectangular.setFloat32(base + 4, (1 - 2 * sourceY) * 0.5, true);
-      rectangular.setUint16(base + 12, Math.round(sourceX * 65535), true);
-      rectangular.setUint16(base + 14, Math.round(sourceY * 65535), true);
-      for (let c = 0; c < 4; c++) rectangular.setUint8(base + 16 + c, 255);
+      rectangular.setFloat32(base + POSITION, 2 * sourceX - 1, true);
+      rectangular.setFloat32(base + POSITION + 4, (1 - 2 * sourceY) * 0.5, true);
+      rectangular.setUint16(base + TEXCOORD, Math.round(sourceX * 65535), true);
+      rectangular.setUint16(base + TEXCOORD + 2, Math.round(sourceY * 65535), true);
+      for (let c = 0; c < 4; c++) rectangular.setUint8(base + COLOR + c, 255);
       writeTail(rectangular, base, [0, Math.PI / 4, 0, 2], [[1, 0, 0], [0, 1, 0]]);
     }
     gl.bufferData(gl.ARRAY_BUFFER, rectangular.buffer, gl.STREAM_DRAW);
@@ -160,15 +162,15 @@ test('radial image uses source coordinates through atlas D4 and explicit flips',
     if (alpha(45, 26) < 220 || alpha(38, 20) > 20) failures.push('rectangular angular sweep is not in layout-pixel space');
 
     for (let i = 0; i < 4; i++) {
-      rectangular.setFloat32(i * stride + 24, Math.PI * 2, true);
-      rectangular.setFloat32(i * stride + 28, 0.6, true);
+      rectangular.setFloat32(i * stride + RADIAL + 4, Math.PI * 2, true);
+      rectangular.setFloat32(i * stride + RADIAL + 8, 0.6, true);
     }
     gl.bufferData(gl.ARRAY_BUFFER, rectangular.buffer, gl.STREAM_DRAW);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
     if (alpha(45, 26) > 20 || alpha(60, 32) < 220) failures.push('rectangular ring does not use oval radius');
     return { failures, error: gl.getError() };
-  }, { vertex: shaderSource('sprite_radial.vert'), fragment: shaderSource('radial_image.frag') });
+  }, { vertex: shaderSource('sprite_radial.vert'), fragment: shaderSource('radial_image.frag'), layout });
 
   expect(result.error).toBe(0);
   expect(result.failures).toEqual([]);

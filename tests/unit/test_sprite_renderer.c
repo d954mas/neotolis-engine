@@ -1445,8 +1445,8 @@ void test_sprite_renderer_layout_splits_vertex_inputs_not_pipelines(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_vertex_input_cache_count());
 }
 
-/* The vertex-input key packs every attr_map location: one location step on the
- * same program and state is a second vertex input, still one pipeline. */
+/* The vertex-input key hashes the full layout: one location step on the same
+ * program and state is a second vertex input, still one pipeline. */
 void test_sprite_renderer_location_step_splits_vertex_inputs(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
@@ -2429,7 +2429,7 @@ void test_sprite_rejects_unsupported_prefix_and_capacity(void) {
             desc.vertex_layout.attrs[3].offset = 0;
             break;
         case 3:
-            desc.vertex_layout.stride = NT_SPRITE_CUSTOM_STRIDE_MAX == 64 ? 148 : (uint16_t)(24 + NT_SPRITE_CUSTOM_STRIDE_MAX);
+            desc.vertex_layout.stride = (uint16_t)(24 + NT_SPRITE_CUSTOM_STRIDE_MAX); /* 4 bytes past the cap */
             break;
         case 4:
             desc.vertex_layout.attrs[3].offset = (uint16_t)(layout.stride - 4U); /* FLOAT4 ends past the stride */

@@ -55,7 +55,7 @@ float nt_ui_shape_inner_distance(vec2 p, vec2 size, vec4 radii, vec4 widths, flo
     return nt_ui_shape_inner_corner(distance, vec2(inner_p.x, inner_size.y - inner_p.y), max(vec2(radii.w) - widths.xw, vec2(0.0)));
 }
 
-vec4 nt_ui_shape_box(vec2 p, vec4 layout_data, vec4 radii, vec4 widths, float inner_empty, vec4 inner_strip, vec4 fill, vec4 endpoint, vec4 border_color) {
+vec4 nt_ui_shape_box(vec2 p, vec4 layout_data, vec4 radii, vec4 widths, vec4 inner_strip, vec4 fill, vec4 endpoint, vec4 border_color) {
     float distance = nt_ui_shape_box_distance(p, layout_data.xy, radii);
     float aa = max(fwidth(distance), 1e-6);
     float outer = clamp(0.5 - distance / aa, 0.0, 1.0);
@@ -64,26 +64,22 @@ vec4 nt_ui_shape_box(vec2 p, vec4 layout_data, vec4 radii, vec4 widths, float in
     vec2 last_outer = clamp(0.5 + (layout_data.xy - p) / pixel_span, 0.0, 1.0);
     vec2 outer_interval = max(first_outer + last_outer - 1.0, vec2(0.0));
     outer = min(outer, min(outer_interval.x, outer_interval.y));
-    float inner = 0.0;
-    if (inner_empty < 0.5) {
-        if (all(equal(widths, vec4(0.0)))) {
-            inner = outer;
-        } else {
-            float inner_distance = nt_ui_shape_inner_distance(p, layout_data.xy, radii, widths, distance);
-            float inner_aa = max(fwidth(inner_distance), 1e-6);
-            inner = min(outer, clamp(0.5 - inner_distance / inner_aa, 0.0, 1.0));
-            // Opposing edges share one footprint when the inset becomes subpixel.
-            vec2 first_edge = clamp(0.5 + (p - widths.xy) / pixel_span, 0.0, 1.0);
-            vec2 last_edge = clamp(0.5 + (layout_data.xy - widths.zw - p) / pixel_span, 0.0, 1.0);
-            vec2 interval = max(first_edge + last_edge - 1.0, vec2(0.0));
-            inner = min(inner, min(interval.x, interval.y));
-            if (dot(inner_strip.xy, inner_strip.xy) > 0.0) {
-                float position = dot(p, inner_strip.xy);
-                float span = max(fwidth(position), 1e-6);
-                float first = clamp(0.5 + (position - inner_strip.z) / span, 0.0, 1.0);
-                float last = clamp(0.5 + (inner_strip.w - position) / span, 0.0, 1.0);
-                inner = min(inner, max(first + last - 1.0, 0.0));
-            }
+    float inner = outer;
+    if (any(notEqual(widths, vec4(0.0)))) {
+        float inner_distance = nt_ui_shape_inner_distance(p, layout_data.xy, radii, widths, distance);
+        float inner_aa = max(fwidth(inner_distance), 1e-6);
+        inner = min(inner, clamp(0.5 - inner_distance / inner_aa, 0.0, 1.0));
+        // Opposing edges share one footprint when the inset becomes subpixel.
+        vec2 first_edge = clamp(0.5 + (p - widths.xy) / pixel_span, 0.0, 1.0);
+        vec2 last_edge = clamp(0.5 + (layout_data.xy - widths.zw - p) / pixel_span, 0.0, 1.0);
+        vec2 interval = max(first_edge + last_edge - 1.0, vec2(0.0));
+        inner = min(inner, min(interval.x, interval.y));
+        if (dot(inner_strip.xy, inner_strip.xy) > 0.0) {
+            float position = dot(p, inner_strip.xy);
+            float span = max(fwidth(position), 1e-6);
+            float first = clamp(0.5 + (position - inner_strip.z) / span, 0.0, 1.0);
+            float last = clamp(0.5 + (inner_strip.w - position) / span, 0.0, 1.0);
+            inner = min(inner, max(first + last - 1.0, 0.0));
         }
     }
     float border = max(outer - inner, 0.0);
