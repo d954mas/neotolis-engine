@@ -254,7 +254,7 @@ static void assert_sprite_layout(const nt_vertex_layout_t *layout) {
             base_mask |= 4U;
             break;
         default:
-            NT_ASSERT(attr->offset >= NT_SPRITE_BASE_STRIDE);
+            NT_ASSERT(attr->offset >= NT_SPRITE_BASE_STRIDE && attr->offset + (attr->count * nt_vertex_type_size(attr->type)) <= layout->stride);
             break;
         }
     }

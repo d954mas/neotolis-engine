@@ -140,8 +140,8 @@ vertex bytes, and uniform params remain vec4 values.
 Sprite materials explicitly declare their full vertex. The sprite producer
 requires FLOAT3 position at location 0/offset 0, normalized USHORT2 UV at
 location 3/offset 12, and normalized UBYTE4 color at location 2/offset 16. Extra
-attributes start at offset 20. Its stride must be a multiple of 4 and fit
-`20 + NT_SPRITE_CUSTOM_STRIDE_MAX`. Another prefix asserts when the sprite
+attributes start at offset 20 and end within the stride. Its stride must be a
+multiple of 4 and fit `20 + NT_SPRITE_CUSTOM_STRIDE_MAX`. Another prefix asserts when the sprite
 renderer first builds a vertex input for that layout.
 
 Every region/slice9/geometry emit accepts a complete `const void *attrs,

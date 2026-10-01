@@ -485,14 +485,19 @@ static void test_radial_image_style_defaults(void) {
     TEST_ASSERT_EQUAL_INT(3, (int)NT_UI_RADIAL_REVEAL_TINT);
 }
 
-static void test_radial_image_rejects_slice9_override(void) {
+/* Slice9 and the engine-owned payload bits; ANALYTIC_SHAPE would read the reveal as a shape style. */
+static void test_radial_image_rejects_slice9_and_engine_flags(void) {
+    static const uint8_t k_flags[] = {NT_UI_IMAGE_SLICE9_OVERRIDE, NT_UI_IMAGE_ANALYTIC_SHAPE, NT_UI_IMAGE_RADIAL_REVEAL};
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
     style.material = make_radial_image_material();
-    style.flags = NT_UI_IMAGE_SLICE9_OVERRIDE;
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     const nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800, 600, 0, &mouse, 1);
-    NT_TEST_EXPECT_ASSERT(nt_ui_radial_image(s_fx.ctx, NULL, &ref, 0.0F, 1.0F, &style, NULL));
+    for (uint32_t i = 0; i < sizeof k_flags; ++i) {
+        style.flags = (uint8_t)(k_flags[i] | NT_UI_IMAGE_ORIGIN_OVERRIDE);
+        NT_TEST_EXPECT_ASSERT(nt_ui_radial_image(s_fx.ctx, NULL, &ref, 0.0F, 1.0F, &style, NULL));
+        TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "NT_UI_IMAGE_ORIGIN_OVERRIDE"));
+    }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -615,7 +620,7 @@ int main(void) {
     RUN_TEST(test_radial_image_reveal_mode_plumbed);
     RUN_TEST(test_radial_image_packed_region_uses_source_uv);
     RUN_TEST(test_radial_image_style_defaults);
-    RUN_TEST(test_radial_image_rejects_slice9_override);
+    RUN_TEST(test_radial_image_rejects_slice9_and_engine_flags);
     RUN_TEST(test_radial_image_draws_baked_slice9_as_plain_quad);
     RUN_TEST(test_radial_image_fill_emit);
     RUN_TEST(test_radial_image_opacity_preserves_tint_strength);

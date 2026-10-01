@@ -42,7 +42,7 @@ void nt_ui_shape_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
     nt_ui_image_payload_t *payload = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
     NT_ASSERT(shape != NULL && payload != NULL);
     *shape = *style;
-    *payload = (nt_ui_image_payload_t){.atlas = ctx->atlas, .region_index = ctx->white_region, .slice9_scale = 1.0F, .flags = NT_UI_IMAGE_ANALYTIC_SHAPE, .material = style->material, .shape = shape};
+    *payload = (nt_ui_image_payload_t){.flags = NT_UI_IMAGE_ANALYTIC_SHAPE, .shape = shape};
     Clay_ElementDeclaration final = decl != NULL ? *decl : (Clay_ElementDeclaration){0};
     final.image = (Clay_ImageElementConfig){.imageData = payload, .nt_defer_culling = true};
     final.userData = (void *)data;

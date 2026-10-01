@@ -2416,7 +2416,7 @@ void test_sprite_rejects_unsupported_prefix_and_capacity(void) {
     s_atlas_res = register_test_atlas(0x518ULL);
     const nt_material_t base = create_radial_test_material("custom", 4);
     const nt_vertex_layout_t layout = nt_material_get_info(base)->vertex_layout;
-    for (uint32_t variant = 0; variant < 5; ++variant) {
+    for (uint32_t variant = 0; variant < 6; ++variant) {
         nt_material_create_desc_t desc = {.program = nt_material_get_info(base)->program, .vertex_layout = layout};
         switch (variant) {
         case 0:
@@ -2431,6 +2431,9 @@ void test_sprite_rejects_unsupported_prefix_and_capacity(void) {
         case 3:
             desc.vertex_layout.stride = NT_SPRITE_CUSTOM_STRIDE_MAX == 64 ? 148 : (uint16_t)(24 + NT_SPRITE_CUSTOM_STRIDE_MAX);
             break;
+        case 4:
+            desc.vertex_layout.attrs[3].offset = (uint16_t)(layout.stride - 4U); /* FLOAT4 ends past the stride */
+            break;
         default:
             desc.vertex_layout = (nt_vertex_layout_t){0};
             break;
@@ -2438,6 +2441,9 @@ void test_sprite_rejects_unsupported_prefix_and_capacity(void) {
         const nt_material_t mat = nt_material_create(&desc);
         TEST_ASSERT_TRUE(nt_material_valid(mat));
         NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_set_material(mat));
+        if (variant == 4U) {
+            TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "<= layout->stride"));
+        }
         const nt_entity_t entity = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
         const nt_render_item_t item = {.entity = entity.id, .batch_key = sprite_batch_key(entity, mat)};
         NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_draw_list(&item, 1));

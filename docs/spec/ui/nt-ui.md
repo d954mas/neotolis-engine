@@ -59,7 +59,7 @@ For world UI, an enabled `element_depth_bias_ndc` places the shadow half a
 hierarchy step behind its body: the body uses its hierarchy depth, the shadow
 depth minus 0.5, both from the element's original world matrix. A shadow drawn
 with a depth-writing material asserts unless the context is world UI with a
-nonzero bias, because a coincident shadow wins the depth test against its body.
+positive bias, because a coincident shadow wins the depth test against its body.
 
 RADIAL fills the ellipse inscribed in the element box, restricted to an angular
 span and an optional ring. Equal start/end angles produce an empty shape. Angular
@@ -96,8 +96,8 @@ matrix, so screen and world UI share the format.
 | 108 | 9 | UBYTE4: fill alpha, mode (1 BOX, 2 RADIAL, 3 shadow), gradient, flags |
 
 The renderer stages instances per material command, uploads them once per flush
-and issues one instanced draw per command. Consecutive shapes therefore share
-draws regardless of how many layers a skin stacks. A walker switch between the
+and issues one instanced draw per command. Consecutive shapes with one material
+therefore share a draw, however many layers a skin stacks. A walker switch between the
 shape, sprite and text renderers flushes the previous renderer, so declaration
 order survives across renderers. A shape material supplies program, blend,
 depth, params and textures; it declares no vertex layout.

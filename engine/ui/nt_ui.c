@@ -1852,8 +1852,8 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
     if (bb.width <= 0.0F || bb.height <= 0.0F || opacity <= 0.0F) {
         return;
     }
-    const float guard = screen_space ? shape_affine_guard(target, world) : shape_world_guard(ctx, target, world, bb);
-    if (guard == 0.0F) {
+    const uint8_t inherited_alpha = (uint8_t)lrintf(opacity * 255.0F);
+    if (inherited_alpha == 0U) {
         return;
     }
     const uint32_t end = style->paint.gradient == NT_UI_SHAPE_SOLID ? style->paint.color0 : style->paint.color1;
@@ -1863,9 +1863,19 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
     const bool has_border = style->kind == NT_UI_SHAPE_BOX && (bw->left > 0.0F || bw->top > 0.0F || bw->right > 0.0F || bw->bottom > 0.0F);
     bool body_visible = ((style->paint.color0 | end | (has_border ? style->paint.border_color : 0U)) >> 24U) != 0U;
     bool shadow_visible = (style->shadow.color >> 24U) != 0U;
+    float guard = 0.0F;
+    float shadow_guard = 0.0F;
     if (screen_space) {
-        body_visible = body_visible && shape_screen_visible(bb, guard, target, world);
-        shadow_visible = shadow_visible && shape_screen_visible(shadow_box, guard + reach, target, world);
+        guard = shape_affine_guard(target, world);
+        shadow_guard = guard;
+        body_visible = body_visible && guard > 0.0F && shape_screen_visible(bb, guard, target, world);
+        shadow_visible = shadow_visible && guard > 0.0F && shape_screen_visible(shadow_box, guard + reach, target, world);
+    } else {
+        /* An offset shadow can face the camera while its body is behind it. */
+        guard = body_visible ? shape_world_guard(ctx, target, world, bb) : 0.0F;
+        shadow_guard = shadow_visible ? shape_world_guard(ctx, target, world, shadow_box) : 0.0F;
+        body_visible = body_visible && guard > 0.0F;
+        shadow_visible = shadow_visible && shadow_guard > 0.0F;
     }
     if (!body_visible && !shadow_visible) {
         return;
@@ -1895,7 +1905,6 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
         instance.geometry[1] = style->radial.angle_end;
         instance.geometry[2] = style->radial.inner_radius_norm;
     }
-    const uint8_t inherited_alpha = (uint8_t)lrintf(opacity * 255.0F);
     if (shadow_visible) {
         nt_ui_shape_instance_t shadow = instance;
         shadow.widths[0] = style->shadow.spread;
@@ -1915,7 +1924,7 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
             apply_element_depth_bias(ctx, (float)ws->hierarchy_depth - 0.5F, biased_shadow);
             shadow_world = biased_shadow;
         }
-        emit_shape_instance(shadow_box, guard + reach, shadow_world, &shadow);
+        emit_shape_instance(shadow_box, shadow_guard + reach, shadow_world, &shadow);
     }
     if (!body_visible) {
         return;
@@ -1929,6 +1938,7 @@ static void emit_shape(const nt_ui_context_t *ctx, const Clay_RenderCommand *cmd
     }
     instance.color[3] = inherited_alpha;
     instance.control[0] = (uint8_t)(style->paint.color0 >> 24U);
+    _Static_assert(NT_UI_SHAPE_BOX == NT_UI_SHAPE_MODE_BOX && NT_UI_SHAPE_RADIAL == NT_UI_SHAPE_MODE_RADIAL, "shape kind doubles as the shader mode");
     instance.control[1] = (uint8_t)style->kind;
     instance.control[2] = (uint8_t)style->paint.gradient;
     instance.control[3] = interior_flags;

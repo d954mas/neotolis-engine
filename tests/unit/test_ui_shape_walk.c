@@ -276,7 +276,7 @@ static void test_transparent_container_draws_only_children(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_ui_shape_renderer_test_draw_count());
 }
 
-/* Declaration order survives the renderer switch; adjacent shapes share one draw across materials. */
+/* Declaration order survives the renderer switch; a material change opens a new draw. */
 static void test_shapes_and_sprites_keep_declaration_order(void) {
     const nt_ui_shape_style_t style = box_style();
     nt_ui_shape_style_t other = box_style();
@@ -297,6 +297,60 @@ static void test_shapes_and_sprites_keep_declaration_order(void) {
     TEST_ASSERT_EQUAL_UINT32(sprite.id, nt_gfx_fake_draw_trace_at(2).program.id);
     TEST_ASSERT_NOT_EQUAL(sprite.id, nt_gfx_fake_draw_trace_at(3).program.id);
     nt_material_destroy(other.material);
+}
+
+/* A shape pending at a scissor boundary draws under its own clip state. */
+static void test_scissor_boundaries_flush_pending_shapes(void) {
+    const nt_ui_shape_style_t style = box_style();
+    begin_frame();
+    CLAY({.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM, .sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {
+        emit_box(&style, NULL);
+        CLAY({.layout.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(100)}, .clip = {.horizontal = true, .vertical = true}}) { emit_box(&style, NULL); }
+        emit_box(&style, NULL);
+    }
+    end_and_walk();
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_at(0).scissor_enabled);
+    TEST_ASSERT_TRUE(nt_gfx_fake_draw_trace_at(1).scissor_enabled);
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_at(2).scissor_enabled);
+}
+
+static uint32_t s_draws_before_custom;
+
+static void record_custom(const nt_ui_custom_frame_t *frame, void *userdata) {
+    (void)frame;
+    (void)userdata;
+    s_draws_before_custom = nt_gfx_fake_draw_trace_count();
+}
+
+/* Text and CUSTOM split the shape run: the fixture font draws no glyphs, so the split itself shows the flush. */
+static void test_text_and_custom_keep_order_around_shapes(void) {
+    const nt_ui_shape_style_t style = box_style();
+    nt_ui_set_custom_handler(s_fx.ctx, record_custom, NULL);
+    begin_frame();
+    CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(100)}}}) {
+        emit_box(&style, NULL);
+        CLAY_TEXT(CLAY_STRING("ab"), CLAY_TEXT_CONFIG({.fontSize = 16, .textColor = {255, 255, 255, 255}}));
+        emit_box(&style, NULL);
+        CLAY({.layout.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20)}}) { nt_ui_custom(s_fx.ctx, NULL, NULL); }
+        emit_box(&style, NULL);
+    }
+    s_draws_before_custom = UINT32_MAX;
+    end_and_walk();
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_ui_shape_renderer_test_draw_count());
+    TEST_ASSERT_EQUAL_UINT32(2, s_draws_before_custom);
+}
+
+/* An inherited opacity that rounds to alpha 0 emits nothing. */
+static void test_opacity_rounding_to_zero_emits_nothing(void) {
+    const nt_ui_shape_style_t style = box_style();
+    const nt_ui_transform_t identity = nt_ui_transform_defaults();
+    begin_frame();
+    emit_box(&style, NT_UI_DATA_XFORM(0, &identity, 0.001F));
+    end_and_walk();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_ui_shape_renderer_test_emit_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
 static void test_offscreen_layout_transformed_into_view_still_draws(void) {
@@ -457,6 +511,54 @@ static void test_renderer_restore_drops_staged_instances(void) {
     nt_ui_shape_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
 }
+
+/* Each material command reads its own slice of the one uploaded buffer. */
+static void test_renderer_commands_bind_their_instance_offset(void) {
+    const nt_ui_shape_instance_t instance = {.width = 1, .height = 1, .control = {255, 1, 0, 0}};
+    const nt_material_t other = make_shape_material(false);
+    const uint32_t counts[3] = {3, 2, 1};
+    const nt_material_t materials[3] = {s_body_material, other, s_body_material};
+    for (uint32_t c = 0; c < 3U; ++c) {
+        nt_ui_shape_renderer_set_material(materials[c]);
+        for (uint32_t i = 0; i < counts[c]; ++i) {
+            nt_ui_shape_renderer_emit(&instance);
+        }
+    }
+    nt_ui_shape_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_count());
+    uint32_t first = 0;
+    for (uint32_t c = 0; c < 3U; ++c) {
+        const nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(c);
+        TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(materials[c])->program.id, draw.program.id);
+        TEST_ASSERT_EQUAL_UINT32(counts[c], draw.instance_count);
+        TEST_ASSERT_EQUAL_UINT32(first * (uint32_t)sizeof(nt_ui_shape_instance_t), draw.instance_offset);
+        first += counts[c];
+    }
+    nt_material_destroy(other);
+}
+
+/* The instance layout the GPU receives matches the table in the nt-ui spec. */
+static void test_renderer_instance_layout_matches_spec_table(void) {
+    TEST_ASSERT_EQUAL(NT_OK, nt_ui_shape_renderer_restore_gpu());
+    const nt_vertex_input_desc_t desc = nt_gfx_fake_last_vertex_input_desc();
+    TEST_ASSERT_EQUAL_UINT8(0, desc.layout.attr_count);
+    TEST_ASSERT_EQUAL_UINT16(112, desc.instance_layout.stride);
+    TEST_ASSERT_EQUAL_UINT8(10, desc.instance_layout.attr_count);
+    for (uint8_t i = 0; i < 10U; ++i) {
+        const nt_vertex_attr_t *attr = &desc.instance_layout.attrs[i];
+        TEST_ASSERT_EQUAL_UINT8(i, attr->location);
+        TEST_ASSERT_EQUAL_UINT8(4, attr->count);
+        if (i < 6U) {
+            TEST_ASSERT_EQUAL_UINT16(i * 16U, attr->offset);
+            TEST_ASSERT_EQUAL(NT_VERTEX_FLOAT, attr->type);
+            TEST_ASSERT_FALSE(attr->normalized);
+        } else {
+            TEST_ASSERT_EQUAL_UINT16(96U + ((i - 6U) * 4U), attr->offset);
+            TEST_ASSERT_EQUAL(NT_VERTEX_UINT8, attr->type);
+            TEST_ASSERT_EQUAL(i != 9U, attr->normalized); /* control carries raw bytes */
+        }
+    }
+}
 // #endregion
 
 // #region world instances
@@ -554,6 +656,17 @@ static void test_world_radial_and_shadow_only(void) {
     export_case("shadow-only-perspective", far_left, &k_screen, true, false, NULL);
 }
 
+/* A body behind the camera does not drop an offset shadow that faces it. */
+static void test_world_shadow_guard_ignores_body_behind_camera(void) {
+    const float vp[16] = {0.005F, 0, 0, 0.01F, 0, -0.02F, 0, 0, 0, 0, 0.1F, 0, -0.5F, 0.6F, 0, -2.5F};
+    nt_ui_shape_style_t style = box_style();
+    style.shadow = (nt_ui_shape_shadow_t){.color = 0x80402010U, .offset_x = 400, .spread = 2};
+    walk_world(&style, vp, NULL, &k_screen);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_ui_shape_renderer_test_emit_count());
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_SHAPE_MODE_SHADOW, emitted(0)->control[1]);
+    TEST_ASSERT_TRUE(emitted(0)->pad > 2.0F);
+}
+
 static void declare_depth_shapes(bool translucent) {
     nt_ui_shape_style_t styles[3];
     const uint32_t colors[3] = {0xFF00C800U, translucent ? 0x800000FFU : 0xFF0000FFU, 0xFFFF0000U};
@@ -631,6 +744,16 @@ static void test_depth_writing_shadow_without_bias_asserts(void) {
     emit_box(&style, NULL);
     nt_ui_end(s_fx.ctx);
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &k_screen));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "element_depth_bias_ndc > 0"));
+
+    const float vp[16] = {0.005F, 0, 0, 0, 0, -0.02F, 0, 0, 0, 0, 0.1F, 0, -0.5F, 0.6F, 0, 1};
+    setup_world_context();
+    begin_frame();
+    nt_ui_set_view_proj(s_fx.ctx, vp);
+    emit_box(&style, NULL);
+    nt_ui_end(s_fx.ctx);
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &k_screen));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "element_depth_bias_ndc > 0"));
 }
 // #endregion
 
@@ -647,6 +770,9 @@ int main(int argc, char **argv) {
     RUN_TEST(test_transparent_body_keeps_only_visible_shadow);
     RUN_TEST(test_transparent_container_draws_only_children);
     RUN_TEST(test_shapes_and_sprites_keep_declaration_order);
+    RUN_TEST(test_scissor_boundaries_flush_pending_shapes);
+    RUN_TEST(test_text_and_custom_keep_order_around_shapes);
+    RUN_TEST(test_opacity_rounding_to_zero_emits_nothing);
     RUN_TEST(test_offscreen_layout_transformed_into_view_still_draws);
     RUN_TEST(test_shadow_only_visible_keeps_outset_and_offset);
     RUN_TEST(test_transformed_paint_outside_view_is_culled);
@@ -656,11 +782,14 @@ int main(int argc, char **argv) {
     RUN_TEST(test_screen_offset_viewports_render_translated_body_and_shadow);
     RUN_TEST(test_renderer_overflow_flushes_and_keeps_material);
     RUN_TEST(test_renderer_restore_drops_staged_instances);
+    RUN_TEST(test_renderer_commands_bind_their_instance_offset);
+    RUN_TEST(test_renderer_instance_layout_matches_spec_table);
     RUN_TEST(test_world_guard_uses_projection_and_physical_viewport);
     RUN_TEST(test_world_plane_seen_face_on_through_rotated_axes);
     RUN_TEST(test_world_support_behind_camera_is_culled);
     RUN_TEST(test_world_clip_crossings_emit_whole_quad);
     RUN_TEST(test_world_radial_and_shadow_only);
+    RUN_TEST(test_world_shadow_guard_ignores_body_behind_camera);
     RUN_TEST(test_world_shadow_half_step_preserves_depth_hierarchy);
     RUN_TEST(test_world_shadow_depth_half_step_near_far);
     RUN_TEST(test_depth_writing_shadow_without_bias_asserts);

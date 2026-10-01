@@ -32,8 +32,8 @@ void nt_ui_radial_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(isfinite(angle_start) && isfinite(angle_end) && "nt_ui_radial_image: angles must be finite");
     NT_ASSERT(isfinite(style->inner_radius_norm) && style->inner_radius_norm >= 0.0F && style->inner_radius_norm < 1.0F && "nt_ui_radial_image: inner_radius_norm must be finite in [0,1)");
     NT_ASSERT(isfinite(style->tint_strength) && style->tint_strength >= 0.0F && style->tint_strength <= 1.0F && "nt_ui_radial_image: tint_strength must be finite in [0,1]");
-    /* Slice9 stretches patches, so angles in source-image space would distort. */
-    NT_ASSERT(!(style->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) && "nt_ui_radial_image: slice9 is unsupported");
+    /* Slice9 stretches patches, so angles in source-image space would distort; the other bits are engine-owned. */
+    NT_ASSERT((style->flags & ~NT_UI_IMAGE_ORIGIN_OVERRIDE) == 0U && "nt_ui_radial_image: style.flags accepts only NT_UI_IMAGE_ORIGIN_OVERRIDE");
     if (style->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
         NT_ASSERT(isfinite(style->origin_x) && isfinite(style->origin_y) && "nt_ui_radial_image: ORIGIN_OVERRIDE -> style.origin_{x,y} must be finite");
     }

@@ -39,7 +39,7 @@ typedef struct {
     uint32_t tint_color_packed; /* 0xAABBGGRR; TINT mode target color (per-widget) */
     float tint_strength;        /* [0,1]; TINT mix strength (per-widget) */
     uint8_t flip_bits;          /* NT_SPRITE_FLAG_FLIP_X | _FLIP_Y */
-    uint8_t flags;              /* NT_UI_IMAGE_ORIGIN_OVERRIDE (SLICE9_OVERRIDE rejected in v1) */
+    uint8_t flags;              /* NT_UI_IMAGE_ORIGIN_OVERRIDE only */
     uint8_t _reserved[2];
 } nt_ui_radial_image_style_t;
 _Static_assert(sizeof(nt_ui_radial_image_style_t) == 32, "nt_ui_radial_image_style_t size (32 B)");
