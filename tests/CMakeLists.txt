@@ -90,6 +90,12 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_skeletal_gpu PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_skeletal_gpu)
 
+    # One-upload-per-frame arena for prepared vertex data, on the gfx fake.
+    add_executable(test_frame_arena unit/test_frame_arena.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_frame_arena PRIVATE nt_frame_arena nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_log_stub unity)
+    target_include_directories(test_frame_arena PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_frame_arena)
+
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
 
@@ -247,6 +253,16 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_app COMMAND test_app)
+
+    # --- Web frame-cap pacing (header-only; replays synthetic RAF clocks natively) ---
+    add_executable(test_app_pace unit/test_app_pace.c)
+    target_link_libraries(test_app_pace PRIVATE nt_app_interface unity)
+    nt_set_warning_flags(test_app_pace)
+    nt_set_sanitizer_flags(test_app_pace)
+    set_target_properties(test_app_pace PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_app_pace COMMAND test_app_pace)
 
     # --- Managed loop (time-control) tests (L1: pause/manual/scale loop + sim-advance counter) ---
     add_executable(test_app_managed unit/test_app_managed.c unit/test_helpers/nt_assert_trap.c)
@@ -427,8 +443,9 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_gfx_scissor)
 
     # --- Shape module tests ---
-    add_executable(test_shape unit/test_shape.c)
+    add_executable(test_shape unit/test_shape.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_shape PRIVATE nt_shape_renderer nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
+    target_include_directories(test_shape PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_set_warning_flags(test_shape)
     nt_set_sanitizer_flags(test_shape)
     set_target_properties(test_shape PROPERTIES

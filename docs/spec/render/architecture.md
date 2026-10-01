@@ -110,8 +110,9 @@ buffer is *not* cascade-destroyed, but destroying one clears the dependents'
 pointed flag: their next draw using that vertex input asserts until
 `nt_gfx_bind_instance_buffer` re-points it, and the GL attachment's storage
 lingers until that re-point or the vertex input's death.
-Buffer *contents* may change freely — `update`/`orphan`
-keep the GL name, so baked attachments survive per-flush orphaning — and
+Buffer *contents* may change at any time for correctness — `update`/`orphan`
+keep the GL name, so baked attachments survive per-flush orphaning; what a
+write costs depends on when it happens (see Dynamic data lifetime) — and
 index-buffer data ops run inside a service upload VAO in the backend,
 because the element-array binding is VAO state — it would otherwise be
 silently rewired into whichever vertex input is bound, and core-profile GL
@@ -272,6 +273,83 @@ cannot grow the cache. A miss creates the vertex input and caches it only on
 success; recoverable creation failures leave the cache unchanged so the next
 lookup retries.
 
+### Dynamic data lifetime
+
+A write into a buffer that an earlier draw of the same frame read is correct
+but not free: Mali drivers under ANGLE track the whole buffer, not the written
+range, so the write waits for those draws or copies around them. Measured on
+the reference phone with `examples/bench_stream`:
+
+- appending per-draw data between draws of one frame (the mesh, skinned and
+  shape instance rings) costs 2-15x frame time when the frame is not GPU-bound;
+- a partial rewrite from offset 0 (the shape batch) stalls the same way;
+- a full-size rewrite does not stall: Chrome gives the buffer new storage;
+- rewriting a buffer one frame after its last read does not stall;
+- orphaning (`nt_gfx_orphan_buffer`) removes the wait but allocates storage on
+  every call.
+
+Policy for engine renderers: data known before drawing is **prepared** — packed
+for the whole frame, uploaded once before the first draw that reads the storage,
+and drawn by range in any pass, any number of times. Immediate-mode batches that
+flush between game passes (sprite, text, shape) choose a per-flush policy by
+measurement. The instance rings named above predate this rule; prepared data
+lives in the frame arena (see Prepared dynamic data).
+
+A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
+waits did not raise GPU work per frame, and the phone's governor granted the
+waiting build a higher clock. Compare builds as described in
+[measuring performance on phones](../../perf-measurement.md).
+
+### Prepared dynamic data
+
+`nt_frame_arena` holds one frame's prepared per-draw vertex data (instance
+attributes) for every renderer that prepares: engine renderers and game-owned
+ones alike. It is a CPU staging copy plus one `STREAM` vertex buffer of the
+capacity the game passes to `nt_frame_arena_init` (nonzero, a multiple of
+`NT_FRAME_ARENA_ALIGN`, after `nt_gfx_init`); it sits over raw `nt_gfx`, which
+stays unaware of the arena.
+
+The game owns the frame order, once per gfx frame after `nt_gfx_begin_frame`:
+
+1. `nt_frame_arena_begin_frame` resets the cursor.
+2. Renderers `nt_frame_arena_reserve` ranges while preparing and fill the
+   returned staging pointer. A reserve returns a byte offset aligned to
+   `NT_FRAME_ARENA_ALIGN` (16 bytes: one RGBA32F texel, so the same offsets can
+   index a data texture later). Alignment padding has unspecified contents;
+   consumers read only the requested bytes.
+3. `nt_frame_arena_upload` sends every reserved byte in one buffer update,
+   after the last reserve and before the first draw that reads arena data.
+4. Draws bind `nt_frame_arena_buffer()` at a reserved offset, in any pass, any
+   number of times.
+
+Assertions reject a second `begin_frame` in one gfx frame, a reserve after
+upload, a second upload, and taking the buffer before upload. They do not track
+draws: the game must prepare and upload before any draw reads the arena buffer
+in that gfx frame, including draws using the previous upload. A frame that skips
+`begin_frame` may reuse the last upload for the whole frame. An offset stays
+valid until the next `begin_frame`. A restore empties the buffer but keeps
+staging and offsets:
+`nt_frame_arena_buffer` asserts until the frame uploads again. Overflowing
+the capacity logs the bytes needed and free, then asserts; the arena never grows
+or chains buffers. `nt_frame_arena_peak` reports the most bytes any frame
+uploaded since init, to size the capacity from a real scene.
+
+Data created after the first draw that reads arena data (for example 3D built
+while walking UI) is not supported: updating the same buffer between draws can
+wait on earlier reads even when the written ranges are disjoint. Prepare it
+before the first draw that reads arena data.
+
+One `STREAM` buffer is the policy selected from the measurements in #590:
+rotation showed no consistent benefit in the tested workloads. The P40 runs
+also compared full and partial per-frame uploads (`arena` and `arena_headroom`
+in `examples/bench_stream`). The API does not guarantee a stall-free upload.
+
+View uniform buffers remain game-owned: upload all their blocks before the
+first draw that reads the buffer, then select ranges with
+`nt_gfx_bind_uniform_buffer_range`.
+Standalone material `vec4` parameters still use the existing per-material
+uniform setters; they are not arena data.
+
 ### Render targets
 
 Render targets are a general backend capability for offscreen passes, not a
@@ -283,6 +361,38 @@ The game still owns pass order. Each pass selects its destination through
 `nt_render_target_t` selects an offscreen target. `nt_gfx` binds the matching
 backend framebuffer internally during `nt_gfx_begin_pass`; public code does not
 bind or unbind render-target state outside the pass descriptor.
+
+Each pass clears color and depth unless `load_color`/`load_depth` keeps the
+attachment's current contents. A clear initializes the entire attachment
+regardless of scissor; clear values matter only for a cleared attachment.
+Stencil is never cleared by a pass.
+
+`nt_gfx_clear` is an explicit operation inside an open pass. Its borrowed
+`nt_clear_desc_t` selects color and depth independently with `color`/`depth`
+and supplies `clear_color`/`clear_depth`; unselected values are ignored.
+It clears the current target under the current scissor, or the entire attachment
+when scissor is disabled. It does not use the viewport as a clear rectangle.
+It preserves the pipeline, vertex input, texture set, uniforms, viewport and
+scissor. Depth clear temporarily enables depth writes and restores the bound
+pipeline's mask before returning. Selecting neither attachment does no GPU work;
+a lost context skips the operation. Stencil has no clear API.
+Capture records a CLEAR request, its copied values and selections, its target,
+and the actual GL calls without growing the event record.
+
+`discard_color`/`discard_depth` end the contents' lifetime at `end_pass`, before
+the framebuffer is unbound, without invalidating texture handles;
+`discard_depth` also discards stencil. A later reader must use contents written
+after the discard. Producer outputs sampled by later passes must not discard; a
+consuming pass's flags apply only to its own attachments. Absent attachments
+ignore the flags. Discarding the default framebuffer's color asserts, because
+it is the presented frame. The descriptor is borrowed only during `begin_pass`.
+
+Loading does not preserve default-framebuffer contents across presentation
+(`preserveDrawingBuffer` is false) or restore contents after context loss.
+Discard maps to `glInvalidateFramebuffer`; native skips this optional hint when
+the driver lacks ARB_invalidate_subdata. Call capture records attachment enums,
+not pointers. BEGIN/PASS records contain the requested flags; INITIAL/PASS holds
+only cached clear values, with flag fields having no meaning.
 
 Pass color and depth clears are pass-owned operations. In particular,
 `clear_depth` is applied independently of the previous pipeline's `depth_write`
@@ -296,7 +406,8 @@ Destroying a texture or a live render target inside a pass asserts: pass-scoped
 draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
-uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
+uniform-buffer binding calls `glBindBufferBase` (`glBindBufferRange` for a
+range) on every request. A depth clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
@@ -368,10 +479,10 @@ proportionality but not on specific weights. Comparison itself is core in
 GLES 3.0, WebGL 2, and desktop GL 3.0+, so it needs no capability bit.
 
 Mip completeness needs no bind-time gate: `GL_TEXTURE_MAX_LEVEL` is set to
-`mip_count - 1` when the storage is created, so a texture's levels `0..MAX_LEVEL`
-all exist by the time its handle is published. A sampler override with a mipmap
-minification filter is therefore always valid, and over a single-level texture
-it samples level 0.
+`mip_count - 1` when storage commands are issued, matching the uploaded or generated
+chain. A sampler override may therefore use a mipmap minification filter even
+for a single-level texture, where it samples level 0. Driver upload failures
+are not polled, so a published handle does not guarantee complete GPU storage.
 
 Block-compressed storage (`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`,
 `ASTC_4x4_RGBA`) is normalized color for the sampler classes: it satisfies
@@ -387,6 +498,8 @@ both allow `NEAREST` or `NEAREST_MIPMAP_NEAREST` minification and require
 changing the requested sampler.
 RGBA32F mipmap generation additionally requires `has_float_render_target`:
 WebGL requires the source storage to be both filterable and color-renderable.
+RGBA16F mipmap generation requires `has_float_render_target` as well; its
+filtering is core and needs no float-filtering extension.
 This does not add RGBA32F render-target support to the engine.
 
 This capability supplies low-level targets and depth textures only. It does not
@@ -448,14 +561,22 @@ operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
 failure reason and error log. The backend asks only where the answer prevents a crash or a
 misleading log: before shader and program creation, because Emscripten throws on
 the null object some browsers return on a lost context; error logs for link,
-uniform reflection, framebuffer completeness and texture creation, which a loss
-suppresses; a GL error pending before a texture upload, which a loss turns from
-an assert into a rolled-back failure; and the vertex array made at context
-setup, whose name 0 asserts only on a live context. A GPU timer query named 0
-leaves its segment unallocated and skipped, because `beginQuery` throws on it. A
-fresh context (init or restore) first drains GL errors: Emscripten keeps a
-recorded error across contexts, so a call that reached the dead context must not
-fail the fresh one's first check.
+uniform reflection and framebuffer completeness, which a loss suppresses;
+after texture upload, because a nonzero WebGL name does not establish context
+liveness; and the vertex array made at context setup, whose name 0 asserts only
+on a live context. A GPU timer query named 0 leaves its segment unallocated and
+skipped, because `beginQuery` throws on it. A fresh context (init or restore) first
+drains GL errors: Emscripten keeps a recorded error across contexts, so a call
+that reached the dead context must not fail the fresh one's first check.
+
+Texture creation reads no GL error: on WebGL `glGetError` is a blocking
+round trip to the GPU process that waits for the queued uploads. After upload,
+the backend asks whether the context is lost without waiting for GPU completion;
+a confirmed loss deletes the name and ends the create `CONTEXT_LOST`, including
+when the browser returned a non-null texture object during loss. GL misuse is
+reported under `NT_GFX_WEB_GL_DEBUG` / `NT_GFX_NATIVE_GL_DEBUG`. An upload or mipmap
+generation the driver rejects on a live context (out of memory) is not detected:
+the create ends `ACCEPTED` but GPU storage may be incomplete.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
@@ -624,6 +745,94 @@ unavailable in existing CPU state are explicitly unknown. The initial SCISSOR
 rectangle is UNKNOWN because the frontend mirror is not authoritative after a
 context loss. Capture
 never adds a persistent GL-state mirror or queries GL to reconstruct them.
+
+## Shape strokes
+
+`nt_shape_renderer` owns immediate-mode shape geometry and batches it until
+`flush`; the game owns the pass, view-projection matrix and viewport. Thick
+lines are triangle geometry on native GL and WebGL 2, so width never depends on
+hardware line-width support.
+
+### Paths and width
+
+- `line(a, b, color)` draws one independent segment with butt ends.
+- `polyline(points, count, closed, color)` draws a connected sequence of
+  world-space `float[3]` positions. It consumes points during the call and keeps
+  no caller pointers. The caller samples curves into points; this renderer does
+  not own Bezier/spline evaluation or an adaptive tessellation policy.
+- Open paths have butt ends. Closed paths connect the last point to the first;
+  the caller may repeat the first point at the end. Consecutive equal positions
+  are skipped using component-wise equality. Fewer than two remaining positions
+  emit nothing; two positions produce one segment even with `closed=true`.
+  `points` may be null only when `count=0`. Positions must be finite.
+- Joins use a miter up to four half-widths, then a bevel. A flush in the middle
+  of a path keeps its joins.
+- `set_line_width(width)` selects world units, including when switching back
+  from pixels. The default is `0.02`. Width is applied after a shape's scale and
+  rotation, so it is independent of radius or height; the camera projection
+  determines its size on screen.
+- `set_line_width_pixels(width, viewport_width, viewport_height)` selects
+  framebuffer pixels. Dimensions are the active viewport's physical pixel
+  size, including for an offscreen target or sub-viewport. The game resubmits
+  them after a viewport/target/DPR change. The setter does not change the gfx
+  viewport. Both dimensions must be positive; both width setters require a
+  finite positive width and assert programmer violations.
+
+Width, width mode, viewport dimension, VP and depth changes flush all pending
+geometry. Identical values do not flush.
+Settings survive GPU restore, including a failed restore followed by retry.
+The game must flush before changing render passes or directly changing the gfx
+viewport; the renderer does not intercept gfx state changes.
+
+World strokes use camera-facing cross-sections at each endpoint. The camera is
+derived from the VP matrix: perspective strokes face its projection center,
+orthographic strokes face the constant view direction. Pixel strokes
+project adjacent points into viewport pixel coordinates before constructing
+joins. Their centerline is clipped against the homogeneous near plane before
+perspective division; clipped ends become butt ends. A fully hidden segment
+emits no visible triangles. Reversed/degenerate directions use bounded fallback
+geometry, without a division by zero. These are camera-facing strokes, not
+cylindrical tubes with volumetric thickness.
+
+### Ready-made wire shapes
+
+Rectangle and triangle outlines use connected closed paths. Circle outlines
+use one closed 16-segment XZ ring; spheres use three orthogonal rings. Cylinders
+use two closed rings and four independent struts. Capsules use two equator rings
+and two closed meridians that include the straight sides. A capsule with
+`height <= 2 * radius` uses the sphere wire template, avoiding duplicate rings
+and collapsed straight segments. Rotated variants transform the complete path
+before constructing its thickness.
+
+A branching wire graph is distinct from a path: cube edges and `mesh_wire`
+remain independent segments, and cylinder strut/ring intersections do not gain
+an arbitrary two-edge join. No global graph stitching, hidden-edge extraction,
+mesh silhouette or duplicate-edge removal is implied by these APIs.
+
+Strokes are opaque and follow the depth setting. Inner bevel triangles and
+intersecting paths can overlap; the renderer does not promise composited
+translucent strokes.
+
+### Storage and draw order
+
+No heap allocation or trigonometry occurs when submitting strokes. Circle,
+sphere, cylinder and capsule wires use immutable templates built at
+initialization and cost one instance per shape.
+
+Every flush draws filled instanced shapes by type, then triangles and meshes,
+then wire templates by type, connected segments and independent lines. Within
+one flush this kind order replaces submission order: outlines stay on top of
+fills, and interleaved submissions batch into at most one draw per kind. Flushes
+are the only ordering barriers — explicit `flush`, a full queue and the state
+changes above. A game that needs a later layer over an earlier one, typically in
+overlay mode, calls `flush` between them.
+
+`NT_SHAPE_RENDERER_MAX_LINES` bounds independent lines (default 8192) and
+`NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` connected segments (default 1024).
+Each wire template type holds `ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)`
+shapes (default 512). A full queue flushes all pending geometry. A skipped flush
+after failed initialization empties every queue, preventing overflow during
+context recovery.
 
 ## Renderer complexity classes
 

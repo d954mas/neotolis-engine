@@ -55,7 +55,8 @@ typedef struct {
     uint8_t usage;      /* nt_buffer_usage_t */
     uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
     uint8_t _pad;
-    uint32_t size;
+    uint32_t size; /* initial capacity, retained across orphaning */
+    uint32_t storage_size;
 } nt_gfx_buffer_meta_t;
 
 /* ---- Vertex input metadata (destroy cascade + draw-invariant checks) ---- */
@@ -693,6 +694,8 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
 
+    NT_ASSERT((desc->target.id != 0 || !desc->discard_color) && "begin_pass: discarding the window color loses the presented frame");
+
     uint32_t render_target_backend = 0;
     uint16_t width = 0;
     uint16_t height = 0;
@@ -726,6 +729,10 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
             event->data.pass.target = desc->target.id;
             memcpy(event->data.pass.color, desc->clear_color, sizeof(event->data.pass.color));
             event->data.pass.depth = desc->clear_depth;
+            event->data.pass.load_color = desc->load_color;
+            event->data.pass.load_depth = desc->load_depth;
+            event->data.pass.discard_color = desc->discard_color;
+            event->data.pass.discard_depth = desc->discard_depth;
         });
     NT_GFX_END(begin_pass(desc));
 }
@@ -750,6 +757,29 @@ static nt_gfx_result_t end_pass(void) {
 void nt_gfx_end_pass(void) {
     NT_GFX_BEGIN(NT_GFX_OP_END_PASS, NT_GFX_OBJECT_NONE, 0);
     NT_GFX_END(end_pass());
+}
+
+static nt_gfx_result_t clear(const nt_clear_desc_t *desc) {
+    if (g_nt_gfx.context_lost) {
+        return NT_GFX_RESULT_CONTEXT_LOST;
+    }
+    NT_ASSERT(desc != NULL);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "clear requires an open pass");
+    if (desc->color || desc->depth) {
+        nt_gfx_backend_clear(desc);
+    }
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
+void nt_gfx_clear(const nt_clear_desc_t *desc) {
+    NT_GFX_BEGIN_REQUEST(
+        NT_GFX_OP_CLEAR, NT_GFX_OBJECT_RENDER_TARGET, s_gfx.active_render_target, if (desc != NULL) {
+            memcpy(event->data.clear.clear_color, desc->clear_color, sizeof(event->data.clear.clear_color));
+            event->data.clear.clear_depth = desc->clear_depth;
+            event->data.clear.color = desc->color;
+            event->data.clear.depth = desc->depth;
+        });
+    NT_GFX_END(clear(desc));
 }
 
 /* ---- Resource creation ---- */
@@ -1053,6 +1083,7 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *ou
     s_gfx.buffer_metas[slot].usage = (uint8_t)desc->usage;
     s_gfx.buffer_metas[slot].index_type = desc->index_type;
     s_gfx.buffer_metas[slot].size = desc->size;
+    s_gfx.buffer_metas[slot].storage_size = desc->size;
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_BUFFER, id);
@@ -1148,6 +1179,9 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
         /* Integer storage samples NEAREST only, so extra levels are dead VRAM. */
         NT_ASSERT(local_desc.level_count <= 1 && "integer texture mip levels are not sampleable");
     }
+    if (local_desc.format == NT_TEXTURE_FORMAT_RGBA16F) {
+        NT_ASSERT((!local_desc.gen_mipmaps || g_nt_gfx.gpu_caps.has_float_render_target) && "RGBA16F mipmaps require float rendering support");
+    }
     if (local_desc.format == NT_TEXTURE_FORMAT_RGBA32F) {
         NT_ASSERT((g_nt_gfx.gpu_caps.has_float_texture_linear || !texture_filter_uses_linear(local_desc.min_filter)) && "RGBA32F min_filter requires float texture linear support");
         NT_ASSERT((g_nt_gfx.gpu_caps.has_float_texture_linear || local_desc.mag_filter == NT_FILTER_NEAREST) && "RGBA32F mag_filter requires float texture linear support");
@@ -1189,7 +1223,7 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
     s_gfx.texture_metas[slot].width = local_desc.width;
     s_gfx.texture_metas[slot].height = local_desc.height;
     s_gfx.texture_metas[slot].format = (uint8_t)local_desc.format;
-    /* Levels the storage really has: gen_mipmaps fills the chain GL-side. */
+    /* Requested levels; driver upload failures are not polled. */
     uint8_t mip_count = local_desc.level_count > 1 ? local_desc.level_count : 1;
     if (local_desc.gen_mipmaps && local_desc.data) {
         mip_count = nt_texture_full_chain_levels(local_desc.width, local_desc.height);
@@ -2260,8 +2294,9 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 
 /* ---- Uniform buffer ---- */
 
+/* size 0 binds the whole buffer; the public range entry point rejects it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
+static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2275,6 +2310,18 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         NT_LOG_ERROR("bind_uniform_buffer: buffer is not uniform type");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
+    if (size != 0) {
+        const uint32_t align = g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment;
+        const bool aligned = align != 0 && offset % align == 0;
+        const uint32_t storage_size = s_gfx.buffer_metas[idx].storage_size;
+        const bool fits = size <= storage_size && offset <= storage_size - size;
+        NT_ASSERT(aligned && "bind_uniform_buffer_range: offset is not a multiple of uniform_buffer_offset_alignment");
+        NT_ASSERT(fits && "bind_uniform_buffer_range: range exceeds the buffer");
+        if (!aligned || !fits) {
+            NT_LOG_ERROR("bind_uniform_buffer_range: misaligned or out-of-bounds range");
+            return NT_GFX_RESULT_INVALID_ARGUMENT;
+        }
+    }
     /* Buffers are never auto-restored: a zeroed backend means the owner skipped
      * the recreate contract, and binding it would feed the shader garbage. */
     NT_ASSERT(s_gfx.buffer_backends[idx] != 0 && "bind_uniform_buffer: buffer has no live backend -- recreate it after context restore");
@@ -2282,13 +2329,19 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         NT_LOG_ERROR_ONCE("bind_uniform_buffer: buffer has no live backend");
         return NT_GFX_RESULT_UNREADY;
     }
-    nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
+    nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot, offset, size);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot);
-    NT_GFX_END(bind_uniform_buffer(buf, slot));
+    NT_GFX_END(bind_uniform_buffer(buf, slot, 0, 0));
+}
+
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
+    NT_ASSERT(size != 0 && "bind_uniform_buffer_range: empty range");
+    NT_GFX_END(size != 0 ? bind_uniform_buffer(buf, slot, offset, size) : NT_GFX_RESULT_INVALID_ARGUMENT);
 }
 
 /* ---- Buffer update ---- */
@@ -2381,6 +2434,7 @@ static nt_gfx_result_t orphan_buffer(nt_buffer_t buf, const void *data, uint32_t
     NT_ASSERT(size <= s_gfx.buffer_metas[slot].size && "orphan_buffer: size exceeds buffer capacity");
     NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "orphan_buffer: buffer has no live backend -- recreate it after context restore");
     nt_gfx_backend_orphan_buffer(s_gfx.buffer_backends[slot], data, size);
+    s_gfx.buffer_metas[slot].storage_size = size;
     return NT_GFX_RESULT_ACCEPTED;
 }
 

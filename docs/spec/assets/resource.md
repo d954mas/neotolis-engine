@@ -96,8 +96,10 @@ also fit the target address space. Unmount frees asset records, not requested sl
 
 Accessors reject zero and unallocated indices with their documented empty results.
 `nt_resource_get()` returns the current published runtime handle.
-`nt_resource_is_ready()` means the published winner is fully usable, not merely
-that a runtime handle exists somewhere in the stack.
+`nt_resource_is_ready()` means the published winner is usable under its asset
+type's contract, not merely that a runtime handle exists somewhere in the stack.
+For textures, READY does not verify GPU storage allocation or upload success;
+texture creation does not poll GPU errors.
 
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 
@@ -321,6 +323,10 @@ module initialized but unable to draw; the game must retry
 `nt_postfx_blur_restore_gpu` until it succeeds. `nt_mesh_renderer`,
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
 restore drops queued commands and pipeline caches, then the game relinks.
+`nt_frame_arena_restore_gpu` recreates the arena buffer empty and keeps the
+staging copy and the frame's offsets; `nt_frame_arena_buffer` asserts until
+the next upload, and a failed restore asserts on that upload until a retry
+succeeds.
 
 `nt_mesh_renderer_restore_gpu()`, `nt_sprite_renderer_restore_gpu()`, and
 `nt_text_renderer_restore_gpu()` return `nt_result_t`. They retain CPU

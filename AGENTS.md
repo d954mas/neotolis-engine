@@ -71,6 +71,7 @@ alternative, what each catches. The developer decides.
 
 - State the changed claim and prove it with the narrowest check that exercises the expected behavior. Build success alone is not runtime proof; inspect errors even when exit status is zero.
 - Before running an example/benchmark by hand, rebuild its target. An existing executable is not freshness evidence.
+- Before comparing builds on a phone, read [measuring performance on phones](docs/perf-measurement.md): compare FPS per GPU MHz in warm, sustained ABBA runs.
 - Missing infrastructure or untested behavior is `unverified`, with the next concrete command; never imply success. Record rejected approaches in the issue so later work does not repeat them.
 - For full branch review, use [.claude/skills/reviewing-engine-code/SKILL.md](.claude/skills/reviewing-engine-code/SKILL.md): independent read-only reviewers, engine-principle lens and adversarial verification.
 

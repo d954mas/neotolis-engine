@@ -25,6 +25,7 @@
 #include "nt_mesh_format.h" /* in-code mesh blob for the instanced VAO probe */
 #include "nt_pack_format.h" /* NT_ASSET_* resource-type enum */
 #include "render/nt_render_defs.h"
+#include "renderers/nt_shape_renderer.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -51,6 +52,7 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h> /* EM_JS / EMSCRIPTEN_KEEPALIVE for the window.__nt hooks */
+uint32_t nt_test_shape_stroke_probe(void);
 #endif
 
 #include "clay.h"
@@ -462,6 +464,135 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_texture(color);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
+EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
+#if NT_GFX_CAPTURE_ENABLED
+    if (capture != 0) {
+        nt_gfx_capture_request();
+    }
+#else
+    (void)capture;
+#endif
+    nt_gfx_begin_frame();
+    const uint8_t original[8] = {17, 43, 89, 255, 211, 127, 31, 255};
+    nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .data = original});
+    nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 1, .format = NT_TEXTURE_FORMAT_DEPTH24});
+    nt_render_target_t prepass = nt_gfx_make_render_target(&(nt_render_target_desc_t){.depth = depth});
+    nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color, .depth = depth});
+    const char *vs_source = "uniform vec4 u_depth; void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, u_depth.x, 1.0); }";
+    const char *fs_source = "precision highp float; out vec4 color; void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }";
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_write = true, .depth_func = NT_DEPTH_LESS});
+    nt_pipeline_t overwrite = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_func = NT_DEPTH_ALWAYS});
+    nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    nt_hash32_t uniform = nt_hash32_str("u_depth");
+    float z[4] = {-0.5F, 0.0F, 0.0F, 0.0F};
+    nt_gfx_set_scissor_enabled(false);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = prepass, .clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+
+    uint32_t result = 0;
+    uint8_t pixels[8] = {0};
+    z[0] = 0.5F;
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F, .load_color = true, .load_depth = true});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, original, sizeof(pixels)) == 0) {
+        result |= 1U;
+    }
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F, .load_color = true});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    const uint8_t green[8] = {0, 255, 0, 255, 0, 255, 0, 255};
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
+        result |= 2U;
+    }
+    nt_gfx_set_scissor(1, 0, 1, 1);
+    nt_gfx_set_scissor_enabled(true);
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .load_depth = true});
+    const uint8_t red[8] = {255, 0, 0, 255, 255, 0, 0, 255};
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0 && nt_gfx_scissor_enabled()) {
+        result |= 4U;
+    }
+    nt_gfx_set_scissor_enabled(false);
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
+    nt_gfx_bind_pipeline(overwrite);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_set_scissor(0, 0, 1, 1);
+    nt_gfx_set_scissor_enabled(true);
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {0, 0, 1, 1}});
+    const uint8_t blue_red[8] = {0, 0, 255, 255, 255, 0, 0, 255};
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, blue_red, sizeof(pixels)) == 0) {
+        result |= 64U;
+    }
+    nt_gfx_clear(&(nt_clear_desc_t){.depth = true, .clear_depth = 0.2F});
+    nt_gfx_clear(&(nt_clear_desc_t){0});
+    nt_gfx_set_scissor_enabled(false);
+    /* This draw must keep the pipeline's disabled depth writes after the clear. */
+    nt_gfx_draw(0, 3);
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {1, 0, 0, 1}});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    z[0] = 0.0F;
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    const uint8_t red_green[8] = {255, 0, 0, 255, 0, 255, 0, 255};
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red_green, sizeof(pixels)) == 0) {
+        result |= 128U;
+    }
+    nt_gfx_end_pass();
+    nt_pass_desc_t discard = {.target = target, .load_color = true, .load_depth = true, .discard_depth = true};
+    nt_gfx_begin_pass(&discard);
+    nt_gfx_bind_pipeline(overwrite);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    nt_gfx_set_uniform_vec4(uniform, z);
+    nt_gfx_draw(0, 3);
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
+        result |= 16U;
+    }
+    discard.discard_depth = false;
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
+        result |= 32U;
+    }
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.load_color = true, .load_depth = true, .discard_depth = true});
+    nt_gfx_end_pass();
+    nt_gfx_destroy_vertex_input(input);
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_pipeline(overwrite);
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_render_target(target);
+    nt_gfx_destroy_render_target(prepass);
+    nt_gfx_destroy_texture(color);
+    nt_gfx_destroy_texture(depth);
+    nt_gfx_begin_frame();
+    return result;
+}
+
 static double s_observe_values[40];
 /* Requests every other frame: a request consumed at begin_frame replaces the capture it
  * just finished, so the unrequested frame between keeps that capture readable. */
@@ -702,6 +833,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
             return { 'preset': UTF8ToString(_nt_test_diagnostics_preset()), 'log': _nt_test_diagnostics_config(0),
                 'ui': _nt_test_diagnostics_config(1), 'gpu': _nt_test_diagnostics_config(2), 'metrics': _nt_test_diagnostics_config(3) };
         },
+        'pass_actions_probe': function(mode) { return _nt_test_pass_actions_probe(mode); },
         'observe_probe': function(mode) { return _nt_test_observe_probe(mode); },
         'observe_value': function(index) { return _nt_test_observe_value(index); },
         'observe_record': function(enabled) { _nt_test_observe_record(enabled); },
@@ -717,6 +849,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'basis_build_codecs': function() { return _nt_test_basis_build_codecs(); },
         'basis_sample': function(level) { return _nt_test_basis_sample(level) >>> 0; },
         'basis_single_pixel_format': function() { return _nt_test_basis_single_pixel_format(); },
+        'shape_stroke_probe': function() { return _nt_test_shape_stroke_probe() >>> 0; },
         'gpu_command': function(operation, segment) { return _nt_test_gpu_command(operation, segment || 0); },
         'hide_probe': function(mode) { _nt_test_hide_probe(mode); },
         'field_visible': function() { return _nt_test_field_visible() !== 0; },
@@ -877,6 +1010,7 @@ static bool gpu_restore_step(void) {
     bool ok = s_frame_ubo.id != 0;
     ok = (nt_sprite_renderer_restore_gpu() == NT_OK) && ok;
     ok = (nt_text_renderer_restore_gpu() == NT_OK) && ok;
+    nt_shape_renderer_restore_gpu();
     /* The probe's mesh and vertex input died with the context. */
     mesh_probe_destroy();
     ok = mesh_probe_create() && ok;
@@ -1099,6 +1233,7 @@ int main(int argc, char *argv[]) {
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
+    nt_shape_renderer_init();
     const bool probe_ok = mesh_probe_create();
     NT_ASSERT(probe_ok && "mesh probe creation failed at startup"); /* cold start: the context is alive */
     (void)probe_ok;
@@ -1237,6 +1372,7 @@ int main(int argc, char *argv[]) {
     nt_ui_module_shutdown();
     nt_text_renderer_shutdown();
     nt_sprite_renderer_shutdown();
+    nt_shape_renderer_shutdown();
     nt_font_destroy(s_font);
     for (uint32_t i = 0; i < 4U; i++) {
         nt_font_destroy(s_rich_font[i]);

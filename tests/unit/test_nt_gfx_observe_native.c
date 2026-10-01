@@ -393,6 +393,93 @@ static void test_shutdown_while_recording_writes_no_record(void) {
     TEST_ASSERT_NULL(view.events);
 }
 
+static void GLAD_API_PTR invalidate_noop(GLenum target, GLsizei count, const GLenum *attachments) {
+    (void)target;
+    (void)count;
+    (void)attachments;
+}
+
+static void test_pass_actions_capture_values_and_attachment_enums(void) {
+    /* Drivers without the optional entry point would skip the recorded call. */
+    PFNGLINVALIDATEFRAMEBUFFERPROC driver = glad_glInvalidateFramebuffer;
+    if (driver == NULL) {
+        glad_glInvalidateFramebuffer = invalidate_noop;
+    }
+    nt_gfx_capture_request();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.load_depth = true, .discard_depth = true});
+    TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
+    nt_gfx_end_pass();
+    TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    nt_gfx_event_t begin = {0};
+    nt_gfx_event_t invalidate = {0};
+    uint32_t begins = 0;
+    uint32_t invalidates = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_PASS) {
+            begin = *event;
+            begins++;
+        }
+        if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_glInvalidateFramebuffer) {
+            invalidate = *event;
+            invalidates++;
+        }
+    }
+    glad_glInvalidateFramebuffer = driver;
+    TEST_ASSERT_EQUAL_UINT32(1, begins);
+    TEST_ASSERT_EQUAL_UINT32(1, invalidates);
+    TEST_ASSERT_FALSE(begin.data.pass.load_color);
+    TEST_ASSERT_TRUE(begin.data.pass.load_depth);
+    TEST_ASSERT_FALSE(begin.data.pass.discard_color);
+    TEST_ASSERT_TRUE(begin.data.pass.discard_depth);
+    TEST_ASSERT_EQUAL_HEX32(GL_FRAMEBUFFER, invalidate.data.backend.args[0]);
+    TEST_ASSERT_EQUAL_UINT32(2, invalidate.data.backend.args[1]);
+    TEST_ASSERT_EQUAL_HEX32(GL_DEPTH, invalidate.data.backend.args[2]);
+    TEST_ASSERT_EQUAL_HEX32(GL_STENCIL, invalidate.data.backend.args[3]);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.gl[NT_GFX_GL_glInvalidateFramebuffer]);
+}
+
+static void test_explicit_clear_records_issued_calls_and_skips_empty_selections(void) {
+    nt_gfx_capture_request();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    const nt_clear_desc_t expected = {.color = true, .depth = true, .clear_color = {0.25F, 0.5F, 0.75F, 1}, .clear_depth = 0.5F};
+    nt_clear_desc_t desc = expected;
+    nt_gfx_clear(&desc);
+    memset(&desc, 0, sizeof(desc));
+    nt_gfx_clear(&expected);
+    uint32_t before[NT_GFX_GL_COUNT];
+    memcpy(before, g_nt_gfx.counters.gl, sizeof(before));
+    nt_gfx_clear(&(nt_clear_desc_t){.clear_color = {1, 0, 0, 1}, .clear_depth = 0.25F});
+    TEST_ASSERT_EQUAL_MEMORY(before, g_nt_gfx.counters.gl, sizeof(before));
+    nt_gfx_end_pass();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CLEAR]);
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.gl[NT_GFX_GL_glClear]);
+    TEST_ASSERT_EQUAL_UINT32(3, captured_calls(NT_GFX_GL_glClear));
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    uint32_t selected = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_BACKEND && event->detail == NT_GFX_GL_glClear) {
+            TEST_ASSERT_EQUAL_HEX32(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, event->data.backend.args[0]);
+        }
+        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_CLEAR && event->data.clear.color) {
+            TEST_ASSERT_EQUAL_UINT32(NT_GFX_OBJECT_RENDER_TARGET, event->object_kind);
+            TEST_ASSERT_EQUAL_UINT32(0, event->object);
+            TEST_ASSERT_TRUE(event->data.clear.depth);
+            TEST_ASSERT_EQUAL_MEMORY(expected.clear_color, event->data.clear.clear_color, sizeof(expected.clear_color));
+            TEST_ASSERT_EQUAL_MEMORY(&expected.clear_depth, &event->data.clear.clear_depth, sizeof(float));
+            selected++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, selected);
+}
+
 static void test_readback_is_recorded_as_issued_call(void) {
     nt_gfx_capture_request();
     nt_gfx_begin_frame();
@@ -465,19 +552,21 @@ static void test_texture_mips_storage_and_subrect_payloads(void) {
     nt_gfx_begin_frame();
 }
 
-/* The error code alone never reports a loss: only the browser's isContextLost does, and native has none. */
-static void test_failed_upload_keeps_issued_bytes(void) {
+/* Injected GL_OUT_OF_MEMORY after a real upload verifies no glGetError polling
+ * during creation (a blocking round trip on WebGL), not actual VRAM exhaustion. */
+static void test_texture_create_reads_no_gl_error(void) {
     const uint8_t pixels[64] = {0};
-    const GLenum errors[] = {GL_OUT_OF_MEMORY, 0x9242U /* CONTEXT_LOST_WEBGL */};
-    for (uint32_t i = 0; i < 2; i++) {
-        s_upload_error = errors[i];
-        nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
-        TEST_ASSERT_EQUAL_UINT32(0, texture.id);
-        nt_gfx_begin_frame();
-        const nt_gfx_counters_t *snapshot = &g_nt_gfx.last_frame;
-        TEST_ASSERT_EQUAL_UINT64(1, snapshot->texture_upload_calls);
-        TEST_ASSERT_EQUAL_UINT64(64, snapshot->texture_upload_bytes);
-    }
+    nt_gfx_begin_frame(); /* init drains errors; measure the create's frame alone */
+    s_upload_error = GL_OUT_OF_MEMORY;
+    nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
+    s_upload_error = s_pending_error = GL_NO_ERROR;
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, texture.id);
+    nt_gfx_begin_frame();
+    const nt_gfx_counters_t *snapshot = &g_nt_gfx.last_frame;
+    TEST_ASSERT_EQUAL_UINT32(0, snapshot->gl[NT_GFX_GL_glGetError]);
+    TEST_ASSERT_EQUAL_UINT64(1, snapshot->texture_upload_calls);
+    TEST_ASSERT_EQUAL_UINT64(64, snapshot->texture_upload_bytes);
+    nt_gfx_destroy_texture(texture);
 }
 
 static void test_repeated_frames_separate_requests_from_issued_calls(void) {
@@ -610,12 +699,14 @@ int main(void) {
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
     RUN_TEST(test_complete_capture_matches_gl_counters);
     RUN_TEST(test_readback_is_recorded_as_issued_call);
+    RUN_TEST(test_explicit_clear_records_issued_calls_and_skips_empty_selections);
+    RUN_TEST(test_pass_actions_capture_values_and_attachment_enums);
     RUN_TEST(test_shutdown_while_recording_writes_no_record);
 #endif
     RUN_TEST(test_payloads_before_render_land_in_their_frame);
     RUN_TEST(test_texture_mips_storage_and_subrect_payloads);
     RUN_TEST(test_r8_odd_width_update_counts_exact_bytes);
-    RUN_TEST(test_failed_upload_keeps_issued_bytes);
+    RUN_TEST(test_texture_create_reads_no_gl_error);
     RUN_TEST(test_repeated_frames_separate_requests_from_issued_calls);
     RUN_TEST(test_compressed_mips_use_issued_block_sizes);
     RUN_TEST(test_attribute_pointer_calls_are_counted_per_issue);

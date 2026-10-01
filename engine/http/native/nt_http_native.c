@@ -199,6 +199,10 @@ bool nt_http_backend_init(void) {
         curl_global_cleanup();
         return false;
     }
+    /* curl's default keeps 4 x the transfers running right now, so after a burst it closes
+     * connections the next burst reopens (TCP + TLS). At most NT_HTTP_MAX_REQUESTS transfers
+     * run at once, so a pool of that many connections holds a whole burst. */
+    curl_multi_setopt(s_native.multi, CURLMOPT_MAXCONNECTS, (long)NT_HTTP_MAX_REQUESTS);
     /* A consumer-provided libcurl without async DNS would block nt_http_update
      * (and the frame) on every hostname resolve, silently breaking the
      * non-blocking frame contract — refuse init instead (the vendored build

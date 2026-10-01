@@ -474,7 +474,19 @@ typedef struct {
     /* Applied regardless of the previous pipeline's depth_write state.
      * Typically 1.0f; zero-init gives 0.0 which fails all depth tests. */
     float clear_depth;
+    /* false clears the full attachment regardless of scissor; true keeps its contents */
+    bool load_color, load_depth;
+    /* Contents are undefined after end_pass; texture handles stay valid.
+     * discard_depth also discards stencil; discard_color requires a render target. */
+    bool discard_color, discard_depth;
 } nt_pass_desc_t;
+
+/* Select attachments independently; unselected values are ignored. */
+typedef struct {
+    float clear_color[4];
+    float clear_depth;
+    bool color, depth;
+} nt_clear_desc_t;
 
 // #region frame counters and observation
 /* Public operations (BEGIN/END pairs) and the record-only STATE marker. */
@@ -515,6 +527,7 @@ typedef enum {
     NT_GFX_OP_SEGMENT_POLL,
     NT_GFX_OP_GPU_TIMING,
     NT_GFX_OP_TIMER_DISJOINT,
+    NT_GFX_OP_CLEAR,
     NT_GFX_OP_COUNT
 } nt_gfx_operation_t;
 
@@ -528,6 +541,7 @@ typedef enum {
     X(glBeginQuery)                                                                                                                                                                                    \
     X(glBindBuffer)                                                                                                                                                                                    \
     X(glBindBufferBase)                                                                                                                                                                                \
+    X(glBindBufferRange)                                                                                                                                                                               \
     X(glBindFramebuffer)                                                                                                                                                                               \
     X(glBindSampler)                                                                                                                                                                                   \
     X(glBindTexture)                                                                                                                                                                                   \
@@ -577,6 +591,7 @@ typedef enum {
     X(glGenVertexArrays)                                                                                                                                                                               \
     X(glGenerateMipmap)                                                                                                                                                                                \
     X(glGetActiveUniform)                                                                                                                                                                              \
+    X(glGetActiveUniformsiv)                                                                                                                                                                           \
     X(glGetError)                                                                                                                                                                                      \
     X(glGetIntegerv)                                                                                                                                                                                   \
     X(glGetProgramInfoLog)                                                                                                                                                                             \
@@ -587,6 +602,7 @@ typedef enum {
     X(glGetShaderiv)                                                                                                                                                                                   \
     X(glGetUniformBlockIndex)                                                                                                                                                                          \
     X(glGetUniformLocation)                                                                                                                                                                            \
+    X(glInvalidateFramebuffer)                                                                                                                                                                         \
     X(glLinkProgram)                                                                                                                                                                                   \
     X(glPixelStorei)                                                                                                                                                                                   \
     X(glPolygonOffset)                                                                                                                                                                                 \
@@ -711,12 +727,15 @@ typedef struct {
             float values[16];
         } uniform;
         struct {
-            uint32_t secondary, name, slot, offset;
+            uint32_t secondary, name, slot, offset, size;
         } binding;
         struct {
             uint32_t target;
             float color[4], depth;
+            /* Flags are meaningful only in BEGIN records; INITIAL holds cached clear values. */
+            bool load_color, load_depth, discard_color, discard_depth;
         } pass;
+        nt_clear_desc_t clear;
         struct {
             uint32_t buffer, offset, stride, location, type, count, normalized, divisor;
         } attribute;
@@ -758,12 +777,13 @@ nt_gfx_capture_view_t nt_gfx_capture_read(void);
 /* ---- GPU format capabilities ---- */
 
 typedef struct {
-    bool has_astc;                 /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
-    bool has_bc7;                  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
-    bool has_etc2;                 /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
-    bool has_float_render_target;  /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
-    bool has_float_texture_linear; /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
-    uint32_t max_texture_size;     /* GL_MAX_TEXTURE_SIZE, queried at init */
+    bool has_astc;                            /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;                             /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2;                            /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    bool has_float_render_target;             /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
+    bool has_float_texture_linear;            /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
+    uint32_t max_texture_size;                /* GL_MAX_TEXTURE_SIZE, queried at init */
+    uint32_t uniform_buffer_offset_alignment; /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: ranged UBO binds start at a multiple */
 } nt_gfx_gpu_caps_t;
 
 /* ---- Global state ---- */
@@ -827,6 +847,10 @@ void nt_gfx_begin_frame(void);
 /* Passes do not nest; on a lost context both calls are no-ops. */
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_end_pass(void);
+/* Requires an open pass and a non-NULL desc, borrowed only for this call.
+ * Clears selected attachments under the current scissor (or fully when disabled).
+ * Preserves draw state, including depth write mask. No selections or a lost context do no GPU work. */
+void nt_gfx_clear(const nt_clear_desc_t *desc);
 
 /* ---- Resource creation ---- */
 
@@ -842,6 +866,8 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
  * INVALID means context loss or backend allocation failure; caller errors assert. */
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
+/* A nonzero handle means upload commands were issued, not that GPU storage
+ * allocation or upload succeeded; creation does not poll GPU errors. */
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_render_target. The target
@@ -885,6 +911,8 @@ nt_texture_t nt_gfx_render_target_color(nt_render_target_t rt);
  * destroy_texture cascade, or a context loss (loss frees every render-target
  * slot; the owner recreates its textures and targets after restore). */
 bool nt_gfx_render_target_valid(nt_render_target_t rt);
+/* Reports a backend object not discarded by engine loss synchronization;
+ * does not verify GPU storage allocation or upload success. */
 bool nt_gfx_texture_ready(nt_texture_t tex);
 /* Reports a live stage backend. Readiness lost to context loss never returns for that handle;
  * re-read the new handle from its resource after reactivation. */
@@ -976,7 +1004,13 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 
 /* ---- Uniform buffer ---- */
 
+/* Binds the whole buffer, or [offset, offset + size) of it. A range starts at a
+ * multiple of gpu_caps.uniform_buffer_offset_alignment, is nonempty and fits the
+ * buffer; WebGL also requires it to cover the block's full data size. Upload every
+ * range of a frame before the first draw that reads the buffer: Mali/ANGLE stall on
+ * a rewrite of any part of a buffer an earlier draw read. */
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Disjoint

@@ -33,6 +33,11 @@ void tearDown(void) {
     nt_gfx_fake_reset();
 }
 
+static void next_frame(void) {
+    nt_gfx_begin_frame();
+    nt_skeletal_gpu_begin_frame();
+}
+
 static void gpu_init(uint16_t width, uint16_t height) {
     TEST_ASSERT_EQUAL(NT_OK, nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = width, .height = height}));
     s_gpu_up = true;
@@ -104,7 +109,7 @@ static void test_init_rejects_zero_height(void) {
 // #region reserve
 static void test_reserve_packs_frames_row_major_without_spanning(void) {
     gpu_init(12, 3);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t a;
     nt_deformation_binding_t b;
     nt_deformation_binding_t c;
@@ -149,7 +154,7 @@ static void test_reserve_packs_frames_row_major_without_spanning(void) {
 static void test_reserve_wraps_a_frame_that_does_not_fit_the_row(void) {
     /* Width 7 holds two entries (6 texels) and one spare texel. */
     gpu_init(7, 2);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t a;
     nt_deformation_binding_t b;
     (void)nt_skeletal_gpu_reserve(2, &a);
@@ -160,10 +165,10 @@ static void test_reserve_wraps_a_frame_that_does_not_fit_the_row(void) {
 
 static void test_begin_frame_resets_the_cursor(void) {
     gpu_init(12, 2);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t a;
     (void)nt_skeletal_gpu_reserve(3, &a);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     (void)nt_skeletal_gpu_reserve(1, &a);
     TEST_ASSERT_EQUAL_UINT16(0, a.x0);
     TEST_ASSERT_EQUAL_UINT16(0, a.y0);
@@ -181,7 +186,7 @@ static void test_palette_build_writes_into_the_reserved_frame(void) {
     model[0].r[0][0] = model[0].r[1][1] = model[0].r[2][2] = 1.0F;
     model[1] = model[0];
 
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t b;
     nt_skeletal_mat34_t *frame = nt_skeletal_gpu_reserve(2, &b);
     nt_skin_palette_build(&binding, model, 2, frame, 2);
@@ -202,7 +207,7 @@ static void assert_one_full_width_rect(uint16_t width, uint16_t rows) {
 
 static void test_flush_uploads_touched_rows_as_one_rectangle(void) {
     gpu_init(12, 3);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t b;
     (void)nt_skeletal_gpu_reserve(4, &b); /* row 0 exactly */
     (void)nt_skeletal_gpu_reserve(1, &b); /* row 1, 3 texels */
@@ -212,7 +217,7 @@ static void test_flush_uploads_touched_rows_as_one_rectangle(void) {
 
 static void test_flush_exactly_filled_rows_adds_no_row(void) {
     gpu_init(6, 3);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t b;
     (void)nt_skeletal_gpu_reserve(2, &b);
     (void)nt_skeletal_gpu_reserve(2, &b);
@@ -222,7 +227,7 @@ static void test_flush_exactly_filled_rows_adds_no_row(void) {
 
 static void test_flush_twice_re_uploads_the_same_rectangle(void) {
     gpu_init(12, 2);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t b;
     (void)nt_skeletal_gpu_reserve(1, &b);
     nt_skeletal_gpu_flush();
@@ -236,7 +241,7 @@ static void test_flush_twice_re_uploads_the_same_rectangle(void) {
 
 static void test_flush_of_an_empty_frame_uploads_nothing(void) {
     gpu_init(12, 2);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_skeletal_gpu_flush();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_texture_count());
 }
@@ -245,7 +250,7 @@ static void test_flush_of_an_empty_frame_uploads_nothing(void) {
 // #region restore
 static void test_restore_recreates_the_texture_and_new_bindings_use_it(void) {
     gpu_init(12, 2);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t before;
     (void)nt_skeletal_gpu_reserve(1, &before);
 
@@ -257,7 +262,7 @@ static void test_restore_recreates_the_texture_and_new_bindings_use_it(void) {
     TEST_ASSERT_EQUAL(NT_FILTER_NEAREST, d.min_filter);
     TEST_ASSERT_FALSE(d.gen_mipmaps);
 
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t after;
     (void)nt_skeletal_gpu_reserve(1, &after);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, after.texture.id);
@@ -273,14 +278,14 @@ static void test_failed_restore_is_retried_before_the_next_reserve(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
     nt_deformation_binding_t b;
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_test_assert_install();
     NT_TEST_EXPECT_ASSERT((void)nt_skeletal_gpu_reserve(1, &b));
 #endif
     /* The retry creates a fresh texture without destroying the husk twice. */
     TEST_ASSERT_EQUAL(NT_OK, nt_skeletal_gpu_restore_gpu());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     (void)nt_skeletal_gpu_reserve(1, &b);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, b.texture.id);
 }
@@ -313,7 +318,7 @@ static void test_skin_comp_swap_and_pop_keeps_every_remaining_value(void) {
     nt_skin_comp_add(e1);
     nt_skin_comp_add(e2);
     /* Live bindings from the module, so a destroy in remove would reach the fake. */
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     (void)nt_skeletal_gpu_reserve(1, nt_skin_comp_handle(e0));
     (void)nt_skeletal_gpu_reserve(1, nt_skin_comp_handle(e1));
     (void)nt_skeletal_gpu_reserve(1, nt_skin_comp_handle(e2));
@@ -353,7 +358,7 @@ static void test_skin_comp_holds_a_reserved_binding_by_value(void) {
     gpu_init(12, 1);
     nt_entity_t e = nt_entity_create();
     nt_skin_comp_add(e);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     (void)nt_skeletal_gpu_reserve(2, nt_skin_comp_handle(e));
     TEST_ASSERT_EQUAL_UINT16(0, nt_skin_comp_handle(e)->x0);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_skin_comp_handle(e)->texture.id);
@@ -367,7 +372,7 @@ static void test_skin_comp_holds_a_reserved_binding_by_value(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 static void test_reserve_rejects_zero_count(void) {
     gpu_init(12, 1);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t b;
     nt_test_assert_install();
     NT_TEST_EXPECT_ASSERT((void)nt_skeletal_gpu_reserve(0, &b));
@@ -375,15 +380,24 @@ static void test_reserve_rejects_zero_count(void) {
 
 static void test_reserve_rejects_a_frame_wider_than_the_texture(void) {
     gpu_init(12, 4);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t b;
     nt_test_assert_install();
     NT_TEST_EXPECT_ASSERT((void)nt_skeletal_gpu_reserve(5, &b));
 }
 
+static void test_second_begin_frame_in_one_gfx_frame_asserts(void) {
+    gpu_init(12, 1);
+    next_frame();
+    nt_skeletal_gpu_flush();
+    nt_test_assert_install();
+    NT_TEST_EXPECT_ASSERT(nt_skeletal_gpu_begin_frame());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "twice in one gfx frame"));
+}
+
 static void test_reserve_asserts_when_the_texture_is_full(void) {
     gpu_init(6, 1);
-    nt_skeletal_gpu_begin_frame();
+    next_frame();
     nt_deformation_binding_t b;
     (void)nt_skeletal_gpu_reserve(2, &b);
     nt_test_assert_install();
@@ -418,6 +432,7 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_reserve_rejects_zero_count);
     RUN_TEST(test_reserve_rejects_a_frame_wider_than_the_texture);
+    RUN_TEST(test_second_begin_frame_in_one_gfx_frame_asserts);
     RUN_TEST(test_reserve_asserts_when_the_texture_is_full);
 #endif
     return UNITY_END();

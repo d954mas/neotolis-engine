@@ -38,6 +38,8 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 
 void nt_gfx_end_pass(void) {}
 
+void nt_gfx_clear(const nt_clear_desc_t *desc) { (void)desc; }
+
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
     (void)desc;
     return (nt_shader_t){0};
@@ -255,6 +257,13 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
     (void)buf;
     (void)slot;
+}
+
+void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+    (void)buf;
+    (void)slot;
+    (void)offset;
+    (void)size;
 }
 
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {

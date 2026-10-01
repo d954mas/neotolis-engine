@@ -638,8 +638,18 @@ static void test_header_does_not_expose_target_bind_state_api(void) {
     }
 }
 
+static void test_pass_discarding_window_color_asserts(void) {
+    nt_pass_desc_t pass = {.discard_color = true};
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&pass));
+    pass.discard_color = false;
+    pass.discard_depth = true;
+    nt_gfx_begin_pass(&pass);
+    nt_gfx_end_pass();
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_pass_discarding_window_color_asserts);
     RUN_TEST(test_color_only_target_borrows_its_texture);
     RUN_TEST(test_depth_only_target_passes_its_size_to_the_pass);
     RUN_TEST(test_color_depth_target_passes_both_backends);

@@ -2310,7 +2310,6 @@ static void stage_viewport(uint32_t part, uint32_t count) {
     nt_gfx_update_buffer(s_frame_ubo, 0, &s_frame_uniforms, sizeof s_frame_uniforms);
     nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
     nt_shape_renderer_set_vp((const float *)vp);
-    nt_shape_renderer_set_cam_pos(s_frame_uniforms.camera_pos);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

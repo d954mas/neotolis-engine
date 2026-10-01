@@ -58,6 +58,8 @@ void nt_gfx_fake_fail_next_sampler_create(void);
 uint16_t nt_gfx_fake_last_pass_width(void);
 uint16_t nt_gfx_fake_last_pass_height(void);
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
+/* Desc of the last buffer create the backend saw, failed ones included; pointers are borrowed. */
+nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void);
 /* Texture backends passed to the last render-target create; 0 = absent. */
 uint32_t nt_gfx_fake_last_color_texture_backend(void);
 uint32_t nt_gfx_fake_last_depth_texture_backend(void);
@@ -68,6 +70,16 @@ typedef struct {
 } nt_gfx_fake_update_texture_rect_t;
 /* Update i since the last reset (history capacity 16; zero past it). */
 nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t index);
+
+typedef struct {
+    uint32_t buffer_backend, slot, offset, size; /* size 0: whole-buffer bind */
+} nt_gfx_fake_ubo_bind_t;
+
+uint32_t nt_gfx_fake_ubo_bind_count(void);
+nt_gfx_fake_ubo_bind_t nt_gfx_fake_ubo_bind_at(uint32_t index);
+/* Reported as gpu_caps.uniform_buffer_offset_alignment by the next caps probe
+ * (init or restore); 256 after nt_gfx_fake_reset, the largest GL permits. */
+void nt_gfx_fake_set_uniform_buffer_offset_alignment(uint32_t alignment);
 uint32_t nt_gfx_fake_update_buffer_count(void);
 /* Borrowed bytes from the last update_buffer call. Valid only until the caller
  * reuses/frees its staging storage; renderer tests inspect it immediately. */

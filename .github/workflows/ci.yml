@@ -804,7 +804,7 @@ jobs:
       # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
       # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
       - name: Run browser smoke test
-        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts observation.spec.ts shape_shader.spec.ts radial_shader.spec.ts
+        run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts observation.spec.ts pass_actions.spec.ts shape_shader.spec.ts radial_shader.spec.ts
 
       # Each admission row (NT_BASISU_ROWS) activates its own fixture pack in wasm Debug (FULL
       # asserts) and samples the transcoded texels through WebGL; a Release row would add no
@@ -834,7 +834,9 @@ jobs:
             cmake --build "build/_cmake/$name" --target browser_smoke
             test -f "build/tests/browser/app/$name/assets/ui_showcase.ntpack"
             test -f "build/tests/browser/app/$name/assets/basis_fixture.ntpack"
-            (cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$name" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 NT_DIAGNOSTICS_PRESET="$name" NT_DIAGNOSTICS_LOG=1 NT_DIAGNOSTICS_UI="$ui" NT_DIAGNOSTICS_GPU="$gpu" NT_DIAGNOSTICS_METRICS=0 NT_DIAGNOSTICS_TIMER_BASE=4294967296 npx playwright test diagnostics.spec.ts context_loss.spec.ts --project=chromium --workers=1)
+            pass_specs=""
+            if [[ "$ui $gpu" == "0 0" ]]; then pass_specs="pass_actions.spec.ts"; fi
+            (cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$name" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 NT_DIAGNOSTICS_PRESET="$name" NT_DIAGNOSTICS_LOG=1 NT_DIAGNOSTICS_UI="$ui" NT_DIAGNOSTICS_GPU="$gpu" NT_DIAGNOSTICS_METRICS=0 NT_DIAGNOSTICS_TIMER_BASE=4294967296 npx playwright test diagnostics.spec.ts context_loss.spec.ts $pass_specs --project=chromium --workers=1)
           done
 
   deploy:
