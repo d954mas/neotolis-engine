@@ -330,15 +330,10 @@ while walking UI) is not supported: the driver tracks the whole buffer, so a
 second upload would stall whatever range it writes. Prepare it before the first
 draw that reads arena data.
 
-One buffer, not a rotation: on the reference phone and on desktop Chrome,
-Firefox and native GL, one, two and three rotating buffers measured equal. A
-capacity sized from the peak makes most uploads partial; on the phone that
-shape (`arena_headroom` in `examples/bench_stream`, half the capacity uploaded
-each frame) ran within noise of a full-buffer upload, so rewriting a buffer
-that only the previous frame read does not stall. `STREAM` is the usage: `DYNAMIC`
-was 25% slower in one phone case (one 64 KB upload per frame) and within noise
-elsewhere. Desktop native GL runs one 1.3 MB update 15% slower than many small
-ones into one buffer (about 0.1 ms per frame); desktop Chrome did not show it.
+One `STREAM` buffer, not a rotation: rewriting a buffer that only the
+previous frame read does not stall, also for the partial uploads a peak-sized
+capacity produces (`arena` and `arena_headroom` in `examples/bench_stream`;
+measurements in #590).
 
 View and material uniforms are not arena data: pack them into a uniform buffer
 the game owns and bind ranges with `nt_gfx_bind_uniform_buffer_range`, uploaded

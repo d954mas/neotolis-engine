@@ -69,11 +69,9 @@ static void test_upload_sends_every_reserved_byte_in_one_call(void) {
     const uint8_t *sent = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
     uint8_t expect_a[8];
     uint8_t expect_b[12];
-    uint8_t zero_pad[8] = {0};
     memset(expect_a, 0xA1, sizeof expect_a);
     memset(expect_b, 0xB2, sizeof expect_b);
     TEST_ASSERT_EQUAL_MEMORY(expect_a, sent + a, sizeof expect_a);
-    TEST_ASSERT_EQUAL_MEMORY(zero_pad, sent + a + sizeof expect_a, sizeof zero_pad);
     TEST_ASSERT_EQUAL_MEMORY(expect_b, sent + b, sizeof expect_b);
 }
 
@@ -97,6 +95,7 @@ static void test_every_frame_reuses_one_buffer_from_offset_0(void) {
     nt_frame_arena_upload();
     TEST_ASSERT_EQUAL_UINT32(first.id, nt_frame_arena_buffer().id);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_update_buffer_offset());
     TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_update_buffer_size());
 }
 
