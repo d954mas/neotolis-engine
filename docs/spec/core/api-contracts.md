@@ -133,9 +133,12 @@ destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
 Frame-scoped values are plain values with no generation: a frame arena offset
-(`nt_frame_arena_reserve`) and a deformation binding (`nt_skeletal_gpu_reserve`)
+(`nt_frame_arena_reserve`), a mesh run (`nt_mesh_renderer_prepare`,
+`nt_skinned_mesh_renderer_prepare`) and a deformation binding (`nt_skeletal_gpu_reserve`)
 stay valid until the owning module's next `begin_frame`; a restore invalidates
-a binding, and an arena offset needs a new upload. The values carry no stamp;
+a binding and the runs, and an arena offset needs a new upload. A skinned run
+embeds deformation bindings and also expires at the next
+`nt_skeletal_gpu_begin_frame`. The values carry no stamp;
 each module asserts only its frame order (one `begin_frame` per gfx frame).
 
 ### Program handles
@@ -211,7 +214,7 @@ batch is dropped instead -- there is nothing left to draw it through.
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
 the first assignment, after context loss is processed, or after program
-destruction. The ECS `draw_list` paths skip unready programs and warn once until
+destruction. The mesh renderers' `prepare` and the sprite `draw_list` skip unready programs and warn once until
 a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` /
 `nt_text_renderer_set_material` entry points assert only that a program was
 assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks

@@ -292,7 +292,7 @@ typedef struct {
     const float (*params)[4];
 } nt_renderer_material_view_t;
 
-/* Zero-init = nothing bound; lives for ONE draw_list or flush. Material uniforms replay on
+/* Zero-init = nothing bound; lives for ONE mesh draw, draw_list or flush. Material uniforms replay on
  * a material change or a pipeline change. Texture and sampler binds are deduplicated by the
  * GL backend, so the renderer tracks only what it replays itself. */
 typedef struct {

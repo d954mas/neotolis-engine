@@ -2,6 +2,7 @@
 
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include "frame_arena/nt_frame_arena.h"
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
@@ -325,21 +326,39 @@ static nt_entity_t make_entity(nt_mesh_t mesh, nt_material_t material, const nt_
     return entity;
 }
 
+static void begin_target_pass(void) { nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F}); }
+
 static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t mesh, bool skinned, uint8_t out[FRAME_BYTES]) {
     const nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
+    nt_gfx_begin_frame();
+    nt_frame_arena_begin_frame();
     if (skinned) {
-        nt_skinned_mesh_renderer_draw_list(&item, 1);
+        nt_mesh_run_t run;
+        const uint32_t run_count = nt_skinned_mesh_renderer_prepare(&item, 1, &run, 1);
+        nt_frame_arena_upload();
+        begin_target_pass();
+        nt_skinned_mesh_renderer_draw(&run, run_count);
     } else {
-        nt_mesh_renderer_draw_list(&item, 1);
+        nt_mesh_run_t run;
+        const uint32_t run_count = nt_mesh_renderer_prepare(&item, 1, &run, 1);
+        nt_frame_arena_upload();
+        begin_target_pass();
+        nt_mesh_renderer_draw(&run, run_count);
     }
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
 }
 
+#define RENDER_MAX_RUNS 2
+
 static void render_skinned_list(const nt_render_item_t *items, uint32_t count, uint8_t out[FRAME_BYTES]) {
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0.0F, 0.0F, 0.0F, 0.0F}, .clear_depth = 1.0F});
-    nt_skinned_mesh_renderer_draw_list(items, count);
+    nt_gfx_begin_frame();
+    nt_frame_arena_begin_frame();
+    nt_mesh_run_t runs[RENDER_MAX_RUNS];
+    const uint32_t run_count = nt_skinned_mesh_renderer_prepare(items, count, runs, RENDER_MAX_RUNS);
+    nt_frame_arena_upload();
+    begin_target_pass();
+    nt_skinned_mesh_renderer_draw(runs, run_count);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
 }
@@ -477,8 +496,9 @@ void setUp(void) {
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 32});
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
     s_initialized = true;
-    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_instances = 8, .max_pipelines = 4, .max_mesh_layouts = 4}));
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_instances = 8, .max_pipelines = 4, .max_mesh_layouts = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = 4096}));
 
     const bool sources_ready = compose_skin_vertex_source(&skin_source) && read_text("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
                                read_text("tests/fixtures/skinned_mesh_renderer_native.frag", &fragment_source);
@@ -525,6 +545,7 @@ void tearDown(void) {
     if (!s_initialized) {
         return;
     }
+    nt_frame_arena_shutdown();
     nt_skinned_mesh_renderer_shutdown();
     nt_mesh_renderer_shutdown();
     nt_material_shutdown();
