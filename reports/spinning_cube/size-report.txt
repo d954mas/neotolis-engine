@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 1b25afd
+# Commit: fd60d97
 
 ## WASM Section Sizes
 
