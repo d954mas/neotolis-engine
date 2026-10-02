@@ -18,6 +18,29 @@
 /* Check continuation byte: must be 10xxxxxx */
 #define UTF8_CONT(b) (((b) & 0xC0) == 0x80)
 
+/* cp came from utf8_decode, so it is a valid scalar value; out holds up to 4 bytes + NUL. */
+static void utf8_encode(uint32_t cp, char out[5]) {
+    if (cp < 0x80U) {
+        out[0] = (char)cp;
+        out[1] = '\0';
+    } else if (cp < 0x800U) {
+        out[0] = (char)(0xC0U | (cp >> 6U));
+        out[1] = (char)(0x80U | (cp & 0x3FU));
+        out[2] = '\0';
+    } else if (cp < 0x10000U) {
+        out[0] = (char)(0xE0U | (cp >> 12U));
+        out[1] = (char)(0x80U | ((cp >> 6U) & 0x3FU));
+        out[2] = (char)(0x80U | (cp & 0x3FU));
+        out[3] = '\0';
+    } else {
+        out[0] = (char)(0xF0U | (cp >> 18U));
+        out[1] = (char)(0x80U | ((cp >> 12U) & 0x3FU));
+        out[2] = (char)(0x80U | ((cp >> 6U) & 0x3FU));
+        out[3] = (char)(0x80U | (cp & 0x3FU));
+        out[4] = '\0';
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t utf8_decode(const uint8_t **p) {
     uint32_t c = **p;
@@ -805,10 +828,19 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     int *charset_glyph_ids = (int *)malloc((size_t)glyph_count * sizeof(int));
     NT_BUILD_ASSERT(charset_glyph_ids && "decode_font: charset_glyph_ids alloc failed");
 
+    uint32_t missing = 0;
     for (uint32_t i = 0; i < glyph_count; i++) {
         ginfo[i].glyph_idx = stbtt_FindGlyphIndex(&font, (int)codepoints[i]);
-        NT_BUILD_ASSERT(ginfo[i].glyph_idx != 0 && "codepoint not in font");
+        if (ginfo[i].glyph_idx == 0) { /* name every gap before failing: one run lists them all */
+            char utf8[5];
+            utf8_encode(codepoints[i], utf8);
+            NT_LOG_ERROR("font builder: U+%04X '%s' is not in %s", codepoints[i], utf8, path);
+            missing++;
+        }
         charset_glyph_ids[i] = ginfo[i].glyph_idx;
+    }
+    if (missing > 0) {
+        NT_BUILD_FAIL("decode_font: charset has codepoints the font does not have", "font builder: %u charset codepoint(s) are not in %s", missing, path);
     }
     // #endregion
 

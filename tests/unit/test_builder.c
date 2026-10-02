@@ -4871,6 +4871,15 @@ void test_font_kern_pairs(void) {
     free(pack_data);
 }
 
+static void count_missing_codepoints(nt_log_level_t level, const char *domain, const char *message, void *user_data) {
+    (void)level;
+    (void)domain;
+    if (strstr(message, "U+E00") != NULL && strstr(message, "is not in") != NULL) {
+        (*(uint32_t *)user_data)++;
+    }
+}
+
+/* Every missing codepoint is named before the build fails, so one run lists the whole gap. */
 void test_font_missing_codepoint_asserts(void) {
     const char *ttf_path = find_test_ttf();
     if (!ttf_path) {
@@ -4881,9 +4890,13 @@ void test_font_missing_codepoint_asserts(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_font_missing.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
 
-    /* U+E000 (Private Use Area) -- no standard font maps this */
-    nt_font_opts_t opts = {.charset = "\xEE\x80\x80", .resource_name = NULL};
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_font(ctx, ttf_path, &opts));
+    /* U+E000, U+E001 (Private Use Area) -- no standard font maps them */
+    nt_font_opts_t opts = {.charset = "A\xEE\x80\x80\xEE\x80\x81", .resource_name = NULL};
+    uint32_t missing = 0;
+    nt_log_add_sink(count_missing_codepoints, &missing);
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_font(ctx, ttf_path, &opts), "charset has codepoints the font does not have");
+    nt_log_remove_sink(count_missing_codepoints, &missing);
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 2U : 0U, missing);
 }
 
 void test_font_null_charset_asserts(void) {
