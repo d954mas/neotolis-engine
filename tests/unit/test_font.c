@@ -219,7 +219,7 @@ static nt_resource_t register_font_resource(const char *name, const uint8_t *blo
 
 static nt_font_create_desc_t test_font_desc(void) {
     return (nt_font_create_desc_t){
-        .curve_texture_width = 64, .curve_texture_height = 64, .band_texture_height = 16, .band_count = 4, .measure_cache_size = 256, /* match v1.7 default; FONT-02 cases assert against this */
+        .max_glyphs = 16, .band_count = 4, .measure_cache_size = 256, /* match v1.7 default; FONT-02 cases assert against this */
     };
 }
 
@@ -384,14 +384,13 @@ void test_font_unready_pair_keeps_cpu_queries_gpu_free(void) {
 
         const nt_texture_t partial_curve = nt_font_get_curve_texture(font);
         const nt_texture_t partial_band = nt_font_get_band_texture(font);
-        const uint32_t generation = nt_font_get_cache_generation(font);
         nt_gfx_fake_fail_texture_creates(3U);
         nt_font_step();
         TEST_ASSERT_EQUAL_UINT32(0U, nt_font_get_curve_texture(font).id);
         TEST_ASSERT_EQUAL_UINT32(0U, nt_font_get_band_texture(font).id);
         TEST_ASSERT_FALSE(nt_gfx_texture_ready(partial_curve));
         TEST_ASSERT_FALSE(nt_gfx_texture_ready(partial_band));
-        TEST_ASSERT_GREATER_THAN_UINT32(generation, nt_font_get_cache_generation(font));
+        TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_stats(font).glyphs_cached);
         nt_gfx_fake_fail_texture_creates(mask);
         nt_font_step();
         TEST_ASSERT_EQUAL((mask & 1U) == 0U, nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
@@ -450,13 +449,12 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
     nt_resource_step();
     nt_font_step();
     TEST_ASSERT_NOT_NULL(nt_font_lookup_glyph(font, 'A'));
-    TEST_ASSERT_EQUAL_UINT16(1U, nt_font_get_stats(font).glyphs_cached);
-    const uint32_t generation = nt_font_get_cache_generation(font);
+    TEST_ASSERT_EQUAL_UINT16(2U, nt_font_get_stats(font).glyphs_cached); /* tofu + 'A' */
 
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_NULL(nt_font_lookup_glyph(font, 'A'));
-    TEST_ASSERT_EQUAL_UINT16(1U, nt_font_get_stats(font).glyphs_cached);
+    TEST_ASSERT_EQUAL_UINT16(2U, nt_font_get_stats(font).glyphs_cached);
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
@@ -465,7 +463,6 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
     nt_gfx_fake_fail_texture_creates(2U);
     nt_font_step();
-    TEST_ASSERT_GREATER_THAN_UINT32(generation, nt_font_get_cache_generation(font));
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_stats(font).glyphs_cached);
     TEST_ASSERT_NULL(nt_font_lookup_glyph(font, 'A'));
     nt_font_step();
@@ -581,9 +578,7 @@ void test_font_lookup_glyph_miss_tofu(void) {
 
 void test_font_get_stats(void) {
     nt_font_create_desc_t desc = {
-        .curve_texture_width = 64,
-        .curve_texture_height = 64,
-        .band_texture_height = 8,
+        .max_glyphs = 8,
         .band_count = 4,
     };
     nt_font_t font = nt_font_create(&desc);
@@ -601,11 +596,10 @@ void test_font_get_stats(void) {
     nt_font_lookup_glyph(font, 'B');
 
     nt_font_stats_t s = nt_font_get_stats(font);
-    /* 'A' + 'B' + tofu (generated on first miss check before 'A') = varies */
-    TEST_ASSERT_GREATER_OR_EQUAL(2, s.glyphs_cached);
+    TEST_ASSERT_EQUAL_UINT16(3, s.glyphs_cached); /* tofu + 'A' + 'B' */
     TEST_ASSERT_EQUAL_UINT16(8, s.max_glyphs);
     TEST_ASSERT_GREATER_THAN(0U, s.curve_texels_used);
-    TEST_ASSERT_EQUAL_UINT32(64 * 64, s.curve_texels_total);
+    TEST_ASSERT_EQUAL_UINT32(NT_FONT_GLYPH_TEXELS * 8U, s.curve_texels_total);
 
     nt_font_destroy(font);
     free(blob);
@@ -616,9 +610,7 @@ void test_font_get_stats(void) {
 void test_font_lru_eviction(void) {
     /* Small cache: max_glyphs = 4, so A + B + C + tofu = full */
     nt_font_create_desc_t desc = {
-        .curve_texture_width = 128,
-        .curve_texture_height = 128,
-        .band_texture_height = 4,
+        .max_glyphs = 4,
         .band_count = 4,
     };
     nt_font_t font = nt_font_create(&desc);
@@ -1215,7 +1207,7 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     TEST_ASSERT_EQUAL_UINT16(1000U, m_a.units_per_em);
     TEST_ASSERT_EQUAL_INT16(800, m_a.ascent);
 
-    uint32_t gen_before = nt_font_get_cache_generation(font);
+    TEST_ASSERT_EQUAL_INT16(800, nt_font_lookup_glyph(font, 'Z')->bbox_y1); /* tofu spans the ascent */
 
     /* reregister = unmount old + mount new under the same (pid, rid) with NO
      * intervening font_step. Single-provider metrics mismatch -> hot-swap: accept
@@ -1230,7 +1222,7 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     TEST_ASSERT_EQUAL_UINT16(2048U, m_b.units_per_em);
     TEST_ASSERT_EQUAL_INT16(1600, m_b.ascent);
     TEST_ASSERT_EQUAL_INT16(-400, m_b.descent);
-    TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
+    TEST_ASSERT_EQUAL_INT16(1600, nt_font_lookup_glyph(font, 'Z')->bbox_y1); /* tofu follows the new metrics */
 
     nt_font_destroy(font);
     free(blob_a);
@@ -1263,7 +1255,6 @@ void test_font_flushes_on_same_metrics_winner_swap(void) {
     TEST_ASSERT_NOT_NULL(a1);
     TEST_ASSERT_EQUAL_INT16(500, a1->advance);
     nt_text_size_t m1 = nt_font_measure(font, "A", 1000.0F, 0.0F);
-    uint32_t gen_before = nt_font_get_cache_generation(font);
 
     /* Hot-reload the SAME (pid, rid) with IDENTICAL metrics but advance 700 — one step, no intervening
      * font_step. Presence stays true and metrics match; only the winner handle changes. */
@@ -1278,7 +1269,6 @@ void test_font_flushes_on_same_metrics_winner_swap(void) {
 
     /* Identity-driven flush: glyph cache re-decodes (ASCII fast-path -> new glyph table) and the
      * measure cache is cleared, so both report the new advance. Without the fix these stay 500. */
-    TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
     const nt_glyph_cache_entry_t *a2 = nt_font_lookup_glyph(font, 'A');
     TEST_ASSERT_NOT_NULL(a2);
     TEST_ASSERT_EQUAL_INT16(700, a2->advance);
@@ -1312,14 +1302,14 @@ void test_font_file_pack_unmount_cleans_state(void) {
     (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
-    uint32_t gen_before = nt_font_get_cache_generation(font);
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_font_get_stats(font).glyphs_cached); /* tofu */
 
     nt_font_test_deactivate(tok);
     nt_resource_step(); /* resolve -> font_on_cleanup, provider lost */
     nt_font_step();     /* epoch changed -> flush + clear metrics */
 
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
-    TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
+    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_stats(font).glyphs_cached); /* flushed, no tofu without metrics */
 
     nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_TRUE(after.width == 0.0F);
@@ -1727,7 +1717,7 @@ void test_font_gpu_textures(void) {
     TEST_ASSERT_NOT_EQUAL(0U, bt.id);
 
     TEST_ASSERT_EQUAL_UINT8(4, nt_font_get_band_count(font));
-    TEST_ASSERT_EQUAL_UINT16(64, nt_font_get_curve_texture_width(font));
+    TEST_ASSERT_EQUAL_UINT32(NT_FONT_GLYPH_TEXELS * 16U, nt_font_get_stats(font).curve_texels_total);
 
     nt_font_destroy(font);
 }
@@ -1799,7 +1789,7 @@ void test_fp16_rounding_keeps_curves_in_adjacent_bands(void) {
         memcpy(blob, &hdr, sizeof hdr);
         memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
         uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, pts, 4);
-        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.curve_texture_width = 64, .curve_texture_height = 64, .band_texture_height = 16, .band_count = 16});
+        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16, .band_count = 16});
         nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
         nt_resource_step();
         nt_font_step();
@@ -1814,6 +1804,107 @@ void test_fp16_rounding_keeps_curves_in_adjacent_bands(void) {
         TEST_ASSERT_EQUAL_INT16(glyph.bbox_y1, entry->bbox_y1);
         nt_font_destroy(font);
     }
+}
+
+/* A glyph looked up this frame may already sit in a recorded draw, so a full cache serves tofu instead
+ * of evicting it; the next frame evicts the least recently used glyph. */
+void test_font_full_cache_never_evicts_this_frame(void) {
+    const uint32_t cps[] = {'A', 'B', 'C', 'D'};
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_font_blob_codepoints(1000, 800, -200, 0, cps, 4U, 500, &blob_size);
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4, .band_count = 4}); /* tofu + 3 glyphs */
+    nt_font_add(font, register_font_resource("font_full", blob, blob_size));
+    nt_resource_step();
+    nt_font_step();
+
+    const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
+    const nt_glyph_cache_entry_t *b = nt_font_lookup_glyph(font, 'B');
+    const nt_glyph_cache_entry_t *c = nt_font_lookup_glyph(font, 'C');
+    const uint32_t uploads = nt_gfx_fake_update_texture_count();
+    TEST_ASSERT_TRUE(nt_font_lookup_glyph(font, 'D')->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count());
+    TEST_ASSERT_EQUAL_UINT32('A', a->codepoint);
+    TEST_ASSERT_EQUAL_UINT32('B', b->codepoint);
+    TEST_ASSERT_EQUAL_UINT32('C', c->codepoint);
+
+    nt_font_step();
+    (void)nt_font_lookup_glyph(font, 'B');
+    (void)nt_font_lookup_glyph(font, 'C');
+    const nt_glyph_cache_entry_t *d = nt_font_lookup_glyph(font, 'D');
+    TEST_ASSERT_FALSE(d->is_tofu);
+    TEST_ASSERT_EQUAL_UINT32('D', d->codepoint);
+    TEST_ASSERT_EQUAL_PTR(a, d); /* took the slot of 'A', the least recently used */
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* Evicting a slot frees its curve row, so churn far past the curve texture never runs out of space. */
+void test_font_churn_reuses_slot_rows(void) {
+    uint32_t cps[26];
+    for (uint32_t i = 0; i < 26U; i++) {
+        cps[i] = 'A' + i;
+    }
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_font_blob_codepoints(1000, 800, -200, 0, cps, 26U, 500, &blob_size);
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4, .band_count = 4});
+    nt_font_add(font, register_font_resource("font_churn", blob, blob_size));
+    nt_resource_step();
+
+    for (uint32_t frame = 0; frame < 100U; frame++) {
+        nt_font_step();
+        for (uint32_t k = 0; k < 3U; k++) {
+            const uint32_t cp = cps[((frame * 3U) + k) % 26U];
+            const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph(font, cp);
+            TEST_ASSERT_FALSE(g->is_tofu);
+            TEST_ASSERT_EQUAL_UINT32(cp, g->codepoint);
+            TEST_ASSERT_EQUAL_UINT32(0U, g->curve_offset); /* the glyph's data starts its own row */
+            TEST_ASSERT_TRUE(g->band_row >= 1U && g->band_row < 4U);
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT16(4U, nt_font_get_stats(font).glyphs_cached);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* Band data depends on the runtime band_count, so a glyph may fit with few bands and overflow its slot
+ * with many; the overflow renders tofu. */
+void test_font_glyph_over_slot_texels_renders_tofu(void) {
+    enum { TEETH = 32, POINTS = TEETH * 4 };
+    int16_t pts[POINTS][2];
+    for (size_t t = 0; t < TEETH; t++) { /* a comb: every tooth edge crosses all Y-bands */
+        const int16_t x = (int16_t)(t * 10U);
+        const int16_t tooth[4][2] = {{x, 0}, {x, 1000}, {(int16_t)(x + 5), 1000}, {(int16_t)(x + 5), 0}};
+        memcpy(pts[t * 4], tooth, sizeof tooth);
+    }
+    uint8_t blob[sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + 2048] = {0};
+    NtFontAssetHeader hdr = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 1000, .descent = 0};
+    NtFontGlyphEntry glyph = {
+        .codepoint = 'A',
+        .data_offset = sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry),
+        .advance = 320,
+        .bbox_x1 = (TEETH * 10) - 5,
+        .bbox_y1 = 1000,
+        .curve_count = POINTS,
+    };
+    memcpy(blob, &hdr, sizeof hdr);
+    memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
+    const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
+    const nt_resource_t res = nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
+    nt_font_t few_bands = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4, .band_count = 2});
+    nt_font_t many_bands = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4, .band_count = 16});
+    nt_font_add(few_bands, res);
+    nt_font_add(many_bands, res);
+    nt_resource_step();
+    nt_font_step();
+
+    TEST_ASSERT_FALSE(nt_font_lookup_glyph(few_bands, 'A')->is_tofu);
+    TEST_ASSERT_TRUE(nt_font_lookup_glyph(many_bands, 'A')->is_tofu);
+    TEST_ASSERT_EQUAL_UINT16(1U, nt_font_get_stats(many_bands).glyphs_cached); /* only tofu */
+
+    nt_font_destroy(few_bands);
+    nt_font_destroy(many_bands);
 }
 
 /* Append ONE all-on-curve closed contour at *wp; advance *wp. */
@@ -2329,9 +2420,9 @@ void test_cache_variant_distinct_slots(void) {
     TEST_ASSERT_FALSE(bold->is_tofu);
     TEST_ASSERT_EQUAL_UINT32('A', reg->codepoint);
     TEST_ASSERT_EQUAL_UINT32('A', bold->codepoint);
-    /* Distinct slots — different curve offsets, not the same entry. */
+    /* Distinct slots — different texture rows, not the same entry. */
     TEST_ASSERT_TRUE(reg != bold);
-    TEST_ASSERT_TRUE(reg->curve_offset != bold->curve_offset);
+    TEST_ASSERT_TRUE(reg->band_row != bold->band_row);
 
     /* Re-lookup returns the SAME cached slots (cache hit, no new alloc). */
     TEST_ASSERT_EQUAL_PTR(reg, nt_font_lookup_glyph_offset(slot, 'A', 0));
@@ -2405,9 +2496,7 @@ void test_embolden_entry_bbox_grows(void) {
 void test_cache_evict_chain_integrity(void) {
     /* Small cache: 4 glyph slots. tofu takes one, leaving 3 evictable. */
     nt_font_create_desc_t desc = {
-        .curve_texture_width = 256,
-        .curve_texture_height = 256,
-        .band_texture_height = 4,
+        .max_glyphs = 4,
         .band_count = 4,
     };
     nt_font_t font = nt_font_create(&desc);
@@ -2420,12 +2509,14 @@ void test_cache_evict_chain_integrity(void) {
     nt_font_slot_t *slot = nt_font_get_slot(font);
 
     /* Churn A/B/C across several weights — far more than 3 slots, forcing many
-     * evictions and backshifts. Every lookup must return a valid, correct entry. */
+     * evictions and backshifts. Every lookup must return a valid, correct entry.
+     * One lookup per frame: glyphs of the current frame are never evicted. */
     const uint32_t cps[3] = {'A', 'B', 'C'};
     const int16_t offs[4] = {0, 16, 40, 80};
     for (int pass = 0; pass < 6; pass++) {
         for (int c = 0; c < 3; c++) {
             for (int o = 0; o < 4; o++) {
+                nt_font_step();
                 const nt_glyph_cache_entry_t *e = nt_font_lookup_glyph_offset(slot, cps[c], offs[o]);
                 TEST_ASSERT_NOT_NULL(e);
                 TEST_ASSERT_EQUAL_UINT32(cps[c], e->codepoint);
@@ -2845,6 +2936,9 @@ int main(void) {
     /* embolden (offset_points) */
     RUN_TEST(test_embolden_w0_identity);
     RUN_TEST(test_fp16_rounding_keeps_curves_in_adjacent_bands);
+    RUN_TEST(test_font_full_cache_never_evicts_this_frame);
+    RUN_TEST(test_font_churn_reuses_slot_rows);
+    RUN_TEST(test_font_glyph_over_slot_texels_renders_tofu);
 #if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_embolden_monotonic_bbox);
     RUN_TEST(test_embolden_counter_shrinks);

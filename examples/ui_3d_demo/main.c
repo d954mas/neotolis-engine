@@ -1158,9 +1158,7 @@ int main(int argc, char *argv[]) {
     nt_ui_inspector_set_materials(s_ctx, s_inspector_sprite_material, s_inspector_text_material);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){
-        .curve_texture_width = 1024,
-        .curve_texture_height = 512,
-        .band_texture_height = 256,
+        .max_glyphs = 256,
         .band_count = 8,
         .measure_cache_size = 256,
     });

@@ -5,9 +5,8 @@ precision highp int;
 // Ported from HLSL reference (github.com/EricLengyel/Slug, MIT license)
 // Uses CalcRootCode, reference solvers, and CalcCoverage formula verbatim.
 
-uniform sampler2D u_curve_texture;       // RGBA16F -- curve control points as float16
+uniform sampler2D u_curve_texture;       // RGBA16F -- curve control points as float16; row = glyph band_row
 uniform highp usampler2D u_band_texture; // RG16UI -- (curve_start, curve_count) per band
-uniform int u_curve_tex_width;           // For linear-to-2D addressing
 uniform vec4 u_alpha_cutoff;             // .x = coverage discard threshold (set per material; 0 disables)
 
 in vec2 v_texcoord;
@@ -22,8 +21,6 @@ out vec4 frag_color;
 #ifndef SLUG_LINEAR_FALLBACK_EPSILON
 #define SLUG_LINEAR_FALLBACK_EPSILON (1.0 / 65536.0)
 #endif
-
-ivec2 CurveTexCoord(uint offset) { return ivec2(int(offset) % u_curve_tex_width, int(offset) / u_curve_tex_width); }
 
 // Determine root eligibility from signs of control point coordinates.
 // Returns eligibility in bits 0 (root 1) and 8 (root 2).
@@ -113,8 +110,8 @@ float SlugRender(vec2 coord) {
 
     for (uint i = 0u; i < yband.g; i++) {
         uint ti = ycurveBase + i * 2u;
-        vec4 d0 = texelFetch(u_curve_texture, CurveTexCoord(ti), 0);
-        vec4 d1 = texelFetch(u_curve_texture, CurveTexCoord(ti + 1u), 0);
+        vec4 d0 = texelFetch(u_curve_texture, ivec2(int(ti), int(band_row)), 0);
+        vec4 d1 = texelFetch(u_curve_texture, ivec2(int(ti) + 1, int(band_row)), 0);
         vec2 p0 = d0.xy - coord;
         vec2 p1 = d0.zw - coord;
         vec2 p2 = d1.xy - coord;
@@ -144,8 +141,8 @@ float SlugRender(vec2 coord) {
 
     for (uint i = 0u; i < xband.g; i++) {
         uint ti = xcurveBase + i * 2u;
-        vec4 d0 = texelFetch(u_curve_texture, CurveTexCoord(ti), 0);
-        vec4 d1 = texelFetch(u_curve_texture, CurveTexCoord(ti + 1u), 0);
+        vec4 d0 = texelFetch(u_curve_texture, ivec2(int(ti), int(band_row)), 0);
+        vec4 d1 = texelFetch(u_curve_texture, ivec2(int(ti) + 1, int(band_row)), 0);
         vec2 p0 = d0.xy - coord;
         vec2 p1 = d0.zw - coord;
         vec2 p2 = d1.xy - coord;

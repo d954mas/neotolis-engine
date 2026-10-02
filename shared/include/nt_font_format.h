@@ -110,6 +110,15 @@ _Static_assert(sizeof(NtFontKernEntry) == 4, "NtFontKernEntry must be 4 bytes");
 /* Maximum points per contour — shared limit between builder and runtime */
 #define NT_FONT_MAX_POINTS_PER_CONTOUR 4096
 
+/* Curve texels one runtime glyph-cache slot owns (one RGBA16F row). */
+#ifndef NT_FONT_GLYPH_TEXELS
+#define NT_FONT_GLYPH_TEXELS 2048
+#endif
+
+/* Every curve lands in at least one Y-band and one X-band, 2 texels each, so a glyph with more curves
+ * never fits a slot. The builder rejects it; the runtime sizes its decode buffers by it. */
+#define NT_FONT_MAX_CURVES_PER_GLYPH (NT_FONT_GLYPH_TEXELS / 4)
+
 /* Bitmask byte size for contour type bits (ceil(n/8), 2-byte aligned) */
 #define NT_FONT_BITMASK_BYTES(n) ((((uint32_t)(n) + 15U) / 8U) & ~1U)
 

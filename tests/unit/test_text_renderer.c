@@ -252,9 +252,7 @@ void setUp(void) {
     /* Build font and create handle */
     s_blob = build_test_font_blob(&s_blob_size);
     nt_font_create_desc_t desc = {
-        .curve_texture_width = 64,
-        .curve_texture_height = 64,
-        .band_texture_height = 16,
+        .max_glyphs = 16,
         .band_count = 4,
     };
     s_font = nt_font_create(&desc);
@@ -306,10 +304,8 @@ void test_text_renderer_forwards_material_blend_state(void) {
     nt_blend_state_t actual = nt_gfx_fake_last_pipeline_blend();
     TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
 
-    /* Sampler units are fixed at link: the only int a flush writes is the curve width. */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_curve_tex_width").value, nt_gfx_fake_uniform_int_hash_at(0));
-    TEST_ASSERT_EQUAL_INT((int)nt_font_get_curve_texture_width(s_font), nt_gfx_fake_uniform_int_value_at(0));
+    /* Sampler units are fixed at link and curves are addressed by glyph row: a flush writes no int. */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 
 /* The two font textures land on the units their program assigned, in canonical
@@ -331,7 +327,7 @@ void test_text_renderer_font_textures_land_on_program_units(void) {
     TEST_ASSERT_EQUAL_UINT32((uint32_t)band_unit, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_curve_texture(s_font)), nt_gfx_fake_bound_texture_at(1));
     TEST_ASSERT_EQUAL_UINT32((uint32_t)curve_unit, nt_gfx_fake_bound_texture_slot_at(1));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 
 void test_text_renderer_rejects_unrelated_second_sampler(void) {
@@ -436,7 +432,7 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         hdr.descent = cases[i].descent;
         memcpy(blob, &hdr, sizeof hdr);
 
-        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.curve_texture_width = 64, .curve_texture_height = 64, .band_texture_height = 16, .band_count = 4});
+        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16, .band_count = 4});
         nt_font_add(font, register_font_resource("rounded_tofu", blob, blob_size));
         nt_resource_step();
         nt_font_step();
@@ -748,27 +744,24 @@ void test_overflow_flush_reopens_the_batch_pipeline(void) {
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
 }
 
-void test_font_cache_flush_preserves_the_entire_run(void) {
+/* One glyph slot: 'A' takes it, B and C find every slot in use this frame and draw as tofu. */
+void test_full_glyph_cache_still_draws_the_entire_run(void) {
     nt_font_create_desc_t desc = {
-        .curve_texture_width = 16,
-        .curve_texture_height = 2,
-        .band_texture_height = 16,
+        .max_glyphs = 2,
         .band_count = 4,
     };
     nt_font_t tiny_font = nt_font_create(&desc);
-    nt_font_add(tiny_font, register_font_resource("text_cache_flush", s_blob, s_blob_size));
+    nt_font_add(tiny_font, register_font_resource("text_cache_full", s_blob, s_blob_size));
     nt_resource_step();
     nt_font_step();
     nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
     nt_text_renderer_set_font(tiny_font);
-    const uint32_t generation = nt_font_get_cache_generation(tiny_font);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
 
-    TEST_ASSERT_GREATER_THAN_UINT32(generation, nt_font_get_cache_generation(tiny_font));
     TEST_ASSERT_EQUAL_UINT64(36U, g_nt_gfx.counters.indices);
     TEST_ASSERT_EQUAL_UINT64(24U, g_nt_gfx.counters.vertices);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
@@ -776,6 +769,7 @@ void test_font_cache_flush_preserves_the_entire_run(void) {
     nt_text_renderer_set_underline(true);
     nt_text_renderer_set_strikethrough(true);
     nt_gfx_begin_frame();
+    nt_font_step();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
@@ -1523,7 +1517,7 @@ int main(void) {
     RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
     RUN_TEST(test_a_replaced_program_does_not_redirect_a_staged_batch);
     RUN_TEST(test_overflow_flush_reopens_the_batch_pipeline);
-    RUN_TEST(test_font_cache_flush_preserves_the_entire_run);
+    RUN_TEST(test_full_glyph_cache_still_draws_the_entire_run);
     RUN_TEST(test_decoration_only_run_opens_its_pipeline);
     RUN_TEST(test_destroyed_replaced_program_drops_staged_work);
     RUN_TEST(test_unready_font_skips_glyph_and_decoration_uploads);

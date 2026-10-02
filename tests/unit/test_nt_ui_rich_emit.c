@@ -187,9 +187,7 @@ static void test_double_walk_is_deterministic(void) {
  * units_per_em stays 0 so draw_n is a counted no-op (no glyph atlas needed). */
 static nt_font_t make_stub_font(void) {
     return nt_font_create(&(nt_font_create_desc_t){
-        .curve_texture_width = 64,
-        .curve_texture_height = 64,
-        .band_texture_height = 16,
+        .max_glyphs = 16,
         .band_count = 4,
         .measure_cache_size = 0,
     });

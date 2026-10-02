@@ -39,26 +39,17 @@ struct nt_font_slot_s {
     uint32_t resource_handles[NT_FONT_MAX_SOURCES_PER_FONT];
     uint8_t resource_count;
 
-    nt_texture_t curve_texture; /* RGBA16F */
-    nt_texture_t band_texture;  /* RG16UI */
-    uint16_t curve_tex_width;
-    uint16_t curve_tex_height;
-    uint16_t band_tex_height; /* = max_glyphs */
+    nt_texture_t curve_texture; /* RGBA16F, NT_FONT_GLYPH_TEXELS x max_glyphs: row i = cache slot i */
+    nt_texture_t band_texture;  /* RG16UI, band_count*2 x max_glyphs: row i = cache slot i */
     uint8_t band_count;
 
-    nt_font_cache_slot_t *cache; /* [max_glyphs] */
-    uint16_t glyphs_cached;
-    uint32_t curve_write_head; /* linear allocator into curve texture */
-    bool tofu_generated;
+    nt_font_cache_slot_t *cache; /* [max_glyphs]; slot 0 holds tofu once metrics are known */
     uint16_t max_glyphs;
-
-    uint16_t *free_stack; /* [max_glyphs], O(1) alloc/free */
-    uint16_t free_top;
+    bool warned_slots_full;
+    bool warned_glyph_too_big;
 
     uint16_t *hash_table; /* codepoint → cache slot+1 (0 = empty), POT */
     uint16_t hash_table_size;
-
-    uint32_t cache_generation; /* bumped on flush; consumers invalidate staging */
 
     nt_font_measure_cache_t measure_cache; /* pointers NULL when size == 0 */
     uint32_t measure_cache_size;
@@ -84,7 +75,6 @@ typedef struct {
     uint32_t frame_counter;      /* LRU tick */
     uint32_t last_resolve_epoch; /* last nt_resource_publication_epoch() seen — gates the step rescan */
     bool needs_resource_rescan;  /* a font's resource set changed; epoch alone won't reflect it */
-    nt_font_pre_flush_fn pre_flush_fn;
     bool initialized;
 } nt_font_state_t;
 

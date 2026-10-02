@@ -218,7 +218,6 @@ static void destroy_gpu_resources(void) {
 /* Fixed font uniform names: hashed once, since the flush path sets them every time. */
 static nt_hash32_t s_u_curve_texture;
 static nt_hash32_t s_u_band_texture;
-static nt_hash32_t s_u_curve_tex_width;
 
 void nt_text_renderer_init(void) {
     NT_ASSERT(!s_text.initialized);
@@ -226,11 +225,6 @@ void nt_text_renderer_init(void) {
 
     s_u_curve_texture = nt_hash32_str("u_curve_texture");
     s_u_band_texture = nt_hash32_str("u_band_texture");
-    s_u_curve_tex_width = nt_hash32_str("u_curve_tex_width");
-
-    /* Pre-flush hook so font-cache evictions flush our staging while texture offsets are still valid.
-     * Safe when staging is empty (flush early-returns on glyph_count == 0). */
-    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
 
     create_gpu_resources();
     s_text.initialized = true;
@@ -241,7 +235,6 @@ void nt_text_renderer_shutdown(void) {
         return;
     }
     destroy_gpu_resources();
-    nt_font_set_pre_flush_callback(NULL);
     memset(&s_text, 0, sizeof(s_text));
 }
 
@@ -746,7 +739,6 @@ static void bind_font_textures(void) {
         {.name = s_u_band_texture, .texture = nt_font_get_band_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
     };
     nt_gfx_apply_texture_bindings(bindings, 2);
-    nt_gfx_set_uniform_int(s_u_curve_tex_width, (int)nt_font_get_curve_texture_width(s_text.font));
 }
 
 void nt_text_renderer_flush(void) {

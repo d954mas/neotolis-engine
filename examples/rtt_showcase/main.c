@@ -636,9 +636,7 @@ int main(void) {
     nt_ui_set_sprite_material(s_ui_ctx, s_sprite_material);
     nt_ui_set_text_material(s_ui_ctx, s_text_material);
     s_font = nt_font_create(&(nt_font_create_desc_t){
-        .curve_texture_width = 1024,
-        .curve_texture_height = 512,
-        .band_texture_height = 256,
+        .max_glyphs = 256,
         .band_count = 8,
         .measure_cache_size = 256,
     });

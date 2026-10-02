@@ -497,6 +497,30 @@ Per-glyph data (at data_offset):
 
 Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier curves (lines promoted to degenerate quadratics). At lookup time, contours are decoded into float control points, decomposed into horizontal bands, and uploaded to GPU textures for Slug-style vector rendering. Glyphs are cached with LRU eviction — not immutable once loaded.
 
+**Glyph cache.** A font has `max_glyphs` cache slots. Slot `i` owns row `i` of
+the curve texture (`NT_FONT_GLYPH_TEXELS` RGBA16F texels, 16 KB) and row `i` of
+the band texture, so evicting a slot frees its curve space: the cache never
+clears itself for space. Slot 0 holds tofu, which `nt_font_step` generates once
+metrics and ready textures exist.
+
+- A miss takes an empty slot, else the least recently used slot not looked up
+  since the last `nt_font_step`. Draws recorded this frame may still sample a
+  slot looked up this frame, so call `nt_font_step` once per frame before any
+  text. This is documented, not asserted.
+- If every slot is in use this frame, the lookup returns tofu and warns once
+  per font naming `max_glyphs`. The glyph set depends on content the game does
+  not control (player text, localisation), so this is recoverable.
+- A glyph's band data depends on the runtime `band_count` and weight. If it
+  exceeds `NT_FONT_GLYPH_TEXELS`, the lookup returns tofu and warns once per
+  font with the codepoint.
+- The whole cache is cleared only inside `nt_font_step`: after texture
+  re-creation and after a provider or metrics change.
+
+Each curve lands in at least one Y-band and one X-band, two texels each, so a
+glyph with more than `NT_FONT_MAX_CURVES_PER_GLYPH` (`NT_FONT_GLYPH_TEXELS / 4`)
+curves never fits a slot. The builder asserts on such a glyph and logs its
+codepoint; the runtime asserts the same bound as an invariant.
+
 Curve coordinates use round-to-nearest-even FP16. Band membership includes the
 FP16 rounding error bound (maximum absolute control coordinate / 2048 per axis).
 Text quads include the corresponding bbox-based font-unit padding plus 0.5 local
