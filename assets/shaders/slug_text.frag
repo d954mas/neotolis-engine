@@ -3,14 +3,14 @@ precision highp int;
 
 // Slug GPU vector text fragment shader
 // Ported from HLSL reference (github.com/EricLengyel/Slug, MIT license)
-// Uses CalcRootCode, reference solvers, and CalcCoverage formula verbatim.
+// Uses CalcRootCode and CalcCoverage verbatim; the solvers use a cancellation-free root form (below).
 
 // RGBA16F; row = glyph band_row: band_count header texels (y_start, y_count, x_start, x_count), then curves.
 uniform sampler2D u_curve_texture;
 uniform vec4 u_alpha_cutoff; // .x = coverage discard threshold (set per material; 0 disables)
 
 in vec2 v_texcoord;
-flat in uvec4 v_glyph;       // unused, band_row, unused, band_count
+flat in uvec2 v_glyph;       // band_row, band_count
 flat in vec4 v_glyph_bounds; // bbox (x0, y0, x1, y1) in em-space
 in vec4 v_color;
 
@@ -87,11 +87,11 @@ float SlugRender(vec2 coord) {
     // Decoration sentinel: underline/strike/solid quads ride the text batch with band_count==0 AND
     // zeroed glyph_bounds. The glyph path would divide by bbox_height==0 (-> NaN) and clamp with hi<lo
     // (band_count-1 == -1, UB), so this branch both forces solid coverage and skips that garbage.
-    if (v_glyph.w == 0u)
+    if (v_glyph.y == 0u)
         return 1.0;
 
-    int band_row = int(v_glyph.y);
-    uint band_count = v_glyph.w;
+    int band_row = int(v_glyph.x);
+    uint band_count = v_glyph.y;
 
     vec2 pixelsPerEm = 1.0 / max(fwidth(coord), vec2(1.0e-6));
     float bbox_height = v_glyph_bounds.w - v_glyph_bounds.y;

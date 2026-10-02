@@ -1818,7 +1818,7 @@ void test_font_full_cache_never_evicts_this_frame(void) {
     s_warns[0] = '\0';
     TEST_ASSERT_TRUE(nt_font_lookup_glyph(font, 'D')->is_tofu);
     TEST_ASSERT_TRUE(nt_font_lookup_glyph(font, 'D')->is_tofu);
-    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_WARN ? 1U : 0U, s_warn_count); /* once per font */
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_WARN ? 1U : 0U, s_warn_count); /* once per process */
     TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count());
     TEST_ASSERT_EQUAL_UINT32('A', a->codepoint);
     TEST_ASSERT_EQUAL_UINT32('B', b->codepoint);

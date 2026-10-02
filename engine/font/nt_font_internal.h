@@ -41,12 +41,9 @@ struct nt_font_slot_s {
 
     nt_texture_t curve_texture; /* RGBA16F, NT_FONT_GLYPH_TEXELS x max_glyphs: row i = cache slot i */
 
-    nt_font_cache_slot_t *cache; /* [max_glyphs]; slot 0 holds tofu once metrics are known */
+    nt_font_cache_slot_t *cache; /* [max_glyphs]; slot 0 holds tofu */
     uint16_t max_glyphs;
     uint16_t fill; /* slots [1, fill) were taken since the last clear; later ones are unused */
-    bool warned_slots_full;
-    bool warned_bands_dropped;
-    bool warned_weight_dropped;
 
     uint16_t *hash_table; /* codepoint → cache slot+1 (0 = empty), POT */
     uint16_t hash_table_size;

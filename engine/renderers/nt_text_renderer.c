@@ -14,16 +14,16 @@
 #include <string.h>
 
 // #region Vertex format
-/* 72 bytes per vertex, matching slug_text.vert contract */
+/* 64 bytes per vertex, matching slug_text.vert contract */
 typedef struct {
     float position[3];     /* 12B: world-space quad corner (full 3D) */
     float texcoord[2];     /* 8B: em-space coordinate */
-    float glyph_data[4];   /* 16B: packed uint via memcpy (unused, band_row, unused, band_count) */
+    float glyph_data[2];   /* 8B: packed uint via memcpy (band_row, band_count) */
     float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
     float color[4];        /* 16B: RGBA float */
     float depth_bias;      /* 4B: per-glyph clip-space depth bias (subtracted from NDC z in the VS) */
 } nt_text_vertex_t;
-_Static_assert(sizeof(nt_text_vertex_t) == 72, "text vertex stride must be 72 bytes");
+_Static_assert(sizeof(nt_text_vertex_t) == 64, "text vertex stride must be 64 bytes");
 // #endregion
 
 // #region Module state
@@ -157,20 +157,20 @@ static void create_vertex_input(void) {
     if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
         return;
     }
-    /* Slug vertex layout: 6 attributes, stride = 72 bytes */
+    /* Slug vertex layout: 6 attributes, stride = 64 bytes */
     s_text.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout =
             {
                 .attr_count = 6,
-                .stride = 72,
+                .stride = 64,
                 .attrs =
                     {
                         {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},  /* a_position */
                         {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12}, /* a_texcoord */
-                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20}, /* a_glyph_data */
-                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}, /* a_glyph_bounds */
-                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52}, /* a_color */
-                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 68}, /* a_depth_bias */
+                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 20}, /* a_glyph_data */
+                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 28}, /* a_glyph_bounds */
+                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 44}, /* a_color */
+                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 60}, /* a_depth_bias */
                     },
             },
         .vertex_buffer = s_text.vbo,
@@ -340,12 +340,8 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     /* Pack glyph data as uint bit patterns */
     float gd0;
     float gd1;
-    float gd2;
-    float gd3;
-    pack_uint_as_float(&gd0, 0U);
-    pack_uint_as_float(&gd1, (uint32_t)g->band_row);
-    pack_uint_as_float(&gd2, 0U);
-    pack_uint_as_float(&gd3, (uint32_t)g->band_count);
+    pack_uint_as_float(&gd0, (uint32_t)g->band_row);
+    pack_uint_as_float(&gd1, (uint32_t)g->band_count);
 
     /* 4 vertices per quad: BL, BR, TR, TL */
     uint32_t vi = s_text.vertex_count;
@@ -355,8 +351,6 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
      * UNDILATED glyph bbox so the shader's band lookup stays correct. */
     v[0].glyph_data[0] = gd0;
     v[0].glyph_data[1] = gd1;
-    v[0].glyph_data[2] = gd2;
-    v[0].glyph_data[3] = gd3;
     v[0].glyph_bounds[0] = (float)g->bbox_x0;
     v[0].glyph_bounds[1] = (float)g->bbox_y0;
     v[0].glyph_bounds[2] = (float)g->bbox_x1;
@@ -405,9 +399,7 @@ static void emit_decoration_quad(const float model[16], float x0, float y0, floa
     float band0;
     pack_uint_as_float(&band0, 0U); /* band_count=0 = decoration sentinel */
     v[0].glyph_data[0] = 0.0F;
-    v[0].glyph_data[1] = 0.0F;
-    v[0].glyph_data[2] = 0.0F;
-    v[0].glyph_data[3] = band0;
+    v[0].glyph_data[1] = band0;
     /* bounds/texcoord unused: the shader returns before reading them for the sentinel. */
     v[0].glyph_bounds[0] = 0.0F;
     v[0].glyph_bounds[1] = 0.0F;

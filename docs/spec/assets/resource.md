@@ -509,7 +509,7 @@ metrics and a ready texture exist.
   up in the current gfx frame (since `nt_gfx_begin_frame`): that frame's
   recorded draws may still sample those rows.
 - If every slot is in use this frame, the lookup returns tofu and warns once
-  per font naming `max_glyphs`. The glyph set depends on content the game does
+  naming `max_glyphs`. The glyph set depends on content the game does
   not control (player text, localisation), so this is recoverable.
 - The whole cache is cleared only inside `nt_font_step`: after texture
   re-creation and after a provider or metrics change. Call it once per frame
@@ -518,15 +518,15 @@ metrics and a ready texture exist.
 Bands only speed up the shader's curve search: more bands mean fewer curves per
 pixel and cost only texels of the already reserved row. A glyph starts at
 `NT_FONT_MAX_BANDS` (16) and halves its bands until header and curves fit its
-row; its cache entry carries its own `band_count`, and the font warns once when
-a glyph drops bands. At one band a glyph needs one header texel plus at most
+row; its cache entry carries its own `band_count`, and the runtime warns once
+when a glyph drops bands. At one band a glyph needs one header texel plus at most
 four texels per curve, so `NT_FONT_MAX_CURVES_PER_GLYPH`
 (`(NT_FONT_GLYPH_TEXELS - 1) / 4` = 511) curves always fit. The builder asserts
 on a larger glyph and logs its codepoint; the runtime asserts the same bound.
 
-Emboldening adds curves at sharp reflex corners. An emboldened outline that
+Emboldening adds curves (reflex-corner joins, resolved self-intersections). An emboldened outline that
 outgrows `NT_FONT_MAX_CURVES_PER_GLYPH` would be cut and leak fill, so that
-variant is drawn at regular weight and the font warns once with the codepoint.
+variant is drawn at regular weight and the runtime warns once with the codepoint.
 
 Curve coordinates use round-to-nearest-even FP16. Band membership includes the
 FP16 rounding error bound (maximum absolute control coordinate / 2048 per axis).

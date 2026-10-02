@@ -374,7 +374,7 @@ static uint16_t take_slot(nt_font_slot_t *slot) {
 /* One glyph's curve row for upload (no CPU mirror). RGBA16F: 4 uint16 per texel. */
 static uint16_t s_curve_upload[(size_t)NT_FONT_GLYPH_TEXELS * 4];
 
-/* Only nt_font_step calls this, so no draw recorded this frame references the wiped slots. */
+/* Outside tests only nt_font_step calls this, before any text, so no recorded draw references the wiped slots. */
 static void clear_glyph_cache(nt_font_slot_t *slot) {
     memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
     memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
@@ -1250,9 +1250,8 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
         NT_ASSERT(bands > 1 && "one band always fits: the builder caps curves per glyph");
         bands = (uint8_t)(bands / 2);
     }
-    if (bands != NT_FONT_MAX_BANDS && !slot->warned_bands_dropped) {
-        NT_LOG_WARN("font: U+%04X overflows its glyph slot at %u bands -- drawn with %u (slower shader)", glyph->codepoint, NT_FONT_MAX_BANDS, bands);
-        slot->warned_bands_dropped = true;
+    if (bands != NT_FONT_MAX_BANDS) {
+        NT_LOG_WARN_ONCE("font: U+%04X overflows its glyph slot at %u bands -- drawn with %u (slower shader)", glyph->codepoint, NT_FONT_MAX_BANDS, bands);
     }
     // #endregion
 
@@ -1851,10 +1850,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
 
     uint16_t cache_idx = take_slot(slot);
     if (cache_idx == UINT16_MAX) {
-        if (!slot->warned_slots_full) {
-            NT_LOG_WARN("font: all %u glyph slots are in use since the last nt_font_step, new glyphs render as tofu -- raise max_glyphs or call nt_font_step once per frame", slot->max_glyphs);
-            slot->warned_slots_full = true;
-        }
+        NT_LOG_WARN_ONCE("font: all %u glyph slots are in use this frame, new glyphs render as tofu -- raise max_glyphs", slot->max_glyphs);
         return tofu_entry(slot);
     }
 
@@ -1870,10 +1866,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
         curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, (float)key_offset);
         if (s_decode_truncated) {
             /* A cut outline leaks fill; the regular outline always fits the builder's cap. */
-            if (!slot->warned_weight_dropped) {
-                NT_LOG_WARN("font: U+%04X at weight %d outgrows %u curves -- drawn at regular weight", codepoint, key_offset, NT_FONT_MAX_CURVES_PER_GLYPH);
-                slot->warned_weight_dropped = true;
-            }
+            NT_LOG_WARN_ONCE("font: U+%04X at weight %d outgrows %u curves -- drawn at regular weight", codepoint, key_offset, NT_FONT_MAX_CURVES_PER_GLYPH);
             curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, 0.0F);
         }
         NT_ASSERT(!s_decode_truncated && "regular outline exceeds the builder's curve cap");
