@@ -178,7 +178,7 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
         NT_ASSERT(mat_info->color_mode <= NT_COLOR_MODE_FLOAT4); /* corrupted material = programmer error */
         const bool mat_changed = run_mat.id != prev_mat.id;
         if (mat_changed) {
-            /* prev_mat is set only after a READY run, and program state changes only in begin_frame. */
+            /* prev_mat is set only after a READY run, and no program changes state inside prepare. */
             const nt_gfx_program_state_t program_state = nt_gfx_program_state(mat_info->program);
             if (program_state != NT_GFX_PROGRAM_READY) {
                 nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info, program_state);

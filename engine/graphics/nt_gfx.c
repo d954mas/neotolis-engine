@@ -123,6 +123,7 @@ static struct {
     uint32_t *pipeline_programs; /* full program handle each pipeline borrows */
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
+    uint32_t linking_programs; /* live programs whose link is not finished yet */
 
     nt_gfx_buffer_meta_t *buffer_metas;   /* minimal buffer metadata for runtime validation */
     nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
@@ -518,6 +519,7 @@ static void wipe_backend_handles(void) {
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
         s_gfx.program_backends[i] = 0;
     }
+    s_gfx.linking_programs = 0;
     /* Pipelines, vertex inputs and render targets are baked objects with no re-fill path:
      * loss frees their slots outright, so handles held across a loss go
      * stale and the weak renderer caches self-heal on their validity
@@ -591,21 +593,30 @@ static nt_gfx_program_state_t finish_program(uint32_t slot, bool wait) {
     if (backend == 0) {
         return NT_GFX_PROGRAM_UNAVAILABLE;
     }
+    const bool was_linking = !nt_gfx_backend_program_ready(backend);
     const nt_gfx_link_t link = nt_gfx_backend_finish_program(backend, wait);
+    if (link == NT_GFX_LINK_PENDING) {
+        return NT_GFX_PROGRAM_LINKING;
+    }
+    s_gfx.linking_programs -= was_linking ? 1U : 0U;
     if (link == NT_GFX_LINK_FAILED) {
         s_gfx.program_backends[slot] = 0;
         const bool lost = backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST;
+        if (!lost) {
+            /* The assert fires in whichever frame finishes the link, far from make_program. */
+            NT_LOG_ERROR("program %u: link failed", s_gfx.program_pool.slots[slot].id);
+        }
         NT_ASSERT(lost && "program link failed");
-        (void)lost;
         return NT_GFX_PROGRAM_UNAVAILABLE;
     }
-    return link == NT_GFX_LINK_DONE ? NT_GFX_PROGRAM_READY : NT_GFX_PROGRAM_LINKING;
+    return NT_GFX_PROGRAM_READY;
 }
 
 /* One completion query per pending program per frame. Without parallel-link support,
- * every pending program was created in an earlier frame, and finishing it may block. */
+ * every pending program was created in an earlier frame, and finishing it may block.
+ * A loss wipes the count with the backend names, so a lost context has nothing pending. */
 static void finish_pending_programs(void) {
-    if (g_nt_gfx.context_lost) {
+    if (s_gfx.linking_programs == 0) {
         return;
     }
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
@@ -881,6 +892,7 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     NT_ASSERT(backend != 0 && "program link could not start");
 
     s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
+    s_gfx.linking_programs++;
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, id);
@@ -1409,7 +1421,9 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
         nt_gfx_destroy_pipeline((nt_pipeline_t){s_gfx.pipeline_pool.slots[i].id});
     }
     uint32_t slot = nt_pool_slot_index(prog.id);
-    nt_gfx_backend_destroy_program(s_gfx.program_backends[slot]);
+    const uint32_t backend = s_gfx.program_backends[slot];
+    s_gfx.linking_programs -= (backend != 0 && !nt_gfx_backend_program_ready(backend)) ? 1U : 0U;
+    nt_gfx_backend_destroy_program(backend);
     s_gfx.program_backends[slot] = 0;
     nt_pool_free(&s_gfx.program_pool, prog.id);
     return NT_GFX_RESULT_ACCEPTED;

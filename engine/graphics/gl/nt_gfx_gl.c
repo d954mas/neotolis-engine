@@ -135,7 +135,7 @@ typedef struct {
  * state, and core profile rejects it with VAO 0 bound (INVALID_OPERATION). */
 static GLuint s_ebo_upload_vao;
 
-static nt_gfx_gl_program_t *s_programs;           /* linked programs, indexed by slot */
+static nt_gfx_gl_program_t *s_programs;           /* linking or linked programs, indexed by slot */
 static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by slot */
 static nt_gfx_gl_vertex_input_t *s_vertex_inputs; /* vertex-input VAOs, indexed by slot */
 static GLuint *s_buffer_gl;                       /* GL buffer names, indexed by slot */
@@ -1512,6 +1512,9 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     }
 
     GLuint program = NT_GL_RET0(glCreateProgram);
+    if (program == 0) {
+        return 0; /* a zero name would leave this slot looking free */
+    }
     NT_GL(glAttachShader, program, (GLuint)vs_backend);
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
     /* Only started here: browsers link on worker threads, and asking for the

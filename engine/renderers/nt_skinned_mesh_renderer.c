@@ -192,7 +192,7 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
         NT_ASSERT(material->color_mode <= NT_COLOR_MODE_FLOAT4);
         const bool material_changed = material_handle.id != previous_material.id;
         if (material_changed) {
-            /* previous_material is set only after a READY run, and program state changes only in begin_frame. */
+            /* previous_material is set only after a READY run, and no program changes state inside prepare. */
             const nt_gfx_program_state_t program_state = nt_gfx_program_state(material->program);
             if (program_state != NT_GFX_PROGRAM_READY) {
                 nt_renderer_warn_program_not_ready(&s_skinned.warned_program_not_ready, material, program_state);

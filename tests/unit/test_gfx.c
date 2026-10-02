@@ -369,14 +369,17 @@ void test_gfx_make_pipeline_rejects_linking_without_finishing(void) {
 }
 
 void test_gfx_program_wait_finishes_inside_a_pass_without_advancing_frames(void) {
+    nt_pipeline_t bound = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_fake_make_program(NULL, 0)});
     nt_gfx_fake_set_links_pending(true);
     nt_program_t prog = nt_gfx_fake_make_program((const char *const[]){"u_tex"}, 1);
     TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_LINKING, nt_gfx_program_state(prog));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(bound);
     const uint64_t frame = g_nt_gfx.counters.frame_sequence;
     const uint64_t last_frame = g_nt_gfx.last_frame.frame_sequence;
 
     TEST_ASSERT_TRUE(nt_gfx_program_wait(prog));
+    TEST_ASSERT_EQUAL_UINT32(bound.id, nt_gfx_test_bound_pipeline());
     TEST_ASSERT_EQUAL_UINT64(frame, g_nt_gfx.counters.frame_sequence);
     TEST_ASSERT_EQUAL_UINT64(last_frame, g_nt_gfx.last_frame.frame_sequence);
     TEST_ASSERT_EQUAL_INT(0, nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_tex")));
@@ -394,9 +397,52 @@ void test_gfx_program_wait_rejects_invalid_and_stale_handles(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(stale.id), nt_pool_slot_index(fresh.id));
     const uint32_t finishes = nt_gfx_fake_program_finish_count();
     TEST_ASSERT_FALSE(nt_gfx_program_wait(stale));
-    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = stale}));
     TEST_ASSERT_EQUAL_UINT32(finishes, nt_gfx_fake_program_finish_count());
+    /* fresh is READY in the same slot, so only the stale generation can trip the assert. */
     TEST_ASSERT_TRUE(nt_gfx_program_wait(fresh));
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = stale}));
+}
+
+/* begin_frame asks the backend once per LINKING program and never about a settled one. */
+void test_gfx_begin_frame_polls_each_linking_program_once(void) {
+    nt_program_t ready = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(ready));
+    nt_gfx_fake_set_links_pending(true);
+    nt_program_t first = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t second = nt_gfx_make_program(make_test_vs(), make_test_fs());
+
+    uint32_t finishes = nt_gfx_fake_program_finish_count();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(finishes + 2, nt_gfx_fake_program_finish_count());
+
+    nt_gfx_destroy_program(first);
+    finishes = nt_gfx_fake_program_finish_count();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(finishes + 1, nt_gfx_fake_program_finish_count());
+
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(second));
+    finishes = nt_gfx_fake_program_finish_count();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(finishes, nt_gfx_fake_program_finish_count());
+    nt_gfx_destroy_program(second);
+    nt_gfx_destroy_program(ready);
+}
+
+/* Settling or destroying other programs must not make begin_frame forget one that still links. */
+void test_gfx_begin_frame_finishes_a_link_after_other_programs_settle(void) {
+    nt_gfx_fake_set_links_pending(true);
+    nt_program_t waited = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t destroyed = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_program_t pending = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(waited));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(waited));
+    nt_gfx_destroy_program(waited);
+    nt_gfx_destroy_program(destroyed);
+
+    nt_gfx_fake_set_links_pending(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_READY, nt_gfx_program_state(pending));
+    nt_gfx_destroy_program(pending);
 }
 
 void test_gfx_program_wait_returns_unavailable_for_context_loss(void) {
@@ -592,6 +638,7 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
 
 void test_gfx_context_loss_keeps_handle_drops_ready(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(prog));
 
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
@@ -599,6 +646,22 @@ void test_gfx_context_loss_keeps_handle_drops_ready(void) {
 
     TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
     TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_state(prog));
+}
+
+/* A loss drops a pending link with its backend name: nothing is left to finish, then or after the restore. */
+void test_gfx_context_loss_while_linking_drops_the_pending_link(void) {
+    nt_gfx_fake_set_links_pending(true);
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    const uint32_t finishes = nt_gfx_fake_program_finish_count();
+
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_begin_frame();
+
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_state(prog));
+    TEST_ASSERT_EQUAL_UINT32(finishes, nt_gfx_fake_program_finish_count());
 }
 
 /* ---- Global blocks: registration order does not matter ---- */
@@ -3334,6 +3397,8 @@ int main(void) {
     RUN_TEST(test_gfx_make_pipeline_rejects_linking_without_finishing);
     RUN_TEST(test_gfx_program_wait_finishes_inside_a_pass_without_advancing_frames);
     RUN_TEST(test_gfx_program_wait_rejects_invalid_and_stale_handles);
+    RUN_TEST(test_gfx_begin_frame_polls_each_linking_program_once);
+    RUN_TEST(test_gfx_begin_frame_finishes_a_link_after_other_programs_settle);
     RUN_TEST(test_gfx_program_wait_returns_unavailable_for_context_loss);
     RUN_TEST(test_gfx_failed_link_asserts_and_leaves_a_husk);
     RUN_TEST(test_gfx_destroy_program_invalidates);
@@ -3346,6 +3411,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss);
     RUN_TEST(test_gfx_program_link_context_loss_releases_every_slot);
     RUN_TEST(test_gfx_context_loss_keeps_handle_drops_ready);
+    RUN_TEST(test_gfx_context_loss_while_linking_drops_the_pending_link);
     RUN_TEST(test_gfx_register_global_block_after_program_is_allowed);
     RUN_TEST(test_gfx_pipeline_asserts_null_desc);
     RUN_TEST(test_gfx_pipeline_context_lost_returns_invalid);

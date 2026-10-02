@@ -1113,7 +1113,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
             memo_mat = (memo_pip.id != 0) ? mat->id : 0;
         }
         const nt_pipeline_t pip = memo_pip;
-        if (pip.id == 0) { /* context died mid-frame; skip rather than draw through a stale bind */
+        if (pip.id == 0) { /* program linking or lost; skip rather than draw through a stale bind */
             run_start = run_end;
             continue;
         }

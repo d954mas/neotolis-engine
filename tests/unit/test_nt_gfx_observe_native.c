@@ -226,10 +226,15 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     uint32_t units = 0;
     uint32_t skips = 0;
     uint32_t pipeline_states = 0;
+    uint32_t finished_links = 0;
     nt_gfx_operation_t stack[16] = {0};
     uint32_t depth = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
+        /* The wait is the one program STATE op here; the sampler records come from its finish. */
+        if (event->kind == NT_GFX_EVENT_RESULT && event->operation == NT_GFX_OP_STATE && event->object_kind == NT_GFX_OBJECT_PROGRAM) {
+            finished_links += (event->result == NT_GFX_RESULT_ACCEPTED) ? 1U : 0U;
+        }
         if (event->kind == NT_GFX_EVENT_INITIAL && event->operation == NT_GFX_OP_SAMPLER) {
             if (event->data.backend.args[1] == nt_hash32_str("a").value) {
                 names |= 1;
@@ -260,6 +265,7 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
     TEST_ASSERT_EQUAL_UINT32(3, units);
     TEST_ASSERT_EQUAL_UINT32(3, skips);
     TEST_ASSERT_EQUAL_UINT32(1, pipeline_states);
+    TEST_ASSERT_EQUAL_UINT32(1, finished_links);
     TEST_ASSERT_FALSE(capture.overflow);
 }
 

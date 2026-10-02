@@ -1104,6 +1104,51 @@ void test_state_skip_mid_list_resolves_next_run(void) {
     nt_gfx_fake_draw_trace_reset(false);
 }
 
+/* The gate runs once per material change: a second run on the same LINKING material
+ * must not ride the pipeline the READY run before it left behind. LINKING never warns. */
+void test_draw_list_skips_linking_runs_silently_until_the_link_finishes(void) {
+    nt_mesh_t mesh_a = create_test_mesh();
+    nt_mesh_t mesh_b = create_test_mesh();
+    nt_material_t ready = create_test_material();
+    nt_gfx_fake_set_links_pending(true);
+    nt_material_t linking = create_test_material();
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_LINKING, nt_gfx_program_state(nt_material_get_info(linking)->program));
+
+    nt_material_t mats[3] = {ready, linking, linking};
+    nt_mesh_t meshes[3] = {mesh_a, mesh_a, mesh_b};
+    nt_entity_t entities[3] = {create_test_entity(mesh_a, ready), create_test_entity(mesh_a, linking), create_test_entity(mesh_b, linking)};
+    nt_render_item_t items[3];
+    fill_items(items, entities, mats, meshes, 3);
+
+    draw_list(items, 3);
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, s_program_warnings);
+
+    nt_gfx_fake_set_links_pending(false);
+    draw_list(items, 3);
+    TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, s_program_warnings);
+}
+
+/* UNAVAILABLE warns once however many runs of that material one prepare skips. */
+void test_draw_list_warns_once_for_consecutive_unavailable_runs(void) {
+    nt_mesh_t mesh_a = create_test_mesh();
+    nt_mesh_t mesh_b = create_test_mesh();
+    nt_material_t unavailable = create_test_material();
+    nt_material_t ready = create_test_material();
+    nt_material_set_program(unavailable, NT_PROGRAM_INVALID);
+
+    nt_material_t mats[3] = {unavailable, unavailable, ready};
+    nt_mesh_t meshes[3] = {mesh_a, mesh_b, mesh_a};
+    nt_entity_t entities[3] = {create_test_entity(mesh_a, unavailable), create_test_entity(mesh_b, unavailable), create_test_entity(mesh_a, ready)};
+    nt_render_item_t items[3];
+    fill_items(items, entities, mats, meshes, 3);
+
+    draw_list(items, 3);
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_program_warnings);
+}
+
 /* A run whose pipeline could not be created binds nothing, so the run after it
  * still sees the state the run before it left bound. */
 void test_state_pipeline_failure_mid_list_rebinds_next_run(void) {
@@ -1860,6 +1905,8 @@ int main(void) {
     RUN_TEST(test_state_override_binds_one_sampler_per_texture_change);
     RUN_TEST(test_state_distinct_textures_a_b_a);
     RUN_TEST(test_state_skip_mid_list_resolves_next_run);
+    RUN_TEST(test_draw_list_skips_linking_runs_silently_until_the_link_finishes);
+    RUN_TEST(test_draw_list_warns_once_for_consecutive_unavailable_runs);
     RUN_TEST(test_state_pipeline_failure_mid_list_rebinds_next_run);
     RUN_TEST(test_state_same_tex_same_sampler_diff_params);
     RUN_TEST(test_pipeline_cache_skips_failed_pipeline);

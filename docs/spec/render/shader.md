@@ -32,7 +32,8 @@ A program linked from pack-loaded stages needs a per-frame gate, because the
 stages arrive asynchronously and nothing can link before both resolve.
 `nt_program_ref_t` (`material/nt_program_ref.h`) is that gate: the game gives it
 the two resource handles once, calls `nt_program_ref_update` every frame, and
-assigns on the frame it returns true. It stores the resource handles rather than
+assigns on the frame it returns true. True means a program was created, not that
+it is READY: it may still be LINKING, and draws gate on its state. It stores the resource handles rather than
 the compiled stages or the source text, because only the handles survive a
 context loss -- `nt_program_ref_drop` clears the program and the same gate links
 again once the stages re-activate. A shader embedded as a source string needs

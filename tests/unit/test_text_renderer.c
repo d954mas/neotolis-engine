@@ -649,20 +649,18 @@ void test_flush_warns_on_vertex_input_failure_while_program_links(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
 }
 
-void test_flush_warns_after_pipeline_creation_failure(void) {
-    nt_log_add_sink(capture_warnings, NULL);
+/* A failed pipeline creation discards that batch and is retried by the next one. */
+void test_flush_retries_pipeline_creation_after_backend_failure(void) {
     nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
     nt_gfx_fake_draw_trace_reset(true);
     nt_gfx_fake_fail_next_pipeline_create();
 
     draw_and_flush();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
 
     draw_and_flush();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
 }
 
 /* A recoverable vertex-input creation failure must not disable text until the
@@ -1633,7 +1631,7 @@ int main(void) {
     RUN_TEST(test_flush_skips_linking_batches_without_warning);
     RUN_TEST(test_flush_warns_once_without_a_material);
     RUN_TEST(test_flush_warns_on_vertex_input_failure_while_program_links);
-    RUN_TEST(test_flush_warns_after_pipeline_creation_failure);
+    RUN_TEST(test_flush_retries_pipeline_creation_after_backend_failure);
     RUN_TEST(test_flush_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_failed_restore_releases_partial_buffers);
     RUN_TEST(test_flush_discards_glyphs_on_a_destroyed_program);

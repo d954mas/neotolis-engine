@@ -165,9 +165,10 @@ With `KHR_parallel_shader_compile` (KHR or ARB on native) it queries completion
 once per pending program and leaves unfinished ones LINKING. Without the
 extension it finishes every pending program, which can block until the driver
 finishes; nonblocking linking requires the extension. WebGL diagnostic compiler
-checks may themselves block inside `glLinkProgram`. A program is therefore READY
-no earlier than the frame after creation, and its state changes only in
-`nt_gfx_begin_frame` or `nt_gfx_program_wait`.
+checks may themselves block inside `glLinkProgram`. Without
+`nt_gfx_program_wait` a program is therefore READY no earlier than the frame
+after creation; it becomes READY only in `nt_gfx_begin_frame` or
+`nt_gfx_program_wait`.
 
 `nt_gfx_program_wait` finishes the link now, for synchronous initialization, and
 returns true when the program is READY. It does not advance the frame or change

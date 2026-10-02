@@ -370,8 +370,9 @@ an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
 re-activate on the next step within the activation budget; an evicted pack must
 re-download first. Rebuild resource-dependent render state after publication.
 
-The mesh renderers' `prepare` and the sprite `draw_list` skip a material whose program is not ready and warn
-once until a pipeline is built again. The skip is normal runtime state, not a
+The mesh renderers' `prepare` and the sprite `draw_list` skip a material whose
+program is not READY. An UNAVAILABLE program warns once until a pipeline is built
+again; a LINKING one is silent. The skip is normal runtime state, not a
 caller error. The immediate-mode
 `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
 assert only that a program was assigned, not that it is live. The game stops

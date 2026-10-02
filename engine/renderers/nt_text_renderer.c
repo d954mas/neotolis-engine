@@ -144,12 +144,7 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     if (cached.id != 0) {
         return cached;
     }
-    const nt_pipeline_t pipeline = nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc, &s_text.warned_no_pipeline);
-    if (pipeline.id == 0 && !s_text.warned_no_pipeline) {
-        NT_LOG_WARN("nt_text_renderer: pipeline creation failed -- discarding this batch");
-        s_text.warned_no_pipeline = true;
-    }
-    return pipeline;
+    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc, &s_text.warned_no_pipeline);
 }
 // #endregion
 

@@ -979,6 +979,75 @@ static void test_global_block_registered_after_link_binds_in_that_program(void) 
     nt_gfx_destroy_shader(vs);
 }
 
+/* A block registered while the program links must not query the unfinished link; the finish binds it. */
+static void test_global_block_registered_while_linking_binds_when_the_link_finishes(void) {
+    static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
+                                       "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
+    static const char *fragment_source = "#ifdef GL_ES\n"
+                                         "precision mediump float;\n"
+                                         "#endif\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = vec4(1.0); }\n";
+
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+
+    nt_program_t prog = nt_gfx_make_program(vs, fs);
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_LINKING, nt_gfx_program_state(prog));
+    nt_gfx_register_global_block("Globals", 4);
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(prog));
+
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+
+    GLint current_program = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+    TEST_ASSERT_NOT_EQUAL_INT(0, current_program);
+    GLuint block_index = glGetUniformBlockIndex((GLuint)current_program, "Globals");
+    TEST_ASSERT_NOT_EQUAL_UINT32(GL_INVALID_INDEX, block_index);
+    GLint binding = -1;
+    glGetActiveUniformBlockiv((GLuint)current_program, block_index, GL_UNIFORM_BLOCK_BINDING, &binding);
+    TEST_ASSERT_EQUAL_INT(4, binding);
+
+    nt_gfx_end_pass();
+
+    nt_gfx_destroy_pipeline(pip);
+    nt_gfx_destroy_program(prog);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
+/* Finishing a sampler program writes its units through glUseProgram; the pass's program must come back. */
+static void test_program_wait_inside_a_pass_keeps_the_bound_program(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0); }"});
+    nt_shader_t plain_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 color; void main() { color = vec4(1.0); }"});
+    nt_shader_t sampler_fs = nt_gfx_make_shader(
+        &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D u_tex; out vec4 color; void main() { color = texture(u_tex, vec2(0.0)); }"});
+    nt_program_t bound = nt_gfx_make_program(vs, plain_fs);
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(bound));
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = bound});
+    nt_program_t late = nt_gfx_make_program(vs, sampler_fs);
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    GLint before = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &before);
+    TEST_ASSERT_NOT_EQUAL_INT(0, before);
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(late));
+    GLint after = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &after);
+    TEST_ASSERT_EQUAL_INT(before, after);
+    nt_gfx_end_pass();
+
+    nt_gfx_destroy_program(late);
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_destroy_program(bound);
+    nt_gfx_destroy_shader(sampler_fs);
+    nt_gfx_destroy_shader(plain_fs);
+    nt_gfx_destroy_shader(vs);
+}
+
 static GLuint bind_uniform_test_program(const char *fragment_source) {
     static const char *vertex_source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n";
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
@@ -1889,6 +1958,8 @@ int main(void) {
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
     RUN_TEST(test_global_block_registered_before_link_binds_in_the_program);
     RUN_TEST(test_global_block_registered_after_link_binds_in_that_program);
+    RUN_TEST(test_global_block_registered_while_linking_binds_when_the_link_finishes);
+    RUN_TEST(test_program_wait_inside_a_pass_keeps_the_bound_program);
     RUN_TEST(test_uniform_values_are_shared_by_pipelines_on_one_program);
     RUN_TEST(test_each_pipeline_binds_its_own_program);
     RUN_TEST(test_destroying_one_pipeline_leaves_the_shared_program_alive);
