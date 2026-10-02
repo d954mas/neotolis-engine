@@ -349,8 +349,8 @@ discards staged glyphs while its buffers are missing. Examples may explicitly
 choose fail-fast handling, while a game that needs retries owns that policy.
 
 Materials survive teardown and retain their old program handles. Destroying a
-program bumps its slot generation, so `nt_gfx_program_ready(info->program)`
-reports false. Material handles remain unchanged; ECS components, the UI context,
+program bumps its slot generation, so `nt_gfx_program_state(info->program)`
+reports UNAVAILABLE. Material handles remain unchanged; ECS components, the UI context,
 and game-side structures need no re-binding.
 
 A font keeps its `nt_font_add` source list of resource handles. Once the context
@@ -370,8 +370,9 @@ an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
 re-activate on the next step within the activation budget; an evicted pack must
 re-download first. Rebuild resource-dependent render state after publication.
 
-The mesh renderers' `prepare` and the sprite `draw_list` skip a material whose program is not ready and warn
-once until a pipeline is built again. The skip is normal runtime state, not a
+The mesh renderers' `prepare` and the sprite `draw_list` skip a material whose
+program is not READY. An UNAVAILABLE program warns once until a pipeline is built
+again; a LINKING one is silent. The skip is normal runtime state, not a
 caller error. The immediate-mode
 `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
 assert only that a program was assigned, not that it is live. The game stops

@@ -842,7 +842,9 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
  * begin_frame copies the counters into g_nt_gfx.last_frame, then resets
  * g_nt_gfx.counters. The loss sync takes the browser's loss events: a new loss wipes
  * every backend name and sets context_lost; while lost it restores once the browser
- * reports the context back and sets context_restored until the next begin_frame. */
+ * reports the context back and sets context_restored until the next begin_frame.
+ * Last, it finishes pending program links: one completion query per LINKING program
+ * with parallel shader compile, a finish that may block on the driver without it. */
 void nt_gfx_begin_frame(void);
 /* Passes do not nest; on a lost context both calls are no-ops. */
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
@@ -855,11 +857,15 @@ void nt_gfx_clear(const nt_clear_desc_t *desc);
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
-/* Links valid stages. Link errors, >16 non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert.
+/* Starts linking valid stages; the handle stays LINKING until a later begin_frame
+ * or nt_gfx_program_wait finishes the link. Link errors, >16 non-sampler uniforms
+ * and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert when the link finishes.
  * Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
-/* Creation preserves the currently bound pipeline. */
+/* Requires a READY program; never finishes a link. Returns invalid while the context
+ * is lost; otherwise invalid, unavailable or linking programs assert. Preserves the
+ * bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_vertex_input. The VI
  * borrows its buffers; creation borrows desc/label and preserves the bound VI.
@@ -878,7 +884,8 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 
 /* ---- Resource destruction ---- */
 
-/* Already linked programs remain usable after their stages are destroyed. */
+/* Programs stay usable after their stages are destroyed, linked or still linking;
+ * a link that fails afterwards cannot log the destroyed stage. */
 void nt_gfx_destroy_shader(nt_shader_t shd);
 /* Destroys the program and its pipelines; materials retain the now-unready handle.
  * Renderer caches drop dead entries on insertion/reset. INVALID is a no-op; stale nonzero handles assert.
@@ -928,9 +935,19 @@ bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
  * slot -- they are baked objects with no re-fill path). Renderer caches
  * check this on lookup and self-heal. */
 bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
-/* Reports a live program backend, required by nt_gfx_make_pipeline.
- * Readiness lost to context loss never returns for that handle. */
-bool nt_gfx_program_ready(nt_program_t prog);
+typedef enum {
+    NT_GFX_PROGRAM_UNAVAILABLE, /* invalid, stale or never assigned; or terminal after a context loss or a failed link */
+    NT_GFX_PROGRAM_LINKING,
+    NT_GFX_PROGRAM_READY,
+} nt_gfx_program_state_t;
+
+/* Reads the program's state; no GL call. begin_frame finishes pending links, so a
+ * program becomes READY only there or in nt_gfx_program_wait. A terminal live handle
+ * never becomes READY again. */
+nt_gfx_program_state_t nt_gfx_program_state(nt_program_t prog);
+/* Finishes a link now and reports READY; may block on the driver. Does not
+ * advance the frame or change the bound pipeline. */
+bool nt_gfx_program_wait(nt_program_t prog);
 /* The program the pipeline borrows; INVALID for an invalid or stale pipeline. */
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip);
 /* Writes logical dimensions. Outputs are required; invalid handles write zero and return false. */

@@ -10,7 +10,7 @@ Related: [Material System](material.md), [Runtime Formats](../assets/runtime-for
 ## Runtime objects: ShaderCode, Program
 
 `NT_ASSET_SHADER_CODE` is the text of ONE stage; there is no program asset.
-`nt_gfx_make_shader` compiles a stage and `nt_gfx_make_program(vs, fs)` links
+`nt_gfx_make_shader` starts compiling a stage and `nt_gfx_make_program(vs, fs)` starts linking
 a pair, from either an embedded source string or two resolved resources. The
 shader resource exists so the builder can compile each stage offline and reject
 a broken one at build time. That validation needs a GL context: a headless build
@@ -32,11 +32,14 @@ A program linked from pack-loaded stages needs a per-frame gate, because the
 stages arrive asynchronously and nothing can link before both resolve.
 `nt_program_ref_t` (`material/nt_program_ref.h`) is that gate: the game gives it
 the two resource handles once, calls `nt_program_ref_update` every frame, and
-assigns on the frame it returns true. It stores the resource handles rather than
+assigns on the frame it returns true. True means a program was created, not that
+it is READY: it may still be LINKING, and draws gate on its state. It stores the resource handles rather than
 the compiled stages or the source text, because only the handles survive a
 context loss -- `nt_program_ref_drop` clears the program and the same gate links
 again once the stages re-activate. A shader embedded as a source string needs
-none of this: compile and link at init, with nothing to wait for.
+no resource gate: start its program at init, then draw once it is READY, or call
+`nt_gfx_program_wait` before creating a pipeline at init. Link completion and
+stage lifetimes follow [Program handles](../core/api-contracts.md#program-handles).
 
 Pack priority does not reach a material's program. A material stores a linked
 `nt_program_t`, not the `NT_ASSET_SHADER_CODE` stages behind it, so a
@@ -103,18 +106,19 @@ map a complete name-keyed set to units, and callers never observe or choose unit
 numbers. A name absent after driver optimization is inactive and ignored before
 its texture or sampler handle is inspected.
 
-A reflection query that reports nothing discards the new program before
-publication, so the next frame links again rather than caching half a location
-table. Nothing catches an exception thrown out of reflection: on the web the
-Emscripten GL layer dereferences a null result in two of its own reflection
-helpers. The browser reports a loss through `isContextLost` at once (only the
-lost event is queued), and program creation queries it before the link and
-after a failed one, so the throw needs a loss that lands after a successful
-link and before reflection within one create. The engine accepts that race
-rather than wrap Emscripten's helpers.
+A failed link or incomplete reflection discards the backend program and leaves
+the already-published handle UNAVAILABLE. A context loss is recoverable;
+other link/reflection failures assert. No partial reflection becomes READY.
+Nothing catches an exception thrown out of reflection: on the web the
+Emscripten GL layer dereferences a null result in two reflection helpers.
+The browser reports loss through `isContextLost` immediately; loss between a
+successful link-status query and reflection remains an accepted race rather
+than adding wrappers around Emscripten's helpers.
 
-A link failure is a developer error and traps (`NT_ASSERT`) rather than
-returning an invalid handle. `nt_gfx_make_program` returns an invalid handle on
+A link failure is a developer error and traps (`NT_ASSERT`) where the link
+finishes, in `nt_gfx_begin_frame` or `nt_gfx_program_wait`, rather than
+returning an invalid handle.
+`nt_gfx_make_program` returns an invalid handle on
 a lost context, including a loss the browser reports before its lost event
 arrives and pending engine recovery after the browser has restored it, and for a live stage handle whose GPU object an earlier loss discarded --
 that stage is permanently unready, so the owner recreates it and links again.

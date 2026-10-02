@@ -177,7 +177,7 @@ static bool make_quad_resources(void) {
         return false;
     }
     s_demo.quad_program = nt_gfx_make_program(s_demo.quad_vs, s_demo.quad_fs);
-    if (!nt_gfx_program_ready(s_demo.quad_program)) {
+    if (!nt_gfx_program_wait(s_demo.quad_program)) {
         return false;
     }
 
@@ -324,7 +324,8 @@ static void declare_slider_control(const char *title, const char *value_text, ui
 static bool ui_ready(void) {
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    return s_atlas_bound && s_font_bound && sprite_info != NULL && nt_gfx_program_ready(sprite_info->program) && text_info != NULL && nt_gfx_program_ready(text_info->program);
+    return s_atlas_bound && s_font_bound && sprite_info != NULL && text_info != NULL && nt_gfx_program_state(sprite_info->program) == NT_GFX_PROGRAM_READY &&
+           nt_gfx_program_state(text_info->program) == NT_GFX_PROGRAM_READY;
 }
 
 static void draw_ui_overlay(void) {

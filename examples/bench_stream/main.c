@@ -406,6 +406,9 @@ static nt_pipeline_t make_pipeline(const char *vs_src, const char *fs_src, nt_bl
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src, .label = label});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src, .label = label});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
+    if (!nt_gfx_program_wait(prog)) {
+        return (nt_pipeline_t){0};
+    }
     return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog, .blend = blend, .label = label});
 }
 

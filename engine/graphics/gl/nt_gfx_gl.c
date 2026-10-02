@@ -56,6 +56,11 @@
 
 #endif
 
+/* KHR_parallel_shader_compile; the GLES3 headers leave it to gl2ext.h. */
+#ifndef GL_COMPLETION_STATUS_KHR
+#define GL_COMPLETION_STATUS_KHR 0x91B1
+#endif
+
 /* ---- Pipeline backend data ---- */
 
 /* Per-program standalone locations, including each array element. */
@@ -100,6 +105,10 @@ typedef struct {
  * pipelines that borrow the program. */
 typedef struct {
     GLuint program;
+    /* Until finish_program: reflection, sampler units and UBO bindings wait for the link. */
+    bool linking;
+    uint32_t link_vs; /* stages named in a failed link's log */
+    uint32_t link_fs;
     nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
     uint8_t uniform_count;
     uint16_t vec4_mask;
@@ -126,7 +135,7 @@ typedef struct {
  * state, and core profile rejects it with VAO 0 bound (INVALID_OPERATION). */
 static GLuint s_ebo_upload_vao;
 
-static nt_gfx_gl_program_t *s_programs;           /* linked programs, indexed by slot */
+static nt_gfx_gl_program_t *s_programs;           /* linking or linked programs, indexed by slot */
 static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by slot */
 static nt_gfx_gl_vertex_input_t *s_vertex_inputs; /* vertex-input VAOs, indexed by slot */
 static GLuint *s_buffer_gl;                       /* GL buffer names, indexed by slot */
@@ -134,6 +143,7 @@ static GLenum *s_buffer_targets;                  /* GL_ARRAY_BUFFER or GL_ELEME
 static GLuint *s_texture_gl;                      /* GL texture names, indexed by slot */
 static GLuint *s_render_target_gl;                /* GL framebuffer names, indexed by slot */
 static GLuint s_bound_framebuffer;
+static bool s_parallel_link; /* GL_COMPLETION_STATUS_KHR is queryable */
 static GLbitfield s_pass_discard;
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
@@ -213,9 +223,9 @@ static struct {
 
 // #region capture of authoritative backend mirrors
 #if NT_GFX_CAPTURE_ENABLED
-static void capture_program_definition(uint32_t i) {
+/* Empty while the program links; finish_program records it once reflection exists. */
+static void capture_program_reflection(uint32_t i) {
     const nt_gfx_gl_program_t *program = &s_programs[i];
-    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_PROGRAM; event->data.backend.args[0] = i; event->data.backend.args[1] = program->program;);
     for (uint32_t u = 0; u < program->uniform_count; u++) {
         if ((program->vec4_mask & (1U << u)) == 0) {
             continue;
@@ -231,6 +241,11 @@ static void capture_program_definition(uint32_t i) {
                       event->data.backend.args[2] = (uint32_t)program->sampler_units[u].location; event->data.backend.args[3] = u;
                       event->data.backend.args[4] = program->sampler_units[u].sampler_class;);
     }
+}
+
+static void capture_program_definition(uint32_t i) {
+    NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_PROGRAM; event->data.backend.args[0] = i; event->data.backend.args[1] = s_programs[i].program;);
+    capture_program_reflection(i);
 }
 
 static void capture_pipeline_definition(uint32_t slot) {
@@ -597,6 +612,7 @@ static void nt_gfx_gl_init_context_features(void) {
     /* Emscripten keeps a recorded error across contexts: calls that reached the
      * dead context must not fail the fresh one's first error check. */
     nt_gfx_gl_drain_errors();
+    s_parallel_link = nt_gfx_gl_ctx_enable_parallel_link();
 #if NT_GFX_GPU_TIMING_ENABLED
     s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
     s_debug_groups_enabled = nt_gfx_gl_ctx_enable_debug_groups();
@@ -1230,6 +1246,9 @@ static void nt_gfx_gl_log_lines(const char *log) {
 }
 
 static void nt_gfx_gl_log_shader(uint32_t shader, const char *stage) {
+    if (shader == 0) {
+        return;
+    }
     GLint len = 0;
     NT_GL(glGetShaderiv, (GLuint)shader, GL_INFO_LOG_LENGTH, &len);
     if (len <= 1) {
@@ -1267,46 +1286,44 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     if (backend_handle == 0) {
         return;
     }
+    /* Emscripten drops deleted shader IDs even while a program keeps the attachment. */
+    for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
+        if (s_programs[i].link_vs == backend_handle) {
+            s_programs[i].link_vs = 0;
+        }
+        if (s_programs[i].link_fs == backend_handle) {
+            s_programs[i].link_fs = 0;
+        }
+    }
     NT_GL(glDeleteShader, (GLuint)backend_handle);
 }
 
-/* Links a stage pair and binds every registered global UBO block. Returns 0 on
- * link failure, after logging both stages and the program log. */
+/* Reads the status of a finished link and binds every registered global UBO
+ * block. False on link failure, after logging both stages and the program log. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
-    /* Emscripten's glCreateProgram throws on the null program some browsers return on a lost context. */
-    if (nt_gfx_gl_ctx_query_lost()) {
-        return 0;
-    }
-    GLuint program = NT_GL_RET0(glCreateProgram);
-    NT_GL(glAttachShader, program, (GLuint)vs_backend);
-    NT_GL(glAttachShader, program, (GLuint)fs_backend);
-    NT_GL(glLinkProgram, program);
-
+static bool nt_gfx_gl_finish_link(const nt_gfx_gl_program_t *rec) {
     GLint linked = 0;
-    NT_GL(glGetProgramiv, program, GL_LINK_STATUS, &linked);
+    NT_GL(glGetProgramiv, rec->program, GL_LINK_STATUS, &linked);
     if (!linked) {
         /* A loss fails the link before its event arrives; the query latches it for the caller. */
         if (!nt_gfx_gl_ctx_query_lost()) {
-            nt_gfx_gl_log_shader(vs_backend, "vertex");
-            nt_gfx_gl_log_shader(fs_backend, "fragment");
-            nt_gfx_gl_log_program(program);
+            nt_gfx_gl_log_shader(rec->link_vs, "vertex");
+            nt_gfx_gl_log_shader(rec->link_fs, "fragment");
+            nt_gfx_gl_log_program(rec->program);
         }
-
-        NT_GL(glDeleteProgram, program);
-        return 0;
+        return false;
     }
 
     const nt_global_block_t *blocks;
     uint32_t block_count;
     nt_gfx_get_global_blocks(&blocks, &block_count);
     for (uint32_t bi = 0; bi < block_count; bi++) {
-        GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, blocks[bi].name);
+        GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, rec->program, blocks[bi].name);
         if (block_index != GL_INVALID_INDEX) {
-            NT_GL(glUniformBlockBinding, program, block_index, (GLuint)blocks[bi].binding_slot);
+            NT_GL(glUniformBlockBinding, rec->program, block_index, (GLuint)blocks[bi].binding_slot);
         }
     }
-    return program;
+    return true;
 }
 
 static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
@@ -1479,11 +1496,10 @@ static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) 
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
-    GLuint program = nt_gfx_gl_link_program(vs_backend, fs_backend);
-    if (program == 0) {
+    /* Emscripten's glCreateProgram throws on the null program some browsers return on a lost context. */
+    if (nt_gfx_gl_ctx_query_lost()) {
         return 0;
     }
-
     uint32_t slot = 0;
     for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
         if (s_programs[i].program == 0) {
@@ -1492,23 +1508,63 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
         }
     }
     if (slot == 0) {
-        NT_GL(glDeleteProgram, program);
         return 0; /* no free slots */
     }
 
-    if (!nt_gfx_gl_cache_uniforms(program, &s_programs[slot])) {
-        if (!nt_gfx_gl_ctx_query_lost()) {
-            NT_LOG_ERROR("program uniform reflection failed");
-        }
-        NT_GL(glDeleteProgram, program);
-        return 0;
+    GLuint program = NT_GL_RET0(glCreateProgram);
+    if (program == 0) {
+        return 0; /* a zero name would leave this slot looking free */
     }
-    write_sampler_units(program, &s_programs[slot]);
-    s_programs[slot].program = program;
+    NT_GL(glAttachShader, program, (GLuint)vs_backend);
+    NT_GL(glAttachShader, program, (GLuint)fs_backend);
+    /* Only started here: browsers link on worker threads, and asking for the
+     * status now would block the main thread until the link is done. */
+    NT_GL(glLinkProgram, program);
+    s_programs[slot] = (nt_gfx_gl_program_t){
+        .program = program,
+        .linking = true,
+        .link_vs = vs_backend,
+        .link_fs = fs_backend,
+    };
 #if NT_GFX_CAPTURE_ENABLED
     capture_program_definition(slot);
 #endif
     return slot;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
+nt_gfx_link_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool wait) {
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_programs && s_programs[backend_handle].program != 0 && "finish_program: requires a live program");
+    nt_gfx_gl_program_t *rec = &s_programs[backend_handle];
+    if (!rec->linking) {
+        return NT_GFX_LINK_DONE;
+    }
+    if (!wait && s_parallel_link) {
+        GLint done = 0;
+        NT_GL(glGetProgramiv, rec->program, GL_COMPLETION_STATUS_KHR, &done);
+        if (!done) {
+            return NT_GFX_LINK_PENDING;
+        }
+    }
+    const bool linked = nt_gfx_gl_finish_link(rec);
+    if (!linked || !nt_gfx_gl_cache_uniforms(rec->program, rec)) {
+        if (linked && !nt_gfx_gl_ctx_query_lost()) {
+            NT_LOG_ERROR("program uniform reflection failed");
+        }
+        NT_GL(glDeleteProgram, rec->program);
+        memset(rec, 0, sizeof(*rec));
+        return NT_GFX_LINK_FAILED;
+    }
+    rec->linking = false;
+    write_sampler_units(rec->program, rec);
+#if NT_GFX_CAPTURE_ENABLED
+    capture_program_reflection(backend_handle);
+#endif
+    return NT_GFX_LINK_DONE;
+}
+
+bool nt_gfx_backend_program_ready(uint32_t backend_handle) {
+    return backend_handle != 0 && backend_handle <= s_init_desc.max_programs && s_programs[backend_handle].program != 0 && !s_programs[backend_handle].linking;
 }
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) {
@@ -1787,7 +1843,9 @@ void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *bloc
         return;
     }
     GLuint program = s_programs[program_backend].program;
-    if (program == 0) {
+    /* A linking program binds every registered block when its link finishes;
+     * the block index query would wait for the link. */
+    if (program == 0 || s_programs[program_backend].linking) {
         return;
     }
     GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, block_name);

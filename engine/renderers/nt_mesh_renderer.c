@@ -71,10 +71,6 @@ static const nt_vertex_layout_t s_instance_layouts[3] = {
 /* ---- Pipeline cache lookup/create ---- */
 
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
-    /* Sprite and text gate on readiness here; this renderer gates in prepare, so
-     * state the requirement where the pipeline is actually built. */
-    NT_ASSERT(nt_gfx_program_ready(mat_info->program) && "find_or_create_pipeline: caller must gate on nt_gfx_program_ready");
-
     /* Layouts and color_mode live on the vertex-input versions; the pipeline is
      * program x render state, keyed by its exact desc identity. */
     const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mat_info, "mesh_pipeline");
@@ -180,13 +176,14 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(run_mesh);
         NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh render item references a destroyed material or mesh");
         NT_ASSERT(mat_info->color_mode <= NT_COLOR_MODE_FLOAT4); /* corrupted material = programmer error */
-        if (!nt_gfx_program_ready(mat_info->program)) {
-            nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info);
-            continue;
-        }
-
         const bool mat_changed = run_mat.id != prev_mat.id;
         if (mat_changed) {
+            /* prev_mat is set only after a READY run, and no program changes state inside prepare. */
+            const nt_gfx_program_state_t program_state = nt_gfx_program_state(mat_info->program);
+            if (program_state != NT_GFX_PROGRAM_READY) {
+                nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info, program_state);
+                continue;
+            }
             pip = find_or_create_pipeline(mat_info);
         }
         /* VI identity is (mesh row, material-derived layout), so a mesh change re-resolves too. */

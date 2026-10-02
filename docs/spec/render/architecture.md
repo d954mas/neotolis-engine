@@ -598,8 +598,8 @@ unpublished. Frames are a host contract in every build, independent of
 simulation time; app/gfx never close one implicitly. begin_frame asserts that
 no pass is open; passes may begin any time after init. A frame holds any number
 of passes; their counters sum. begin_frame also does the per-frame backend
-work: it ages the upload staging buffer and, with GPU timing, checks the timer
-disjoint flag on a live context. The stub is stateless: its begin_frame is inert
+work: it ages the upload staging buffer and, on a live context, finishes pending
+program links and, with GPU timing, checks the timer disjoint flag. The stub is stateless: its begin_frame is inert
 and it never publishes counters.
 
 `g_nt_gfx.counters` holds the live counters of the open frame.
@@ -698,7 +698,9 @@ cascaded destroys). Only frontend cache hits
 (END result CACHE), rejections and losses are left out; an operation whose
 backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
 (SKIP/INACTIVE) still ends ACCEPTED and counts. A GPU timer poll with no result
-yet ends `UNREADY`. Texture
+yet ends `UNREADY`. Finishing a pending link in begin_frame and
+`nt_gfx_program_wait` are `STATE` operations naming the program; READY ends
+ACCEPTED, LINKING or UNAVAILABLE ends UNREADY. Reading the state records nothing. Texture
 sets count per operation, while per-unit binds show in `gl[]`. Accepted
 operations minus GL calls is not a cache-skip count.
 Each initialization restarts the frame sequence: the first frame after init is 1,
@@ -729,6 +731,8 @@ All record bytes are initialized before publication. A recorded frame starts at
 the begin_frame that opens it and first snapshots
 inherited state, including one definition per live resource (plus
 program uniform/sampler and vertex-input attribute records), into the same array.
+Pending programs include their backend slot/raw-name definition; reflection
+records appear only when begin_frame or a wait finishes the link.
 Size the capacity for that snapshot plus the frame's commands; a capacity below
 the snapshot overflows before any command is recorded.
 
@@ -801,7 +805,7 @@ Program publication and initial state include `INITIAL/SAMPLER` records with
 backend program slot, name hash, location, unit and sampler class in args 0–4.
 `INITIAL/UNIFORM_VEC4` gives program slot/name hash/location in args 0–2 and cached
 vec4 values; `UNKNOWN` means no retained value. These INITIAL records can occur
-inside CREATE when the program first becomes available. Inactive names emit
+inside the STATE operation that finishes linking. Inactive names emit
 SKIP/INACTIVE; cache skips are distinct from invalid requests.
 
 `SKIP` records mark work that was not issued without ending an operation:

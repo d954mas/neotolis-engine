@@ -792,6 +792,50 @@ void test_unready_program_warns_once_and_rearms_after_success(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 2U : 0U, s_program_warnings);
 }
 
+/* The gate runs once per material change: a second run on the same LINKING material
+ * must not ride the pipeline and skin slot the READY run before it left behind. */
+void test_linking_runs_skip_silently_until_the_link_finishes(void) {
+    nt_mesh_t mesh_a = make_mesh();
+    nt_mesh_t mesh_b = make_mesh();
+    const nt_deformation_binding_t binding = {.texture = make_deformation_texture()};
+    nt_material_t ready = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_gfx_fake_set_links_pending(true);
+    nt_material_t linking = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_LINKING, nt_gfx_program_state(nt_material_get_info(linking)->program));
+    nt_render_item_t items[3] = {
+        make_item(make_entity(mesh_a, ready, binding), ready, mesh_a),
+        make_item(make_entity(mesh_a, linking, binding), linking, mesh_a),
+        make_item(make_entity(mesh_b, linking, binding), linking, mesh_b),
+    };
+
+    skinned_draw_list(items, 3);
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, s_program_warnings);
+
+    nt_gfx_fake_set_links_pending(false);
+    skinned_draw_list(items, 3);
+    TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, s_program_warnings);
+}
+
+/* UNAVAILABLE warns once however many runs of that material one prepare skips. */
+void test_consecutive_unavailable_runs_warn_once(void) {
+    nt_mesh_t mesh_a = make_mesh();
+    nt_mesh_t mesh_b = make_mesh();
+    const nt_deformation_binding_t binding = {.texture = make_deformation_texture()};
+    nt_material_t unavailable = make_material(NT_PROGRAM_INVALID);
+    nt_material_t ready = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_render_item_t items[3] = {
+        make_item(make_entity(mesh_a, unavailable, binding), unavailable, mesh_a),
+        make_item(make_entity(mesh_b, unavailable, binding), unavailable, mesh_b),
+        make_item(make_entity(mesh_a, ready, binding), ready, mesh_a),
+    };
+
+    skinned_draw_list(items, 3);
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_program_warnings);
+}
+
 void test_failed_pipeline_and_vertex_input_creation_are_retryable(void) {
     nt_mesh_t mesh = make_mesh();
     nt_texture_t texture = make_deformation_texture();
@@ -942,6 +986,8 @@ int main(void) {
     RUN_TEST(test_static_none_color_allows_mesh_attribute_at_inactive_color_location);
     RUN_TEST(test_static_mesh_renderer_ignores_unmapped_skin_streams);
     RUN_TEST(test_unready_program_warns_once_and_rearms_after_success);
+    RUN_TEST(test_linking_runs_skip_silently_until_the_link_finishes);
+    RUN_TEST(test_consecutive_unavailable_runs_warn_once);
     RUN_TEST(test_failed_pipeline_and_vertex_input_creation_are_retryable);
     RUN_TEST(test_restore_drops_caches_and_the_next_draw_rebuilds_them);
     RUN_TEST(test_prepared_lists_draw_their_own_range_from_one_upload);

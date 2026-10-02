@@ -123,6 +123,7 @@ static struct {
     uint32_t *pipeline_programs; /* full program handle each pipeline borrows */
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
+    uint32_t linking_programs; /* live programs whose link is not finished yet */
 
     nt_gfx_buffer_meta_t *buffer_metas;   /* minimal buffer metadata for runtime validation */
     nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
@@ -518,6 +519,7 @@ static void wipe_backend_handles(void) {
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
         s_gfx.program_backends[i] = 0;
     }
+    s_gfx.linking_programs = 0;
     /* Pipelines, vertex inputs and render targets are baked objects with no re-fill path:
      * loss frees their slots outright, so handles held across a loss go
      * stale and the weak renderer caches self-heal on their validity
@@ -584,6 +586,48 @@ static nt_gfx_result_t restore_context(void) {
     return NT_GFX_RESULT_ACCEPTED;
 }
 
+/* Finishes the link make_program started. A failed link leaves the handle a husk,
+ * as a loss does: never ready again, and its owner destroys it. */
+static nt_gfx_program_state_t finish_program(uint32_t slot, bool wait) {
+    const uint32_t backend = s_gfx.program_backends[slot];
+    if (backend == 0) {
+        return NT_GFX_PROGRAM_UNAVAILABLE;
+    }
+    const bool was_linking = !nt_gfx_backend_program_ready(backend);
+    const nt_gfx_link_t link = nt_gfx_backend_finish_program(backend, wait);
+    if (link == NT_GFX_LINK_PENDING) {
+        return NT_GFX_PROGRAM_LINKING;
+    }
+    s_gfx.linking_programs -= was_linking ? 1U : 0U;
+    if (link == NT_GFX_LINK_FAILED) {
+        s_gfx.program_backends[slot] = 0;
+        const bool lost = backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST;
+        if (!lost) {
+            /* The assert fires in whichever frame finishes the link, far from make_program. */
+            NT_LOG_ERROR("program %u: link failed", s_gfx.program_pool.slots[slot].id);
+        }
+        NT_ASSERT(lost && "program link failed");
+        return NT_GFX_PROGRAM_UNAVAILABLE;
+    }
+    return NT_GFX_PROGRAM_READY;
+}
+
+/* One completion query per pending program per frame. Without parallel-link support,
+ * every pending program was created in an earlier frame, and finishing it may block.
+ * A loss wipes the count with the backend names, so a lost context has nothing pending. */
+static void finish_pending_programs(void) {
+    if (s_gfx.linking_programs == 0) {
+        return;
+    }
+    for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
+        if (s_gfx.program_backends[i] == 0 || nt_gfx_backend_program_ready(s_gfx.program_backends[i])) {
+            continue;
+        }
+        NT_GFX_BEGIN(NT_GFX_OP_STATE, NT_GFX_OBJECT_PROGRAM, s_gfx.program_pool.slots[i].id);
+        NT_GFX_END(finish_program(i, false) == NT_GFX_PROGRAM_READY ? NT_GFX_RESULT_ACCEPTED : NT_GFX_RESULT_UNREADY);
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 void nt_gfx_begin_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
@@ -618,6 +662,7 @@ void nt_gfx_begin_frame(void) {
         NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
         NT_GFX_END(restore_context());
     }
+    finish_pending_programs();
 #if NT_GFX_GPU_TIMING_ENABLED
     if (!g_nt_gfx.context_lost) {
         NT_GFX_BEGIN(NT_GFX_OP_TIMER_DISJOINT, NT_GFX_OBJECT_NONE, 0);
@@ -835,7 +880,7 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
     }
 
     /* Before the link, not after: the GL backend's program table has the same
-     * capacity, so linking first makes exhaustion surface as a link failure. */
+     * capacity, so allocating first makes exhaustion surface as a failed link start. */
     uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 
@@ -844,9 +889,10 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
         nt_pool_free(&s_gfx.program_pool, id);
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(backend != 0 && "program link failed");
+    NT_ASSERT(backend != 0 && "program link could not start");
 
     s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
+    s_gfx.linking_programs++;
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, id);
@@ -936,14 +982,14 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
+    const uint32_t program_backend = nt_pool_valid(&s_gfx.program_pool, desc->program.id) ? s_gfx.program_backends[nt_pool_slot_index(desc->program.id)] : 0;
+    NT_ASSERT(program_backend != 0 && nt_gfx_backend_program_ready(program_backend) && "make_pipeline: program must be READY");
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
     NT_ASSERT(id != 0 && "pipeline pool full -- raise nt_gfx_desc_t.max_pipelines");
 
     uint32_t slot = nt_pool_slot_index(id);
-    uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(desc->program.id)];
     uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend, slot);
     if (backend == 0) {
         NT_LOG_ERROR("backend pipeline creation failed");
@@ -1375,7 +1421,9 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
         nt_gfx_destroy_pipeline((nt_pipeline_t){s_gfx.pipeline_pool.slots[i].id});
     }
     uint32_t slot = nt_pool_slot_index(prog.id);
-    nt_gfx_backend_destroy_program(s_gfx.program_backends[slot]);
+    const uint32_t backend = s_gfx.program_backends[slot];
+    s_gfx.linking_programs -= (backend != 0 && !nt_gfx_backend_program_ready(backend)) ? 1U : 0U;
+    nt_gfx_backend_destroy_program(backend);
     s_gfx.program_backends[slot] = 0;
     nt_pool_free(&s_gfx.program_pool, prog.id);
     return NT_GFX_RESULT_ACCEPTED;
@@ -1513,11 +1561,19 @@ bool nt_gfx_pipeline_valid(nt_pipeline_t pip) { return nt_pool_valid(&s_gfx.pipe
 
 bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi) { return nt_pool_valid(&s_gfx.vertex_input_pool, vi.id); }
 
-bool nt_gfx_program_ready(nt_program_t prog) {
-    if (!nt_pool_valid(&s_gfx.program_pool, prog.id)) {
-        return false;
+nt_gfx_program_state_t nt_gfx_program_state(nt_program_t prog) {
+    const uint32_t backend = nt_pool_valid(&s_gfx.program_pool, prog.id) ? s_gfx.program_backends[nt_pool_slot_index(prog.id)] : 0;
+    if (backend == 0) {
+        return NT_GFX_PROGRAM_UNAVAILABLE;
     }
-    return s_gfx.program_backends[nt_pool_slot_index(prog.id)] != 0;
+    return nt_gfx_backend_program_ready(backend) ? NT_GFX_PROGRAM_READY : NT_GFX_PROGRAM_LINKING;
+}
+
+bool nt_gfx_program_wait(nt_program_t prog) {
+    NT_GFX_BEGIN(NT_GFX_OP_STATE, NT_GFX_OBJECT_PROGRAM, prog.id);
+    const nt_gfx_program_state_t state = nt_pool_valid(&s_gfx.program_pool, prog.id) ? finish_program(nt_pool_slot_index(prog.id), true) : NT_GFX_PROGRAM_UNAVAILABLE;
+    NT_GFX_END(state == NT_GFX_PROGRAM_READY ? NT_GFX_RESULT_ACCEPTED : NT_GFX_RESULT_UNREADY);
+    return state == NT_GFX_PROGRAM_READY;
 }
 
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip) {
@@ -1781,7 +1837,7 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
 
 #ifdef NT_TEST_ACCESS
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info) {
-    NT_ASSERT(nt_gfx_program_ready(prog) && "test_program_sampler_info: program is not linked");
+    NT_ASSERT(nt_gfx_program_state(prog) == NT_GFX_PROGRAM_READY && "test_program_sampler_info: program is not READY");
     NT_ASSERT(out_info != NULL && "test_program_sampler_info: out_info is required");
     return nt_gfx_backend_program_sampler_info(s_gfx.program_backends[nt_pool_slot_index(prog.id)], name.value, out_info);
 }
@@ -1792,7 +1848,7 @@ int nt_gfx_test_program_sampler_unit(nt_program_t prog, nt_hash32_t name) {
 }
 
 uint32_t nt_gfx_test_program_sampler_mask(nt_program_t prog) {
-    NT_ASSERT(nt_gfx_program_ready(prog) && "test_program_sampler_mask: program is not linked");
+    NT_ASSERT(nt_gfx_program_state(prog) == NT_GFX_PROGRAM_READY && "test_program_sampler_mask: program is not READY");
     return nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(prog.id)]);
 }
 #endif

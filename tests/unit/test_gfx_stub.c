@@ -23,7 +23,9 @@ static void test_stub_has_no_graphics_resources(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_shader(NULL, 0));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(NULL, 0));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(NULL, 0));
-    TEST_ASSERT_FALSE(nt_gfx_program_ready((nt_program_t){1}));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_state((nt_program_t){1}));
+    TEST_ASSERT_FALSE(nt_gfx_program_wait(NT_PROGRAM_INVALID));
+    TEST_ASSERT_FALSE(nt_gfx_program_wait((nt_program_t){1}));
     TEST_ASSERT_FALSE(nt_gfx_program_valid((nt_program_t){1}));
     TEST_ASSERT_FALSE(nt_gfx_texture_ready((nt_texture_t){1}));
     TEST_ASSERT_FALSE(nt_gfx_render_target_valid((nt_render_target_t){1}));

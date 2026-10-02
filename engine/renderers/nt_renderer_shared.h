@@ -366,9 +366,10 @@ static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_mat
 }
 // #endregion
 
-/* Warn once to explain skipped draws without per-frame spam; pipeline insertion re-arms the flag. */
-static inline void nt_renderer_warn_program_not_ready(bool *warned, const nt_material_info_t *mat_info) {
-    if (*warned) {
+/* Warn once to explain skipped draws without per-frame spam; pipeline insertion re-arms the flag.
+ * A program still linking is expected to skip a few frames and is not worth a warning. */
+static inline void nt_renderer_warn_program_not_ready(bool *warned, const nt_material_info_t *mat_info, nt_gfx_program_state_t state) {
+    if (*warned || state != NT_GFX_PROGRAM_UNAVAILABLE) {
         return;
     }
     NT_LOG_WARN("skipping '%s': its program is not ready -- assign one with nt_material_set_program, and after a context loss invalidate NT_ASSET_SHADER_CODE so the stages come back",

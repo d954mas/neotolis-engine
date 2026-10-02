@@ -154,18 +154,43 @@ A program's linked executable and identity are immutable after
 Recovery requires the owner to destroy the old program and link a new handle.
 
 Handle validity and GPU liveness are separate. `nt_gfx_program_valid` reports
-whether the handle still refers to a live slot; `nt_gfx_program_ready` reports
-whether the GL program behind it exists. Processing context loss clears readiness while
-handles stay valid, and because no API relinks, a valid handle that is not ready
-never becomes ready again -- that state is terminal, not transitional.
-`nt_gfx_make_pipeline` requires readiness.
+whether the handle still refers to a live slot. `nt_gfx_program_state` reads
+one state without a GL call: `NT_GFX_PROGRAM_LINKING`, `NT_GFX_PROGRAM_READY`,
+or `NT_GFX_PROGRAM_UNAVAILABLE` (invalid, destroyed, or a terminal live handle).
+
+`nt_gfx_make_program` starts the link. Each `nt_gfx_begin_frame` on a live
+context finishes pending links: read the link result, bind registered global
+blocks, reflect uniforms and set sampler units before the program is READY.
+With `KHR_parallel_shader_compile` (KHR or ARB on native) it queries completion
+once per pending program and leaves unfinished ones LINKING. Without the
+extension it finishes every pending program, which can block until the driver
+finishes; nonblocking linking requires the extension. WebGL diagnostic compiler
+checks may themselves block inside `glLinkProgram`. Without
+`nt_gfx_program_wait` a program is therefore READY no earlier than the frame
+after creation; it becomes READY only in `nt_gfx_begin_frame` or
+`nt_gfx_program_wait`.
+
+`nt_gfx_program_wait` finishes the link now, for synchronous initialization, and
+returns true when the program is READY. It does not advance the frame or change
+the bound pipeline.
+
+`nt_gfx_make_pipeline` requires a READY program and never finishes a link; any
+other program asserts.
+Shader stages may be destroyed after `nt_gfx_make_program`, including while it
+links. Deferred diagnostics log only stages whose engine-owned shader objects
+still exist.
+
+Processing context loss leaves program handles valid but UNAVAILABLE. No API
+relinks that handle: the owner destroys it and creates a replacement.
 
 `nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op and asserts on
 a stale non-zero handle. Clear the owner's variable to `NT_PROGRAM_INVALID`
 when destroying it.
 
-A link failure is a developer error and asserts, alongside an invalid stage
-handle, and an exhausted program pool.
+A link failure is a developer error and asserts when the link finishes, in
+`nt_gfx_begin_frame` or `nt_gfx_program_wait`. An invalid stage handle and an
+exhausted program pool also assert. When asserts are off, the failed handle is
+terminal like one a loss left behind.
 
 `nt_gfx_register_global_block` applies the global name -> binding slot registry
 to existing and future programs; registration may precede or follow linking.
@@ -211,11 +236,13 @@ the renderer's `set_material` before emitting more work. If the old program is
 destroyed rather than merely replaced, its pipelines go with it and the staged
 batch is dropped instead -- there is nothing left to draw it through.
 
-A material carries no readiness field. Callers derive readiness with
-`nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
-the first assignment, after context loss is processed, or after program
-destruction. The mesh renderers' `prepare` and the sprite `draw_list` skip unready programs and warn once until
-a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` /
+A material carries no readiness field. Callers read
+`nt_gfx_program_state(nt_material_get_info(mat)->program)` and draw only on READY.
+It returns LINKING during a pending link, and UNAVAILABLE before assignment,
+after context loss is processed, or after destruction. The mesh renderers'
+`prepare` and the sprite `draw_list` skip unready programs and warn once for
+UNAVAILABLE until a pipeline is built again. LINKING does not warn. The
+immediate-mode `nt_sprite_renderer_set_material` /
 `nt_text_renderer_set_material` entry points assert only that a program was
 assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks
 context loss before asserting readiness.
@@ -256,8 +283,8 @@ or when resetting the cache. Lookup validates a matching pipeline but does not
 remove records. An unassigned program kept alive by its owner keeps its pipelines
 alive too. `nt_gfx_destroy_pipeline` accepts stale handles as a no-op because
 program destruction can invalidate a renderer's cached handles.
-Materials retain the stale program handle until reassignment; readiness reports
-false without mutating the material.
+Materials retain the stale program handle until reassignment; its state is
+UNAVAILABLE.
 
 ### Texture descriptors
 
@@ -451,9 +478,10 @@ check runs first. A returned invalid target therefore means a lost context, a
 failed backend allocation, or an incomplete framebuffer, such as `RGBA16F`
 without float rendering. `nt_gfx_make_pipeline`
 follows the same split: a
-NULL descriptor, an unready program, and an exhausted pipeline pool assert, so a returned invalid
-pipeline handle means a lost context or a failed backend allocation — the two
-recoverable outcomes, both retried on a later frame.
+NULL descriptor, a program that is not READY, and an exhausted pipeline pool
+assert. For valid requests, a returned invalid pipeline handle means a lost
+context or a failed backend allocation — the two recoverable outcomes, both
+retried on a later frame.
 `nt_gfx_make_vertex_input` applies the same contract to the layout checks: an
 attribute count over `NT_GFX_MAX_VERTEX_ATTRS` (instance layouts over
 `NT_GFX_MAX_INSTANCE_ATTRS`), a stride over the WebGL2 cap of 255, misaligned

@@ -12,6 +12,8 @@ void nt_gfx_fake_set_samplers_typed(const char *const *names, const uint8_t *sam
  * source, so the stages are placeholders. */
 nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count);
 nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count);
+/* Links vs+fs and waits, so the program is READY unless links are held pending. */
+nt_program_t nt_gfx_fake_link(nt_shader_t vs, nt_shader_t fs);
 
 /* Draw trace: recorded by the fake backend, so the engine's draw path stays
  * free of test bookkeeping. pipeline/program are the FRONTEND handles bound at
@@ -42,6 +44,7 @@ uint32_t nt_gfx_fake_render_target_create_count(void);
 uint32_t nt_gfx_fake_render_target_destroy_count(void);
 uint32_t nt_gfx_fake_texture_create_count(void);
 uint32_t nt_gfx_fake_program_create_count(void);
+uint32_t nt_gfx_fake_program_finish_count(void);
 uint32_t nt_gfx_fake_pipeline_create_count(void);
 uint32_t nt_gfx_fake_bind_pipeline_count(void);
 uint32_t nt_gfx_fake_uniform_int_count(void);
@@ -52,6 +55,9 @@ uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index);
 void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]);
 void nt_gfx_fake_fail_next_program_create(void);
 void nt_gfx_fake_lose_context_on_program_create(void);
+/* While set, begin_frame leaves links PENDING; nt_gfx_program_wait still completes them. */
+void nt_gfx_fake_set_links_pending(bool pending);
+void nt_gfx_fake_fail_next_link(void);
 void nt_gfx_fake_fail_next_pipeline_create(void);
 void nt_gfx_fake_fail_next_sampler_create(void);
 /* Viewport size the front-end passed to the last begin_pass; 0 for the default framebuffer. */

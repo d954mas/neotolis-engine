@@ -123,17 +123,15 @@ static void generate_quad_indices(void) {
  * not pipeline state. */
 static nt_pipeline_t find_or_create_pipeline(void) {
     const nt_material_info_t *info = nt_material_get_info(s_text.material);
-    const nt_program_t program = (info != NULL) ? info->program : NT_PROGRAM_INVALID;
-    /* One query covers every state: no program yet, a program that died with the
-     * context, and a program its owner destroyed. */
-    if (!info || !nt_gfx_program_ready(program)) {
-        nt_renderer_warn_program_not_ready(&s_text.warned_no_pipeline, info);
+    const nt_gfx_program_state_t program_state = info != NULL ? nt_gfx_program_state(info->program) : NT_GFX_PROGRAM_UNAVAILABLE;
+    if (program_state != NT_GFX_PROGRAM_READY) {
+        nt_renderer_warn_program_not_ready(&s_text.warned_no_pipeline, info, program_state);
         return (nt_pipeline_t){0};
     }
 
     /* Read render state from material — same pattern as mesh_renderer */
     const nt_pipeline_desc_t desc = {
-        .program = program,
+        .program = info->program,
         .depth_test = info->depth_test,
         .depth_write = info->depth_write,
         .depth_func = NT_DEPTH_LEQUAL,
@@ -278,7 +276,7 @@ void nt_text_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(info != NULL && "nt_text_renderer_set_material: invalid material handle");
     /* Assignment, not liveness: on the frame the context dies the program is
      * already dead here, and trapping on that would crash a recoverable event.
-     * make_pipeline polls the lost context and hands back an invalid pipeline. */
+     * The pipeline lookup returns an invalid handle until recovery replaces it. */
     NT_ASSERT(info->program.id != 0 && "nt_text_renderer_set_material: material has no program");
 
     if (s_text.material.id == mat.id) {
@@ -763,10 +761,11 @@ void nt_text_renderer_flush(void) {
      * the first glyph and here. The vertex input stays invalid when the retry
      * above failed (context still lost / backend failure). */
     const nt_pipeline_t pipeline = s_text.batch_pipeline;
-    if (!nt_gfx_pipeline_valid(pipeline) || !nt_gfx_vertex_input_valid(s_text.vertex_input)) {
-        /* Unready programs were reported at batch open; destruction of a captured
-         * pipeline or backend allocation failure still needs a warning. */
-        if (!s_text.warned_no_pipeline) {
+    const bool vertex_input_valid = nt_gfx_vertex_input_valid(s_text.vertex_input);
+    if (!nt_gfx_pipeline_valid(pipeline) || !vertex_input_valid) {
+        /* Pending links skip silently; missing materials, destroyed captured pipelines
+         * and vertex-input failures still need a warning. */
+        if (!s_text.warned_no_pipeline && (s_text.material.id == 0 || pipeline.id != 0 || !vertex_input_valid)) {
             NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline or vertex input -- discarding %u glyphs", s_text.glyph_count);
             s_text.warned_no_pipeline = true;
         }

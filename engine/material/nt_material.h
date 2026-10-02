@@ -97,8 +97,8 @@ static inline nt_material_desc_t nt_material_desc_defaults(void) {
 
 typedef struct {
     /* Borrowed: the material never links, destroys or inspects it. May name a
-     * program that died with the GL context or that its owner destroyed -- ask
-     * nt_gfx_program_ready(program) before building a pipeline from it. */
+     * program that died with the GL context or that its owner destroyed -- poll
+     * for NT_GFX_PROGRAM_READY before building a pipeline without waiting. */
     nt_program_t program;
     /* Declared at create and never rewritten (unlike params). Renderers normally
      * resolve these at draw; a documented supplied semantic may replace its
@@ -137,8 +137,7 @@ void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
 /* Replaces the borrowed program; INVALID clears it and assigning the same handle changes nothing.
  * Neither program is owned or destroyed here. mat must be valid.
- * Query readiness with
- * nt_gfx_program_ready(nt_material_get_info(mat)->program). */
+ * Poll the borrowed program for NT_GFX_PROGRAM_READY before drawing. */
 void nt_material_set_program(nt_material_t mat, nt_program_t program);
 const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 

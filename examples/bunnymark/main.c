@@ -425,7 +425,7 @@ static void frame(void) {
 
     /* ---- Render ---- */
     const nt_material_info_t *mat_info = nt_material_get_info(s_sprite_material);
-    bool can_render = s_atlas_resolved && mat_info && nt_gfx_program_ready(mat_info->program) && s_bunny_count > 0;
+    bool can_render = s_atlas_resolved && mat_info && (nt_gfx_program_state(mat_info->program) == NT_GFX_PROGRAM_READY) && s_bunny_count > 0;
 
     /* nt_debug_overlay reads frame total via segment named "frame" by convention. */
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
@@ -473,7 +473,7 @@ static void frame(void) {
 #endif
 
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    if (text_info && nt_gfx_program_ready(text_info->program)) {
+    if (text_info && (nt_gfx_program_state(text_info->program) == NT_GFX_PROGRAM_READY)) {
         const float overlay_size = 22.0F;
         mat4 overlay_model;
         glm_mat4_identity(overlay_model);

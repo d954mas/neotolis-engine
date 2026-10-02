@@ -714,8 +714,7 @@ void test_sprite_renderer_reset_drops_commands_and_pipelines(void) {
 }
 
 /* The restore window with the context already back: the material still holds the
- * program the game destroyed, and the live-context poll inside make_pipeline no
- * longer covers it. Binding must degrade to a pipeline-less cmd, not trap. */
+ * program the game destroyed. Binding must degrade to a pipeline-less cmd, not trap. */
 void test_sprite_renderer_set_material_survives_a_destroyed_program(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
@@ -729,6 +728,44 @@ void test_sprite_renderer_set_material_survives_a_destroyed_program(void) {
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_cmd_count());
+}
+
+void test_sprite_renderer_same_material_reopens_after_program_links(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+    s_atlas_res = register_test_atlas(0xCCULL);
+    nt_gfx_fake_set_samplers((const char *const[]){"u_texture"}, 1);
+    nt_gfx_fake_set_links_pending(true);
+    const nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
+    const nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
+    const nt_program_t program = nt_gfx_fake_link(vs, fs);
+    const nt_material_t mat = nt_material_create(&(nt_material_create_desc_t){
+        .program = program,
+        .textures = {{.name = "u_texture"}},
+        .texture_count = 1,
+    });
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
+
+    nt_sprite_renderer_flush();
+    nt_gfx_fake_set_links_pending(false);
+    nt_gfx_end_pass();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_sprite_renderer_set_material(mat);
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    nt_sprite_renderer_flush();
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(program.id, nt_gfx_fake_draw_trace_at(0).program.id);
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
 }
 
 void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(void) {
@@ -2252,6 +2289,7 @@ int main(void) {
     RUN_TEST(test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelines);
     RUN_TEST(test_sprite_renderer_reset_drops_commands_and_pipelines);
     RUN_TEST(test_sprite_renderer_set_material_survives_a_destroyed_program);
+    RUN_TEST(test_sprite_renderer_same_material_reopens_after_program_links);
     RUN_TEST(test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter);
     RUN_TEST(test_sprite_renderer_flush_drops_cmds_whose_program_died);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);

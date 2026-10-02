@@ -519,6 +519,8 @@ void setUp(void) {
     free(fragment_source);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, s_skin_program.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, s_reference_program.id);
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(s_skin_program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(s_reference_program));
 
     /* nt_gfx_shutdown releases the attachment textures. */
     s_target = nt_gfx_make_render_target(&(nt_render_target_desc_t){

@@ -95,6 +95,8 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     return caps;
 }
 
+bool nt_gfx_gl_ctx_enable_parallel_link(void) { return get_extension("KHR_parallel_shader_compile"); }
+
 #if NT_GFX_GPU_TIMING_ENABLED
 /* Enable EXT_disjoint_timer_query_webgl2; getExtension activates its constants for this context. */
 bool nt_gfx_gl_ctx_enable_timer_query(void) { return get_extension("EXT_disjoint_timer_query_webgl2"); }

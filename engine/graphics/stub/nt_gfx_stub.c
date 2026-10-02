@@ -130,7 +130,12 @@ bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi) {
     return false;
 }
 
-bool nt_gfx_program_ready(nt_program_t prog) {
+nt_gfx_program_state_t nt_gfx_program_state(nt_program_t prog) {
+    (void)prog;
+    return NT_GFX_PROGRAM_UNAVAILABLE;
+}
+
+bool nt_gfx_program_wait(nt_program_t prog) {
     (void)prog;
     return false;
 }

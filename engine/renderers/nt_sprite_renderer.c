@@ -301,10 +301,11 @@ static uint64_t nt_sprite_layout_key(const nt_material_info_t *mat_info) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* A recovered context may still have materials awaiting a new program. */
-    if (!nt_gfx_program_ready(mat_info->program)) {
+    const nt_gfx_program_state_t program_state = nt_gfx_program_state(mat_info->program);
+    if (program_state != NT_GFX_PROGRAM_READY) {
         /* The one choke point every caller passes through, so the immediate and
          * draw_list paths both get told. */
-        nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
+        nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info, program_state);
         return (nt_pipeline_t){0};
     }
     /* Vertex-inputs own layouts; the pipeline is program x state, keyed by its exact desc identity. */
@@ -506,7 +507,7 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
     const nt_material_info_t *mat_info = nt_material_get_info(mat);
     /* Assignment, not liveness: on the frame the context dies the program is
      * already dead here, and trapping on that would crash a recoverable event.
-     * make_pipeline polls the lost context and hands back an invalid pipeline. */
+     * The pipeline lookup returns an invalid handle until recovery replaces it. */
     NT_ASSERT(mat_info != NULL && mat_info->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
 
     /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
@@ -1112,7 +1113,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
             memo_mat = (memo_pip.id != 0) ? mat->id : 0;
         }
         const nt_pipeline_t pip = memo_pip;
-        if (pip.id == 0) { /* context died mid-frame; skip rather than draw through a stale bind */
+        if (pip.id == 0) { /* program linking or lost; skip rather than draw through a stale bind */
             run_start = run_end;
             continue;
         }

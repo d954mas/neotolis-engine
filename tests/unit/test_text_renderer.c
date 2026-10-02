@@ -118,6 +118,7 @@ static uint8_t *s_blob;
 static uint32_t s_blob_size;
 static nt_font_t s_font;
 static uint32_t s_error_count;
+static uint32_t s_warning_count;
 
 static void capture_errors(nt_log_level_t level, const char *domain, const char *msg, void *user) {
     (void)domain;
@@ -125,6 +126,15 @@ static void capture_errors(nt_log_level_t level, const char *domain, const char 
     (void)user;
     if (level == NT_LOG_LEVEL_ERROR) {
         s_error_count++;
+    }
+}
+
+static void capture_warnings(nt_log_level_t level, const char *domain, const char *msg, void *user) {
+    (void)domain;
+    (void)msg;
+    (void)user;
+    if (level == NT_LOG_LEVEL_WARN) {
+        s_warning_count++;
     }
 }
 
@@ -137,7 +147,7 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_material_t material = nt_material_create(&(nt_material_create_desc_t){
-        .program = nt_gfx_make_program(vs, fs),
+        .program = nt_gfx_fake_link(vs, fs),
         .blend = blend,
         .cull_mode = NT_CULL_NONE,
     });
@@ -203,7 +213,7 @@ void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_state(first));
 
     /* No drop() anywhere. The stages are dead too, so the ref waits instead of
      * relinking from corpses -- and must not keep handing out the old program. */
@@ -226,8 +236,30 @@ void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
 
     TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, ref.program.id);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(ref.program));
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(ref.program));
 
+    nt_program_ref_drop(&ref);
+}
+
+/* A link still running is not a loss: the ref keeps its program instead of relinking every frame. */
+void test_program_ref_keeps_a_program_while_it_links(void) {
+    nt_program_ref_t ref = {0};
+    ref.vs = publish_stage("ref_link_vs", make_stage(NT_SHADER_VERTEX).id);
+    ref.fs = publish_stage("ref_link_fs", make_stage(NT_SHADER_FRAGMENT).id);
+    nt_resource_step();
+
+    nt_gfx_fake_set_links_pending(true);
+    const uint32_t creates = nt_gfx_fake_program_create_count();
+    TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
+    const nt_program_t linking = ref.program;
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_LINKING, nt_gfx_program_state(linking));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    TEST_ASSERT_EQUAL_UINT32(linking.id, ref.program.id);
+    TEST_ASSERT_EQUAL_UINT32(creates + 1U, nt_gfx_fake_program_create_count());
+
+    nt_gfx_fake_set_links_pending(false);
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(ref.program));
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
     nt_program_ref_drop(&ref);
 }
 
@@ -240,6 +272,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
+    s_warning_count = 0;
     nt_gfx_fake_reset();
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
     /* Band before curve: units the renderer must query, not the 0/1 a hardcode would use. */
@@ -270,6 +303,7 @@ void setUp(void) {
 
 void tearDown(void) {
     nt_log_remove_sink(capture_errors, NULL);
+    nt_log_remove_sink(capture_warnings, NULL);
     nt_text_renderer_shutdown();
     nt_font_destroy(s_font);
     free(s_blob);
@@ -475,7 +509,7 @@ void test_text_material_with_textures_asserts_at_flush(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_material_t textured = nt_material_create(&(nt_material_create_desc_t){
-        .program = nt_gfx_make_program(vs, fs),
+        .program = nt_gfx_fake_link(vs, fs),
         .cull_mode = NT_CULL_NONE,
         .textures[0] = {.name = "u_extra", .resource = NT_RESOURCE_INVALID},
         .texture_count = 1,
@@ -550,6 +584,85 @@ void test_flush_stops_after_program_cleared(void) {
     nt_gfx_end_pass();
 }
 
+void test_flush_skips_linking_batches_without_warning(void) {
+    nt_log_add_sink(capture_warnings, NULL);
+    nt_gfx_fake_set_links_pending(true);
+    const nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    const nt_program_t program = nt_material_get_info(material)->program;
+    nt_text_renderer_set_material(material);
+    nt_gfx_fake_draw_trace_reset(true);
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, s_warning_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    /* Completion after batch open must neither redirect that batch nor warn. */
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_fake_set_links_pending(false);
+    TEST_ASSERT_TRUE(nt_gfx_program_wait(program));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_text_renderer_flush();
+    nt_gfx_end_pass();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, s_warning_count);
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(program.id, nt_gfx_fake_draw_trace_at(0U).program.id);
+    TEST_ASSERT_EQUAL_UINT32(12U, nt_gfx_fake_draw_trace_at(0U).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_warning_count);
+}
+
+void test_flush_warns_once_without_a_material(void) {
+    nt_log_add_sink(capture_warnings, NULL);
+    nt_gfx_fake_draw_trace_reset(true);
+
+    draw_and_flush();
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+}
+
+void test_flush_warns_on_vertex_input_failure_while_program_links(void) {
+    nt_log_add_sink(capture_warnings, NULL);
+    nt_gfx_fake_set_links_pending(true);
+    nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_gfx_fake_fail_next_vertex_input_create();
+    TEST_ASSERT_EQUAL_INT(NT_OK, nt_text_renderer_restore_gpu());
+
+    nt_gfx_fake_fail_next_vertex_input_create();
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
+}
+
+/* A failed pipeline creation discards that batch and is retried by the next one. */
+void test_flush_retries_pipeline_creation_after_backend_failure(void) {
+    nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_gfx_fake_fail_next_pipeline_create();
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
+
+    draw_and_flush();
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+}
+
 /* A recoverable vertex-input creation failure must not disable text until the
  * next restore: flush retries the creation lazily, like the pipeline cache. */
 void test_flush_retries_vertex_input_after_backend_failure(void) {
@@ -591,7 +704,7 @@ void test_failed_restore_releases_partial_buffers(void) {
 void test_materials_sharing_a_program_share_one_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t shared = nt_gfx_make_program(vs, fs);
+    nt_program_t shared = nt_gfx_fake_link(vs, fs);
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
@@ -609,7 +722,7 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
 void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t shared = nt_gfx_make_program(vs, fs);
+    nt_program_t shared = nt_gfx_fake_link(vs, fs);
     nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
     nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
@@ -628,10 +741,10 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
 void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void) {
     nt_shader_t vs0 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs0 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t p0 = nt_gfx_make_program(vs0, fs0);
+    nt_program_t p0 = nt_gfx_fake_link(vs0, fs0);
     nt_shader_t vs1 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs1 = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t p1 = nt_gfx_make_program(vs1, fs1);
+    nt_program_t p1 = nt_gfx_fake_link(vs1, fs1);
     TEST_ASSERT_EQUAL_UINT32(p0.id + 1, p1.id);
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
@@ -664,7 +777,7 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     nt_gfx_destroy_program(dead);
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
-    nt_program_t reborn = nt_gfx_make_program(vs, fs); /* same pool slot, new generation */
+    nt_program_t reborn = nt_gfx_fake_link(vs, fs); /* same pool slot, new generation */
     TEST_ASSERT_NOT_EQUAL_UINT32(dead.id, reborn.id);
 
     nt_material_set_program(mat, NT_PROGRAM_INVALID);
@@ -687,7 +800,7 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
 void test_a_replaced_program_does_not_redirect_a_staged_batch(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     const nt_program_t first = nt_material_get_info(mat)->program;
-    const nt_program_t second = nt_gfx_make_program(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
+    const nt_program_t second = nt_gfx_fake_link(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
     const nt_gfx_fake_draw_t first_draw = warm_material_program(mat, first);
     const nt_gfx_fake_draw_t second_draw = warm_material_program(mat, second);
     nt_material_set_program(mat, first);
@@ -715,7 +828,7 @@ void test_a_replaced_program_does_not_redirect_a_staged_batch(void) {
 void test_overflow_flush_reopens_the_batch_pipeline(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_alpha());
     const nt_program_t first = nt_material_get_info(mat)->program;
-    const nt_program_t second = nt_gfx_make_program(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
+    const nt_program_t second = nt_gfx_fake_link(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
     const nt_gfx_fake_draw_t first_draw = warm_material_program(mat, first);
     const nt_gfx_fake_draw_t second_draw = warm_material_program(mat, second);
     nt_material_set_program(mat, first);
@@ -823,9 +936,10 @@ void test_decoration_only_run_opens_its_pipeline(void) {
 }
 
 void test_destroyed_replaced_program_drops_staged_work(void) {
+    nt_log_add_sink(capture_warnings, NULL);
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     const nt_program_t first = nt_material_get_info(material)->program;
-    const nt_program_t second = nt_gfx_make_program(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
+    const nt_program_t second = nt_gfx_fake_link(make_stage(NT_SHADER_VERTEX), make_stage(NT_SHADER_FRAGMENT));
     (void)warm_material_program(material, first);
     const nt_gfx_fake_draw_t second_draw = warm_material_program(material, second);
     nt_material_set_program(material, first);
@@ -837,12 +951,14 @@ void test_destroyed_replaced_program_drops_staged_work(void) {
     nt_gfx_destroy_program(first);
     nt_text_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     assert_text_draw(0U, second_draw, 2U);
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_warning_count);
 }
 
 void test_unready_font_skips_glyph_and_decoration_uploads(void) {
@@ -929,7 +1045,7 @@ void test_a_new_program_after_a_reset_does_not_reuse_the_old_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_pipeline_create_count());
 
     nt_text_renderer_restore_gpu();
-    nt_material_set_program(mat, nt_gfx_make_program(vs, fs));
+    nt_material_set_program(mat, nt_gfx_fake_link(vs, fs));
 
     nt_text_renderer_set_material(mat);
     nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F, 0.0F);
@@ -984,7 +1100,7 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(nt_gfx_program_valid(first));
-    TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
+    TEST_ASSERT_EQUAL_INT(NT_GFX_PROGRAM_UNAVAILABLE, nt_gfx_program_state(first));
 
     /* Restore frame: reset the renderer, drop the program, keep the material. */
     nt_gfx_fake_set_context_lost(false);
@@ -999,8 +1115,8 @@ void test_restore_cycle_reuses_the_material_and_rebuilds_the_pipeline(void) {
     TEST_ASSERT_NOT_NULL(nt_material_get_info(handle_before));
 
     /* The game's gate relinks and re-assigns onto the same material. */
-    nt_program_t second = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
-                                              nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
+    nt_program_t second = nt_gfx_fake_link(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
+                                           nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
     nt_material_set_program(material, second);
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, second.id);
 
@@ -1512,6 +1628,10 @@ int main(void) {
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_flush_stops_after_program_cleared);
+    RUN_TEST(test_flush_skips_linking_batches_without_warning);
+    RUN_TEST(test_flush_warns_once_without_a_material);
+    RUN_TEST(test_flush_warns_on_vertex_input_failure_while_program_links);
+    RUN_TEST(test_flush_retries_pipeline_creation_after_backend_failure);
     RUN_TEST(test_flush_retries_vertex_input_after_backend_failure);
     RUN_TEST(test_failed_restore_releases_partial_buffers);
     RUN_TEST(test_flush_discards_glyphs_on_a_destroyed_program);
@@ -1521,6 +1641,7 @@ int main(void) {
     RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
     RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
     RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
+    RUN_TEST(test_program_ref_keeps_a_program_while_it_links);
     RUN_TEST(test_a_replaced_program_does_not_redirect_a_staged_batch);
     RUN_TEST(test_overflow_flush_reopens_the_batch_pipeline);
     RUN_TEST(test_font_cache_flush_preserves_the_entire_run);

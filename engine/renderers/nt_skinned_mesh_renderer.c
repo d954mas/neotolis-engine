@@ -94,7 +94,6 @@ static uint32_t find_run_end(const nt_render_item_t *items, uint32_t leader, uin
 }
 
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *material) {
-    NT_ASSERT(nt_gfx_program_ready(material->program));
     const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(material, "skinned_mesh_pipeline");
     const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
     nt_pipeline_t pipeline = nt_renderer_pipeline_cache_find(s_skinned.pipelines, s_skinned.pipeline_count, &key);
@@ -191,13 +190,14 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
         const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info(mesh_handle);
         NT_ASSERT(material != NULL && mesh != NULL && "skinned render item references a destroyed material or mesh");
         NT_ASSERT(material->color_mode <= NT_COLOR_MODE_FLOAT4);
-        if (!nt_gfx_program_ready(material->program)) {
-            nt_renderer_warn_program_not_ready(&s_skinned.warned_program_not_ready, material);
-            continue;
-        }
-
         const bool material_changed = material_handle.id != previous_material.id;
         if (material_changed) {
+            /* previous_material is set only after a READY run, and no program changes state inside prepare. */
+            const nt_gfx_program_state_t program_state = nt_gfx_program_state(material->program);
+            if (program_state != NT_GFX_PROGRAM_READY) {
+                nt_renderer_warn_program_not_ready(&s_skinned.warned_program_not_ready, material, program_state);
+                continue;
+            }
             pipeline = find_or_create_pipeline(material);
             supplied_slot = skin_slot(material);
         }
