@@ -132,6 +132,15 @@ Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
+Frame-scoped values are plain values with no generation: a frame arena offset
+(`nt_frame_arena_reserve`), a mesh run (`nt_mesh_renderer_prepare`,
+`nt_skinned_mesh_renderer_prepare`) and a deformation binding (`nt_skeletal_gpu_reserve`)
+stay valid until the owning module's next `begin_frame`; a restore invalidates
+a binding and the runs, and an arena offset needs a new upload. A skinned run
+embeds deformation bindings and also expires at the next
+`nt_skeletal_gpu_begin_frame`. The values carry no stamp;
+each module asserts only its frame order (one `begin_frame` per gfx frame).
+
 ### Program handles
 
 `nt_program_t` is the linked (vertex, fragment) pair and has exactly one owner:
@@ -188,6 +197,18 @@ There is no per-program override. The registry borrows `name` without copying:
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registration
 survives context loss.
 
+`nt_gfx_bind_uniform_buffer_range` binds `[offset, offset + size)` of a uniform
+buffer. The offset is a multiple of `gpu_caps.uniform_buffer_offset_alignment`
+(re-probed at context restore), the size is nonzero and the range fits the
+buffer; each violation asserts, as does a non-uniform buffer, and without
+asserts the bind is rejected with `INVALID_ARGUMENT`. After `nt_gfx_orphan_buffer`,
+the range must fit the replacement storage; orphaning may shrink it and later
+grow it up to the original creation capacity. WebGL additionally rejects
+a draw whose bound range is smaller than the block's data size; gfx does not
+know block sizes, so the caller sizes the range. Upload every range of a frame
+before the first draw that reads the buffer: Mali/ANGLE track a buffer as a
+whole, and rewriting any part of one an earlier draw read stalls the GPU.
+
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
 `nt_gfx_begin_frame` has synced, or a link the browser reports lost. The second
@@ -217,9 +238,10 @@ batch is dropped instead -- there is nothing left to draw it through.
 A material carries no readiness field. Callers read
 `nt_gfx_program_state(nt_material_get_info(mat)->program)` and draw only on READY.
 It returns LINKING during a pending link, and UNAVAILABLE before assignment,
-after context loss is processed, or after destruction. The ECS `draw_list` paths
-skip unready programs and warn once for UNAVAILABLE until a pipeline is built
-again. LINKING does not warn. The immediate-mode `nt_sprite_renderer_set_material` /
+after context loss is processed, or after destruction. The mesh renderers'
+`prepare` and the sprite `draw_list` skip unready programs and warn once for
+UNAVAILABLE until a pipeline is built again. LINKING does not warn. The
+immediate-mode `nt_sprite_renderer_set_material` /
 `nt_text_renderer_set_material` entry points assert only that a program was
 assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks
 context loss before asserting readiness.
@@ -292,19 +314,23 @@ measures `max(1, width >> L)` by `max(1, height >> L)` and occupies
 `nt_texture_level_bytes` of that size. Any count from 1 to the full chain
 (`1 + floor(log2(max(width, height)))`) is legal. `N > 1` requires `data` and
 excludes `gen_mipmaps`, which is the other way to fill a chain. Creation is one
-shot: the handle is published only after the last declared level uploaded and
-the default sampler was acquired. A failed upload or sampler creation leaves no
-texture and no pool slot. Filter and wrap state lives only on sampler objects:
+shot: the handle is published after all declared level uploads were issued and
+the default sampler was acquired. A detected context loss, failed texture-name
+allocation or failed sampler creation leaves no texture and no pool slot.
+Driver upload and mipmap-generation errors on a live context are not polled:
+a nonzero handle does not prove successful GPU storage allocation. Filter and
+wrap state lives only on sampler objects:
 every sampling bind carries one (the texture's default or an override), the
 texture object itself keeps GL defaults, and the backend asserts on a bind
 without a sampler.
 
-`GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1` when the storage is created, so
-every published texture is complete for every minification filter. A
-`glGenerateMipmap` that fails fails the creation: no texture is published. A
-mipmap filter over a single-level texture is therefore legal in both the descriptor and
-a sampler override; it samples level 0. `nt_gfx_update_texture` on a compressed
-or multi-level texture asserts, then returns without touching storage; whole
+`GL_TEXTURE_MAX_LEVEL` is set to `mip_count - 1`, matching the requested uploaded
+or generated chain. With successful storage allocation, the texture is complete
+for every minification filter. An undetected upload or mipmap-generation failure
+may leave it incomplete. A mipmap filter over a single-level texture is legal
+in both the descriptor and a sampler override; it samples level 0.
+`nt_gfx_update_texture` on a compressed or multi-level texture asserts, then
+returns without touching storage; whole
 levels are replaced by recreating the texture.
 
 `RGBA32F` requires `gpu_caps.has_float_texture_linear` for any linear filtering,
@@ -315,7 +341,9 @@ Creating mipmaps requires
 both `has_float_texture_linear` and `has_float_render_target`, because WebGL
 generation requires filterable, color-renderable storage. Unsupported combinations
 assert before creating storage or applying bindings; filters are never substituted.
-`RGBA16F` linear filtering is core and does not require the new capability.
+`RGBA16F` linear filtering is core and does not require the float-filtering
+capability. Its mipmap generation still requires `has_float_render_target`;
+requesting it without that capability asserts before creating storage.
 
 A sampler override passed in `nt_gfx_texture_binding_t` must obey the same
 format restrictions; it cannot replace the explicit texture state with an
@@ -383,10 +411,12 @@ otherwise selection continues with the next candidate of that order.
 The activator transcodes the whole chain into the shared staging buffer with one
 codec call and then creates the texture through `nt_gfx_make_texture`, which is
 the single path to storage — there is no internal create/upload pair. The codec
-call opens and closes its own transcoder session. Any failure — transcode,
-staging, storage creation, sampler creation — publishes nothing: no handle, no
-pool slot, no open transcoder session. Texture pool exhaustion during activation
-is an asserted precondition, exactly as in `nt_gfx_make_texture`, not a
+call opens and closes its own transcoder session. Any reported failure (transcode,
+staging, texture-name allocation, context loss or sampler creation) publishes
+nothing: no handle, no pool slot, no open transcoder session. Live-context upload
+errors remain unchecked, as in the public constructor. Texture pool exhaustion
+during activation is an asserted precondition, exactly as in
+`nt_gfx_make_texture`, not a
 rejection.
 
 ### Render-target handles
@@ -406,7 +436,8 @@ stale target handle is a no-op, as for vertex inputs.
 handle for a stale target or one without color. `nt_gfx_render_target_valid`
 reports a live target slot; it is `false` after destruction, the texture
 cascade, or a context loss. `nt_gfx_texture_ready` reports whether a texture
-handle has live backend storage. Both queries return `false` for invalid
+handle has a backend object that engine loss synchronization has not discarded;
+it does not verify upload success. Both queries return `false` for invalid
 handles, so callers can also use them after a failed resource-creation call.
 `nt_gfx_texture_size` writes a texture's logical dimensions to its two required
 outputs. Invalid handles write zero to both outputs and return `false`.
@@ -460,16 +491,25 @@ destruction may invalidate it through the documented cascade. The descriptor
 and label are borrowed only for the call. Creating a pipeline or a vertex input
 preserves both current bindings (the bound pipeline and the bound vertex
 input); the caller does not need to rebind after creating another object.
-Allocation failures from public GPU-resource operations, framebuffer
+Detected allocation failures from public GPU-resource operations, framebuffer
 completeness, and context restore remain runtime failures reported
-through invalid handles, `false`, or readiness queries. Mandatory backend
-setup objects are internal invariants: failure to create the GL service EBO
+through invalid handles, `false`, or readiness queries. Texture upload failures
+are unchecked as specified above. Mandatory backend setup objects are internal
+invariants: failure to create the GL service EBO
 upload VAO with a live context asserts.
 
-`nt_gfx_begin_pass` asserts on invalid sequencing and on an invalid or stale
-target. Callers check `nt_gfx_render_target_valid` before a pass on a target
+`nt_gfx_begin_pass` asserts on invalid sequencing, on discarding the default
+framebuffer color, and on an invalid or stale target. Callers check `nt_gfx_render_target_valid` before a pass on a target
 that a loss or a cascade may have freed; there is no non-asserting pass-begin
 variant.
+
+`nt_gfx_clear` requires an open pass and a non-NULL descriptor; violations assert
+on a live context. The descriptor is borrowed only for the call, with no retained
+pointer. `color` and `depth` select independent clears; unselected values are
+ignored. The current scissor limits the clear, while a disabled scissor clears
+the whole attachment. Clear preserves draw state and restores the depth write
+mask after a depth clear. No selections is an accepted operation without GPU
+work. On a known lost context clear does nothing, as pass calls do.
 
 ## Hot Path Rule
 

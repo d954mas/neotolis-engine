@@ -22,7 +22,9 @@ let nextId = 1;
 
 // Web-smoke gate: only a real headless Chromium exposes the deferred-capture drain race — the PNG
 // resolves to real pixels (not {deferred:true}) only after a rendered frame fills the pre-swap seam.
-test('devapi web transport: discovery + game.* + deferred capture yields a non-blank PNG', async ({ page }) => {
+test('devapi web transport: discovery + game.* + deferred capture yields a non-blank PNG after context restore', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/index.html');
 
   // Frame barrier: resolve after two nested requestAnimationFrame calls — one real rendered frame.
@@ -33,6 +35,25 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
 
   // Boot gate: the web shim sets window.__devapi.ready once installed (engine/devapi/nt_devapi_web.c).
   await page.waitForFunction(() => window.__devapi?.ready === true, null, { timeout: 30_000 });
+
+  // Capture must remain usable after WebGL restoration.
+  for (let cycle = 0; cycle < 2; cycle++) {
+    await page.evaluate(async () => {
+      const canvas = document.querySelector('canvas')!;
+      const gl = canvas.getContext('webgl2')!;
+      const loss = gl.getExtension('WEBGL_lose_context');
+      if (!loss) throw new Error('WEBGL_lose_context unavailable');
+      const lost = new Promise<void>((resolve) => canvas.addEventListener('webglcontextlost', () => resolve(), { once: true }));
+      loss.loseContext();
+      await lost;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const restored = new Promise<void>((resolve) => canvas.addEventListener('webglcontextrestored', () => resolve(), { once: true }));
+      loss.restoreContext();
+      await restored;
+    });
+    await frame();
+    expect(errors).toEqual([]);
+  }
 
   // submit one method+params line, parse the synchronous response envelope. A "" response means the
   // command DEFERRED — the caller must poll() for the data line (used by the capture path below).
@@ -141,6 +162,7 @@ test('devapi web transport: discovery + game.* + deferred capture yields a non-b
     return seen.size;
   }, b64);
   expect(distinctColors).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
 
   const afterReset = await page.evaluate((rid) => {
     window.__devapi!.reset();

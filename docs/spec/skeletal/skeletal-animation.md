@@ -225,10 +225,10 @@ The game stores mode and pending intent; the engine never switches by distance, 
 
 `nt_skin_palette_build(binding, model, model_count, out, capacity)` computes B without uploads. `skeletal_gpu` (`engine/skeletal_gpu`, implemented) owns **one** preallocated RGBA32F texture (NEAREST, no mips, `desc.width × desc.height` texels; `width = 0` → `min(2048, gpu_caps.max_texture_size)`, the rule of §10) and a CPU staging buffer of the same size. Per frame: `begin_frame → reserve* → flush → all passes`.
 
-- `nt_skeletal_gpu_begin_frame()` resets the frame cursor to `(0, 0)`.
+- `nt_skeletal_gpu_begin_frame()` resets the frame cursor to `(0, 0)`. Once per gfx frame after `nt_gfx_begin_frame`; a second call in one gfx frame asserts to prevent resetting ranges already used by this frame's draws.
 - `nt_skeletal_gpu_reserve(count, &binding)` places a frame of `3·count` texels at the cursor under the §10 texel layout — a frame that does not fit the current row starts the next one — writes `{texture, x0, y0, x1 = x0, y1 = y0, alpha = 0}` and returns the staging pointer of that frame, which the game hands to `nt_skin_palette_build(..., out = ptr, capacity = count)`. Zero-copy: the game keeps no palette buffer, and a palette that must outlive the frame (#485 bridge) is the game's own copy. No GL call. Asserts: `count > 0`, `3·count ≤ width`, capacity (no growth, no eviction).
 - `nt_skeletal_gpu_flush()` uploads every row touched since `begin_frame` as one rectangle `(0, 0, width, rows)` through `nt_gfx_update_texture` (one call; none when nothing was reserved). The unreserved tail of the last row rides along — complete rows carry packing tails anyway and nothing reads them; `width = 3·P_max` makes every frame one row and removes both. Once per frame between the last palette write and the first pass; a second call re-uploads the same bytes.
-- `nt_skeletal_gpu_restore_gpu()` destroys and recreates the texture (the `nt_mesh_renderer_restore_gpu` contract); staging survives but the next frame rewrites it (§15 order).
+- `nt_skeletal_gpu_restore_gpu()` destroys and recreates the texture (the `nt_frame_arena_restore_gpu` contract); staging survives but the next frame rewrites it (§15 order).
 
 Bank entries (planned, #478) build the same struct as a compound literal from `bank_texture` and a lookup result at their call site; no helper lives here.
 
@@ -240,15 +240,17 @@ typedef struct {
 } nt_deformation_binding_t;      /* _Static_assert(sizeof == 16) */
 ```
 
-A binding is valid until the context's next `begin_frame` or graphics invalidation; the game's frame order (§15: prepare before list build) is what keeps a binding current, and no epoch counter mirrors that order — `skeletal_gpu` keeps no `in_frame`/`flushed` flags either. Textures and assets stay alive through all consuming passes. Capacities are init parameters; overflow asserts. Identical pose+binding may share one prepared binding explicitly; no global dedup cache. Origins are separate x/y integers, not a linear index: the shader fetches with `texelFetch(ivec2)` and `nt_vertex_type_t` has no 32-bit integer attribute, so a linear index would cost the same four bytes plus a per-vertex div/mod.
+A binding is valid until the context's next `begin_frame` or graphics invalidation; the game's frame order (§15: prepare before list build) is what keeps a binding current, and bindings carry no epoch; `skeletal_gpu` asserts only one `begin_frame` per gfx frame. Textures and assets stay alive through all consuming passes. Capacities are init parameters; overflow asserts. Identical pose+binding may share one prepared binding explicitly; no global dedup cache. Origins are separate x/y integers, not a linear index: the shader fetches with `texelFetch(ivec2)` and `nt_vertex_type_t` has no 32-bit integer attribute, so a linear index would cost the same four bytes plus a per-vertex div/mod.
 
 **`skin_comp`** (`engine/skin_comp`, implemented) stores one by-value `nt_deformation_binding_t` per entity in the `mesh_comp` pattern (`init/shutdown/add/has/remove`, `nt_skin_comp_handle(entity)` asserts presence). `add` starts from the zero binding; drawing it is the renderer's assert (§13). Swap-and-pop moves the 16 B value; `remove` frees nothing — the texture is borrowed. Under `NT_INTROSPECT_ENABLED` the component describes its texture handle, origins and alpha like the other render components, so a devapi bot can spot an entity left on the zero binding.
 
 ## 13. Renderer (implemented, #523)
 
-`nt_skinned_mesh_renderer_draw_list(items, count)` consumes existing 16-byte
+`nt_skinned_mesh_renderer_prepare(items, count, runs, max_runs)` consumes existing 16-byte
 render items in the given order; through entity it reads
-mesh/material/world/color and `skin_comp`. No sampling, FK, mode selection,
+mesh/material/world/color and `skin_comp`, packs the instances into the frame
+arena and writes resolved runs; `nt_skinned_mesh_renderer_draw(runs, run_count)`
+executes them ([Prepared mesh runs](../render/architecture.md#prepared-mesh-runs)). No sampling, FK, mode selection,
 culling or sorting.
 
 **One skinning vertex program per pass, always two frames.** The shader fetches
@@ -270,12 +272,12 @@ variant; a second program appears only if that number justifies it.
 
 **Sampler set.** The material explicitly declares `u_skin_matrices` as a
 `highp sampler2D` within `NT_MATERIAL_MAX_TEXTURES` = 4. The renderer replaces
-that declared slot's resource and sampler with the current deformation texture
+that declared slot's resource and sampler with the run's deformation texture
 and its default sampler, resolves the surface slots normally, and applies the
 complete combined set in one `nt_gfx_apply_texture_bindings` call. The declared
 placeholder resource and sampler have no effect in this renderer. Reapply when
-the material or deformation texture changes; reset tracking at each
-`draw_list`.
+the material, pipeline or deformation texture changes; reset tracking at each
+`draw`.
 
 **Batching.** `nt_mesh_renderer_batch_key(material, mesh)` stays the exact
 two-slot packing. An equal key is a candidate run, and the run also requires an
@@ -308,7 +310,7 @@ warning, explicit acknowledgement flag and a separate accurate-normal
 material/shader. CPU skeleton math still supports nonuniform scale. The profile
 is a material choice, not a runtime enum or automatic renderer branch.
 
-**Passes.** All passes use the same frame binding. Baseline multipass: assign pass material → build/sort list → draw → next pass. WebGL2 needs only 2D float textures with NEAREST filters, `texelFetch`, instanced attributes; no SSBO/compute/texture arrays/float render targets/float-linear filtering.
+**Passes.** All passes use the same frame binding. Baseline multipass: per pass assign the pass material → build/sort the list → prepare its runs; then flush and upload once and draw each pass's runs in its pass ([Frame order](../render/architecture.md#frame-order)). WebGL2 needs only 2D float textures with NEAREST filters, `texelFetch`, instanced attributes; no SSBO/compute/texture arrays/float render targets/float-linear filtering.
 
 ## 14. Bounds and culling
 
@@ -328,7 +330,7 @@ The max of two clip radii is *not* a bound for their mix (two 80° bends mixed a
 
 **The v1 adapters** are `nt_skeletal_assets_activate_skeleton/skin_binding/clip` and their deactivators (`engine/skeletal_assets`), registered by the application through `nt_resource_register_type` exactly like textures; resource core references none of them. Each one validates the header before it allocates anything, copies the payload into **one** allocation and points the view of §7.2 into that copy — the wire layout is the runtime layout (§16), so nothing is transposed or re-indexed. A structurally broken payload logs one warning and returns 0, which leaves the asset FAILED: NSKL and NSKN reject from the source bytes and allocate nothing; only the NANM joint tables are checked through the view over the copy, and that rejection takes and releases a slot, where in a full pool the take asserts like any other activation (the capacity is sized for the peak set). The adapters are copy-out consumers in the sense of [Resource](../assets/resource.md): nothing reads the blob after activation. `nt_skeletal_assets_init(max_assets)` allocates **one** pool for all three types, so the game sizes the peak mounted set once instead of guessing three splits; activating past the capacity is an assert, not a load failure. The capacity counts every *activated* asset, not every published one: when one resource id is present in two mounted packs both copies activate and hold a slot, only the winner is published, and the loser is released when its own pack unmounts. The runtime handle is a generational `nt_pool` id, so a stale handle fails `nt_pool_valid` instead of naming a reused slot. `nt_skeletal_assets_skeleton/skin_binding/clip(nt_resource_t)` return the views and assert the asset type and a live handle; a view stays valid until its asset is deactivated (unmount, reload, shutdown), so the game refetches it after `resource_step`. The adapters cross-check no `rig_compat_id` — no second asset exists at activation.
 
-Order per frame: draws finished → `resource_step` → refresh views → advance/compose/prepare → build list → draw. A borrowed view lasts until its owner is deactivated/republished; a bank borrows the clip, skeleton and binding views it bakes from, so their assets outlive the bank.
+Order per frame: draws finished → `resource_step` → refresh views → advance/compose/prepare palettes → build lists → prepare runs → flush/upload → draw. A borrowed view lasts until its owner is deactivated/republished; a bank borrows the clip, skeleton and binding views it bakes from, so their assets outlive the bank.
 
 **Pack grouping.** Activation and unmount are whole-pack (default `NT_RESOURCE_MAX_PACKS` = 16), and mounting a pack that contains a non-BLOB type whose activator is not registered asserts (`nt_resource.c`, parse). Builder manifests therefore group by **co-residency**: a rig/mesh pack (MESH, NSKL, NSKN); clip-group packs (NANM, e.g. base locomotion vs. dances loaded mid-game). Applications that link animation register the three activators; the manifest keeps peak mounted packs (old + new + prefetch) within the limit or overrides it deliberately.
 

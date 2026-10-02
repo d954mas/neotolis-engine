@@ -78,6 +78,8 @@ static void test_stub_queries_require_outputs(void) {
 static void test_stub_drops_draws_and_state_changes(void) {
     TEST_ASSERT_EQUAL_UINT16(0, nt_gfx_max_meshes());
     nt_gfx_begin_pass(NULL);
+    nt_gfx_clear(NULL);
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .depth = true, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline((nt_pipeline_t){1});
     nt_gfx_bind_vertex_input((nt_vertex_input_t){1});
     nt_gfx_apply_texture_bindings(NULL, 0);

@@ -2727,6 +2727,18 @@ void test_gfx_rgba32f_filters_require_capability(void) {
     nt_gfx_destroy_texture(linear);
 }
 
+void test_gfx_rgba16f_mipmap_generation_requires_render_capability(void) {
+    const nt_texture_desc_t desc = {.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA16F, .data = s_test_half_4x4, .gen_mipmaps = true, .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR};
+    g_nt_gfx.gpu_caps.has_float_texture_linear = false;
+    g_nt_gfx.gpu_caps.has_float_render_target = false;
+    EXPECT_ASSERT(nt_gfx_make_texture(&desc));
+    g_nt_gfx.gpu_caps.has_float_render_target = true;
+    nt_texture_t texture = nt_gfx_make_texture(&desc);
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(texture));
+    TEST_ASSERT_TRUE(nt_gfx_fake_last_texture_desc().gen_mipmaps);
+    nt_gfx_destroy_texture(texture);
+}
+
 void test_gfx_rgba32f_mipmap_generation_requires_both_capabilities(void) {
     const float pixels[2 * 2 * 4] = {0};
     const nt_texture_desc_t desc = {.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA32F, .data = pixels, .gen_mipmaps = true};
@@ -3209,6 +3221,68 @@ void test_gfx_bound_pipeline_holds_the_generation(void) {
     nt_gfx_end_pass();
 }
 
+static nt_buffer_t make_test_ubo(uint32_t size) { return nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = size}); }
+
+void test_bind_uniform_buffer_range_reaches_backend(void) {
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_bind_uniform_buffer(ubo, 1);
+    nt_gfx_bind_uniform_buffer_range(ubo, 7, 768, 256); /* final legal range */
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    nt_gfx_fake_ubo_bind_t whole = nt_gfx_fake_ubo_bind_at(0);
+    nt_gfx_fake_ubo_bind_t range = nt_gfx_fake_ubo_bind_at(1);
+    TEST_ASSERT_EQUAL_UINT32(1, whole.slot);
+    TEST_ASSERT_EQUAL_UINT32(0, whole.size);
+    TEST_ASSERT_EQUAL_UINT32(whole.buffer_backend, range.buffer_backend);
+    TEST_ASSERT_EQUAL_UINT32(7, range.slot);
+    TEST_ASSERT_EQUAL_UINT32(768, range.offset);
+    TEST_ASSERT_EQUAL_UINT32(256, range.size);
+}
+
+void test_bind_uniform_buffer_range_asserts(void) {
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 1024});
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256));          /* off the 256 B alignment */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 0));             /* empty */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 512));         /* past the end */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0xFFFFFF00U, 512)); /* offset + size wraps */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 2048));          /* larger than the buffer */
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(vbo, 0, 0, 256));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
+}
+
+void test_bind_uniform_buffer_range_follows_orphaned_storage(void) {
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_orphan_buffer(ubo, NULL, 256);
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 512));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 256);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
+
+    nt_gfx_orphan_buffer(ubo, NULL, 0);
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 16));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
+
+    nt_gfx_orphan_buffer(ubo, NULL, 1024);
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    EXPECT_ASSERT(nt_gfx_orphan_buffer(ubo, NULL, 1280));
+}
+
+/* The alignment is a device cap, re-read on every probe. */
+void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
+    nt_gfx_shutdown();
+    nt_gfx_fake_set_uniform_buffer_offset_alignment(16);
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    TEST_ASSERT_EQUAL_UINT32(16, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
+
+    nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256);
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 8, 256));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
@@ -3361,9 +3435,14 @@ int main(void) {
     RUN_TEST(test_register_global_block);
     RUN_TEST(test_register_global_block_max);
     RUN_TEST(test_register_global_block_cleared_on_shutdown);
+    RUN_TEST(test_bind_uniform_buffer_range_reaches_backend);
+    RUN_TEST(test_bind_uniform_buffer_range_asserts);
+    RUN_TEST(test_bind_uniform_buffer_range_follows_orphaned_storage);
+    RUN_TEST(test_bind_uniform_buffer_range_follows_probed_alignment);
     /* New pixel format tests */
     RUN_TEST(test_gfx_make_texture_rgba16f);
     RUN_TEST(test_gfx_rgba32f_filters_require_capability);
+    RUN_TEST(test_gfx_rgba16f_mipmap_generation_requires_render_capability);
     RUN_TEST(test_gfx_rgba32f_mipmap_generation_requires_both_capabilities);
     RUN_TEST(test_gfx_rgba32f_sampler_overrides_require_capability);
     RUN_TEST(test_gfx_make_texture_rg16ui);

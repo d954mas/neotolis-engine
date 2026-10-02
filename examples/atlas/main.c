@@ -16,6 +16,7 @@
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
+#include "frame_arena/nt_frame_arena.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
@@ -89,7 +90,6 @@ static nt_program_ref_t s_program;
 /* ---- Entity ---- */
 
 static nt_entity_t s_cube;
-static nt_render_item_t s_sort_scratch[1];
 
 /* ---- State ---- */
 
@@ -125,7 +125,8 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         /* Materials keep their handles and draw again once their programs relink. */
-        const nt_result_t restore_result = nt_mesh_renderer_restore_gpu();
+        nt_mesh_renderer_restore_gpu();
+        const nt_result_t restore_result = nt_frame_arena_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         (void)restore_result;
         nt_program_ref_drop(&s_program);
@@ -195,22 +196,27 @@ static void frame(void) {
     const nt_material_info_t *mat_info = nt_material_get_info(s_material);
     bool can_render = mat_info && (nt_gfx_program_state(mat_info->program) == NT_GFX_PROGRAM_READY) && nt_resource_is_ready(s_mesh_handle);
 
+    nt_render_item_t items[1];
+    uint32_t item_count = 0;
+    if (can_render) {
+        nt_mesh_t mesh = {.id = nt_resource_get(s_mesh_handle)};
+        *nt_mesh_comp_handle(s_cube) = mesh;
+        items[0].sort_key = nt_sort_key_opaque(s_material.id, mesh.id);
+        items[0].entity = s_cube.id;
+        items[0].batch_key = nt_mesh_renderer_batch_key(s_material, mesh);
+        item_count = 1;
+    }
+    nt_frame_arena_begin_frame();
+    nt_mesh_run_t runs[1];
+    const uint32_t run_count = nt_mesh_renderer_prepare(items, item_count, runs, 1);
+    nt_frame_arena_upload();
+
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-
-        nt_mesh_t mesh = {.id = nt_resource_get(s_mesh_handle)};
-        *nt_mesh_comp_handle(s_cube) = mesh;
-
-        nt_render_item_t items[1];
-        items[0].sort_key = nt_sort_key_opaque(s_material.id, mesh.id);
-        items[0].entity = s_cube.id;
-        items[0].batch_key = nt_mesh_renderer_batch_key(s_material, mesh);
-
-        nt_sort_by_key(items, 1, s_sort_scratch);
-        nt_mesh_renderer_draw_list(items, 1);
+        nt_mesh_renderer_draw(runs, run_count);
     }
 
     nt_gfx_end_pass();
@@ -262,6 +268,7 @@ int main(void) {
 
     nt_mesh_renderer_desc_t mr_desc = nt_mesh_renderer_desc_defaults();
     nt_mesh_renderer_init(&mr_desc);
+    nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = NT_INSTANCE_STRIDE_MAX});
 
     /* Request resource handles */
     s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
@@ -329,6 +336,7 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+    nt_frame_arena_shutdown();
     nt_mesh_renderer_shutdown();
     nt_drawable_comp_shutdown();
     nt_material_comp_shutdown();

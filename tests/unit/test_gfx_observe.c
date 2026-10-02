@@ -160,7 +160,30 @@ static void test_shutdown_discards_an_open_frame(void) {
     TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.counters.frame_sequence);
 }
 
+static void test_clear_preserves_bound_draw_state(void) {
+    draw_setup();
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    uint32_t pipeline = nt_gfx_test_bound_pipeline();
+    uint32_t input = nt_gfx_test_bound_vertex_input();
+    uint32_t textures = nt_gfx_test_texture_set_state();
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .depth = true, .clear_depth = 0.5F});
+    TEST_ASSERT_EQUAL_UINT32(pipeline, nt_gfx_test_bound_pipeline());
+    TEST_ASSERT_EQUAL_UINT32(input, nt_gfx_test_bound_vertex_input());
+    TEST_ASSERT_EQUAL_UINT32(textures, nt_gfx_test_texture_set_state());
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    draw_teardown();
+}
+
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
+static void test_clear_requires_an_open_pass_and_descriptor(void) {
+    NT_TEST_EXPECT_ASSERT(nt_gfx_clear(&(nt_clear_desc_t){.color = true}));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_clear(&(nt_clear_desc_t){0}));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_gfx_clear(NULL));
+    nt_gfx_end_pass();
+}
+
 static void test_begin_frame_with_an_open_pass_asserts(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
@@ -204,6 +227,44 @@ static uint32_t result_of(nt_gfx_capture_view_t capture, nt_gfx_operation_t oper
         }
     }
     return result;
+}
+
+static void test_clear_copies_requests_and_skips_known_loss(void) {
+    const nt_clear_desc_t requests[2] = {{.color = true, .clear_color = {0.25F, 0.5F, 0.75F, 1}, .clear_depth = 0.25F}, {.depth = true, .clear_color = {0.75F, 0.25F, 0.5F, 1}, .clear_depth = 0.75F}};
+    record_next_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    for (uint32_t i = 0; i < 2; i++) {
+        nt_clear_desc_t desc = requests[i];
+        nt_gfx_clear(&desc);
+        memset(&desc, 0, sizeof(desc));
+    }
+    nt_gfx_end_pass();
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t found = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_CLEAR) {
+            if (found >= 2) {
+                TEST_FAIL_MESSAGE("Unexpected extra clear request");
+                return;
+            }
+            TEST_ASSERT_EQUAL_MEMORY(requests[found].clear_color, event->data.clear.clear_color, sizeof(requests[found].clear_color));
+            TEST_ASSERT_EQUAL_MEMORY(&requests[found].clear_depth, &event->data.clear.clear_depth, sizeof(float));
+            TEST_ASSERT_EQUAL(requests[found].color, event->data.clear.color);
+            TEST_ASSERT_EQUAL(requests[found].depth, event->data.clear.depth);
+            found++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, found);
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CLEAR]);
+    nt_gfx_fake_set_context_lost(true);
+    record_next_frame();
+    nt_gfx_clear(NULL);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CLEAR, NT_GFX_OBJECT_RENDER_TARGET));
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CLEAR]);
 }
 
 static void test_render_target_work_on_a_known_loss_ends_context_lost(void) {
@@ -626,6 +687,7 @@ static void test_exact_capacity_and_one_record_short(void) {
 int main(void) {
     nt_log_add_sink(count_error_logs, NULL);
     UNITY_BEGIN();
+    RUN_TEST(test_clear_preserves_bound_draw_state);
     RUN_TEST(test_passes_sum_and_begin_frame_resets);
     RUN_TEST(test_instanced_products_are_widened_before_multiplication);
     RUN_TEST(test_loss_is_wiped_at_begin_frame_and_pass_calls_are_no_ops);
@@ -635,9 +697,11 @@ int main(void) {
     RUN_TEST(test_first_frame_counts_initial_resource_creation);
     RUN_TEST(test_shutdown_discards_an_open_frame);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_clear_requires_an_open_pass_and_descriptor);
     RUN_TEST(test_begin_frame_with_an_open_pass_asserts);
 #endif
 #if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_clear_copies_requests_and_skips_known_loss);
     RUN_TEST(test_resource_operations_keep_published_handles_after_destroy);
     RUN_TEST(test_render_target_work_on_a_known_loss_ends_context_lost);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL

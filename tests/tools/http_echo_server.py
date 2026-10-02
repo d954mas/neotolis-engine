@@ -4,20 +4,36 @@
 Run:  python tests/tools/http_echo_server.py [port]   (default 8124)
 Then: build/tests/<preset>/test_http_native_net
 
-Endpoints mirror tests/browser/serve.mjs so both acceptance tests assert the
-same contract: POST /echo (byte-exact echo + request headers reflected into
+Endpoints: POST /echo (byte-exact echo + request headers reflected into
 X-Echo-* response headers), GET /hello, /status404, /slow (5 s stall),
 /slowbody (headers then stall), /gzip, /truncated, /empty, /loop,
-/r301hello + /hello301 (redirect probes).
+/r301hello + /hello301 (redirect probes), and /peer (a short hold, then the
+number of the TCP connection it arrived on, so a test can tell a reused
+connection from a new one). tests/browser/serve.mjs serves the same /status404
+and /slow and a narrower POST /echo (Content-Type and X-NT-Test reflected); the
+rest are native-only.
 """
 import gzip
+import itertools
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+class Server(ThreadingHTTPServer):
+    # A burst of NT_HTTP_MAX_REQUESTS connects arrives at once; a backlog smaller
+    # than the burst answers the rest with RST on Windows
+    request_queue_size = 64
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # Numbers every accepted connection; next() on a count is atomic under the GIL
+    _connections = itertools.count(1)
+
+    def setup(self):
+        super().setup()
+        self.connection_number = next(Handler._connections)
 
     def log_message(self, *args):
         pass
@@ -71,6 +87,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/slow":
             time.sleep(5)
             self._reply(200, b"ok")
+        elif self.path == "/peer":
+            # Long enough that a burst's requests overlap and each needs its own connection
+            time.sleep(0.3)
+            self._reply(200, str(self.connection_number).encode())
         elif self.path == "/hello301":
             # Lands here only when a redirected POST correctly became a GET
             self._reply(200, b"hello-neotolis")
@@ -111,7 +131,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8124
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = Server(("127.0.0.1", port), Handler)
     # PORT= line first: run_http_net_test.py parses it (port 0 -> OS-assigned)
     print(f"PORT={server.server_address[1]}", flush=True)
     print(f"nt_http echo server: http://127.0.0.1:{server.server_address[1]}/", flush=True)

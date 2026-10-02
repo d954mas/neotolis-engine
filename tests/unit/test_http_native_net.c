@@ -286,6 +286,53 @@ static void test_timeout_mid_body_keeps_status(void) {
     nt_http_free(req);
 }
 
+/* Fires NT_HTTP_MAX_REQUESTS overlapping /peer requests and records the number
+ * the server gave the connection each one arrived on. */
+static void peer_burst(unsigned connections[NT_HTTP_MAX_REQUESTS]) {
+    nt_http_request_t reqs[NT_HTTP_MAX_REQUESTS];
+    for (int i = 0; i < NT_HTTP_MAX_REQUESTS; i++) {
+        reqs[i] = nt_http_request(make_url("/peer"));
+        TEST_ASSERT_NOT_EQUAL(0, reqs[i].id);
+    }
+    for (int i = 0; i < NT_HTTP_MAX_REQUESTS; i++) {
+        TEST_ASSERT_EQUAL(NT_HTTP_STATE_DONE, pump_to_completion(reqs[i]));
+        uint32_t size = 0;
+        uint8_t *data = nt_http_take_data(reqs[i], &size);
+        TEST_ASSERT_NOT_NULL(data);
+        TEST_ASSERT_GREATER_THAN(0, size);
+        char text[16] = {0};
+        TEST_ASSERT_LESS_THAN(sizeof(text), size);
+        memcpy(text, data, size);
+        free(data);
+        connections[i] = (unsigned)strtoul(text, NULL, 10);
+        TEST_ASSERT_NOT_EQUAL(0U, connections[i]);
+        nt_http_free(reqs[i]);
+    }
+}
+
+/* A burst's connections stay pooled when it ends: the next burst to the same
+ * host must not reconnect. Pins that the pool keeps a whole burst's connections;
+ * on https each reconnect it saves is a TCP and TLS setup. */
+static void test_burst_reuses_previous_burst_connections(void) {
+    unsigned first[NT_HTTP_MAX_REQUESTS];
+    unsigned second[NT_HTTP_MAX_REQUESTS];
+    peer_burst(first);
+    /* Otherwise a pool smaller than the burst would pass unnoticed */
+    for (int i = 0; i < NT_HTTP_MAX_REQUESTS; i++) {
+        for (int j = i + 1; j < NT_HTTP_MAX_REQUESTS; j++) {
+            TEST_ASSERT_NOT_EQUAL_MESSAGE(first[i], first[j], "the first burst shared a connection");
+        }
+    }
+    peer_burst(second);
+    for (int i = 0; i < NT_HTTP_MAX_REQUESTS; i++) {
+        bool reused = false;
+        for (int j = 0; j < NT_HTTP_MAX_REQUESTS; j++) {
+            reused = reused || second[i] == first[j];
+        }
+        TEST_ASSERT_TRUE_MESSAGE(reused, "a request of the second burst opened a new connection");
+    }
+}
+
 /* Leaves the transfer in flight on purpose: tearDown's nt_http_shutdown must
  * cancel a live easy handle and clean up the multi without leaks or crashes */
 static void test_shutdown_with_inflight(void) {
@@ -313,6 +360,7 @@ int main(void) {
     RUN_TEST(test_timeout_mid_body_keeps_status);
     RUN_TEST(test_connection_refused_fails);
     RUN_TEST(test_cancel_in_flight);
+    RUN_TEST(test_burst_reuses_previous_burst_connections);
     RUN_TEST(test_shutdown_with_inflight);
     return UNITY_END();
 }

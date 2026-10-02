@@ -110,8 +110,9 @@ buffer is *not* cascade-destroyed, but destroying one clears the dependents'
 pointed flag: their next draw using that vertex input asserts until
 `nt_gfx_bind_instance_buffer` re-points it, and the GL attachment's storage
 lingers until that re-point or the vertex input's death.
-Buffer *contents* may change freely — `update`/`orphan`
-keep the GL name, so baked attachments survive per-flush orphaning — and
+Buffer *contents* may change at any time for correctness — `update`/`orphan`
+keep the GL name, so baked attachments survive per-flush orphaning; what a
+write costs depends on when it happens (see Dynamic data lifetime) — and
 index-buffer data ops run inside a service upload VAO in the backend,
 because the element-array binding is VAO state — it would otherwise be
 silently rewired into whichever vertex input is bound, and core-profile GL
@@ -139,7 +140,7 @@ pipeline and vertex-input binding are orthogonal: either may change without
 re-binding the other. Two pipelines on one program
 share every uniform value, and binding one does not reset what the other set.
 Renderers replay declared material params on each material or pipeline transition
-inside one `draw_list` call or flush. Renderer-tracked bound state is discarded at the
+inside one mesh `draw`, `draw_list` call or flush. Renderer-tracked bound state is discarded at the
 end of that call; across calls the GL backend deduplicates program, VAO,
 pipeline state, texture, sampler, viewport and clear-value binds (scissor-enable is deduplicated by the
 front-end mirror). Standalone float vec4 writes are skipped when their bytes
@@ -204,19 +205,21 @@ drive one shared state machine, `nt_renderer_bound_t` in
 It separates four transitions, each with its own identity: pipeline (handle),
 vertex input (handle), material uniforms — every vec4 param, keyed by material
 id — and the per-run instance range plus draw. A run that changes only the mesh
-therefore does no material work at all. The tracked state lives for exactly one `draw_list` call or flush: inside
+therefore does no material work at all. The tracked state lives for exactly one mesh `draw`, `draw_list` call or flush: inside
 that call the renderer is the only writer of GL draw state. Material uniforms
 replay on a material change *or* a pipeline change, because uniform values are
 program state and the new pipeline may sit on another program — one flush can
 hold one material id on two programs when a game replaces the material's program
-between an immediate-mode emit and an ECS `draw_list`. The mesh renderer pays
-nothing for this: a pipeline change there always implies a material change.
+between an immediate-mode emit and an ECS `draw_list`. The mesh renderers pay
+nothing for this inside one prepared list, where a pipeline change implies a
+material change; concatenated runs follow the general rule.
 Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a material
 without an override selects the texture's asset default. At every material
 transition the renderer resolves the material's declared `nt_resource_t` texture
 handles, and every sprite command submits the complete semantic set once. The
-skinned renderer replaces the declared `u_skin_matrices` resource and sampler
-with the current deformation texture and its default sampler, resolves the other
+skinned renderer records the deformation texture in each run, and the run
+executor replaces the declared `u_skin_matrices` resource and sampler
+with that texture and its default sampler, resolves the other
 declarations, and submits the same complete set. The skin declaration still
 counts toward the material's four slots; there is no renderer-only fifth
 binding. The sprite batch key packs the material pool slot and the currently published GPU
@@ -264,6 +267,166 @@ cannot grow the cache. A miss creates the vertex input and caches it only on
 success; recoverable creation failures leave the cache unchanged so the next
 lookup retries.
 
+### Dynamic data lifetime
+
+A write into a buffer that an earlier draw of the same frame read is correct
+but not free: Mali drivers under ANGLE track the whole buffer, not the written
+range, so the write waits for those draws or copies around them. Measured on
+the reference phone with `examples/bench_stream`:
+
+- appending per-draw data between draws of one frame (the former mesh and
+  skinned instance rings, the shape instance rings) costs 2-15x frame time when
+  the frame is not GPU-bound;
+- a partial rewrite from offset 0 (the shape batch) stalls the same way;
+- a full-size rewrite does not stall: Chrome gives the buffer new storage;
+- rewriting a buffer one frame after its last read does not stall;
+- orphaning (`nt_gfx_orphan_buffer`) removes the wait but allocates storage on
+  every call.
+
+Policy for engine renderers: data known before drawing is **prepared** — packed
+for the whole frame, uploaded once before the first draw that reads the storage,
+and drawn by range in any pass, any number of times. Immediate-mode batches that
+flush between game passes (sprite, text, shape) choose a per-flush policy by
+measurement. The mesh renderers prepare (see Prepared mesh runs); the shape
+instance rings predate this rule. Prepared data lives in the frame arena (see
+Prepared dynamic data).
+
+A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
+waits did not raise GPU work per frame, and the phone's governor granted the
+waiting build a higher clock. Compare builds as described in
+[measuring performance on phones](../../perf-measurement.md).
+
+### Prepared dynamic data
+
+`nt_frame_arena` holds one frame's prepared per-draw vertex data (instance
+attributes) for every renderer that prepares: engine renderers and game-owned
+ones alike. It is a CPU staging copy plus one `STREAM` vertex buffer of the
+capacity the game passes to `nt_frame_arena_init` (nonzero, a multiple of
+`NT_FRAME_ARENA_ALIGN`, after `nt_gfx_init`); it sits over raw `nt_gfx`, which
+stays unaware of the arena.
+
+The game owns the frame order, once per gfx frame after `nt_gfx_begin_frame`:
+
+1. `nt_frame_arena_begin_frame` resets the cursor.
+2. Renderers `nt_frame_arena_reserve` ranges while preparing and fill the
+   returned staging pointer. A reserve returns a byte offset aligned to
+   `NT_FRAME_ARENA_ALIGN` (16 bytes: one RGBA32F texel, so the same offsets can
+   index a data texture later). Alignment padding has unspecified contents;
+   consumers read only the requested bytes.
+3. `nt_frame_arena_upload` sends every reserved byte in one buffer update,
+   after the last reserve and before the first draw that reads arena data.
+4. Draws bind `nt_frame_arena_buffer()` at a reserved offset, in any pass, any
+   number of times.
+
+Assertions reject a second `begin_frame` in one gfx frame, a reserve after
+upload, a second upload, and taking the buffer before upload. They do not track
+draws: the game must prepare and upload before any draw reads the arena buffer
+in that gfx frame, including draws using the previous upload. A frame that skips
+`begin_frame` may reuse the last upload for the whole frame. An offset stays
+valid until the next `begin_frame`. A restore empties the buffer but keeps
+staging and offsets:
+`nt_frame_arena_buffer` asserts until the frame uploads again. Overflowing
+the capacity logs the bytes needed and free, then asserts; the arena never grows
+or chains buffers. `nt_frame_arena_peak` reports the most bytes any frame
+uploaded since init, to size the capacity from a real scene.
+
+Data created after the first draw that reads arena data (for example 3D built
+while walking UI) is not supported: updating the same buffer between draws can
+wait on earlier reads even when the written ranges are disjoint. Prepare it
+before the first draw that reads arena data.
+
+One `STREAM` buffer is the policy selected from the measurements in #590:
+rotation showed no consistent benefit in the tested workloads. The P40 runs
+also compared full and partial per-frame uploads (`arena` and `arena_headroom`
+in `examples/bench_stream`). The API does not guarantee a stall-free upload.
+
+View uniform buffers remain game-owned: upload all their blocks before the
+first draw that reads the buffer, then select ranges with
+`nt_gfx_bind_uniform_buffer_range`.
+Standalone material `vec4` parameters still use the existing per-material
+uniform setters; they are not arena data.
+
+### Prepared mesh runs
+
+`nt_mesh_renderer` and `nt_skinned_mesh_renderer` record before they draw.
+`prepare(items, count, runs, max_runs)` splits the items into runs of adjacent
+equal batch keys (the skinned renderer also splits on the deformation texture),
+resolves each run's pipeline and vertex input — creating them on a cache miss —
+packs the instance data of drawable runs into one arena reserve, and writes
+`nt_mesh_run_t` values into game-owned storage. It writes no buffer. A run
+whose program is not ready, or whose pipeline or vertex input could not be
+created, is neither packed nor recorded. A list never needs more runs than
+items; a smaller `max_runs` that runs out asserts.
+
+A run holds everything its draw needs: pipeline, vertex input, material, an
+optional supplied texture with its material slot (the skinned deformation
+texture), the arena offset, the instance count, the mesh's index and vertex
+counts, and the color mode with its attribute location. `draw(runs, run_count)`
+executes runs in order through one executor shared by both renderers and binds
+only what changed. It never merges or reorders runs and reads no entity
+component. Consequences:
+
+- Batching happens at prepare, so the game's item order decides what merges.
+- One list draws in any number of passes (shadow cascades) from one upload.
+- Entity bindings may change after prepare, so one entity can enter several
+  lists with different materials (multipass) before the single upload.
+- Runs are frame-scoped values without a stamp: valid until the next
+  `nt_frame_arena_begin_frame` or GPU restore. Skinned runs embed deformation
+  bindings, so they also expire at the next `nt_skeletal_gpu_begin_frame`.
+- The material, its program and textures, and the mesh stay live until the
+  last draw: replacing and destroying the program also destroys the pipeline a
+  run holds. Material params and texture publications are read at draw.
+
+Runs may be copied, filtered or concatenated, never built by hand.
+
+### Frame order
+
+One canonical order covers deformation palettes (`nt_skeletal_gpu`), prepared
+instance data (`nt_frame_arena`) and view uniform blocks. Each `begin_frame`
+runs once per gfx frame after `nt_gfx_begin_frame`; every write precedes the
+first draw that reads its storage:
+
+```c
+nt_gfx_begin_frame();
+nt_skeletal_gpu_begin_frame();
+nt_frame_arena_begin_frame();
+
+/* Record: no buffer writes (a cache miss creates a pipeline or vertex input).
+ * Palettes before the skinned prepare that packs their bindings. */
+for (uint32_t i = 0; i < character_count; i++) {
+    nt_skeletal_mat34_t *palette = nt_skeletal_gpu_reserve(palette_count, nt_skin_comp_handle(characters[i]));
+    nt_skin_palette_build(skin, model[i], joint_count, palette, palette_count);
+}
+bind_shadow_materials();
+uint32_t shadow_n = nt_skinned_mesh_renderer_prepare(shadow_items, shadow_count, shadow_runs, MAX_ITEMS);
+bind_surface_materials();
+uint32_t skinned_n = nt_skinned_mesh_renderer_prepare(skinned_items, skinned_count, skinned_runs, MAX_ITEMS);
+uint32_t static_n = nt_mesh_renderer_prepare(static_items, static_count, static_runs, MAX_ITEMS);
+
+/* Upload: once per storage. */
+nt_skeletal_gpu_flush();
+nt_frame_arena_upload();
+nt_gfx_update_buffer(view_ubo, 0, views, sizeof views); /* every view block */
+
+/* Execute: game-owned passes. */
+for (uint32_t c = 0; c < CASCADES; c++) {
+    nt_gfx_begin_pass(&shadow_pass[c]);
+    nt_gfx_bind_uniform_buffer_range(view_ubo, 0, c * view_stride, sizeof(view_t));
+    nt_skinned_mesh_renderer_draw(shadow_runs, shadow_n);
+    nt_gfx_end_pass();
+}
+nt_gfx_begin_pass(&main_pass);
+nt_gfx_bind_uniform_buffer_range(view_ubo, 0, CASCADES * view_stride, sizeof(view_t));
+nt_skinned_mesh_renderer_draw(skinned_runs, skinned_n);
+nt_mesh_renderer_draw(static_runs, static_n);
+nt_gfx_end_pass();
+```
+
+`view_stride` is `sizeof(view_t)` rounded up to
+`gpu_caps.uniform_buffer_offset_alignment`. Immediate-mode renderers (sprite,
+text, shape) flush inside passes under their own policy and do not read the
+arena.
+
 ### Render targets
 
 Render targets are a general backend capability for offscreen passes, not a
@@ -275,6 +438,38 @@ The game still owns pass order. Each pass selects its destination through
 `nt_render_target_t` selects an offscreen target. `nt_gfx` binds the matching
 backend framebuffer internally during `nt_gfx_begin_pass`; public code does not
 bind or unbind render-target state outside the pass descriptor.
+
+Each pass clears color and depth unless `load_color`/`load_depth` keeps the
+attachment's current contents. A clear initializes the entire attachment
+regardless of scissor; clear values matter only for a cleared attachment.
+Stencil is never cleared by a pass.
+
+`nt_gfx_clear` is an explicit operation inside an open pass. Its borrowed
+`nt_clear_desc_t` selects color and depth independently with `color`/`depth`
+and supplies `clear_color`/`clear_depth`; unselected values are ignored.
+It clears the current target under the current scissor, or the entire attachment
+when scissor is disabled. It does not use the viewport as a clear rectangle.
+It preserves the pipeline, vertex input, texture set, uniforms, viewport and
+scissor. Depth clear temporarily enables depth writes and restores the bound
+pipeline's mask before returning. Selecting neither attachment does no GPU work;
+a lost context skips the operation. Stencil has no clear API.
+Capture records a CLEAR request, its copied values and selections, its target,
+and the actual GL calls without growing the event record.
+
+`discard_color`/`discard_depth` end the contents' lifetime at `end_pass`, before
+the framebuffer is unbound, without invalidating texture handles;
+`discard_depth` also discards stencil. A later reader must use contents written
+after the discard. Producer outputs sampled by later passes must not discard; a
+consuming pass's flags apply only to its own attachments. Absent attachments
+ignore the flags. Discarding the default framebuffer's color asserts, because
+it is the presented frame. The descriptor is borrowed only during `begin_pass`.
+
+Loading does not preserve default-framebuffer contents across presentation
+(`preserveDrawingBuffer` is false) or restore contents after context loss.
+Discard maps to `glInvalidateFramebuffer`; native skips this optional hint when
+the driver lacks ARB_invalidate_subdata. Call capture records attachment enums,
+not pointers. BEGIN/PASS records contain the requested flags; INITIAL/PASS holds
+only cached clear values, with flag fields having no meaning.
 
 Pass color and depth clears are pass-owned operations. In particular,
 `clear_depth` is applied independently of the previous pipeline's `depth_write`
@@ -288,7 +483,8 @@ Destroying a texture or a live render target inside a pass asserts: pass-scoped
 draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
-uniform-buffer binding calls `glBindBufferBase` on every request. The clear forces the depth
+uniform-buffer binding calls `glBindBufferBase` (`glBindBufferRange` for a
+range) on every request. A depth clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
@@ -360,10 +556,10 @@ proportionality but not on specific weights. Comparison itself is core in
 GLES 3.0, WebGL 2, and desktop GL 3.0+, so it needs no capability bit.
 
 Mip completeness needs no bind-time gate: `GL_TEXTURE_MAX_LEVEL` is set to
-`mip_count - 1` when the storage is created, so a texture's levels `0..MAX_LEVEL`
-all exist by the time its handle is published. A sampler override with a mipmap
-minification filter is therefore always valid, and over a single-level texture
-it samples level 0.
+`mip_count - 1` when storage commands are issued, matching the uploaded or generated
+chain. A sampler override may therefore use a mipmap minification filter even
+for a single-level texture, where it samples level 0. Driver upload failures
+are not polled, so a published handle does not guarantee complete GPU storage.
 
 Block-compressed storage (`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`,
 `ASTC_4x4_RGBA`) is normalized color for the sampler classes: it satisfies
@@ -379,6 +575,8 @@ both allow `NEAREST` or `NEAREST_MIPMAP_NEAREST` minification and require
 changing the requested sampler.
 RGBA32F mipmap generation additionally requires `has_float_render_target`:
 WebGL requires the source storage to be both filterable and color-renderable.
+RGBA16F mipmap generation requires `has_float_render_target` as well; its
+filtering is core and needs no float-filtering extension.
 This does not add RGBA32F render-target support to the engine.
 
 This capability supplies low-level targets and depth textures only. It does not
@@ -440,14 +638,22 @@ operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
 failure reason and error log. The backend asks only where the answer prevents a crash or a
 misleading log: before shader and program creation, because Emscripten throws on
 the null object some browsers return on a lost context; error logs for link,
-uniform reflection, framebuffer completeness and texture creation, which a loss
-suppresses; a GL error pending before a texture upload, which a loss turns from
-an assert into a rolled-back failure; and the vertex array made at context
-setup, whose name 0 asserts only on a live context. A GPU timer query named 0
-leaves its segment unallocated and skipped, because `beginQuery` throws on it. A
-fresh context (init or restore) first drains GL errors: Emscripten keeps a
-recorded error across contexts, so a call that reached the dead context must not
-fail the fresh one's first check.
+uniform reflection and framebuffer completeness, which a loss suppresses;
+after texture upload, because a nonzero WebGL name does not establish context
+liveness; and the vertex array made at context setup, whose name 0 asserts only
+on a live context. A GPU timer query named 0 leaves its segment unallocated and
+skipped, because `beginQuery` throws on it. A fresh context (init or restore) first
+drains GL errors: Emscripten keeps a recorded error across contexts, so a call
+that reached the dead context must not fail the fresh one's first check.
+
+Texture creation reads no GL error: on WebGL `glGetError` is a blocking
+round trip to the GPU process that waits for the queued uploads. After upload,
+the backend asks whether the context is lost without waiting for GPU completion;
+a confirmed loss deletes the name and ends the create `CONTEXT_LOST`, including
+when the browser returned a non-null texture object during loss. GL misuse is
+reported under `NT_GFX_WEB_GL_DEBUG` / `NT_GFX_NATIVE_GL_DEBUG`. An upload or mipmap
+generation the driver rejects on a live context (out of memory) is not detected:
+the create ends `ACCEPTED` but GPU storage may be incomplete.
 
 All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
@@ -715,10 +921,10 @@ Not all renderers carry the same weight. The engine ships three classes; copying
 
 **Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`,
 `nt_mesh_renderer`, optional `nt_skinned_mesh_renderer`). Single pipeline, fixed
-pattern, one or more instanced draws per compatible run — split at
-`max_instances` chunk boundaries (see items-sorting-batching.md). Use for 3D
+pattern, one instanced draw per compatible run (see items-sorting-batching.md),
+recorded at prepare and executed by range from the frame arena. Use for 3D
 meshes, custom geometry, anything where the game owns batching strategy. Stay
-minimal. The mesh renderers do state-delta tracking through the shared
+minimal. The mesh renderers share one run executor and do state-delta tracking through the shared
 `static inline` helper, which costs them no cmd queue and no snapshot machinery.
 
 **Batched dynamic** — high-throughput accumulation renderers (`nt_sprite_renderer`; future particles). Cmd queue, state-delta tracking, overflow recovery via snapshot/replay, multi-page atlas resolution, SIMD path. Optimized for many small draws per frame (1k–60k items). Complex by necessity — the 580 LOC of `nt_sprite_renderer.c` are paid for by measured throughput on bunnymark. Don't simplify away the cmd queue or snapshot recovery without a measured replacement plan.

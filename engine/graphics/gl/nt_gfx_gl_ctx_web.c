@@ -89,6 +89,9 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     GLint max_texture_size = 0;
     NT_GL(glGetIntegerv, GL_MAX_TEXTURE_SIZE, &max_texture_size);
     caps.max_texture_size = (uint32_t)max_texture_size;
+    GLint ubo_align = 0;
+    NT_GL(glGetIntegerv, GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &ubo_align);
+    caps.uniform_buffer_offset_alignment = (uint32_t)ubo_align;
     return caps;
 }
 

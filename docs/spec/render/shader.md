@@ -48,9 +48,10 @@ stage links a second program and assigns it with `nt_material_set_program` --
 a supported flat replace, and the only runtime shader replacement there is.
 Pipeline cache keys include the program handle. Destroying the old program frees
 its pipelines; renderers remove dead records during insertion after a cache miss
-or on reset. Staged work retains its original pipeline and is discarded if that
-pipeline is destroyed. Numeric material params remain mutable and are read at
-flush; snapshot timing is specified in
+or on reset. Sprite and text staged work retains its original pipeline and is
+discarded if that pipeline is destroyed. Prepared mesh runs require their
+captured program to stay live until the last draw. Numeric material params
+remain mutable and are read at draw or flush; snapshot timing is specified in
 [API contracts](../core/api-contracts.md#program-handles).
 
 Uniform block bindings are program state, not material state: a program is
@@ -59,7 +60,8 @@ last-writer-wins across them. The engine keeps one global name -> slot registry
 instead, and `nt_gfx_register_global_block` applies it to existing and future
 programs that declare the block. The registry borrows each name without copying;
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registrations
-survive context loss. The buffer varies per draw via `nt_gfx_bind_uniform_buffer`.
+survive context loss. The buffer varies per draw via `nt_gfx_bind_uniform_buffer`,
+or a range of one buffer via `nt_gfx_bind_uniform_buffer_range`.
 
 The GL backend caches at most 16 active standalone non-sampler uniform locations
 per program. Each active array element consumes one entry; uniforms in blocks do

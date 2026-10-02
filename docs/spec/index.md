@@ -97,6 +97,7 @@ lifetime, and naming vocabulary.
 | *(audio — planned module, no dir yet)* | [io/audio.md](io/audio.md) |
 | `engine/skeletal` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (`nt_skeletal.h` pose ABI/FK/rig identity, skin binding + palette, clip sampling, `nt_skeletal_clip_view`) |
 | `engine/skeletal_assets` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (§15 NSKL/NSKN/NANM activators and views), [assets/resource.md](assets/resource.md) (activator contract) |
+| `engine/frame_arena` | [render/architecture.md](render/architecture.md#prepared-dynamic-data) (frame order, asserts, capacity) |
 | `engine/skeletal_gpu`, `engine/skin_comp` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (§12 frame staging/upload, `nt_deformation_binding_t`, skin component) |
 | *(`engine/skeletal_bank` — planned, epic #472)* | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) |
 | `engine/fs`, `engine/http` | [assets/async-loading.md](assets/async-loading.md) (pack I/O), [core/module-layout.md](core/module-layout.md) (swappable) |
@@ -126,7 +127,7 @@ reverse direction, file → chapter):
 
 | Task | Entry points |
 |---|---|
-| Add/change a render item field | `engine/render/nt_render_defs.h` (16 B item, `_Static_assert`) → `nt_sort_by_key` / `nt_sort_by_key_then_batch` → renderer-owned batch-key helper → `nt_*_renderer_draw_list`. **The game builds items and chooses sort policy**, not the engine: reference `examples/bunnymark/main.c` |
+| Add/change a render item field | `engine/render/nt_render_defs.h` (16 B item, `_Static_assert`) → `nt_sort_by_key` / `nt_sort_by_key_then_batch` → renderer-owned batch-key helper → `nt_*_mesh_renderer_prepare` / `nt_sprite_renderer_draw_list`. **The game builds items and chooses sort policy**, not the engine: reference `examples/bunnymark/main.c` |
 | Change UI text wrapping | Wrapping itself lives in vendored Clay (`deps/clay`, `CLAY_TEXT_WRAP_*`); the engine owns only the measure callback (`engine/ui/nt_ui.c` → `nt_font_measure_n`) and the wrap mode it passes. Rich text has its own solver: `engine/ui/nt_ui_rich_text.c` |
 | Touch the `.ntpack` format | Layout: `shared/include/nt_pack_format.h` (magic `NPAK`) → writer `nt_builder_finish_pack` (`tools/builder/nt_builder.c`) → reader `engine/resource/nt_resource.c` (header/version check) |
 | Add builder validation | Programmer/IO errors assert (`NT_BUILD_ASSERT`, e.g. `tools/builder/nt_builder_texture.c`); content errors of atlas sprites go to the graceful channel `nt_builder_get_errors` (`tools/builder/nt_builder_atlas.c`) |

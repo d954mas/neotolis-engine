@@ -183,22 +183,19 @@ static void recover_on_disconnect(void) {
 #endif /* !__EMSCRIPTEN__ */
 
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
-/* Deterministic two-tone non-blank frame so the pre-swap capture seam reads a real PNG, not a uniform
-   clear: full-frame background, then a scissored centered sub-rect (glClear honors GL_SCISSOR_TEST). */
+/* Two tones make a uniform/blank pre-swap capture observable. */
 static const float k_bg_color[4] = {0.10F, 0.20F, 0.45F, 1.0F};
 static const float k_fg_color[4] = {0.90F, 0.55F, 0.10F, 1.0F};
 
 static void render_pattern(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_bg_color[0], k_bg_color[1], k_bg_color[2], k_bg_color[3]}, .clear_depth = 1.0F});
-    nt_gfx_end_pass();
-
     const int fb_w = (int)g_nt_window.fb_width;
     const int fb_h = (int)g_nt_window.fb_height;
-    nt_gfx_set_scissor(fb_w / 4, fb_h / 4, fb_w / 2, fb_h / 2); /* GL bottom-left; placement is irrelevant to not-blank. */
+    nt_gfx_set_scissor(fb_w / 4, fb_h / 4, fb_w / 2, fb_h / 2);
     nt_gfx_set_scissor_enabled(true);
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_fg_color[0], k_fg_color[1], k_fg_color[2], k_fg_color[3]}, .clear_depth = 1.0F});
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {k_fg_color[0], k_fg_color[1], k_fg_color[2], k_fg_color[3]}});
+    nt_gfx_set_scissor_enabled(false);
     nt_gfx_end_pass();
-    nt_gfx_set_scissor_enabled(false); /* leave scissor off so the next frame's bg clear covers the whole FB. */
 }
 #endif /* NT_DEVAPI_HOST_WEB_CAPTURE */
 
