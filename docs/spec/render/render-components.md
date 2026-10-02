@@ -178,7 +178,7 @@ text_comp fields (planned):
   text   StringId    /* intern-table reference, design TBD */
 ```
 
-`nt_font_t` is a pool-backed handle to a font instance. A font instance owns GPU textures (curve + band) and a glyph cache with one curve-texture row per slot (see the resource chapter, "NT_ASSET_FONT binary format"). Font data comes from one or more `nt_resource_t` assets attached via `nt_font_add()`, allowing fallback chains (base font + CJK extension pack, etc.). Glyphs are decoded and uploaded to GPU on first lookup, not on asset load.
+`nt_font_t` is a pool-backed handle to a font instance. A font instance owns one GPU curve texture and a glyph cache with one texture row per slot (see the resource chapter, "NT_ASSET_FONT binary format"). Font data comes from one or more `nt_resource_t` assets attached via `nt_font_add()`, allowing fallback chains (base font + CJK extension pack, etc.). Glyphs are decoded and uploaded to GPU on first lookup, not on asset load.
 
 StringId references a string in a string pool/intern table (detail deferred to implementation phase).
 

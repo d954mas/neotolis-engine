@@ -40,13 +40,13 @@ struct nt_font_slot_s {
     uint8_t resource_count;
 
     nt_texture_t curve_texture; /* RGBA16F, NT_FONT_GLYPH_TEXELS x max_glyphs: row i = cache slot i */
-    nt_texture_t band_texture;  /* RG16UI, band_count*2 x max_glyphs: row i = cache slot i */
-    uint8_t band_count;
 
     nt_font_cache_slot_t *cache; /* [max_glyphs]; slot 0 holds tofu once metrics are known */
     uint16_t max_glyphs;
+    uint16_t fill; /* slots [1, fill) were taken since the last clear; later ones are unused */
     bool warned_slots_full;
-    bool warned_glyph_too_big;
+    bool warned_bands_dropped;
+    bool warned_weight_dropped;
 
     uint16_t *hash_table; /* codepoint → cache slot+1 (0 = empty), POT */
     uint16_t hash_table_size;
@@ -72,7 +72,6 @@ struct nt_font_slot_s {
 typedef struct {
     nt_pool_t pool;
     nt_font_slot_t *slots;       /* [capacity+1], index 0 reserved */
-    uint32_t frame_counter;      /* LRU tick */
     uint32_t last_resolve_epoch; /* last nt_resource_publication_epoch() seen — gates the step rescan */
     bool needs_resource_rescan;  /* a font's resource set changed; epoch alone won't reflect it */
     bool initialized;

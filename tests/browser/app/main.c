@@ -1311,13 +1311,11 @@ int main(int argc, char *argv[]) {
 
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 256,
-        .band_count = 8,
         .measure_cache_size = 256,
     });
     for (uint32_t i = 0; i < 4U; i++) {
         s_rich_font[i] = nt_font_create(&(nt_font_create_desc_t){
             .max_glyphs = 256,
-            .band_count = 8,
             .measure_cache_size = 256,
         });
     }

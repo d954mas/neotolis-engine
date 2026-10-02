@@ -417,9 +417,8 @@ static void frame(void) {
             nt_log_info("  font_step  avg=%.3f ms  max=%.3f ms", s_prof_font_step_sum * inv, s_prof_font_step_max);
             nt_log_info("  draw       avg=%.3f ms  max=%.3f ms", s_prof_draw_sum * inv, s_prof_draw_max);
             nt_log_info("  flush      avg=%.3f ms  max=%.3f ms", s_prof_flush_sum * inv, s_prof_flush_max);
-            nt_log_info("  cache      %u/%u glyphs  curve %u/%u texels (%.0f%%)  band %u/%u texels (%.0f%%)", fs.glyphs_cached, fs.max_glyphs, fs.curve_texels_used, fs.curve_texels_total,
-                        fs.curve_texels_total > 0 ? 100.0 * fs.curve_texels_used / fs.curve_texels_total : 0.0, fs.band_texels_used, fs.band_texels_total,
-                        fs.band_texels_total > 0 ? 100.0 * fs.band_texels_used / fs.band_texels_total : 0.0);
+            nt_log_info("  cache      %u/%u glyphs  curve %u/%u texels (%.0f%%)", fs.glyphs_cached, fs.max_glyphs, fs.curve_texels_used, fs.curve_texels_total,
+                        fs.curve_texels_total > 0 ? 100.0 * fs.curve_texels_used / fs.curve_texels_total : 0.0);
             s_prof_reported = true;
         }
     }
@@ -512,7 +511,6 @@ int main(void) {
     /* 14. Create font and add font resources */
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 256,
-        .band_count = 8,
         .measure_cache_size = 256,
     });
 

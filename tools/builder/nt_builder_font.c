@@ -846,9 +846,9 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
 
         ginfo[i].curve_data_size = compute_curve_data_size((stbtt_vertex *)vert_cache_raw[i], vert_counts[i], &ginfo[i].total_segments, &ginfo[i].contour_count);
         if (ginfo[i].total_segments > NT_FONT_MAX_CURVES_PER_GLYPH) {
-            NT_LOG_ERROR("font %s: U+%04X has %u curves, a runtime glyph slot holds %u -- remove it from the charset", path, codepoints[i], ginfo[i].total_segments, NT_FONT_MAX_CURVES_PER_GLYPH);
+            NT_BUILD_FAIL("decode_font: glyph has more curves than a runtime glyph slot holds", "font %s: U+%04X has %u curves, a runtime glyph slot holds %u -- remove it from the charset", path,
+                          codepoints[i], ginfo[i].total_segments, NT_FONT_MAX_CURVES_PER_GLYPH);
         }
-        NT_BUILD_ASSERT(ginfo[i].total_segments <= NT_FONT_MAX_CURVES_PER_GLYPH && "decode_font: glyph has more curves than a runtime glyph slot holds");
         total_curve_data += ginfo[i].curve_data_size;
     }
     // #endregion

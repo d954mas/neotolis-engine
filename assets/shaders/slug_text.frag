@@ -5,12 +5,12 @@ precision highp int;
 // Ported from HLSL reference (github.com/EricLengyel/Slug, MIT license)
 // Uses CalcRootCode, reference solvers, and CalcCoverage formula verbatim.
 
-uniform sampler2D u_curve_texture;       // RGBA16F -- curve control points as float16; row = glyph band_row
-uniform highp usampler2D u_band_texture; // RG16UI -- (curve_start, curve_count) per band
-uniform vec4 u_alpha_cutoff;             // .x = coverage discard threshold (set per material; 0 disables)
+// RGBA16F; row = glyph band_row: band_count header texels (y_start, y_count, x_start, x_count), then curves.
+uniform sampler2D u_curve_texture;
+uniform vec4 u_alpha_cutoff; // .x = coverage discard threshold (set per material; 0 disables)
 
 in vec2 v_texcoord;
-flat in uvec4 v_glyph;       // curve_offset_y, band_row, curve_offset_x, band_count
+flat in uvec4 v_glyph;       // unused, band_row, unused, band_count
 flat in vec4 v_glyph_bounds; // bbox (x0, y0, x1, y1) in em-space
 in vec4 v_color;
 
@@ -90,9 +90,7 @@ float SlugRender(vec2 coord) {
     if (v_glyph.w == 0u)
         return 1.0;
 
-    uint curve_offset_y = v_glyph.x;
-    uint band_row = v_glyph.y;
-    uint curve_offset_x = v_glyph.z;
+    int band_row = int(v_glyph.y);
     uint band_count = v_glyph.w;
 
     vec2 pixelsPerEm = 1.0 / max(fwidth(coord), vec2(1.0e-6));
@@ -102,16 +100,15 @@ float SlugRender(vec2 coord) {
     // ---- Y-band: horizontal ray (+X) ----
     float band_y = (coord.y - v_glyph_bounds.y) / bbox_height * float(band_count);
     int yband_idx = clamp(int(band_y), 0, int(band_count) - 1);
-    uvec4 yband = texelFetch(u_band_texture, ivec2(yband_idx, int(band_row)), 0);
+    uvec2 yband = uvec2(texelFetch(u_curve_texture, ivec2(yband_idx, band_row), 0).xy);
 
     float xcov = 0.0;
     float xwgt = 0.0;
-    uint ycurveBase = curve_offset_y + yband.r * 2u;
 
-    for (uint i = 0u; i < yband.g; i++) {
-        uint ti = ycurveBase + i * 2u;
-        vec4 d0 = texelFetch(u_curve_texture, ivec2(int(ti), int(band_row)), 0);
-        vec4 d1 = texelFetch(u_curve_texture, ivec2(int(ti) + 1, int(band_row)), 0);
+    for (uint i = 0u; i < yband.y; i++) {
+        uint ti = yband.x + i * 2u;
+        vec4 d0 = texelFetch(u_curve_texture, ivec2(int(ti), band_row), 0);
+        vec4 d1 = texelFetch(u_curve_texture, ivec2(int(ti) + 1, band_row), 0);
         vec2 p0 = d0.xy - coord;
         vec2 p1 = d0.zw - coord;
         vec2 p2 = d1.xy - coord;
@@ -133,16 +130,15 @@ float SlugRender(vec2 coord) {
     // ---- X-band: vertical ray (+Y) ----
     float band_x = (coord.x - v_glyph_bounds.x) / bbox_width * float(band_count);
     int xband_idx = clamp(int(band_x), 0, int(band_count) - 1);
-    uvec4 xband = texelFetch(u_band_texture, ivec2(int(band_count) + xband_idx, int(band_row)), 0);
+    uvec2 xband = uvec2(texelFetch(u_curve_texture, ivec2(xband_idx, band_row), 0).zw);
 
     float ycov = 0.0;
     float ywgt = 0.0;
-    uint xcurveBase = curve_offset_x + xband.r * 2u;
 
-    for (uint i = 0u; i < xband.g; i++) {
-        uint ti = xcurveBase + i * 2u;
-        vec4 d0 = texelFetch(u_curve_texture, ivec2(int(ti), int(band_row)), 0);
-        vec4 d1 = texelFetch(u_curve_texture, ivec2(int(ti) + 1, int(band_row)), 0);
+    for (uint i = 0u; i < xband.y; i++) {
+        uint ti = xband.x + i * 2u;
+        vec4 d0 = texelFetch(u_curve_texture, ivec2(int(ti), band_row), 0);
+        vec4 d1 = texelFetch(u_curve_texture, ivec2(int(ti) + 1, band_row), 0);
         vec2 p0 = d0.xy - coord;
         vec2 p1 = d0.zw - coord;
         vec2 p2 = d1.xy - coord;

@@ -112,7 +112,6 @@ static nt_resource_t register_font_resource(const char *name, const uint8_t *blo
 static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
     nt_font_create_desc_t fd = {
         .max_glyphs = 16,
-        .band_count = 4,
         .measure_cache_size = 256,
     };
     nt_font_t font = nt_font_create(&fd);

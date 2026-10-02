@@ -637,7 +637,6 @@ int main(void) {
     nt_ui_set_text_material(s_ui_ctx, s_text_material);
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 256,
-        .band_count = 8,
         .measure_cache_size = 256,
     });
     nt_resource_set_activate_time_budget(0);

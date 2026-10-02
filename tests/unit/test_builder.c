@@ -4914,14 +4914,11 @@ void test_font_glyph_over_curve_limit_asserts(void) {
             ttf_path = candidates[i];
         }
     }
-    if (!ttf_path) {
-        TEST_IGNORE_MESSAGE("DejaVu Sans fixture not found");
-        return;
-    }
+    TEST_ASSERT_NOT_NULL_MESSAGE(ttf_path, "committed DejaVu Sans fixture not found");
 
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_font_curve_limit.ntpack");
     nt_font_opts_t opts = {.charset = "A\xE2\x98\x83"};
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_font(ctx, ttf_path, &opts));
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_font(ctx, ttf_path, &opts), "more curves than a runtime glyph slot holds");
 }
 
 /* --- Decoration metric (v5) helpers --- */

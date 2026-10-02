@@ -188,7 +188,6 @@ static void test_double_walk_is_deterministic(void) {
 static nt_font_t make_stub_font(void) {
     return nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 16,
-        .band_count = 4,
         .measure_cache_size = 0,
     });
 }

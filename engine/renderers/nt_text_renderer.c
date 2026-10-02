@@ -18,7 +18,7 @@
 typedef struct {
     float position[3];     /* 12B: world-space quad corner (full 3D) */
     float texcoord[2];     /* 8B: em-space coordinate */
-    float glyph_data[4];   /* 16B: packed uint via memcpy (curve_offset, band_row, curve_offset_x, band_count) */
+    float glyph_data[4];   /* 16B: packed uint via memcpy (unused, band_row, unused, band_count) */
     float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
     float color[4];        /* 16B: RGBA float */
     float depth_bias;      /* 4B: per-glyph clip-space depth bias (subtracted from NDC z in the VS) */
@@ -217,14 +217,12 @@ static void destroy_gpu_resources(void) {
 
 /* Fixed font uniform names: hashed once, since the flush path sets them every time. */
 static nt_hash32_t s_u_curve_texture;
-static nt_hash32_t s_u_band_texture;
 
 void nt_text_renderer_init(void) {
     NT_ASSERT(!s_text.initialized);
     memset(&s_text, 0, sizeof(s_text)); /* cold start: clear everything, GPU + logical */
 
     s_u_curve_texture = nt_hash32_str("u_curve_texture");
-    s_u_band_texture = nt_hash32_str("u_band_texture");
 
     create_gpu_resources();
     s_text.initialized = true;
@@ -313,7 +311,7 @@ static void transform_point(float out[3], const float model[16], float x, float 
     out[2] = model[2] * x + model[6] * y + model[14];
 }
 
-static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count, float glyph_bias) {
+static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
     }
@@ -344,10 +342,10 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     float gd1;
     float gd2;
     float gd3;
-    pack_uint_as_float(&gd0, g->curve_offset);
+    pack_uint_as_float(&gd0, 0U);
     pack_uint_as_float(&gd1, (uint32_t)g->band_row);
-    pack_uint_as_float(&gd2, g->curve_offset_x);
-    pack_uint_as_float(&gd3, (uint32_t)band_count);
+    pack_uint_as_float(&gd2, 0U);
+    pack_uint_as_float(&gd3, (uint32_t)g->band_count);
 
     /* 4 vertices per quad: BL, BR, TR, TL */
     uint32_t vi = s_text.vertex_count;
@@ -444,8 +442,8 @@ static void emit_decoration_quad(const float model[16], float x0, float y0, floa
  * once per active pass (shadow, outline, fill), grouped and never interleaved: per-glyph interleave
  * breaks premultiplied-alpha compositing when glyphs overlap. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, uint8_t band_count, nt_font_slot_t *slot,
-                            int16_t key_offset, const float color[4], float off_x, float off_y, float *glyph_bias) {
+static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, nt_font_slot_t *slot, int16_t key_offset,
+                            const float color[4], float off_x, float off_y, float *glyph_bias) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
@@ -484,7 +482,7 @@ static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float mo
             continue;
         }
         if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, model, scale, pen_x + off_x, pen_y + off_y, color, band_count, *glyph_bias);
+            emit_quad(g, model, scale, pen_x + off_x, pen_y + off_y, color, *glyph_bias);
             *glyph_bias += s_text.glyph_depth_bias;
         }
         pen_x += (float)g->advance * scale;
@@ -591,11 +589,10 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     if (metrics.units_per_em == 0) {
         return; /* no resource loaded yet (or all unmounted) */
     }
-    if (!nt_gfx_texture_ready(nt_font_get_curve_texture(s_text.font)) || !nt_gfx_texture_ready(nt_font_get_band_texture(s_text.font))) {
+    if (!nt_gfx_texture_ready(nt_font_get_curve_texture(s_text.font))) {
         return;
     }
     float scale = size / (float)metrics.units_per_em;
-    uint8_t band_count = nt_font_get_band_count(s_text.font);
 
     nt_font_slot_t *slot = nt_font_get_slot(s_text.font);
     NT_ASSERT(slot != NULL);
@@ -642,15 +639,14 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
      * self-flush mid-pass does NOT reorder: passes emit in global order and flush draws the FIFO prefix,
      * so no shadow/outline quad is ever drawn after a later pass's quad. */
     if (shadow_active) {
-        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, shadow_key, s_text.deco.shadow_color, s_text.deco.shadow_dx * size, s_text.deco.shadow_dy * size,
-                        &glyph_bias);
+        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, slot, shadow_key, s_text.deco.shadow_color, s_text.deco.shadow_dx * size, s_text.deco.shadow_dy * size, &glyph_bias);
     }
 #if NT_FONT_EMBOLDEN_ENABLED
     if (outline_active) {
-        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, outline_key, s_text.deco.outline_color, 0.0F, 0.0F, &glyph_bias);
+        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, slot, outline_key, s_text.deco.outline_color, 0.0F, 0.0F, &glyph_bias);
     }
 #endif
-    emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, fill_key, color, 0.0F, 0.0F, &glyph_bias);
+    emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, slot, fill_key, color, 0.0F, 0.0F, &glyph_bias);
 
     /* Underline/strike sentinel quads last (on top of fill), one continuous quad per line. */
     if (s_text.deco.underline || s_text.deco.strikethrough) {
@@ -736,9 +732,8 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 static void bind_font_textures(void) {
     const nt_gfx_texture_binding_t bindings[] = {
         {.name = s_u_curve_texture, .texture = nt_font_get_curve_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
-        {.name = s_u_band_texture, .texture = nt_font_get_band_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
     };
-    nt_gfx_apply_texture_bindings(bindings, 2);
+    nt_gfx_apply_texture_bindings(bindings, 1);
 }
 
 void nt_text_renderer_flush(void) {

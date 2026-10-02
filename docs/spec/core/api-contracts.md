@@ -244,8 +244,8 @@ Sprite and text retain legacy exceptions until #528. A sprite material that
 samples the atlas declares its page sampler at slot 0, but the renderer
 substitutes the page resource per command; a material declaring no textures
 never receives the page and is for analytical coverage. A text material declares
-no textures at all — the font's curve and band textures are the text renderer's
-own binds. `nt_text_renderer_flush` asserts that the material declares nothing
+no textures at all — the font's curve texture is the text renderer's
+own bind. `nt_text_renderer_flush` asserts that the material declares nothing
 and submits its font set unconditionally; gfx's coverage check confirms every
 sampler the program actually links.
 

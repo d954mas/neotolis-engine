@@ -242,8 +242,7 @@ void setUp(void) {
     nt_assert_handler = test_assert_handler;
     nt_gfx_fake_reset();
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
-    /* Band before curve: units the renderer must query, not the 0/1 a hardcode would use. */
-    nt_gfx_fake_set_samplers_typed((const char *const[]){"u_band_texture", "u_curve_texture"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_UINT, NT_GFX_SAMPLER_CLASS_FLOAT}, 2);
+    nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture"}, 1);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
@@ -253,7 +252,6 @@ void setUp(void) {
     s_blob = build_test_font_blob(&s_blob_size);
     nt_font_create_desc_t desc = {
         .max_glyphs = 16,
-        .band_count = 4,
     };
     s_font = nt_font_create(&desc);
     nt_resource_t res = register_font_resource("test_text_font", s_blob, s_blob_size);
@@ -310,7 +308,7 @@ void test_text_renderer_forwards_material_blend_state(void) {
 
 /* The two font textures land on the units their program assigned, in canonical
  * unit order, and nothing writes a sampler int. */
-void test_text_renderer_font_textures_land_on_program_units(void) {
+void test_text_renderer_font_texture_lands_on_its_program_unit(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(material);
     nt_gfx_fake_reset();
@@ -318,16 +316,9 @@ void test_text_renderer_font_textures_land_on_program_units(void) {
 
     const nt_program_t prog = nt_material_get_info(material)->program;
     const int curve_unit = nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_curve_texture"));
-    const int band_unit = nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_band_texture"));
-    TEST_ASSERT_EQUAL_INT(1, curve_unit);
-    TEST_ASSERT_EQUAL_INT(0, band_unit);
-
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_band_texture(s_font)), nt_gfx_fake_bound_texture_at(0));
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)band_unit, nt_gfx_fake_bound_texture_slot_at(0));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_curve_texture(s_font)), nt_gfx_fake_bound_texture_at(1));
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)curve_unit, nt_gfx_fake_bound_texture_slot_at(1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_curve_texture(s_font)), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)curve_unit, nt_gfx_fake_bound_texture_slot_at(0));
 }
 
 void test_text_renderer_rejects_unrelated_second_sampler(void) {
@@ -432,7 +423,7 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         hdr.descent = cases[i].descent;
         memcpy(blob, &hdr, sizeof hdr);
 
-        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16, .band_count = 4});
+        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
         nt_font_add(font, register_font_resource("rounded_tofu", blob, blob_size));
         nt_resource_step();
         nt_font_step();
@@ -748,7 +739,6 @@ void test_overflow_flush_reopens_the_batch_pipeline(void) {
 void test_full_glyph_cache_still_draws_the_entire_run(void) {
     nt_font_create_desc_t desc = {
         .max_glyphs = 2,
-        .band_count = 4,
     };
     nt_font_t tiny_font = nt_font_create(&desc);
     nt_font_add(tiny_font, register_font_resource("text_cache_full", s_blob, s_blob_size));
@@ -757,25 +747,15 @@ void test_full_glyph_cache_still_draws_the_entire_run(void) {
     nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
     nt_text_renderer_set_font(tiny_font);
 
+    const uint32_t uploads = nt_gfx_fake_update_texture_count();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
 
+    TEST_ASSERT_EQUAL_UINT32(uploads + 1U, nt_gfx_fake_update_texture_count()); /* only 'A' uploads its row */
     TEST_ASSERT_EQUAL_UINT64(36U, g_nt_gfx.counters.indices);
     TEST_ASSERT_EQUAL_UINT64(24U, g_nt_gfx.counters.vertices);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
-
-    nt_text_renderer_set_underline(true);
-    nt_text_renderer_set_strikethrough(true);
-    nt_gfx_begin_frame();
-    nt_font_step();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_text_renderer_flush();
-    nt_gfx_end_pass();
-    TEST_ASSERT_EQUAL_UINT64(48U, g_nt_gfx.counters.indices);
-    TEST_ASSERT_EQUAL_UINT64(32U, g_nt_gfx.counters.vertices);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
     nt_text_renderer_set_font(s_font);
     nt_font_destroy(tiny_font);
@@ -842,7 +822,8 @@ void test_destroyed_replaced_program_drops_staged_work(void) {
 void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     nt_log_add_sink(capture_errors, NULL);
     nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
-    for (uint8_t mask = 1U; mask <= 3U; mask++) {
+    {
+        const uint8_t mask = 1U; /* fail the font's only texture */
         nt_text_renderer_reset_decoration();
         nt_gfx_fake_fail_texture_creates(mask);
         nt_font_create_desc_t desc = nt_font_create_desc_defaults();
@@ -1491,7 +1472,7 @@ int main(void) {
 #endif
     RUN_TEST(test_utf8_decode_ascii);
     RUN_TEST(test_text_renderer_forwards_material_blend_state);
-    RUN_TEST(test_text_renderer_font_textures_land_on_program_units);
+    RUN_TEST(test_text_renderer_font_texture_lands_on_its_program_unit);
     RUN_TEST(test_text_renderer_rejects_unrelated_second_sampler);
     RUN_TEST(test_utf8_decode_cyrillic);
     RUN_TEST(test_utf8_decode_cjk);

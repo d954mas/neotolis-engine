@@ -27,15 +27,13 @@ static inline nt_font_desc_t nt_font_desc_defaults(void) {
 }
 
 typedef struct {
-    uint16_t max_glyphs; /* glyph-cache slots, one curve-texture row each: max_glyphs * 16 KB (RGBA16F x NT_FONT_GLYPH_TEXELS) */
-    uint8_t band_count;
+    uint16_t max_glyphs;         /* glyph-cache slots incl. tofu, one curve-texture row each (16 KB); 2..2048 */
     uint16_t measure_cache_size; /* POT if non-zero; 0 = disabled; max 32768 */
 } nt_font_create_desc_t;
 
 static inline nt_font_create_desc_t nt_font_create_desc_defaults(void) {
     return (nt_font_create_desc_t){
         .max_glyphs = 256,
-        .band_count = 8,
         .measure_cache_size = 1024,
     };
 }
@@ -57,17 +55,14 @@ typedef struct {
     uint16_t max_glyphs;
     uint32_t curve_texels_used;
     uint32_t curve_texels_total;
-    uint32_t band_texels_used;
-    uint32_t band_texels_total;
 } nt_font_stats_t;
 
 typedef struct {
     uint32_t codepoint;
-    uint32_t curve_offset;   /* Y-band curves: first texel in curve-texture row band_row */
-    uint32_t curve_offset_x; /* X-band curves: first texel in curve-texture row band_row */
     uint16_t curve_count;
     uint16_t band_row;
-    int16_t advance; /* font units */
+    uint8_t band_count; /* NT_FONT_MAX_BANDS, halved until the glyph fits its row */
+    int16_t advance;    /* font units */
     int16_t bbox_x0;
     int16_t bbox_y0;
     int16_t bbox_x1;
@@ -113,8 +108,8 @@ void nt_font_measure_invalidate(nt_font_t font);
  * Registers FONT once per resource lifecycle; nt_font_shutdown() does not reset that registration. */
 nt_result_t nt_font_init(const nt_font_desc_t *desc);
 void nt_font_shutdown(void);
-/* Call once per frame after gfx begin_frame, outside a pass and before any text: recovery replaces GPU
- * textures, and glyphs looked up since the last step are never evicted, so this frame's draws stay valid. */
+/* Call once per frame after gfx begin_frame, outside a pass and before any text: recovery replaces the
+ * GPU texture, and a provider change clears the glyph cache that this frame's draws will sample. */
 void nt_font_step(void);
 
 nt_font_t nt_font_create(const nt_font_create_desc_t *desc);
@@ -130,16 +125,14 @@ void nt_font_add(nt_font_t font, nt_resource_t resource);
 nt_font_metrics_t nt_font_get_metrics(nt_font_t font);
 nt_font_stats_t nt_font_get_stats(nt_font_t font);
 
-/* Returns NULL while textures or font metrics are unavailable. Tofu stands in for a missing glyph, a glyph
- * over NT_FONT_GLYPH_TEXELS and a miss while every slot is in use this frame (raise max_glyphs).
+/* Returns NULL while the texture or font metrics are unavailable. Tofu stands in for a missing glyph and
+ * for a miss while every slot is in use this gfx frame (raise max_glyphs).
  * Borrowed cache entry, valid until eviction/clear or font destruction; copy immediately, never free.
  *
  * Per-codepoint loops use nt_font_hot.h after checking both textures are ready. */
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint);
 
 nt_texture_t nt_font_get_curve_texture(nt_font_t font);
-nt_texture_t nt_font_get_band_texture(nt_font_t font);
-uint8_t nt_font_get_band_count(nt_font_t font);
 
 int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right_codepoint);
 

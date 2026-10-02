@@ -120,7 +120,7 @@ static nt_resource_t register_font_resource(const char *name, const uint8_t *blo
 
 static nt_font_create_desc_t bench_font_desc(void) {
     return (nt_font_create_desc_t){
-        .max_glyphs = 16, .band_count = 4, .measure_cache_size = 256, /* benchmark measures cache hit/miss — explicit opt-in */
+        .max_glyphs = 16, .measure_cache_size = 256, /* benchmark measures cache hit/miss — explicit opt-in */
     };
 }
 
