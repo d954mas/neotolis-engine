@@ -24,6 +24,7 @@
       "Bash(scripts/:*)",
       "Bash(./scripts/:*)",
       "Bash(node tests/*)",
+      "Bash(node .claude/skills/reviewing-engine-code/scripts/*)",
       "Bash(python tools/*)",
       "Bash(python3 tools/*)",
       "Bash(npm ci:*)",
