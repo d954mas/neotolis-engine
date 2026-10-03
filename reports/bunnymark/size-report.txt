@@ -1,36 +1,36 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: fd60d97
+# Commit: 484dd7e
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 258 B
+Type                 257 B
 Import               570 B
 Function             203 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                83 B
-Elem                  97 B
-Code              217032 B
-Data              208754 B
-Custom             11373 B
+Elem                  96 B
+Code              214277 B
+Data              208872 B
+Custom             11359 B
 ---------------- ----------
-TOTAL             438391 B
+TOTAL             435738 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
 31590 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
-29675 B   frame
-27353 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
-17733 B   nt_gfx_activate_texture
- 7737 B   nt_font_lookup_glyph_offset
- 7628 B   main
- 5758 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
+29182 B   frame
+27347 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
+17735 B   nt_gfx_activate_texture
+ 7205 B   main
+ 5759 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
+ 4146 B   upload_glyph
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
  3313 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
  3002 B   fmt_fp
@@ -42,20 +42,20 @@ TOTAL             438391 B
  2427 B   printf_core
  2298 B   nt_program_ref_update
  1678 B   basist::bitwise_decoder::read_huffman_table(basist::huffman_decoding_table&)
+ 1678 B   nt_font_lookup_glyph_offset
+ 1671 B   emit_glyph_pass
  1621 B   atlas_on_resolve
  1466 B   nt_gfx_make_vertex_input
  1383 B   nt_gfx_bind_pipeline
- 1375 B   emit_glyph_pass
  1310 B   nt_gfx_apply_texture_bindings
  1241 B   basist::bc7_mode_5_encoder::eval_weights(basist::color32 const*, unsigned char*, int, int, int, int, int, int)
  1218 B   basist::transcode_uastc_to_etc2_eac_a8(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  1132 B   spawn_one_defold
  1119 B   nt_input_web_on_blur
  1103 B   nt_material_create
- 1100 B   nt_hash32_str
 
 Total functions: 201
-Total code size: 216703 B
+Total code size: 213947 B
 
 ## Built Engine Archives
 
@@ -76,7 +76,7 @@ libnt_core.a                2180 B
 libnt_debug_overlay.a       2212 B
 libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
-libnt_font.a              196228 B
+libnt_font.a               94198 B
 libnt_frame_arena.a         3074 B
 libnt_gfx.a                85352 B
 libnt_gfx_stub.a            6144 B
@@ -112,7 +112,7 @@ libnt_skinned_mesh_renderer.a   10166 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8864 B
 libnt_sprite_renderer.a    48424 B
-libnt_text_renderer.a    1243428 B
+libnt_text_renderer.a    1112744 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
 libnt_ui.a                353934 B
@@ -123,9 +123,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4404944 B
+TOTAL (archives)         4172230 B
 
 ## Data Segments Summary
 
 Segments: 157
-Total data size: 207580 B
+Total data size: 207696 B
