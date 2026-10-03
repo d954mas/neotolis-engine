@@ -29,9 +29,7 @@
 static nt_material_t make_material(bool with_page_sampler) {
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof desc);
-    desc.program = with_page_sampler
-                       ? nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1)
-                       : nt_gfx_fake_make_program_typed((const char *const[]){"u_curve_texture", "u_band_texture"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_FLOAT, NT_GFX_SAMPLER_CLASS_UINT}, 2);
+    desc.program = with_page_sampler ? nt_gfx_fake_make_program((const char *const[]){"u_texture"}, 1) : nt_gfx_fake_make_program((const char *const[]){"u_curve_texture"}, 1);
     /* Programs the engine links later (shape renderer) must not inherit this template. */
     nt_gfx_fake_set_samplers(NULL, 0);
     desc.depth_test = false;
@@ -86,10 +84,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
      * true so walker's contract assert passes, but units_per_em stays 0 so
      * nt_text_renderer_draw_n early-returns before any glyph work. */
     fx->stub_font = nt_font_create(&(nt_font_create_desc_t){
-        .curve_texture_width = 64,
-        .curve_texture_height = 64,
-        .band_texture_height = 16,
-        .band_count = 4,
+        .max_glyphs = 16,
         .measure_cache_size = 0,
     });
 

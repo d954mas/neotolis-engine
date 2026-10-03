@@ -29,6 +29,7 @@ static nt_font_state_t s_font;
 static void rebuild_ascii_index(nt_font_slot_t *slot);
 static void measure_cache_clear(nt_font_slot_t *slot);
 static void clear_glyph_cache(nt_font_slot_t *slot);
+static void generate_tofu(nt_font_slot_t *slot);
 #ifdef NT_TEST_ACCESS
 static void font_test_shutdown_packs(void);
 #endif
@@ -144,6 +145,7 @@ static void slot_refresh_after_resource_change(nt_font_slot_t *slot, bool flush_
         slot->metrics = (nt_font_metrics_t){0};
         slot->metrics_set = false;
     }
+    generate_tofu(slot);
 }
 
 /* ---- Internal helpers ---- */
@@ -206,7 +208,7 @@ static void hash_insert(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_of
 }
 
 /* Remove one (codepoint, key_offset) entry with backshift to keep probe chains intact.
- * Called by evict_lru before clearing the cache slot — O(cluster) instead of O(N) rebuild. */
+ * Called by take_slot before clearing the cache slot — O(cluster) instead of O(N) rebuild. */
 static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint, int16_t key_offset) {
     uint16_t mask = (uint16_t)(slot->hash_table_size - 1);
     uint16_t pos = key_home(mask, codepoint, key_offset);
@@ -342,221 +344,47 @@ static int compare_kern_right(const void *key, const void *elem) {
     return 0;
 }
 
-/* ---- LRU eviction ---- */
+/* ---- Slot allocation ---- */
 
-static uint16_t evict_lru(nt_font_slot_t *slot) {
+/* LRU clock: the gfx frame, the window in which recorded draws still sample glyph rows. */
+static uint32_t frame_now(void) { return (uint32_t)g_nt_gfx.counters.frame_sequence; }
+
+/* A never-used slot, else the least recently used one not looked up this gfx frame: this frame's recorded
+ * draws still sample those rows. UINT16_MAX when all are in use. */
+static uint16_t take_slot(nt_font_slot_t *slot) {
+    if (slot->fill < slot->max_glyphs) {
+        return slot->fill++; /* a taken slot is always filled: upload cannot fail */
+    }
+    uint16_t victim = UINT16_MAX;
     uint32_t max_age = 0;
-    uint16_t victim = 0;
-    bool found = false;
-    for (uint16_t i = 0; i < slot->max_glyphs; i++) {
-        nt_font_cache_slot_t *cs = &slot->cache[i];
-        if (cs->entry.codepoint == 0) {
-            continue; /* empty slot */
-        }
-        if (cs->entry.is_tofu) {
-            continue; /* never evict tofu */
-        }
-        uint32_t age = s_font.frame_counter - cs->lru_frame; /* unsigned wrap-safe */
-        if (age >= max_age) {
+    for (uint16_t i = 1; i < slot->max_glyphs; i++) {          /* slot 0 is tofu */
+        uint32_t age = frame_now() - slot->cache[i].lru_frame; /* unsigned wrap-safe */
+        if (age > max_age) {
             max_age = age;
             victim = i;
-            found = true;
         }
     }
-    NT_ASSERT(found); /* no evictable entry found */
-
-    /* Remove from hash table before clearing slot */
-    hash_remove(slot, slot->cache[victim].entry.codepoint, slot->cache[victim].key_offset);
-
-    /* Clear victim */
-    memset(&slot->cache[victim], 0, sizeof(nt_font_cache_slot_t));
-    slot->glyphs_cached--;
+    if (victim != UINT16_MAX) {
+        hash_remove(slot, slot->cache[victim].entry.codepoint, slot->cache[victim].key_offset);
+        memset(&slot->cache[victim], 0, sizeof(nt_font_cache_slot_t));
+    }
     return victim;
 }
 
-/* ---- Curve texture space management ---- */
+/* One glyph's curve row for upload (no CPU mirror). RGBA16F: 4 uint16 per texel. */
+static uint16_t s_curve_upload[(size_t)NT_FONT_GLYPH_TEXELS * 4];
 
-/* Max curves per glyph (256 handles any real-world glyph, override via -D) */
-#ifndef NT_FONT_MAX_CURVES_PER_GLYPH
-#define NT_FONT_MAX_CURVES_PER_GLYPH 256
-#endif
-
-/* Static temp buffer for GPU upload (no CPU mirror needed).
- * Max texels per glyph: NT_FONT_MAX_CURVES_PER_GLYPH * bands * 2 * 2 (Y+X bands).
- * RGBA16F: 4 uint16 per texel. Realistic: 40 curves * 8 bands * 2 * 2 * 4 = 5KB. */
-static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * NT_FONT_MAX_BANDS * 2 * 4 * 2];
-
-/* Reset free stack to all slots available (0..max_glyphs-1) */
-static void free_stack_reset(nt_font_slot_t *slot) {
-    for (uint16_t i = 0; i < slot->max_glyphs; i++) {
-        slot->free_stack[i] = (uint16_t)(slot->max_glyphs - 1 - i); /* top of stack = 0 */
-    }
-    slot->free_top = slot->max_glyphs;
-}
-
-static uint16_t free_stack_pop(nt_font_slot_t *slot) {
-    NT_ASSERT(slot->free_top > 0);
-    return slot->free_stack[--slot->free_top];
-}
-
-/* Pre-flush callback fires first so consumers can drain staging buffers
- * while texture offsets are still valid. */
+/* Outside tests only nt_font_step calls this, before any text, so no recorded draw references the wiped slots. */
 static void clear_glyph_cache(nt_font_slot_t *slot) {
-    if (s_font.pre_flush_fn) {
-        s_font.pre_flush_fn();
-    }
     memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
     memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
-    free_stack_reset(slot);
-    slot->glyphs_cached = 0;
-    slot->curve_write_head = 0;
-    slot->tofu_generated = false;
-    slot->cache_generation++;
+    slot->fill = 1;
 }
 
-/* Same reset as clear_glyph_cache, plus the "texture full" warning. */
-static void flush_cache_for_overflow(nt_font_slot_t *slot) {
-    NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height", slot->curve_tex_width, slot->curve_tex_height);
-    clear_glyph_cache(slot);
-}
+/* ---- Tofu ---- */
 
-/* Ensure enough texels, flushing if needed.
- * WARNING: flush invalidates ALL cache entries, hash table, and bumps
- * cache_generation. Callers (upload_glyph, generate_tofu) must handle the
- * case where the cache was reset mid-operation. Currently safe because
- * cache_idx is (re)allocated after this call returns. */
-static void ensure_curve_space(nt_font_slot_t *slot, uint32_t needed_texels) {
-    uint32_t total = (uint32_t)slot->curve_tex_width * slot->curve_tex_height;
-    NT_ASSERT(needed_texels <= total); /* single glyph exceeds entire curve texture */
-    if (slot->curve_write_head + needed_texels > total) {
-        flush_cache_for_overflow(slot);
-    }
-}
-
-/* ---- Tofu generation ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void generate_tofu(nt_font_slot_t *slot) {
-    if (slot->tofu_generated) {
-        return;
-    }
-    if (!slot->metrics_set) {
-        return; /* resources not loaded yet — tofu impossible, lookup returns NULL */
-    }
-
-    /* Tofu dimensions from metrics */
-    int16_t tofu_w = (int16_t)(slot->metrics.units_per_em / 2);
-    int16_t y0 = slot->metrics.descent;
-    int16_t y1 = slot->metrics.ascent;
-
-    /* 4 line segments forming a rectangle: bottom, right, top, left
-     * Each line promoted to degenerate quadratic: p1 = midpoint(p0, p2)
-     * 4 curves x 2 texels x 2 (Y-bands + X-bands) = 16 texels needed */
-    uint32_t needed_texels = 4 * 2 * 2;
-
-    /* Ensure we have cache slot space */
-    ensure_curve_space(slot, needed_texels);
-    uint16_t cache_idx;
-    if (slot->glyphs_cached < slot->max_glyphs) {
-        cache_idx = free_stack_pop(slot);
-    } else {
-        cache_idx = evict_lru(slot);
-    }
-
-    /* Rectangle corners: (0, y0), (tofu_w, y0), (tofu_w, y1), (0, y1) */
-    /* clang-format off */
-    float lines[4][4] = {
-        {0,       (float)y0, (float)tofu_w, (float)y0}, /* bottom: left to right */
-        {(float)tofu_w, (float)y0, (float)tofu_w, (float)y1}, /* right: bottom to top */
-        {(float)tofu_w, (float)y1, 0,       (float)y1}, /* top: right to left */
-        {0,       (float)y1, 0,       (float)y0}, /* left: top to bottom */
-    };
-    /* clang-format on */
-
-    uint32_t curve_offset = slot->curve_write_head;
-
-    for (int seg = 0; seg < 4; seg++) {
-        float p0x = lines[seg][0];
-        float p0y = lines[seg][1];
-        float p2x = lines[seg][2];
-        float p2y = lines[seg][3];
-        /* Degenerate quadratic: p1 = midpoint(p0, p2) */
-        float p1x = (p0x + p2x) * 0.5F;
-        float p1y = (p0y + p2y) * 0.5F;
-
-        uint32_t t0 = (uint32_t)seg * 2 * 4;
-        uint32_t t1 = t0 + 4;
-        s_curve_upload[t0 + 0] = nt_f32_to_f16(p0x);
-        s_curve_upload[t0 + 1] = nt_f32_to_f16(p0y);
-        s_curve_upload[t0 + 2] = nt_f32_to_f16(p1x);
-        s_curve_upload[t0 + 3] = nt_f32_to_f16(p1y);
-        s_curve_upload[t1 + 0] = nt_f32_to_f16(p2x);
-        s_curve_upload[t1 + 1] = nt_f32_to_f16(p2y);
-        s_curve_upload[t1 + 2] = 0;
-        s_curve_upload[t1 + 3] = 0;
-    }
-
-    /* Duplicate same 4 curves for X-bands (appended after Y-band data) */
-    uint32_t x_curve_offset = curve_offset + (4 * 2); /* after Y-band curves */
-    for (int seg = 0; seg < 4; seg++) {
-        uint32_t src0 = (uint32_t)seg * 2 * 4;
-        uint32_t dst0 = (uint32_t)(4 + seg) * 2 * 4;
-        for (uint32_t k = 0; k < 8; k++) {
-            s_curve_upload[dst0 + k] = s_curve_upload[src0 + k];
-        }
-    }
-
-    /* Upload all curve data (Y + X) to GPU */
-    uint32_t remaining = needed_texels;
-    uint32_t src_texel = 0;
-    uint32_t dst_texel = curve_offset;
-    while (remaining > 0) {
-        uint16_t row2 = (uint16_t)(dst_texel / slot->curve_tex_width);
-        uint16_t col2 = (uint16_t)(dst_texel % slot->curve_tex_width);
-        uint16_t w2 = (uint16_t)(slot->curve_tex_width - col2);
-        if (w2 > remaining) {
-            w2 = (uint16_t)remaining;
-        }
-        nt_gfx_update_texture(slot->curve_texture, col2, row2, w2, 1, &s_curve_upload[(size_t)src_texel * 4]);
-        remaining -= w2;
-        src_texel += w2;
-        dst_texel += w2;
-    }
-
-    /* Upload band data for tofu -- all 4 curves in every Y-band and X-band */
-    uint16_t band_data[NT_FONT_MAX_BANDS * 2 * 2] = {0};
-    for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_data[(b * 2) + 0] = 0; /* Y-band: curve_start */
-        band_data[(b * 2) + 1] = 4; /* Y-band: curve_count */
-    }
-    uint8_t xoff = slot->band_count;
-    for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_data[((xoff + b) * 2) + 0] = 0; /* X-band: curve_start */
-        band_data[((xoff + b) * 2) + 1] = 4; /* X-band: curve_count */
-    }
-    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, (uint16_t)(slot->band_count * 2), 1, band_data);
-
-    /* Fill cache entry */
-    nt_font_cache_slot_t *cs = &slot->cache[cache_idx];
-    cs->entry.codepoint = 0xFFFFFFFFU; /* tofu sentinel */
-    cs->entry.curve_offset = curve_offset;
-    cs->entry.curve_offset_x = x_curve_offset;
-    cs->entry.curve_count = 8;
-    cs->entry.band_row = cache_idx;
-    cs->entry.advance = tofu_w;
-    cs->entry.bbox_x0 = 0;
-    cs->entry.bbox_y0 = y0;
-    cs->entry.bbox_x1 = tofu_w;
-    cs->entry.bbox_y1 = y1;
-    cs->entry.is_tofu = true;
-    cs->key_offset = 0; /* tofu is weight-agnostic */
-    cs->lru_frame = s_font.frame_counter;
-
-    slot->curve_write_head += needed_texels;
-    slot->glyphs_cached++;
-    slot->tofu_generated = true;
-    hash_insert(slot, 0xFFFFFFFFU, 0, cache_idx);
-}
+/* NULL until nt_font_step has generated tofu (needs metrics and a ready texture). */
+static const nt_glyph_cache_entry_t *tofu_entry(const nt_font_slot_t *slot) { return slot->cache[0].entry.is_tofu ? &slot->cache[0].entry : NULL; }
 
 /* ---- Decode contours and upload glyph to GPU ---- */
 
@@ -598,10 +426,15 @@ static inline int16_t clamp_i16(float v) {
 }
 
 /* Emit one quadratic curve to the output buffer */
+/* Set when emit_curve drops a curve: only an emboldened outline can outgrow the builder's curve cap. */
+static bool s_decode_truncated;
+
 static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_c, float p0x, float p0y, float p1x, float p1y, float p2x, float p2y) {
     if (*total < max_c) {
         curves[*total] = (nt_curve_t){p0x, p0y, p1x, p1y, p2x, p2y};
         (*total)++;
+    } else {
+        s_decode_truncated = true;
     }
 }
 
@@ -1260,6 +1093,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
     memcpy(&contour_count, contour_data, 2);
     const uint8_t *body = contour_data + 2;
     uint16_t total_curves = 0;
+    s_decode_truncated = false;
 
 #if !NT_FONT_EMBOLDEN_ENABLED
     NT_ASSERT(weight == 0.0F);
@@ -1316,22 +1150,20 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
 #endif
 }
 
-/* Upload a glyph to GPU textures and fill cache entry.
- * Allocates cache slot internally (after ensure_curve_space) to avoid
- * the flush-invalidates-slot bug. Returns allocated cache_idx. */
+/* Upload a glyph into row cache_idx of the curve texture and fill the entry. The row starts with one header
+ * texel per band, (y_start, y_count, x_start, x_count) in texels/curves, then the band-sorted curves. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index, int16_t key_offset) {
+static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index, int16_t key_offset) {
     float bbox_y0 = (float)glyph->bbox_y0;
     float bbox_y1 = (float)glyph->bbox_y1;
     float bbox_x0 = (float)glyph->bbox_x0;
     float bbox_x1 = (float)glyph->bbox_x1;
-    NT_ASSERT(slot->band_count <= NT_FONT_MAX_BANDS);
 
     // #region Precompute per-curve Y and X bounds
-    float curve_y_min[NT_FONT_MAX_CURVES_PER_GLYPH];
-    float curve_y_max[NT_FONT_MAX_CURVES_PER_GLYPH];
-    float curve_x_min[NT_FONT_MAX_CURVES_PER_GLYPH];
-    float curve_x_max[NT_FONT_MAX_CURVES_PER_GLYPH];
+    static float curve_y_min[NT_FONT_MAX_CURVES_PER_GLYPH];
+    static float curve_y_max[NT_FONT_MAX_CURVES_PER_GLYPH];
+    static float curve_x_min[NT_FONT_MAX_CURVES_PER_GLYPH];
+    static float curve_x_max[NT_FONT_MAX_CURVES_PER_GLYPH];
     float ext_x_min = bbox_x0;
     float ext_x_max = bbox_x1;
     float ext_y_min = bbox_y0;
@@ -1367,69 +1199,77 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
         bbox_x1 = ceilf(ext_x_max);
         bbox_y1 = ceilf(ext_y_max);
     }
-    float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
-    float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
-
-    // #region Count Y-band and X-band curve pairs
-    /* Include FP16 control rounding as well as shader band-boundary error. */
-    float y_margin = fmaxf(band_height * 0.01F, fmaxf(fabsf(ext_y_min), fabsf(ext_y_max)) / 2048.0F);
-    float x_margin = fmaxf(band_width * 0.01F, fmaxf(fabsf(ext_x_min), fabsf(ext_x_max)) / 2048.0F);
-
-    uint16_t yband_counts[NT_FONT_MAX_BANDS] = {0};
-    uint16_t xband_counts[NT_FONT_MAX_BANDS] = {0};
-    for (uint16_t ci = 0; ci < curve_count; ci++) {
-        for (uint8_t b = 0; b < slot->band_count; b++) {
-            float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
-            float ytop = ybot + band_height + (y_margin * 2.0F);
-            if (curve_y_max[ci] >= ybot && curve_y_min[ci] <= ytop) {
-                yband_counts[b]++;
-            }
-            if (band_width > 0.0F) {
-                float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
-                float xright = xleft + band_width + (x_margin * 2.0F);
-                if (curve_x_max[ci] >= xleft && curve_x_min[ci] <= xright) {
-                    xband_counts[b]++;
+    // #region Count Y-band and X-band curve pairs, dropping bands until the glyph fits its row
+    /* More bands mean fewer curves per pixel and cost only texels of the already reserved row, so a glyph
+     * starts at the maximum. With one band it needs 1 header texel plus at most 4 per curve, and the
+     * builder caps curves at (NT_FONT_GLYPH_TEXELS - 1) / 4, so the loop always ends. */
+    uint8_t bands = NT_FONT_MAX_BANDS;
+    float band_height;
+    float band_width;
+    float y_margin;
+    float x_margin;
+    uint16_t yband_counts[NT_FONT_MAX_BANDS];
+    uint16_t xband_counts[NT_FONT_MAX_BANDS];
+    uint32_t y_total;
+    uint32_t x_total;
+    uint32_t needed_texels;
+    for (;;) {
+        band_height = (bbox_y1 - bbox_y0) / (float)bands;
+        band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)bands : 0.0F;
+        /* Include FP16 control rounding as well as shader band-boundary error. */
+        y_margin = fmaxf(band_height * 0.01F, fmaxf(fabsf(ext_y_min), fabsf(ext_y_max)) / 2048.0F);
+        x_margin = fmaxf(band_width * 0.01F, fmaxf(fabsf(ext_x_min), fabsf(ext_x_max)) / 2048.0F);
+        memset(yband_counts, 0, sizeof yband_counts);
+        memset(xband_counts, 0, sizeof xband_counts);
+        for (uint16_t ci = 0; ci < curve_count; ci++) {
+            for (uint8_t b = 0; b < bands; b++) {
+                float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
+                float ytop = ybot + band_height + (y_margin * 2.0F);
+                if (curve_y_max[ci] >= ybot && curve_y_min[ci] <= ytop) {
+                    yband_counts[b]++;
+                }
+                if (band_width > 0.0F) {
+                    float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
+                    float xright = xleft + band_width + (x_margin * 2.0F);
+                    if (curve_x_max[ci] >= xleft && curve_x_min[ci] <= xright) {
+                        xband_counts[b]++;
+                    }
                 }
             }
         }
+        y_total = 0;
+        x_total = 0;
+        for (uint8_t b = 0; b < bands; b++) {
+            y_total += yband_counts[b];
+            x_total += xband_counts[b];
+        }
+        needed_texels = bands + ((y_total + x_total) * 2);
+        if (needed_texels <= NT_FONT_GLYPH_TEXELS) {
+            break;
+        }
+        NT_ASSERT(bands > 1 && "one band always fits: the builder caps curves per glyph");
+        bands = (uint8_t)(bands / 2);
     }
-
-    uint32_t y_total = 0;
-    uint32_t x_total = 0;
-    for (uint8_t b = 0; b < slot->band_count; b++) {
-        y_total += yband_counts[b];
-        x_total += xband_counts[b];
-    }
-    uint32_t needed_texels = (y_total + x_total) * 2;
-    // #endregion
-
-    ensure_curve_space(slot, needed_texels);
-
-    // #region Allocate cache slot (after ensure_curve_space to avoid flush-invalidates-slot)
-    uint16_t cache_idx;
-    if (slot->glyphs_cached < slot->max_glyphs) {
-        cache_idx = free_stack_pop(slot);
-    } else {
-        cache_idx = evict_lru(slot);
+    if (bands != NT_FONT_MAX_BANDS) {
+        NT_LOG_WARN_ONCE("font: U+%04X overflows its glyph slot at %u bands -- drawn with %u (slower shader)", glyph->codepoint, NT_FONT_MAX_BANDS, bands);
     }
     // #endregion
 
-    // #region Write Y-band curves to temp buffer
-    uint32_t curve_offset_y = slot->curve_write_head;
+    // #region Write Y-band curves to temp buffer (after the header, X data follows)
     uint16_t yband_offsets[NT_FONT_MAX_BANDS] = {0};
 
-    uint32_t local_pos = 0;
+    uint32_t local_pos = bands; /* texel index in the row */
     /* Per-band curves sorted DESC by max-x (Y-bands) / max-y (X-bands) so the
      * shader's early-out matches reference Slug (SlugPixelShader.hlsl:187-192). */
-    uint16_t band_sorted[NT_FONT_MAX_CURVES_PER_GLYPH];
-    for (uint8_t b = 0; b < slot->band_count; b++) {
-        yband_offsets[b] = (uint16_t)(local_pos / 2);
+    static uint16_t band_sorted[NT_FONT_MAX_CURVES_PER_GLYPH];
+    for (uint8_t b = 0; b < bands; b++) {
+        yband_offsets[b] = (uint16_t)local_pos;
         float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
         float ytop = ybot + band_height + (y_margin * 2.0F);
         uint16_t band_n = 0;
         for (uint16_t ci = 0; ci < curve_count; ci++) {
-            if (curve_y_max[ci] < ybot || curve_y_min[ci] > ytop) {
-                continue;
+            if (!(curve_y_max[ci] >= ybot && curve_y_min[ci] <= ytop)) {
+                continue; /* the count's exact test (NaN included), so writes never pass needed_texels */
             }
             band_sorted[band_n++] = ci;
         }
@@ -1461,18 +1301,16 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     // #endregion
 
     // #region Write X-band curves to temp buffer (after Y-band data)
-    uint32_t y_local_pos = local_pos;
-    uint32_t curve_offset_x = curve_offset_y + y_local_pos;
     uint16_t xband_offsets[NT_FONT_MAX_BANDS] = {0};
 
-    for (uint8_t b = 0; b < slot->band_count; b++) {
-        xband_offsets[b] = (uint16_t)((local_pos - y_local_pos) / 2);
+    for (uint8_t b = 0; b < bands; b++) {
+        xband_offsets[b] = (uint16_t)local_pos;
         if (band_width > 0.0F) {
             float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
             float xright = xleft + band_width + (x_margin * 2.0F);
             uint16_t band_n = 0;
             for (uint16_t ci = 0; ci < curve_count; ci++) {
-                if (curve_x_max[ci] < xleft || curve_x_min[ci] > xright) {
+                if (!(curve_x_max[ci] >= xleft && curve_x_min[ci] <= xright)) {
                     continue;
                 }
                 band_sorted[band_n++] = ci;
@@ -1505,47 +1343,20 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     }
     // #endregion
 
-    // #region Upload curve data to GPU from temp buffer
-    if (needed_texels > 0) {
-        uint32_t remaining = needed_texels;
-        uint32_t src_texel = 0;
-        uint32_t dst_texel = curve_offset_y;
-        while (remaining > 0) {
-            uint16_t row = (uint16_t)(dst_texel / slot->curve_tex_width);
-            uint16_t col = (uint16_t)(dst_texel % slot->curve_tex_width);
-            uint16_t w = (uint16_t)(slot->curve_tex_width - col);
-            if (w > remaining) {
-                w = (uint16_t)remaining;
-            }
-            nt_gfx_update_texture(slot->curve_texture, col, row, w, 1, &s_curve_upload[(size_t)src_texel * 4]);
-            remaining -= w;
-            src_texel += w;
-            dst_texel += w;
-        }
+    for (uint8_t b = 0; b < bands; b++) { /* fp16 holds these integers (<= 2048) exactly */
+        s_curve_upload[(b * 4U) + 0] = nt_f32_to_f16((float)yband_offsets[b]);
+        s_curve_upload[(b * 4U) + 1] = nt_f32_to_f16((float)yband_counts[b]);
+        s_curve_upload[(b * 4U) + 2] = nt_f32_to_f16((float)xband_offsets[b]);
+        s_curve_upload[(b * 4U) + 3] = nt_f32_to_f16((float)xband_counts[b]);
     }
-    // #endregion
-
-    // #region Upload band data to GPU (Y-bands + X-bands in one row)
-    uint16_t band_upload[NT_FONT_MAX_BANDS * 2 * 2] = {0}; /* Y-bands + X-bands, RG16UI each */
-    for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_upload[(b * 2) + 0] = yband_offsets[b];
-        band_upload[(b * 2) + 1] = yband_counts[b];
-    }
-    uint8_t xoff = slot->band_count;
-    for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_upload[((xoff + b) * 2) + 0] = xband_offsets[b];
-        band_upload[((xoff + b) * 2) + 1] = xband_counts[b];
-    }
-    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, (uint16_t)(slot->band_count * 2), 1, band_upload);
-    // #endregion
+    nt_gfx_update_texture(slot->curve_texture, 0, cache_idx, (uint16_t)needed_texels, 1, s_curve_upload);
 
     // #region Fill cache entry
     nt_font_cache_slot_t *cs = &slot->cache[cache_idx];
     cs->entry.codepoint = glyph->codepoint;
-    cs->entry.curve_offset = curve_offset_y;
-    cs->entry.curve_offset_x = curve_offset_x;
     cs->entry.curve_count = (uint16_t)(y_total + x_total);
     cs->entry.band_row = cache_idx;
+    cs->entry.band_count = bands;
     cs->entry.advance = glyph->advance;
     if (key_offset != 0) {
         cs->entry.bbox_x0 = clamp_i16(bbox_x0);
@@ -1558,23 +1369,38 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
         cs->entry.bbox_x1 = glyph->bbox_x1;
         cs->entry.bbox_y1 = glyph->bbox_y1;
     }
-    cs->entry.is_tofu = false;
     cs->key_offset = key_offset;
-    cs->lru_frame = s_font.frame_counter;
+    cs->lru_frame = frame_now();
     cs->resource_index = resource_index;
     // #endregion
+}
 
-    slot->curve_write_head = curve_offset_y + local_pos;
-    slot->glyphs_cached++;
-    return cache_idx;
+/* Tofu is a rectangle outline in slot 0, which LRU never takes. */
+static void generate_tofu(nt_font_slot_t *slot) {
+    if (slot->cache[0].entry.is_tofu || !slot->metrics_set || !nt_gfx_texture_ready(slot->curve_texture)) {
+        return;
+    }
+    const int16_t w = (int16_t)(slot->metrics.units_per_em / 2);
+    const float fw = (float)w;
+    const float y0 = (float)slot->metrics.descent;
+    const float y1 = (float)slot->metrics.ascent;
+    const float ym = (y0 + y1) * 0.5F;
+    const nt_curve_t box[4] = {/* lines as degenerate quadratics: p1 = midpoint */
+                               {0, y0, fw * 0.5F, y0, fw, y0},
+                               {fw, y0, fw, ym, fw, y1},
+                               {fw, y1, fw * 0.5F, y1, 0, y1},
+                               {0, y1, 0, ym, 0, y0}};
+    const NtFontGlyphEntry glyph = {.codepoint = 0xFFFFFFFFU, .advance = w, .bbox_y0 = slot->metrics.descent, .bbox_x1 = w, .bbox_y1 = slot->metrics.ascent, .curve_count = 4};
+    upload_glyph(slot, 0, &glyph, box, 4, 0, 0);
+    slot->cache[0].entry.is_tofu = true;
 }
 
 /* ---- Lifecycle ---- */
 
 static void create_font_textures(nt_font_slot_t *slot) {
     slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = slot->curve_tex_width,
-        .height = slot->curve_tex_height,
+        .width = NT_FONT_GLYPH_TEXELS,
+        .height = slot->max_glyphs,
         .format = NT_TEXTURE_FORMAT_RGBA16F,
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
@@ -1582,24 +1408,11 @@ static void create_font_textures(nt_font_slot_t *slot) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "font_curve",
     });
-    slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = (uint16_t)(slot->band_count * 2),
-        .height = slot->band_tex_height,
-        .format = NT_TEXTURE_FORMAT_RG16UI,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .label = "font_band",
-    });
 }
 
 static void destroy_font_textures(nt_font_slot_t *slot) {
     if (slot->curve_texture.id != 0) {
         nt_gfx_destroy_texture(slot->curve_texture);
-    }
-    if (slot->band_texture.id != 0) {
-        nt_gfx_destroy_texture(slot->band_texture);
     }
 }
 
@@ -1640,7 +1453,6 @@ void nt_font_shutdown(void) {
         }
         nt_font_slot_t *slot = &s_font.slots[i];
         free(slot->cache);
-        free(slot->free_stack);
         free(slot->hash_table);
         free(slot->measure_cache.key_hashes); /* SoA base — frees all 4 sub-arrays; NULL-safe */
         destroy_font_textures(slot);
@@ -1670,17 +1482,16 @@ void nt_font_step(void) {
                 continue;
             }
             nt_font_slot_t *slot = &s_font.slots[i];
-            if (nt_gfx_texture_ready(slot->curve_texture) && nt_gfx_texture_ready(slot->band_texture)) {
+            if (nt_gfx_texture_ready(slot->curve_texture)) {
                 continue;
             }
             destroy_font_textures(slot);
             create_font_textures(slot);
             clear_glyph_cache(slot); /* textures recreated — old cache entries point at stale GPU regions */
+            generate_tofu(slot);
         }
     }
     // #endregion
-
-    s_font.frame_counter++;
 
     /* Epoch-gate the resource rescan: O(1) when no published slot changed and no font's resource set
      * was mutated. The context-restore rebuild above still runs every frame; only the winner/metrics
@@ -1834,12 +1645,8 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
         return NT_FONT_INVALID;
     }
 
-    NT_ASSERT(desc->curve_texture_width > 0);
-    NT_ASSERT(desc->curve_texture_height > 0);
-    NT_ASSERT(desc->band_texture_height > 0);
-
-    NT_ASSERT(desc->band_count > 0 && desc->band_count <= NT_FONT_MAX_BANDS);
-    uint8_t band_count = desc->band_count;
+    /* 2048 rows is the WebGL2 guaranteed MAX_TEXTURE_SIZE; slot 0 holds tofu. */
+    NT_ASSERT(desc->max_glyphs > 1 && desc->max_glyphs <= 2048 && "max_glyphs: tofu + glyphs, at most 2048 texture rows");
 
     uint32_t id = nt_pool_alloc(&s_font.pool);
     if (id == 0) {
@@ -1895,25 +1702,18 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     }
 
     // #region Store config
-    slot->curve_tex_width = desc->curve_texture_width;
-    slot->curve_tex_height = desc->curve_texture_height;
-    slot->band_tex_height = desc->band_texture_height;
-    slot->band_count = band_count;
-    slot->max_glyphs = desc->band_texture_height;
+    slot->max_glyphs = desc->max_glyphs;
+    slot->fill = 1;
     // #endregion
 
     create_font_textures(slot);
 
-    // #region Allocate cache, free stack, hash table
-    slot->cache = (nt_font_cache_slot_t *)calloc(desc->band_texture_height, sizeof(nt_font_cache_slot_t));
+    // #region Allocate cache, hash table
+    slot->cache = (nt_font_cache_slot_t *)calloc(desc->max_glyphs, sizeof(nt_font_cache_slot_t));
     NT_ASSERT(slot->cache);
 
-    slot->free_stack = (uint16_t *)calloc(desc->band_texture_height, sizeof(uint16_t));
-    NT_ASSERT(slot->free_stack);
-    free_stack_reset(slot);
-
     /* Codepoint hash table: POT size, load factor ≤ 0.5 */
-    slot->hash_table_size = next_pot16((uint16_t)(desc->band_texture_height * 2));
+    slot->hash_table_size = next_pot16((uint16_t)(desc->max_glyphs * 2));
     slot->hash_table = (uint16_t *)calloc(slot->hash_table_size, sizeof(uint16_t));
     NT_ASSERT(slot->hash_table);
     // #endregion
@@ -1929,7 +1729,6 @@ void nt_font_destroy(nt_font_t font) {
 
     nt_font_slot_t *slot = get_slot(font);
     free(slot->cache);
-    free(slot->free_stack);
     free(slot->hash_table);
     free(slot->measure_cache.key_hashes); /* SoA base pointer — frees all 4 arrays in one block. NULL-safe. */
     destroy_font_textures(slot);
@@ -1989,13 +1788,19 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font) {
         return (nt_font_stats_t){0};
     }
     nt_font_slot_t *slot = get_slot(font);
+    uint16_t cached = 0;
+    uint32_t curve_texels = 0;
+    for (uint16_t i = 0; i < slot->max_glyphs; i++) {
+        if (slot->cache[i].entry.codepoint != 0) {
+            cached++;
+            curve_texels += slot->cache[i].entry.band_count + ((uint32_t)slot->cache[i].entry.curve_count * 2U);
+        }
+    }
     return (nt_font_stats_t){
-        .glyphs_cached = slot->glyphs_cached,
+        .glyphs_cached = cached,
         .max_glyphs = slot->max_glyphs,
-        .curve_texels_used = slot->curve_write_head,
-        .curve_texels_total = (uint32_t)slot->curve_tex_width * slot->curve_tex_height,
-        .band_texels_used = (uint32_t)slot->glyphs_cached * slot->band_count * 2, /* Y + X bands */
-        .band_texels_total = (uint32_t)slot->band_count * 2 * slot->band_tex_height,
+        .curve_texels_used = curve_texels,
+        .curve_texels_total = (uint32_t)NT_FONT_GLYPH_TEXELS * slot->max_glyphs,
     };
 }
 
@@ -2023,7 +1828,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
     // #region Cache hit check (hash table)
     nt_font_cache_slot_t *hit = hash_lookup(slot, codepoint, key_offset);
     if (hit) {
-        hit->lru_frame = s_font.frame_counter;
+        hit->lru_frame = frame_now();
         return &hit->entry;
     }
     // #endregion
@@ -2034,9 +1839,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
     bool found = find_glyph_in_resources(slot, codepoint, &res_idx, &glyph_entry);
 
     if (!found) {
-        generate_tofu(slot);
-        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU, 0);
-        return tofu ? &tofu->entry : NULL;
+        return tofu_entry(slot);
     }
     // #endregion
 
@@ -2044,11 +1847,11 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
     uint32_t blob_size = 0;
     const uint8_t *blob = font_provider_blob(slot->resources[res_idx], &blob_size);
     NT_ASSERT(blob);
-    if (!blob) {
-        /* Provider vanished between find and decode — degrade to tofu, never deref NULL. */
-        generate_tofu(slot);
-        nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU, 0);
-        return tofu ? &tofu->entry : NULL;
+
+    uint16_t cache_idx = take_slot(slot);
+    if (cache_idx == UINT16_MAX) {
+        NT_LOG_WARN_ONCE("font: all %u glyph slots are in use this frame, new glyphs render as tofu -- raise max_glyphs", slot->max_glyphs);
+        return tofu_entry(slot);
     }
 
     /* Contour data is at: data_offset + kern_count * sizeof(NtFontKernEntry) */
@@ -2061,14 +1864,17 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
         /* Decode weight = the SAME (already quantized+saturated) key_offset the slot is keyed
          * by, so the cached geometry and the cache key can never disagree. */
         curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, (float)key_offset);
+        if (s_decode_truncated) {
+            /* A cut outline leaks fill; the regular outline always fits the builder's cap. */
+            NT_LOG_WARN_ONCE("font: U+%04X at weight %d outgrows %u curves -- drawn at regular weight", codepoint, key_offset, NT_FONT_MAX_CURVES_PER_GLYPH);
+            curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH, 0.0F);
+        }
+        NT_ASSERT(!s_decode_truncated && "regular outline exceeds the builder's curve cap");
     }
     // #endregion
 
-    // #region Upload, allocate slot, fill cache
-    uint16_t cache_idx = upload_glyph(slot, glyph_entry, s_decode_curves, curve_count, res_idx, key_offset);
+    upload_glyph(slot, cache_idx, glyph_entry, s_decode_curves, curve_count, res_idx, key_offset);
     hash_insert(slot, codepoint, key_offset, cache_idx);
-    // #endregion
-
     return &slot->cache[cache_idx].entry;
 }
 
@@ -2102,7 +1908,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
     nt_font_slot_t *slot = get_slot(font);
-    if (!nt_gfx_texture_ready(slot->curve_texture) || !nt_gfx_texture_ready(slot->band_texture)) {
+    if (!nt_gfx_texture_ready(slot->curve_texture)) {
         return NULL;
     }
     return nt_font_lookup_glyph_in_slot(slot, codepoint);
@@ -2117,44 +1923,6 @@ nt_texture_t nt_font_get_curve_texture(nt_font_t font) {
         return (nt_texture_t){0};
     }
     return get_slot(font)->curve_texture;
-}
-
-nt_texture_t nt_font_get_band_texture(nt_font_t font) {
-    NT_ASSERT(s_font.initialized);
-    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return (nt_texture_t){0};
-    }
-    return get_slot(font)->band_texture;
-}
-
-uint8_t nt_font_get_band_count(nt_font_t font) {
-    NT_ASSERT(s_font.initialized);
-    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return 0;
-    }
-    return get_slot(font)->band_count;
-}
-
-uint16_t nt_font_get_curve_texture_width(nt_font_t font) {
-    NT_ASSERT(s_font.initialized);
-    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return 0;
-    }
-    return get_slot(font)->curve_tex_width;
-}
-
-/* ---- Cache generation ---- */
-
-uint32_t nt_font_get_cache_generation(nt_font_t font) {
-    NT_ASSERT(s_font.initialized);
-    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return 0;
-    }
-    return get_slot(font)->cache_generation;
 }
 
 /* ---- Kern pair lookup ---- */
@@ -2208,10 +1976,6 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
     return nt_font_get_kern_in_slot(get_slot(font), left_codepoint, right_codepoint);
 }
-
-/* ---- Pre-flush callback ---- */
-
-void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn) { s_font.pre_flush_fn = fn; }
 
 // #region Metrics-only lookup (pure CPU, no GPU, no cache)
 nt_glyph_metrics_t nt_font_lookup_metrics(nt_font_t font, uint32_t codepoint) {
@@ -2692,6 +2456,8 @@ void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t asc
     slot->metrics.descent = descent;
     slot->metrics.line_height = line_height;
     slot->metrics_set = true;
+    clear_glyph_cache(slot); /* as a real metrics change does */
+    generate_tofu(slot);
 }
 
 #if NT_FONT_EMBOLDEN_ENABLED

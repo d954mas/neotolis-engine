@@ -242,8 +242,7 @@ void setUp(void) {
     nt_assert_handler = test_assert_handler;
     nt_gfx_fake_reset();
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
-    /* Band before curve: units the renderer must query, not the 0/1 a hardcode would use. */
-    nt_gfx_fake_set_samplers_typed((const char *const[]){"u_band_texture", "u_curve_texture"}, (const uint8_t[]){NT_GFX_SAMPLER_CLASS_UINT, NT_GFX_SAMPLER_CLASS_FLOAT}, 2);
+    nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture"}, 1);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
@@ -252,10 +251,7 @@ void setUp(void) {
     /* Build font and create handle */
     s_blob = build_test_font_blob(&s_blob_size);
     nt_font_create_desc_t desc = {
-        .curve_texture_width = 64,
-        .curve_texture_height = 64,
-        .band_texture_height = 16,
-        .band_count = 4,
+        .max_glyphs = 16,
     };
     s_font = nt_font_create(&desc);
     nt_resource_t res = register_font_resource("test_text_font", s_blob, s_blob_size);
@@ -306,15 +302,13 @@ void test_text_renderer_forwards_material_blend_state(void) {
     nt_blend_state_t actual = nt_gfx_fake_last_pipeline_blend();
     TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
 
-    /* Sampler units are fixed at link: the only int a flush writes is the curve width. */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_int_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_curve_tex_width").value, nt_gfx_fake_uniform_int_hash_at(0));
-    TEST_ASSERT_EQUAL_INT((int)nt_font_get_curve_texture_width(s_font), nt_gfx_fake_uniform_int_value_at(0));
+    /* Sampler units are fixed at link and curves are addressed by glyph row: a flush writes no int. */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
 }
 
 /* The two font textures land on the units their program assigned, in canonical
  * unit order, and nothing writes a sampler int. */
-void test_text_renderer_font_textures_land_on_program_units(void) {
+void test_text_renderer_font_texture_lands_on_its_program_unit(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_text_renderer_set_material(material);
     nt_gfx_fake_reset();
@@ -322,16 +316,9 @@ void test_text_renderer_font_textures_land_on_program_units(void) {
 
     const nt_program_t prog = nt_material_get_info(material)->program;
     const int curve_unit = nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_curve_texture"));
-    const int band_unit = nt_gfx_test_program_sampler_unit(prog, nt_hash32_str("u_band_texture"));
-    TEST_ASSERT_EQUAL_INT(1, curve_unit);
-    TEST_ASSERT_EQUAL_INT(0, band_unit);
-
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_band_texture(s_font)), nt_gfx_fake_bound_texture_at(0));
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)band_unit, nt_gfx_fake_bound_texture_slot_at(0));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_curve_texture(s_font)), nt_gfx_fake_bound_texture_at(1));
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)curve_unit, nt_gfx_fake_bound_texture_slot_at(1));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_int_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(nt_font_get_curve_texture(s_font)), nt_gfx_fake_bound_texture_at(0));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)curve_unit, nt_gfx_fake_bound_texture_slot_at(0));
 }
 
 void test_text_renderer_rejects_unrelated_second_sampler(void) {
@@ -389,19 +376,19 @@ void test_measure_null_string(void) {
     TEST_ASSERT_TRUE(sz.height == 0.0F);
 }
 
-/* ---- Test 7: Vertex stride is 72 bytes (TEXT-01) ---- */
+/* ---- Test 7: Vertex stride is 64 bytes (TEXT-01) ---- */
 
-void test_vertex_stride_72(void) {
+void test_vertex_stride_64(void) {
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1, nt_text_renderer_test_glyph_count());
 
-    /* 4 vertices for one glyph, at 72 bytes stride */
+    /* 4 vertices for one glyph, at 64 bytes stride */
     const uint8_t *verts = (const uint8_t *)nt_text_renderer_test_vertices();
     TEST_ASSERT_NOT_NULL(verts);
 
-    /* Vertex 0 and vertex 1 should be at offsets 0 and 72 */
+    /* Vertex 0 and vertex 1 should be at offsets 0 and 64 */
     /* They represent different quad corners, so position data differs */
-    TEST_ASSERT_FALSE(memcmp(verts, verts + 72, 72) == 0);
+    TEST_ASSERT_FALSE(memcmp(verts, verts + 64, 64) == 0);
 }
 
 /* ---- Test 8: 4 vertices per glyph (TEXT-01) ---- */
@@ -436,7 +423,7 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         hdr.descent = cases[i].descent;
         memcpy(blob, &hdr, sizeof hdr);
 
-        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.curve_texture_width = 64, .curve_texture_height = 64, .band_texture_height = 16, .band_count = 4});
+        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
         nt_font_add(font, register_font_resource("rounded_tofu", blob, blob_size));
         nt_resource_step();
         nt_font_step();
@@ -449,8 +436,8 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         float tr[5];
         float bounds[4];
         memcpy(bl, verts, sizeof bl);
-        memcpy(tr, verts + ((size_t)2U * 72U), sizeof tr);
-        memcpy(bounds, verts + 36U, sizeof bounds);
+        memcpy(tr, verts + ((size_t)2U * 64U), sizeof tr);
+        memcpy(bounds, verts + 28U, sizeof bounds);
         TEST_ASSERT_TRUE(bl[0] <= -0.5F);
         TEST_ASSERT_TRUE(bl[1] <= (cases[i].rounded_bottom * 2.0F) - 0.5F);
         TEST_ASSERT_TRUE(tr[0] >= (cases[i].rounded_right * 2.0F) + 0.5F);
@@ -522,8 +509,8 @@ void test_draw_newline_advances_to_next_line(void) {
     float second_y = 0.0F;
     memcpy(&first_x, verts + 0, sizeof(float));
     memcpy(&first_y, verts + 4, sizeof(float));
-    memcpy(&second_x, verts + ((size_t)4U * 72U), sizeof(float));
-    memcpy(&second_y, verts + ((size_t)4U * 72U) + 4U, sizeof(float));
+    memcpy(&second_x, verts + ((size_t)4U * 64U), sizeof(float));
+    memcpy(&second_y, verts + ((size_t)4U * 64U) + 4U, sizeof(float));
 
     TEST_ASSERT_TRUE(first_x == second_x);
     TEST_ASSERT_TRUE(second_y < first_y);
@@ -748,40 +735,27 @@ void test_overflow_flush_reopens_the_batch_pipeline(void) {
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
 }
 
-void test_font_cache_flush_preserves_the_entire_run(void) {
+/* One glyph slot: 'A' takes it, B and C find every slot in use this frame and draw as tofu. */
+void test_full_glyph_cache_still_draws_the_entire_run(void) {
     nt_font_create_desc_t desc = {
-        .curve_texture_width = 16,
-        .curve_texture_height = 2,
-        .band_texture_height = 16,
-        .band_count = 4,
+        .max_glyphs = 2,
     };
     nt_font_t tiny_font = nt_font_create(&desc);
-    nt_font_add(tiny_font, register_font_resource("text_cache_flush", s_blob, s_blob_size));
+    nt_font_add(tiny_font, register_font_resource("text_cache_full", s_blob, s_blob_size));
     nt_resource_step();
     nt_font_step();
     nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
     nt_text_renderer_set_font(tiny_font);
-    const uint32_t generation = nt_font_get_cache_generation(tiny_font);
 
+    const uint32_t uploads = nt_gfx_fake_update_texture_count();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     nt_text_renderer_flush();
     nt_gfx_end_pass();
 
-    TEST_ASSERT_GREATER_THAN_UINT32(generation, nt_font_get_cache_generation(tiny_font));
+    TEST_ASSERT_EQUAL_UINT32(uploads + 1U, nt_gfx_fake_update_texture_count()); /* only 'A' uploads its row */
     TEST_ASSERT_EQUAL_UINT64(36U, g_nt_gfx.counters.indices);
     TEST_ASSERT_EQUAL_UINT64(24U, g_nt_gfx.counters.vertices);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
-
-    nt_text_renderer_set_underline(true);
-    nt_text_renderer_set_strikethrough(true);
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_text_renderer_draw("ABCABC", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    nt_text_renderer_flush();
-    nt_gfx_end_pass();
-    TEST_ASSERT_EQUAL_UINT64(48U, g_nt_gfx.counters.indices);
-    TEST_ASSERT_EQUAL_UINT64(32U, g_nt_gfx.counters.vertices);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_glyph_count());
     nt_text_renderer_set_font(s_font);
     nt_font_destroy(tiny_font);
@@ -848,7 +822,8 @@ void test_destroyed_replaced_program_drops_staged_work(void) {
 void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     nt_log_add_sink(capture_errors, NULL);
     nt_text_renderer_set_material(create_test_material_with_blend(nt_blend_alpha()));
-    for (uint8_t mask = 1U; mask <= 3U; mask++) {
+    {
+        const uint8_t mask = 1U; /* fail the font's only texture */
         nt_text_renderer_reset_decoration();
         nt_gfx_fake_fail_texture_creates(mask);
         nt_font_create_desc_t desc = nt_font_create_desc_defaults();
@@ -1032,9 +1007,9 @@ void test_draw_n_matches_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, draw_gcount);
 
     /* Snapshot vertex bytes — flush will zero the staging buffer counters next,
-     * so we copy out before reset. Stride is 72 bytes per nt_text_vertex_t. */
-    const size_t bytes_to_copy = (size_t)draw_vcount * 72U;
-    uint8_t buf_draw[8U * 72U];
+     * so we copy out before reset. Stride is 64 bytes per nt_text_vertex_t. */
+    const size_t bytes_to_copy = (size_t)draw_vcount * 64U;
+    uint8_t buf_draw[8U * 64U];
     memcpy(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);
 
     /* Reset staging counters (no pipeline → flush warns + zeros counters). */
@@ -1059,7 +1034,7 @@ void test_draw_n_letter_spacing_advances_pen(void) {
     TEST_ASSERT_EQUAL_UINT32(8U, nt_text_renderer_test_vertex_count());
     const uint8_t *vraw = (const uint8_t *)nt_text_renderer_test_vertices();
     float base_b_x = 0.0F;
-    memcpy(&base_b_x, vraw + ((size_t)4U * 72U), sizeof(float));
+    memcpy(&base_b_x, vraw + ((size_t)4U * 64U), sizeof(float));
 
     nt_text_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
@@ -1068,7 +1043,7 @@ void test_draw_n_letter_spacing_advances_pen(void) {
     nt_text_renderer_draw_n("AB", 2U, s_identity, 32.0F, s_white, 7.0F, 0.0F);
     const uint8_t *vspaced = (const uint8_t *)nt_text_renderer_test_vertices();
     float spaced_b_x = 0.0F;
-    memcpy(&spaced_b_x, vspaced + ((size_t)4U * 72U), sizeof(float));
+    memcpy(&spaced_b_x, vspaced + ((size_t)4U * 64U), sizeof(float));
 
     /* UNITY_EXCLUDE_FLOAT in this build: int-truncate to compare. */
     TEST_ASSERT_EQUAL_INT32((int32_t)(base_b_x + 7.0F), (int32_t)spaced_b_x);
@@ -1083,7 +1058,7 @@ void test_draw_n_line_leading_advances_pen_y(void) {
     const uint8_t *vraw = (const uint8_t *)nt_text_renderer_test_vertices();
     /* vertex 0 = A's first corner, vertex 4 = B's first corner. y is float[1]. */
     float base_b_y = 0.0F;
-    memcpy(&base_b_y, vraw + ((size_t)4U * 72U) + sizeof(float), sizeof(float));
+    memcpy(&base_b_y, vraw + ((size_t)4U * 64U) + sizeof(float), sizeof(float));
 
     nt_text_renderer_flush();
 
@@ -1091,7 +1066,7 @@ void test_draw_n_line_leading_advances_pen_y(void) {
     nt_text_renderer_draw_n("A\nB", 3U, s_identity, 32.0F, s_white, 0.0F, 10.0F);
     const uint8_t *vleading = (const uint8_t *)nt_text_renderer_test_vertices();
     float leading_b_y = 0.0F;
-    memcpy(&leading_b_y, vleading + ((size_t)4U * 72U) + sizeof(float), sizeof(float));
+    memcpy(&leading_b_y, vleading + ((size_t)4U * 64U) + sizeof(float), sizeof(float));
 
     /* B drew lower by exactly 10px (pen_y decreases by line_advance, which got +10). */
     TEST_ASSERT_EQUAL_INT32((int32_t)(base_b_y - 10.0F), (int32_t)leading_b_y);
@@ -1105,8 +1080,8 @@ void test_draw_n_does_not_over_read(void) {
     const uint32_t ref_vcount = nt_text_renderer_test_vertex_count();
     TEST_ASSERT_EQUAL_UINT32(8U, ref_vcount);
 
-    const size_t bytes_to_copy = (size_t)ref_vcount * 72U;
-    uint8_t buf_ref[8U * 72U];
+    const size_t bytes_to_copy = (size_t)ref_vcount * 64U;
+    uint8_t buf_ref[8U * 64U];
     memcpy(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
 
     nt_text_renderer_flush();
@@ -1259,7 +1234,7 @@ void test_oblique_leans_glyph_top(void) {
     float bl_x = 0.0F; /* vertex 0 = BL */
     float tl_x = 0.0F; /* vertex 3 = TL */
     memcpy(&bl_x, v + 0, sizeof(float));
-    memcpy(&tl_x, v + ((size_t)3U * 72U), sizeof(float));
+    memcpy(&tl_x, v + ((size_t)3U * 64U), sizeof(float));
     TEST_ASSERT_TRUE(bl_x == tl_x); /* upright: no shear -> top and bottom share x exactly */
 
     nt_text_renderer_flush();
@@ -1268,7 +1243,7 @@ void test_oblique_leans_glyph_top(void) {
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     v = (const uint8_t *)nt_text_renderer_test_vertices();
     memcpy(&bl_x, v + 0, sizeof(float));
-    memcpy(&tl_x, v + ((size_t)3U * 72U), sizeof(float));
+    memcpy(&tl_x, v + ((size_t)3U * 64U), sizeof(float));
     TEST_ASSERT_TRUE_MESSAGE(tl_x > bl_x + 1.0F, "oblique leans the glyph top toward +x");
 
     nt_text_renderer_set_oblique(0.0F); /* restore upright for test isolation */
@@ -1399,8 +1374,8 @@ void test_shadow_pass_offset(void) {
     float fill_y = 0.0F;
     memcpy(&shadow_x, v + 0, sizeof(float)); /* quad0 v0 = shadow */
     memcpy(&shadow_y, v + sizeof(float), sizeof(float));
-    memcpy(&fill_x, v + ((size_t)4U * 72U), sizeof(float)); /* quad1 v0 = fill */
-    memcpy(&fill_y, v + ((size_t)4U * 72U) + sizeof(float), sizeof(float));
+    memcpy(&fill_x, v + ((size_t)4U * 64U), sizeof(float)); /* quad1 v0 = fill */
+    memcpy(&fill_y, v + ((size_t)4U * 64U) + sizeof(float), sizeof(float));
     TEST_ASSERT_EQUAL_INT32(20, (int32_t)(shadow_x - fill_x));
     TEST_ASSERT_EQUAL_INT32(-10, (int32_t)(shadow_y - fill_y));
     nt_text_renderer_reset_decoration();
@@ -1418,10 +1393,10 @@ void test_passes_grouped_not_interleaved(void) {
     float sh_b = 0.0F;
     float fl_a = 0.0F;
     float fl_b = 0.0F;
-    memcpy(&sh_a, v + ((size_t)0U * 4U * 72U), sizeof(float)); /* quad0 = shadow_A */
-    memcpy(&sh_b, v + ((size_t)1U * 4U * 72U), sizeof(float)); /* quad1 = shadow_B */
-    memcpy(&fl_a, v + ((size_t)2U * 4U * 72U), sizeof(float)); /* quad2 = fill_A */
-    memcpy(&fl_b, v + ((size_t)3U * 4U * 72U), sizeof(float)); /* quad3 = fill_B */
+    memcpy(&sh_a, v + ((size_t)0U * 4U * 64U), sizeof(float)); /* quad0 = shadow_A */
+    memcpy(&sh_b, v + ((size_t)1U * 4U * 64U), sizeof(float)); /* quad1 = shadow_B */
+    memcpy(&fl_a, v + ((size_t)2U * 4U * 64U), sizeof(float)); /* quad2 = fill_A */
+    memcpy(&fl_b, v + ((size_t)3U * 4U * 64U), sizeof(float)); /* quad3 = fill_B */
     TEST_ASSERT_EQUAL_INT32(20, (int32_t)(sh_a - fl_a));
     TEST_ASSERT_EQUAL_INT32(20, (int32_t)(sh_b - fl_b)); /* grouping: quad1 is shadow_B, not fill_A */
     nt_text_renderer_reset_decoration();
@@ -1434,11 +1409,11 @@ void test_underline_one_quad_per_segment(void) {
     /* 2 fill glyphs + 1 underline quad. */
     TEST_ASSERT_EQUAL_UINT32(3U, nt_text_renderer_test_glyph_count());
 
-    /* The 3rd quad is the decoration sentinel: band_count (glyph_data[3]) packed as uint 0. */
+    /* The 3rd quad is the decoration sentinel: band_count (glyph_data[1]) packed as uint 0. */
     const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
     uint32_t band_count = 0xFFFFFFFFU;
-    /* vertex 8 (quad2 v0), glyph_data at byte offset 20, [3] at +12 = 32. */
-    memcpy(&band_count, v + ((size_t)8U * 72U) + 20U + 12U, sizeof(uint32_t));
+    /* vertex 8 (quad2 v0), glyph_data at byte offset 20, [1] at +4 = 24. */
+    memcpy(&band_count, v + ((size_t)8U * 64U) + 20U + 4U, sizeof(uint32_t));
     TEST_ASSERT_EQUAL_UINT32(0U, band_count);
     nt_text_renderer_reset_decoration();
 }
@@ -1497,14 +1472,14 @@ int main(void) {
 #endif
     RUN_TEST(test_utf8_decode_ascii);
     RUN_TEST(test_text_renderer_forwards_material_blend_state);
-    RUN_TEST(test_text_renderer_font_textures_land_on_program_units);
+    RUN_TEST(test_text_renderer_font_texture_lands_on_its_program_unit);
     RUN_TEST(test_text_renderer_rejects_unrelated_second_sampler);
     RUN_TEST(test_utf8_decode_cyrillic);
     RUN_TEST(test_utf8_decode_cjk);
     RUN_TEST(test_measure_returns_nonzero);
     RUN_TEST(test_measure_empty_string);
     RUN_TEST(test_measure_null_string);
-    RUN_TEST(test_vertex_stride_72);
+    RUN_TEST(test_vertex_stride_64);
     RUN_TEST(test_vertex_count_4_per_glyph);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
     RUN_TEST(test_text_material_with_textures_asserts_at_flush);
@@ -1523,7 +1498,7 @@ int main(void) {
     RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
     RUN_TEST(test_a_replaced_program_does_not_redirect_a_staged_batch);
     RUN_TEST(test_overflow_flush_reopens_the_batch_pipeline);
-    RUN_TEST(test_font_cache_flush_preserves_the_entire_run);
+    RUN_TEST(test_full_glyph_cache_still_draws_the_entire_run);
     RUN_TEST(test_decoration_only_run_opens_its_pipeline);
     RUN_TEST(test_destroyed_replaced_program_drops_staged_work);
     RUN_TEST(test_unready_font_skips_glyph_and_decoration_uploads);

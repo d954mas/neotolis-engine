@@ -14,16 +14,16 @@
 #include <string.h>
 
 // #region Vertex format
-/* 72 bytes per vertex, matching slug_text.vert contract */
+/* 64 bytes per vertex, matching slug_text.vert contract */
 typedef struct {
     float position[3];     /* 12B: world-space quad corner (full 3D) */
     float texcoord[2];     /* 8B: em-space coordinate */
-    float glyph_data[4];   /* 16B: packed uint via memcpy (curve_offset, band_row, curve_offset_x, band_count) */
+    float glyph_data[2];   /* 8B: packed uint via memcpy (band_row, band_count) */
     float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
     float color[4];        /* 16B: RGBA float */
     float depth_bias;      /* 4B: per-glyph clip-space depth bias (subtracted from NDC z in the VS) */
 } nt_text_vertex_t;
-_Static_assert(sizeof(nt_text_vertex_t) == 72, "text vertex stride must be 72 bytes");
+_Static_assert(sizeof(nt_text_vertex_t) == 64, "text vertex stride must be 64 bytes");
 // #endregion
 
 // #region Module state
@@ -157,20 +157,20 @@ static void create_vertex_input(void) {
     if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
         return;
     }
-    /* Slug vertex layout: 6 attributes, stride = 72 bytes */
+    /* Slug vertex layout: 6 attributes, stride = 64 bytes */
     s_text.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout =
             {
                 .attr_count = 6,
-                .stride = 72,
+                .stride = 64,
                 .attrs =
                     {
                         {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},  /* a_position */
                         {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12}, /* a_texcoord */
-                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 20}, /* a_glyph_data */
-                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 36}, /* a_glyph_bounds */
-                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 52}, /* a_color */
-                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 68}, /* a_depth_bias */
+                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 20}, /* a_glyph_data */
+                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 28}, /* a_glyph_bounds */
+                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 44}, /* a_color */
+                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 60}, /* a_depth_bias */
                     },
             },
         .vertex_buffer = s_text.vbo,
@@ -217,20 +217,12 @@ static void destroy_gpu_resources(void) {
 
 /* Fixed font uniform names: hashed once, since the flush path sets them every time. */
 static nt_hash32_t s_u_curve_texture;
-static nt_hash32_t s_u_band_texture;
-static nt_hash32_t s_u_curve_tex_width;
 
 void nt_text_renderer_init(void) {
     NT_ASSERT(!s_text.initialized);
     memset(&s_text, 0, sizeof(s_text)); /* cold start: clear everything, GPU + logical */
 
     s_u_curve_texture = nt_hash32_str("u_curve_texture");
-    s_u_band_texture = nt_hash32_str("u_band_texture");
-    s_u_curve_tex_width = nt_hash32_str("u_curve_tex_width");
-
-    /* Pre-flush hook so font-cache evictions flush our staging while texture offsets are still valid.
-     * Safe when staging is empty (flush early-returns on glyph_count == 0). */
-    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
 
     create_gpu_resources();
     s_text.initialized = true;
@@ -241,7 +233,6 @@ void nt_text_renderer_shutdown(void) {
         return;
     }
     destroy_gpu_resources();
-    nt_font_set_pre_flush_callback(NULL);
     memset(&s_text, 0, sizeof(s_text));
 }
 
@@ -320,7 +311,7 @@ static void transform_point(float out[3], const float model[16], float x, float 
     out[2] = model[2] * x + model[6] * y + model[14];
 }
 
-static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count, float glyph_bias) {
+static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
     }
@@ -349,12 +340,8 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     /* Pack glyph data as uint bit patterns */
     float gd0;
     float gd1;
-    float gd2;
-    float gd3;
-    pack_uint_as_float(&gd0, g->curve_offset);
-    pack_uint_as_float(&gd1, (uint32_t)g->band_row);
-    pack_uint_as_float(&gd2, g->curve_offset_x);
-    pack_uint_as_float(&gd3, (uint32_t)band_count);
+    pack_uint_as_float(&gd0, (uint32_t)g->band_row);
+    pack_uint_as_float(&gd1, (uint32_t)g->band_count);
 
     /* 4 vertices per quad: BL, BR, TR, TL */
     uint32_t vi = s_text.vertex_count;
@@ -364,8 +351,6 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
      * UNDILATED glyph bbox so the shader's band lookup stays correct. */
     v[0].glyph_data[0] = gd0;
     v[0].glyph_data[1] = gd1;
-    v[0].glyph_data[2] = gd2;
-    v[0].glyph_data[3] = gd3;
     v[0].glyph_bounds[0] = (float)g->bbox_x0;
     v[0].glyph_bounds[1] = (float)g->bbox_y0;
     v[0].glyph_bounds[2] = (float)g->bbox_x1;
@@ -414,9 +399,7 @@ static void emit_decoration_quad(const float model[16], float x0, float y0, floa
     float band0;
     pack_uint_as_float(&band0, 0U); /* band_count=0 = decoration sentinel */
     v[0].glyph_data[0] = 0.0F;
-    v[0].glyph_data[1] = 0.0F;
-    v[0].glyph_data[2] = 0.0F;
-    v[0].glyph_data[3] = band0;
+    v[0].glyph_data[1] = band0;
     /* bounds/texcoord unused: the shader returns before reading them for the sentinel. */
     v[0].glyph_bounds[0] = 0.0F;
     v[0].glyph_bounds[1] = 0.0F;
@@ -451,8 +434,8 @@ static void emit_decoration_quad(const float model[16], float x0, float y0, floa
  * once per active pass (shadow, outline, fill), grouped and never interleaved: per-glyph interleave
  * breaks premultiplied-alpha compositing when glyphs overlap. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, uint8_t band_count, nt_font_slot_t *slot,
-                            int16_t key_offset, const float color[4], float off_x, float off_y, float *glyph_bias) {
+static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, nt_font_slot_t *slot, int16_t key_offset,
+                            const float color[4], float off_x, float off_y, float *glyph_bias) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
@@ -491,7 +474,7 @@ static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float mo
             continue;
         }
         if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, model, scale, pen_x + off_x, pen_y + off_y, color, band_count, *glyph_bias);
+            emit_quad(g, model, scale, pen_x + off_x, pen_y + off_y, color, *glyph_bias);
             *glyph_bias += s_text.glyph_depth_bias;
         }
         pen_x += (float)g->advance * scale;
@@ -598,11 +581,10 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     if (metrics.units_per_em == 0) {
         return; /* no resource loaded yet (or all unmounted) */
     }
-    if (!nt_gfx_texture_ready(nt_font_get_curve_texture(s_text.font)) || !nt_gfx_texture_ready(nt_font_get_band_texture(s_text.font))) {
+    if (!nt_gfx_texture_ready(nt_font_get_curve_texture(s_text.font))) {
         return;
     }
     float scale = size / (float)metrics.units_per_em;
-    uint8_t band_count = nt_font_get_band_count(s_text.font);
 
     nt_font_slot_t *slot = nt_font_get_slot(s_text.font);
     NT_ASSERT(slot != NULL);
@@ -649,15 +631,14 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
      * self-flush mid-pass does NOT reorder: passes emit in global order and flush draws the FIFO prefix,
      * so no shadow/outline quad is ever drawn after a later pass's quad. */
     if (shadow_active) {
-        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, shadow_key, s_text.deco.shadow_color, s_text.deco.shadow_dx * size, s_text.deco.shadow_dy * size,
-                        &glyph_bias);
+        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, slot, shadow_key, s_text.deco.shadow_color, s_text.deco.shadow_dx * size, s_text.deco.shadow_dy * size, &glyph_bias);
     }
 #if NT_FONT_EMBOLDEN_ENABLED
     if (outline_active) {
-        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, outline_key, s_text.deco.outline_color, 0.0F, 0.0F, &glyph_bias);
+        emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, slot, outline_key, s_text.deco.outline_color, 0.0F, 0.0F, &glyph_bias);
     }
 #endif
-    emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, band_count, slot, fill_key, color, 0.0F, 0.0F, &glyph_bias);
+    emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, slot, fill_key, color, 0.0F, 0.0F, &glyph_bias);
 
     /* Underline/strike sentinel quads last (on top of fill), one continuous quad per line. */
     if (s_text.deco.underline || s_text.deco.strikethrough) {
@@ -743,10 +724,8 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 static void bind_font_textures(void) {
     const nt_gfx_texture_binding_t bindings[] = {
         {.name = s_u_curve_texture, .texture = nt_font_get_curve_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
-        {.name = s_u_band_texture, .texture = nt_font_get_band_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
     };
-    nt_gfx_apply_texture_bindings(bindings, 2);
-    nt_gfx_set_uniform_int(s_u_curve_tex_width, (int)nt_font_get_curve_texture_width(s_text.font));
+    nt_gfx_apply_texture_bindings(bindings, 1);
 }
 
 void nt_text_renderer_flush(void) {

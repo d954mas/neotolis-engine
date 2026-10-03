@@ -354,7 +354,7 @@ reports false. Material handles remain unchanged; ECS components, the UI context
 and game-side structures need no re-binding.
 
 A font keeps its `nt_font_add` source list of resource handles. Once the context
-is usable, `nt_font_step` recreates non-ready curve and band textures before its
+is usable, `nt_font_step` recreates a non-ready curve texture before its
 resource rescan; this does not require source-asset reactivation. Re-adding an
 existing source asserts on the duplicate. Call `nt_font_step` after
 `nt_gfx_begin_frame` and before any render pass: recovery destroys and replaces
@@ -495,7 +495,38 @@ Per-glyph data (at data_offset):
   Contour data (delta-encoded int16 coordinates, line/quadratic bitmask)
 ```
 
-Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier curves (lines promoted to degenerate quadratics). At lookup time, contours are decoded into float control points, decomposed into horizontal bands, and uploaded to GPU textures for Slug-style vector rendering. Glyphs are cached with LRU eviction — not immutable once loaded.
+Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier curves (lines promoted to degenerate quadratics). At lookup time, contours are decoded into float control points, decomposed into horizontal and vertical bands, and uploaded to a GPU texture for Slug-style vector rendering. Glyphs are cached with LRU eviction — not immutable once loaded.
+
+**Glyph cache.** A font has `max_glyphs` cache slots (2..2048: the WebGL2
+guaranteed texture size) and one RGBA16F curve texture with a row per slot
+(`NT_FONT_GLYPH_TEXELS` = 2048 texels, 16 KB). A row starts with one header
+texel per band, `(y_start, y_count, x_start, x_count)`, followed by the
+band-sorted curves; evicting a slot frees its row, so the cache never clears
+itself for space. Slot 0 holds tofu, which `nt_font_step` generates once
+metrics and a ready texture exist.
+
+- A miss takes a never-used slot, else the least recently used slot not looked
+  up in the current gfx frame (since `nt_gfx_begin_frame`): that frame's
+  recorded draws may still sample those rows.
+- If every slot is in use this frame, the lookup returns tofu and warns once
+  naming `max_glyphs`. The glyph set depends on content the game does
+  not control (player text, localisation), so this is recoverable.
+- The whole cache is cleared only inside `nt_font_step`: after texture
+  re-creation and after a provider or metrics change. Call it once per frame
+  before any text.
+
+Bands only speed up the shader's curve search: more bands mean fewer curves per
+pixel and cost only texels of the already reserved row. A glyph starts at
+`NT_FONT_MAX_BANDS` (16) and halves its bands until header and curves fit its
+row; its cache entry carries its own `band_count`, and the runtime warns once
+when a glyph drops bands. At one band a glyph needs one header texel plus at most
+four texels per curve, so `NT_FONT_MAX_CURVES_PER_GLYPH`
+(`(NT_FONT_GLYPH_TEXELS - 1) / 4` = 511) curves always fit. The builder asserts
+on a larger glyph and logs its codepoint; the runtime asserts the same bound.
+
+Emboldening adds curves (reflex-corner joins, resolved self-intersections). An emboldened outline that
+outgrows `NT_FONT_MAX_CURVES_PER_GLYPH` would be cut and leak fill, so that
+variant is drawn at regular weight and the runtime warns once with the codepoint.
 
 Curve coordinates use round-to-nearest-even FP16. Band membership includes the
 FP16 rounding error bound (maximum absolute control coordinate / 2048 per axis).

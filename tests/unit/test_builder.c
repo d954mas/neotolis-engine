@@ -4911,6 +4911,29 @@ void test_font_null_charset_asserts(void) {
     EXPECT_BUILD_ASSERT(ctx, nt_builder_add_font(ctx, ttf_path, &opts));
 }
 
+/* DejaVu Sans U+2603 (snowman) has 543 curves, more than a runtime glyph slot holds. */
+void test_font_glyph_over_curve_limit_asserts(void) {
+    static const char *candidates[] = {
+        "examples/ui_showcase/raw/font_dejavu_r.ttf",
+        "../examples/ui_showcase/raw/font_dejavu_r.ttf",
+        "../../examples/ui_showcase/raw/font_dejavu_r.ttf",
+        NULL,
+    };
+    const char *ttf_path = NULL;
+    for (int i = 0; candidates[i] && !ttf_path; i++) {
+        FILE *f = fopen(candidates[i], "rb");
+        if (f) {
+            (void)fclose(f);
+            ttf_path = candidates[i];
+        }
+    }
+    TEST_ASSERT_NOT_NULL_MESSAGE(ttf_path, "committed DejaVu Sans fixture not found");
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_font_curve_limit.ntpack");
+    nt_font_opts_t opts = {.charset = "A\xE2\x98\x83"};
+    EXPECT_BUILD_ASSERT_MATCH(ctx, nt_builder_add_font(ctx, ttf_path, &opts), "more curves than a runtime glyph slot holds");
+}
+
 /* --- Decoration metric (v5) helpers --- */
 
 static uint16_t sfnt_be_u16(const uint8_t *p) { return (uint16_t)(((uint16_t)p[0] << 8) | p[1]); }
@@ -9564,6 +9587,7 @@ int main(void) {
     RUN_TEST(test_font_kern_pairs);
     RUN_TEST(test_font_missing_codepoint_asserts);
     RUN_TEST(test_font_null_charset_asserts);
+    RUN_TEST(test_font_glyph_over_curve_limit_asserts);
     RUN_TEST(test_font_v5_header_size);
     RUN_TEST(test_font_bakes_decoration_metrics_from_tables);
     RUN_TEST(test_font_decoration_heuristic_when_tables_absent);

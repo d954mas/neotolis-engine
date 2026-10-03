@@ -123,7 +123,7 @@ subsystem — decoration reuses the text pipeline and the `slug_text` shader.
   font-header metrics (font units) scaled by `size`. One consistent rule: *size in px, decoration in em*.
 - **Glyph variants.** Synthetic weight and outline offset the glyph contour (Minkowski-style point-ring
   offset + self-intersection resolution) and cache the result under a `(codepoint, quantized weight)`
-  key — a separate entry from the natural glyph, sharing the same curve/band textures so an emboldened
+  key — a separate entry from the natural glyph, sharing the same curve texture so an emboldened
   or outlined run still batches into ONE draw. This geometry runs only on the glyph-cache **miss path**
   (not per frame); the outline pass grows the fill weight by `outline_w`, the shadow pass reuses the
   outermost visible variant (no new key). This CPU offset/self-intersection resolution is a **deliberate,
