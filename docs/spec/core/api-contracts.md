@@ -250,11 +250,16 @@ and submits its font set unconditionally; gfx's coverage check confirms every
 sampler the program actually links.
 
 A text material picks its fragment shader by depth writes. `slug_text.frag` has
-no `discard`: a premultiplied empty pixel changes nothing, and `discard` would
-cost early depth and hidden-surface removal on tile GPUs. A material with
+no `discard`: a premultiplied empty pixel changes nothing, and `discard` blocks
+hidden-surface removal on some tile GPUs (PowerVR HSR). A material with
 `depth_write` uses `slug_text_depth.frag`, which discards pixels below 1/255
-coverage so empty quad pixels do not occlude. The renderer does not check the
-pairing; shaders are game assets, and a game may supply its own variant.
+coverage so empty quad pixels do not occlude; there `discard` forces late depth
+on every GPU. The renderer does not check the pairing; shaders are game assets,
+and a game may supply its own variant. A variant consumes the `slug_text.vert`
+outputs `v_texcoord`, `flat uvec2 v_glyph` (band row, band count),
+`flat vec4 v_band_transform` (bbox x0, y0, band count / width, band count /
+height, in em) and `v_color`, and computes coverage with `SlugRender(coord,
+glyph, band_transform)` from `common/slug_coverage.glsl`.
 
 Pipeline cache keys include the program handle, so replacement selects a
 different entry. Destroying the old program frees its pipelines immediately;

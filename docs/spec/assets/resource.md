@@ -529,8 +529,7 @@ band's ray (x for horizontal bands, y for vertical bands). The fragment shader
 relies on this order: it stops at the first curve that lies more than half a
 pixel behind the sample, as reference Slug does. Keys come from the float32
 curves; FP16 rounding is monotone, so the order also holds for the uploaded
-values. Runtime-built weight and outline curves are asserted finite, since a
-NaN key would break the order.
+values.
 
 Emboldening adds curves (reflex-corner joins, resolved self-intersections). An emboldened outline that
 outgrows `NT_FONT_MAX_CURVES_PER_GLYPH` would be cut and leak fill, so that

@@ -1797,33 +1797,36 @@ void test_fp16_rounding_keeps_curves_in_adjacent_bands(void) {
 }
 
 /* The shader breaks out of a band at the first curve wholly behind the sample, so every uploaded band
- * must be non-increasing in the FP16 max along its ray axis. Returns how many neighbours tie in FP16. */
-static uint32_t assert_uploaded_bands_sorted(const nt_glyph_cache_entry_t *g) {
+ * must be non-increasing in the FP16 max along its ray axis. Asserts both axes hold curves. */
+static void assert_uploaded_bands_sorted(const nt_glyph_cache_entry_t *g) {
+    assert_glyph_uploaded_to_its_row(g);
     const nt_gfx_fake_update_texture_rect_t r = nt_gfx_fake_update_texture_rect_at(nt_gfx_fake_update_texture_count() - 1U);
-    TEST_ASSERT_EQUAL_UINT16(g->band_row, r.y);
     const uint16_t *texels = (const uint16_t *)r.data;
-    uint32_t ties = 0;
+    uint32_t visited[2] = {0, 0};
     for (uint32_t b = 0; b < g->band_count; b++) {
         for (uint32_t axis = 0; axis < 2; axis++) {
             /* Header (y_start, y_count, x_start, x_count): Y-bands cast +X rays, X-bands +Y rays. */
             const uint32_t start = (uint32_t)nt_f16_to_f32(texels[(b * 4U) + (axis * 2U)]);
             const uint32_t count = (uint32_t)nt_f16_to_f32(texels[(b * 4U) + (axis * 2U) + 1U]);
+            TEST_ASSERT_TRUE(start + (count * 2U) <= r.w);
+            visited[axis] += count;
             float prev = INFINITY;
             for (uint32_t i = 0; i < count; i++) {
                 const uint16_t *c = texels + ((size_t)(start + (i * 2U)) * 4U);
                 const uint32_t k = axis == 0 ? 0U : 1U; /* x for Y-bands, y for X-bands */
                 const float m = fmaxf(fmaxf(nt_f16_to_f32(c[k]), nt_f16_to_f32(c[2U + k])), nt_f16_to_f32(c[4U + k]));
                 TEST_ASSERT_TRUE_MESSAGE(m <= prev, "band curves are not sorted by descending FP16 max");
-                ties += (m == prev) ? 1U : 0U;
                 prev = m;
             }
         }
     }
-    return ties;
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, visited[0]);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, visited[1]);
 }
 
 /* Teeth at 2049..2053 font units: distinct in float32, several equal after FP16 rounding (step 2). */
 void test_font_bands_sorted_by_fp16_max(void) {
+    TEST_ASSERT_EQUAL_UINT16(nt_f32_to_f16(2051.0F), nt_f32_to_f16(2053.0F)); /* the fixture really collides */
     enum { TEETH = 8, POINTS = (TEETH * 4) + 3 };
     int16_t pts[POINTS][2];
     uint16_t n = 0;
@@ -1846,6 +1849,11 @@ void test_font_bands_sorted_by_fp16_max(void) {
     pts[n][0] = 0;
     pts[n++][1] = 2040;
     TEST_ASSERT_EQUAL_UINT16(POINTS, n);
+    for (int i = 0; i < POINTS / 2; i++) { /* clockwise, so weight grows it like an outer contour */
+        int16_t t[2] = {pts[i][0], pts[i][1]};
+        memcpy(pts[i], pts[POINTS - 1 - i], sizeof t);
+        memcpy(pts[POINTS - 1 - i], t, sizeof t);
+    }
 
     static uint8_t blob[sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + 512];
     memset(blob, 0, sizeof blob);
@@ -1867,13 +1875,15 @@ void test_font_bands_sorted_by_fp16_max(void) {
     nt_font_step();
 
     const nt_glyph_cache_entry_t *regular = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_NOT_NULL(regular);
     TEST_ASSERT_FALSE(regular->is_tofu);
-    TEST_ASSERT_GREATER_THAN_UINT32(0U, assert_uploaded_bands_sorted(regular));
+    assert_uploaded_bands_sorted(regular);
 #if NT_FONT_EMBOLDEN_ENABLED
     const nt_glyph_cache_entry_t *bold = nt_font_lookup_glyph_offset(nt_font_get_slot(font), 'A', 40);
+    TEST_ASSERT_NOT_NULL(bold);
     TEST_ASSERT_FALSE(bold->is_tofu);
-    TEST_ASSERT_TRUE(bold != regular);
-    (void)assert_uploaded_bands_sorted(bold);
+    TEST_ASSERT_TRUE(bold->bbox_x1 > regular->bbox_x1); /* the offset path really ran */
+    assert_uploaded_bands_sorted(bold);
 #endif
     nt_font_destroy(font);
 }

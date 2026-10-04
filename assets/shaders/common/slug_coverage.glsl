@@ -86,6 +86,7 @@ float SlugRender(vec2 coord, uvec2 glyph, vec4 band_transform) {
     uint band_count = glyph.y;
 
     vec2 pixelsPerEm = 1.0 / max(fwidth(coord), vec2(1.0e-6));
+    vec2 halfPixelBehind = -0.5 / pixelsPerEm; // early-out threshold in em, hoisted out of both loops
 
     // ---- Y-band: horizontal ray (+X) ----
     float band_y = (coord.y - band_transform.y) * band_transform.w;
@@ -104,7 +105,7 @@ float SlugRender(vec2 coord, uvec2 glyph, vec4 band_transform) {
         vec2 p2 = d1.xy - coord;
 
         // Curves are sorted by descending max x: once one lies wholly left of the sample, so do the rest.
-        if (max(max(p0.x, p1.x), p2.x) * pixelsPerEm.x < -0.5)
+        if (max(max(p0.x, p1.x), p2.x) < halfPixelBehind.x)
             break;
 
         uint code = CalcRootCode(p0.y, p1.y, p2.y);
@@ -138,7 +139,7 @@ float SlugRender(vec2 coord, uvec2 glyph, vec4 band_transform) {
         vec2 p2 = d1.xy - coord;
 
         // Sorted by descending max y: the first curve wholly below the sample ends the band.
-        if (max(max(p0.y, p1.y), p2.y) * pixelsPerEm.y < -0.5)
+        if (max(max(p0.y, p1.y), p2.y) < halfPixelBehind.y)
             break;
 
         uint code = CalcRootCode(p0.x, p1.x, p2.x);

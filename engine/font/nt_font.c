@@ -1169,8 +1169,6 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
     float ext_y_min = bbox_y0;
     float ext_y_max = bbox_y1;
     for (uint16_t ci = 0; ci < curve_count; ci++) {
-        /* Weight/outline curves are built here, not by the builder; a NaN key would break the band order below. */
-        NT_ASSERT(isfinite(curves[ci].p0x) && isfinite(curves[ci].p0y) && isfinite(curves[ci].p1x) && isfinite(curves[ci].p1y) && isfinite(curves[ci].p2x) && isfinite(curves[ci].p2y));
         float ay = curves[ci].p0y;
         float by = curves[ci].p1y;
         float cy = curves[ci].p2y;

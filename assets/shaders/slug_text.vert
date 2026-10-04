@@ -25,10 +25,11 @@ flat out vec4 v_band_transform; // bbox x0, y0, band_count / width, band_count /
 out vec4 v_color;
 
 void main() {
-    v_glyph = floatBitsToUint(a_glyph_data);
+    uvec2 glyph = floatBitsToUint(a_glyph_data);
+    v_glyph = glyph;
     v_texcoord = a_texcoord;
     // Per-vertex divisions so the fragment shader picks a band with one multiply.
-    vec2 bands = vec2(float(v_glyph.y));
+    vec2 bands = vec2(float(glyph.y));
     v_band_transform = vec4(a_glyph_bounds.xy, bands / (a_glyph_bounds.zw - a_glyph_bounds.xy));
     v_color = a_color;
 

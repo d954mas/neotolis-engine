@@ -914,7 +914,9 @@ static void frame(void) {
     /* UI: needs perspective VP in frame_uniforms for sprite/text material shaders. */
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
-    const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
+    const nt_material_info_t *text_3d_info = nt_material_get_info(s_text_material_3d); /* world labels: their own program */
+    const bool ui_can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program) && text_3d_info &&
+                               nt_gfx_program_ready(text_3d_info->program);
 
     if (ui_can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_3d, sizeof uniforms_3d);
