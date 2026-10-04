@@ -154,7 +154,7 @@ static void test_first_frame_counts_initial_resource_creation(void) {
     TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
 }
 
-/* Pre-loop loading never ends its frame, also after a re-init. */
+/* The init frame may close without end_frame, also after a re-init. */
 static void test_the_init_frame_needs_no_end_frame(void) {
     nt_gfx_begin_frame();
     nt_gfx_shutdown();
