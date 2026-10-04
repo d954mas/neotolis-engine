@@ -292,9 +292,13 @@ EMSCRIPTEN_KEEPALIVE int nt_test_diagnostics_config(int field) {
 }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_diagnostics_preset(void) { return NT_TEST_PRESET_NAME; }
 EMSCRIPTEN_KEEPALIVE int nt_test_gpu_supported(void) { return nt_gfx_is_gpu_timing_supported() ? 1 : 0; }
+/* JS calls probes between rAF frames, after the app frame's end_frame: a probe that draws runs as
+ * its own frame and publishes it, so it returns with the frame ended again. */
 EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
+    nt_gfx_begin_frame();
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     if ((use_texture != 0 && !caps->has_float_texture_linear) || (use_texture == 0 && !caps->has_float_render_target)) {
+        nt_gfx_end_frame();
         return -1;
     }
     nt_render_target_t target = {0};
@@ -306,11 +310,13 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     } else {
         texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA16F, .min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
         if (texture.id == 0) {
+            nt_gfx_end_frame();
             return -2;
         }
         target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = texture});
         if (target.id == 0) {
             nt_gfx_destroy_texture(texture);
+            nt_gfx_end_frame();
             return -2;
         }
     }
@@ -322,7 +328,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_program_t program = nt_gfx_make_program(vs, fs);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    nt_gfx_begin_frame();
     if (target.id != 0) {
         nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.25F, 0.5F, 0.75F, 1.0F}});
         nt_gfx_end_pass();
@@ -336,13 +341,15 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     uint8_t pixel[4] = {0};
     bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(texture);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
 /* context_loss.spec.ts calls steps 1-3 right after a synchronous loseContext(): the browser already
@@ -420,17 +427,21 @@ EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
  * or readback failed. */
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     NT_ASSERT(level == 0 || level == 3 || level == 7);
+    nt_gfx_begin_frame();
     const nt_texture_t tex = basis_fixture_texture();
     if (tex.id == 0 || !nt_gfx_texture_ready(tex)) {
+        nt_gfx_end_frame();
         return 0xFFFFFFFFU;
     }
     nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "basis_probe_color"});
     if (color.id == 0) {
+        nt_gfx_end_frame();
         return 0xFFFFFFFFU;
     }
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color, .label = "basis_probe_rt"});
     if (target.id == 0) {
         nt_gfx_destroy_texture(color);
+        nt_gfx_end_frame();
         return 0xFFFFFFFFU;
     }
     nt_sampler_t sampler =
@@ -448,7 +459,6 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     /* Centre of texel (0,0) at the requested level (the single texel at level 7). */
     const float texel = 0.5F / (BASIS_FIXTURE_SIZE / (float)(1 << level));
     const float uv[4] = {texel, texel, (float)level, 0.0F};
-    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 1.0F, 1.0F}});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
@@ -459,13 +469,15 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     uint8_t pixel[4] = {0};
     bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(color);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
 EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {

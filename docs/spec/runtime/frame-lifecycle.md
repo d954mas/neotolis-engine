@@ -51,7 +51,7 @@ use (the resource and font steps included), also when nothing renders. Context
 loss and restore are synced there, so the whole callback sees one stable
 `context_lost`/`context_restored` state. The callback calls `nt_gfx_end_frame`
 once after its last pass and before `nt_window_swap_buffers`, also when nothing
-renders; no pass may begin after it, resource calls may. Pre-loop loading lands
+renders; no pass may begin after it, calls that need no pass may. Pre-loop loading lands
 in the first frame, which needs no end_frame; teardown work after the last
 callback lands in a frame that `nt_gfx_shutdown` discards. Code in the callback (devapi commands, stats
 readers) reads the previous callback's frame from `g_nt_gfx.last_frame`. See

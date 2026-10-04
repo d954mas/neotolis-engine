@@ -847,10 +847,11 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 void nt_gfx_begin_frame(void);
 /* Required once in every host iteration, also when nothing renders: after the last
  * end_pass and before nt_window_swap_buffers. Requires no open pass; a second call or a
- * begin_pass before the next begin_frame asserts. Resource calls stay legal after it.
- * Counters still close at begin_frame. */
+ * begin_pass before the next begin_frame asserts; every call that needs no pass stays
+ * legal after it. Counters still close at begin_frame. */
 void nt_gfx_end_frame(void);
-/* Passes do not nest; on a lost context both calls are no-ops. */
+/* Passes do not nest; on a lost context both calls are no-ops, except that a begin_pass
+ * after nt_gfx_end_frame still asserts. */
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_end_pass(void);
 /* Requires an open pass and a non-NULL desc, borrowed only for this call.

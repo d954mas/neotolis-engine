@@ -154,6 +154,24 @@ static void test_first_frame_counts_initial_resource_creation(void) {
     TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
 }
 
+/* Pre-loop loading never ends its frame, also after a re-init. */
+static void test_the_init_frame_needs_no_end_frame(void) {
+    nt_gfx_begin_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.frame_sequence);
+}
+
+/* The pre-swap capture seam reads after end_frame: work there is legal and counts in the open frame. */
+static void test_work_after_end_frame_counts_in_the_open_frame(void) {
+    nt_gfx_end_frame();
+    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
+}
+
 static void test_shutdown_discards_an_open_frame(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -201,8 +219,9 @@ static void test_begin_frame_with_an_open_pass_asserts(void) {
 }
 
 static void test_begin_frame_requires_the_previous_end_frame(void) {
-    nt_gfx_begin_frame(); /* the frame init opened needs no end_frame */
+    nt_gfx_begin_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "did not run since the previous begin_frame"));
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
 }
@@ -210,19 +229,23 @@ static void test_begin_frame_requires_the_previous_end_frame(void) {
 static void test_end_frame_with_an_open_pass_or_twice_asserts(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_end_frame());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "end_frame: a pass is still open"));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_end_frame());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "called twice"));
 }
 
 static void test_begin_pass_after_end_frame_asserts_also_on_a_loss(void) {
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "after nt_gfx_end_frame"));
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "after nt_gfx_end_frame"));
 }
 #endif
 
@@ -759,6 +782,8 @@ int main(void) {
     RUN_TEST(test_creates_on_a_loss_fail_quietly);
     RUN_TEST(test_loss_and_restore_between_iterations_restore_in_one_begin_frame);
     RUN_TEST(test_first_frame_counts_initial_resource_creation);
+    RUN_TEST(test_the_init_frame_needs_no_end_frame);
+    RUN_TEST(test_work_after_end_frame_counts_in_the_open_frame);
     RUN_TEST(test_shutdown_discards_an_open_frame);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_clear_requires_an_open_pass_and_descriptor);

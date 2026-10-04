@@ -599,8 +599,9 @@ build, independent of simulation time; app/gfx never close one implicitly.
 
 The host also calls `nt_gfx_end_frame` once per callback, also when nothing
 renders: after the last pass and before `nt_window_swap_buffers`. It ends the
-frame's passes, not its counters: work after it (resource calls, the pre-swap
-capture seam) still counts in the open frame. Only the frame init opens may
+frame's passes, not its counters: only a begin_pass asserts after it, and other
+work there (resource calls, GPU timing segments, the pre-swap capture seam)
+still counts in the open frame. Only the frame init opens may
 skip it. Assertions reject a begin_frame with an open pass or without the open
 frame's end_frame, an end_frame with an open pass or a second one in the frame,
 and a begin_pass after end_frame. A frame holds any number of passes; their
