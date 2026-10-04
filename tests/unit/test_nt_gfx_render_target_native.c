@@ -44,6 +44,7 @@ void setUp(void) {
     desc.max_textures = 3;
     desc.max_render_targets = 2;
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
     s_invalidate = glad_glInvalidateFramebuffer;
     s_invalidate_count = 0;
@@ -1455,6 +1456,7 @@ static void assert_reflection_query_failure_retries(GLenum skipped_query) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_programs = 2;
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
 
     uint32_t vs = nt_gfx_backend_create_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_VERTEX,

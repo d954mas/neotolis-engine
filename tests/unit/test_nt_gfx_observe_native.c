@@ -109,6 +109,7 @@ void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     s_buffer_data = glad_glBufferData;
     s_buffer_sub_data = glad_glBufferSubData;
     s_use_program = glad_glUseProgram;
@@ -399,6 +400,7 @@ static void test_shutdown_while_recording_writes_no_record(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     nt_gfx_capture_view_t view = nt_gfx_capture_read();
     TEST_ASSERT_EQUAL_UINT32(0, view.count);
     TEST_ASSERT_NULL(view.events);

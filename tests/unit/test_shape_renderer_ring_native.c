@@ -23,6 +23,7 @@ static nt_render_target_t s_target;
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
     /* nt_gfx_shutdown releases the attachment textures. */

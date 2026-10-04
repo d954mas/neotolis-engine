@@ -47,6 +47,7 @@ static const uint16_t s_degenerate_indices[3] = {0, 0, 0};
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
 
@@ -612,6 +613,7 @@ static void test_ground_state_disables_scissor(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
     TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)glIsEnabled(GL_SCISSOR_TEST));
@@ -791,6 +793,7 @@ static void test_ground_state_after_reinit(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
     TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)glIsEnabled(GL_BLEND));
 
@@ -886,6 +889,7 @@ static void test_ground_state_viewport_reissued_after_reinit(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
     install_state_counters();

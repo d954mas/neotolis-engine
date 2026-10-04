@@ -20,6 +20,7 @@ void setUp(void) {
         .max_vertex_inputs = 8,
         .max_render_targets = 16,
     });
+    nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
 

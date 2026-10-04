@@ -46,6 +46,7 @@ void setUp(void) {
         .max_vertex_inputs = 8,
         .max_render_targets = 4,
     });
+    nt_gfx_begin_frame();
     nt_gfx_fake_reset();
     nt_gfx_fake_set_samplers((const char *const[]){"u_source"}, 1);
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_init());

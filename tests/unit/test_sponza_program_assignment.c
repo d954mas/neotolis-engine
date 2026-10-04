@@ -139,6 +139,7 @@ void setUp(void) {
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
     gfx.max_programs = 8;
     nt_gfx_init(&gfx);
+    nt_gfx_begin_frame();
     nt_http_init();
     nt_fs_init();
     nt_resource_init(&(nt_resource_desc_t){0});

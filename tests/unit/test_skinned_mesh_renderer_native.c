@@ -489,6 +489,7 @@ void setUp(void) {
         .max_vertex_inputs = 64,
         .max_render_targets = 4,
     });
+    nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 32});
     nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = 32});

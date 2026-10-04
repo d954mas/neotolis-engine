@@ -293,7 +293,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_diagnostics_config(int field) {
 EMSCRIPTEN_KEEPALIVE const char *nt_test_diagnostics_preset(void) { return NT_TEST_PRESET_NAME; }
 EMSCRIPTEN_KEEPALIVE int nt_test_gpu_supported(void) { return nt_gfx_is_gpu_timing_supported() ? 1 : 0; }
 /* JS calls probes between rAF frames, after the app frame's end_frame: a probe that draws runs as
- * its own frame and publishes it, so it returns with the frame ended again. */
+ * its own frame and returns with it ended. */
 EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_gfx_begin_frame();
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
@@ -347,8 +347,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(texture);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
     nt_gfx_end_frame();
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
@@ -475,8 +473,6 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(color);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
     nt_gfx_end_frame();
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }

@@ -471,10 +471,9 @@ are unchecked as specified above. Mandatory backend setup objects are internal
 invariants: failure to create the GL service EBO
 upload VAO with a live context asserts.
 
-`nt_gfx_begin_pass` asserts on invalid sequencing (a nested pass; a pass after
-`nt_gfx_end_frame` before the next begin_frame, also on a lost context), on
-discarding the default
-framebuffer color, and on an invalid or stale target. Callers check `nt_gfx_render_target_valid` before a pass on a target
+`nt_gfx_begin_pass` asserts on invalid sequencing (a nested pass or a pass
+outside `nt_gfx_begin_frame`..`nt_gfx_end_frame`, also on a lost context), on discarding
+the default framebuffer color, and on an invalid or stale target. Callers check `nt_gfx_render_target_valid` before a pass on a target
 that a loss or a cascade may have freed; there is no non-asserting pass-begin
 variant.
 

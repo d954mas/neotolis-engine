@@ -6,6 +6,7 @@
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
 }
 
 void tearDown(void) { nt_gfx_shutdown(); }

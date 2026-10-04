@@ -598,14 +598,13 @@ first frame; teardown work after the last callback lands in a frame that
 build, independent of simulation time; app/gfx never close one implicitly.
 
 The host also calls `nt_gfx_end_frame` once per callback, also when nothing
-renders: after the last pass and before `nt_window_swap_buffers`. It ends the
-frame's passes, not its counters: only a begin_pass asserts after it, and other
-work there (resource calls, GPU timing segments, the pre-swap capture seam)
-still counts in the open frame. Only the frame init opens may skip it.
-Assertions reject a begin_frame with an open pass or without the open frame's
-end_frame, an end_frame with an open pass or a second one in the frame, and a
-begin_pass after end_frame. A frame holds any number of passes; their counters
-sum. begin_frame also does the per-frame backend work: it ages the upload
+renders: after the last pass and before `nt_window_swap_buffers`. Passes run
+only between begin_frame and end_frame; the order is asserted, also on a lost
+context. end_frame ends the passes, not the counters: work after it (resource
+calls, GPU timing segments, the pre-swap capture seam) still counts in the open
+frame. The frame that init opens only loads and starts ended, so pre-loop code
+that draws opens its own begin_frame/end_frame pair. A frame holds any number of
+passes; their counters sum. begin_frame also does the per-frame backend work: it ages the upload
 staging buffer and, with GPU timing, checks the timer disjoint flag on a live
 context. The stub is stateless: its begin_frame and end_frame are inert and it
 never publishes counters.

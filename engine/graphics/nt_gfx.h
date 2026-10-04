@@ -835,23 +835,22 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 
 /* ---- Frame / Pass ---- */
 
-/* The one host frame boundary, called first in every host iteration before any other
+/* The one counter boundary, called first in every host iteration before any other
  * gfx use: nt_gfx_init opens the first frame and every begin_frame closes the open one,
  * syncs context loss and opens the next, so all gfx work between init and shutdown
- * belongs to a frame; shutdown discards the open one. Requires no open pass and, except
- * for the frame init opened, the open frame's nt_gfx_end_frame.
+ * belongs to a frame; shutdown discards the open one. Requires the open frame's
+ * nt_gfx_end_frame; the init frame only loads and starts ended.
  * begin_frame copies the counters into g_nt_gfx.last_frame, then resets
  * g_nt_gfx.counters. The loss sync takes the browser's loss events: a new loss wipes
  * every backend name and sets context_lost; while lost it restores once the browser
  * reports the context back and sets context_restored until the next begin_frame. */
 void nt_gfx_begin_frame(void);
 /* Required once in every host iteration, also when nothing renders: after the last
- * end_pass and before nt_window_swap_buffers. Requires no open pass; a second call or a
- * begin_pass before the next begin_frame asserts; every call that needs no pass stays
- * legal after it. Counters still close at begin_frame. */
+ * end_pass and before nt_window_swap_buffers. Requires an open frame with no open pass.
+ * Every call that needs no pass stays legal after it. */
 void nt_gfx_end_frame(void);
-/* Passes do not nest; on a lost context both calls are no-ops, except that a begin_pass
- * after nt_gfx_end_frame still asserts. */
+/* Passes do not nest and run only between begin_frame and end_frame; on a lost context
+ * both calls are no-ops, but begin_pass still asserts that order. */
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_end_pass(void);
 /* Requires an open pass and a non-NULL desc, borrowed only for this call.

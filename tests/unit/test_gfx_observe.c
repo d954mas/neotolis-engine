@@ -20,6 +20,7 @@ void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 64;
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
 }
 
 void tearDown(void) {
@@ -39,7 +40,7 @@ static void draw_setup(void) {
 static void draw_teardown(void) { nt_gfx_end_pass(); }
 
 static void test_passes_sum_and_begin_frame_resets(void) {
-    TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.counters.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(2, g_nt_gfx.counters.frame_sequence);
     draw_setup();
     nt_gfx_draw(0, 3);
     draw_teardown();
@@ -49,19 +50,19 @@ static void test_passes_sum_and_begin_frame_resets(void) {
     draw_teardown();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(2, g_nt_gfx.last_frame.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.last_frame));
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_DRAW_INSTANCED]);
     TEST_ASSERT_EQUAL_UINT64(27, g_nt_gfx.last_frame.vertices);
     TEST_ASSERT_EQUAL_UINT64(4, g_nt_gfx.last_frame.instances);
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_PIPELINE]);
     /* Closing a frame opens the next one with fresh counters. */
-    TEST_ASSERT_EQUAL_UINT64(2, g_nt_gfx.counters.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(3, g_nt_gfx.counters.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT64(2, g_nt_gfx.last_frame.frame_sequence);
+    TEST_ASSERT_EQUAL_UINT64(3, g_nt_gfx.last_frame.frame_sequence);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.last_frame));
 }
 
@@ -144,24 +145,16 @@ static void test_loss_and_restore_between_iterations_restore_in_one_begin_frame(
 
 /* Loading after init lands in the first frame, so its creations are counted like any frame's. */
 static void test_first_frame_counts_initial_resource_creation(void) {
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&desc);
     (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8});
     (void)nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     (void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
-    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.frame_sequence);
     /* The texture also creates its default sampler: four accepted creations. */
     TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
-}
-
-/* The init frame may close without end_frame, also after a re-init. */
-static void test_the_init_frame_needs_no_end_frame(void) {
-    nt_gfx_begin_frame();
-    nt_gfx_shutdown();
-    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
-    nt_gfx_init(&desc);
-    nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.frame_sequence);
 }
 
 /* The pre-swap capture seam reads after end_frame: work there is legal and counts in the open frame. */
@@ -210,42 +203,41 @@ static void test_clear_requires_an_open_pass_and_descriptor(void) {
     nt_gfx_end_pass();
 }
 
-static void test_begin_frame_with_an_open_pass_asserts(void) {
+static void test_begin_frame_needs_the_open_frame_ended(void) {
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "begin_frame: the open frame has no nt_gfx_end_frame"));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "begin_frame: the open frame has no nt_gfx_end_frame"));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
 }
 
-static void test_begin_frame_requires_the_previous_end_frame(void) {
-    nt_gfx_begin_frame();
-    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "did not run since the previous begin_frame"));
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-}
-
-static void test_end_frame_with_an_open_pass_or_twice_asserts(void) {
+static void test_end_frame_needs_an_open_frame_without_a_pass(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_end_frame());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "end_frame: a pass is still open"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "end_frame: needs an open frame with no open pass"));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_end_frame());
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "called twice"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "end_frame: needs an open frame with no open pass"));
 }
 
-static void test_begin_pass_after_end_frame_asserts_also_on_a_loss(void) {
+static void test_begin_pass_needs_an_open_frame_without_a_pass_also_on_a_loss(void) {
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "begin_pass: needs an open frame with no open pass"));
+    nt_gfx_end_pass();
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "after nt_gfx_end_frame"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "begin_pass: needs an open frame with no open pass"));
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "after nt_gfx_end_frame"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "begin_pass: needs an open frame with no open pass"));
 }
 #endif
 
@@ -693,6 +685,7 @@ static void test_capture_overflow_does_not_stop_counters(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 1;
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
     record_next_frame();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -748,6 +741,7 @@ static void test_capture_read_after_shutdown_is_empty(void) {
     TEST_ASSERT_EQUAL_UINT64(0, view.counters.frame_sequence);
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
 }
 
 static void test_exact_capacity_and_one_record_short(void) {
@@ -761,6 +755,7 @@ static void test_exact_capacity_and_one_record_short(void) {
         nt_gfx_desc_t desc = nt_gfx_desc_defaults();
         desc.capture_capacity = needed - missing;
         nt_gfx_init(&desc);
+        nt_gfx_begin_frame();
         record_next_frame();
         nt_gfx_end_frame();
         nt_gfx_begin_frame();
@@ -782,15 +777,13 @@ int main(void) {
     RUN_TEST(test_creates_on_a_loss_fail_quietly);
     RUN_TEST(test_loss_and_restore_between_iterations_restore_in_one_begin_frame);
     RUN_TEST(test_first_frame_counts_initial_resource_creation);
-    RUN_TEST(test_the_init_frame_needs_no_end_frame);
     RUN_TEST(test_work_after_end_frame_counts_in_the_open_frame);
     RUN_TEST(test_shutdown_discards_an_open_frame);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_clear_requires_an_open_pass_and_descriptor);
-    RUN_TEST(test_begin_frame_with_an_open_pass_asserts);
-    RUN_TEST(test_begin_frame_requires_the_previous_end_frame);
-    RUN_TEST(test_end_frame_with_an_open_pass_or_twice_asserts);
-    RUN_TEST(test_begin_pass_after_end_frame_asserts_also_on_a_loss);
+    RUN_TEST(test_begin_frame_needs_the_open_frame_ended);
+    RUN_TEST(test_end_frame_needs_an_open_frame_without_a_pass);
+    RUN_TEST(test_begin_pass_needs_an_open_frame_without_a_pass_also_on_a_loss);
 #endif
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_clear_copies_requests_and_skips_known_loss);
