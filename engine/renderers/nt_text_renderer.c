@@ -384,7 +384,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 // #endregion
 
 // #region Decoration sentinel quad
-/* Sentinel "glyph" with band_count=0: slug_text.frag early-returns coverage=1, so it fills solid for
+/* Sentinel "glyph" with band_count=0: the Slug fragment shaders return coverage=1, so it fills solid for
  * underline/strike. Pixel-space corners (already include pen/scale) flow through the same transform_point
  * path as glyphs — correct under any model matrix (world / 3D), no scissor/viewport hijack. */
 static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, const float color[4], float glyph_bias) {

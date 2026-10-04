@@ -16,6 +16,7 @@
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "nt_font_format.h"
+#include "nt_half.h"
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
 #include "stb_truetype.h"
@@ -1795,6 +1796,88 @@ void test_fp16_rounding_keeps_curves_in_adjacent_bands(void) {
     }
 }
 
+/* The shader breaks out of a band at the first curve wholly behind the sample, so every uploaded band
+ * must be non-increasing in the FP16 max along its ray axis. Returns how many neighbours tie in FP16. */
+static uint32_t assert_uploaded_bands_sorted(const nt_glyph_cache_entry_t *g) {
+    const nt_gfx_fake_update_texture_rect_t r = nt_gfx_fake_update_texture_rect_at(nt_gfx_fake_update_texture_count() - 1U);
+    TEST_ASSERT_EQUAL_UINT16(g->band_row, r.y);
+    const uint16_t *texels = (const uint16_t *)r.data;
+    uint32_t ties = 0;
+    for (uint32_t b = 0; b < g->band_count; b++) {
+        for (uint32_t axis = 0; axis < 2; axis++) {
+            /* Header (y_start, y_count, x_start, x_count): Y-bands cast +X rays, X-bands +Y rays. */
+            const uint32_t start = (uint32_t)nt_f16_to_f32(texels[(b * 4U) + (axis * 2U)]);
+            const uint32_t count = (uint32_t)nt_f16_to_f32(texels[(b * 4U) + (axis * 2U) + 1U]);
+            float prev = INFINITY;
+            for (uint32_t i = 0; i < count; i++) {
+                const uint16_t *c = texels + ((size_t)(start + (i * 2U)) * 4U);
+                const uint32_t k = axis == 0 ? 0U : 1U; /* x for Y-bands, y for X-bands */
+                const float m = fmaxf(fmaxf(nt_f16_to_f32(c[k]), nt_f16_to_f32(c[2U + k])), nt_f16_to_f32(c[4U + k]));
+                TEST_ASSERT_TRUE_MESSAGE(m <= prev, "band curves are not sorted by descending FP16 max");
+                ties += (m == prev) ? 1U : 0U;
+                prev = m;
+            }
+        }
+    }
+    return ties;
+}
+
+/* Teeth at 2049..2053 font units: distinct in float32, several equal after FP16 rounding (step 2). */
+void test_font_bands_sorted_by_fp16_max(void) {
+    enum { TEETH = 8, POINTS = (TEETH * 4) + 3 };
+    int16_t pts[POINTS][2];
+    uint16_t n = 0;
+    pts[n][0] = 0;
+    pts[n++][1] = 0;
+    for (int k = 0; k < TEETH; k++) {
+        pts[n][0] = 2040;
+        pts[n++][1] = (int16_t)(k * 250);
+        pts[n][0] = (int16_t)(2049 + (k % 5));
+        pts[n++][1] = (int16_t)((k * 250) + 125);
+    }
+    pts[n][0] = 2040;
+    pts[n++][1] = 2040;
+    for (int k = 0; k < TEETH; k++) {
+        pts[n][0] = (int16_t)(2040 - (k * 250) - 125);
+        pts[n++][1] = (int16_t)(2049 + (k % 5));
+        pts[n][0] = (int16_t)(2040 - ((k + 1) * 250));
+        pts[n++][1] = 2040;
+    }
+    pts[n][0] = 0;
+    pts[n++][1] = 2040;
+    TEST_ASSERT_EQUAL_UINT16(POINTS, n);
+
+    static uint8_t blob[sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry) + 512];
+    memset(blob, 0, sizeof blob);
+    NtFontAssetHeader hdr = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 2048, .ascent = 2100, .descent = 0};
+    NtFontGlyphEntry glyph = {
+        .codepoint = 'A',
+        .data_offset = sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry),
+        .advance = 2100,
+        .bbox_x1 = 2053,
+        .bbox_y1 = 2053,
+        .curve_count = POINTS,
+    };
+    memcpy(blob, &hdr, sizeof hdr);
+    memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
+    const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
+    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
+    nt_resource_step();
+    nt_font_step();
+
+    const nt_glyph_cache_entry_t *regular = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_FALSE(regular->is_tofu);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, assert_uploaded_bands_sorted(regular));
+#if NT_FONT_EMBOLDEN_ENABLED
+    const nt_glyph_cache_entry_t *bold = nt_font_lookup_glyph_offset(nt_font_get_slot(font), 'A', 40);
+    TEST_ASSERT_FALSE(bold->is_tofu);
+    TEST_ASSERT_TRUE(bold != regular);
+    (void)assert_uploaded_bands_sorted(bold);
+#endif
+    nt_font_destroy(font);
+}
+
 /* A glyph looked up this gfx frame may already sit in a recorded draw, so a full cache serves tofu
  * instead of evicting it; a later frame evicts the least recently used glyph. */
 void test_font_full_cache_never_evicts_this_frame(void) {
@@ -2974,6 +3057,7 @@ int main(void) {
     /* embolden (offset_points) */
     RUN_TEST(test_embolden_w0_identity);
     RUN_TEST(test_fp16_rounding_keeps_curves_in_adjacent_bands);
+    RUN_TEST(test_font_bands_sorted_by_fp16_max);
     RUN_TEST(test_font_full_cache_never_evicts_this_frame);
     RUN_TEST(test_font_glyph_over_slot_texels_drops_bands);
 #if NT_FONT_EMBOLDEN_ENABLED

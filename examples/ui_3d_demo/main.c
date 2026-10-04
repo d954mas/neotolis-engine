@@ -147,7 +147,8 @@ static nt_material_t s_inspector_sprite_material; /* depth-off overlay materials
 static nt_material_t s_inspector_text_material;
 static nt_program_ref_t s_sprite_cutoff_program;
 static nt_program_ref_t s_sprite_program;
-static nt_program_ref_t s_text_program; /* shared by the three text materials on this pair */
+static nt_program_ref_t s_text_program;       /* HUD and inspector text: no depth writes */
+static nt_program_ref_t s_text_depth_program; /* world UI labels: discard keeps empty quad pixels out of depth */
 
 /* Links each pair once both its stages are ready. The programs are ours:
  * materials only borrow the handles, and context loss forces a relink. */
@@ -160,8 +161,10 @@ static void link_programs(void) {
     }
     if (nt_program_ref_update(&s_text_program)) {
         nt_material_set_program(s_text_material, s_text_program.program);
-        nt_material_set_program(s_text_material_3d, s_text_program.program);
         nt_material_set_program(s_inspector_text_material, s_text_program.program);
+    }
+    if (nt_program_ref_update(&s_text_depth_program)) {
+        nt_material_set_program(s_text_material_3d, s_text_depth_program.program);
     }
 }
 static nt_font_t s_font;
@@ -806,6 +809,7 @@ static void frame(void) {
         nt_program_ref_drop(&s_sprite_cutoff_program);
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
+        nt_program_ref_drop(&s_text_depth_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
         /* The font keeps its sources across a restore -- only its GPU textures
@@ -1091,6 +1095,8 @@ int main(int argc, char *argv[]) {
     s_sprite_cutoff_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_CUTOFF_FRAG, NT_ASSET_SHADER_CODE);
     s_text_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_depth_program.vs = s_text_program.vs;
+    s_text_depth_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_DEPTH_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_3D_DEMO_ATLAS, NT_ASSET_ATLAS);
     s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_3D_DEMO_ATLAS_TEX0, NT_ASSET_TEXTURE);
     s_font_resource = nt_resource_request(ASSET_FONT_UI_3D_DEMO_FONT, NT_ASSET_FONT);
@@ -1117,8 +1123,6 @@ int main(int argc, char *argv[]) {
         .depth_test = true,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
-        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
-        .param_count = 1,
         .label = "ui_3d_demo_text",
     });
     s_text_material_3d = nt_material_create(&(nt_material_create_desc_t){
@@ -1126,8 +1130,6 @@ int main(int argc, char *argv[]) {
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_NONE,
-        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
-        .param_count = 1,
         .label = "ui_3d_demo_text_3d",
     });
 
@@ -1151,8 +1153,6 @@ int main(int argc, char *argv[]) {
         .depth_test = false,
         .depth_write = false,
         .cull_mode = NT_CULL_NONE,
-        .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
-        .param_count = 1,
         .label = "ui_3d_demo_inspector_text",
     });
     nt_ui_inspector_set_materials(s_ctx, s_inspector_sprite_material, s_inspector_text_material);
@@ -1191,6 +1191,7 @@ int main(int argc, char *argv[]) {
     nt_program_ref_drop(&s_sprite_cutoff_program);
     nt_program_ref_drop(&s_sprite_program);
     nt_program_ref_drop(&s_text_program);
+    nt_program_ref_drop(&s_text_depth_program);
     nt_material_shutdown();
     nt_debug_overlay_shutdown();
     nt_mem_scratch_shutdown();

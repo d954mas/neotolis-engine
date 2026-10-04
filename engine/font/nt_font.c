@@ -1169,6 +1169,8 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
     float ext_y_min = bbox_y0;
     float ext_y_max = bbox_y1;
     for (uint16_t ci = 0; ci < curve_count; ci++) {
+        /* Weight/outline curves are built here, not by the builder; a NaN key would break the band order below. */
+        NT_ASSERT(isfinite(curves[ci].p0x) && isfinite(curves[ci].p0y) && isfinite(curves[ci].p1x) && isfinite(curves[ci].p1y) && isfinite(curves[ci].p2x) && isfinite(curves[ci].p2y));
         float ay = curves[ci].p0y;
         float by = curves[ci].p1y;
         float cy = curves[ci].p2y;
@@ -1259,8 +1261,8 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
     uint16_t yband_offsets[NT_FONT_MAX_BANDS] = {0};
 
     uint32_t local_pos = bands; /* texel index in the row */
-    /* Per-band curves sorted DESC by max-x (Y-bands) / max-y (X-bands) so the
-     * shader's early-out matches reference Slug (SlugPixelShader.hlsl:187-192). */
+    /* Per-band curves sorted DESC by max-x (Y-bands) / max-y (X-bands): the shader stops at the first curve
+     * left of / below the sample. FP16 rounding is monotone, so the f32 order also holds for the uploaded values. */
     static uint16_t band_sorted[NT_FONT_MAX_CURVES_PER_GLYPH];
     for (uint8_t b = 0; b < bands; b++) {
         yband_offsets[b] = (uint16_t)local_pos;
