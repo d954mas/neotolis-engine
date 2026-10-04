@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 484dd7e
+# Commit: e86f8a7
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  53 B
-Code              235737 B
-Data               22486 B
+Code              235695 B
+Data               22457 B
 Custom              6897 B
 ---------------- ----------
-TOTAL             266437 B
+TOTAL             266366 B
 
 ## Top 30 Functions by Size
 
@@ -27,7 +27,7 @@ TOTAL             266437 B
 17651 B   dispatch_command
 16258 B   nt_shape_renderer_init
 10275 B   declare_slider_control
- 9316 B   main
+ 9275 B   main
  8796 B   Clay__ConfigureOpenElementPtr
  6038 B   Clay__SizeContainersAlongAxis
  5643 B   Clay__InitializeEphemeralMemory
@@ -55,7 +55,7 @@ TOTAL             266437 B
  1468 B   nt_gfx_make_vertex_input
 
 Total functions: 205
-Total code size: 235379 B
+Total code size: 235337 B
 
 ## Built Engine Archives
 
@@ -128,4 +128,4 @@ TOTAL (archives)         4172230 B
 ## Data Segments Summary
 
 Segments: 41
-Total data size: 22192 B
+Total data size: 22164 B

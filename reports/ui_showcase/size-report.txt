@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: 484dd7e
+# Commit: e86f8a7
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                95 B
 Elem                 144 B
-Code              382816 B
-Data               42000 B
-Custom             11518 B
+Code              382775 B
+Data               41970 B
+Custom             11504 B
 ---------------- ----------
-TOTAL             438111 B
+TOTAL             438026 B
 
 ## Top 30 Functions by Size
 
@@ -26,7 +26,7 @@ TOTAL             438111 B
 69713 B   frame
 17507 B   dispatch_command
 16312 B   nt_shape_renderer_init
- 9869 B   main
+ 9828 B   main
  9676 B   input_field
  8830 B   Clay__ConfigureOpenElementPtr
  8251 B   nt_ui_rich_text_markup
@@ -55,7 +55,7 @@ TOTAL             438111 B
  2429 B   printf_core
 
 Total functions: 362
-Total code size: 382183 B
+Total code size: 382142 B
 
 ## Built Engine Archives
 
@@ -127,5 +127,5 @@ TOTAL (archives)         4172230 B
 
 ## Data Segments Summary
 
-Segments: 152
-Total data size: 40928 B
+Segments: 151
+Total data size: 40905 B

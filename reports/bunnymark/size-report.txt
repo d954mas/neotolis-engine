@@ -1,5 +1,5 @@
 # Size Report: bunnymark (wasm-analysis-paired)
-# Commit: 484dd7e
+# Commit: e86f8a7
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  96 B
-Code              214277 B
-Data              208872 B
+Code              214237 B
+Data              208844 B
 Custom             11359 B
 ---------------- ----------
-TOTAL             435738 B
+TOTAL             435670 B
 
 ## Top 30 Functions by Size
 
@@ -27,8 +27,8 @@ TOTAL             435738 B
 29182 B   frame
 27347 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17735 B   nt_gfx_activate_texture
- 7205 B   main
- 5759 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
+ 7166 B   main
+ 5758 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4146 B   upload_glyph
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
@@ -55,7 +55,7 @@ TOTAL             435738 B
  1103 B   nt_material_create
 
 Total functions: 201
-Total code size: 213947 B
+Total code size: 213907 B
 
 ## Built Engine Archives
 
@@ -128,4 +128,4 @@ TOTAL (archives)         4172230 B
 ## Data Segments Summary
 
 Segments: 157
-Total data size: 207696 B
+Total data size: 207670 B

@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: 484dd7e
+# Commit: e86f8a7
 
 ## WASM Section Sizes
 
@@ -13,20 +13,20 @@ Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                  54 B
-Code              239685 B
+Code              239658 B
 Data               20805 B
 Custom              6801 B
 ---------------- ----------
-TOTAL             268576 B
+TOTAL             268549 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-63605 B   frame
+63674 B   frame
 17650 B   dispatch_command
-16266 B   nt_shape_renderer_init
- 9771 B   main
+16268 B   nt_shape_renderer_init
+ 9678 B   main
  8796 B   Clay__ConfigureOpenElementPtr
  6038 B   Clay__SizeContainersAlongAxis
  5643 B   Clay__InitializeEphemeralMemory
@@ -55,7 +55,7 @@ TOTAL             268576 B
  1383 B   nt_gfx_bind_pipeline
 
 Total functions: 201
-Total code size: 239339 B
+Total code size: 239312 B
 
 ## Built Engine Archives
 

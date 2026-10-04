@@ -1,5 +1,5 @@
 # Size Report: slice9_demo (wasm-analysis-paired)
-# Commit: 484dd7e
+# Commit: e86f8a7
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                  54 B
-Code              195322 B
-Data               11377 B
-Custom              5973 B
+Code              195281 B
+Data               11357 B
+Custom              5949 B
 ---------------- ----------
-TOTAL             213870 B
+TOTAL             213785 B
 
 ## Top 30 Functions by Size
 
@@ -25,12 +25,12 @@ TOTAL             213870 B
 --------  ----
 52635 B   frame
 17642 B   dispatch_command
- 9007 B   main
+ 8967 B   main
  8787 B   Clay__ConfigureOpenElementPtr
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
  4146 B   upload_glyph
- 3991 B   Clay__MeasureTextCached
+ 3990 B   Clay__MeasureTextCached
  3365 B   nt_sprite_renderer_set_material
  3353 B   Clay__CloseElement
  3095 B   nt_ui_label
@@ -55,7 +55,7 @@ TOTAL             213870 B
  1103 B   nt_material_create
 
 Total functions: 175
-Total code size: 195025 B
+Total code size: 194984 B
 
 ## Built Engine Archives
 
@@ -127,5 +127,5 @@ TOTAL (archives)         4172230 B
 
 ## Data Segments Summary
 
-Segments: 33
-Total data size: 11155 B
+Segments: 31
+Total data size: 11148 B
