@@ -11,7 +11,7 @@ in vec4 v_color;
 out vec4 frag_color;
 
 // For text that writes depth: empty quad pixels must not occlude what is behind them.
-// Kept out of slug_text.frag: with depth writes, discard forces late depth on every GPU.
+// Kept out of slug_text.frag: with depth writes, discard defers the depth write until the shader ends.
 void main() {
     float coverage = SlugRender(v_texcoord, v_glyph, v_band_transform);
 

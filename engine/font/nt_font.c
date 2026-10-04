@@ -1260,7 +1260,7 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
 
     uint32_t local_pos = bands; /* texel index in the row */
     /* Per-band curves sorted DESC by max-x (Y-bands) / max-y (X-bands): the shader stops at the first curve
-     * left of / below the sample. FP16 rounding is monotone, so the f32 order also holds for the uploaded values. */
+     * more than half a pixel left of / below the sample. FP16 rounding is monotone, so the f32 order also holds for the uploaded values. */
     static uint16_t band_sorted[NT_FONT_MAX_CURVES_PER_GLYPH];
     for (uint8_t b = 0; b < bands; b++) {
         yband_offsets[b] = (uint16_t)local_pos;

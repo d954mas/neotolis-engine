@@ -28,7 +28,7 @@ void main() {
     uvec2 glyph = floatBitsToUint(a_glyph_data);
     v_glyph = glyph;
     v_texcoord = a_texcoord;
-    // Per-vertex divisions so the fragment shader picks a band with one multiply.
+    // Divide per vertex so the fragment shader picks a band without dividing.
     vec2 bands = vec2(float(glyph.y));
     v_band_transform = vec4(a_glyph_bounds.xy, bands / (a_glyph_bounds.zw - a_glyph_bounds.xy));
     v_color = a_color;
