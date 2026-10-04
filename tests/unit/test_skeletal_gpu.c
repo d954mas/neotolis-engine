@@ -34,6 +34,7 @@ void tearDown(void) {
 }
 
 static void next_frame(void) {
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_skeletal_gpu_begin_frame();
 }

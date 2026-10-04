@@ -512,8 +512,10 @@ void test_reactivation_after_context_restore_yields_the_same_storage(void) {
     nt_gfx_deactivate_texture(first);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* latches the loss and drops the backend tables */
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* restore completes; caps are re-probed */
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     /* The re-probe wiped the caps this test injected; the game re-activates. */
@@ -530,6 +532,7 @@ void test_reactivation_after_context_restore_yields_the_same_storage(void) {
 
 static void idle_frames(uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
+        nt_gfx_end_frame();
         nt_gfx_begin_frame();
     }
 }

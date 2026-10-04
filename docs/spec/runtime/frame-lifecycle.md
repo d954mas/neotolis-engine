@@ -41,15 +41,19 @@ game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
 game_render           ← nt_ui_walk reads scratch pointers; any number of
                         gfx passes
+nt_gfx_end_frame      ← after the last pass, also when nothing renders
+nt_window_swap_buffers
 ```
 
 The host owns the gfx frame boundary: `nt_gfx_init` opens the first frame and the
 frame callback calls `nt_gfx_begin_frame` once at its start, before any other gfx
 use (the resource and font steps included), also when nothing renders. Context
 loss and restore are synced there, so the whole callback sees one stable
-`context_lost`/`context_restored` state. Pre-loop loading lands in the first
-frame; teardown work after the last callback lands in a frame that
-`nt_gfx_shutdown` discards. Code in the callback (devapi commands, stats
+`context_lost`/`context_restored` state. The callback calls `nt_gfx_end_frame`
+once after its last pass and before `nt_window_swap_buffers`, also when nothing
+renders; no pass may begin after it, resource calls may. Pre-loop loading lands
+in the first frame, which needs no end_frame; teardown work after the last
+callback lands in a frame that `nt_gfx_shutdown` discards. Code in the callback (devapi commands, stats
 readers) reads the previous callback's frame from `g_nt_gfx.last_frame`. See
 [frame observation](../render/architecture.md#frame-observation).
 

@@ -330,6 +330,7 @@ static void begin_target_pass(void) { nt_gfx_begin_pass(&(nt_pass_desc_t){.targe
 
 static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t mesh, bool skinned, uint8_t out[FRAME_BYTES]) {
     const nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_frame_arena_begin_frame();
     if (skinned) {
@@ -352,6 +353,7 @@ static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t 
 #define RENDER_MAX_RUNS 2
 
 static void render_skinned_list(const nt_render_item_t *items, uint32_t count, uint8_t out[FRAME_BYTES]) {
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_frame_arena_begin_frame();
     nt_mesh_run_t runs[RENDER_MAX_RUNS];

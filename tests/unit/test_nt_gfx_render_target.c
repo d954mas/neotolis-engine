@@ -24,11 +24,13 @@ static nt_render_target_t make_target(nt_texture_t color, nt_texture_t depth) { 
 
 static void lose_context(void) {
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
 }
 
 static void restore_context(void) {
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
 }
 
@@ -304,6 +306,7 @@ static void test_context_restore_waits_after_a_restore_that_leaves_the_backend_l
     nt_gfx_fake_fail_next_backend_restore_lost();
     nt_gfx_fake_set_context_lost(false);
     for (int i = 0; i < 4; i++) {
+        nt_gfx_end_frame();
         nt_gfx_begin_frame();
     }
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
@@ -328,6 +331,7 @@ static void test_context_restore_waits_while_backend_remains_lost(void) {
     nt_gfx_set_scissor_enabled(true);
     TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
     lose_context();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
 
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);

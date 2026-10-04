@@ -442,13 +442,16 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
     TEST_ASSERT_EQUAL_UINT16(2U, nt_font_get_stats(font).glyphs_cached); /* tofu + 'A' */
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_NULL(nt_font_lookup_glyph(font, 'A'));
     TEST_ASSERT_EQUAL_UINT16(2U, nt_font_get_stats(font).glyphs_cached);
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
 
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_restored);
     nt_gfx_fake_fail_texture_creates(1U);
@@ -687,6 +690,7 @@ void test_font_lru_eviction(void) {
     nt_font_add(font, res2);
     nt_resource_step();
     nt_font_step();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* A, B, C were looked up in the previous frame */
 
     /* Lookup 'D' should trigger eviction */
@@ -1824,8 +1828,10 @@ void test_font_full_cache_never_evicts_this_frame(void) {
     TEST_ASSERT_EQUAL_UINT32('B', b->codepoint);
     TEST_ASSERT_EQUAL_UINT32('C', c->codepoint);
 
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     (void)nt_font_lookup_glyph(font, 'A'); /* B and C stay one frame older than A */
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     const nt_glyph_cache_entry_t *d = nt_font_lookup_glyph(font, 'D');
     TEST_ASSERT_FALSE(d->is_tofu);
@@ -2543,6 +2549,7 @@ void test_cache_evict_chain_integrity(void) {
     for (int pass = 0; pass < 6; pass++) {
         for (int c = 0; c < 3; c++) {
             for (int o = 0; o < 4; o++) {
+                nt_gfx_end_frame();
                 nt_gfx_begin_frame();
                 /* The two previous keys survived the last eviction: their probe chains still hit. */
                 for (int k = 0; k < 2; k++) {

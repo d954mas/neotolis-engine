@@ -265,6 +265,7 @@ static nt_entity_t create_test_entity(nt_mesh_t mesh, nt_material_t mat) {
 /* Leaves the pass the tests draw in closed and the arena open for reserves. */
 static void begin_arena_frame(void) {
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_frame_arena_begin_frame();
 }

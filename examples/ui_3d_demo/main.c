@@ -989,6 +989,8 @@ static void frame(void) {
     nt_gfx_end_segment();
 #endif
 
+    nt_gfx_end_frame();
+
 #if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
     /* Throttled mem probe: nt_platform_memory_usage() walks the allocator (mallinfo is O(allocations)

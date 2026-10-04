@@ -644,6 +644,7 @@ static void test_identical_second_frame_issues_no_bind_calls(void) {
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
 
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     const uint32_t sampler_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindSampler];
     install_state_counters();

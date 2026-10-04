@@ -378,6 +378,7 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 }

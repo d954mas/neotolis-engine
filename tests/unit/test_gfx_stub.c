@@ -109,7 +109,9 @@ static void test_stub_observation_is_unavailable(void) {
 #if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_request();
 #endif
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.last_frame.frame_sequence);
     TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.frame_sequence);

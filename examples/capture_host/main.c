@@ -61,11 +61,15 @@ static void frame(void) {
     nt_devapi_update();
     nt_input_poll();
 
-    if (nt_app_render_enabled()) {
+    const bool render = nt_app_render_enabled();
+    if (render) {
         render_pattern();
-        /* The capture seam runs INSIDE nt_window_swap_buffers (post-render, pre-swap, where
-           nt_gfx_read_pixels is GL-valid). Gated implicitly with rendering: render off => no swap =>
-           seam doesn't run => a capture stays pending until a real frame draws, never a stale frame. */
+    }
+    nt_gfx_end_frame();
+    /* The capture seam runs INSIDE nt_window_swap_buffers (post-render, pre-swap, where
+       nt_gfx_read_pixels is GL-valid). Gated implicitly with rendering: render off => no swap =>
+       seam doesn't run => a capture stays pending until a real frame draws, never a stale frame. */
+    if (render) {
         nt_window_swap_buffers();
     }
 

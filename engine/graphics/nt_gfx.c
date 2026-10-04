@@ -144,6 +144,7 @@ static struct {
     uint8_t bound_index_type;    /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
     uint8_t texture_set_state;   /* nt_gfx_texture_set_state_t for the bound pipeline's program */
     bool scissor_enabled;        /* mirrors GL_SCISSOR_TEST */
+    bool frame_ended;            /* nt_gfx_end_frame ran since the last begin_frame */
 
     /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
      * probes read them; production never does. */
@@ -588,6 +589,9 @@ static nt_gfx_result_t restore_context(void) {
 void nt_gfx_begin_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_frame: a pass is still open");
+    /* The frame nt_gfx_init opens is the only one that may close without end_frame. */
+    NT_ASSERT((s_gfx.frame_ended || g_nt_gfx.counters.frame_sequence == 1) && "begin_frame: nt_gfx_end_frame did not run since the previous begin_frame");
+    s_gfx.frame_ended = false;
     age_stage_buffer();
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
@@ -625,6 +629,13 @@ void nt_gfx_begin_frame(void) {
         NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
     }
 #endif
+}
+
+void nt_gfx_end_frame(void) {
+    NT_ASSERT(g_nt_gfx.initialized);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "end_frame: a pass is still open");
+    NT_ASSERT(!s_gfx.frame_ended && "end_frame: called twice in one frame");
+    s_gfx.frame_ended = true;
 }
 
 /* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
@@ -679,6 +690,7 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
+    NT_ASSERT(!s_gfx.frame_ended && "begin_pass: after nt_gfx_end_frame; passes belong before it");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }

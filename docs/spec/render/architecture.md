@@ -420,6 +420,7 @@ nt_gfx_bind_uniform_buffer_range(view_ubo, 0, CASCADES * view_stride, sizeof(vie
 nt_skinned_mesh_renderer_draw(skinned_runs, skinned_n);
 nt_mesh_renderer_draw(static_runs, static_n);
 nt_gfx_end_pass();
+nt_gfx_end_frame();
 ```
 
 `view_stride` is `sizeof(view_t)` rounded up to
@@ -587,19 +588,25 @@ or a shadow-map system.
 
 All gfx work between `nt_gfx_init` and `nt_gfx_shutdown` happens inside a
 **frame**, so no operation or GL call escapes the counters. `nt_gfx_begin_frame`
-is the only boundary: `nt_gfx_init` opens the first frame, and every begin_frame
-closes the open frame and at once opens the next, so there is no state outside
-a frame and nothing to assert about it. The host calls `nt_gfx_begin_frame` once
-at the start of each frame callback, before any other gfx use (resource and
-font steps included), also when nothing renders. Work between init and the
-first begin_frame (init itself, pre-loop loading) is the first frame; teardown
-work after the last callback lands in a frame that `nt_gfx_shutdown` discards
-unpublished. Frames are a host contract in every build, independent of
-simulation time; app/gfx never close one implicitly. begin_frame asserts that
-no pass is open; passes may begin any time after init. A frame holds any number
-of passes; their counters sum. begin_frame also does the per-frame backend
+is the only counter boundary: `nt_gfx_init` opens the first frame, and every
+begin_frame closes the open frame and at once opens the next. The host calls
+`nt_gfx_begin_frame` once at the start of each frame callback, before any other
+gfx use (resource and font steps included), also when nothing renders. Work
+between init and the first begin_frame (init itself, pre-loop loading) is the
+first frame; teardown work after the last callback lands in a frame that
+`nt_gfx_shutdown` discards unpublished. Frames are a host contract in every
+build, independent of simulation time; app/gfx never close one implicitly.
+
+The host also calls `nt_gfx_end_frame` once per callback, also when nothing
+renders: after the last pass and before `nt_window_swap_buffers`. It ends the
+frame's passes, not its counters: work after it (resource calls, the pre-swap
+capture seam) still counts in the open frame. Only the frame init opens may
+skip it. Assertions reject a begin_frame with an open pass or without the open
+frame's end_frame, an end_frame with an open pass or a second one in the frame,
+and a begin_pass after end_frame. A frame holds any number of passes; their
+counters sum. begin_frame also does the per-frame backend
 work: it ages the upload staging buffer and, with GPU timing, checks the timer
-disjoint flag on a live context. The stub is stateless: its begin_frame is inert
+disjoint flag on a live context. The stub is stateless: its begin_frame and end_frame are inert
 and it never publishes counters.
 
 `g_nt_gfx.counters` holds the live counters of the open frame.

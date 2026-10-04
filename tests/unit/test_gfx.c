@@ -419,8 +419,10 @@ void test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss(void) {
     nt_shader_t fs = make_test_fs();
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* wipes the backend tables, latches context_lost */
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* recovery completes; the stages stay unready */
 
     /* Neither loss gate can explain the rejection below. */
@@ -488,6 +490,7 @@ void test_gfx_context_loss_keeps_handle_drops_ready(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
 
@@ -847,6 +850,7 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     end_texture_binding_test_pass();
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     /* The loss branch itself drops the set; apply must not be what clears it. */
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
@@ -861,6 +865,7 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
 void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(void) {
     nt_texture_t husk = make_binding_test_texture(1);
     nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(husk));
 
@@ -895,6 +900,7 @@ void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
     nt_sampler_t compare = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, compare.id);
     nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
 
     nt_texture_t color = make_binding_test_texture(1);
@@ -990,6 +996,7 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_program_t old = nt_gfx_make_program(vs, fs);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
     TEST_ASSERT_TRUE(nt_gfx_program_valid(old));
@@ -1006,6 +1013,7 @@ void test_gfx_context_restore_yields_a_new_program_handle(void) {
     nt_gfx_destroy_shader(pending_vs);
     nt_gfx_destroy_shader(pending_fs);
 
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     nt_program_t fresh = nt_gfx_make_program(make_test_vs(), make_test_fs());
@@ -1022,6 +1030,7 @@ void test_gfx_frame_boundary_syncs_loss_before_creates(void) {
     nt_shader_t fs = make_test_fs();
     nt_gfx_fake_lose_and_restore_context();
 
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
@@ -1114,6 +1123,7 @@ void test_gfx_pipeline_context_lost_returns_invalid(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     nt_gfx_fake_set_context_lost(false);
@@ -2799,8 +2809,10 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* latches the loss, frees pipeline slots */
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* recovery completes */
 
     TEST_ASSERT_FALSE(nt_gfx_pipeline_valid(pip));
@@ -2833,8 +2845,10 @@ void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, ubo.id);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* latches the loss, zeroes every backend record */
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* restore succeeds; the buffer stays a husk */
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
@@ -2853,8 +2867,10 @@ void test_gfx_update_texture_on_husk_asserts(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_texture_backend_id(tex));
@@ -2873,8 +2889,10 @@ void test_gfx_update_buffer_on_husk_asserts(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vbo.id);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
@@ -2891,8 +2909,10 @@ void test_gfx_orphan_buffer_on_husk_asserts(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, vbo.id);
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
@@ -2905,6 +2925,7 @@ void test_gfx_orphan_buffer_on_husk_asserts(void) {
 /* The restore runs before the iteration builds anything, so what it rebuilds draws in the same iteration. */
 void test_gfx_restored_iteration_draws_what_it_rebuilds(void) {
     nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
 
@@ -2989,6 +3010,7 @@ void test_gfx_frame_draw_calls(void) {
 
     /* Counters persist across passes; only the next frame resets them. */
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_draw_calls(&g_nt_gfx.last_frame));
