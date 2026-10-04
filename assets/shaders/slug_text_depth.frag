@@ -10,10 +10,13 @@ in vec4 v_color;
 
 out vec4 frag_color;
 
-// No discard: an empty premultiplied pixel already changes nothing, and discard blocks
-// hidden-surface removal on some tile GPUs. Depth-writing text uses slug_text_depth.frag.
+// For text that writes depth: empty quad pixels must not occlude what is behind them.
+// Kept out of slug_text.frag: with depth writes, discard defers the depth write until the shader ends.
 void main() {
     float coverage = SlugRender(v_texcoord, v_glyph, v_band_transform);
+
+    if (coverage < 1.0 / 255.0)
+        discard;
 
     // Premultiplied alpha output
     float alpha = coverage * v_color.a;

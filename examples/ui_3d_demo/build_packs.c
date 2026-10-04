@@ -67,7 +67,9 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/sprite_cutoff.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/slug_text.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 5 (sprite + sprite_cutoff + slug_text)\n");
+    /* Depth-writing UI labels use the discard variant. */
+    nt_builder_add_shader(ctx, "assets/shaders/slug_text_depth.frag", NT_BUILD_SHADER_FRAGMENT);
+    (void)printf("  Shaders added: 6 (sprite + sprite_cutoff + slug_text + slug_text_depth)\n");
     // #endregion
 
     // #region atlas: button slice9 + icon + white pixel

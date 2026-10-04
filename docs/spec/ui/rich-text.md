@@ -114,7 +114,8 @@ Five decoration axes are **renderer-level sticky state** on `nt_text_renderer`, 
 `set_weight` / `set_outline` / `set_shadow` / `set_underline` / `set_strikethrough`. Both authoring
 fronts feed the SAME setters at emit: `nt_ui_label` from `nt_ui_label_style_t` fields, and rich text
 from composed run state (variant bits + `push_outline/shadow/underline/strikethrough`). No new
-subsystem — decoration reuses the text pipeline and the `slug_text` shader.
+subsystem — decoration reuses the text pipeline and the Slug text shaders (`slug_text.frag`, or
+`slug_text_depth.frag` for depth-writing text).
 
 - **Units.** Text `font_size` is **px**. Everything decorative is **em** (a fraction of the text
   height, so it scales with size): `weight`, `outline` width, and `shadow` (dx,dy) offset are all em,

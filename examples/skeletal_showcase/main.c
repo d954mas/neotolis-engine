@@ -2767,11 +2767,7 @@ int main(int argc, char *argv[]) {
     }
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .textures = {{.name = "u_texture", .resource = s_atlas_texture}}, .texture_count = 1, .blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_sprite"});
-    s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(),
-                                                                      .cull_mode = NT_CULL_NONE,
-                                                                      .params[0] = {.name = "u_alpha_cutoff", .value = {NT_TEXT_ALPHA_CUTOFF_DEFAULT}},
-                                                                      .param_count = 1,
-                                                                      .label = "skeletal_showcase_text"});
+    s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_text"});
     s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 256, .measure_cache_size = 256});
     nt_ui_set_sprite_material(s_ui, s_sprite_material);
     nt_ui_set_text_material(s_ui, s_text_material);

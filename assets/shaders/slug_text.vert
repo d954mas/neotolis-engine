@@ -21,13 +21,16 @@ layout(location = 5) in float a_depth_bias;
 
 out vec2 v_texcoord;
 flat out uvec2 v_glyph;
-flat out vec4 v_glyph_bounds;
+flat out vec4 v_band_transform; // bbox x0, y0, band_count / width, band_count / height
 out vec4 v_color;
 
 void main() {
-    v_glyph = floatBitsToUint(a_glyph_data);
+    uvec2 glyph = floatBitsToUint(a_glyph_data);
+    v_glyph = glyph;
     v_texcoord = a_texcoord;
-    v_glyph_bounds = a_glyph_bounds;
+    // Divide per vertex so the fragment shader picks a band without dividing.
+    vec2 bands = vec2(float(glyph.y));
+    v_band_transform = vec4(a_glyph_bounds.xy, bands / (a_glyph_bounds.zw - a_glyph_bounds.xy));
     v_color = a_color;
 
     gl_Position = view_proj * vec4(a_position, 1.0);

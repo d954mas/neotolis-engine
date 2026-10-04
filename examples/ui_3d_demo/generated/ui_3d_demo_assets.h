@@ -11,6 +11,7 @@
 /* --- SHADER --- */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
+#define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_DEPTH_FRAG ((nt_hash64_t){0xC34497793BA4792BULL}) /* assets/shaders/slug_text_depth.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_FRAG ((nt_hash64_t){0x96ED6312E7B10087ULL}) /* assets/shaders/sprite.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT ((nt_hash64_t){0x75A9EEA4D1472026ULL}) /* assets/shaders/sprite.vert */
 #define ASSET_SHADER_ASSETS_SHADERS_SPRITE_CUTOFF_FRAG ((nt_hash64_t){0x8126896E5DC4B921ULL}) /* assets/shaders/sprite_cutoff.frag */
@@ -32,6 +33,7 @@
 static inline void ui_3d_demo_assets_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/slug_text.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.vert");
+    (void)nt_hash64_str("assets/shaders/slug_text_depth.frag");
     (void)nt_hash64_str("assets/shaders/sprite.frag");
     (void)nt_hash64_str("assets/shaders/sprite.vert");
     (void)nt_hash64_str("assets/shaders/sprite_cutoff.frag");

@@ -524,6 +524,13 @@ four texels per curve, so `NT_FONT_MAX_CURVES_PER_GLYPH`
 (`(NT_FONT_GLYPH_TEXELS - 1) / 4` = 511) curves always fit. The builder asserts
 on a larger glyph and logs its codepoint; the runtime asserts the same bound.
 
+Within a band the curves are sorted by descending maximum coordinate along the
+band's ray (x for horizontal bands, y for vertical bands). The fragment shader
+relies on this order: it stops at the first curve that lies more than half a
+pixel behind the sample, as reference Slug does. Keys come from the float32
+curves; FP16 rounding is monotone, so the order also holds for the uploaded
+values.
+
 Emboldening adds curves (reflex-corner joins, resolved self-intersections). An emboldened outline that
 outgrows `NT_FONT_MAX_CURVES_PER_GLYPH` would be cut and leak fill, so that
 variant is drawn at regular weight and the runtime warns once with the codepoint.

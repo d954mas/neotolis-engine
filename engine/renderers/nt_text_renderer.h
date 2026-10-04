@@ -25,12 +25,6 @@ _Static_assert(NT_TEXT_RENDERER_MAX_PIPELINES <= 65535, "NT_TEXT_RENDERER_MAX_PI
 /* uint16 index buffer: base = glyph_index * 4, must not overflow */
 _Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPHS > 16383 overflows uint16 index buffer");
 
-/* Default for the slug_text `u_alpha_cutoff.x` param: discards only fully-empty glyph-quad pixels.
- * Good even for depth-writing world text: pair it with a per-glyph depth bias
- * (nt_text_renderer_set_glyph_depth_bias) to separate overlapping glyphs — raising the cutoff would
- * harden AA edges without removing a real halo. */
-#define NT_TEXT_ALPHA_CUTOFF_DEFAULT (1.0F / 255.0F)
-
 /* Synthetic bold weight in em; labels and rich text use the same glyph variant. */
 #define NT_TEXT_SYNTH_BOLD_WEIGHT 0.04F
 
@@ -44,8 +38,8 @@ void nt_text_renderer_shutdown(void);
 nt_result_t nt_text_renderer_restore_gpu(void);
 
 /* Requires an assigned slug_text program, premultiplied-compatible blend and cull NONE; setters flush on handle changes.
- * Declare u_alpha_cutoff on every material sharing the program or none: omitted uniforms retain prior values.
- * NT_TEXT_ALPHA_CUTOFF_DEFAULT enables coverage discard.
+ * slug_text.frag never discards; a depth-writing material uses slug_text_depth.frag, which discards empty
+ * pixels so they do not occlude. Pair it with nt_text_renderer_set_glyph_depth_bias for overlapping glyphs.
  * A text material declares no textures: units 0 and 1 belong to the font's curve and band textures (asserted at flush). */
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
