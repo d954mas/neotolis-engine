@@ -731,11 +731,14 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
     const char *names[] = {"diagnostics-a", "diagnostics-b", "diagnostics-c"};
     NT_ASSERT(segment >= 0 && segment < 3);
     switch (operation) {
-    case 0: /* a segment lives inside a frame */
+    /* Segment commands record into the frame stream; a frame of their own runs their GL work now. */
+    case 0:
         nt_gfx_begin_frame();
         nt_gfx_begin_segment(names[segment]);
+        nt_gfx_end_frame();
         break;
     case 1:
+        nt_gfx_begin_frame();
         nt_gfx_end_segment();
         nt_gfx_end_frame();
         break;
