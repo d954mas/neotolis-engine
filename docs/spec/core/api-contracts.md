@@ -499,7 +499,8 @@ binds do. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
 target and clears the bound pipeline, vertex input, instance binding and texture
 set. The scissor rectangle, uniform-buffer bindings and vertex attribute defaults
 carry over, so a pass sets the scissor rectangle before it enables scissor. A
-bind equal to the current state ends `NT_GFX_RESULT_CACHE` and records nothing
+bind equal to the current state ends `NT_GFX_RESULT_CACHE` and records nothing;
+a texture-set apply always ends `ACCEPTED` and records only the changed units
 ([binding dedup](../render/architecture.md#binding-dedup-and-draw-merge));
 uniform-buffer slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS`.
 `nt_gfx_begin_segment` and `nt_gfx_end_segment` assert outside an open frame.

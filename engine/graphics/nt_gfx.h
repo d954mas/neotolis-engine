@@ -952,7 +952,8 @@ nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 /* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and
  * uniforms are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
  * discards them. Physical texture/sampler and uniform-buffer binds are context state.
- * A bind equal to the current state ends CACHE and records nothing. */
+ * A bind equal to the current state ends CACHE and records nothing; a texture-set
+ * apply always ends ACCEPTED and records only the changed units. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
