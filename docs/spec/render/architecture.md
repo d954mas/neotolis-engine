@@ -73,7 +73,9 @@ and int uniform setters, scissor rectangle and enable, viewport, the plain and
 indexed draws (both carry an instance count; the indexed draw also carries the
 index type of the bound vertex input), and GPU timing
 segment begin and end. Descriptors and uniform values are copied
-into the stream. `nt_gfx_end_frame` executes the stream in call order. Nothing is
+into the stream. A binding equal to the current one and an indexed draw that
+continues the previous one record nothing new (see Binding dedup and draw
+merge). `nt_gfx_end_frame` executes the stream in call order. Nothing is
 recorded outside a frame.
 
 Every other operation is immediate: creates, destroys, buffer and texture
@@ -102,6 +104,53 @@ and backend asserts without a front-end equivalent fire at execution, inside
 `nt_gfx_end_frame` or an operation that executes the stream first; see Frame
 observation for counters and capture.
 
+### Binding dedup and draw merge
+
+The front-end is the one layer that drops redundant public binds; the GL backend
+only skips repeated physical state (below). Every binding call
+compares with a front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE` and
+records nothing. A mirror lives exactly as long as the contract keeps its state:
+
+- pipeline, vertex input, the texture set (per unit: texture and sampler),
+  the instance buffer and the viewport live for one pass: `begin_pass` discards
+  them, so the first bind of each in a pass records;
+- the scissor rectangle and the uniform-buffer binding of each slot carry over
+  passes; destroying a buffer clears the slots it holds, and a context loss
+  clears both. An orphan keeps the binding (GL keeps it too); an equal range bind
+  whose range no longer fits the orphaned storage re-validates;
+- scissor enable is reset to off by `begin_pass`.
+
+`nt_gfx_apply_texture_bindings` never ends `CACHE`: a successful apply validates
+and publishes the whole set and ends `ACCEPTED`, but records a unit bind only
+when that unit's texture or sampler changed in the pass. Uniform-buffer slots
+are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind or
+a global block registration at that slot or above asserts.
+
+The compare runs after the pass check; an equal value was validated when it was
+recorded and every path that could invalidate it clears the mirror. An invalid
+pipeline or vertex-input handle clears its mirror (the unbind); other invalid
+binds leave their mirrors unchanged. Uniform values and vertex attribute
+defaults are not deduplicated by the front-end. The GL backend keeps caches for
+physical GL state the front-end does not name: the program and VAO behind
+different pipelines and vertex inputs, the fixed-function difference between
+pipelines, the texture and sampler halves of a unit across passes, the
+viewport, clear values and the active unit.
+
+Draws are whole triangle lists: every draw asserts that its vertex or index
+count is a multiple of 3, index data never holds the primitive-restart value
+(`0xFFFF`/`0xFFFFFFFF`; WebGL2 always restarts on it, native GL draws that
+vertex), and shaders follow the [draw merge rule](shader.md#draw-merge).
+`nt_gfx_draw` and `nt_gfx_draw_indexed` therefore extend the previous command
+when that command is the last one recorded, was recorded by the same function,
+and its range of vertices or indices ends where the new one starts (the summed
+count fits `GLsizei`). The merged call ends `CACHE` with its vertices and
+indices counted, so
+`nt_gfx_draw_calls()` counts recorded draws. An execution of the stream ends the
+merge chain. Instanced draws never merge: joining them changes
+`gl_InstanceID`. A merge joins only draws adjacent in call order with no state
+change between them, so the picture is unchanged and the game still decides
+what is adjacent.
+
 ### Vertex inputs
 
 Vertex-input state is a public gfx object referenced by `nt_vertex_input_t`.
@@ -114,9 +163,13 @@ draws; per mesh switch that is a single `glBindVertexArray` instead of
 buffer re-binds plus per-attribute `glVertexAttribPointer` rewrites. The
 object's *static* half — vertex attributes and the index binding — is
 immutable after creation; its *instance* attribute pointers are re-specified
-by each `nt_gfx_bind_instance_buffer` into the vertex input the front-end
+by each recorded `nt_gfx_bind_instance_buffer` into the vertex input the front-end
 names explicitly to the backend (WebGL2 has no
-baseInstance, so per-draw instance re-pointing stays). An empty layout with
+baseInstance, so per-draw instance re-pointing stays). The instance binding is
+pass state: a draw of a vertex input with instance attributes asserts unless the
+last `nt_gfx_bind_instance_buffer` of the current pass pointed that vertex input.
+Switching to a vertex input without instance attributes and back needs no
+re-point: the VAO keeps its pointer. An empty layout with
 no buffers is the attribute-less `gl_VertexID` path; every draw asserts a
 bound vertex input.
 
@@ -146,8 +199,8 @@ keeps renderer-cached vertex inputs from outliving mesh buffers; mesh caches
 revalidate handles with `nt_gfx_vertex_input_valid` on lookup. Because the
 cascade makes stale handles routine, `nt_gfx_destroy_vertex_input` tolerates
 stale and INVALID handles as no-ops. The dynamically captured instance
-buffer is *not* cascade-destroyed, but destroying one clears the dependents'
-pointed flag: their next draw using that vertex input asserts until
+buffer is *not* cascade-destroyed, but destroying the one the pass pointed clears
+that instance binding: the next draw of that vertex input asserts until
 `nt_gfx_bind_instance_buffer` re-points it, and the GL attachment's storage
 lingers until that re-point or the vertex input's death.
 Buffer *contents* may change at any time for correctness — `update`/`orphan`
@@ -181,9 +234,8 @@ re-binding the other. Two pipelines on one program
 share every uniform value, and binding one does not reset what the other set.
 Renderers replay declared material params on each material or pipeline transition
 inside one mesh `draw`, `draw_list` call or flush. Renderer-tracked bound state is discarded at the
-end of that call; across calls the GL backend deduplicates program, VAO,
-pipeline state, texture, sampler, viewport and clear-value binds (scissor-enable is deduplicated by the
-front-end mirror). Standalone float vec4 writes are skipped when their bytes
+end of that call; across calls the front-end drops equal binds and the GL backend
+drops repeated physical state (see Binding dedup and draw merge). Standalone float vec4 writes are skipped when their bytes
 match the last submitted value for that program and uniform; other uniform
 writes are issued unchanged. The
 backend GL cache persists across passes and frames; ground state is issued once
@@ -268,9 +320,10 @@ remain live and unchanged from list construction through draw completion; a new
 list resolves the current publication again. The
 gfx front-end maps names to the bound program's canonical units,
 ignores inactive declarations, validates complete active coverage, and calls the
-backend only after the whole set resolves. The backend GL cache drops repeated
-physical binds. The text renderer draws once per flush and other renderers draw
-in between, so it also submits its complete set unconditionally.
+backend only after the whole set resolves, recording only the units whose
+texture or sampler changed in the pass. The text renderer draws once per flush
+and other renderers draw in between, so it also submits its complete set
+unconditionally.
 
 The material-driven mesh, skinned mesh, sprite, and text renderer caches build the
 `nt_pipeline_desc_t` from the material's render state and key on its
@@ -517,8 +570,8 @@ only cached clear values, with flag fields having no meaning.
 Pass color and depth clears are pass-owned operations. In particular,
 `clear_depth` is applied independently of the previous pipeline's `depth_write`
 state; pipeline write masks affect draws, not the next pass initialization. Bound
-pipeline, vertex input, and the logical complete texture set are pass-scoped:
-`begin_pass` discards them. The texture set is additionally tied to the bound
+pipeline, vertex input, the instance binding and the logical complete texture
+set are pass-scoped: `begin_pass` discards them. The texture set is additionally tied to the bound
 program and is discarded when that program changes or when the bound pipeline is
 destroyed. Pipeline and vertex-input binds, texture-set application,
 instance-buffer re-pointing, uniform writes and draws outside a pass assert.
@@ -527,7 +580,8 @@ draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
 uniform-buffer binding calls `glBindBufferBase` (`glBindBufferRange` for a
-range) on every request. A depth clear forces the depth
+range) for every recorded request, and the front-end records a slot's binding
+only when buffer, offset or size changed. A depth clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
@@ -709,7 +763,7 @@ All counters are built and counted in every build; there is no counter option
 or runtime toggle. Geometry and instance fields are uint64; operands widen before
 multiplication, and uint64 sums cannot overflow within a frame. Draw calls are
 not a separate field: `nt_gfx_draw_calls()` sums the four accepted draw
-operations. Vertices/indices are submitted
+operations, which are the recorded draws: a merged draw ends `CACHE`. Vertices/indices are submitted
 counts, multiplied by instance count for instanced calls; instances counts only
 instances in instanced calls. These are not rasterized triangles or
 vertex-shader invocations.
@@ -747,7 +801,8 @@ was ACCEPTED, in every build: every public operation, readback and GPU timer
 segment calls included, is one BEGIN/END pair, and END is the only place that
 counts it. It counts every operation, nested ones included (default samplers,
 cascaded destroys). Only frontend cache hits
-(END result CACHE), rejections and losses are left out; an operation whose
+(END result CACHE: an equal bind, or an indexed draw merged into the previous
+one, whose indices still count), rejections and losses are left out; an operation whose
 backend skipped a call as a cache hit (SKIP/CACHE) or found an inactive uniform
 (SKIP/INACTIVE) still ends ACCEPTED and counts. A GPU timer poll with no result
 yet ends `UNREADY`. Texture
@@ -874,11 +929,14 @@ pipeline definition carries the program handle in `related[0]`. Backend
 `DEFINITION/PIPELINE` and `DEFINITION/ATTRIBUTE` records carry the pipeline or
 vertex-input backend slot in `detail`; initial state uses the current raw
 program name. Vertex-input creation copies each static/instance attribute with
-its divisor, layout, and known buffer. Inherited layouts and UBO bindings
-unavailable in existing CPU state are explicitly unknown. The initial SCISSOR
-rectangle is UNKNOWN because the frontend mirror is not authoritative after a
-context loss. Capture
-never adds a persistent GL-state mirror or queries GL to reconstruct them.
+its divisor, layout, and known buffer. The initial SCISSOR record holds the
+carried-over rectangle and the initial UBO records hold each bound slot's
+buffer, offset and size, from the front-end dedup mirrors. The rectangle is
+`UNKNOWN` before the first set and after a context loss; an unbound slot has no
+record. A bind inside the capture that
+ends `CACHE` matches this state or one set earlier in the frame. Inherited
+layouts unavailable in existing CPU state are explicitly unknown. Capture
+never adds a GL-state mirror of its own or queries GL to reconstruct state.
 
 ## Shape strokes
 

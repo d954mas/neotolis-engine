@@ -41,8 +41,10 @@ _Static_assert(_Alignof(nt_gfx_cmd_begin_pass_t) <= 4 && _Alignof(nt_clear_desc_
 
 typedef struct {
     uint32_t *words;
-    uint32_t used;     /* words */
-    uint32_t capacity; /* words */
+    uint32_t used;      /* words */
+    uint32_t capacity;  /* words */
+    uint32_t merge_end; /* words up to the end of the last mergeable draw; 0 = none */
+    uint32_t merge_op;  /* nt_gfx_cmd_t of that draw: DRAW or DRAW_INDEXED */
 } nt_gfx_stream_t;
 
 extern nt_gfx_stream_t g_nt_gfx_stream;
@@ -126,6 +128,29 @@ static inline void nt_gfx_frame_set_scissor_enabled(bool enabled) { nt_gfx_frame
 static inline void nt_gfx_frame_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) { nt_gfx_frame_u32x4(NT_GFX_CMD_DRAW, 3, first_vertex, num_vertices, instance_count, 0); }
 static inline void nt_gfx_frame_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
     nt_gfx_frame_u32x4(NT_GFX_CMD_DRAW_INDEXED, 4, first_index, num_indices, instance_count, index_type);
+}
+/* Extends the previous single-instance draw of the same kind when it is still the last
+ * command (any other command moves `used` past `merge_end`) and the range continues;
+ * callers keep index data restart-free, so the joined draw is identical. True when merged. */
+static inline bool nt_gfx_frame_draw_merging(nt_gfx_cmd_t op, uint32_t first, uint32_t count, uint8_t index_type) {
+    nt_gfx_stream_t *s = &g_nt_gfx_stream;
+    const uint32_t arg_words = (op == NT_GFX_CMD_DRAW_INDEXED) ? 4U : 3U;
+    if (s->merge_end != 0 && s->merge_end == s->used && s->merge_op == (uint32_t)op) {
+        uint32_t *prev = s->words + s->merge_end - arg_words; /* first, count, instances[, index type] */
+        /* The backend passes the count as GLsizei. */
+        if ((uint64_t)prev[0] + prev[1] == first && (uint64_t)prev[1] + count <= INT32_MAX) {
+            prev[1] += count;
+            return true;
+        }
+    }
+    if (op == NT_GFX_CMD_DRAW_INDEXED) {
+        nt_gfx_frame_draw_indexed(first, count, 1, index_type);
+    } else {
+        nt_gfx_frame_draw(first, count, 1);
+    }
+    s->merge_end = s->used;
+    s->merge_op = (uint32_t)op;
+    return false;
 }
 /* The name must have static lifetime; the pointer is stored unaligned, so it goes through memcpy. */
 static inline void nt_gfx_frame_begin_segment(const char *name) { memcpy(nt_gfx_frame_push(NT_GFX_CMD_BEGIN_SEGMENT, sizeof(name)), (const void *)&name, sizeof(name)); }

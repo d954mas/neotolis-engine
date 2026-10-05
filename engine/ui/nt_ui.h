@@ -492,7 +492,7 @@ static inline const nt_ui_probe_node_t *nt_ui_probe_collect_owned(const nt_ui_co
 /* Order: band (baked zIndex) asc, then layer asc within each barrier-delimited run, then declaration. SCISSOR/CUSTOM are hard barriers. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
-/* Window delta over the walk; includes CUSTOM-handler draws. */
+/* Window delta over the walk in recorded draws (merged draws count once); includes CUSTOM-handler draws. */
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
 /* Total Clay commands incl. SCISSOR/CUSTOM/NONE. */
 uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);

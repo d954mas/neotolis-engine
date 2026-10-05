@@ -847,8 +847,9 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     apply_texture_set(&binding, 1);
 
     /* Loss is observed by begin_frame only: a material transition never polls the platform. */
+    const nt_gfx_texture_binding_t other = {.name = binding.name, .texture = make_binding_test_texture(2), .sampler = NT_SAMPLER_DEFAULT};
     nt_gfx_fake_set_context_lost(true);
-    apply_texture_set(&binding, 1);
+    apply_texture_set(&other, 1); /* another texture, so the apply must record a bind */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     nt_gfx_fake_set_context_lost(false);
 
@@ -3218,7 +3219,7 @@ void test_stream_executes_draws_in_call_order_at_end_frame(void) {
     TEST_ASSERT_EQUAL_UINT32(before_draw + 5, g_nt_gfx_stream.used); /* the draw itself is pending */
     nt_gfx_end_pass();
     nt_pipeline_t second = begin_stream_test_pass();
-    nt_gfx_draw_indexed(1, 2, 3);
+    nt_gfx_draw_indexed(1, 3, 3);
     nt_gfx_end_pass();
     const uint32_t recorded_bytes = g_nt_gfx_stream.used * 4U;
 
@@ -3267,6 +3268,265 @@ void test_stream_records_every_draw_phase_call(void) {
     EXPECT_RECORDED(nt_gfx_begin_segment("stream-test"));
     EXPECT_RECORDED(nt_gfx_end_segment());
 #endif
+}
+
+#define EXPECT_NOT_RECORDED(call)                                                                                                                                                                      \
+    do {                                                                                                                                                                                               \
+        const uint32_t before = g_nt_gfx_stream.used;                                                                                                                                                  \
+        call;                                                                                                                                                                                          \
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(before, g_nt_gfx_stream.used, #call);                                                                                                                         \
+    } while (0)
+
+/* An equal bind ends CACHE: nothing recorded, not counted as accepted. */
+void test_equal_binds_record_nothing(void) {
+    nt_buffer_t ubo = make_test_ubo(512);
+    nt_pipeline_t pipeline = begin_stream_test_pass();
+    EXPECT_NOT_RECORDED(nt_gfx_bind_pipeline(pipeline));
+    EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
+    EXPECT_NOT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
+    EXPECT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
+    EXPECT_NOT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 3, 256, 128));
+    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 3, 256, 128));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 3, 0, 128)); /* another range */
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 3));               /* whole buffer */
+    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 3));
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_PIPELINE]);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_VIEWPORT]);
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
+    nt_gfx_end_pass();
+}
+
+/* Pipeline, vertex input and viewport are pass state; the scissor rectangle
+ * and uniform-buffer slots carry over passes. */
+void test_bind_mirrors_follow_their_contract_scope(void) {
+    nt_buffer_t ubo = make_test_ubo(256);
+    nt_pipeline_t pipeline = begin_stream_test_pass();
+    nt_gfx_set_viewport(0, 0, 4, 4);
+    nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_bind_uniform_buffer(ubo, 0);
+    const nt_vertex_input_t vi = {nt_gfx_test_bound_vertex_input()};
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_RECORDED(nt_gfx_bind_pipeline(pipeline));
+    EXPECT_RECORDED(nt_gfx_bind_vertex_input(vi));
+    EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
+    EXPECT_NOT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
+    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 0));
+    nt_gfx_end_pass();
+    /* The mirror does not bypass the pass check. */
+    EXPECT_ASSERT(nt_gfx_bind_pipeline(pipeline));
+}
+
+void test_context_loss_clears_carried_over_bind_mirrors(void) {
+    begin_stream_test_pass();
+    nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_end_pass();
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
+    nt_gfx_end_pass();
+}
+
+/* A buffer re-created in the same pool slot has a new id and binds again; the slot clear
+ * itself is pinned by the capture snapshot test. */
+void test_destroyed_uniform_buffer_leaves_its_slots(void) {
+    nt_buffer_t ubo = make_test_ubo(256);
+    begin_stream_test_pass();
+    nt_gfx_bind_uniform_buffer(ubo, 0);
+    nt_gfx_bind_uniform_buffer(ubo, NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1);
+    nt_gfx_destroy_buffer(ubo);
+    nt_buffer_t again = make_test_ubo(256);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(ubo.id), nt_pool_slot_index(again.id));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(again, 0));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(again, NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(again, NT_GFX_MAX_UNIFORM_BUFFER_SLOTS));
+    nt_gfx_end_pass();
+}
+
+/* A texture set records only the units whose texture or sampler changed in the pass. */
+void test_texture_set_records_only_changed_units(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
+    nt_texture_t a = make_binding_test_texture(1);
+    nt_texture_t b = make_binding_test_texture(2);
+    nt_texture_t c = make_binding_test_texture(3);
+    begin_texture_binding_test_pass(program);
+    nt_gfx_texture_binding_t set[] = {
+        {.name = nt_hash32_str("u_a"), .texture = a, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_b"), .texture = b, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    apply_texture_set(set, 2);
+    EXPECT_NOT_RECORDED(apply_texture_set(set, 2));
+    set[1].texture = c;
+    apply_texture_set(set, 2);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
+    end_texture_binding_test_pass();
+
+    begin_texture_binding_test_pass(program);
+    apply_texture_set(set, 2); /* begin_pass discards the units */
+    TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_fake_bound_texture_count());
+    end_texture_binding_test_pass();
+}
+
+static uint32_t merged_draws_after_end_frame(void) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const uint32_t draws = nt_gfx_fake_draw_trace_count();
+    nt_gfx_begin_frame();
+    return draws;
+}
+
+/* Contiguous indexed draws with no state change between them become one backend draw. */
+void test_contiguous_indexed_draws_merge(void) {
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_pipeline_t pipeline = begin_stream_test_pass();
+    nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_bind_pipeline(pipeline); /* equal bind: records nothing */
+    nt_gfx_draw_indexed(3, 6, 3);
+    nt_gfx_draw_indexed(9, 3, 3);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_DRAW_INDEXED]);
+    TEST_ASSERT_EQUAL_UINT64(12, g_nt_gfx.counters.indices);
+    TEST_ASSERT_EQUAL_UINT64(9, g_nt_gfx.counters.vertices);
+    TEST_ASSERT_EQUAL_UINT32(1, merged_draws_after_end_frame());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(0).first_index);
+    TEST_ASSERT_EQUAL_UINT32(12, nt_gfx_fake_draw_trace_at(0).num_indices);
+}
+
+/* Any recorded command, a gap in the range or an execution of the stream ends the merge. */
+void test_indexed_draw_merge_boundaries(void) {
+    nt_buffer_t spare = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+    nt_buffer_t ubo = make_test_ubo(256);
+    nt_gfx_fake_draw_trace_reset(true);
+    begin_stream_test_pass();
+    nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_set_scissor(0, 0, 1, 1); /* a real state change */
+    nt_gfx_draw_indexed(3, 3, 3);
+    nt_gfx_draw_indexed(9, 3, 3); /* not contiguous */
+    nt_gfx_draw_indexed_instanced(12, 3, 3, 1);
+    nt_gfx_draw_indexed_instanced(15, 3, 3, 1); /* instanced draws never merge */
+    nt_gfx_draw_indexed(18, 3, 3);
+    nt_gfx_destroy_buffer(spare); /* executes the stream */
+    nt_gfx_draw_indexed(21, 3, 3);
+    nt_gfx_draw_indexed(24, 3, 3); /* merges into 21 */
+    nt_gfx_set_viewport(0, 0, 4, 4);
+    nt_gfx_draw_indexed(27, 3, 3);
+    nt_gfx_bind_uniform_buffer(ubo, 0);
+    nt_gfx_draw_indexed(30, 3, 3);
+    /* A segment is a command only with GPU timing compiled in; without it the draws join. */
+    nt_gfx_begin_segment("merge-boundary");
+    nt_gfx_draw_indexed(33, 3, 3);
+    nt_gfx_end_segment();
+    /* 0 | 3 | 9 | 12i | 15i | 18 | 21+24 | 27 | 30 [| 33] */
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_GPU_TIMING_ENABLED ? 10U : 9U, merged_draws_after_end_frame());
+}
+
+/* An orphan keeps the binding; a range that no longer fits the shrunk storage re-validates. */
+void test_orphaned_uniform_buffer_revalidates_its_range(void) {
+    nt_buffer_t ubo = make_test_ubo(512);
+    const uint8_t data[256] = {0};
+    begin_stream_test_pass();
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128);
+    nt_gfx_orphan_buffer(ubo, data, 512);
+    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128));
+    nt_gfx_orphan_buffer(ubo, data, 256);
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128));
+    nt_gfx_end_pass();
+}
+
+void test_register_global_block_asserts_unsupported_slot(void) { EXPECT_ASSERT(nt_gfx_register_global_block("Frame", NT_GFX_MAX_UNIFORM_BUFFER_SLOTS)); }
+
+void test_indexed_draw_merge_spans_texture_updates_but_not_passes(void) {
+    nt_texture_t texture = make_binding_test_texture(1);
+    const uint8_t pixel[4] = {9, 9, 9, 9};
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_pipeline_t pipeline = begin_stream_test_pass();
+    nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_update_texture(texture, 0, 0, 1, 1, pixel); /* never executes the stream */
+    nt_gfx_draw_indexed(3, 3, 3);
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    bind_test_vertex_input();
+    nt_gfx_draw_indexed(6, 3, 3);
+    TEST_ASSERT_EQUAL_UINT32(2, merged_draws_after_end_frame());
+}
+
+/* A failed texture-set apply rejects the next draw; it neither merges nor records. */
+void test_indexed_draw_after_failed_texture_set_is_rejected_not_merged(void) {
+    nt_texture_t husk = make_binding_test_texture(1);
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    nt_texture_t live = make_binding_test_texture(2);
+    nt_gfx_fake_draw_trace_reset(true);
+    begin_texture_binding_test_pass(program);
+    bind_test_vertex_input();
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = live, .sampler = NT_SAMPLER_DEFAULT};
+    apply_texture_set(&binding, 1);
+    nt_gfx_draw_indexed(0, 3, 3);
+    binding.texture = husk;
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    nt_gfx_draw_indexed(3, 3, 3);
+    TEST_ASSERT_EQUAL_UINT64(3, g_nt_gfx.counters.indices);
+    /* The failed set recorded nothing, so the unit mirror still holds the live texture. */
+    binding.texture = live;
+    EXPECT_NOT_RECORDED(apply_texture_set(&binding, 1));
+    TEST_ASSERT_EQUAL_UINT32(1, merged_draws_after_end_frame());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(0).num_indices);
+}
+
+/* The backend passes the count as GLsizei: a sum past INT32_MAX records a second draw. */
+void test_indexed_draw_merge_keeps_the_count_in_glsizei(void) {
+    begin_stream_test_pass();
+    const uint32_t big = 2147483646U; /* INT32_MAX - 1, divisible by 3 */
+    nt_gfx_draw_indexed(0, big - 3U, 3);
+    const uint32_t used = g_nt_gfx_stream.used;
+    nt_gfx_draw_indexed(big - 3U, 3, 3); /* the largest sum still merges */
+    TEST_ASSERT_EQUAL_UINT32(used, g_nt_gfx_stream.used);
+    nt_gfx_draw_indexed(big, 3, 3); /* past INT32_MAX: a second draw */
+    TEST_ASSERT_EQUAL_UINT32(used + 5, g_nt_gfx_stream.used);
+    nt_gfx_end_pass();
+}
+
+/* Plain draws follow the same rule; draws of different kinds never join. */
+void test_contiguous_plain_draws_merge(void) {
+    nt_gfx_fake_draw_trace_reset(true);
+    begin_stream_test_pass();
+    nt_gfx_draw(0, 3);
+    const uint32_t used = g_nt_gfx_stream.used;
+    nt_gfx_draw(3, 6);
+    TEST_ASSERT_EQUAL_UINT32(used, g_nt_gfx_stream.used);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    TEST_ASSERT_EQUAL_UINT64(9, g_nt_gfx.counters.vertices);
+    nt_gfx_draw_indexed(9, 3, 3); /* contiguous numbers, another kind */
+    nt_gfx_draw(9, 3);            /* follows an indexed draw */
+    nt_gfx_draw(15, 3);           /* not contiguous */
+    TEST_ASSERT_EQUAL_UINT32(4, merged_draws_after_end_frame());
+}
+
+void test_indexed_draws_assert_whole_triangles(void) {
+    begin_stream_test_pass();
+    EXPECT_ASSERT(nt_gfx_draw_indexed(0, 4, 3));
+    EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 5, 3, 2));
+    EXPECT_ASSERT(nt_gfx_draw(0, 4));
+    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 5, 2));
+    nt_gfx_end_pass();
+    /* The count is checked before the lost-context return. */
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    EXPECT_ASSERT(nt_gfx_draw_indexed(0, 4, 3));
+    nt_gfx_fake_set_context_lost(false);
 }
 
 void test_stream_records_copies_of_descriptors_and_uniform_values(void) {
@@ -3321,13 +3581,13 @@ void test_buffer_write_executes_earlier_draws_and_recording_continues(void) {
     const uint8_t data[16] = {0};
     nt_gfx_update_buffer(buf, 0, data, sizeof(data));
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
-    nt_gfx_draw_indexed(1, 2, 3);
+    nt_gfx_draw_indexed(3, 3, 3); /* contiguous, but the first draw already executed */
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(0).first_index);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).first_index);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(1).first_index);
     nt_gfx_begin_frame();
 }
 
@@ -3481,6 +3741,20 @@ int main(void) {
     RUN_TEST(test_make_uniform_buffer);
     RUN_TEST(test_stream_executes_draws_in_call_order_at_end_frame);
     RUN_TEST(test_stream_records_every_draw_phase_call);
+    RUN_TEST(test_equal_binds_record_nothing);
+    RUN_TEST(test_bind_mirrors_follow_their_contract_scope);
+    RUN_TEST(test_context_loss_clears_carried_over_bind_mirrors);
+    RUN_TEST(test_destroyed_uniform_buffer_leaves_its_slots);
+    RUN_TEST(test_texture_set_records_only_changed_units);
+    RUN_TEST(test_contiguous_indexed_draws_merge);
+    RUN_TEST(test_indexed_draw_merge_boundaries);
+    RUN_TEST(test_indexed_draw_merge_spans_texture_updates_but_not_passes);
+    RUN_TEST(test_indexed_draw_after_failed_texture_set_is_rejected_not_merged);
+    RUN_TEST(test_indexed_draw_merge_keeps_the_count_in_glsizei);
+    RUN_TEST(test_contiguous_plain_draws_merge);
+    RUN_TEST(test_indexed_draws_assert_whole_triangles);
+    RUN_TEST(test_orphaned_uniform_buffer_revalidates_its_range);
+    RUN_TEST(test_register_global_block_asserts_unsupported_slot);
     RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
     RUN_TEST(test_gpu_timing_toggle_mid_frame_executes_the_stream_only_with_gpu_timing);
     RUN_TEST(test_buffer_write_executes_earlier_draws_and_recording_continues);

@@ -394,9 +394,11 @@ void test_a_b_a_textures_reapply_complete_set_and_ignore_skin_override(void) {
     const uint32_t surface_backend = nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(surface)});
     const uint32_t a_backend = nt_gfx_test_texture_backend_id(texture_a);
     const uint32_t b_backend = nt_gfx_test_texture_backend_id(texture_b);
-    const uint32_t expected[6] = {surface_backend, a_backend, surface_backend, b_backend, surface_backend, a_backend};
-    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_bound_texture_count());
-    for (uint32_t i = 0; i < 6; i++) {
+    /* Every run applies the complete set; gfx records only the units that changed in the pass. */
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    const uint32_t expected[4] = {surface_backend, a_backend, b_backend, a_backend};
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_bound_texture_count());
+    for (uint32_t i = 0; i < 4; i++) {
         TEST_ASSERT_EQUAL_UINT32(expected[i], nt_gfx_fake_bound_texture_at(i));
     }
     const uint32_t default_backend = nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(texture_a));
@@ -498,11 +500,11 @@ void test_material_transition_reapplies_complete_surface_and_skin_set(void) {
     nt_gfx_fake_reset();
     skinned_draw_list(items, 2);
 
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_bound_texture_count());
+    /* The transition applies the complete set again; its unit binds equal the pass state and are dropped. */
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(2));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(3));
 }
 
 void test_indexed_and_nonindexed_meshes_use_matching_draw_paths(void) {

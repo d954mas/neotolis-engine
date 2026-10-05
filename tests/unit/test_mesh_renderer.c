@@ -902,9 +902,10 @@ void test_state_three_materials_same_mesh(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_uniform_vec4_count());
-    /* One bind per material transition; the backend GL cache drops the repeats. */
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_sampler_count());
+    /* Every material transition applies its set; gfx drops the unchanged unit binds of the pass. */
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
 }
 
 void test_state_render_state_split(void) {
@@ -1145,8 +1146,10 @@ void test_state_same_tex_same_sampler_diff_params(void) {
     nt_gfx_fake_reset();
     draw_list(items, 2);
 
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_sampler_count());
+    /* Both materials apply their set; same texture and sampler: the second unit bind of the pass is dropped. */
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
 }
@@ -1763,9 +1766,11 @@ void test_concatenated_runs_rebind_textures_on_a_pipeline_change(void) {
 
     TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(p2.id, nt_gfx_fake_draw_trace_at(s_draw_mark + 2).program.id);
-    /* The repeated run binds nothing; the pipeline change replays uniforms and textures. */
+    /* The repeated run binds nothing; the pipeline change replays uniforms and the texture
+     * set, whose unit bind gfx drops: GL units survive a program change. */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_pipeline_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
 }
 

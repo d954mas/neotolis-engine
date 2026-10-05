@@ -88,7 +88,10 @@ This is one of the most important decisions.
 - render passes
 - render tags
 - sort policy
-- batching choice per pass
+- batching choice per pass (gfx only joins adjacent non-instanced draws
+  with no state change between them, see
+  [draw merge](../render/architecture.md#binding-dedup-and-draw-merge); the order
+  is unchanged)
 - level/scene logic
 - capture ownership semantics
 - high-level content organization

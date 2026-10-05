@@ -487,6 +487,12 @@ void setUp(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
+/* Gfx drops unit binds equal to the pass state; a fresh pass makes each batch bind its whole set. */
+static void begin_fresh_pass(void) {
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 void tearDown(void) {
     if (nt_sprite_renderer_test_initialized()) {
         nt_sprite_renderer_shutdown();
@@ -762,6 +768,7 @@ void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(voi
     nt_material_set_program(mat, program_b);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_set_material(mat);
+    begin_fresh_pass();
     nt_gfx_fake_reset();
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_flush();
@@ -1080,6 +1087,7 @@ void test_sprite_renderer_dead_material_cmd_binds_on_program_unit(void) {
 
     nt_material_destroy(mat);
 
+    begin_fresh_pass(); /* the unit bind must not be dropped as equal to the control flush */
     nt_gfx_fake_reset();
     nt_gfx_fake_draw_trace_reset(true);
     nt_sprite_renderer_flush();
@@ -1167,6 +1175,7 @@ void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
     TEST_ASSERT_EQUAL_UINT32(replacement.id, nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1)));
 
     /* Batch 2: the flush cleared cmd_count, so set_material opens a fresh cmd. */
+    begin_fresh_pass();
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
@@ -1179,6 +1188,7 @@ void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
     /* Batch 3: the cmd resolved when it opened, so neither a later publication nor
      * the material's death changes what it binds -- the resolve cannot be deferred
      * to flush. */
+    begin_fresh_pass();
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
@@ -1200,6 +1210,7 @@ void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
      * slot-1 texture the live material resolved at open while unit 1 follows the page. */
     nt_material_t mat2 = nt_material_create(&mdesc);
     TEST_ASSERT_TRUE(mat2.id != 0);
+    begin_fresh_pass();
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat2);
     /* Region 0 lives on page 0, region 1 on page 1. */
@@ -1207,18 +1218,17 @@ void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
     nt_sprite_renderer_emit_region(s_atlas_res, 1, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_flush();
 
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_bound_texture_count());
+    /* "u_other" is unit 0: the current publication, identical across the split, so the
+     * second half records no bind for it. */
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(2));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(3));
-    /* "u_other" is unit 0: the current publication, identical across the split. */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(2));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(0));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(2));
     /* "u_texture" is unit 1: page 0 then page 1. */
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0))}), nt_gfx_fake_bound_texture_at(1));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1))}), nt_gfx_fake_bound_texture_at(3));
-    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_bound_texture_at(1), nt_gfx_fake_bound_texture_at(3));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1))}), nt_gfx_fake_bound_texture_at(2));
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_bound_texture_at(1), nt_gfx_fake_bound_texture_at(2));
 }
 
 /* A program replaced between an immediate emit and an ECS draw_list puts one
@@ -1241,15 +1251,17 @@ void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) 
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_material_set_program(mat, program_b);
+    const uint32_t sets_before = g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET];
     /* draw_list opens its cmds on the new pipeline without flushing the pending one. */
     nt_sprite_renderer_draw_list(&item, 1);
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(program_b.id, nt_gfx_fake_draw_trace_at(1).program.id);
-    /* One bind per cmd per sampled slot; the backend GL cache drops the second one.
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET] - sets_before);
+    /* Each cmd applies its set; gfx drops the second, equal unit bind of the pass.
      * Params are program state and go out twice. */
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
     nt_gfx_fake_draw_trace_reset(false);
@@ -1592,6 +1604,26 @@ void test_sprite_renderer_stride_change_flushes_pending_batch(void) {
     nt_sprite_renderer_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_nonempty_flush_calls());
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_last_emit_first_vertex());
+}
+
+/* Index 0xFFFF is the WebGL2 primitive-restart value, so a uint16 chunk holds at most 65535 vertices. */
+void test_sprite_renderer_max_vertices_keeps_restart_index_free(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    desc.max_vertices = 65536;
+    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_init(&desc));
+    desc.max_vertices = 65535;
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+}
+
+void test_sprite_renderer_emit_geometry_asserts_partial_triangle(void) {
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(NULL));
+    s_atlas_res = register_test_atlas(0xADULL);
+    nt_sprite_renderer_set_material(create_defaults_test_material(1.0F));
+    const float quad[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const uint16_t whole[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_emit_geometry(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH), quad, 4, whole, 6, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU, NULL, 0); /* control */
+    const uint16_t idx[4] = {0, 1, 2, 3};
+    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_emit_geometry(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH), quad, 4, idx, 4, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU, NULL, 0));
 }
 
 /* With no room for the padding the quad flushes instead and starts the next batch at vertex 0. */
@@ -2281,6 +2313,8 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_custom_block_size_mismatch_asserts);
     RUN_TEST(test_sprite_renderer_draw_list_bakes_material_defaults);
     RUN_TEST(test_sprite_renderer_stride_change_flushes_pending_batch);
+    RUN_TEST(test_sprite_renderer_max_vertices_keeps_restart_index_free);
+    RUN_TEST(test_sprite_renderer_emit_geometry_asserts_partial_triangle);
     RUN_TEST(test_sprite_renderer_align_without_room_starts_quad_at_zero);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_intrinsic_scale_emit_positions_and_uvs);
