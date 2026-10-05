@@ -638,16 +638,8 @@ int main(int argc, char **argv) {
     nt_window_init();
     nt_example_frames_init(argc, argv);
     nt_input_init();
-    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 256U * 1024U,
-                                 .max_shaders = 32,
-                                 .max_programs = 16,
-                                 .max_pipelines = 16,
-                                 .max_buffers = 128,
-                                 .max_textures = 16,
-                                 .max_meshes = 64,
-                                 .max_vertex_inputs = 64,
-                                 .max_render_targets = 16,
-                                 .depth = true});
+    nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&gfx_desc);
     nt_shape_renderer_init();
 
 #ifdef NT_PLATFORM_WEB

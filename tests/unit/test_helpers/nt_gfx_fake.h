@@ -22,6 +22,7 @@ typedef struct {
     uint32_t first_index; /* indexed draws only */
     uint32_t num_indices; /* 0 on a non-indexed draw: the backend gets no vertex count */
     uint32_t instance_count;
+    uint8_t index_type; /* NT_INDEX_NONE on a non-indexed draw */
 } nt_gfx_fake_draw_t;
 
 void nt_gfx_fake_draw_trace_reset(bool enabled);
@@ -58,6 +59,9 @@ void nt_gfx_fake_fail_next_sampler_create(void);
 /* Viewport size the front-end passed to the last begin_pass; 0 for the default framebuffer. */
 uint16_t nt_gfx_fake_last_pass_width(void);
 uint16_t nt_gfx_fake_last_pass_height(void);
+nt_pass_desc_t nt_gfx_fake_last_pass_desc(void);
+nt_clear_desc_t nt_gfx_fake_last_clear_desc(void);
+void nt_gfx_fake_last_uniform_mat4(float out[16]);
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void);
 /* Desc of the last buffer create the backend saw, failed ones included; pointers are borrowed. */
 nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void);

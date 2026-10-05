@@ -112,6 +112,9 @@ static uint32_t s_fake_ubo_bind_count;
 static nt_gfx_fake_ubo_bind_t s_fake_ubo_binds[NT_GFX_FAKE_HISTORY_CAPACITY];
 static uint16_t s_fake_last_pass_width;
 static uint16_t s_fake_last_pass_height;
+static nt_pass_desc_t s_fake_last_pass_desc;
+static nt_clear_desc_t s_fake_last_clear_desc;
+static float s_fake_last_uniform_mat4[16];
 static nt_texture_desc_t s_fake_last_texture_desc;
 static nt_buffer_desc_t s_fake_last_buffer_desc;
 static uint32_t s_fake_last_color_texture_backend;
@@ -251,6 +254,18 @@ uint16_t nt_gfx_fake_last_pass_height(void) {
     nt_gfx_frame_execute();
     return s_fake_last_pass_height;
 }
+nt_pass_desc_t nt_gfx_fake_last_pass_desc(void) {
+    nt_gfx_frame_execute();
+    return s_fake_last_pass_desc;
+}
+nt_clear_desc_t nt_gfx_fake_last_clear_desc(void) {
+    nt_gfx_frame_execute();
+    return s_fake_last_clear_desc;
+}
+void nt_gfx_fake_last_uniform_mat4(float out[16]) {
+    nt_gfx_frame_execute();
+    memcpy(out, s_fake_last_uniform_mat4, sizeof(s_fake_last_uniform_mat4));
+}
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void) { return s_fake_last_texture_desc; }
 nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void) { return s_fake_last_buffer_desc; }
 uint32_t nt_gfx_fake_last_color_texture_backend(void) { return s_fake_last_color_texture_backend; }
@@ -335,6 +350,9 @@ void nt_gfx_fake_reset(void) {
     s_fake_ubo_bind_count = 0;
     s_fake_last_pass_width = 0;
     s_fake_last_pass_height = 0;
+    s_fake_last_pass_desc = (nt_pass_desc_t){0};
+    s_fake_last_clear_desc = (nt_clear_desc_t){0};
+    memset(s_fake_last_uniform_mat4, 0, sizeof(s_fake_last_uniform_mat4));
     s_fake_last_texture_desc = (nt_texture_desc_t){0};
     s_fake_last_buffer_desc = (nt_buffer_desc_t){0};
     s_fake_last_color_texture_backend = 0;
@@ -403,7 +421,7 @@ nt_gfx_fake_draw_t nt_gfx_fake_draw_trace_at(uint32_t index) {
     return s_fake_draws[index];
 }
 
-static void fake_record_draw(uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
+static void fake_record_draw(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
     if (!s_fake_draw_enabled) {
         return;
     }
@@ -418,6 +436,7 @@ static void fake_record_draw(uint32_t first_index, uint32_t num_indices, uint32_
         .first_index = first_index,
         .num_indices = num_indices,
         .instance_count = instance_count,
+        .index_type = index_type,
     };
 }
 
@@ -452,7 +471,7 @@ bool nt_gfx_backend_query_context_lost(void) { return s_fake_context_lost; }
 void nt_gfx_backend_check_timer_disjoint(void) {}
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend, uint16_t width, uint16_t height) {
-    (void)desc;
+    s_fake_last_pass_desc = *desc;
     s_fake_last_pass_target = render_target_backend;
     s_fake_last_pass_width = width;
     s_fake_last_pass_height = height;
@@ -463,7 +482,7 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
 
 void nt_gfx_backend_end_pass(void) {}
 
-void nt_gfx_backend_clear(const nt_clear_desc_t *desc) { (void)desc; }
+void nt_gfx_backend_clear(const nt_clear_desc_t *desc) { s_fake_last_clear_desc = *desc; }
 
 /* Scissor and viewport fake no-ops. State is cached in shared nt_gfx.c
  * so NT_TEST_ACCESS probes can read it back without GL. */
@@ -561,8 +580,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint8_t index_type, uint32_t slot) {
-    (void)index_type;
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
     (void)vbo_backend;
     (void)ibo_backend;
     s_fake_vertex_input_create_count++;
@@ -775,7 +793,7 @@ void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *bloc
 void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
     s_fake_last_uniform_program = program_backend;
     (void)name_hash;
-    (void)matrix;
+    memcpy(s_fake_last_uniform_mat4, matrix, sizeof(s_fake_last_uniform_mat4));
 }
 
 void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_hash, const float *vec) {
@@ -821,14 +839,14 @@ static void fake_complete_draw(void) {
 }
 
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
-    fake_record_draw(0, 0, instance_count);
+    fake_record_draw(0, 0, instance_count, NT_INDEX_NONE);
     fake_complete_draw();
     (void)first_vertex;
     (void)num_vertices;
 }
 
-void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
-    fake_record_draw(first_index, num_indices, instance_count);
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
+    fake_record_draw(first_index, num_indices, instance_count, index_type);
     fake_complete_draw();
 }
 

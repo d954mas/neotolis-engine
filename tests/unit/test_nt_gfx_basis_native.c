@@ -1,4 +1,5 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include "test_helpers/nt_gfx_test_desc.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,15 +39,7 @@ static uint32_t s_blob_size;
 static nt_basisu_info_t s_info;
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
-                                 .max_shaders = 16,
-                                 .max_programs = 8,
-                                 .max_pipelines = 8,
-                                 .max_buffers = 8,
-                                 .max_textures = 16,
-                                 .max_meshes = 4,
-                                 .max_vertex_inputs = 8,
-                                 .max_render_targets = 4});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 8, .max_textures = 16, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 4));
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }

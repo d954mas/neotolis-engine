@@ -538,7 +538,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .load_depth = true});
     const uint8_t red[8] = {255, 0, 0, 255, 255, 0, 0, 255};
-    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0 && !nt_gfx_scissor_enabled()) {
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0) {
         result |= 4U;
     }
     nt_gfx_end_pass();

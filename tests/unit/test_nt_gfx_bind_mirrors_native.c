@@ -629,7 +629,7 @@ static void test_ground_state_disables_scissor(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
     TEST_ASSERT_EQUAL_INT(GL_FALSE, (int)glIsEnabled(GL_SCISSOR_TEST));
-    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
 
 /* The cache survives begin_frame, so a frame that repeats the previous one reaches

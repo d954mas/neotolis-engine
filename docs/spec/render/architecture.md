@@ -70,8 +70,8 @@ backend-resolved arguments of the backend call into one command stream: begin
 and end pass, clear, pipeline, vertex-input and instance-buffer binds, vertex
 attribute defaults, texture-unit and uniform-buffer binds, the mat4, vec4, float
 and int uniform setters, scissor rectangle and enable, viewport, the plain and
-indexed draws (both carry an instance count; the index type comes from the bound
-vertex input, as WebGPU `setIndexBuffer` carries the format), and GPU timing
+indexed draws (both carry an instance count; the indexed draw also carries the
+index type of the bound vertex input), and GPU timing
 segment begin and end. Descriptors and uniform values are copied
 into the stream. `nt_gfx_end_frame` executes the stream in call order. Nothing is
 recorded outside a frame.
@@ -86,8 +86,8 @@ samples must not be rewritten in that frame.
 `nt_gfx_desc_t.stream_capacity` is the byte budget of draw-phase commands
 recorded between executions, allocated once at init; `nt_gfx_desc_defaults()`
 sets 256 KiB, and init asserts at least 4 bytes. The stream never grows: an
-overflow logs the needed and free bytes and asserts, because the capacity is the
-game's budget. `nt_gfx_counters_t.stream_bytes` reports the frame's peak
+overflow logs the needed and free bytes and stops the program, with assertions
+OFF too, because the capacity is the game's budget. `nt_gfx_counters_t.stream_bytes` reports the frame's peak
 recorded bytes between executions, to size the capacity from a real scene.
 
 GL `begin_pass`

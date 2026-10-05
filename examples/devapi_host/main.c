@@ -194,7 +194,6 @@ static void render_pattern(void) {
     nt_gfx_set_scissor(fb_w / 4, fb_h / 4, fb_w / 2, fb_h / 2);
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {k_fg_color[0], k_fg_color[1], k_fg_color[2], k_fg_color[3]}});
-    nt_gfx_set_scissor_enabled(false);
     nt_gfx_end_pass();
 }
 #endif /* NT_DEVAPI_HOST_WEB_CAPTURE */
@@ -305,16 +304,8 @@ int main(void) {
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
     /* Web capture build: a real GL context so the pre-swap capture seam reads a non-blank frame.
        The capture group inits its own fpng encoder in nt_devapi_register_capture (no nt_fpng_init here). */
-    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 256U * 1024U,
-                                 .max_shaders = 32,
-                                 .max_programs = 16,
-                                 .max_pipelines = 16,
-                                 .max_buffers = 128,
-                                 .max_textures = 16,
-                                 .max_meshes = 64,
-                                 .max_vertex_inputs = 64,
-                                 .max_render_targets = 16,
-                                 .depth = true});
+    nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&gfx_desc);
 #endif
 
     /* Obs wiring: host pushes frames into nt_metrics; the log ring captures nt_log_write for log.tail.

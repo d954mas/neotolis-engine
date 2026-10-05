@@ -1,4 +1,5 @@
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 /* Render-target API mechanics via the test backend. */
 
 #include "graphics/nt_gfx.h"
@@ -35,17 +36,7 @@ static void restore_context(void) {
 }
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){
-        .stream_capacity = 64U * 1024U,
-        .max_shaders = 4,
-        .max_programs = 4,
-        .max_pipelines = 4,
-        .max_buffers = 8,
-        .max_textures = 8,
-        .max_meshes = 4,
-        .max_vertex_inputs = 8,
-        .max_render_targets = 4,
-    });
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 4));
     nt_gfx_begin_frame();
     nt_gfx_fake_reset();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -333,7 +324,7 @@ static void test_context_restore_waits_while_backend_remains_lost(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_TRUE(nt_gfx_test_scissor_enabled());
     lose_context();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -345,7 +336,7 @@ static void test_context_restore_waits_while_backend_remains_lost(void) {
     restore_context();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_backend_restore_count());
 }
 // #endregion

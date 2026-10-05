@@ -3,6 +3,7 @@
  * asserts nt_resource_is_ready(atlas). */
 
 /* System headers before Unity -- avoids __declspec(noreturn) clash on MSVC. */
+#include "test_helpers/nt_gfx_test_desc.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -279,15 +280,8 @@ void setUp(void) {
     s_vpack_counter = 0;
 
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
-                                 .max_shaders = 32,
-                                 .max_programs = 16,
-                                 .max_pipelines = 16,
-                                 .max_buffers = 64,
-                                 .max_textures = 32,
-                                 .max_meshes = 16,
-                                 .max_vertex_inputs = 16,
-                                 .max_render_targets = 16});
+    nt_gfx_init(
+        &NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();

@@ -20,9 +20,10 @@ void nt_gfx_frame_shutdown(void) {
     g_nt_gfx_stream = (nt_gfx_stream_t){0};
 }
 
-void nt_gfx_frame_overflow(uint32_t needed_words) {
+_Noreturn void nt_gfx_frame_overflow(uint32_t needed_words) {
     NT_LOG_ERROR("gfx stream overflow: needed %u bytes, free %u of %u", needed_words * 4U, (g_nt_gfx_stream.capacity - g_nt_gfx_stream.used) * 4U, g_nt_gfx_stream.capacity * 4U);
     NT_ASSERT(false && "gfx stream overflow: raise nt_gfx_desc_t.stream_capacity");
+    __builtin_trap(); /* the push would write past the stream */
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one case per recorded backend call
@@ -66,8 +67,7 @@ void nt_gfx_frame_execute(void) {
             w += 3;
             break;
         case NT_GFX_CMD_SET_VERTEX_ATTRIB_DEFAULT: {
-            float value[4];
-            memcpy(value, w + 1, sizeof(value));
+            const float *value = (const float *)(w + 1);
             nt_gfx_backend_set_vertex_attrib_default((uint8_t)w[0], value[0], value[1], value[2], value[3]);
             w += 5;
             break;
@@ -88,13 +88,10 @@ void nt_gfx_frame_execute(void) {
             nt_gfx_backend_set_uniform_vec4(w[0], w[1], (const float *)(w + 2));
             w += 2 + 4;
             break;
-        case NT_GFX_CMD_SET_UNIFORM_FLOAT: {
-            float val;
-            memcpy(&val, w + 2, sizeof(val));
-            nt_gfx_backend_set_uniform_float(w[0], w[1], val);
+        case NT_GFX_CMD_SET_UNIFORM_FLOAT:
+            nt_gfx_backend_set_uniform_float(w[0], w[1], *(const float *)(w + 2));
             w += 2 + 1;
             break;
-        }
         case NT_GFX_CMD_SET_UNIFORM_INT:
             nt_gfx_backend_set_uniform_int(w[0], w[1], (int)w[2]);
             w += 3;
@@ -116,8 +113,8 @@ void nt_gfx_frame_execute(void) {
             w += 3;
             break;
         case NT_GFX_CMD_DRAW_INDEXED:
-            nt_gfx_backend_draw_indexed(w[0], w[1], w[2]);
-            w += 3;
+            nt_gfx_backend_draw_indexed(w[0], w[1], w[2], (uint8_t)w[3]);
+            w += 4;
             break;
         case NT_GFX_CMD_BEGIN_SEGMENT: {
             const char *name;

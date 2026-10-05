@@ -51,8 +51,8 @@ void nt_gfx_frame_init(uint32_t capacity_bytes);
 void nt_gfx_frame_shutdown(void);
 /* Replays the recorded commands in call order and empties the stream. */
 void nt_gfx_frame_execute(void);
-/* Cold path: logs needed/free bytes and asserts. */
-void nt_gfx_frame_overflow(uint32_t needed_words);
+/* Cold path: logs needed/free bytes and stops; it never returns, also with asserts OFF. */
+_Noreturn void nt_gfx_frame_overflow(uint32_t needed_words);
 
 #define NT_GFX_CMD_WORDS(bytes) (((uint32_t)(bytes) + 3U) / 4U)
 
@@ -124,8 +124,8 @@ static inline void nt_gfx_frame_set_scissor(int x, int y, int w, int h) { nt_gfx
 static inline void nt_gfx_frame_set_viewport(int x, int y, int w, int h) { nt_gfx_frame_u32x4(NT_GFX_CMD_SET_VIEWPORT, 4, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h); }
 static inline void nt_gfx_frame_set_scissor_enabled(bool enabled) { nt_gfx_frame_u32x4(NT_GFX_CMD_SET_SCISSOR_ENABLED, 1, enabled ? 1U : 0U, 0, 0, 0); }
 static inline void nt_gfx_frame_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) { nt_gfx_frame_u32x4(NT_GFX_CMD_DRAW, 3, first_vertex, num_vertices, instance_count, 0); }
-static inline void nt_gfx_frame_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
-    nt_gfx_frame_u32x4(NT_GFX_CMD_DRAW_INDEXED, 3, first_index, num_indices, instance_count, 0);
+static inline void nt_gfx_frame_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
+    nt_gfx_frame_u32x4(NT_GFX_CMD_DRAW_INDEXED, 4, first_index, num_indices, instance_count, index_type);
 }
 /* The name must have static lifetime; the pointer is stored unaligned, so it goes through memcpy. */
 static inline void nt_gfx_frame_begin_segment(const char *name) { memcpy(nt_gfx_frame_push(NT_GFX_CMD_BEGIN_SEGMENT, sizeof(name)), (const void *)&name, sizeof(name)); }

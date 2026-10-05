@@ -973,8 +973,6 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
  * inside a pass; every pass starts with scissor disabled. */
 void nt_gfx_set_scissor(int x, int y, int w, int h);
 void nt_gfx_set_scissor_enabled(bool enabled);
-/* Returns the mirror: false after begin_pass and after context restore. */
-bool nt_gfx_scissor_enabled(void);
 void nt_gfx_set_viewport(int x, int y, int w, int h);
 
 /* Returns NT_SAMPLER_INVALID for an invalid handle. A husk left by a context
@@ -1045,6 +1043,7 @@ bool nt_gfx_is_gpu_timing_supported(void);
 
 /* ---- Texture update (uncompressed, non-mipmapped, non-depth textures only, level 0) ---- */
 
+/* Lands before every draw of the frame: do not rewrite a region that a draw of this frame samples. */
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */
@@ -1071,6 +1070,8 @@ void nt_gfx_test_scissor_rect(int out[4]);
 /* Read back the cached viewport rect [x, y, w, h] from the last
  * nt_gfx_set_viewport call. Out-param must be a 4-element int array. */
 void nt_gfx_test_viewport_rect(int out[4]);
+/* The scissor-enable mirror: false after begin_pass and after context restore. */
+bool nt_gfx_test_scissor_enabled(void);
 #endif
 // #endregion
 

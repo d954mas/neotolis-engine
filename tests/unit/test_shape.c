@@ -1,5 +1,6 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 /* NT_TEST_ACCESS defined via CMake target_compile_definitions */
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
@@ -13,15 +14,8 @@
 static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
-                                 .max_shaders = 32,
-                                 .max_programs = 32,
-                                 .max_pipelines = 32,
-                                 .max_buffers = 128,
-                                 .max_textures = 32,
-                                 .max_meshes = 32,
-                                 .max_vertex_inputs = 32,
-                                 .max_render_targets = 16});
+    nt_gfx_init(
+        &NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 32, .max_pipelines = 32, .max_buffers = 128, .max_textures = 32, .max_meshes = 32, .max_vertex_inputs = 32, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_gfx_fake_reset();
     nt_shape_renderer_init();

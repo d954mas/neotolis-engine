@@ -1028,7 +1028,7 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
     NT_ASSERT(id != 0 && "vertex input pool full -- raise nt_gfx_desc_t.max_vertex_inputs");
 
     uint32_t slot = nt_pool_slot_index(id);
-    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, index_type, slot);
+    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, slot);
     if (backend == 0) {
         nt_pool_free(&s_gfx.vertex_input_pool, id);
         return backend_failed("backend vertex input creation failed");
@@ -1862,6 +1862,8 @@ void nt_gfx_test_viewport_rect(int out[4]) {
     out[3] = s_gfx.viewport_rect[3];
 }
 
+bool nt_gfx_test_scissor_enabled(void) { return s_gfx.scissor_enabled; }
+
 uint32_t nt_gfx_test_bound_pipeline(void) { return s_gfx.bound_pipeline; }
 
 nt_pipeline_t nt_gfx_test_pipeline_of_backend(uint32_t backend_handle) { return (nt_pipeline_t){s_gfx.pipeline_pool.slots[backend_handle].id}; }
@@ -2002,8 +2004,6 @@ void nt_gfx_set_scissor_enabled(bool enabled) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_SCISSOR_ENABLE, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
     NT_GFX_END(set_scissor_enabled(enabled));
 }
-
-bool nt_gfx_scissor_enabled(void) { return s_gfx.scissor_enabled; }
 
 static nt_gfx_result_t set_viewport(int x, int y, int w, int h) {
     NT_ASSERT(w >= 0);
@@ -2209,7 +2209,7 @@ static nt_gfx_result_t draw_indexed(uint32_t first_index, uint32_t num_indices, 
 
     g_nt_gfx.counters.vertices += num_vertices;
     g_nt_gfx.counters.indices += num_indices;
-    nt_gfx_frame_draw_indexed(first_index, num_indices, 1);
+    nt_gfx_frame_draw_indexed(first_index, num_indices, 1, s_gfx.bound_index_type);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2244,7 +2244,7 @@ static nt_gfx_result_t draw_indexed_instanced(uint32_t first_index, uint32_t num
     g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
     g_nt_gfx.counters.indices += (uint64_t)num_indices * instance_count;
     g_nt_gfx.counters.instances += instance_count;
-    nt_gfx_frame_draw_indexed(first_index, num_indices, instance_count);
+    nt_gfx_frame_draw_indexed(first_index, num_indices, instance_count, s_gfx.bound_index_type);
     return NT_GFX_RESULT_ACCEPTED;
 }
 

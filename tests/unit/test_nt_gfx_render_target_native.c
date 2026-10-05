@@ -1578,7 +1578,7 @@ static void test_pass_clear_covers_attachment_and_starts_with_scissor_off(void) 
     for (uint32_t i = 0; i < 12; i++) {
         TEST_ASSERT_UINT32_WITHIN(1, 750, (uint32_t)((depth[i] * 1000.0F) + 0.5F));
     }
-    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
     TEST_ASSERT_FALSE(glIsEnabled(GL_SCISSOR_TEST));
     nt_gfx_end_pass();
     destroy_test_target(&target);
@@ -1668,7 +1668,7 @@ static void test_explicit_clear_preserves_unselected_pixels_and_draw_state(void)
     nt_gfx_clear(&(nt_clear_desc_t){.clear_color = {1, 1, 1, 1}, .clear_depth = 1});
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(clears, g_nt_gfx.counters.gl[NT_GFX_GL_glClear]);
-    TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_TRUE(nt_gfx_test_scissor_enabled());
     TEST_ASSERT_TRUE(glIsEnabled(GL_SCISSOR_TEST));
     nt_gfx_draw(0, 3);
     nt_gfx_frame_execute();

@@ -1,3 +1,4 @@
+#include "test_helpers/nt_gfx_test_desc.h"
 #include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -18,15 +19,7 @@ static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_
 
 void setUp(void) {
     /* gfx pulled in transitively via nt_font/nt_resource; stub is fine. */
-    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
-                                 .max_shaders = 4,
-                                 .max_programs = 4,
-                                 .max_pipelines = 4,
-                                 .max_buffers = 4,
-                                 .max_textures = 4,
-                                 .max_meshes = 4,
-                                 .max_vertex_inputs = 8,
-                                 .max_render_targets = 16});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_ui_module_init();
 }

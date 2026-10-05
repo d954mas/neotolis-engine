@@ -580,6 +580,7 @@ int main(int argc, char **argv) {
     nt_input_init();
     nt_example_frames_init(argc, argv);
     s_initial_count = nt_example_arg_u32(argc, argv, "--count", BUNNY_INITIAL_COUNT);
+    NT_ASSERT(s_initial_count <= BUNNY_MAX && "--count exceeds BUNNY_MAX");
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
