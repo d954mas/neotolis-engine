@@ -158,9 +158,9 @@ The source uses any `sampler2D` color format — the uncompressed set (`R8`,
 formats are invalid. `temp` and
 `dest` are distinct valid `RGBA8` targets matching the source size. The helper
 samples the source `NEAREST` with clamped edges, whatever its default sampler;
-taps land on texel centres. Scissor
-must be disabled for the call. The helper leaves scissor disabled and does not
-restore prior graphics bindings.
+taps land on texel centres. Its own passes start with scissor disabled, so the
+caller's scissor does not affect it. The helper does not restore prior graphics
+bindings.
 Blur arguments, readiness of the source and validity of the targets are preconditions
 and assert when violated, as does a link failure in the helper's program.
 Initialization and restore return `NT_ERR_INIT_FAILED` for shader, buffer, or

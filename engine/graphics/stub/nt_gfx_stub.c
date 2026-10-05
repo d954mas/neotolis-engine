@@ -172,8 +172,6 @@ void nt_gfx_set_scissor(int x, int y, int w, int h) {
 
 void nt_gfx_set_scissor_enabled(bool enabled) { (void)enabled; }
 
-bool nt_gfx_scissor_enabled(void) { return false; }
-
 void nt_gfx_set_viewport(int x, int y, int w, int h) {
     (void)x;
     (void)y;

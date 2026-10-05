@@ -333,6 +333,7 @@ typedef struct {
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
+    uint32_t stream_capacity;    /* draw-phase command bytes recorded between executions, default: 256 KiB; allocated once at init */
     bool depth;                  /* request depth buffer (default: true) */
     bool stencil;                /* request stencil buffer (default: false) */
     bool antialias;              /* MSAA (default: false) */
@@ -651,6 +652,7 @@ typedef struct {
     uint64_t texture_upload_calls;
     uint64_t texture_upload_bytes;
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
+    uint32_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
 
@@ -811,6 +813,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_meshes = 128,
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
+        .stream_capacity = 256U * 1024U,
         .depth = true,
         .premultiplied_alpha = true,
     };
@@ -847,7 +850,7 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 void nt_gfx_begin_frame(void);
 /* Required once in every host iteration, also when nothing renders: after the last
  * end_pass and before nt_window_swap_buffers. Requires an open frame with no open pass.
- * Every call that needs no pass stays legal after it. */
+ * Executes the frame's recorded draw-phase calls in call order. */
 void nt_gfx_end_frame(void);
 /* Passes do not nest and run only between begin_frame and end_frame; on a lost context
  * both calls are no-ops, but begin_pass still asserts that order. */
@@ -966,12 +969,10 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
 /* ---- Scissor and viewport ----
  *
  * GL bottom-left convention. Callers thinking in top-left coordinates must
- * y-flip against framebuffer height; the wrapper does not. State persists
- * across frames — caller manages enable/disable explicitly. */
+ * y-flip against framebuffer height; the wrapper does not. Pass-scoped: call
+ * inside a pass; every pass starts with scissor disabled. */
 void nt_gfx_set_scissor(int x, int y, int w, int h);
 void nt_gfx_set_scissor_enabled(bool enabled);
-/* Returns caller-owned state; resets to false after context restore. */
-bool nt_gfx_scissor_enabled(void);
 void nt_gfx_set_viewport(int x, int y, int w, int h);
 
 /* Returns NT_SAMPLER_INVALID for an invalid handle. A husk left by a context
@@ -1006,6 +1007,7 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
  * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets);
  * asserted. Re-bind per draw to re-point. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
+/* Inside a pass. */
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* ---- Uniform buffer ---- */
@@ -1014,7 +1016,7 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
  * multiple of gpu_caps.uniform_buffer_offset_alignment, is nonempty and fits the
  * buffer; WebGL also requires it to cover the block's full data size. Upload every
  * range of a frame before the first draw that reads the buffer: Mali/ANGLE stall on
- * a rewrite of any part of a buffer an earlier draw read. */
+ * a rewrite of any part of a buffer an earlier draw read. Inside a pass. */
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size);
 
@@ -1025,9 +1027,9 @@ void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, ui
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* GPU TIME_ELAPSED segments cannot nest: GL allows only one active query.
- * name must be non-NULL in every configuration. Use a stable string literal
- * for hashed lookup and native debug-group
- * labels. */
+ * Inside a frame. name must be non-NULL and have static lifetime: the pointer
+ * is kept until the recorded commands execute; it also keys the hashed lookup and native
+ * debug-group labels. */
 void nt_gfx_begin_segment(const char *name);
 void nt_gfx_end_segment(void);
 /* out_ns is required. Compile OFF or stub: false with zero output, except on a
@@ -1041,6 +1043,7 @@ bool nt_gfx_is_gpu_timing_supported(void);
 
 /* ---- Texture update (uncompressed, non-mipmapped, non-depth textures only, level 0) ---- */
 
+/* Not ordered against this frame's draws: write a sampled region at most once per frame, before its first draw. */
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */
@@ -1067,6 +1070,8 @@ void nt_gfx_test_scissor_rect(int out[4]);
 /* Read back the cached viewport rect [x, y, w, h] from the last
  * nt_gfx_set_viewport call. Out-param must be a 4-element int array. */
 void nt_gfx_test_viewport_rect(int out[4]);
+/* The scissor-enable mirror: false after begin_pass and after context restore. */
+bool nt_gfx_test_scissor_enabled(void);
 #endif
 // #endregion
 

@@ -55,6 +55,7 @@
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
 
+#include "../shared/nt_example_frames.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
 #include "sponza_assets.h"
@@ -360,6 +361,7 @@ static void load_scene_from_manifest(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
+    nt_example_frames_begin();
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_MESH);
@@ -387,7 +389,9 @@ static void frame(void) {
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
-    nt_input_poll();
+    if (!nt_example_frames_on()) {
+        nt_input_poll();
+    }
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
@@ -624,11 +628,12 @@ static void frame(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    nt_example_frames_end(s_full_promoted && s_scene_loaded);
 
     nt_window_swap_buffers();
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     /* 1. Engine init */
     nt_engine_config_t config = {0};
     config.app_name = "sponza";
@@ -643,6 +648,7 @@ int main(void) {
     g_nt_window.width = 800;
     g_nt_window.height = 600;
     nt_window_init();
+    nt_example_frames_init(argc, argv);
 
     /* 3. Input init */
     nt_input_init();

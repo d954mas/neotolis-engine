@@ -30,7 +30,7 @@ void setUp(void) {
      * This test exercises the metrics-bridge pattern so we init both here: the app publishes walk
      * stats into nt_metrics, the overlay HUD reads them back. */
     nt_metrics_init();
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 }
 
 void tearDown(void) {

@@ -13,14 +13,10 @@ static struct {
 } s_overlay;
 
 // #region Lifecycle
-nt_result_t nt_debug_overlay_init(const nt_debug_overlay_desc_t *desc) {
+void nt_debug_overlay_init(void) {
     NT_ASSERT(!s_overlay.initialized);
-    /* desc carries no live knobs after the nt_metrics inversion; accepted for API stability. */
-    (void)desc;
-
     memset(&s_overlay, 0, sizeof(s_overlay));
     s_overlay.initialized = true;
-    return NT_OK;
 }
 
 void nt_debug_overlay_shutdown(void) { s_overlay.initialized = false; }

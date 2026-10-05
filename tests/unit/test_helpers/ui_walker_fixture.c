@@ -1,5 +1,6 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 
 /* Empty TU when NT_TEST_ACCESS undefined (helper compiled into non-UI binaries). */
 #ifdef NT_TEST_ACCESS
@@ -56,7 +57,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_mem_scratch_init((size_t)64U * 1024U); /* NT_UI_DATA_LAYER / NT_UI_DATA_FULL allocate here. */
     nt_gfx_init(
-        &(nt_gfx_desc_t){.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16, .max_render_targets = 16});
+        &NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();

@@ -1,3 +1,4 @@
+#include "graphics/nt_gfx_frame.h"
 #include "graphics/nt_gfx_internal.h"
 
 #include <stdlib.h>
@@ -143,7 +144,7 @@ static struct {
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
     uint8_t bound_index_type;    /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
     uint8_t texture_set_state;   /* nt_gfx_texture_set_state_t for the bound pipeline's program */
-    bool scissor_enabled;        /* mirrors GL_SCISSOR_TEST */
+    bool scissor_enabled;        /* GL_SCISSOR_TEST as recorded */
 
     /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
      * probes read them; production never does. */
@@ -169,6 +170,7 @@ static const nt_gfx_texture_meta_t *render_target_size_meta(uint32_t rt_slot) {
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
     NT_ASSERT(name != NULL);
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UNIFORM_BLOCK, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = nt_hash32_str(name).value; event->data.binding.slot = binding_slot);
     NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
     /* Borrowed until nt_gfx_shutdown; use a string literal or equally long-lived immutable storage. */
@@ -351,6 +353,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
         NT_ASSERT(g_nt_gfx_capture.events != NULL);
     }
 #endif
+    nt_gfx_frame_init(desc->stream_capacity);
     /* Init work, like everything after it, belongs to the first frame. */
     open_frame();
 
@@ -396,6 +399,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_shutdown(void) {
+    nt_gfx_frame_shutdown();
     /* The open frame is discarded unpublished; teardown calls must not record into the freed array. */
 #if NT_GFX_CAPTURE_ENABLED
     g_nt_gfx_capture.recording = false;
@@ -632,6 +636,7 @@ void nt_gfx_begin_frame(void) {
 void nt_gfx_end_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "end_frame: needs an open frame with no open pass");
+    nt_gfx_frame_execute();
     s_gfx.render_state = NT_GFX_STATE_ENDED;
 }
 
@@ -678,6 +683,7 @@ static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uin
 }
 
 bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_READ_PIXELS, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = (uint32_t)x; event->data.state.integers[1] = (uint32_t)y;
                          event->data.state.integers[2] = (uint32_t)w; event->data.state.integers[3] = (uint32_t)h);
     const nt_gfx_result_t result = read_pixels(x, y, w, h, out, out_cap);
@@ -722,7 +728,12 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     discard_texture_set();
     s_gfx.bound_vertex_input = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
-    nt_gfx_backend_begin_pass(desc, render_target_backend, width, height);
+    /* Scissor is pass-scoped: every pass starts with it off. */
+    if (s_gfx.scissor_enabled) {
+        s_gfx.scissor_enabled = false;
+        nt_gfx_frame_set_scissor_enabled(false);
+    }
+    nt_gfx_frame_begin_pass(desc, render_target_backend, width, height);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -753,7 +764,7 @@ static nt_gfx_result_t end_pass(void) {
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
     s_gfx.active_render_target = 0;
-    nt_gfx_backend_end_pass();
+    nt_gfx_frame_end_pass();
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -769,7 +780,7 @@ static nt_gfx_result_t clear(const nt_clear_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "clear requires an open pass");
     if (desc->color || desc->depth) {
-        nt_gfx_backend_clear(desc);
+        nt_gfx_frame_clear(desc);
     }
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -1357,6 +1368,7 @@ static nt_gfx_result_t destroy_shader(nt_shader_t shd) {
 }
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_SHADER, shd.id);
     NT_GFX_END(destroy_shader(shd));
 }
@@ -1385,6 +1397,7 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
 }
 
 void nt_gfx_destroy_program(nt_program_t prog) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PROGRAM, prog.id);
     NT_GFX_END(destroy_program(prog));
 }
@@ -1406,6 +1419,7 @@ static nt_gfx_result_t destroy_pipeline(nt_pipeline_t pip) {
 }
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, pip.id);
     NT_GFX_END(destroy_pipeline(pip));
 }
@@ -1428,6 +1442,7 @@ static nt_gfx_result_t destroy_vertex_input(nt_vertex_input_t vi) {
 }
 
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_VERTEX_INPUT, vi.id);
     NT_GFX_END(destroy_vertex_input(vi));
 }
@@ -1462,11 +1477,13 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id);
     NT_GFX_END(destroy_buffer(buf));
 }
 
 void nt_gfx_destroy_texture(nt_texture_t tex) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE, tex.id);
     NT_GFX_END(destroy_texture(tex));
 }
@@ -1490,6 +1507,7 @@ static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
 }
 
 void nt_gfx_destroy_render_target(nt_render_target_t rt) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_RENDER_TARGET, rt.id);
     NT_GFX_END(destroy_render_target(rt));
 }
@@ -1586,7 +1604,7 @@ static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
     }
     /* Loss frees pipeline slots, so a live slot always has a backend. */
     s_gfx.bound_pipeline = pip.id;
-    nt_gfx_backend_bind_pipeline(slot);
+    nt_gfx_frame_bind_pipeline(slot);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1616,7 +1634,7 @@ static nt_gfx_result_t bind_vertex_input(nt_vertex_input_t vi) {
     s_gfx.bound_vertex_input = vi.id;
     /* NT_INDEX_NONE for a non-indexed vertex input: cleared, not stale. */
     s_gfx.bound_index_type = s_gfx.vertex_input_metas[slot].index_type;
-    nt_gfx_backend_bind_vertex_input(slot);
+    nt_gfx_frame_bind_vertex_input(slot);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1770,8 +1788,7 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
         if ((applied_mask & (uint8_t)(1U << unit)) == 0) {
             continue;
         }
-        nt_gfx_backend_bind_texture(texture_backends[unit], unit);
-        nt_gfx_backend_bind_sampler(sampler_backends[unit], unit);
+        nt_gfx_frame_bind_texture_unit(texture_backends[unit], sampler_backends[unit], unit);
     }
     s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_APPLIED;
     return NT_GFX_RESULT_ACCEPTED;
@@ -1845,7 +1862,11 @@ void nt_gfx_test_viewport_rect(int out[4]) {
     out[3] = s_gfx.viewport_rect[3];
 }
 
+bool nt_gfx_test_scissor_enabled(void) { return s_gfx.scissor_enabled; }
+
 uint32_t nt_gfx_test_bound_pipeline(void) { return s_gfx.bound_pipeline; }
+
+nt_pipeline_t nt_gfx_test_pipeline_of_backend(uint32_t backend_handle) { return (nt_pipeline_t){s_gfx.pipeline_pool.slots[backend_handle].id}; }
 
 uint32_t nt_gfx_test_bound_vertex_input(void) { return s_gfx.bound_vertex_input; }
 
@@ -1950,11 +1971,12 @@ static nt_gfx_result_t set_scissor(int x, int y, int w, int h) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_scissor: must be called inside a pass");
     s_gfx.scissor_rect[0] = x;
     s_gfx.scissor_rect[1] = y;
     s_gfx.scissor_rect[2] = w;
     s_gfx.scissor_rect[3] = h;
-    nt_gfx_backend_set_scissor(x, y, w, h);
+    nt_gfx_frame_set_scissor(x, y, w, h);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1968,12 +1990,13 @@ static nt_gfx_result_t set_scissor_enabled(bool enabled) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_scissor_enabled: must be called inside a pass");
     /* The mirror owns this state end to end, so the dedup lives here and the backend stays raw. */
     if (s_gfx.scissor_enabled == enabled) {
         return NT_GFX_RESULT_CACHE;
     }
     s_gfx.scissor_enabled = enabled;
-    nt_gfx_backend_set_scissor_enabled(enabled);
+    nt_gfx_frame_set_scissor_enabled(enabled);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -1982,19 +2005,18 @@ void nt_gfx_set_scissor_enabled(bool enabled) {
     NT_GFX_END(set_scissor_enabled(enabled));
 }
 
-bool nt_gfx_scissor_enabled(void) { return s_gfx.scissor_enabled; }
-
 static nt_gfx_result_t set_viewport(int x, int y, int w, int h) {
     NT_ASSERT(w >= 0);
     NT_ASSERT(h >= 0);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_viewport: must be called inside a pass");
     s_gfx.viewport_rect[0] = x;
     s_gfx.viewport_rect[1] = y;
     s_gfx.viewport_rect[2] = w;
     s_gfx.viewport_rect[3] = h;
-    nt_gfx_backend_set_viewport(x, y, w, h);
+    nt_gfx_frame_set_viewport(x, y, w, h);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2018,7 +2040,7 @@ static nt_gfx_result_t set_uniform_mat4(nt_hash32_t name, const float *matrix) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(matrix != NULL);
-    nt_gfx_backend_set_uniform_mat4(uniform_target_program(), name.value, matrix);
+    nt_gfx_frame_set_uniform_mat4(uniform_target_program(), name.value, matrix);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2034,7 +2056,7 @@ static nt_gfx_result_t set_uniform_vec4(nt_hash32_t name, const float *vec) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(vec != NULL);
-    nt_gfx_backend_set_uniform_vec4(uniform_target_program(), name.value, vec);
+    nt_gfx_frame_set_uniform_vec4(uniform_target_program(), name.value, vec);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2049,7 +2071,7 @@ static nt_gfx_result_t set_uniform_float(nt_hash32_t name, float val) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    nt_gfx_backend_set_uniform_float(uniform_target_program(), name.value, val);
+    nt_gfx_frame_set_uniform_float(uniform_target_program(), name.value, val);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2063,7 +2085,7 @@ static nt_gfx_result_t set_uniform_int(nt_hash32_t name, int val) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    nt_gfx_backend_set_uniform_int(uniform_target_program(), name.value, val);
+    nt_gfx_frame_set_uniform_int(uniform_target_program(), name.value, val);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2120,7 +2142,7 @@ static nt_gfx_result_t draw(uint32_t first_vertex, uint32_t num_vertices) {
     assert_instance_attribs_pointed();
 
     g_nt_gfx.counters.vertices += num_vertices;
-    nt_gfx_backend_draw(first_vertex, num_vertices);
+    nt_gfx_frame_draw(first_vertex, num_vertices, 1);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2153,7 +2175,7 @@ static nt_gfx_result_t draw_instanced(uint32_t first_vertex, uint32_t num_vertic
 
     g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
     g_nt_gfx.counters.instances += instance_count;
-    nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
+    nt_gfx_frame_draw(first_vertex, num_vertices, instance_count);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2187,7 +2209,7 @@ static nt_gfx_result_t draw_indexed(uint32_t first_index, uint32_t num_indices, 
 
     g_nt_gfx.counters.vertices += num_vertices;
     g_nt_gfx.counters.indices += num_indices;
-    nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
+    nt_gfx_frame_draw_indexed(first_index, num_indices, 1, s_gfx.bound_index_type);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2222,7 +2244,7 @@ static nt_gfx_result_t draw_indexed_instanced(uint32_t first_index, uint32_t num
     g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
     g_nt_gfx.counters.indices += (uint64_t)num_indices * instance_count;
     g_nt_gfx.counters.instances += instance_count;
-    nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
+    nt_gfx_frame_draw_indexed(first_index, num_indices, instance_count, s_gfx.bound_index_type);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2272,7 +2294,7 @@ static nt_gfx_result_t bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offse
     NT_ASSERT(s_gfx.vertex_input_metas[vi_slot].instance_attr_count > 0 && "bind_instance_buffer: bound vertex input declares no instance layout");
     s_gfx.vertex_input_metas[vi_slot].instance_pointed = true;
     s_gfx.vertex_input_metas[vi_slot].inst_buf_id = buf.id;
-    nt_gfx_backend_bind_instance_buffer(vi_slot, s_gfx.buffer_backends[slot], byte_offset);
+    nt_gfx_frame_bind_instance_buffer(vi_slot, s_gfx.buffer_backends[slot], byte_offset);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2285,7 +2307,8 @@ static nt_gfx_result_t set_vertex_attrib_default(uint8_t location, float x, floa
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    nt_gfx_backend_set_vertex_attrib_default(location, x, y, z, w);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_vertex_attrib_default: must be called inside a pass");
+    nt_gfx_frame_set_vertex_attrib_default(location, x, y, z, w);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2303,6 +2326,7 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint3
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_buffer: must be called inside a pass");
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         NT_LOG_ERROR("bind_uniform_buffer: invalid handle");
         return NT_GFX_RESULT_INVALID_HANDLE;
@@ -2332,7 +2356,7 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint3
         NT_LOG_ERROR_ONCE("bind_uniform_buffer: buffer has no live backend");
         return NT_GFX_RESULT_UNREADY;
     }
-    nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot, offset, size);
+    nt_gfx_frame_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot, offset, size);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2369,15 +2393,21 @@ static nt_gfx_result_t update_buffer(nt_buffer_t buf, uint32_t offset, const voi
 }
 
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.related[0] = offset; event->data.resource.flags = data != NULL);
     NT_GFX_END(update_buffer(buf, offset, data, size));
 }
 
 static nt_gfx_result_t begin_segment(const char *name) {
+    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_ENDED && "begin_segment: must be called inside a frame");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    nt_gfx_backend_begin_segment(name);
+#if NT_GFX_GPU_TIMING_ENABLED
+    nt_gfx_frame_begin_segment(name);
+#else
+    (void)name;
+#endif
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2388,10 +2418,13 @@ void nt_gfx_begin_segment(const char *name) {
 }
 
 static nt_gfx_result_t end_segment(void) {
+    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_ENDED && "end_segment: must be called inside a frame");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    nt_gfx_backend_end_segment();
+#if NT_GFX_GPU_TIMING_ENABLED
+    nt_gfx_frame_end_segment();
+#endif
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2416,6 +2449,9 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 }
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
+#if NT_GFX_GPU_TIMING_ENABLED /* OFF keeps the toggle inert */
+    nt_gfx_frame_execute();
+#endif
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
@@ -2442,6 +2478,7 @@ static nt_gfx_result_t orphan_buffer(nt_buffer_t buf, const void *data, uint32_t
 }
 
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_ORPHAN, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.flags = data != NULL);
     NT_GFX_END(orphan_buffer(buf, data, size));
 }

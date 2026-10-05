@@ -500,7 +500,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_hash32_t uniform = nt_hash32_str("u_depth");
     float z[4] = {-0.5F, 0.0F, 0.0F, 0.0F};
-    nt_gfx_set_scissor_enabled(false);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = prepass, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(input);
@@ -539,10 +538,9 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .load_depth = true});
     const uint8_t red[8] = {255, 0, 0, 255, 255, 0, 0, 255};
-    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0 && nt_gfx_scissor_enabled()) {
+    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0) {
         result |= 4U;
     }
-    nt_gfx_set_scissor_enabled(false);
     nt_gfx_end_pass();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
     nt_gfx_bind_pipeline(overwrite);
@@ -733,11 +731,16 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
     const char *names[] = {"diagnostics-a", "diagnostics-b", "diagnostics-c"};
     NT_ASSERT(segment >= 0 && segment < 3);
     switch (operation) {
+    /* Segment commands are recorded; a frame of their own executes their GL work before the hook returns. */
     case 0:
+        nt_gfx_begin_frame();
         nt_gfx_begin_segment(names[segment]);
+        nt_gfx_end_frame();
         break;
     case 1:
+        nt_gfx_begin_frame();
         nt_gfx_end_segment();
+        nt_gfx_end_frame();
         break;
     case 2:
         nt_gfx_set_gpu_timing_enabled(false);

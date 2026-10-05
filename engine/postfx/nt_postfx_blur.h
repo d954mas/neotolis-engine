@@ -26,7 +26,7 @@ nt_result_t nt_postfx_blur_restore_gpu(void);
 /* Borrows a ready source texture and valid temp/dest targets of matching dimensions; source must be
  * R8/RG8/RGB8/RGBA8/RGBA16F/RGBA32F (sampler2D).
  * The source is sampled NEAREST with clamped edges; taps land on texel centres.
- * Scissor must be disabled and is left unchanged; pass and binding state are not restored.
+ * Runs outside a pass; its own passes start with scissor disabled. Pass and binding state are not restored.
  * The helper never creates, destroys, or stores caller handles. */
 void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass);
 

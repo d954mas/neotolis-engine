@@ -260,7 +260,8 @@ test('diagnostics: full ring stays nonblocking and pending full ring is disjoint
   });
   expect(observed.fullDisjoint).toEqual({ ...zero, disjoint: 1 });
   expect(observed.invalidated).toBe(-1);
-  expect(observed.overflow).toEqual({ ...zero, begin: 9, end: 9, available: 1 });
+  // Each segment command runs in its own frame; begin_frame reads disjoint while work is pending (17 of 18 frames).
+  expect(observed.overflow).toEqual({ ...zero, begin: 9, end: 9, available: 1, disjoint: 17 });
 });
 
 test('diagnostics: unsupported timer capability performs no timer work', async ({ page }) => {
@@ -360,7 +361,8 @@ test('diagnostics: loss cancels dead queries and restore preserves OFF and repro
     expect(restored.supported).toBe(supported);
     expect(restored.whileOff).toEqual(zero);
     expect(restored.old).toBe(-1);
-    expect(restored.resumed).toEqual(supported ? { ...zero, create: 8, begin: 1, end: 1 } : zero);
+    // The end-segment command's own frame reads disjoint once while the resumed query is active.
+    expect(restored.resumed).toEqual(supported ? { ...zero, create: 8, begin: 1, end: 1, disjoint: 1 } : zero);
     expect(restored.timerExtensions).toBe(expected.gpu ? 1 : 0);
     const pixels = await page.evaluate(() => {
       const api = (window as unknown as { __nt: DiagnosticsHooks }).__nt;

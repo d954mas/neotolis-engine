@@ -1,4 +1,5 @@
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <setjmp.h>
 #include <stdio.h>
@@ -243,7 +244,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
     nt_gfx_fake_reset();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture"}, 1);
     nt_hash_init(&(nt_hash_desc_t){0});

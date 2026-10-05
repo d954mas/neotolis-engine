@@ -955,14 +955,7 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
         }
     }
     if (clear != 0) {
-        bool scissor = nt_gfx_scissor_enabled();
-        if (scissor) {
-            NT_GL(glDisable, GL_SCISSOR_TEST);
-        }
-        NT_GL(glClear, clear);
-        if (scissor) {
-            NT_GL(glEnable, GL_SCISSOR_TEST);
-        }
+        NT_GL(glClear, clear); /* scissor is off: the front-end disables it before every pass */
     }
 }
 
@@ -1181,12 +1174,23 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
 
 /* ---- Draw calls ---- */
 
-void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) { NT_GL(glDrawArrays, GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices); }
+void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
+    if (instance_count == 1) {
+        NT_GL(glDrawArrays, GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices);
+    } else {
+        NT_GL(glDrawArraysInstanced, GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices, (GLsizei)instance_count);
+    }
+}
 
-void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type) {
-    GLenum gl_type = (index_type == 2) ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
-    uint32_t stride = (index_type == 2) ? sizeof(uint32_t) : sizeof(uint16_t);
-    NT_GL(glDrawElements, GL_TRIANGLES, (GLsizei)num_indices, gl_type, nt_gl_offset((uintptr_t)first_index * stride));
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
+    const bool wide = index_type == NT_INDEX_UINT32;
+    const GLenum gl_type = wide ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
+    const void *offset = nt_gl_offset((uintptr_t)first_index * (wide ? sizeof(uint32_t) : sizeof(uint16_t)));
+    if (instance_count == 1) {
+        NT_GL(glDrawElements, GL_TRIANGLES, (GLsizei)num_indices, gl_type, offset);
+    } else {
+        NT_GL(glDrawElementsInstanced, GL_TRIANGLES, (GLsizei)num_indices, gl_type, offset, (GLsizei)instance_count);
+    }
 }
 
 /* ---- Resource management (shader / buffer / pipeline) ---- */
@@ -2073,7 +2077,7 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
+static void bind_texture(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "bind_texture: slot out of range");
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && s_texture_gl[backend_handle] != 0 && "bind_texture: requires a live texture");
     GLuint tex = s_texture_gl[backend_handle];
@@ -2128,7 +2132,7 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
-void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
+static void bind_sampler(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "bind_sampler: slot out of range");
     NT_ASSERT(backend_handle != 0 && "bind_sampler: sampling without a sampler object");
     GLuint sampler = (GLuint)backend_handle;
@@ -2141,14 +2145,9 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     s_gl_cache.bound_samplers[slot] = sampler;
 }
 
-void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
-    NT_GL(glDrawArraysInstanced, GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices, (GLsizei)instance_count);
-}
-
-void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
-    GLenum gl_type = (index_type == 2) ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
-    uint32_t stride = (index_type == 2) ? sizeof(uint32_t) : sizeof(uint16_t);
-    NT_GL(glDrawElementsInstanced, GL_TRIANGLES, (GLsizei)num_indices, gl_type, nt_gl_offset((uintptr_t)first_index * stride), (GLsizei)instance_count);
+void nt_gfx_backend_bind_texture_unit(uint32_t texture_backend, uint32_t sampler_backend, uint32_t slot) {
+    bind_texture(texture_backend, slot);
+    bind_sampler(sampler_backend, slot);
 }
 
 /* ---- Context loss recovery ---- */

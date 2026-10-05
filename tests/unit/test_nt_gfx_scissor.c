@@ -1,4 +1,5 @@
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 /* Scissor and viewport API round-trip via NT_TEST_ACCESS probes. */
 
 #include <stdbool.h>
@@ -10,17 +11,9 @@
 #include "graphics/nt_gfx_internal.h"
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){
-        .max_shaders = 4,
-        .max_programs = 4,
-        .max_pipelines = 4,
-        .max_buffers = 8,
-        .max_textures = 4,
-        .max_meshes = 4,
-        .max_vertex_inputs = 8,
-        .max_render_targets = 16,
-    });
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 16));
     nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
 
@@ -40,9 +33,9 @@ static void test_set_scissor_round_trips(void) {
 /* ---- GFX-02: nt_gfx_set_scissor_enabled round-trips via probe ---- */
 static void test_set_scissor_enabled_round_trips(void) {
     nt_gfx_set_scissor_enabled(true);
-    TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_TRUE(nt_gfx_test_scissor_enabled());
     nt_gfx_set_scissor_enabled(false);
-    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
 
 /* ---- GFX-03: nt_gfx_set_viewport round-trips ---- */
@@ -84,6 +77,7 @@ static void test_context_restore_resets_the_scissor_mirror(void) {
     nt_gfx_set_scissor_enabled(true);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_set_scissor_enabled_count());
 
+    nt_gfx_end_pass();
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -92,8 +86,9 @@ static void test_context_restore_resets_the_scissor_mirror(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor_enabled(true);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_set_scissor_enabled_count());
 }

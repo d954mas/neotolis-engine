@@ -149,7 +149,7 @@ typedef struct {
     float opacity;
 } nt_ui_custom_frame_t;
 
-/* Handler owns any GL state it touches; walker only rebinds sprite material on return. */
+/* Handler owns any gfx draw state it changes, through nt_gfx only; walker only rebinds sprite material on return. */
 typedef void (*nt_ui_custom_handler_t)(const nt_ui_custom_frame_t *frame, void *userdata);
 
 /* Command and borrowed payload must outlive every consuming walk; scratch reset invalidates both.

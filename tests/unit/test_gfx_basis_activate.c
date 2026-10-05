@@ -12,6 +12,7 @@
 #include "nt_mesh_format.h"
 #include "nt_texture_format.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 #include "unity.h"
 
 /* --- Assert catching (same hookable-handler longjmp as test_gfx.c) --- */
@@ -39,8 +40,8 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 #define TEST_MAX_TEXTURES 8
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){
-        .max_shaders = 4, .max_programs = 2, .max_pipelines = 2, .max_buffers = 8, .max_textures = TEST_MAX_TEXTURES, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 2});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 2, .max_pipelines = 2, .max_buffers = 8, .max_textures = TEST_MAX_TEXTURES, .max_meshes = 4, .max_vertex_inputs = 4,
+                                  .max_render_targets = 2));
     nt_gfx_begin_frame();
 }
 

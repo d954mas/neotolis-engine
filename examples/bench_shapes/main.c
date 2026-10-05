@@ -1,3 +1,4 @@
+#include "../shared/nt_example_frames.h"
 #include "app/nt_app.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -490,8 +491,11 @@ static void draw_shapes(void) {
 
 static void frame(void) {
     nt_window_poll();
+    nt_example_frames_begin();
     nt_gfx_begin_frame();
-    nt_input_poll();
+    if (!nt_example_frames_on()) {
+        nt_input_poll();
+    }
     float dt = g_nt_app.dt;
     nt_accumulator_update(&s_acc, dt);
 
@@ -508,7 +512,7 @@ static void frame(void) {
     s_dt_count++;
     s_log_timer += dt;
 
-    if (s_log_timer >= 1.0F) {
+    if (s_log_timer >= 1.0F && !nt_example_frames_on()) { /* the --frames report replaces it */
         float avg = s_dt_sum / (float)s_dt_count;
         float render_avg = s_render_sum / (float)s_dt_count;
         const nt_gfx_counters_t stats = g_nt_gfx.last_frame; /* previous frame; this one has not drawn yet */
@@ -601,6 +605,7 @@ static void frame(void) {
     nt_shape_renderer_flush();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    nt_example_frames_end(true);
     double t_render_end = nt_time_now();
     float render_ms = (float)(t_render_end - t_render_start) * 1000.0F;
     s_render_sum += render_ms;
@@ -617,7 +622,7 @@ static void frame(void) {
 #endif
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     nt_engine_config_t config = {0};
     config.app_name = "bench_shapes";
     config.version = 1;
@@ -631,9 +636,10 @@ int main(void) {
     g_nt_window.width = 800;
     g_nt_window.height = 600;
     nt_window_init();
+    nt_example_frames_init(argc, argv);
     nt_input_init();
-    nt_gfx_init(&(nt_gfx_desc_t){
-        .max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 128, .max_textures = 16, .max_meshes = 64, .max_vertex_inputs = 64, .max_render_targets = 16, .depth = true});
+    nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&gfx_desc);
     nt_shape_renderer_init();
 
 #ifdef NT_PLATFORM_WEB

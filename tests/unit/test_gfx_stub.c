@@ -89,7 +89,6 @@ static void test_stub_drops_draws_and_state_changes(void) {
     nt_gfx_draw_indexed(0, 3, 3);
     nt_gfx_draw_indexed_instanced(0, 3, 3, 4);
     nt_gfx_end_pass();
-    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
     TEST_ASSERT_EQUAL_UINT64(0, g_nt_gfx.counters.vertices);
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);

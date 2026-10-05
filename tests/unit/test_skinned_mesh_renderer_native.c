@@ -13,6 +13,7 @@
 #include "renderers/nt_skinned_mesh_renderer.h"
 #include "resource/nt_resource.h"
 #include "skin_comp/nt_skin_comp.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
 
@@ -479,16 +480,7 @@ void setUp(void) {
     char *reference_source = NULL;
     char *fragment_source = NULL;
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&(nt_gfx_desc_t){
-        .max_shaders = 8,
-        .max_programs = 4,
-        .max_pipelines = 8,
-        .max_buffers = 32,
-        .max_textures = 8,
-        .max_meshes = 16,
-        .max_vertex_inputs = 64,
-        .max_render_targets = 4,
-    });
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 8, .max_buffers = 32, .max_textures = 8, .max_meshes = 16, .max_vertex_inputs = 64, .max_render_targets = 4));
     nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 32});

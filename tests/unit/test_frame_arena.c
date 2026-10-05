@@ -1,4 +1,5 @@
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 
 #include <string.h>
 
@@ -10,7 +11,7 @@
 
 void setUp(void) {
     /* One buffer slot: only the arena creates buffers, so a restore that leaks its old buffer cannot create. */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 1, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 4});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 1, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 4));
     nt_gfx_begin_frame();
 }
 

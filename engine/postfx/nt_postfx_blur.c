@@ -275,12 +275,6 @@ static bool validate_module_and_pass(const nt_postfx_blur_pass_t *pass) {
     return s_blur.initialized && s_blur.gpu_ready && pass != NULL;
 }
 
-static bool validate_scissor_state(void) {
-    bool disabled = !nt_gfx_scissor_enabled();
-    NT_ASSERT(disabled && "nt_postfx_blur_gaussian: scissor must be disabled");
-    return disabled;
-}
-
 static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_targets_t *targets) {
     targets->temp_color = nt_gfx_render_target_color(pass->temp);
     targets->dest_color = nt_gfx_render_target_color(pass->dest);
@@ -346,9 +340,6 @@ static bool build_validated_kernel(const nt_postfx_blur_pass_t *pass, uint32_t *
 
 static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radius, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) {
     if (!validate_module_and_pass(pass)) {
-        return false;
-    }
-    if (!validate_scissor_state()) {
         return false;
     }
     blur_pass_targets_t targets;

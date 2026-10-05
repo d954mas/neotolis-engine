@@ -1,11 +1,13 @@
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_frame.h"
 #include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 #include "unity.h"
 
 #include <math.h>
@@ -15,9 +17,10 @@
 /* --- Assert catching (setjmp/longjmp via hookable handler) --- */
 
 static jmp_buf s_assert_jmp;
+static const char *s_assert_expr; /* assert expressions are string literals */
 
 static void test_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
+    s_assert_expr = expr;
     (void)file;
     (void)line;
     longjmp(s_assert_jmp, 1);
@@ -52,7 +55,7 @@ static const uint16_t s_test_rg16ui_4x4[4 * 4 * 2] = {
 };
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
     nt_gfx_begin_frame();
 }
 
@@ -169,7 +172,7 @@ void test_gfx_init_shutdown(void) {
     nt_gfx_shutdown();
     TEST_ASSERT_FALSE(g_nt_gfx.initialized);
     /* Re-init for tearDown */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
     nt_gfx_begin_frame();
 }
 
@@ -211,7 +214,7 @@ void test_gfx_defaults_applied(void) {
 
     /* Re-init for tearDown */
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
     nt_gfx_begin_frame();
 }
 
@@ -2461,7 +2464,9 @@ void test_bind_uniform_buffer(void) {
         .size = 256,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_uniform_buffer(buf, 0); /* must not crash */
+    nt_gfx_end_pass();
     nt_gfx_destroy_buffer(buf);
 }
 
@@ -2572,7 +2577,7 @@ void test_register_global_block_max(void) {
 void test_register_global_block_cleared_on_shutdown(void) {
     nt_gfx_register_global_block("Globals", 0);
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
     nt_gfx_begin_frame();
     const nt_global_block_t *blocks;
     uint32_t count;
@@ -2858,7 +2863,9 @@ void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
     nt_gfx_begin_frame(); /* restore succeeds; the buffer stays a husk */
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, 0));
+    nt_gfx_end_pass();
 }
 
 /* Render-target attachments are rejected earlier, so an update reaching a husk
@@ -3127,8 +3134,10 @@ static nt_buffer_t make_test_ubo(uint32_t size) { return nt_gfx_make_buffer(&(nt
 
 void test_bind_uniform_buffer_range_reaches_backend(void) {
     nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_uniform_buffer(ubo, 1);
     nt_gfx_bind_uniform_buffer_range(ubo, 7, 768, 256); /* final legal range */
+    nt_gfx_end_pass();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
     nt_gfx_fake_ubo_bind_t whole = nt_gfx_fake_ubo_bind_at(0);
@@ -3144,18 +3153,21 @@ void test_bind_uniform_buffer_range_reaches_backend(void) {
 void test_bind_uniform_buffer_range_asserts(void) {
     nt_buffer_t ubo = make_test_ubo(1024);
     nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 1024});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256));          /* off the 256 B alignment */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 0));             /* empty */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 512));         /* past the end */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0xFFFFFF00U, 512)); /* offset + size wraps */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 2048));          /* larger than the buffer */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(vbo, 0, 0, 256));
+    nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
 }
 
 void test_bind_uniform_buffer_range_follows_orphaned_storage(void) {
     nt_buffer_t ubo = make_test_ubo(1024);
     nt_gfx_orphan_buffer(ubo, NULL, 256);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256));
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 512));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
@@ -3169,6 +3181,7 @@ void test_bind_uniform_buffer_range_follows_orphaned_storage(void) {
     nt_gfx_orphan_buffer(ubo, NULL, 1024);
     nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    nt_gfx_end_pass();
     EXPECT_ASSERT(nt_gfx_orphan_buffer(ubo, NULL, 1280));
 }
 
@@ -3176,15 +3189,159 @@ void test_bind_uniform_buffer_range_follows_orphaned_storage(void) {
 void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
     nt_gfx_shutdown();
     nt_gfx_fake_set_uniform_buffer_offset_alignment(16);
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT32(16, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
 
     nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256);
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 8, 256));
+    nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
 }
+
+// #region deferred draw-phase stream
+static nt_pipeline_t begin_stream_test_pass(void) {
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = make_sampler_program(NULL, 0)});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    bind_test_vertex_input();
+    return pipeline;
+}
+
+void test_stream_executes_draws_in_call_order_at_end_frame(void) {
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_pipeline_t first = begin_stream_test_pass();
+    const uint32_t before_draw = g_nt_gfx_stream.used;
+    nt_gfx_draw_indexed(0, 3, 3);
+    TEST_ASSERT_EQUAL_UINT32(before_draw + 5, g_nt_gfx_stream.used); /* the draw itself is pending */
+    nt_gfx_end_pass();
+    nt_pipeline_t second = begin_stream_test_pass();
+    nt_gfx_draw_indexed(1, 2, 3);
+    nt_gfx_end_pass();
+    const uint32_t recorded_bytes = g_nt_gfx_stream.used * 4U;
+
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(first.id, nt_gfx_fake_draw_trace_at(0).pipeline.id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(0).first_index);
+    TEST_ASSERT_EQUAL_UINT8(NT_INDEX_UINT16, nt_gfx_fake_draw_trace_at(0).index_type);
+    TEST_ASSERT_EQUAL_UINT32(second.id, nt_gfx_fake_draw_trace_at(1).pipeline.id);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).first_index);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(recorded_bytes, g_nt_gfx.last_frame.stream_bytes);
+}
+
+/* Fake getters of draw-phase state execute the stream, so only the stream itself shows that a call was deferred. */
+#define EXPECT_RECORDED(call)                                                                                                                                                                          \
+    do {                                                                                                                                                                                               \
+        const uint32_t before = g_nt_gfx_stream.used;                                                                                                                                                  \
+        call;                                                                                                                                                                                          \
+        TEST_ASSERT_TRUE_MESSAGE(g_nt_gfx_stream.used > before, #call);                                                                                                                                \
+    } while (0)
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one stream check per recorded call
+void test_stream_records_every_draw_phase_call(void) {
+    nt_buffer_t ubo = make_test_ubo(256);
+    const float m[16] = {0};
+    const float v[4] = {0};
+    EXPECT_RECORDED(begin_stream_test_pass());
+    EXPECT_RECORDED(nt_gfx_clear(&(nt_clear_desc_t){.color = true}));
+    EXPECT_RECORDED(nt_gfx_set_scissor(0, 0, 4, 4));
+    EXPECT_RECORDED(nt_gfx_set_scissor_enabled(true));
+    EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
+    EXPECT_RECORDED(nt_gfx_set_vertex_attrib_default(1, 1.0F, 1.0F, 1.0F, 1.0F));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 0));
+    EXPECT_RECORDED(nt_gfx_set_uniform_mat4(nt_hash32_str("u_mvp"), m));
+    EXPECT_RECORDED(nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), v));
+    EXPECT_RECORDED(nt_gfx_set_uniform_float(nt_hash32_str("u_time"), 1.0F));
+    EXPECT_RECORDED(nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), 1));
+    EXPECT_RECORDED(nt_gfx_draw(0, 3));
+    EXPECT_RECORDED(nt_gfx_draw_instanced(0, 3, 2));
+    EXPECT_RECORDED(nt_gfx_draw_indexed(0, 3, 3));
+    EXPECT_RECORDED(nt_gfx_draw_indexed_instanced(0, 3, 3, 2));
+    EXPECT_RECORDED(nt_gfx_end_pass());
+#if NT_GFX_GPU_TIMING_ENABLED
+    EXPECT_RECORDED(nt_gfx_begin_segment("stream-test"));
+    EXPECT_RECORDED(nt_gfx_end_segment());
+#endif
+}
+
+void test_stream_records_copies_of_descriptors_and_uniform_values(void) {
+    nt_pass_desc_t pass = {.clear_color = {1.0F, 2.0F, 3.0F, 4.0F}, .clear_depth = 1.0F};
+    nt_gfx_begin_pass(&pass);
+    pass.clear_color[0] = 9.0F;
+    nt_clear_desc_t clear = {.clear_color = {5.0F, 6.0F, 7.0F, 8.0F}, .color = true};
+    nt_gfx_clear(&clear);
+    clear.clear_color[0] = 9.0F;
+    nt_gfx_bind_pipeline(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = make_sampler_program(NULL, 0)}));
+    float matrix[16] = {[0] = 1.0F, [15] = 16.0F};
+    nt_gfx_set_uniform_mat4(nt_hash32_str("u_mvp"), matrix);
+    matrix[15] = 9.0F;
+    float value[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+    nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), value);
+    value[0] = 9.0F;
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(1, (uint32_t)nt_gfx_fake_last_pass_desc().clear_color[0]);
+    TEST_ASSERT_EQUAL_UINT32(5, (uint32_t)nt_gfx_fake_last_clear_desc().clear_color[0]);
+    float seen_matrix[16];
+    nt_gfx_fake_last_uniform_mat4(seen_matrix);
+    TEST_ASSERT_EQUAL_UINT32(16, (uint32_t)seen_matrix[15]);
+    const float recorded[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+    float seen[4];
+    nt_gfx_fake_uniform_vec4_value_at(nt_gfx_fake_uniform_vec4_count() - 1, seen);
+    TEST_ASSERT_EQUAL_MEMORY(recorded, seen, sizeof(seen));
+    nt_gfx_begin_frame();
+}
+
+/* With GPU timing compiled out the toggle is inert and leaves the stream alone. */
+void test_gpu_timing_toggle_mid_frame_executes_the_stream_only_with_gpu_timing(void) {
+    begin_stream_test_pass();
+    nt_gfx_draw_indexed(0, 3, 3);
+#if NT_GFX_GPU_TIMING_ENABLED
+    nt_gfx_set_gpu_timing_enabled(true);
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
+#else
+    const uint32_t pending = g_nt_gfx_stream.used;
+    nt_gfx_set_gpu_timing_enabled(true);
+    TEST_ASSERT_EQUAL_UINT32(pending, g_nt_gfx_stream.used);
+#endif
+    nt_gfx_end_pass();
+}
+
+void test_buffer_write_executes_earlier_draws_and_recording_continues(void) {
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+    begin_stream_test_pass();
+    nt_gfx_draw_indexed(0, 3, 3);
+    const uint8_t data[16] = {0};
+    nt_gfx_update_buffer(buf, 0, data, sizeof(data));
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
+    nt_gfx_draw_indexed(1, 2, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(0).first_index);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).first_index);
+    nt_gfx_begin_frame();
+}
+
+void test_stream_overflow_asserts(void) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.stream_capacity = 8;
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+    EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "gfx stream overflow"));
+}
+// #endregion
 
 int main(void) {
     UNITY_BEGIN();
@@ -3322,6 +3479,12 @@ int main(void) {
     RUN_TEST(test_activate_mesh_rejects_meshopt_decoded_size_overflow);
     /* Uniform buffer tests */
     RUN_TEST(test_make_uniform_buffer);
+    RUN_TEST(test_stream_executes_draws_in_call_order_at_end_frame);
+    RUN_TEST(test_stream_records_every_draw_phase_call);
+    RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
+    RUN_TEST(test_gpu_timing_toggle_mid_frame_executes_the_stream_only_with_gpu_timing);
+    RUN_TEST(test_buffer_write_executes_earlier_draws_and_recording_continues);
+    RUN_TEST(test_stream_overflow_asserts);
     RUN_TEST(test_bind_uniform_buffer);
     RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_update_buffer_at_offset);

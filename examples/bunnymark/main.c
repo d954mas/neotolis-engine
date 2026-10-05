@@ -44,6 +44,7 @@
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
 
+#include "../shared/nt_example_frames.h"
 #include "bunny_physics.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
@@ -121,6 +122,7 @@ static nt_bunny_t s_bunnies[BUNNY_MAX];
 static nt_entity_t s_entities[BUNNY_MAX];
 static uint32_t s_bunny_count;
 static bool s_initial_spawned;
+static uint32_t s_initial_count = BUNNY_INITIAL_COUNT;
 
 static uint16_t s_variant_region_idx[5]; /* resolved at startup once */
 
@@ -281,6 +283,7 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
+    nt_example_frames_begin();
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         /* Before this iteration's steps: they re-resolve what is invalidated here. */
@@ -303,7 +306,9 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
-    nt_input_poll();
+    if (!nt_example_frames_on()) {
+        nt_input_poll();
+    }
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
@@ -325,7 +330,7 @@ static void frame(void) {
     /* Atlas region indices resolve once — picks variant per spawn. */
     resolve_atlas_regions();
     if (s_atlas_resolved && !s_initial_spawned) {
-        spawn_n_defold(BUNNY_INITIAL_COUNT);
+        spawn_n_defold(s_initial_count);
         s_initial_spawned = true;
     }
 
@@ -510,6 +515,7 @@ static void frame(void) {
 #endif
 
     nt_gfx_end_frame();
+    nt_example_frames_end(s_initial_spawned);
 
 #if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
@@ -555,7 +561,7 @@ static void frame(void) {
 
 /* ---- Main ---- */
 
-int main(void) {
+int main(int argc, char **argv) {
     nt_engine_config_t config = {0};
     config.app_name = "bunnymark_demo";
     config.version = 1;
@@ -572,6 +578,9 @@ int main(void) {
     g_nt_window.height = 600;
     nt_window_init();
     nt_input_init();
+    nt_example_frames_init(argc, argv);
+    s_initial_count = nt_example_arg_u32(argc, argv, "--count", BUNNY_INITIAL_COUNT);
+    NT_ASSERT(s_initial_count <= BUNNY_MAX && "--count exceeds BUNNY_MAX");
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
@@ -605,7 +614,7 @@ int main(void) {
 
     /* nt_metrics is the perf store; the overlay HUD is a pure consumer, so init metrics first. */
     nt_metrics_init();
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 
     /* Frame rate cap removed: native engine loop runs uncapped (target_dt=0.0F).
      * dt-scaled physics already produces the same trajectories at any FPS. */

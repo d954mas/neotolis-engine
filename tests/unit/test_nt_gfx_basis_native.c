@@ -10,6 +10,7 @@
 #include "nt_basisu_encoder.h"
 #include "nt_builder.h"
 #include "nt_texture_format.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -38,7 +39,7 @@ static uint32_t s_blob_size;
 static nt_basisu_info_t s_info;
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 8, .max_textures = 16, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 4});
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 8, .max_textures = 16, .max_meshes = 4, .max_vertex_inputs = 8, .max_render_targets = 4));
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 }
@@ -219,7 +220,7 @@ static nt_texture_format_t expected_target(nt_basisu_codec_t codec) {
 #define ANY_CODEC (NT_BASISU_HAS_UASTC ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S)
 
 static GLint texture_max_level(nt_texture_t tex) {
-    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(tex), 0);
+    nt_gfx_backend_bind_texture_unit(nt_gfx_test_texture_backend_id(tex), nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(tex)), 0);
     GLint value = -1;
     glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &value);
     return value;
