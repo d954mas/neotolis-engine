@@ -849,7 +849,7 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     /* Loss is observed by begin_frame only: a material transition never polls the platform. */
     nt_gfx_fake_set_context_lost(true);
     apply_texture_set(&binding, 1);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count()); /* the equal set records no unit bind */
     nt_gfx_fake_set_context_lost(false);
 
     const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
@@ -3269,6 +3269,108 @@ void test_stream_records_every_draw_phase_call(void) {
 #endif
 }
 
+#define EXPECT_NOT_RECORDED(call)                                                                                                                                                                      \
+    do {                                                                                                                                                                                               \
+        const uint32_t before = g_nt_gfx_stream.used;                                                                                                                                                  \
+        call;                                                                                                                                                                                          \
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(before, g_nt_gfx_stream.used, #call);                                                                                                                         \
+    } while (0)
+
+/* An equal bind ends CACHE: nothing recorded, not counted as accepted. */
+void test_equal_binds_record_nothing(void) {
+    nt_buffer_t ubo = make_test_ubo(512);
+    nt_pipeline_t pipeline = begin_stream_test_pass();
+    EXPECT_NOT_RECORDED(nt_gfx_bind_pipeline(pipeline));
+    EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
+    EXPECT_NOT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
+    EXPECT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
+    EXPECT_NOT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 3, 256, 128));
+    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 3, 256, 128));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 3, 0, 128)); /* another range */
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 3));               /* whole buffer */
+    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 3));
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_PIPELINE]);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_VIEWPORT]);
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
+    nt_gfx_end_pass();
+}
+
+/* Pipeline, vertex input and viewport are pass state; the scissor rectangle
+ * and uniform-buffer slots carry over passes. */
+void test_bind_mirrors_follow_their_contract_scope(void) {
+    nt_buffer_t ubo = make_test_ubo(256);
+    nt_pipeline_t pipeline = begin_stream_test_pass();
+    nt_gfx_set_viewport(0, 0, 4, 4);
+    nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_bind_uniform_buffer(ubo, 0);
+    nt_gfx_end_pass();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_RECORDED(nt_gfx_bind_pipeline(pipeline));
+    EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
+    EXPECT_NOT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
+    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 0));
+    nt_gfx_end_pass();
+    /* The mirror does not bypass the pass check. */
+    EXPECT_ASSERT(nt_gfx_bind_pipeline(pipeline));
+}
+
+void test_context_loss_clears_carried_over_bind_mirrors(void) {
+    begin_stream_test_pass();
+    nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_end_pass();
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
+    nt_gfx_end_pass();
+}
+
+/* GL resets the slots of a deleted buffer; a buffer re-created in that pool slot binds again. */
+void test_destroyed_uniform_buffer_leaves_its_slots(void) {
+    nt_buffer_t ubo = make_test_ubo(256);
+    begin_stream_test_pass();
+    nt_gfx_bind_uniform_buffer(ubo, 0);
+    nt_gfx_bind_uniform_buffer(ubo, NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1);
+    nt_gfx_destroy_buffer(ubo);
+    nt_buffer_t again = make_test_ubo(256);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(ubo.id), nt_pool_slot_index(again.id));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(again, 0));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(again, NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(again, NT_GFX_MAX_UNIFORM_BUFFER_SLOTS));
+    nt_gfx_end_pass();
+}
+
+/* A texture set records only the units whose texture or sampler changed in the pass. */
+void test_texture_set_records_only_changed_units(void) {
+    nt_program_t program = make_sampler_program((const char *const[]){"u_a", "u_b"}, 2);
+    nt_texture_t a = make_binding_test_texture(1);
+    nt_texture_t b = make_binding_test_texture(2);
+    nt_texture_t c = make_binding_test_texture(3);
+    begin_texture_binding_test_pass(program);
+    nt_gfx_texture_binding_t set[] = {
+        {.name = nt_hash32_str("u_a"), .texture = a, .sampler = NT_SAMPLER_DEFAULT},
+        {.name = nt_hash32_str("u_b"), .texture = b, .sampler = NT_SAMPLER_DEFAULT},
+    };
+    apply_texture_set(set, 2);
+    EXPECT_NOT_RECORDED(apply_texture_set(set, 2));
+    set[1].texture = c;
+    apply_texture_set(set, 2);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
+    end_texture_binding_test_pass();
+
+    begin_texture_binding_test_pass(program);
+    apply_texture_set(set, 2); /* begin_pass discards the units */
+    TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_fake_bound_texture_count());
+    end_texture_binding_test_pass();
+}
+
 void test_stream_records_copies_of_descriptors_and_uniform_values(void) {
     nt_pass_desc_t pass = {.clear_color = {1.0F, 2.0F, 3.0F, 4.0F}, .clear_depth = 1.0F};
     nt_gfx_begin_pass(&pass);
@@ -3481,6 +3583,11 @@ int main(void) {
     RUN_TEST(test_make_uniform_buffer);
     RUN_TEST(test_stream_executes_draws_in_call_order_at_end_frame);
     RUN_TEST(test_stream_records_every_draw_phase_call);
+    RUN_TEST(test_equal_binds_record_nothing);
+    RUN_TEST(test_bind_mirrors_follow_their_contract_scope);
+    RUN_TEST(test_context_loss_clears_carried_over_bind_mirrors);
+    RUN_TEST(test_destroyed_uniform_buffer_leaves_its_slots);
+    RUN_TEST(test_texture_set_records_only_changed_units);
     RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
     RUN_TEST(test_gpu_timing_toggle_mid_frame_executes_the_stream_only_with_gpu_timing);
     RUN_TEST(test_buffer_write_executes_earlier_draws_and_recording_continues);

@@ -76,6 +76,17 @@ typedef struct {
     uint32_t offset;
 } nt_gfx_instance_binding_t;
 
+typedef struct {
+    uint32_t texture; /* recorded backend names; 0 = nothing recorded in this pass */
+    uint32_t sampler;
+} nt_gfx_unit_binding_t;
+
+typedef struct {
+    uint32_t buffer; /* full handle, 0 = unbound */
+    uint32_t offset;
+    uint32_t size; /* 0 = whole buffer */
+} nt_gfx_ubo_binding_t;
+
 /* ---- Texture metadata (format + dimensions for update_texture validation) ---- */
 
 typedef struct {
@@ -149,12 +160,13 @@ static struct {
     uint8_t bound_index_type;    /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
     uint8_t texture_set_state;   /* nt_gfx_texture_set_state_t for the bound pipeline's program */
     bool scissor_enabled;        /* GL_SCISSOR_TEST as recorded */
+    /* Binding mirrors: an equal bind records nothing. Each lives as long as the
+     * contract keeps its state (render/architecture.md, Binding dedup and draw merge). */
     nt_gfx_instance_binding_t bound_instance;
-
-    /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
-     * probes read them; production never does. */
-    int scissor_rect[4];  /* GL bottom-left x,y,w,h */
-    int viewport_rect[4]; /* GL bottom-left x,y,w,h */
+    nt_gfx_unit_binding_t bound_units[NT_GFX_MAX_TEXTURE_SLOTS];
+    nt_gfx_ubo_binding_t bound_ubos[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* carry over passes */
+    int scissor_rect[4];                                              /* GL bottom-left x,y,w,h; carries over passes; w = -1: unknown */
+    int viewport_rect[4];                                             /* GL bottom-left x,y,w,h; w = -1: unknown */
 } s_gfx;
 
 _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
@@ -302,13 +314,25 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
 }
 #define NT_GFX_DEFINE_RESOURCE(kind, id) capture_resource_definition(kind, id)
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record macros expand at owning sites
 static void capture_initial_state(void) {
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event->detail = NT_GFX_INITIAL_FRONTEND; event->data.state.integers[0] = s_gfx.bound_pipeline;
                   event->data.state.integers[1] = s_gfx.bound_vertex_input; event->data.state.integers[2] = s_gfx.active_render_target; event->data.state.integers[3] = s_gfx.bound_index_type;
                   event->data.state.integers[4] = s_gfx.texture_set_state; event->data.state.integers[5] = g_nt_gfx.context_lost;);
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR_ENABLE, event->data.state.integers[0] = s_gfx.scissor_enabled);
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, event->result = NT_GFX_RESULT_UNKNOWN);
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_UBO, event->result = NT_GFX_RESULT_UNKNOWN);
+    /* The carried-over binding mirrors explain an equal bind that ends CACHE in the capture. */
+    if (s_gfx.scissor_rect[2] < 0) {
+        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, event->result = NT_GFX_RESULT_UNKNOWN);
+    } else {
+        NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, for (uint32_t i = 0; i < 4; i++) { event->data.state.integers[i] = (uint32_t)s_gfx.scissor_rect[i]; });
+    }
+    for (uint32_t slot = 0; slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; slot++) {
+        const nt_gfx_ubo_binding_t *ubo = &s_gfx.bound_ubos[slot];
+        if (ubo->buffer != 0) {
+            NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_UBO, event->object_kind = NT_GFX_OBJECT_BUFFER; event->object = ubo->buffer; event->data.binding.slot = slot;
+                          event->data.binding.offset = ubo->offset; event->data.binding.size = ubo->size);
+        }
+    }
     const nt_pool_t *pools[] = {&s_gfx.shader_pool, &s_gfx.program_pool, &s_gfx.pipeline_pool, &s_gfx.vertex_input_pool, &s_gfx.buffer_pool, &s_gfx.texture_pool, &s_gfx.render_target_pool};
     const nt_gfx_object_kind_t kinds[] = {NT_GFX_OBJECT_SHADER, NT_GFX_OBJECT_PROGRAM, NT_GFX_OBJECT_PIPELINE,     NT_GFX_OBJECT_VERTEX_INPUT,
                                           NT_GFX_OBJECT_BUFFER, NT_GFX_OBJECT_TEXTURE, NT_GFX_OBJECT_RENDER_TARGET};
@@ -346,6 +370,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_render_targets > 0 && "nt_gfx_desc_t.max_render_targets is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
+    s_gfx.scissor_rect[2] = -1;
+    s_gfx.viewport_rect[2] = -1;
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
@@ -562,6 +588,9 @@ static void wipe_backend_handles(void) {
     discard_texture_set();
     s_gfx.bound_vertex_input = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
+    /* A new context starts with no uniform-buffer bindings and an unknown scissor box. */
+    memset(s_gfx.bound_ubos, 0, sizeof(s_gfx.bound_ubos));
+    s_gfx.scissor_rect[2] = -1;
     /* Sampler cache: zero only the backend ids so material-stored sampler.id slot references
      * stay valid; the backend is lazily recreated on the next nt_gfx_make_sampler hit or bind_texture. */
     for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
@@ -732,6 +761,8 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     s_gfx.bound_vertex_input = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
     s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
+    memset(s_gfx.bound_units, 0, sizeof(s_gfx.bound_units));
+    s_gfx.viewport_rect[2] = -1; /* the backend sets the whole target at execution */
     /* Scissor is pass-scoped: every pass starts with it off. */
     if (s_gfx.scissor_enabled) {
         s_gfx.scissor_enabled = false;
@@ -1470,6 +1501,12 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
     if (s_gfx.bound_instance.buffer == buf.id) {
         s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
     }
+    /* GL resets the slots of a deleted buffer; a later buffer in this pool slot is a new bind. */
+    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
+        if (s_gfx.bound_ubos[i].buffer == buf.id) {
+            s_gfx.bound_ubos[i] = (nt_gfx_ubo_binding_t){0};
+        }
+    }
     uint32_t slot = nt_pool_slot_index(buf.id);
     nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
     s_gfx.buffer_backends[slot] = 0;
@@ -1588,6 +1625,10 @@ static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
         NT_LOG_ERROR("bind_pipeline called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
+    /* Destroy clears the mirror, so an equal nonzero id is live. */
+    if (s_gfx.bound_pipeline != 0 && pip.id == s_gfx.bound_pipeline) {
+        return NT_GFX_RESULT_CACHE;
+    }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         /* Clearing the mirror is the whole unbind: later draws and uniform
          * writes trap on it. The bound vertex input is orthogonal state. */
@@ -1623,6 +1664,9 @@ static nt_gfx_result_t bind_vertex_input(nt_vertex_input_t vi) {
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("bind_vertex_input called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
+    }
+    if (s_gfx.bound_vertex_input != 0 && vi.id == s_gfx.bound_vertex_input) {
+        return NT_GFX_RESULT_CACHE;
     }
     if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
         /* Clearing the mirrors is the whole unbind: draws trap on it. */
@@ -1787,9 +1831,11 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
     for (uint8_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
-        if ((applied_mask & (uint8_t)(1U << unit)) == 0) {
+        nt_gfx_unit_binding_t *bound = &s_gfx.bound_units[unit];
+        if ((applied_mask & (uint8_t)(1U << unit)) == 0 || (bound->texture == texture_backends[unit] && bound->sampler == sampler_backends[unit])) {
             continue;
         }
+        *bound = (nt_gfx_unit_binding_t){texture_backends[unit], sampler_backends[unit]};
         nt_gfx_frame_bind_texture_unit(texture_backends[unit], sampler_backends[unit], unit);
     }
     s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_APPLIED;
@@ -1974,6 +2020,9 @@ static nt_gfx_result_t set_scissor(int x, int y, int w, int h) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_scissor: must be called inside a pass");
+    if (s_gfx.scissor_rect[0] == x && s_gfx.scissor_rect[1] == y && s_gfx.scissor_rect[2] == w && s_gfx.scissor_rect[3] == h) {
+        return NT_GFX_RESULT_CACHE;
+    }
     s_gfx.scissor_rect[0] = x;
     s_gfx.scissor_rect[1] = y;
     s_gfx.scissor_rect[2] = w;
@@ -2014,6 +2063,9 @@ static nt_gfx_result_t set_viewport(int x, int y, int w, int h) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_viewport: must be called inside a pass");
+    if (s_gfx.viewport_rect[0] == x && s_gfx.viewport_rect[1] == y && s_gfx.viewport_rect[2] == w && s_gfx.viewport_rect[3] == h) {
+        return NT_GFX_RESULT_CACHE;
+    }
     s_gfx.viewport_rect[0] = x;
     s_gfx.viewport_rect[1] = y;
     s_gfx.viewport_rect[2] = w;
@@ -2267,6 +2319,10 @@ static nt_gfx_result_t bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offse
         NT_LOG_ERROR("bind_instance_buffer called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
+    /* Destroying the buffer clears the mirror, so an equal nonzero id is live. */
+    if (s_gfx.bound_instance.buffer != 0 && buf.id == s_gfx.bound_instance.buffer && byte_offset == s_gfx.bound_instance.offset && s_gfx.bound_vertex_input == s_gfx.bound_instance.vertex_input) {
+        return NT_GFX_RESULT_CACHE;
+    }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         NT_LOG_ERROR("bind_instance_buffer: invalid handle");
         return NT_GFX_RESULT_INVALID_HANDLE;
@@ -2327,6 +2383,15 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint3
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_buffer: must be called inside a pass");
+    NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "bind_uniform_buffer: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
+    if (slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS) {
+        return NT_GFX_RESULT_INVALID_ARGUMENT;
+    }
+    nt_gfx_ubo_binding_t *bound = &s_gfx.bound_ubos[slot];
+    /* Destroying the buffer clears its slots, so an equal nonzero id is live. */
+    if (bound->buffer != 0 && bound->buffer == buf.id && bound->offset == offset && bound->size == size) {
+        return NT_GFX_RESULT_CACHE;
+    }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         NT_LOG_ERROR("bind_uniform_buffer: invalid handle");
         return NT_GFX_RESULT_INVALID_HANDLE;
@@ -2356,6 +2421,7 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint3
         NT_LOG_ERROR_ONCE("bind_uniform_buffer: buffer has no live backend");
         return NT_GFX_RESULT_UNREADY;
     }
+    *bound = (nt_gfx_ubo_binding_t){buf.id, offset, size};
     nt_gfx_frame_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot, offset, size);
     return NT_GFX_RESULT_ACCEPTED;
 }

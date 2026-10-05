@@ -487,6 +487,12 @@ void setUp(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
+/* Gfx drops unit binds equal to the pass state; a fresh pass makes each batch bind its whole set. */
+static void begin_fresh_pass(void) {
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 void tearDown(void) {
     if (nt_sprite_renderer_test_initialized()) {
         nt_sprite_renderer_shutdown();
@@ -766,8 +772,8 @@ void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(voi
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_flush();
 
-    /* One flush, one cmd, one material: one texture bind, no sampler int. */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    /* One flush, one cmd, one material; the page is already on its unit in this pass: no texture bind, no sampler int. */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_count());
@@ -1080,6 +1086,7 @@ void test_sprite_renderer_dead_material_cmd_binds_on_program_unit(void) {
 
     nt_material_destroy(mat);
 
+    begin_fresh_pass(); /* the unit bind must not be dropped as equal to the control flush */
     nt_gfx_fake_reset();
     nt_gfx_fake_draw_trace_reset(true);
     nt_sprite_renderer_flush();
@@ -1167,6 +1174,7 @@ void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
     TEST_ASSERT_EQUAL_UINT32(replacement.id, nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1)));
 
     /* Batch 2: the flush cleared cmd_count, so set_material opens a fresh cmd. */
+    begin_fresh_pass();
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
@@ -1179,6 +1187,7 @@ void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
     /* Batch 3: the cmd resolved when it opened, so neither a later publication nor
      * the material's death changes what it binds -- the resolve cannot be deferred
      * to flush. */
+    begin_fresh_pass();
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
@@ -1200,6 +1209,7 @@ void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
      * slot-1 texture the live material resolved at open while unit 1 follows the page. */
     nt_material_t mat2 = nt_material_create(&mdesc);
     TEST_ASSERT_TRUE(mat2.id != 0);
+    begin_fresh_pass();
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat2);
     /* Region 0 lives on page 0, region 1 on page 1. */
@@ -1207,18 +1217,17 @@ void test_sprite_renderer_non_page_slot_resolves_at_cmd_open(void) {
     nt_sprite_renderer_emit_region(s_atlas_res, 1, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_flush();
 
-    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_bound_texture_count());
+    /* "u_other" is unit 0: the current publication, identical across the split, so the
+     * second half records no bind for it. */
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(2));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(3));
-    /* "u_other" is unit 0: the current publication, identical across the split. */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(2));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(0));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(third), nt_gfx_fake_bound_texture_at(2));
     /* "u_texture" is unit 1: page 0 then page 1. */
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 0))}), nt_gfx_fake_bound_texture_at(1));
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1))}), nt_gfx_fake_bound_texture_at(3));
-    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_bound_texture_at(1), nt_gfx_fake_bound_texture_at(3));
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){.id = nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1))}), nt_gfx_fake_bound_texture_at(2));
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_bound_texture_at(1), nt_gfx_fake_bound_texture_at(2));
 }
 
 /* A program replaced between an immediate emit and an ECS draw_list puts one
@@ -1247,9 +1256,9 @@ void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(program_b.id, nt_gfx_fake_draw_trace_at(1).program.id);
-    /* One bind per cmd per sampled slot; the backend GL cache drops the second one.
+    /* Each cmd applies its set; gfx drops the second, equal unit bind of the pass.
      * Params are program state and go out twice. */
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
     nt_gfx_fake_draw_trace_reset(false);

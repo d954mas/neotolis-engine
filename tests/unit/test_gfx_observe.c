@@ -627,6 +627,48 @@ static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     TEST_ASSERT_TRUE(scissor_unknown);
 }
 
+/* Scissor rectangle and uniform-buffer slots carry over frames: the snapshot
+ * shows the state a CACHE bind inside the capture matched. */
+static void test_capture_initial_state_holds_carried_over_bindings(void) {
+    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 512});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_bind_uniform_buffer_range(ubo, 5, 256, 128);
+    nt_gfx_end_pass();
+    record_next_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_bind_uniform_buffer_range(ubo, 5, 256, 128);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    bool scissor_found = false;
+    bool ubo_found = false;
+    uint32_t cache_results = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_SCISSOR) {
+            TEST_ASSERT_EQUAL_UINT32(1, e->data.state.integers[0]);
+            TEST_ASSERT_EQUAL_UINT32(4, e->data.state.integers[3]);
+            scissor_found = true;
+        }
+        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UBO) {
+            TEST_ASSERT_EQUAL_UINT32(ubo.id, e->object);
+            TEST_ASSERT_EQUAL_UINT32(5, e->data.binding.slot);
+            TEST_ASSERT_EQUAL_UINT32(256, e->data.binding.offset);
+            TEST_ASSERT_EQUAL_UINT32(128, e->data.binding.size);
+            ubo_found = true;
+        }
+        if (e->kind == NT_GFX_EVENT_RESULT && (e->operation == NT_GFX_OP_SCISSOR || e->operation == NT_GFX_OP_UBO) && e->result == NT_GFX_RESULT_CACHE) {
+            cache_results++;
+        }
+    }
+    TEST_ASSERT_TRUE(scissor_found);
+    TEST_ASSERT_TRUE(ubo_found);
+    TEST_ASSERT_EQUAL_UINT32(2, cache_results);
+}
+
 /* Size and formats come from the borrowed textures. */
 static void test_depth_only_render_target_definition_has_no_color_fields(void) {
     nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 64, .height = 32, .format = NT_TEXTURE_FORMAT_DEPTH16});
@@ -851,6 +893,7 @@ int main(void) {
     RUN_TEST(test_every_operation_records_one_begin_and_one_result);
     RUN_TEST(test_accepted_counters_match_recorded_results);
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
+    RUN_TEST(test_capture_initial_state_holds_carried_over_bindings);
     RUN_TEST(test_depth_only_render_target_definition_has_no_color_fields);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);

@@ -919,8 +919,9 @@ vertex-input backend slot in `detail`; initial state uses the current raw
 program name. Vertex-input creation copies each static/instance attribute with
 its divisor, layout, and known buffer. The initial SCISSOR record holds the
 carried-over rectangle and the initial UBO records hold each bound slot's
-buffer, offset and size, from the front-end dedup mirrors; both are `UNKNOWN`
-before the first set and after a context loss. A bind inside the capture that
+buffer, offset and size, from the front-end dedup mirrors. The rectangle is
+`UNKNOWN` before the first set and after a context loss; an unbound slot has no
+record. A bind inside the capture that
 ends `CACHE` matches this state or one set earlier in the frame. Inherited
 layouts unavailable in existing CPU state are explicitly unknown. Capture
 never adds a GL-state mirror of its own or queries GL to reconstruct state.

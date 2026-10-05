@@ -303,6 +303,8 @@ typedef enum {
  * copy for per-draw re-pointing, and max_vertex_inputs slots exist. */
 #define NT_GFX_MAX_INSTANCE_ATTRS 8
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
+/* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS; the front-end mirrors each slot's binding. */
+#define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS 24
 
 typedef struct {
     uint8_t location;
@@ -949,7 +951,8 @@ nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 
 /* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and
  * uniforms are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
- * discards them. Physical texture/sampler and uniform-buffer binds are context state. */
+ * discards them. Physical texture/sampler and uniform-buffer binds are context state.
+ * A bind equal to the current state ends CACHE and records nothing. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +

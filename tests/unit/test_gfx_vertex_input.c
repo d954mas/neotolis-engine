@@ -414,6 +414,25 @@ void test_instance_pointing_is_pass_scoped(void) {
     nt_gfx_end_pass();
 }
 
+/* An equal instance binding in the same pass ends CACHE; another offset or vertex input binds. */
+void test_equal_instance_binding_is_dropped(void) {
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t a = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
+    nt_vertex_input_t b = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
+    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_vertex_input(a);
+    nt_gfx_bind_instance_buffer(stream, 0);
+    nt_gfx_bind_instance_buffer(stream, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_INSTANCE_BUFFER]);
+    nt_gfx_bind_instance_buffer(stream, 16);
+    nt_gfx_bind_vertex_input(b);
+    nt_gfx_bind_instance_buffer(stream, 16);
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_INSTANCE_BUFFER]);
+    nt_gfx_end_pass();
+}
+
 /* A destroyed instance buffer unpoints the vertex input it was bound to. */
 void test_instance_buffer_destroy_unpoints(void) {
     nt_buffer_t vbo = make_vbo();
@@ -610,6 +629,7 @@ int main(void) {
     RUN_TEST(test_instanced_draw_asserts_before_instance_pointing);
     RUN_TEST(test_instance_pointing_is_pass_scoped);
     RUN_TEST(test_instance_buffer_destroy_unpoints);
+    RUN_TEST(test_equal_instance_binding_is_dropped);
     RUN_TEST(test_attributeless_vi_draws);
     RUN_TEST(test_pipeline_and_vertex_input_bind_orthogonally);
     RUN_TEST(test_bind_instance_buffer_rejects_unaligned_offset);
