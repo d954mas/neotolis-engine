@@ -666,7 +666,8 @@ typedef struct {
     uint64_t texture_upload_bytes;
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
     uint32_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
-    /* Frame storage bytes allocated in the frame, padding included; set when the frame closes. */
+    /* Frame storage bytes allocated in the frame, padding included: written as begin_frame closes
+     * the frame, so read g_nt_gfx.last_frame (0 in the live counters). */
     uint32_t frame_bytes[NT_GFX_FRAME_STREAM_COUNT];
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
@@ -1071,7 +1072,7 @@ _Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_
 
 /* Returns size bytes at an offset that is a multiple of align; writes the offset to *out_offset. */
 static inline void *nt_gfx_frame_alloc(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align, uint32_t *out_offset) {
-    NT_ASSERT(stream < NT_GFX_FRAME_STREAM_COUNT && size > 0 && align > 0);
+    NT_ASSERT(stream < NT_GFX_FRAME_STREAM_COUNT && size > 0 && align > 0 && out_offset != NULL);
     nt_gfx_frame_storage_t *s = &g_nt_gfx_frame_storage[stream];
     const uint64_t offset = ((uint64_t)s->used + align - 1U) / align * align;
     if (offset + size > s->capacity) {

@@ -61,6 +61,7 @@ static void test_offsets_are_multiples_of_any_align_and_same_stride_runs_are_con
     TEST_ASSERT_EQUAL_UINT32(936, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
     const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging;
     TEST_ASSERT_EQUAL_HEX8(0x11, staging[4]);
+    TEST_ASSERT_EACH_EQUAL_HEX8(0, staging + 5, 99); /* padding is zeroed once at init */
     TEST_ASSERT_EQUAL_HEX8(0x33, staging[415]);
     TEST_ASSERT_EQUAL_HEX8(0x44, staging[624]);
     /* The streams are independent. */
@@ -78,6 +79,11 @@ static void test_overflow_and_bad_arguments_assert(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame_capacity"));
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 0, 4, &offset));
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 4, 0, &offset));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 4, 4, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, UINT32_MAX, 4, &offset)); /* no wrap */
+    /* The size fits the free bytes, the alignment padding does not. */
+    (void)alloc_filled(NT_GFX_FRAME_UNIFORM, g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].capacity - 14U, 1, 0);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, 8, 16, &offset));
     /* Exactly the capacity fits. */
     TEST_ASSERT_EQUAL_UINT32(capacity - 8U, alloc_filled(NT_GFX_FRAME_INDEX, 8, 4, 0));
 }
@@ -189,7 +195,7 @@ static void test_indexed_draws_read_the_index_storage_as_uint32(void) {
 // #endregion
 
 // #region restore
-static void test_restore_makes_new_buffers_and_a_loss_skips_uploads(void) {
+static void test_restore_makes_new_buffers_and_a_lost_frame_uploads_nothing(void) {
     nt_buffer_t before[NT_GFX_FRAME_STREAM_COUNT];
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         before[s] = nt_gfx_frame_buffer((nt_gfx_frame_stream_t)s);
@@ -218,6 +224,45 @@ static void test_restore_makes_new_buffers_and_a_loss_skips_uploads(void) {
     TEST_ASSERT_EQUAL_UINT32(updates + 1U, nt_gfx_fake_update_buffer_count());
     nt_gfx_begin_frame();
 }
+/* No spare buffer slot: the restore frees the wiped buffers before it makes new ones,
+ * also when the first restore meets a new loss and a later one succeeds. */
+static void test_a_retried_restore_reuses_the_frame_buffer_slots(void) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = TEST_DESC;
+    desc.max_buffers = NT_GFX_FRAME_STREAM_COUNT;
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+    nt_gfx_fake_set_context_lost(true);
+    next_frame();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_fake_lose_context_during_next_restore();
+    next_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_gfx_fake_set_context_lost(false);
+    next_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_frame_buffer((nt_gfx_frame_stream_t)s).id);
+    }
+}
+
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* On a live context a frame buffer that cannot be made is a bug, not a loss. */
+static void test_a_failed_frame_buffer_creation_on_a_live_context_asserts(void) {
+    nt_gfx_fake_set_context_lost(true);
+    next_frame();
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_fake_fail_buffer_creates(1);
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame storage buffer creation failed"));
+    nt_gfx_shutdown();
+    nt_gfx_fake_reset();
+    nt_gfx_init(&TEST_DESC);
+    nt_gfx_begin_frame();
+}
+#endif
 // #endregion
 
 int main(void) {
@@ -233,6 +278,10 @@ int main(void) {
     RUN_TEST(test_a_mid_frame_execution_uploads_and_the_next_one_sends_only_the_delta);
     RUN_TEST(test_allocating_between_draws_keeps_the_merge);
     RUN_TEST(test_indexed_draws_read_the_index_storage_as_uint32);
-    RUN_TEST(test_restore_makes_new_buffers_and_a_loss_skips_uploads);
+    RUN_TEST(test_restore_makes_new_buffers_and_a_lost_frame_uploads_nothing);
+    RUN_TEST(test_a_retried_restore_reuses_the_frame_buffer_slots);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_a_failed_frame_buffer_creation_on_a_live_context_asserts);
+#endif
     return UNITY_END();
 }

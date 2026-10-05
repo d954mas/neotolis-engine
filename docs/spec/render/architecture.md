@@ -404,6 +404,10 @@ copy plus one `STREAM` buffer:
   binds an element buffer as anything else, so indices have their own buffer;
 - `NT_GFX_FRAME_UNIFORM`: view blocks and other per-frame uniform data.
 
+One `STREAM` buffer per stream, rewritten from offset 0 every frame, is the
+policy the phone measurements selected: rotating several buffers showed no
+consistent benefit. The API does not guarantee a stall-free upload.
+
 `nt_gfx_frame_alloc(stream, size, align, &offset)` returns `size` bytes of
 staging at an offset that is a multiple of `align`; both are nonzero. It is
 inline and touches no buffer and no recorded command, so it is legal at any
@@ -445,7 +449,9 @@ recorded and counted where the execution runs (see Frame observation). An
 execution with no recorded command uploads nothing: no draw can read the data
 yet. While the context is lost, uploads are skipped; the begin_frame that
 restores the context makes three new buffers, and that frame's data reaches
-them. `nt_gfx_stub` has zero capacity: every allocation asserts.
+them. A frame buffer that cannot be made, or a missing one at upload, asserts
+unless the context is lost. `nt_gfx_stub` has zero capacity: every allocation
+asserts.
 
 ### Prepared mesh runs
 

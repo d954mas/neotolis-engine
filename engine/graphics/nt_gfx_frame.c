@@ -47,7 +47,7 @@ void nt_gfx_frame_create_buffers(void) {
         if (storage->buffer.id != 0) {
             nt_gfx_destroy_buffer(storage->buffer);
         }
-        /* Fails only on a new context loss; the next restore makes them again. */
+        /* A new context loss is the only expected failure; the next restore makes them again. */
         storage->buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = types[s],
             .usage = NT_USAGE_STREAM,
@@ -55,6 +55,7 @@ void nt_gfx_frame_create_buffers(void) {
             .index_type = s == NT_GFX_FRAME_INDEX ? NT_INDEX_UINT32 : NT_INDEX_NONE,
             .label = labels[s],
         });
+        NT_ASSERT((storage->buffer.id != 0 || g_nt_gfx.context_lost || nt_gfx_backend_query_context_lost()) && "frame storage buffer creation failed");
     }
 }
 // #endregion
@@ -84,8 +85,9 @@ static void upload_storage(void) {
             continue;
         }
         s_uploaded[s] = storage->used;
-        /* A lost context wiped the name: nothing draws until the restore makes new buffers. */
+        /* Only a context loss leaves no name: nothing draws until the restore makes new buffers. */
         const uint32_t backend = nt_gfx_buffer_backend(storage->buffer);
+        NT_ASSERT((backend != 0 || g_nt_gfx.context_lost || nt_gfx_backend_query_context_lost()) && "frame storage buffer destroyed or never made");
         if (backend == 0) {
             continue;
         }

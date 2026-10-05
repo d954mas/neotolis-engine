@@ -544,8 +544,7 @@ static void test_sampler_cache_hit_defines_nothing(void) {
     TEST_ASSERT_TRUE(cache);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks nesting, pairing and creator handles
-/* Frame storage reaches its buffer inside the execution: one upload operation per storage, delta only. */
+/* Frame storage reaches its buffer inside the execution: one upload operation per storage. */
 static void test_frame_storage_uploads_are_recorded_operations(void) {
     record_next_frame();
     uint32_t offset = 0;
@@ -572,6 +571,7 @@ static void test_frame_storage_uploads_are_recorded_operations(void) {
     TEST_ASSERT_EQUAL_UINT32(24, capture.counters.frame_bytes[NT_GFX_FRAME_VERTEX]);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks nesting, pairing and creator handles
 static void test_every_operation_records_one_begin_and_one_result(void) {
     record_next_frame();
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8})});

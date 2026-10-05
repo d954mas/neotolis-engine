@@ -106,15 +106,16 @@ static void test_absolute_uint32_indices_over_two_strides_in_one_frame(void) {
     const nt_vertex_input_t narrow = make_frame_input(12);
     const nt_vertex_input_t wide = make_frame_input(20);
     /* The left triangle sits past vertex 65535, so its indices need 32 bits. */
-    const uint32_t left = alloc_triangle(12, 65540, s_left);
+    const uint32_t left = alloc_triangle(12, 65541, s_left);
     TEST_ASSERT_GREATER_THAN_UINT32(65535, left);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used % 20U); /* the wide stride starts after padding */
     const uint32_t left_first = alloc_indices(left);
     const uint32_t right_first = alloc_indices(alloc_triangle(20, 3, s_right));
 
     begin_black_pass();
     nt_gfx_bind_pipeline(red);
     nt_gfx_bind_vertex_input(narrow);
-    nt_gfx_draw_indexed(left_first, 3, 65540);
+    nt_gfx_draw_indexed(left_first, 3, 65541);
     nt_gfx_bind_pipeline(green);
     nt_gfx_bind_vertex_input(wide);
     nt_gfx_draw_indexed(right_first, 3, 3);
@@ -131,6 +132,15 @@ static uint32_t alloc_color_block(const float color[4]) {
     return offset;
 }
 
+static void assert_center(uint8_t red, uint8_t green) {
+    uint8_t pixel[4] = {0};
+    read_pixel((int)(g_nt_window.fb_width / 2U), (int)(g_nt_window.fb_height / 2U), pixel);
+    TEST_ASSERT_EQUAL_UINT8(red, pixel[0]);
+    TEST_ASSERT_EQUAL_UINT8(green, pixel[1]);
+}
+
+/* The first pass executes (read_pixels) before the second block exists, so the
+ * late block reaches the uniform buffer as a delta of a later execution. */
 static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(void) {
     static const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
     static const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
@@ -145,6 +155,7 @@ static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(voi
     nt_gfx_bind_vertex_input(empty);
     nt_gfx_bind_uniform_buffer_range(ubo, 0, first, 4U * sizeof(float));
     nt_gfx_draw(0, 3);
+    assert_center(255, 0);
     nt_gfx_end_pass();
 
     /* Produced while the frame is being drawn, as after UI layout. */
@@ -154,10 +165,7 @@ static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(voi
     nt_gfx_bind_vertex_input(empty);
     nt_gfx_bind_uniform_buffer_range(ubo, 0, late, 4U * sizeof(float));
     nt_gfx_draw(0, 3);
-    uint8_t pixel[4] = {0};
-    read_pixel((int)(g_nt_window.fb_width / 2U), (int)(g_nt_window.fb_height / 2U), pixel);
-    TEST_ASSERT_EQUAL_UINT8(0, pixel[0]);
-    TEST_ASSERT_EQUAL_UINT8(255, pixel[1]);
+    assert_center(0, 255);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
@@ -165,7 +173,7 @@ static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(voi
 }
 
 /* A buffer write executes the stream mid-frame; the next execution sends only the
- * new vertices and indices, the index delta while the earlier draw's VAO is bound. */
+ * new vertices and indices. */
 static void test_a_mid_frame_execution_and_a_delta_upload_draw_both_halves(void) {
     const nt_pipeline_t red = make_pipeline(s_vs_src, s_fs_red_src);
     const nt_pipeline_t green = make_pipeline(s_vs_src, s_fs_green_src);
@@ -189,6 +197,46 @@ static void test_a_mid_frame_execution_and_a_delta_upload_draw_both_halves(void)
     nt_gfx_begin_frame();
 }
 
+/* An index upload runs while the last replayed draw's vertex input is bound; that
+ * input keeps its own index buffer, so it draws the same triangle afterwards. */
+static void test_an_index_upload_leaves_a_bound_input_with_its_own_index_buffer(void) {
+    static const uint16_t indices[3] = {0, 1, 2};
+    const nt_pipeline_t red = make_pipeline(s_vs_src, s_fs_red_src);
+    const nt_pipeline_t green = make_pipeline(s_vs_src, s_fs_green_src);
+    const nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = s_left, .size = sizeof(s_left)});
+    const nt_buffer_t ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = indices, .size = sizeof(indices), .index_type = NT_INDEX_UINT16});
+    const nt_vertex_input_t own = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2}}},
+        .vertex_buffer = vbo,
+        .index_buffer = ibo,
+    });
+    const nt_vertex_input_t frame = make_frame_input(12);
+    const nt_buffer_t other = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+
+    begin_black_pass();
+    nt_gfx_bind_pipeline(red);
+    nt_gfx_bind_vertex_input(own);
+    nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_update_buffer(other, 0, (const uint8_t[16]){0}, 16); /* replays: `own` is the bound input */
+
+    const uint32_t right_first = alloc_indices(alloc_triangle(12, 3, s_right));
+    nt_gfx_bind_pipeline(green);
+    nt_gfx_bind_vertex_input(frame);
+    nt_gfx_draw_indexed(right_first, 3, 3);
+    nt_gfx_end_pass();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(red);
+    nt_gfx_bind_vertex_input(own);
+    nt_gfx_draw_indexed(0, 3, 3);
+    uint8_t left[4] = {0};
+    read_pixel((int)(g_nt_window.fb_width * 3U / 16U), (int)(g_nt_window.fb_height / 2U), left);
+    TEST_ASSERT_EQUAL_UINT8(255, left[0]);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+    nt_gfx_begin_frame();
+}
+
 int main(void) {
     /* One hidden window and GL context serve every test; setUp/tearDown reset only engine state. */
     if (!glfwInit()) {
@@ -201,6 +249,7 @@ int main(void) {
     RUN_TEST(test_absolute_uint32_indices_over_two_strides_in_one_frame);
     RUN_TEST(test_a_block_allocated_after_the_first_pass_reaches_a_later_draw);
     RUN_TEST(test_a_mid_frame_execution_and_a_delta_upload_draw_both_halves);
+    RUN_TEST(test_an_index_upload_leaves_a_bound_input_with_its_own_index_buffer);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;
