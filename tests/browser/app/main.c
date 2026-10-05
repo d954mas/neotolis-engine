@@ -105,8 +105,6 @@ static void link_programs(void) {
 static nt_font_t s_font;
 static nt_font_t s_rich_font[4]; /* R/B/I/BI faces for the rich block */
 
-static nt_buffer_t s_frame_ubo;
-
 static bool s_atlas_bound;
 static bool s_font_bound;
 static bool s_rich_font_bound;
@@ -131,7 +129,6 @@ static nt_shader_t s_mesh_vs, s_mesh_fs;
 static nt_program_t s_mesh_program;
 static nt_pipeline_t s_mesh_pipeline;
 static nt_vertex_input_t s_mesh_vi;
-static nt_buffer_t s_mesh_instance_buf;
 static uint32_t s_mesh_handle;
 static nt_hash32_t s_mesh_color_name;
 static uint32_t s_mesh_index_count, s_mesh_vertex_count;
@@ -189,8 +186,7 @@ static bool mesh_probe_create(void) {
         .index_buffer = info->ibo,
         .label = "mesh_probe_vi",
     });
-    s_mesh_instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64, .label = "mesh_probe_inst"});
-    return s_mesh_pipeline.id != 0 && s_mesh_vi.id != 0 && s_mesh_instance_buf.id != 0;
+    return s_mesh_pipeline.id != 0 && s_mesh_vi.id != 0;
 }
 
 static void mesh_probe_destroy(void) {
@@ -200,8 +196,6 @@ static void mesh_probe_destroy(void) {
         nt_gfx_deactivate_mesh(s_mesh_handle);
         s_mesh_handle = 0;
     }
-    nt_gfx_destroy_buffer(s_mesh_instance_buf);
-    s_mesh_instance_buf = (nt_buffer_t){0};
     nt_gfx_destroy_pipeline(s_mesh_pipeline);
     s_mesh_pipeline = (nt_pipeline_t){0};
     nt_gfx_destroy_program(s_mesh_program);
@@ -216,15 +210,16 @@ static void mesh_probe_draw(void) {
     if (s_mesh_vi.id == 0 || !nt_gfx_program_ready(s_mesh_program)) {
         return;
     }
-    /* Instance data at byte offset 8: proves the nonzero-offset re-pointing
-     * the mesh renderer's ring allocator relies on. Two stacked quads. */
-    float inst[6] = {0.0F, 0.0F, 0.85F, -0.95F, 0.85F, -0.82F};
-    nt_gfx_update_buffer(s_mesh_instance_buf, 0, inst, sizeof(inst));
+    /* Instance data 8 bytes into a vertex frame storage allocation: proves the
+     * nonzero-offset re-pointing the mesh renderer relies on. Two stacked quads. */
+    const float inst[6] = {0.0F, 0.0F, 0.85F, -0.95F, 0.85F, -0.82F};
+    uint32_t inst_offset = 0;
+    memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(inst), 4, &inst_offset), inst, sizeof(inst));
     nt_gfx_bind_pipeline(s_mesh_pipeline);
     const float color[4] = {0.25F, 0.5F, 0.75F, 1.0F};
     nt_gfx_set_uniform_vec4(s_mesh_color_name, color);
     nt_gfx_bind_vertex_input(s_mesh_vi);
-    nt_gfx_bind_instance_buffer(s_mesh_instance_buf, 8);
+    nt_gfx_bind_instance_buffer(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), inst_offset + 8U);
     nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
 }
 // #endregion
@@ -1021,15 +1016,7 @@ static void render_rich_composition(nt_ui_context_t *ctx) {
 static bool s_gpu_restore_pending;
 
 static bool gpu_restore_step(void) {
-    nt_gfx_destroy_buffer(s_frame_ubo);
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
-    bool ok = s_frame_ubo.id != 0;
-    ok = (nt_sprite_renderer_restore_gpu() == NT_OK) && ok;
+    bool ok = nt_sprite_renderer_restore_gpu() == NT_OK;
     ok = (nt_text_renderer_restore_gpu() == NT_OK) && ok;
     nt_shape_renderer_restore_gpu();
     /* The probe's mesh and vertex input died with the context. */
@@ -1115,8 +1102,10 @@ static void frame(void) {
                             nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        /* View data from frame storage: the restore needs no buffer of its own. */
+        uint32_t uniforms_offset = 0;
+        memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, sizeof(uniforms), nt_gfx_gpu_caps()->uniform_buffer_offset_alignment, &uniforms_offset), &uniforms, sizeof(uniforms));
+        nt_gfx_bind_uniform_buffer_range(nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM), 0, uniforms_offset, sizeof(uniforms));
 
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
@@ -1268,13 +1257,6 @@ int main(int argc, char *argv[]) {
 
     g_nt_app.target_dt = 0.0F;
 
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
-
     /* Reuse the showcase pack (same generated asset ids); the CMake copies ui_showcase.ntpack here. */
     s_pack_id = nt_hash32_str("ui_showcase");
     nt_resource_mount(s_pack_id, 100);
@@ -1402,7 +1384,6 @@ int main(int argc, char *argv[]) {
     nt_http_shutdown();
     nt_hash_shutdown();
     mesh_probe_destroy();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

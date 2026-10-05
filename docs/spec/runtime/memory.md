@@ -50,6 +50,17 @@ nt_mem_scratch_shutdown(); // exit
 
 Type-safe macros: `NT_MEM_SCRATCH_ALLOC(T)`, `NT_MEM_SCRATCH_ALLOC_ARRAY(T, count)`.
 
+### Frame storage
+
+Lifetime: from `nt_gfx_frame_alloc` until the next `nt_gfx_begin_frame`.
+
+Per-frame GPU data (vertices, instances, indices, uniform blocks) is
+bump-allocated from gfx frame storage instead of scratch: each stream is a CPU
+staging copy plus a GPU buffer of `nt_gfx_desc_t.frame_capacity[stream]` bytes,
+so a byte of capacity costs a byte of heap and a byte of GPU memory. The game
+sizes it from `nt_gfx_counters_t.frame_bytes`; overflow stops the program. See
+[Frame storage](../render/architecture.md#frame-storage).
+
 ## Capacity policy
 
 Capacities split into two tiers.

@@ -132,11 +132,11 @@ Virtual-resource APIs that publish a runtime handle do not automatically own or
 destroy the runtime object unless the function says it consumes ownership of the
 runtime object represented by that handle.
 
-Frame-scoped values are plain values with no generation: a frame arena offset
-(`nt_frame_arena_reserve`), a mesh run (`nt_mesh_renderer_prepare`,
+Frame-scoped values are plain values with no generation: a frame storage offset
+(`nt_gfx_frame_alloc`), a mesh run (`nt_mesh_renderer_prepare`,
 `nt_skinned_mesh_renderer_prepare`) and a deformation binding (`nt_skeletal_gpu_reserve`)
-stay valid until the owning module's next `begin_frame`; a restore invalidates
-a binding and the runs, and an arena offset needs a new upload. A skinned run
+stay valid until the owning module's next `begin_frame` (`nt_gfx_begin_frame`
+for offsets and runs); a restore invalidates a binding and the runs. A skinned run
 embeds deformation bindings and also expires at the next
 `nt_skeletal_gpu_begin_frame`. The values carry no stamp;
 each module asserts only its frame order (one `begin_frame` per gfx frame).

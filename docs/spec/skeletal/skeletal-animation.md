@@ -228,7 +228,7 @@ The game stores mode and pending intent; the engine never switches by distance, 
 - `nt_skeletal_gpu_begin_frame()` resets the frame cursor to `(0, 0)`. Once per gfx frame after `nt_gfx_begin_frame`; a second call in one gfx frame asserts to prevent resetting ranges already used by this frame's draws.
 - `nt_skeletal_gpu_reserve(count, &binding)` places a frame of `3·count` texels at the cursor under the §10 texel layout — a frame that does not fit the current row starts the next one — writes `{texture, x0, y0, x1 = x0, y1 = y0, alpha = 0}` and returns the staging pointer of that frame, which the game hands to `nt_skin_palette_build(..., out = ptr, capacity = count)`. Zero-copy: the game keeps no palette buffer, and a palette that must outlive the frame (#485 bridge) is the game's own copy. No GL call. Asserts: `count > 0`, `3·count ≤ width`, capacity (no growth, no eviction).
 - `nt_skeletal_gpu_flush()` uploads every row touched since `begin_frame` as one rectangle `(0, 0, width, rows)` through `nt_gfx_update_texture` (one call; none when nothing was reserved). The unreserved tail of the last row rides along — complete rows carry packing tails anyway and nothing reads them; `width = 3·P_max` makes every frame one row and removes both. Once per frame between the last palette write and the first pass; a second call re-uploads the same bytes.
-- `nt_skeletal_gpu_restore_gpu()` destroys and recreates the texture (the `nt_frame_arena_restore_gpu` contract); staging survives but the next frame rewrites it (§15 order).
+- `nt_skeletal_gpu_restore_gpu()` destroys and recreates the texture; staging survives but the next frame rewrites it (§15 order).
 
 Bank entries (planned, #478) build the same struct as a compound literal from `bank_texture` and a lookup result at their call site; no helper lives here.
 
@@ -310,7 +310,7 @@ warning, explicit acknowledgement flag and a separate accurate-normal
 material/shader. CPU skeleton math still supports nonuniform scale. The profile
 is a material choice, not a runtime enum or automatic renderer branch.
 
-**Passes.** All passes use the same frame binding. Baseline multipass: per pass assign the pass material → build/sort the list → prepare its runs; then flush and upload once and draw each pass's runs in its pass ([Frame order](../render/architecture.md#frame-order)). WebGL2 needs only 2D float textures with NEAREST filters, `texelFetch`, instanced attributes; no SSBO/compute/texture arrays/float render targets/float-linear filtering.
+**Passes.** All passes use the same frame binding. Baseline multipass: per pass assign the pass material → build/sort the list → prepare its runs; then flush the palettes once and draw each pass's runs in its pass ([Frame order](../render/architecture.md#frame-order)). WebGL2 needs only 2D float textures with NEAREST filters, `texelFetch`, instanced attributes; no SSBO/compute/texture arrays/float render targets/float-linear filtering.
 
 ## 14. Bounds and culling
 

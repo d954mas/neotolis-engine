@@ -16,7 +16,6 @@
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
-#include "frame_arena/nt_frame_arena.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
@@ -126,9 +125,6 @@ static void frame(void) {
         });
         /* Materials keep their handles and draw again once their programs relink. */
         nt_mesh_renderer_restore_gpu();
-        const nt_result_t restore_result = nt_frame_arena_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
         nt_program_ref_drop(&s_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
@@ -206,10 +202,8 @@ static void frame(void) {
         items[0].batch_key = nt_mesh_renderer_batch_key(s_material, mesh);
         item_count = 1;
     }
-    nt_frame_arena_begin_frame();
     nt_mesh_run_t runs[1];
     const uint32_t run_count = nt_mesh_renderer_prepare(items, item_count, runs, 1);
-    nt_frame_arena_upload();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
 
@@ -269,7 +263,6 @@ int main(void) {
 
     nt_mesh_renderer_desc_t mr_desc = nt_mesh_renderer_desc_defaults();
     nt_mesh_renderer_init(&mr_desc);
-    nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = NT_INSTANCE_STRIDE_MAX});
 
     /* Request resource handles */
     s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
@@ -337,7 +330,6 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    nt_frame_arena_shutdown();
     nt_mesh_renderer_shutdown();
     nt_drawable_comp_shutdown();
     nt_material_comp_shutdown();

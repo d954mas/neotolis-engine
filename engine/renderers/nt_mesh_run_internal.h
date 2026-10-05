@@ -1,7 +1,6 @@
 #ifndef NT_MESH_RUN_INTERNAL_H
 #define NT_MESH_RUN_INTERNAL_H
 
-#include "frame_arena/nt_frame_arena.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "renderers/nt_renderer_shared.h"
 
@@ -13,7 +12,7 @@ static inline void nt_mesh_runs_draw(const nt_mesh_run_t *runs, uint32_t run_cou
     if (run_count == 0) {
         return;
     }
-    const nt_buffer_t instances = nt_frame_arena_buffer();
+    const nt_buffer_t instances = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX);
     nt_renderer_bound_t bound = {0};
     uint32_t textured_supplied = 0;
     for (uint32_t r = 0; r < run_count; r++) {

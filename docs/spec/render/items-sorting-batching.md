@@ -170,7 +170,7 @@ SpriteRenderer ignores those flags.
 
 MeshRenderer draws consecutive equal-key runs with GPU instancing. Each run
 shares one mesh and material; different meshes are not merged. A run is never
-split: prepare packs every run of a list into one frame arena reserve.
+split: prepare packs every run of a list into one vertex frame storage allocation.
 
 ### Mesh instancing
 

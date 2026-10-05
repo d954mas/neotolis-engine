@@ -7,7 +7,6 @@
 
 /* clang-format off */
 /* NT_TEST_ACCESS defined via CMake target_compile_definitions */
-#include "frame_arena/nt_frame_arena.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "renderers/nt_renderer_shared.h"
 #include "graphics/nt_gfx.h"
@@ -263,17 +262,11 @@ static nt_entity_t create_test_entity(nt_mesh_t mesh, nt_material_t mat) {
     return e;
 }
 
-/* Leaves the pass the tests draw in closed and the arena open for reserves. */
-static void begin_arena_frame(void) {
+/* Leaves the pass the tests draw in closed and opens the next frame with empty frame storage. */
+static void begin_storage_frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_frame_arena_begin_frame();
-}
-
-static void upload_and_begin_pass(void) {
-    nt_frame_arena_upload();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 #define TEST_MAX_RUNS 64
@@ -301,9 +294,9 @@ static uint32_t drawn_instances(void) {
 
 /* One gfx frame of the prepared path for a single list. */
 static void draw_list(const nt_render_item_t *items, uint32_t count) {
-    begin_arena_frame();
+    begin_storage_frame();
     const uint32_t run_count = nt_mesh_renderer_prepare(items, count, s_runs, TEST_MAX_RUNS);
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     draw_runs(s_runs, run_count);
 }
 
@@ -328,7 +321,6 @@ void setUp(void) {
 
     nt_mesh_renderer_desc_t desc = nt_mesh_renderer_desc_defaults();
     nt_mesh_renderer_init(&desc);
-    nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = 16384});
 
     nt_gfx_fake_draw_trace_reset(true);
     s_draw_mark = 0;
@@ -339,7 +331,6 @@ void setUp(void) {
 void tearDown(void) {
     nt_log_remove_sink(capture_program_warning, NULL);
     nt_gfx_end_pass();
-    nt_frame_arena_shutdown();
     nt_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_drawable_comp_shutdown();
@@ -1447,9 +1438,9 @@ void test_vertex_input_versions_overflow_asserts(void) {
     nt_material_t mat3 = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 2, nt_blend_opaque());
     nt_entity_t e3 = create_test_entity(mesh, mat3);
     item = (nt_render_item_t){.sort_key = 0, .entity = e3.id, .batch_key = nt_mesh_renderer_batch_key(mat3, mesh)};
-    begin_arena_frame();
+    begin_storage_frame();
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* ---- Test 9: restore_gpu clears cache and subsequent draw still works ---- */
@@ -1660,16 +1651,16 @@ void test_prepare_and_draw_offsets_agree(void) {
     nt_render_item_t first[1] = {{.entity = e0.id, .batch_key = key}};
     nt_render_item_t second[2] = {{.entity = e0.id, .batch_key = key}, {.entity = e1.id, .batch_key = key}};
 
-    begin_arena_frame();
+    begin_storage_frame();
     nt_mesh_run_t a[1];
     nt_mesh_run_t b[2];
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(first, 1, a, 1));
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(second, 2, b, 2));
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     TEST_ASSERT_EQUAL_UINT32(0, a[0].offset);
-    TEST_ASSERT_EQUAL_UINT32(64, b[0].offset); /* one RGBA8 instance rounded up to NT_FRAME_ARENA_ALIGN */
+    TEST_ASSERT_EQUAL_UINT32(NT_INSTANCE_STRIDE_RGBA8, b[0].offset); /* instance blocks align to 4 */
     TEST_ASSERT_EQUAL_UINT32(2, b[0].instance_count);
-    TEST_ASSERT_EQUAL_UINT32(64 + (2 * NT_INSTANCE_STRIDE_RGBA8), nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(3U * NT_INSTANCE_STRIDE_RGBA8, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
 
     draw_runs(b, 1);
     TEST_ASSERT_EQUAL_UINT32(b[0].offset, nt_gfx_fake_last_instance_offset());
@@ -1679,7 +1670,7 @@ void test_prepare_and_draw_offsets_agree(void) {
     TEST_ASSERT_EQUAL_UINT32(1, drawn_instances());
 }
 
-/* Shadow cascades draw one list in several passes: the frame uploads once, before the first draw. */
+/* Shadow cascades draw one list in several passes: the frame storage uploads once, before the first draw. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_list_drawn_twice_reads_one_upload(void) {
     nt_mesh_t mesh = create_test_mesh();
@@ -1689,14 +1680,14 @@ void test_list_drawn_twice_reads_one_upload(void) {
     const uint32_t key = nt_mesh_renderer_batch_key(mat, mesh);
     nt_render_item_t items[2] = {{.entity = e0.id, .batch_key = key}, {.entity = e1.id, .batch_key = key}};
 
-    const uint32_t updates = nt_gfx_fake_update_buffer_count(); /* prepare writes no buffer */
-    begin_arena_frame();
-    nt_frame_arena_reserve(16, &(uint32_t){0}); /* another renderer's range: the list does not start at 0 */
+    const uint32_t updates = nt_gfx_fake_update_buffer_count();
+    begin_storage_frame();
+    (void)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 16, 4, &(uint32_t){0}); /* another renderer's range: the list does not start at 0 */
     nt_mesh_run_t runs[2];
     const uint32_t run_count = nt_mesh_renderer_prepare(items, 2, runs, 2);
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     TEST_ASSERT_EQUAL_UINT32(1, run_count);
-    TEST_ASSERT_EQUAL_UINT32(updates + 1, nt_gfx_fake_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count()); /* prepare writes no buffer; execution uploads */
     TEST_ASSERT_EQUAL_UINT32(16, runs[0].offset);
 
     for (int pass = 0; pass < 2; pass++) {
@@ -1721,14 +1712,14 @@ void test_runs_keep_state_resolved_at_prepare(void) {
     nt_entity_t e = create_test_entity(mesh, plain);
     nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(plain, mesh)};
 
-    begin_arena_frame();
+    begin_storage_frame();
     nt_mesh_run_t first[1];
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(&item, 1, first, 1));
     *nt_material_comp_handle(e) = colored;
     item.batch_key = nt_mesh_renderer_batch_key(colored, mesh);
     nt_mesh_run_t second[1];
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(&item, 1, second, 1));
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     TEST_ASSERT_NOT_EQUAL_UINT32(first[0].vertex_input.id, second[0].vertex_input.id);
 
     draw_runs(first, 1);
@@ -1751,14 +1742,14 @@ void test_concatenated_runs_rebind_textures_on_a_pipeline_change(void) {
     nt_render_item_t items[1];
     fill_items(items, &e, &mat, &mesh, 1);
 
-    begin_arena_frame();
+    begin_storage_frame();
     nt_mesh_run_t runs[3];
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(items, 1, &runs[0], 1));
     runs[1] = runs[0];
     nt_program_t p2 = create_test_tex_program();
     nt_material_set_program(mat, p2);
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(items, 1, &runs[2], 1));
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     TEST_ASSERT_NOT_EQUAL_UINT32(runs[0].pipeline.id, runs[2].pipeline.id);
 
     nt_gfx_fake_reset();
@@ -1782,10 +1773,10 @@ void test_list_drawn_twice_in_one_pass_reads_current_params(void) {
     nt_render_item_t items[1];
     fill_items(items, &e, &mat, &mesh, 1);
 
-    begin_arena_frame();
+    begin_storage_frame();
     nt_mesh_run_t runs[1];
     const uint32_t run_count = nt_mesh_renderer_prepare(items, 1, runs, 1);
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_reset();
     draw_runs(runs, run_count);
     const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
@@ -1812,12 +1803,12 @@ void test_prepare_asserts_when_runs_run_out(void) {
     /* A skipped run takes no slot: exactly the drawable runs fit. */
     nt_render_item_t with_skip[3] = {{.entity = skipped.id, .batch_key = nt_mesh_renderer_batch_key(not_ready, mesh)}, items[0], items[1]};
 
-    begin_arena_frame();
+    begin_storage_frame();
     nt_mesh_run_t runs[2];
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_prepare(with_skip, 3, runs, 2));
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_prepare(items, 2, runs, 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "runs exhausted"));
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* ---- main ---- */

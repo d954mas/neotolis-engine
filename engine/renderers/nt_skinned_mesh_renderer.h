@@ -35,14 +35,14 @@ void nt_skinned_mesh_renderer_restore_gpu(void);
  * the run supplies the entity's deformation texture and its default sampler. */
 /* Splits items into runs of equal batch_key and deformation texture, resolves
  * pipeline and vertex input per run (creating them on a cache miss), packs
- * world, deformation binding and color of drawable runs into one
- * nt_frame_arena reserve and writes the runs; returns their count. Runs whose
+ * world, deformation binding and color of drawable runs into one vertex frame
+ * storage allocation and writes the runs; returns their count. Runs whose
  * program is not ready or whose pipeline/vertex input failed are skipped.
- * Writes no buffer. Call after the items' nt_skeletal_gpu_reserve, between
- * nt_frame_arena_begin_frame and nt_frame_arena_upload.
+ * Writes no buffer. Call after the items' nt_skeletal_gpu_reserve, at any
+ * point of the frame before the draws.
  * max_runs >= count always suffices; fewer asserts when exceeded. */
 uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count, nt_mesh_run_t *runs, uint32_t max_runs);
-/* Executes runs in order in the current pass after nt_frame_arena_upload and
+/* Executes runs of this gfx frame in order in the current pass after
  * nt_skeletal_gpu_flush, any number of times. runs may be NULL only when
  * run_count is 0. */
 void nt_skinned_mesh_renderer_draw(const nt_mesh_run_t *runs, uint32_t run_count);
