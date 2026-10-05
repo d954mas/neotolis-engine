@@ -629,6 +629,76 @@ static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
 
 /* Scissor rectangle and uniform-buffer slots carry over frames: the snapshot
  * shows the state a CACHE bind inside the capture matched. */
+static uint32_t initial_records(nt_gfx_capture_view_t capture, nt_gfx_operation_t operation, nt_gfx_result_t result) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        count += (capture.events[i].kind == NT_GFX_EVENT_INITIAL && capture.events[i].operation == operation && capture.events[i].result == result) ? 1U : 0U;
+    }
+    return count;
+}
+
+/* A destroyed buffer leaves its slots, and a context loss forgets slots and the scissor rectangle. */
+static void test_capture_initial_state_forgets_destroyed_and_lost_bindings(void) {
+    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 256});
+    nt_buffer_t kept = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 256});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_bind_uniform_buffer(ubo, 2);
+    nt_gfx_bind_uniform_buffer(kept, 3);
+    nt_gfx_end_pass();
+    nt_gfx_destroy_buffer(ubo);
+    record_next_frame();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT32(1, initial_records(capture, NT_GFX_OP_UBO, NT_GFX_RESULT_NONE)); /* only `kept` */
+    TEST_ASSERT_EQUAL_UINT32(0, initial_records(capture, NT_GFX_OP_SCISSOR, NT_GFX_RESULT_UNKNOWN));
+
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    record_next_frame();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    capture = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT32(0, initial_records(capture, NT_GFX_OP_UBO, NT_GFX_RESULT_NONE));
+    TEST_ASSERT_EQUAL_UINT32(1, initial_records(capture, NT_GFX_OP_SCISSOR, NT_GFX_RESULT_UNKNOWN));
+}
+
+/* An equal bind and a merged indexed draw each end CACHE in the capture. */
+static void test_capture_shows_cache_for_equal_binds_and_merged_draws(void) {
+    static const float verts[9] = {0};
+    static const uint16_t indices[6] = {0, 1, 2, 0, 1, 2};
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = verts, .size = sizeof(verts)});
+    nt_buffer_t ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = indices, .size = sizeof(indices), .index_type = NT_INDEX_UINT16});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(
+        &(nt_vertex_input_desc_t){.layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}}, .vertex_buffer = vbo, .index_buffer = ibo});
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_fake_make_program(NULL, 0)});
+    record_next_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    for (uint32_t repeat = 0; repeat < 2; repeat++) {
+        nt_gfx_bind_pipeline(pipeline);
+        nt_gfx_bind_vertex_input(vi);
+        nt_gfx_set_viewport(0, 0, 4, 4);
+        nt_gfx_draw_indexed(repeat * 3U, 3, 3);
+    }
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    const nt_gfx_operation_t ops[] = {NT_GFX_OP_PIPELINE, NT_GFX_OP_VERTEX_INPUT, NT_GFX_OP_VIEWPORT, NT_GFX_OP_DRAW_INDEXED};
+    for (uint32_t o = 0; o < sizeof(ops) / sizeof(ops[0]); o++) {
+        uint32_t cache = 0;
+        for (uint32_t i = 0; i < capture.count; i++) {
+            const nt_gfx_event_t *e = &capture.events[i];
+            cache += (e->kind == NT_GFX_EVENT_RESULT && e->operation == ops[o] && e->result == NT_GFX_RESULT_CACHE) ? 1U : 0U;
+        }
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, cache, "one CACHE result per operation");
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&capture.counters));
+}
+
 static void test_capture_initial_state_holds_carried_over_bindings(void) {
     nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 512});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -650,6 +720,8 @@ static void test_capture_initial_state_holds_carried_over_bindings(void) {
         const nt_gfx_event_t *e = &capture.events[i];
         if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_SCISSOR) {
             TEST_ASSERT_EQUAL_UINT32(1, e->data.state.integers[0]);
+            TEST_ASSERT_EQUAL_UINT32(2, e->data.state.integers[1]);
+            TEST_ASSERT_EQUAL_UINT32(3, e->data.state.integers[2]);
             TEST_ASSERT_EQUAL_UINT32(4, e->data.state.integers[3]);
             scissor_found = true;
         }
@@ -894,6 +966,8 @@ int main(void) {
     RUN_TEST(test_accepted_counters_match_recorded_results);
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
     RUN_TEST(test_capture_initial_state_holds_carried_over_bindings);
+    RUN_TEST(test_capture_initial_state_forgets_destroyed_and_lost_bindings);
+    RUN_TEST(test_capture_shows_cache_for_equal_binds_and_merged_draws);
     RUN_TEST(test_depth_only_render_target_definition_has_no_color_fields);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);
     RUN_TEST(test_capture_prefix_lifetime_and_saved_snapshot);

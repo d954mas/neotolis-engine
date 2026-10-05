@@ -395,6 +395,7 @@ void test_a_b_a_textures_reapply_complete_set_and_ignore_skin_override(void) {
     const uint32_t a_backend = nt_gfx_test_texture_backend_id(texture_a);
     const uint32_t b_backend = nt_gfx_test_texture_backend_id(texture_b);
     /* Every run applies the complete set; gfx records only the units that changed in the pass. */
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
     const uint32_t expected[4] = {surface_backend, a_backend, b_backend, a_backend};
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_bound_texture_count());
     for (uint32_t i = 0; i < 4; i++) {

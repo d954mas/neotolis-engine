@@ -433,6 +433,26 @@ void test_equal_instance_binding_is_dropped(void) {
     nt_gfx_end_pass();
 }
 
+/* A vertex input without instance attributes in between leaves A's pointer in its VAO. */
+void test_instance_pointing_survives_a_plain_vertex_input_in_between(void) {
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t a = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
+    nt_vertex_input_t plain = make_vi(vbo, (nt_buffer_t){0});
+    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
+    nt_pipeline_t pip = make_test_pipeline();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(a);
+    nt_gfx_bind_instance_buffer(stream, 0);
+    nt_gfx_bind_vertex_input(plain);
+    nt_gfx_draw(0, 3);
+    nt_gfx_bind_vertex_input(a);
+    nt_gfx_draw_instanced(0, 3, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    nt_gfx_end_pass();
+}
+
 /* A destroyed instance buffer unpoints the vertex input it was bound to. */
 void test_instance_buffer_destroy_unpoints(void) {
     nt_buffer_t vbo = make_vbo();
@@ -628,6 +648,7 @@ int main(void) {
     RUN_TEST(test_draw_indexed_asserts_on_non_indexed_vi);
     RUN_TEST(test_instanced_draw_asserts_before_instance_pointing);
     RUN_TEST(test_instance_pointing_is_pass_scoped);
+    RUN_TEST(test_instance_pointing_survives_a_plain_vertex_input_in_between);
     RUN_TEST(test_instance_buffer_destroy_unpoints);
     RUN_TEST(test_equal_instance_binding_is_dropped);
     RUN_TEST(test_attributeless_vi_draws);

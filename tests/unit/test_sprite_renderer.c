@@ -768,12 +768,13 @@ void test_sprite_renderer_capacity_flush_keeps_program_until_explicit_setter(voi
     nt_material_set_program(mat, program_b);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_set_material(mat);
+    begin_fresh_pass();
     nt_gfx_fake_reset();
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_flush();
 
-    /* One flush, one cmd, one material; the page is already on its unit in this pass: no texture bind, no sampler int. */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
+    /* One flush, one cmd, one material: one texture bind, no sampler int. */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_count());
@@ -1250,12 +1251,14 @@ void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) 
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_material_set_program(mat, program_b);
+    const uint32_t sets_before = g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET];
     /* draw_list opens its cmds on the new pipeline without flushing the pending one. */
     nt_sprite_renderer_draw_list(&item, 1);
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(program_b.id, nt_gfx_fake_draw_trace_at(1).program.id);
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET] - sets_before);
     /* Each cmd applies its set; gfx drops the second, equal unit bind of the pass.
      * Params are program state and go out twice. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
@@ -1617,6 +1620,8 @@ void test_sprite_renderer_emit_geometry_asserts_partial_triangle(void) {
     s_atlas_res = register_test_atlas(0xADULL);
     nt_sprite_renderer_set_material(create_defaults_test_material(1.0F));
     const float quad[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const uint16_t whole[6] = {0, 1, 2, 0, 2, 3};
+    nt_sprite_renderer_emit_geometry(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH), quad, 4, whole, 6, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU, NULL, 0); /* control */
     const uint16_t idx[4] = {0, 1, 2, 3};
     NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_emit_geometry(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH), quad, 4, idx, 4, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU, NULL, 0));
 }

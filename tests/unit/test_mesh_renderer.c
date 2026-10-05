@@ -1146,7 +1146,8 @@ void test_state_same_tex_same_sampler_diff_params(void) {
     nt_gfx_fake_reset();
     draw_list(items, 2);
 
-    /* Same texture and sampler: the second unit bind of the pass is dropped. */
+    /* Both materials apply their set; same texture and sampler: the second unit bind of the pass is dropped. */
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());

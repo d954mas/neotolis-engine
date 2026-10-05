@@ -843,6 +843,12 @@ static void test_ground_state_after_reinit(void) {
 static void test_viewport_dedup_and_resize(void) {
     begin_black_pass();
     install_state_counters();
+    nt_gfx_frame_execute();
+    const uint32_t after_begin_pass = s_gl_calls.viewport;
+    /* The front-end records this (begin_pass leaves its mirror unknown); the backend drops it. */
+    nt_gfx_set_viewport(0, 0, (int)g_nt_window.fb_width, (int)g_nt_window.fb_height);
+    nt_gfx_frame_execute();
+    TEST_ASSERT_EQUAL_UINT32(after_begin_pass, s_gl_calls.viewport);
     nt_gfx_set_viewport(0, 0, 8, 8);
     nt_gfx_set_viewport(0, 0, 8, 8);
     nt_gfx_frame_execute();
