@@ -666,6 +666,20 @@ static void test_capture_initial_state_forgets_destroyed_and_lost_bindings(void)
     TEST_ASSERT_EQUAL_UINT32(1, initial_records(capture, NT_GFX_OP_SCISSOR, NT_GFX_RESULT_UNKNOWN));
 }
 
+/* GL keeps a uniform-buffer binding across an orphan, so the snapshot keeps it too. */
+static void test_capture_initial_state_keeps_bindings_across_an_orphan(void) {
+    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 256});
+    const uint8_t data[256] = {0};
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_uniform_buffer(ubo, 1);
+    nt_gfx_end_pass();
+    nt_gfx_orphan_buffer(ubo, data, sizeof(data));
+    record_next_frame();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(1, initial_records(nt_gfx_capture_read(), NT_GFX_OP_UBO, NT_GFX_RESULT_NONE));
+}
+
 /* An equal bind and a merged indexed draw each end CACHE in the capture. */
 static void test_capture_shows_cache_for_equal_binds_and_merged_draws(void) {
     static const float verts[9] = {0};
@@ -967,6 +981,7 @@ int main(void) {
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);
     RUN_TEST(test_capture_initial_state_holds_carried_over_bindings);
     RUN_TEST(test_capture_initial_state_forgets_destroyed_and_lost_bindings);
+    RUN_TEST(test_capture_initial_state_keeps_bindings_across_an_orphan);
     RUN_TEST(test_capture_shows_cache_for_equal_binds_and_merged_draws);
     RUN_TEST(test_depth_only_render_target_definition_has_no_color_fields);
     RUN_TEST(test_draw_trace_preserves_arguments_and_live_prefix);

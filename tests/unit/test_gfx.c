@@ -3427,14 +3427,14 @@ void test_indexed_draw_merge_boundaries(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_GPU_TIMING_ENABLED ? 10U : 9U, merged_draws_after_end_frame());
 }
 
-/* An orphan can shrink the storage, so the next bind of the slot re-validates its range. */
+/* An orphan keeps the binding; a range that no longer fits the shrunk storage re-validates. */
 void test_orphaned_uniform_buffer_revalidates_its_range(void) {
     nt_buffer_t ubo = make_test_ubo(512);
     const uint8_t data[256] = {0};
     begin_stream_test_pass();
     nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128);
     nt_gfx_orphan_buffer(ubo, data, 512);
-    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128));
+    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128));
     nt_gfx_orphan_buffer(ubo, data, 256);
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128));
     nt_gfx_end_pass();

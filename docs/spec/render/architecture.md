@@ -114,9 +114,14 @@ records nothing. A mirror lives exactly as long as the contract keeps its state:
   the instance buffer and the viewport live for one pass: `begin_pass` discards
   them, so the first bind of each in a pass records;
 - the scissor rectangle and the uniform-buffer binding of each slot carry over
-  passes; destroying or orphaning a buffer clears the slots it holds (the next
-  bind re-validates its range), and a context loss clears both;
+  passes; destroying a buffer clears the slots it holds, and a context loss
+  clears both. An orphan keeps the binding (GL keeps it too); an equal range bind
+  whose range no longer fits the orphaned storage re-validates;
 - scissor enable is reset to off by `begin_pass`.
+
+`nt_gfx_apply_texture_bindings` is the exception to the CACHE result: it always
+validates and publishes the whole set and ends `ACCEPTED`, but records a unit
+bind only when that unit's texture or sampler changed in the pass.
 
 The compare runs after the pass check; an equal value was validated when it was
 recorded and every path that could invalidate it clears the mirror. An invalid
@@ -131,7 +136,9 @@ viewport, clear values and the active unit.
 Indexed draws are whole triangle lists: both indexed draws assert
 `num_indices % 3 == 0`, and index data never holds the primitive-restart value
 (`0xFFFF`/`0xFFFFFFFF`; WebGL2 always restarts on it, native GL draws that
-vertex). `nt_gfx_draw_indexed` therefore extends the previous command when that
+vertex). Shaders of non-instanced indexed draws do not read `gl_PrimitiveID`
+(native GL only; WebGL2's GLSL ES 3.00 has none), whose numbering a merge would
+continue. `nt_gfx_draw_indexed` therefore extends the previous command when that
 command is the last one recorded, was recorded by `nt_gfx_draw_indexed`, and
 its range ends where the new one starts (the summed count fits `GLsizei`). The
 merged call ends `CACHE` with its vertices and indices counted, so

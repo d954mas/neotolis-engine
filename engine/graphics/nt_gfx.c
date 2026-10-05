@@ -183,15 +183,6 @@ static const nt_gfx_texture_meta_t *render_target_size_meta(uint32_t rt_slot) {
     return render_target_attachment_meta(rt_slot, has_color ? NT_GFX_RT_COLOR : NT_GFX_RT_DEPTH);
 }
 
-/* Clears the uniform-buffer slot mirrors that hold this buffer. */
-static void forget_uniform_buffer_slots(uint32_t buffer_id) {
-    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
-        if (s_gfx.bound_ubos[i].buffer == buffer_id) {
-            s_gfx.bound_ubos[i] = (nt_gfx_ubo_binding_t){0};
-        }
-    }
-}
-
 /* ---- Global UBO block registration ---- */
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
@@ -1512,7 +1503,11 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
         s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
     }
     /* GL resets the slots of a deleted buffer; a later buffer in this pool slot is a new bind. */
-    forget_uniform_buffer_slots(buf.id);
+    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
+        if (s_gfx.bound_ubos[i].buffer == buf.id) {
+            s_gfx.bound_ubos[i] = (nt_gfx_ubo_binding_t){0};
+        }
+    }
     uint32_t slot = nt_pool_slot_index(buf.id);
     nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
     s_gfx.buffer_backends[slot] = 0;
@@ -2399,8 +2394,10 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint3
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
     nt_gfx_ubo_binding_t *bound = &s_gfx.bound_ubos[slot];
-    /* Destroying the buffer clears its slots, so an equal nonzero id is live. */
-    if (bound->buffer != 0 && bound->buffer == buf.id && bound->offset == offset && bound->size == size) {
+    /* Destroying the buffer clears its slots, so an equal nonzero id is live. An orphan keeps
+     * the GL binding but may shrink the storage: a range that no longer fits re-validates. */
+    if (bound->buffer != 0 && bound->buffer == buf.id && bound->offset == offset && bound->size == size &&
+        (size == 0 || (uint64_t)offset + size <= s_gfx.buffer_metas[nt_pool_slot_index(buf.id)].storage_size)) {
         return NT_GFX_RESULT_CACHE;
     }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
@@ -2551,8 +2548,6 @@ static nt_gfx_result_t orphan_buffer(nt_buffer_t buf, const void *data, uint32_t
     NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "orphan_buffer: buffer has no live backend -- recreate it after context restore");
     nt_gfx_backend_orphan_buffer(s_gfx.buffer_backends[slot], data, size);
     s_gfx.buffer_metas[slot].storage_size = size;
-    /* The next bind of a slot re-validates its range against the new storage. */
-    forget_uniform_buffer_slots(buf.id);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
