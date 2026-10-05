@@ -529,8 +529,7 @@ static GLint texture_name_on_unit(uint32_t slot) {
  * not the program-driven semantic set. */
 static void backend_bind_texture_unit(nt_texture_t tex, nt_sampler_t sampler, uint32_t unit) {
     const nt_sampler_t effective = sampler.id != 0 ? sampler : nt_gfx_get_texture_default_sampler(tex);
-    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(tex), unit);
-    nt_gfx_backend_bind_sampler(nt_gfx_test_sampler_backend_id(effective), unit);
+    nt_gfx_backend_bind_texture_unit(nt_gfx_test_texture_backend_id(tex), nt_gfx_test_sampler_backend_id(effective), unit);
 }
 
 /* Counts glGetError calls; on WebGL each one is a blocking GPU-process round trip. */

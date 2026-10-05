@@ -14,13 +14,15 @@ nt_program_t nt_gfx_fake_make_program(const char *const *names, uint8_t count);
 nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint8_t *sampler_classes, uint8_t count);
 
 /* Draw trace: recorded by the fake backend, so the engine's draw path stays
- * free of test bookkeeping. pipeline/program are the FRONTEND handles bound at
- * draw time, read through nt_gfx_test_bound_pipeline and nt_gfx_pipeline_program. */
+ * free of test bookkeeping. pipeline/program are the FRONTEND handles of the
+ * pipeline the fake backend last bound. */
 typedef struct {
     nt_pipeline_t pipeline;
     nt_program_t program;
+    uint32_t first_index; /* indexed draws only */
     uint32_t num_indices; /* 0 on a non-indexed draw: the backend gets no vertex count */
     uint32_t instance_count;
+    uint8_t index_type; /* indexed draws only */
 } nt_gfx_fake_draw_t;
 
 void nt_gfx_fake_draw_trace_reset(bool enabled);

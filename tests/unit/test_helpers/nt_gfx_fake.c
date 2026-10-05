@@ -98,6 +98,7 @@ static uint32_t s_fake_uniform_vec4_hashes[NT_GFX_FAKE_UNIFORM_NAMES];
 static float s_fake_uniform_vec4_values[NT_GFX_FAKE_UNIFORM_NAMES][4];
 static uint32_t s_fake_uniform_vec4_count;
 static uint32_t s_fake_bind_pipeline_count;
+static uint32_t s_fake_bound_pipeline;
 static uint32_t s_fake_update_texture_count;
 static nt_gfx_fake_update_texture_rect_t s_fake_update_texture_rects[NT_GFX_FAKE_HISTORY_CAPACITY];
 static uint32_t s_fake_update_buffer_count;
@@ -317,7 +318,7 @@ nt_gfx_fake_draw_t nt_gfx_fake_draw_trace_at(uint32_t index) {
     return s_fake_draws[index];
 }
 
-static void fake_record_draw(uint32_t num_indices, uint32_t instance_count) {
+static void fake_record_draw(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
     if (!s_fake_draw_enabled) {
         return;
     }
@@ -325,18 +326,21 @@ static void fake_record_draw(uint32_t num_indices, uint32_t instance_count) {
         s_fake_draw_overflow = true;
         return;
     }
-    nt_pipeline_t pipeline = {nt_gfx_test_bound_pipeline()};
+    nt_pipeline_t pipeline = nt_gfx_test_pipeline_of_backend(s_fake_bound_pipeline);
     s_fake_draws[s_fake_draw_count++] = (nt_gfx_fake_draw_t){
         .pipeline = pipeline,
         .program = nt_gfx_pipeline_program(pipeline),
+        .first_index = first_index,
         .num_indices = num_indices,
         .instance_count = instance_count,
+        .index_type = index_type,
     };
 }
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     nt_gfx_fake_draw_trace_reset(false);
+    s_fake_bound_pipeline = 0;
     free(s_fake_program_table);
     s_fake_max_programs = desc->max_programs;
     /* Init-only: a mid-test reset must never re-issue a texture id that is still live. */
@@ -577,7 +581,7 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
     s_fake_render_target_destroy_count++;
 }
 
-void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
+static void fake_bind_texture(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(backend_handle != 0 && "bind_texture: requires a live handle");
     if (s_fake_bound_texture_count < NT_GFX_FAKE_HISTORY_CAPACITY) {
         s_fake_bound_texture_slots[s_fake_bound_texture_count] = slot;
@@ -629,11 +633,16 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
 
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) { (void)backend_handle; }
 
-void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
+static void fake_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     if (slot < NT_GFX_MAX_TEXTURE_SLOTS) {
         s_fake_last_sampler[slot] = backend_handle;
     }
     s_fake_bind_sampler_count++;
+}
+
+void nt_gfx_backend_bind_texture_unit(uint32_t texture_backend, uint32_t sampler_backend, uint32_t slot) {
+    fake_bind_texture(texture_backend, slot);
+    fake_bind_sampler(sampler_backend, slot);
 }
 
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data) {
@@ -649,7 +658,7 @@ void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     NT_ASSERT(backend_handle != 0 && "bind_pipeline: requires a live handle");
     s_fake_bind_pipeline_count++;
-    (void)backend_handle;
+    s_fake_bound_pipeline = backend_handle;
 }
 
 void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset) {
@@ -727,31 +736,27 @@ static void fake_complete_draw(void) {
 }
 
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) {
-    fake_record_draw(0, 1);
+    fake_record_draw(0, 0, 1, 0);
     fake_complete_draw();
     (void)first_vertex;
     (void)num_vertices;
 }
 
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type) {
-    fake_record_draw(num_indices, 1);
+    fake_record_draw(first_index, num_indices, 1, index_type);
     fake_complete_draw();
-    (void)first_index;
-    (void)index_type;
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
-    fake_record_draw(0, instance_count);
+    fake_record_draw(0, 0, instance_count, 0);
     fake_complete_draw();
     (void)first_vertex;
     (void)num_vertices;
 }
 
 void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
-    fake_record_draw(num_indices, instance_count);
+    fake_record_draw(first_index, num_indices, instance_count, index_type);
     fake_complete_draw();
-    (void)first_index;
-    (void)index_type;
 }
 
 bool nt_gfx_backend_recreate_all_resources(void) {

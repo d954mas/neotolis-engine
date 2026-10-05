@@ -2073,7 +2073,7 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
+static void bind_texture(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "bind_texture: slot out of range");
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && s_texture_gl[backend_handle] != 0 && "bind_texture: requires a live texture");
     GLuint tex = s_texture_gl[backend_handle];
@@ -2128,7 +2128,7 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
-void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
+static void bind_sampler(uint32_t backend_handle, uint32_t slot) {
     NT_ASSERT(slot < NT_GFX_MAX_TEXTURE_SLOTS && "bind_sampler: slot out of range");
     NT_ASSERT(backend_handle != 0 && "bind_sampler: sampling without a sampler object");
     GLuint sampler = (GLuint)backend_handle;
@@ -2139,6 +2139,11 @@ void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
     }
     NT_GL(glBindSampler, slot, sampler);
     s_gl_cache.bound_samplers[slot] = sampler;
+}
+
+void nt_gfx_backend_bind_texture_unit(uint32_t texture_backend, uint32_t sampler_backend, uint32_t slot) {
+    bind_texture(texture_backend, slot);
+    bind_sampler(sampler_backend, slot);
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {

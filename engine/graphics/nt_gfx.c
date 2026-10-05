@@ -1770,8 +1770,7 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
         if ((applied_mask & (uint8_t)(1U << unit)) == 0) {
             continue;
         }
-        nt_gfx_backend_bind_texture(texture_backends[unit], unit);
-        nt_gfx_backend_bind_sampler(sampler_backends[unit], unit);
+        nt_gfx_backend_bind_texture_unit(texture_backends[unit], sampler_backends[unit], unit);
     }
     s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_APPLIED;
     return NT_GFX_RESULT_ACCEPTED;
@@ -1846,6 +1845,8 @@ void nt_gfx_test_viewport_rect(int out[4]) {
 }
 
 uint32_t nt_gfx_test_bound_pipeline(void) { return s_gfx.bound_pipeline; }
+
+nt_pipeline_t nt_gfx_test_pipeline_of_backend(uint32_t backend_handle) { return (nt_pipeline_t){s_gfx.pipeline_pool.slots[backend_handle].id}; }
 
 uint32_t nt_gfx_test_bound_vertex_input(void) { return s_gfx.bound_vertex_input; }
 

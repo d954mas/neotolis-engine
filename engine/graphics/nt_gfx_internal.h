@@ -135,8 +135,8 @@ typedef enum {
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
-/* destroy_* accepts 0 (no-op, as glDelete*); bind_sampler accepts 0 as an unbind;
- * every other bind requires a live handle -- the front-end owns husk handling.
+/* destroy_* accepts 0 (no-op, as glDelete*);
+ * every bind requires a live handle -- the front-end owns husk handling.
  * The backend keeps GL-mirror state only; calls name the program or vertex input. */
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
@@ -189,7 +189,6 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
  * 0..N-1 back to back, N = desc->level_count > 1 ? desc->level_count : 1. */
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
-void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_texture_format_t format, const void *data);
 
 enum { NT_GFX_RT_COLOR, NT_GFX_RT_DEPTH, NT_GFX_RT_ATTACHMENTS };
@@ -200,10 +199,8 @@ void nt_gfx_backend_destroy_render_target(uint32_t backend_handle);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
-/* slot is the texture unit (0..MAX). Always paired with bind_texture on that
- * unit; backend_handle == 0 (revert to the texture's own filter state) is left
- * for backend ground state, the front-end always resolves a real sampler. */
-void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot);
+/* slot is the texture unit (0..MAX); the front-end always resolves a real sampler. */
+void nt_gfx_backend_bind_texture_unit(uint32_t texture_backend, uint32_t sampler_backend, uint32_t slot);
 
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
 /* Re-points the named vertex input's instance attribs at byte_offset. */
@@ -278,6 +275,8 @@ uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex);
 uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
 /* Pass-scoped bound state, read from its owner: the front-end. */
 uint32_t nt_gfx_test_bound_pipeline(void);
+/* Front-end handle that owns a pipeline backend handle (a pool slot). */
+nt_pipeline_t nt_gfx_test_pipeline_of_backend(uint32_t backend_handle);
 uint32_t nt_gfx_test_bound_vertex_input(void);
 uint8_t nt_gfx_test_texture_set_state(void);
 bool nt_gfx_test_program_sampler_info(nt_program_t prog, nt_hash32_t name, nt_gfx_sampler_info_t *out_info);

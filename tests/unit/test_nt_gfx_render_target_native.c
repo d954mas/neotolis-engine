@@ -135,7 +135,7 @@ static void test_depth_texture_uses_explicit_format(void) {
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         test_target_t target = make_test_target(4, 4, NT_TEXTURE_FORMAT_RGBA8, cases[i].format);
 
-        nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(target.depth), 0);
+        nt_gfx_backend_bind_texture_unit(nt_gfx_test_texture_backend_id(target.depth), nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(target.depth)), 0);
         GLint value = 0;
         glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &value);
         TEST_ASSERT_EQUAL_INT(cases[i].internal_format, value);
@@ -574,7 +574,7 @@ static void test_depth_only_shadow_map_renders_and_recreates_at_new_size(void) {
 
     destroy_test_target(&shadow_map);
     shadow_map = make_test_target(4, 1, NT_TEXTURE_FORMAT_INVALID, NT_TEXTURE_FORMAT_DEPTH24);
-    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(shadow_map.depth), 0);
+    nt_gfx_backend_bind_texture_unit(nt_gfx_test_texture_backend_id(shadow_map.depth), nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(shadow_map.depth)), 0);
     GLint gl_width = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &gl_width);
     TEST_ASSERT_EQUAL_INT(4, gl_width);
@@ -644,7 +644,7 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
 
     test_target_t target = make_test_target(4, 4, NT_TEXTURE_FORMAT_RGBA16F, NT_TEXTURE_FORMAT_INVALID);
 
-    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(target.color), 0);
+    nt_gfx_backend_bind_texture_unit(nt_gfx_test_texture_backend_id(target.color), nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(target.color)), 0);
     GLint internal_format = 0;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
     TEST_ASSERT_EQUAL_INT(GL_RGBA16F, internal_format);

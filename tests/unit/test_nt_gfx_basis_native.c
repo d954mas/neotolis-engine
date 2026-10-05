@@ -219,7 +219,7 @@ static nt_texture_format_t expected_target(nt_basisu_codec_t codec) {
 #define ANY_CODEC (NT_BASISU_HAS_UASTC ? NT_BASISU_CODEC_UASTC_LDR : NT_BASISU_CODEC_ETC1S)
 
 static GLint texture_max_level(nt_texture_t tex) {
-    nt_gfx_backend_bind_texture(nt_gfx_test_texture_backend_id(tex), 0);
+    nt_gfx_backend_bind_texture_unit(nt_gfx_test_texture_backend_id(tex), nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(tex)), 0);
     GLint value = -1;
     glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &value);
     return value;
