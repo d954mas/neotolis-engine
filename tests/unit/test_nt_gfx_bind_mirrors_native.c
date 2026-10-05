@@ -1267,6 +1267,24 @@ static void test_override_binds_one_sampler(void) {
     TEST_ASSERT_EQUAL_INT((GLint)override_backend, sampler_name_on_unit(1));
 }
 
+/* The texture cache hit on the unit must not skip the sampler half of the bind. */
+static void test_cached_texture_still_binds_a_new_sampler(void) {
+    static const uint8_t white[4] = {255, 255, 255, 255};
+    nt_texture_t tex = make_pixel_texture(white);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    nt_sampler_t override = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
+    uint32_t override_backend = nt_gfx_test_sampler_backend_id(override);
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(tex)), override_backend);
+
+    begin_black_pass();
+    backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
+    backend_bind_texture_unit(tex, override, 0);
+    nt_gfx_end_pass();
+
+    TEST_ASSERT_EQUAL_UINT32(override_backend, nt_gfx_gl_test_cached_sampler(0));
+    TEST_ASSERT_EQUAL_INT((GLint)override_backend, sampler_name_on_unit(0));
+}
+
 /* The native context outlives a recreate and its sampler objects with it, so
  * only ground state's own unbind makes the zeroed cache truthful. */
 static void test_ground_state_reissues_sampler_bind(void) {
@@ -1528,6 +1546,7 @@ int main(void) {
     RUN_TEST(test_destroy_current_program_then_relink_reissues_use_program);
     RUN_TEST(test_same_sampler_on_a_slot_binds_once);
     RUN_TEST(test_override_binds_one_sampler);
+    RUN_TEST(test_cached_texture_still_binds_a_new_sampler);
     RUN_TEST(test_ground_state_reissues_sampler_bind);
     int failures = UNITY_END();
     nt_window_shutdown();

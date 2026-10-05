@@ -1,5 +1,6 @@
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_frame.h"
 #include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
@@ -3238,6 +3239,79 @@ void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
 }
 
+// #region deferred draw-phase stream
+static nt_pipeline_t begin_stream_test_pass(void) {
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = make_sampler_program(NULL, 0)});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    bind_test_vertex_input();
+    return pipeline;
+}
+
+void test_stream_executes_draws_in_call_order_at_end_frame(void) {
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_pipeline_t first = begin_stream_test_pass();
+    nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_end_pass();
+    nt_pipeline_t second = begin_stream_test_pass();
+    nt_gfx_draw_indexed(1, 2, 3);
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(g_nt_gfx_stream.used > 0); /* recorded, not executed */
+
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(first.id, nt_gfx_fake_draw_trace_at(0).pipeline.id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(0).first_index);
+    TEST_ASSERT_EQUAL_UINT32(second.id, nt_gfx_fake_draw_trace_at(1).pipeline.id);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).first_index);
+    nt_gfx_begin_frame();
+}
+
+void test_stream_records_a_copy_of_uniform_values(void) {
+    begin_stream_test_pass();
+    float value[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+    nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), value);
+    value[0] = 9.0F;
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    const float recorded[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+    float seen[4];
+    nt_gfx_fake_uniform_vec4_value_at(nt_gfx_fake_uniform_vec4_count() - 1, seen);
+    TEST_ASSERT_EQUAL_MEMORY(recorded, seen, sizeof(seen));
+    nt_gfx_begin_frame();
+}
+
+void test_buffer_write_executes_earlier_draws_and_recording_continues(void) {
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+    begin_stream_test_pass();
+    nt_gfx_draw_indexed(0, 3, 3);
+    const uint8_t data[16] = {0};
+    nt_gfx_update_buffer(buf, 0, data, sizeof(data));
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
+    nt_gfx_draw_indexed(1, 2, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(0).first_index);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).first_index);
+    nt_gfx_begin_frame();
+}
+
+void test_stream_overflow_asserts(void) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.stream_capacity = 8;
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+    EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
+}
+// #endregion
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
@@ -3374,6 +3448,10 @@ int main(void) {
     RUN_TEST(test_activate_mesh_rejects_meshopt_decoded_size_overflow);
     /* Uniform buffer tests */
     RUN_TEST(test_make_uniform_buffer);
+    RUN_TEST(test_stream_executes_draws_in_call_order_at_end_frame);
+    RUN_TEST(test_stream_records_a_copy_of_uniform_values);
+    RUN_TEST(test_buffer_write_executes_earlier_draws_and_recording_continues);
+    RUN_TEST(test_stream_overflow_asserts);
     RUN_TEST(test_bind_uniform_buffer);
     RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_update_buffer_at_offset);
