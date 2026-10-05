@@ -69,6 +69,7 @@ static void test_offsets_are_multiples_of_any_align_and_same_stride_runs_are_con
     TEST_ASSERT_EQUAL_UINT32(256, alloc_filled(NT_GFX_FRAME_UNIFORM, 64, 256, 0x77));
 }
 
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
 static void test_overflow_and_bad_arguments_assert(void) {
     const uint32_t capacity = g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].capacity;
     uint32_t offset = 0;
@@ -90,6 +91,7 @@ static void test_zero_capacity_asserts_at_init(void) {
     nt_gfx_init(&TEST_DESC);
     nt_gfx_begin_frame();
 }
+#endif
 
 static void test_begin_frame_publishes_use_and_empties_the_storage(void) {
     (void)alloc_filled(NT_GFX_FRAME_VERTEX, 40, 4, 0);
@@ -221,8 +223,10 @@ static void test_restore_makes_new_buffers_and_a_loss_skips_uploads(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_offsets_are_multiples_of_any_align_and_same_stride_runs_are_contiguous);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_overflow_and_bad_arguments_assert);
     RUN_TEST(test_zero_capacity_asserts_at_init);
+#endif
     RUN_TEST(test_begin_frame_publishes_use_and_empties_the_storage);
     RUN_TEST(test_execution_uploads_each_allocated_storage_once_before_its_draws);
     RUN_TEST(test_an_empty_stream_uploads_nothing);

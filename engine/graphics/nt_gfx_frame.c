@@ -11,8 +11,6 @@ nt_gfx_frame_storage_t g_nt_gfx_frame_storage[NT_GFX_FRAME_STREAM_COUNT];
 /* Bytes of each storage already sent to its buffer this frame. */
 static uint32_t s_uploaded[NT_GFX_FRAME_STREAM_COUNT];
 
-static const char *const k_storage_names[NT_GFX_FRAME_STREAM_COUNT] = {"VERTEX", "INDEX", "UNIFORM"};
-
 // #region lifecycle
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void nt_gfx_frame_init(const nt_gfx_desc_t *desc) {
@@ -71,8 +69,8 @@ void nt_gfx_frame_begin(void) {
 }
 
 _Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align) {
-    const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[stream];
-    NT_LOG_ERROR("gfx frame storage %s overflow: needed %u bytes aligned to %u, free %u of %u", k_storage_names[stream], size, align, storage->capacity - storage->used, storage->capacity);
+    NT_LOG_ERROR("gfx frame storage overflow: needed %u bytes aligned to %u, free %u of %u in frame_capacity[%u]", size, align,
+                 g_nt_gfx_frame_storage[stream].capacity - g_nt_gfx_frame_storage[stream].used, g_nt_gfx_frame_storage[stream].capacity, (uint32_t)stream);
     NT_ASSERT(false && "gfx frame storage overflow: raise nt_gfx_desc_t.frame_capacity");
     __builtin_trap(); /* the allocation would point past the staging */
 }
