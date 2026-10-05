@@ -1,5 +1,5 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: e86f8a7
+# Commit: d27cd14
 
 ## WASM Section Sizes
 
@@ -13,18 +13,18 @@ Memory                 7 B
 Global                 9 B
 Export                83 B
 Elem                  34 B
-Code               78778 B
+Code               78835 B
 Data                8602 B
 Custom              4294 B
 ---------------- ----------
-TOTAL              92692 B
+TOTAL              92749 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-17973 B   frame
- 5336 B   main
+18026 B   frame
+ 5340 B   main
  4525 B   nt_text_renderer_flush
  4083 B   upload_glyph
  3002 B   fmt_fp
@@ -55,7 +55,7 @@ TOTAL              92692 B
   435 B   nt_log_write
 
 Total functions: 115
-Total code size: 78588 B
+Total code size: 78645 B
 
 ## Built Engine Archives
 
@@ -78,8 +78,8 @@ libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a               94198 B
 libnt_frame_arena.a         3074 B
-libnt_gfx.a                85352 B
-libnt_gfx_stub.a            6144 B
+libnt_gfx.a                85484 B
+libnt_gfx_stub.a            6188 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -123,7 +123,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4172230 B
+TOTAL (archives)         4172406 B
 
 ## Data Segments Summary
 
