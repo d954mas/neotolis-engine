@@ -136,6 +136,14 @@ typedef enum {
     NT_USAGE_STREAM,        /* GL: STREAM_DRAW */
 } nt_buffer_usage_t;
 
+/* Frame storage streams: per-frame data allocated with nt_gfx_frame_alloc. */
+typedef enum {
+    NT_GFX_FRAME_VERTEX,  /* vertex and instance data */
+    NT_GFX_FRAME_INDEX,   /* uint32_t indices, absolute into the vertex stream */
+    NT_GFX_FRAME_UNIFORM, /* view blocks and other per-frame uniform data */
+    NT_GFX_FRAME_STREAM_COUNT,
+} nt_gfx_frame_stream_t;
+
 /* Vertex attribute component type. With count (1-4) and normalized this spans
  * the vertexAttribPointer space over float/half/byte/short types -- no enum of
  * allowed combinations. (No int32 or 2_10_10_2 packed types.) */
@@ -326,7 +334,7 @@ typedef struct {
     uint16_t max_shaders;   /* default: 32 */
     uint16_t max_programs;  /* default: 16 */
     uint16_t max_pipelines; /* default: 16 */
-    uint16_t max_buffers;   /* default: 128 */
+    uint16_t max_buffers;   /* default: 128; frame storage takes NT_GFX_FRAME_STREAM_COUNT of them */
     uint16_t max_textures;  /* default: 64 */
     uint16_t max_meshes;    /* default: 128 */
     /* default: 560 = max_meshes(128) * max_mesh_layouts(4) + 48 other VIs.
@@ -336,11 +344,14 @@ typedef struct {
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes recorded between executions, default: 256 KiB; allocated once at init */
-    bool depth;                  /* request depth buffer (default: true) */
-    bool stencil;                /* request stencil buffer (default: false) */
-    bool antialias;              /* MSAA (default: false) */
-    bool alpha;                  /* transparent canvas/window (default: false) */
-    bool premultiplied_alpha;    /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
+    /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: vertex 1 MiB, index 256 KiB,
+     * uniform 64 KiB; each is a CPU staging copy plus a GPU buffer, allocated once at init. */
+    uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
+    bool depth;               /* request depth buffer (default: true) */
+    bool stencil;             /* request stencil buffer (default: false) */
+    bool antialias;           /* MSAA (default: false) */
+    bool alpha;               /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha; /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {
@@ -655,6 +666,8 @@ typedef struct {
     uint64_t texture_upload_bytes;
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
     uint32_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
+    /* Frame storage bytes allocated in the frame, padding included; set when the frame closes. */
+    uint32_t frame_bytes[NT_GFX_FRAME_STREAM_COUNT];
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
 
@@ -816,6 +829,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
         .stream_capacity = 256U * 1024U,
+        .frame_capacity = {[NT_GFX_FRAME_VERTEX] = 1024U * 1024U, [NT_GFX_FRAME_INDEX] = 256U * 1024U, [NT_GFX_FRAME_UNIFORM] = 64U * 1024U},
         .depth = true,
         .premultiplied_alpha = true,
     };
@@ -1031,6 +1045,46 @@ void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t o
  * offsets keep in-flight data untouched. orphan_buffer = glBufferData. */
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
+
+/* ---- Frame storage ----
+ *
+ * Per-frame vertex, index and uniform data at any point of the frame. Executing the
+ * recorded calls first uploads every byte allocated since the previous execution, so
+ * fill an allocation before the next nt_gfx call: its bytes are sent once. Offsets and
+ * pointers are valid until the next nt_gfx_begin_frame. Align vertex data read by index
+ * to its stride (vertex i at i * stride; indices are absolute), instance data to 4,
+ * indices to 4 (first_index = offset / 4) and uniform data to
+ * gpu_caps.uniform_buffer_offset_alignment. */
+
+/* Allocator state, public only because the allocation is inline. */
+typedef struct {
+    uint8_t *staging;
+    uint32_t used; /* bytes allocated this frame */
+    uint32_t capacity;
+    nt_buffer_t buffer;
+} nt_gfx_frame_storage_t;
+
+extern nt_gfx_frame_storage_t g_nt_gfx_frame_storage[NT_GFX_FRAME_STREAM_COUNT];
+
+/* Logs the needed and free bytes and stops, also with assertions OFF: the capacity is the game's budget. */
+_Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align);
+
+/* Returns size bytes at an offset that is a multiple of align; writes the offset to *out_offset. */
+static inline void *nt_gfx_frame_alloc(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align, uint32_t *out_offset) {
+    NT_ASSERT(stream < NT_GFX_FRAME_STREAM_COUNT && size > 0 && align > 0);
+    nt_gfx_frame_storage_t *s = &g_nt_gfx_frame_storage[stream];
+    const uint64_t offset = ((uint64_t)s->used + align - 1U) / align * align;
+    if (offset + size > s->capacity) {
+        nt_gfx_frame_alloc_overflow(stream, size, align);
+    }
+    s->used = (uint32_t)(offset + size);
+    *out_offset = (uint32_t)offset;
+    return s->staging + offset;
+}
+
+/* Borrowed: never update, orphan or destroy it. Re-read every frame: a context restore
+ * replaces it. The index buffer is NT_INDEX_UINT32. */
+static inline nt_buffer_t nt_gfx_frame_buffer(nt_gfx_frame_stream_t stream) { return g_nt_gfx_frame_storage[stream].buffer; }
 
 /* GPU TIME_ELAPSED segments cannot nest: GL allows only one active query.
  * Inside a frame. name must be non-NULL and have static lifetime: the pointer

@@ -123,6 +123,14 @@ static void test_stub_observation_is_unavailable(void) {
 #endif
 }
 
+/* No frame storage: every allocation asserts, and the buffers are invalid. */
+static void test_stub_frame_storage_allocation_asserts(void) {
+    uint32_t offset = 0;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX).id);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 16, 4, &offset));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, 0, 4, &offset));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_stub_has_no_graphics_resources);
@@ -133,6 +141,7 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_stub_timer_requires_name_and_output);
     RUN_TEST(test_stub_queries_require_outputs);
+    RUN_TEST(test_stub_frame_storage_allocation_asserts);
 #endif
     return UNITY_END();
 }

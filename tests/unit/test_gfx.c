@@ -1858,13 +1858,15 @@ void test_gfx_double_destroy_texture(void) {
 /* ---- Buffer: exhausting the pool is a configuration error ---- */
 
 void test_gfx_buffer_pool_full_asserts(void) {
-    nt_buffer_t buffers[8]; /* setUp: max_buffers = 8 */
-    for (int i = 0; i < 8; i++) {
+    /* setUp: max_buffers = 8, frame storage holds three. */
+    enum { FREE_BUFFERS = 8 - NT_GFX_FRAME_STREAM_COUNT };
+    nt_buffer_t buffers[FREE_BUFFERS];
+    for (int i = 0; i < FREE_BUFFERS; i++) {
         buffers[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
         TEST_ASSERT_NOT_EQUAL_UINT32(0, buffers[i].id);
     }
     EXPECT_ASSERT(nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64}));
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < FREE_BUFFERS; i++) {
         nt_gfx_destroy_buffer(buffers[i]);
     }
 }

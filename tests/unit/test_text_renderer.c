@@ -564,13 +564,14 @@ void test_failed_restore_releases_partial_buffers(void) {
     nt_gfx_fake_fail_buffer_creates(2); /* vbo succeeds, ibo fails */
     TEST_ASSERT_EQUAL_INT(NT_ERR_INIT_FAILED, nt_text_renderer_restore_gpu());
 
-    /* The orphaned vbo would hold one of the 16 buffer pool slots. */
-    nt_buffer_t buffers[16];
-    for (uint32_t i = 0; i < 16; i++) {
+    /* The orphaned vbo would hold one of the slots left by the frame storage. */
+    enum { FREE_BUFFERS = 16 - NT_GFX_FRAME_STREAM_COUNT };
+    nt_buffer_t buffers[FREE_BUFFERS];
+    for (uint32_t i = 0; i < FREE_BUFFERS; i++) {
         buffers[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
         TEST_ASSERT_NOT_EQUAL_UINT32(0, buffers[i].id);
     }
-    for (uint32_t i = 0; i < 16; i++) {
+    for (uint32_t i = 0; i < FREE_BUFFERS; i++) {
         nt_gfx_destroy_buffer(buffers[i]);
     }
 

@@ -532,12 +532,14 @@ void test_sprite_renderer_init_shutdown(void) {
 }
 
 static void assert_all_buffer_slots_available(void) {
-    nt_buffer_t buffers[64];
-    for (uint32_t i = 0; i < 64; i++) {
+    /* max_buffers = 64 minus the frame storage buffers. */
+    enum { FREE_BUFFERS = 64 - NT_GFX_FRAME_STREAM_COUNT };
+    nt_buffer_t buffers[FREE_BUFFERS];
+    for (uint32_t i = 0; i < FREE_BUFFERS; i++) {
         buffers[i] = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
         TEST_ASSERT_NOT_EQUAL_UINT32(0, buffers[i].id);
     }
-    for (uint32_t i = 0; i < 64; i++) {
+    for (uint32_t i = 0; i < FREE_BUFFERS; i++) {
         nt_gfx_destroy_buffer(buffers[i]);
     }
 }

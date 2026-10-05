@@ -383,7 +383,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
         NT_ASSERT(g_nt_gfx_capture.events != NULL);
     }
 #endif
-    nt_gfx_frame_init(desc->stream_capacity);
+    nt_gfx_frame_init(desc);
     /* Init work, like everything after it, belongs to the first frame. */
     open_frame();
 
@@ -426,6 +426,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
 
     g_nt_gfx.initialized = true;
+    nt_gfx_frame_create_buffers();
 }
 
 void nt_gfx_shutdown(void) {
@@ -628,6 +629,7 @@ void nt_gfx_begin_frame(void) {
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "begin_frame: the open frame has no nt_gfx_end_frame");
     s_gfx.render_state = NT_GFX_STATE_IDLE;
     age_stage_buffer();
+    nt_gfx_frame_begin();
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
     if (g_nt_gfx_capture.recording) {
@@ -656,6 +658,10 @@ void nt_gfx_begin_frame(void) {
     if (g_nt_gfx.context_lost && !nt_gfx_backend_query_context_lost()) {
         NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
         NT_GFX_END(restore_context());
+    }
+    /* After the CONTEXT operation: the remake is ordinary buffer work of the frame. */
+    if (g_nt_gfx.context_restored) {
+        nt_gfx_frame_create_buffers();
     }
 #if NT_GFX_GPU_TIMING_ENABLED
     if (!g_nt_gfx.context_lost) {
@@ -1872,6 +1878,8 @@ nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
     }
     return s_gfx.texture_metas[nt_pool_slot_index(tex.id)].default_sampler;
 }
+
+uint32_t nt_gfx_buffer_backend(nt_buffer_t buf) { return nt_pool_valid(&s_gfx.buffer_pool, buf.id) ? s_gfx.buffer_backends[nt_pool_slot_index(buf.id)] : 0; }
 
 #ifdef NT_TEST_ACCESS
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s) {

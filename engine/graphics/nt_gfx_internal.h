@@ -239,6 +239,9 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
 
 bool nt_gfx_backend_recreate_all_resources(void);
 
+/* The front-end's backend name of a live buffer; 0 for an invalid handle or a name a context loss wiped. */
+uint32_t nt_gfx_buffer_backend(nt_buffer_t buf);
+
 /* GPU caps detection — implemented per-backend. */
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
 
