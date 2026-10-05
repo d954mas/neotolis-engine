@@ -248,8 +248,8 @@ A binding is valid until the context's next `begin_frame` or graphics invalidati
 
 `nt_skinned_mesh_renderer_prepare(items, count, runs, max_runs)` consumes existing 16-byte
 render items in the given order; through entity it reads
-mesh/material/world/color and `skin_comp`, packs the instances into the frame
-arena and writes resolved runs; `nt_skinned_mesh_renderer_draw(runs, run_count)`
+mesh/material/world/color and `skin_comp`, packs the instances into vertex frame
+storage and writes resolved runs; `nt_skinned_mesh_renderer_draw(runs, run_count)`
 executes them ([Prepared mesh runs](../render/architecture.md#prepared-mesh-runs)). No sampling, FK, mode selection,
 culling or sorting.
 

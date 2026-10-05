@@ -1670,6 +1670,25 @@ void test_prepare_and_draw_offsets_agree(void) {
     TEST_ASSERT_EQUAL_UINT32(1, drawn_instances());
 }
 
+/* A mesh new to its cache slot executes nothing: prepare after a recorded draw keeps
+ * the frame in one execution (and one upload). */
+void test_prepare_of_a_new_mesh_after_a_draw_executes_nothing(void) {
+    nt_material_t mat = create_test_material();
+    nt_mesh_t mesh_a = create_test_mesh();
+    nt_mesh_t mesh_b = create_test_mesh();
+    nt_render_item_t a[1] = {{.entity = create_test_entity(mesh_a, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_a)}};
+    nt_render_item_t b[1] = {{.entity = create_test_entity(mesh_b, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_b)}};
+
+    begin_storage_frame();
+    nt_mesh_run_t runs[1];
+    const uint32_t a_count = nt_mesh_renderer_prepare(a, 1, runs, 1);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_mesh_renderer_draw(runs, a_count);
+    const uint32_t updates = nt_gfx_fake_update_buffer_count();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(b, 1, runs, 1));
+    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
+}
+
 /* Shadow cascades draw one list in several passes: the frame storage uploads once, before the first draw. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_list_drawn_twice_reads_one_upload(void) {
@@ -1871,6 +1890,7 @@ int main(void) {
     RUN_TEST(test_draw_list_mixed_color_modes);
     RUN_TEST(test_draw_list_mixed_color_modes_multi_instance);
     RUN_TEST(test_prepare_and_draw_offsets_agree);
+    RUN_TEST(test_prepare_of_a_new_mesh_after_a_draw_executes_nothing);
     RUN_TEST(test_list_drawn_twice_reads_one_upload);
     RUN_TEST(test_runs_keep_state_resolved_at_prepare);
     RUN_TEST(test_concatenated_runs_rebind_textures_on_a_pipeline_change);

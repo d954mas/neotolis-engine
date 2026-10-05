@@ -239,6 +239,9 @@ static void test_a_retried_restore_reuses_the_frame_buffer_slots(void) {
     nt_gfx_fake_lose_context_during_next_restore();
     next_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    /* The dead context reported zero caps; the game still allocates its view blocks this frame. */
+    TEST_ASSERT_EQUAL_UINT32(256, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
+    (void)alloc_filled(NT_GFX_FRAME_UNIFORM, 64, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, 0);
     nt_gfx_fake_set_context_lost(false);
     next_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);

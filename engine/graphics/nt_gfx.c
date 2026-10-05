@@ -611,11 +611,12 @@ static nt_gfx_result_t restore_context(void) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     /* getExtension enables the float color attachments the game's render targets may need. */
-    g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
-    /* Restoring onto a new loss would publish dead names; stay lost and retry later. */
+    const nt_gfx_gpu_caps_t caps = nt_gfx_gl_ctx_detect_gpu_caps();
+    /* Restoring onto a new loss would publish dead names and the zero caps a lost context reports; stay lost and retry later. */
     if (nt_gfx_backend_query_context_lost()) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    g_nt_gfx.gpu_caps = caps;
     g_nt_gfx.context_lost = false;
     s_gfx.scissor_enabled = false;
     g_nt_gfx.context_restored = true;
