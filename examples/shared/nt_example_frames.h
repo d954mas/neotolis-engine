@@ -3,7 +3,30 @@
 
 /* `--frames N`: once the example reports ready, run 60 warmup and N measured
  * frames at a fixed 1/60 step, print per-frame means and a checksum of the
- * last frame, then quit. Native measurement tool; web passes no arguments. */
+ * last frame, then quit. Native only: on web every call is empty, so the tool
+ * adds nothing to the shipped wasm. */
+
+#include "core/nt_platform.h"
+
+#ifdef NT_PLATFORM_WEB
+
+#include "core/nt_types.h"
+
+static inline uint32_t nt_example_arg_u32(int argc, char **argv, const char *name, uint32_t fallback) {
+    (void)argc;
+    (void)argv;
+    (void)name;
+    return fallback;
+}
+static inline void nt_example_frames_init(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+}
+static inline bool nt_example_frames_on(void) { return false; }
+static inline void nt_example_frames_begin(void) {}
+static inline void nt_example_frames_end(bool ready) { (void)ready; }
+
+#else
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,5 +119,7 @@ static inline void nt_example_frames_end(bool ready) {
     (void)fflush(stdout);
     nt_app_quit();
 }
+
+#endif /* NT_PLATFORM_WEB */
 
 #endif /* NT_EXAMPLE_FRAMES_H */

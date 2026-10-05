@@ -512,7 +512,7 @@ static void frame(void) {
     s_dt_count++;
     s_log_timer += dt;
 
-    if (s_log_timer >= 1.0F) {
+    if (s_log_timer >= 1.0F && !nt_example_frames_on()) { /* the --frames report replaces it */
         float avg = s_dt_sum / (float)s_dt_count;
         float render_avg = s_render_sum / (float)s_dt_count;
         const nt_gfx_counters_t stats = g_nt_gfx.last_frame; /* previous frame; this one has not drawn yet */

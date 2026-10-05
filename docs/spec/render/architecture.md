@@ -479,8 +479,8 @@ attachment's current contents. Every pass starts with scissor disabled, so the
 pass clear initializes the entire attachment and scissor never carries from one
 pass to the next; clear values matter only for a cleared attachment.
 Stencil is never cleared by a pass. Scissor, viewport, vertex attribute defaults
-and uniform-buffer binds are set inside an open pass; uniform-buffer bindings are
-not reset per pass.
+and uniform-buffer binds are set inside an open pass; uniform-buffer bindings and
+attribute defaults are not reset per pass.
 
 `nt_gfx_clear` is an explicit operation inside an open pass. Its borrowed
 `nt_clear_desc_t` selects color and depth independently with `color`/`depth`

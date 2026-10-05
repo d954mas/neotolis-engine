@@ -52,6 +52,9 @@ typedef struct {
     int32_t x, y, w, h;
 } nt_gfx_cmd_rect_t;
 
+/* Argument structs are read in place from 4-byte aligned words. */
+_Static_assert(_Alignof(nt_gfx_cmd_begin_pass_t) <= 4 && _Alignof(nt_clear_desc_t) <= 4, "gfx stream arguments must be 4-byte aligned");
+
 typedef struct {
     uint32_t *words;
     uint32_t used;     /* words */

@@ -1276,10 +1276,8 @@ static void test_cached_texture_still_binds_a_new_sampler(void) {
     uint32_t override_backend = nt_gfx_test_sampler_backend_id(override);
     TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(tex)), override_backend);
 
-    begin_black_pass();
     backend_bind_texture_unit(tex, NT_SAMPLER_DEFAULT, 0);
     backend_bind_texture_unit(tex, override, 0);
-    nt_gfx_end_pass();
 
     TEST_ASSERT_EQUAL_UINT32(override_backend, nt_gfx_gl_test_cached_sampler(0));
     TEST_ASSERT_EQUAL_INT((GLint)override_backend, sampler_name_on_unit(0));

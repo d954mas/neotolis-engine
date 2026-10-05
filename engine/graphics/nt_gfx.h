@@ -850,7 +850,7 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 void nt_gfx_begin_frame(void);
 /* Required once in every host iteration, also when nothing renders: after the last
  * end_pass and before nt_window_swap_buffers. Requires an open frame with no open pass.
- * Every call that needs no pass stays legal after it. */
+ * Executes the frame's recorded draw-phase calls in call order. */
 void nt_gfx_end_frame(void);
 /* Passes do not nest and run only between begin_frame and end_frame; on a lost context
  * both calls are no-ops, but begin_pass still asserts that order. */
@@ -969,11 +969,11 @@ void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uin
 /* ---- Scissor and viewport ----
  *
  * GL bottom-left convention. Callers thinking in top-left coordinates must
- * y-flip against framebuffer height; the wrapper does not. State persists
- * across frames — caller manages enable/disable explicitly. */
+ * y-flip against framebuffer height; the wrapper does not. Pass-scoped: call
+ * inside a pass; every pass starts with scissor disabled. */
 void nt_gfx_set_scissor(int x, int y, int w, int h);
 void nt_gfx_set_scissor_enabled(bool enabled);
-/* Returns caller-owned state; resets to false after context restore. */
+/* Returns the mirror: false after begin_pass and after context restore. */
 bool nt_gfx_scissor_enabled(void);
 void nt_gfx_set_viewport(int x, int y, int w, int h);
 
@@ -1009,6 +1009,7 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
  * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets);
  * asserted. Re-bind per draw to re-point. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
+/* Inside a pass; the value is not reset at the next pass. */
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* ---- Uniform buffer ---- */
@@ -1017,7 +1018,8 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
  * multiple of gpu_caps.uniform_buffer_offset_alignment, is nonempty and fits the
  * buffer; WebGL also requires it to cover the block's full data size. Upload every
  * range of a frame before the first draw that reads the buffer: Mali/ANGLE stall on
- * a rewrite of any part of a buffer an earlier draw read. */
+ * a rewrite of any part of a buffer an earlier draw read. Inside a pass; bindings are not
+ * reset at the next pass. */
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size);
 
@@ -1028,9 +1030,9 @@ void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, ui
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* GPU TIME_ELAPSED segments cannot nest: GL allows only one active query.
- * name must be non-NULL in every configuration. Use a stable string literal
- * for hashed lookup and native debug-group
- * labels. */
+ * Inside a frame. name must be non-NULL and have static lifetime: the pointer
+ * is kept until the frame executes; it also keys the hashed lookup and native
+ * debug-group labels. */
 void nt_gfx_begin_segment(const char *name);
 void nt_gfx_end_segment(void);
 /* out_ns is required. Compile OFF or stub: false with zero output, except on a

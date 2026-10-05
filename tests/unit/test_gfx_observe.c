@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_frame.h"
 #include "graphics/nt_gfx_internal.h"
 #include "log/nt_log.h"
 #include "test_helpers/nt_assert_trap.h"
@@ -272,6 +273,7 @@ static void test_draw_state_in_a_pass_on_a_lost_context_does_not_assert(void) {
     nt_gfx_set_viewport(0, 0, 1, 1);
     nt_gfx_set_vertex_attrib_default(0, 0.0F, 0.0F, 0.0F, 1.0F);
     nt_gfx_bind_uniform_buffer(ubo, 0);
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
     nt_gfx_end_pass();
 }
 

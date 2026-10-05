@@ -487,7 +487,6 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }
 static bool texture_filter_uses_linear(nt_texture_filter_t filter) { return filter != NT_FILTER_NEAREST && filter != NT_FILTER_NEAREST_MIPMAP_NEAREST; }
 
 static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
-    nt_gfx_frame_execute();
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         NT_LOG_ERROR("destroy_texture: invalid handle");
         return NT_GFX_RESULT_INVALID_HANDLE;
@@ -644,7 +643,6 @@ void nt_gfx_end_frame(void) {
 /* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
  * so bad size returns false (bot-param validation is the L2 concern). */
 static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
-    nt_gfx_frame_execute();
     if (w <= 0 || h <= 0) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
@@ -685,6 +683,7 @@ static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uin
 }
 
 bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_READ_PIXELS, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = (uint32_t)x; event->data.state.integers[1] = (uint32_t)y;
                          event->data.state.integers[2] = (uint32_t)w; event->data.state.integers[3] = (uint32_t)h);
     const nt_gfx_result_t result = read_pixels(x, y, w, h, out, out_cap);
@@ -1354,7 +1353,6 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 /* ---- Resource destruction ---- */
 
 static nt_gfx_result_t destroy_shader(nt_shader_t shd) {
-    nt_gfx_frame_execute();
     if (shd.id == 0) {
         return NT_GFX_RESULT_INVALID_HANDLE; /* invalid-zero is a first-class value, as for programs */
     }
@@ -1370,12 +1368,12 @@ static nt_gfx_result_t destroy_shader(nt_shader_t shd) {
 }
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_SHADER, shd.id);
     NT_GFX_END(destroy_shader(shd));
 }
 
 static nt_gfx_result_t destroy_program(nt_program_t prog) {
-    nt_gfx_frame_execute();
     /* NT_PROGRAM_INVALID is a first-class value -- games clear their handles on
      * context loss and destroy them again at shutdown. Not an error. */
     if (prog.id == 0) {
@@ -1399,12 +1397,12 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
 }
 
 void nt_gfx_destroy_program(nt_program_t prog) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PROGRAM, prog.id);
     NT_GFX_END(destroy_program(prog));
 }
 
 static nt_gfx_result_t destroy_pipeline(nt_pipeline_t pip) {
-    nt_gfx_frame_execute();
     /* Program destruction may already have reclaimed this cached pipeline. */
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         return NT_GFX_RESULT_INVALID_HANDLE;
@@ -1421,12 +1419,12 @@ static nt_gfx_result_t destroy_pipeline(nt_pipeline_t pip) {
 }
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, pip.id);
     NT_GFX_END(destroy_pipeline(pip));
 }
 
 static nt_gfx_result_t destroy_vertex_input(nt_vertex_input_t vi) {
-    nt_gfx_frame_execute();
     /* The destroy_buffer cascade makes stale handles routine here, so both
      * INVALID and stale are tolerated no-ops (same contract as pipelines). */
     if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
@@ -1444,12 +1442,12 @@ static nt_gfx_result_t destroy_vertex_input(nt_vertex_input_t vi) {
 }
 
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_VERTEX_INPUT, vi.id);
     NT_GFX_END(destroy_vertex_input(vi));
 }
 
 static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
-    nt_gfx_frame_execute();
     if (buf.id == 0) {
         return NT_GFX_RESULT_INVALID_HANDLE; /* invalid-zero is a first-class value, as for programs */
     }
@@ -1479,17 +1477,18 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id);
     NT_GFX_END(destroy_buffer(buf));
 }
 
 void nt_gfx_destroy_texture(nt_texture_t tex) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE, tex.id);
     NT_GFX_END(destroy_texture(tex));
 }
 
 static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
-    nt_gfx_frame_execute();
     /* The destroy_texture cascade and context loss make stale handles routine
      * here, so both INVALID and stale are tolerated no-ops (as for vertex inputs). */
     if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
@@ -1508,6 +1507,7 @@ static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
 }
 
 void nt_gfx_destroy_render_target(nt_render_target_t rt) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_RENDER_TARGET, rt.id);
     NT_GFX_END(destroy_render_target(rt));
 }
@@ -2375,7 +2375,6 @@ void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t o
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansion, not real branching
 static nt_gfx_result_t update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
-    nt_gfx_frame_execute();
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2394,6 +2393,7 @@ static nt_gfx_result_t update_buffer(nt_buffer_t buf, uint32_t offset, const voi
 }
 
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.related[0] = offset; event->data.resource.flags = data != NULL);
     NT_GFX_END(update_buffer(buf, offset, data, size));
 }
@@ -2443,8 +2443,8 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 }
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
     nt_gfx_frame_execute();
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
 }
@@ -2453,7 +2453,6 @@ bool nt_gfx_is_gpu_timing_supported(void) { return nt_gfx_backend_is_gpu_timing_
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 static nt_gfx_result_t orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
-    nt_gfx_frame_execute();
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2471,6 +2470,7 @@ static nt_gfx_result_t orphan_buffer(nt_buffer_t buf, const void *data, uint32_t
 }
 
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
+    nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_ORPHAN, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.flags = data != NULL);
     NT_GFX_END(orphan_buffer(buf, data, size));
 }

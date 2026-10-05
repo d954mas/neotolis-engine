@@ -16,9 +16,10 @@
 /* --- Assert catching (setjmp/longjmp via hookable handler) --- */
 
 static jmp_buf s_assert_jmp;
+static const char *s_assert_expr; /* assert expressions are string literals */
 
 static void test_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
+    s_assert_expr = expr;
     (void)file;
     (void)line;
     longjmp(s_assert_jmp, 1);
@@ -3251,12 +3252,14 @@ static nt_pipeline_t begin_stream_test_pass(void) {
 void test_stream_executes_draws_in_call_order_at_end_frame(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_pipeline_t first = begin_stream_test_pass();
+    const uint32_t before_draw = g_nt_gfx_stream.used;
     nt_gfx_draw_indexed(0, 3, 3);
+    TEST_ASSERT_EQUAL_UINT32(before_draw + 4, g_nt_gfx_stream.used); /* the draw itself is pending */
     nt_gfx_end_pass();
     nt_pipeline_t second = begin_stream_test_pass();
     nt_gfx_draw_indexed(1, 2, 3);
     nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(g_nt_gfx_stream.used > 0); /* recorded, not executed */
+    const uint32_t recorded_bytes = g_nt_gfx_stream.used * 4U;
 
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
@@ -3266,6 +3269,7 @@ void test_stream_executes_draws_in_call_order_at_end_frame(void) {
     TEST_ASSERT_EQUAL_UINT32(second.id, nt_gfx_fake_draw_trace_at(1).pipeline.id);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).first_index);
     nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT64(recorded_bytes, g_nt_gfx.last_frame.stream_bytes);
 }
 
 void test_stream_records_a_copy_of_uniform_values(void) {
@@ -3309,6 +3313,7 @@ void test_stream_overflow_asserts(void) {
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "gfx stream overflow"));
 }
 // #endregion
 

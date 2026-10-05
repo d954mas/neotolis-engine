@@ -1400,7 +1400,8 @@ static void test_set_uniform_int_on_a_sampler_asserts(void) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
-    nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), 1); /* a plain int still writes */
+    nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), 1);
+    nt_gfx_frame_execute(); /* a plain int still writes */
     nt_gfx_set_uniform_int(nt_hash32_str("u_a"), 1);
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_execute());
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "apply_texture_bindings"));
@@ -1430,6 +1431,7 @@ static void test_linking_a_program_keeps_the_bound_pipelines_program_current(voi
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 1.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     bind_empty_vertex_input();
+    nt_gfx_frame_execute(); /* the link must happen while the pipeline is bound in GL */
 
     nt_program_t linked_under_the_bind = make_sampler_program(vertex_source, sampler_fs);
     TEST_ASSERT_EQUAL_INT(0, nt_gfx_test_program_sampler_unit(linked_under_the_bind, nt_hash32_str("u_a")));

@@ -8,7 +8,7 @@
 nt_gfx_stream_t g_nt_gfx_stream;
 
 void nt_gfx_frame_init(uint32_t capacity_bytes) {
-    NT_ASSERT(capacity_bytes > 0 && "nt_gfx_desc_t.stream_capacity is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT(capacity_bytes >= 4U && (capacity_bytes & 3U) == 0 && "nt_gfx_desc_t.stream_capacity must be a non-zero multiple of 4 -- use nt_gfx_desc_defaults() or set explicitly");
     g_nt_gfx_stream.capacity = capacity_bytes / 4U;
     g_nt_gfx_stream.words = (uint32_t *)malloc((size_t)g_nt_gfx_stream.capacity * sizeof(uint32_t));
     NT_ASSERT(g_nt_gfx_stream.words != NULL);
@@ -27,6 +27,9 @@ void nt_gfx_frame_overflow(uint32_t needed_words) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one case per recorded backend call
 void nt_gfx_frame_execute(void) {
+    if (g_nt_gfx_stream.used == 0) {
+        return;
+    }
     const uint32_t *w = g_nt_gfx_stream.words;
     const uint32_t *end = w + g_nt_gfx_stream.used;
     uint64_t bytes = (uint64_t)g_nt_gfx_stream.used * 4U;
@@ -139,6 +142,9 @@ void nt_gfx_frame_execute(void) {
         case NT_GFX_CMD_END_SEGMENT:
             nt_gfx_backend_end_segment();
             break;
+        default:
+            NT_ASSERT(false && "gfx stream: unknown command");
+            return;
         }
     }
 }
