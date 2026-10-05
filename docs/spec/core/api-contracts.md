@@ -489,11 +489,20 @@ the default framebuffer color, and on an invalid or stale target. Callers check 
 that a loss or a cascade may have freed; there is no non-asserting pass-begin
 variant.
 
+Draw state is pass-scoped. `nt_gfx_set_scissor`, `nt_gfx_set_scissor_enabled`,
+`nt_gfx_set_viewport`, `nt_gfx_set_vertex_attrib_default`,
+`nt_gfx_bind_uniform_buffer` and `nt_gfx_bind_uniform_buffer_range` assert
+without an open pass; on a lost context they return before the check, as other
+binds do. Every pass starts with scissor disabled, so scissor never carries into
+the next pass. Uniform-buffer bindings are not reset per pass.
+`nt_gfx_begin_segment` and `nt_gfx_end_segment` assert outside an open frame.
+
 `nt_gfx_clear` requires an open pass and a non-NULL descriptor; violations assert
 on a live context. The descriptor is borrowed only for the call, with no retained
 pointer. `color` and `depth` select independent clears; unselected values are
 ignored. The current scissor limits the clear, while a disabled scissor clears
-the whole attachment. Clear preserves draw state and restores the depth write
+the whole attachment; the pass clear of `nt_gfx_begin_pass` is never scissored.
+Clear preserves draw state and restores the depth write
 mask after a depth clear. No selections is an accepted operation without GPU
 work. On a known lost context clear does nothing, as pass calls do.
 

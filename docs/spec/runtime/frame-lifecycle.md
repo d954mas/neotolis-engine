@@ -41,7 +41,8 @@ game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
 game_render           ← nt_ui_walk reads scratch pointers; any number of
                         gfx passes
-nt_gfx_end_frame      ← after the last pass, also when nothing renders
+nt_gfx_end_frame      ← after the last pass, also when nothing renders; executes
+                        the recorded draw-phase calls
 nt_window_swap_buffers
 ```
 

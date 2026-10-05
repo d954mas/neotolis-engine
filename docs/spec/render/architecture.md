@@ -62,6 +62,40 @@ renderer_draw_mesh(...);
 renderer_draw_sprite(...);
 ```
 
+### Draw-phase command stream
+
+Draw-phase calls are deferred. At the call, the front-end validates, updates its
+logical state and counts the accepted operation, then records the
+backend-resolved arguments of the backend call into one command stream: begin
+and end pass, clear, pipeline, vertex-input and instance-buffer binds, vertex
+attribute defaults, texture-unit and uniform-buffer binds, the mat4, vec4, float
+and int uniform setters, scissor rectangle and enable, viewport, the four draws,
+and GPU timing segment begin and end. Descriptors and uniform values are copied
+into the stream. `nt_gfx_end_frame` executes the stream in call order. Nothing is
+recorded outside a frame.
+
+Every other operation is immediate: creates, destroys, buffer and texture
+updates, activation, queries, `nt_gfx_read_pixels`, the GPU timing toggle and
+polling. Recorded commands keep their mutual order; an immediate operation may
+run before draw-phase calls recorded earlier in the same frame. A texture write
+therefore lands before every draw of its frame: all draws of a frame see the
+texture's final content, as WebGPU `queue.writeTexture` precedes the submit.
+
+`nt_gfx_desc_t.stream_capacity` is the byte budget of draw-phase commands
+recorded between executions, allocated once at init; `nt_gfx_desc_defaults()`
+sets 256 KiB, and init asserts a non-zero value. The stream never grows: an
+overflow logs the needed and free bytes and asserts, because the capacity is the
+game's budget. `nt_gfx_counters_t.stream_bytes` reports the frame's peak
+recorded bytes between executions, to size the capacity from a real scene.
+
+The backend binds a texture unit with one call,
+`nt_gfx_backend_bind_texture_unit(texture, sampler, unit)`; it applies the
+sampler even when the texture is already bound on that unit. GL `begin_pass`
+reads the window framebuffer size at execution, which equals the size at the
+call: the window size changes only in `nt_window_poll`, between frames. GL errors
+and backend asserts without a front-end equivalent fire at execution, inside
+`nt_gfx_end_frame`; see Frame observation for counters and capture.
+
 ### Vertex inputs
 
 Vertex-input state is a public gfx object referenced by `nt_vertex_input_t`.
@@ -151,7 +185,7 @@ at backend init and at context restore. Sampler uniforms are not written at all:
 their units are fixed at link and belong to the program, so no material can
 redirect another's texture. `nt_gfx_apply_texture_bindings` accepts a complete
 name-keyed set for the bound program, resolves it into those units,
-then publishes the logical set and issues backend binds together.
+then publishes the logical set and records its texture-unit binds together.
 A missing or duplicate active name, invalid handle, or sampler-type mismatch
 asserts before backend binds; inactive names are ignored before their handles
 are inspected. Context loss, a texture husk, or failed sampler recreation
@@ -441,9 +475,12 @@ backend framebuffer internally during `nt_gfx_begin_pass`; public code does not
 bind or unbind render-target state outside the pass descriptor.
 
 Each pass clears color and depth unless `load_color`/`load_depth` keeps the
-attachment's current contents. A clear initializes the entire attachment
-regardless of scissor; clear values matter only for a cleared attachment.
-Stencil is never cleared by a pass.
+attachment's current contents. Every pass starts with scissor disabled, so the
+pass clear initializes the entire attachment and scissor never carries from one
+pass to the next; clear values matter only for a cleared attachment.
+Stencil is never cleared by a pass. Scissor, viewport, vertex attribute defaults
+and uniform-buffer binds are set inside an open pass; uniform-buffer bindings are
+not reset per pass.
 
 `nt_gfx_clear` is an explicit operation inside an open pass. Its borrowed
 `nt_clear_desc_t` selects color and depth independently with `color`/`depth`
@@ -600,8 +637,9 @@ build, independent of simulation time; app/gfx never close one implicitly.
 The host also calls `nt_gfx_end_frame` once per callback, also when nothing
 renders: after the last pass and before `nt_window_swap_buffers`. Passes run
 only between begin_frame and end_frame; a begin_pass outside them asserts, also
-on a lost context. end_frame ends the passes, not the counters: work after it
-(resource calls, GPU timing segments, the pre-swap capture seam) still counts in
+on a lost context. end_frame executes the frame's recorded draw-phase calls (see
+Draw-phase command stream) and ends the passes, not the counters: work after it
+(resource calls, GPU timing polls, the pre-swap capture seam) still counts in
 the open frame. The frame that init opens only loads and starts ended, so
 pre-loop code that draws opens its own begin_frame/end_frame pair. A frame holds
 any number of passes; their counters sum. begin_frame also does the per-frame
@@ -680,7 +718,8 @@ configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read` and
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
 through its `NT_GL*` funnel, queries included. Platform context management
 (context create/destroy, loss events, `isContextLost` queries)
-is not counted. The funnel
+is not counted. Draw-phase calls issue their GL calls when `nt_gfx_end_frame`
+executes the stream, so they count in the frame that recorded them. The funnel
 counts with an inline constant-index increment and (with capture) records in the same
 expression that issues the call; a grep gate rejects any bare `gl*` call in
 `engine/graphics/gl`. The funnel does no per-call frame check: a frame is
@@ -752,7 +791,10 @@ a NULL pointer. The finalized view retains its frame's counters (and so its
 Every recorded public operation produces exactly one BEGIN, carrying its
 request arguments, and one RESULT, carrying the outcome `result`; a creator's
 RESULT carries the new handle (zero on failure), while its backend slot and
-names are in the DEFINITION record. Operations issued inside another operation
+names are in the DEFINITION record. BEGIN and RESULT are recorded at the call.
+The BACKEND and backend SKIP records of a draw-phase call are recorded when
+`nt_gfx_end_frame` executes the stream, outside that call's BEGIN/RESULT pair.
+Operations issued inside another operation
 (default samplers, cascaded destroys) nest between its BEGIN and
 RESULT. `ARGUMENT` records are request
 arguments belonging to the enclosing BEGIN (one per texture binding of a texture
@@ -765,8 +807,8 @@ truncates counters.
 The `object_kind` and `object` pair identifies a full frontend handle, including
 its generation. Backend records instead use `detail` as `nt_gfx_gl_call_t`, whose
 values are named after the issued function (`NT_GFX_GL_glBindVertexArray`), and
-carry raw GL names of one GL context; their operation is always STATE,
-the enclosing BEGIN names the frontend operation. With GPU timing, begin_frame
+carry raw GL names of one GL context; their operation is always STATE. Inside
+an immediate operation the enclosing BEGIN names the frontend operation. With GPU timing, begin_frame
 runs the timer disjoint check as its own `TIMER_DISJOINT` operation on a live
 context; the query is issued only while a timer query is pending. Each issued call is recorded
 exactly once, at the call site, by the same statement that issues it (an
