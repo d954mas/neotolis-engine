@@ -52,7 +52,15 @@ static const uint16_t s_test_rg16ui_4x4[4 * 4 * 2] = {
 };
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
+                                 .max_shaders = 8,
+                                 .max_programs = 4,
+                                 .max_pipelines = 4,
+                                 .max_buffers = 8,
+                                 .max_textures = 8,
+                                 .max_meshes = 8,
+                                 .max_vertex_inputs = 8,
+                                 .max_render_targets = 16});
     nt_gfx_begin_frame();
 }
 
@@ -169,7 +177,15 @@ void test_gfx_init_shutdown(void) {
     nt_gfx_shutdown();
     TEST_ASSERT_FALSE(g_nt_gfx.initialized);
     /* Re-init for tearDown */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
+                                 .max_shaders = 8,
+                                 .max_programs = 4,
+                                 .max_pipelines = 4,
+                                 .max_buffers = 8,
+                                 .max_textures = 8,
+                                 .max_meshes = 8,
+                                 .max_vertex_inputs = 8,
+                                 .max_render_targets = 16});
     nt_gfx_begin_frame();
 }
 
@@ -211,7 +227,15 @@ void test_gfx_defaults_applied(void) {
 
     /* Re-init for tearDown */
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
+                                 .max_shaders = 8,
+                                 .max_programs = 4,
+                                 .max_pipelines = 4,
+                                 .max_buffers = 8,
+                                 .max_textures = 8,
+                                 .max_meshes = 8,
+                                 .max_vertex_inputs = 8,
+                                 .max_render_targets = 16});
     nt_gfx_begin_frame();
 }
 
@@ -2574,7 +2598,15 @@ void test_register_global_block_max(void) {
 void test_register_global_block_cleared_on_shutdown(void) {
     nt_gfx_register_global_block("Globals", 0);
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
+                                 .max_shaders = 8,
+                                 .max_programs = 4,
+                                 .max_pipelines = 4,
+                                 .max_buffers = 8,
+                                 .max_textures = 8,
+                                 .max_meshes = 8,
+                                 .max_vertex_inputs = 8,
+                                 .max_render_targets = 16});
     nt_gfx_begin_frame();
     const nt_global_block_t *blocks;
     uint32_t count;
@@ -3186,7 +3218,15 @@ void test_bind_uniform_buffer_range_follows_orphaned_storage(void) {
 void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
     nt_gfx_shutdown();
     nt_gfx_fake_set_uniform_buffer_offset_alignment(16);
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
+                                 .max_shaders = 8,
+                                 .max_programs = 4,
+                                 .max_pipelines = 4,
+                                 .max_buffers = 8,
+                                 .max_textures = 8,
+                                 .max_meshes = 8,
+                                 .max_vertex_inputs = 8,
+                                 .max_render_targets = 16});
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT32(16, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
 

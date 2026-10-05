@@ -333,6 +333,7 @@ typedef struct {
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
+    uint32_t stream_capacity;    /* draw-phase command bytes recorded between executions, default: 256 KiB; allocated once at init */
     bool depth;                  /* request depth buffer (default: true) */
     bool stencil;                /* request stencil buffer (default: false) */
     bool antialias;              /* MSAA (default: false) */
@@ -651,6 +652,7 @@ typedef struct {
     uint64_t texture_upload_calls;
     uint64_t texture_upload_bytes;
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
+    uint64_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
 
@@ -811,6 +813,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_meshes = 128,
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
+        .stream_capacity = 256U * 1024U,
         .depth = true,
         .premultiplied_alpha = true,
     };

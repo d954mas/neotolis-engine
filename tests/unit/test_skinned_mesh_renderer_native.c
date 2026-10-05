@@ -480,6 +480,7 @@ void setUp(void) {
     char *fragment_source = NULL;
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&(nt_gfx_desc_t){
+        .stream_capacity = 64U * 1024U,
         .max_shaders = 8,
         .max_programs = 4,
         .max_pipelines = 8,

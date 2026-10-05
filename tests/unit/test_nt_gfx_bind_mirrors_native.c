@@ -2,6 +2,7 @@
  * and binding preservation across rejected or failed operations. */
 
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_frame.h"
 #include "graphics/nt_gfx_internal.h"
 #include "unity.h"
 #include "window/nt_window.h"
@@ -204,6 +205,8 @@ static void GLAD_API_PTR counting_clear_depth(GLdouble depth) {
 
 /* nt_gfx_init reloads glad, so this must run after the init under test. */
 static void install_state_counters(void) {
+    /* Calls recorded before the window belong to it only if they already ran. */
+    nt_gfx_frame_execute();
     memset(&s_gl_calls, 0, sizeof(s_gl_calls));
     s_saved_use_program = glad_glUseProgram;
     s_saved_uniform_vec4 = glad_glUniform4fv;
@@ -237,6 +240,7 @@ static void remove_state_counters(void) {
     if (s_saved_use_program == NULL) {
         return;
     }
+    nt_gfx_frame_execute();
     glad_glUseProgram = s_saved_use_program;
     glad_glUniform4fv = s_saved_uniform_vec4;
     glad_glBindVertexArray = s_saved_bind_vao;
@@ -319,6 +323,7 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_bind_vertex_input(vi_full);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
+    nt_gfx_frame_execute();
 
     const uint32_t attrib_pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
     const uint32_t vao_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindVertexArray];
@@ -335,6 +340,7 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_bind_instance_buffer(inst_buf, 0);
     nt_gfx_draw_instanced(0, 3, 1);
     nt_gfx_end_pass();
+    nt_gfx_frame_execute();
     /* Captured before teardown so its binds cannot pollute it. */
     uint32_t frame_vao_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindVertexArray] - vao_binds;
     uint32_t frame_attrib_pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer] - attrib_pointers;
@@ -438,6 +444,7 @@ static void test_creating_vertex_input_preserves_bound_one(void) {
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_full);
+    nt_gfx_frame_execute();
     GLint bound_vao = 0;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &bound_vao);
     TEST_ASSERT_NOT_EQUAL_INT(0, bound_vao);
@@ -449,6 +456,7 @@ static void test_creating_vertex_input_preserves_bound_one(void) {
     TEST_ASSERT_EQUAL_INT(bound_vao, current_vao);
 
     nt_gfx_draw(0, 3);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     nt_gfx_end_pass();
@@ -472,6 +480,7 @@ static void test_empty_vertex_input_draws_fullscreen(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     nt_gfx_end_pass();
@@ -491,6 +500,7 @@ static void test_failed_vao_creation_returns_invalid_and_preserves_binding(void)
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_full);
+    nt_gfx_frame_execute();
     GLint bound_vao = 0;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &bound_vao);
 
@@ -609,6 +619,7 @@ static void test_ground_state_disables_scissor(void) {
     begin_black_pass();
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_end_pass();
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_SCISSOR_TEST));
 
     nt_gfx_shutdown();
@@ -729,6 +740,7 @@ static void test_pass_clear_after_depth_write_off(void) {
     nt_gfx_draw(0, 3);
     /* One glDepthMask(GL_TRUE) for the clear, and none for the bind: a mask put
      * back to GL_FALSE after the clear would cost two more. */
+    nt_gfx_frame_execute();
     uint32_t depth_mask_through_far_bind = s_gl_calls.depth_mask;
     uint8_t px[4] = {0, 0, 0, 0};
     bool read_ok = nt_gfx_read_pixels(8, 8, 1, 1, px, sizeof(px));
@@ -789,6 +801,7 @@ static void test_ground_state_after_reinit(void) {
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_BLEND));
 
     nt_gfx_shutdown();
@@ -813,6 +826,7 @@ static void test_ground_state_after_reinit(void) {
     install_state_counters();
     begin_black_pass();
     nt_gfx_bind_pipeline(opaque_pip);
+    nt_gfx_frame_execute();
     uint32_t disable_blend_after_opaque = s_gl_calls.disable_blend;
     nt_gfx_bind_pipeline(alpha_pip);
     nt_gfx_bind_vertex_input(fresh_vi);
@@ -831,14 +845,17 @@ static void test_viewport_dedup_and_resize(void) {
     install_state_counters();
     nt_gfx_set_viewport(0, 0, 8, 8);
     nt_gfx_set_viewport(0, 0, 8, 8);
+    nt_gfx_frame_execute();
     uint32_t after_same_rect = s_gl_calls.viewport;
     nt_gfx_set_viewport(0, 0, 4, 4);
+    nt_gfx_frame_execute();
     uint32_t after_new_rect = s_gl_calls.viewport;
     nt_gfx_end_pass();
 
     const uint32_t saved_fb_width = g_nt_window.fb_width;
     g_nt_window.fb_width = saved_fb_width + 1;
     begin_black_pass();
+    nt_gfx_frame_execute();
     GLint viewport[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_VIEWPORT, viewport);
     nt_gfx_end_pass();
@@ -862,6 +879,7 @@ static void test_clear_values_dedup(void) {
     install_state_counters();
     begin_black_pass();
     nt_gfx_end_pass();
+    nt_gfx_frame_execute();
     uint32_t color_after_identical_pass = s_gl_calls.clear_color;
     uint32_t depth_after_identical_pass = s_gl_calls.clear_depth;
 
@@ -895,6 +913,7 @@ static void test_ground_state_viewport_reissued_after_reinit(void) {
 
     install_state_counters();
     begin_black_pass();
+    nt_gfx_frame_execute();
     GLint viewport[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_VIEWPORT, viewport);
     nt_gfx_end_pass();
@@ -925,15 +944,18 @@ static void test_uniform_write_targets_bound_pipelines_program(void) {
 
     begin_black_pass();
     nt_gfx_bind_pipeline(pip_a);
+    nt_gfx_frame_execute();
     GLint program_a = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &program_a);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_x"), value_a);
 
     nt_gfx_bind_pipeline(pip_b);
+    nt_gfx_frame_execute();
     GLint program_b = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &program_b);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_x"), value_b);
     nt_gfx_end_pass();
+    nt_gfx_frame_execute();
 
     TEST_ASSERT_NOT_EQUAL_INT(0, program_a);
     TEST_ASSERT_NOT_EQUAL_INT(program_a, program_b);
@@ -964,6 +986,7 @@ static void test_recreate_all_resources_grounds_cache(void) {
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_BLEND));
 
     TEST_ASSERT_TRUE(nt_gfx_backend_recreate_all_resources());
@@ -1006,6 +1029,7 @@ static void test_gl_name_reuse_after_destroying_bound_vertex_input(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_b);
     nt_gfx_draw(0, 3);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red());
     nt_gfx_end_pass();
@@ -1138,6 +1162,7 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
+    nt_gfx_frame_execute();
 
     GLint old_program = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &old_program);
@@ -1147,6 +1172,7 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
 
     begin_black_pass();
     nt_gfx_end_pass();
+    nt_gfx_frame_execute();
     TEST_ASSERT_FALSE(glIsProgram((GLuint)old_program));
     GLint current_program = -1;
     glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
@@ -1336,11 +1362,13 @@ static void test_vec4_repeat_skips_physical_upload(void) {
     install_state_counters();
     nt_gfx_set_uniform_vec4(color, value);
     nt_gfx_set_uniform_vec4(color, value);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(1, s_gl_calls.uniform_vec4);
     for (uint32_t i = 0; i < 4; i++) {
         value[i] = (float)(i + 1U) * 0.25F;
         nt_gfx_set_uniform_vec4(color, value);
         nt_gfx_set_uniform_vec4(color, value);
+        nt_gfx_frame_execute();
         TEST_ASSERT_EQUAL_UINT32(i + 2U, s_gl_calls.uniform_vec4);
     }
     nt_gfx_draw(0, 3);
@@ -1392,6 +1420,7 @@ static void test_vec4_cache_follows_program_lifetime(void) {
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_set_uniform_vec4(color, values[0]);
     nt_gfx_draw(0, 3);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(3, s_gl_calls.uniform_vec4);
     TEST_ASSERT_UINT8_WITHIN(1, 64, center_red());
     nt_gfx_end_pass();
@@ -1415,13 +1444,16 @@ static void test_vec4_array_entries_and_other_types(void) {
     }
     nt_gfx_set_uniform_vec4(names[2], values[2]);
     nt_gfx_set_uniform_vec4(nt_hash32_str("inactive"), values[0]);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(4, s_gl_calls.uniform_vec4);
     const float gate[4] = {1, 1, 1, 1};
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_gate"), gate);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_gate"), gate);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(6, s_gl_calls.uniform_vec4);
     nt_gfx_set_uniform_int(nt_hash32_str("u_index"), 2);
     nt_gfx_draw(0, 3);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     TEST_ASSERT_UINT8_WITHIN(1, 191, center_red());
     nt_gfx_end_pass();
@@ -1441,6 +1473,7 @@ static void test_vec4_cache_compares_bytes_and_last_value(void) {
     value[0] = -0.0F;
     nt_gfx_set_uniform_vec4(color, value);
     nt_gfx_set_uniform_vec4(color, value);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(2, s_gl_calls.uniform_vec4);
     value[0] = 0.25F;
     nt_gfx_set_uniform_vec4(color, value);
@@ -1448,6 +1481,7 @@ static void test_vec4_cache_compares_bytes_and_last_value(void) {
     nt_gfx_set_uniform_vec4(color, value);
     value[0] = 0.25F;
     nt_gfx_set_uniform_vec4(color, value);
+    nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(5, s_gl_calls.uniform_vec4);
     nt_gfx_end_pass();
 }

@@ -26,6 +26,7 @@ static struct {
     double gl;
     double uploads;
     double upload_bytes;
+    uint64_t stream_peak;
 } s_example_frames;
 
 static inline uint32_t nt_example_arg_u32(int argc, char **argv, const char *name, uint32_t fallback) {
@@ -75,6 +76,9 @@ static inline void nt_example_frames_end(bool ready) {
     s_example_frames.gl += (double)gl;
     s_example_frames.uploads += (double)c->buffer_upload_calls;
     s_example_frames.upload_bytes += (double)c->buffer_upload_bytes;
+    if (c->stream_bytes > s_example_frames.stream_peak) {
+        s_example_frames.stream_peak = c->stream_bytes;
+    }
     if (index + 1 < NT_EXAMPLE_FRAMES_WARMUP + s_example_frames.frames) {
         return;
     }
@@ -86,8 +90,9 @@ static inline void nt_example_frames_end(bool ready) {
     free(pixels);
 
     double n = (double)s_example_frames.frames;
-    printf("[frames] n=%u frame_ms=%.3f draws=%.1f gl=%.1f buffer_uploads=%.1f buffer_bytes=%.0f checksum=%s%08x\n", s_example_frames.frames, s_example_frames.ms / n, s_example_frames.draws / n,
-           s_example_frames.gl / n, s_example_frames.uploads / n, s_example_frames.upload_bytes / n, read ? "" : "read-failed:", checksum);
+    printf("[frames] n=%u frame_ms=%.3f draws=%.1f gl=%.1f buffer_uploads=%.1f buffer_bytes=%.0f stream_peak=%llu checksum=%s%08x\n", s_example_frames.frames, s_example_frames.ms / n,
+           s_example_frames.draws / n, s_example_frames.gl / n, s_example_frames.uploads / n, s_example_frames.upload_bytes / n, (unsigned long long)s_example_frames.stream_peak,
+           read ? "" : "read-failed:", checksum);
     (void)fflush(stdout);
     nt_app_quit();
 }

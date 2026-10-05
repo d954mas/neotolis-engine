@@ -13,20 +13,24 @@ target_compile_definitions(nt_gfx_interface INTERFACE NT_GFX_CAPTURE_ENABLED=$<B
 if(EMSCRIPTEN)
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
+        nt_gfx_frame.c
         gl/nt_gfx_gl.c
         gl/nt_gfx_gl_ctx_web.c
         nt_gfx.h
         nt_gfx_internal.h
+        nt_gfx_frame.h
         gl/nt_gfx_gl_ctx.h
     )
     target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window_interface nt_log_interface nt_hash nt_gfx_interface nt_basisu_transcoder_interface nt_meshwire_interface)
 else()
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
+        nt_gfx_frame.c
         gl/nt_gfx_gl.c
         gl/nt_gfx_gl_ctx_native.c
         nt_gfx.h
         nt_gfx_internal.h
+        nt_gfx_frame.h
         gl/nt_gfx_gl_ctx.h
     )
     target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window_interface nt_log_interface nt_hash nt_gfx_interface nt_basisu_transcoder_interface nt_meshwire_interface)

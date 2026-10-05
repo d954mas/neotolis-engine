@@ -37,6 +37,7 @@ static nt_render_target_t make_blur_target(uint16_t width, uint16_t height) {
 
 void setUp(void) {
     nt_gfx_init(&(nt_gfx_desc_t){
+        .stream_capacity = 64U * 1024U,
         .max_shaders = 8,
         .max_programs = 8,
         .max_pipelines = 8,

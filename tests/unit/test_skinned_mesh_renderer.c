@@ -270,6 +270,7 @@ void setUp(void) {
     nt_log_add_sink(capture_program_warning, NULL);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&(nt_gfx_desc_t){
+        .stream_capacity = 64U * 1024U,
         .max_shaders = 8,
         .max_programs = 8,
         .max_pipelines = 16, /* skinned 8 + static 2 + headroom */

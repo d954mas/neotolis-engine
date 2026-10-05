@@ -10,7 +10,15 @@
 
 void setUp(void) {
     /* One buffer slot: only the arena creates buffers, so a restore that leaks its old buffer cannot create. */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 1, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 4});
+    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
+                                 .max_shaders = 4,
+                                 .max_programs = 4,
+                                 .max_pipelines = 4,
+                                 .max_buffers = 1,
+                                 .max_textures = 4,
+                                 .max_meshes = 4,
+                                 .max_vertex_inputs = 4,
+                                 .max_render_targets = 4});
     nt_gfx_begin_frame();
 }
 

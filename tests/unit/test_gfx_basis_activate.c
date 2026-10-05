@@ -39,8 +39,15 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 #define TEST_MAX_TEXTURES 8
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){
-        .max_shaders = 4, .max_programs = 2, .max_pipelines = 2, .max_buffers = 8, .max_textures = TEST_MAX_TEXTURES, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 2});
+    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
+                                 .max_shaders = 4,
+                                 .max_programs = 2,
+                                 .max_pipelines = 2,
+                                 .max_buffers = 8,
+                                 .max_textures = TEST_MAX_TEXTURES,
+                                 .max_meshes = 4,
+                                 .max_vertex_inputs = 4,
+                                 .max_render_targets = 2});
     nt_gfx_begin_frame();
 }
 

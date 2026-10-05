@@ -261,7 +261,15 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
     nt_gfx_fake_reset();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16});
+    nt_gfx_init(&(nt_gfx_desc_t){.stream_capacity = 64U * 1024U,
+                                 .max_shaders = 8,
+                                 .max_programs = 4,
+                                 .max_pipelines = 4,
+                                 .max_buffers = 8,
+                                 .max_textures = 32,
+                                 .max_meshes = 8,
+                                 .max_vertex_inputs = 16,
+                                 .max_render_targets = 16});
     nt_gfx_begin_frame();
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});

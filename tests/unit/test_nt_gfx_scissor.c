@@ -11,6 +11,7 @@
 
 void setUp(void) {
     nt_gfx_init(&(nt_gfx_desc_t){
+        .stream_capacity = 64U * 1024U,
         .max_shaders = 4,
         .max_programs = 4,
         .max_pipelines = 4,
