@@ -176,7 +176,7 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 /* Bakes the desc's layouts and the given buffer backends into an owned VAO.
  * Restores the previously bound VAO before returning. Same slot contract as
  * create_pipeline: returns `slot`, or 0 on failure. */
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint8_t index_type, uint32_t slot);
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
 void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle);
 
@@ -234,10 +234,9 @@ void nt_gfx_backend_set_uniform_vec4(uint32_t program_backend, uint32_t name_has
 void nt_gfx_backend_set_uniform_float(uint32_t program_backend, uint32_t name_hash, float val);
 void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash, int val);
 
-void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices);
-void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type);
-void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
-void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type);
+/* instance_count 1 issues the non-instanced call. draw_indexed reads the index type of the bound vertex input. */
+void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count);
 
 bool nt_gfx_backend_recreate_all_resources(void);
 

@@ -205,7 +205,7 @@ static void GLAD_API_PTR counting_clear_depth(GLdouble depth) {
 
 /* nt_gfx_init reloads glad, so this must run after the init under test. */
 static void install_state_counters(void) {
-    /* Calls recorded before the window belong to it only if they already ran. */
+    /* Pending commands recorded before counting must not be counted. */
     nt_gfx_frame_execute();
     memset(&s_gl_calls, 0, sizeof(s_gl_calls));
     s_saved_use_program = glad_glUseProgram;

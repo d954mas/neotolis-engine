@@ -1028,7 +1028,7 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
     NT_ASSERT(id != 0 && "vertex input pool full -- raise nt_gfx_desc_t.max_vertex_inputs");
 
     uint32_t slot = nt_pool_slot_index(id);
-    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, slot);
+    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, index_type, slot);
     if (backend == 0) {
         nt_pool_free(&s_gfx.vertex_input_pool, id);
         return backend_failed("backend vertex input creation failed");
@@ -2142,7 +2142,7 @@ static nt_gfx_result_t draw(uint32_t first_vertex, uint32_t num_vertices) {
     assert_instance_attribs_pointed();
 
     g_nt_gfx.counters.vertices += num_vertices;
-    nt_gfx_frame_draw(first_vertex, num_vertices);
+    nt_gfx_frame_draw(first_vertex, num_vertices, 1);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2175,7 +2175,7 @@ static nt_gfx_result_t draw_instanced(uint32_t first_vertex, uint32_t num_vertic
 
     g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
     g_nt_gfx.counters.instances += instance_count;
-    nt_gfx_frame_draw_instanced(first_vertex, num_vertices, instance_count);
+    nt_gfx_frame_draw(first_vertex, num_vertices, instance_count);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2209,7 +2209,7 @@ static nt_gfx_result_t draw_indexed(uint32_t first_index, uint32_t num_indices, 
 
     g_nt_gfx.counters.vertices += num_vertices;
     g_nt_gfx.counters.indices += num_indices;
-    nt_gfx_frame_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
+    nt_gfx_frame_draw_indexed(first_index, num_indices, 1);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2244,7 +2244,7 @@ static nt_gfx_result_t draw_indexed_instanced(uint32_t first_index, uint32_t num
     g_nt_gfx.counters.vertices += (uint64_t)num_vertices * instance_count;
     g_nt_gfx.counters.indices += (uint64_t)num_indices * instance_count;
     g_nt_gfx.counters.instances += instance_count;
-    nt_gfx_frame_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
+    nt_gfx_frame_draw_indexed(first_index, num_indices, instance_count);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2449,9 +2449,7 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 }
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
-#if NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_frame_execute();
-#endif
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_RESULT_ACCEPTED);

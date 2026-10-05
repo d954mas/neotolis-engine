@@ -118,6 +118,7 @@ typedef struct {
     nt_vertex_attr_t instance_attrs[NT_GFX_MAX_INSTANCE_ATTRS];
     uint8_t instance_attr_count;
     uint16_t instance_stride;
+    uint8_t index_type; /* NT_INDEX_*; indexed draws read it from the bound vertex input */
 } nt_gfx_gl_vertex_input_t;
 
 /* ---- File-scope state ---- */
@@ -125,6 +126,8 @@ typedef struct {
 /* Service VAO for index-buffer data ops: the ELEMENT_ARRAY_BUFFER bind is VAO
  * state, and core profile rejects it with VAO 0 bound (INVALID_OPERATION). */
 static GLuint s_ebo_upload_vao;
+/* Index type of the last bound vertex input. Every pass binds a vertex input before it draws, so no reset is needed. */
+static uint8_t s_index_type;
 
 static nt_gfx_gl_program_t *s_programs;           /* linked programs, indexed by slot */
 static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by slot */
@@ -1174,12 +1177,24 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
 
 /* ---- Draw calls ---- */
 
-void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) { NT_GL(glDrawArrays, GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices); }
+void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
+    if (instance_count == 1) {
+        NT_GL(glDrawArrays, GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices);
+    } else {
+        NT_GL(glDrawArraysInstanced, GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices, (GLsizei)instance_count);
+    }
+}
 
-void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type) {
-    GLenum gl_type = (index_type == 2) ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
-    uint32_t stride = (index_type == 2) ? sizeof(uint32_t) : sizeof(uint16_t);
-    NT_GL(glDrawElements, GL_TRIANGLES, (GLsizei)num_indices, gl_type, nt_gl_offset((uintptr_t)first_index * stride));
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
+    NT_ASSERT(s_index_type != NT_INDEX_NONE && "draw_indexed: the bound vertex input has no index buffer");
+    const bool wide = s_index_type == NT_INDEX_UINT32;
+    const GLenum gl_type = wide ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
+    const void *offset = nt_gl_offset((uintptr_t)first_index * (wide ? sizeof(uint32_t) : sizeof(uint16_t)));
+    if (instance_count == 1) {
+        NT_GL(glDrawElements, GL_TRIANGLES, (GLsizei)num_indices, gl_type, offset);
+    } else {
+        NT_GL(glDrawElementsInstanced, GL_TRIANGLES, (GLsizei)num_indices, gl_type, offset, (GLsizei)instance_count);
+    }
 }
 
 /* ---- Resource management (shader / buffer / pipeline) ---- */
@@ -1565,7 +1580,7 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint8_t index_type, uint32_t slot) {
     NT_ASSERT(desc != NULL);
     /* The frontend pool owns slot allocation; the backend table mirrors it. */
     NT_ASSERT(slot > 0 && slot <= s_init_desc.max_vertex_inputs && s_vertex_inputs[slot].vao == 0);
@@ -1597,6 +1612,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     NT_GL(glBindVertexArray, s_gl_cache.vao);
 
     s_vertex_inputs[slot].vao = vao;
+    s_vertex_inputs[slot].index_type = index_type;
     uint8_t inst_count = desc->instance_layout.attr_count;
     if (inst_count > NT_GFX_MAX_INSTANCE_ATTRS) {
         inst_count = NT_GFX_MAX_INSTANCE_ATTRS;
@@ -1631,6 +1647,7 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle) {
      * previous VAO bound and draw the wrong geometry. */
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_vertex_inputs && s_vertex_inputs[backend_handle].vao != 0 && "bind_vertex_input: requires a live vertex input");
     GLuint vao = s_vertex_inputs[backend_handle].vao;
+    s_index_type = s_vertex_inputs[backend_handle].index_type;
     if (s_gl_cache.vao != vao) {
         NT_GL(glBindVertexArray, vao);
         s_gl_cache.vao = vao;
@@ -2137,16 +2154,6 @@ static void bind_sampler(uint32_t backend_handle, uint32_t slot) {
 void nt_gfx_backend_bind_texture_unit(uint32_t texture_backend, uint32_t sampler_backend, uint32_t slot) {
     bind_texture(texture_backend, slot);
     bind_sampler(sampler_backend, slot);
-}
-
-void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
-    NT_GL(glDrawArraysInstanced, GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices, (GLsizei)instance_count);
-}
-
-void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
-    GLenum gl_type = (index_type == 2) ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
-    uint32_t stride = (index_type == 2) ? sizeof(uint32_t) : sizeof(uint16_t);
-    NT_GL(glDrawElementsInstanced, GL_TRIANGLES, (GLsizei)num_indices, gl_type, nt_gl_offset((uintptr_t)first_index * stride), (GLsizei)instance_count);
 }
 
 /* ---- Context loss recovery ---- */

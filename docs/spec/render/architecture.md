@@ -69,8 +69,10 @@ logical state and counts the accepted operation, then records the
 backend-resolved arguments of the backend call into one command stream: begin
 and end pass, clear, pipeline, vertex-input and instance-buffer binds, vertex
 attribute defaults, texture-unit and uniform-buffer binds, the mat4, vec4, float
-and int uniform setters, scissor rectangle and enable, viewport, the four draws,
-and GPU timing segment begin and end. Descriptors and uniform values are copied
+and int uniform setters, scissor rectangle and enable, viewport, the plain and
+indexed draws (both carry an instance count; the index type comes from the bound
+vertex input, as WebGPU `setIndexBuffer` carries the format), and GPU timing
+segment begin and end. Descriptors and uniform values are copied
 into the stream. `nt_gfx_end_frame` executes the stream in call order. Nothing is
 recorded outside a frame.
 
@@ -83,14 +85,12 @@ samples must not be rewritten in that frame.
 
 `nt_gfx_desc_t.stream_capacity` is the byte budget of draw-phase commands
 recorded between executions, allocated once at init; `nt_gfx_desc_defaults()`
-sets 256 KiB, and init asserts a non-zero value. The stream never grows: an
+sets 256 KiB, and init asserts at least 4 bytes. The stream never grows: an
 overflow logs the needed and free bytes and asserts, because the capacity is the
 game's budget. `nt_gfx_counters_t.stream_bytes` reports the frame's peak
 recorded bytes between executions, to size the capacity from a real scene.
 
-The backend binds a texture unit with one call,
-`nt_gfx_backend_bind_texture_unit(texture, sampler, unit)`; it applies the
-sampler even when the texture is already bound on that unit. GL `begin_pass`
+GL `begin_pass`
 reads the window framebuffer size at execution, which equals the size at the
 call: the window size changes only in `nt_window_poll`, between frames. GL errors
 and backend asserts without a front-end equivalent fire at execution, inside
@@ -478,9 +478,8 @@ Each pass clears color and depth unless `load_color`/`load_depth` keeps the
 attachment's current contents. Every pass starts with scissor disabled, so the
 pass clear initializes the entire attachment and scissor never carries from one
 pass to the next; clear values matter only for a cleared attachment.
-Stencil is never cleared by a pass. Scissor, viewport, vertex attribute defaults
-and uniform-buffer binds are set inside an open pass; uniform-buffer bindings and
-attribute defaults are not reset per pass.
+Stencil is never cleared by a pass. Draw state is pass-scoped as
+[API contracts](../core/api-contracts.md) states.
 
 `nt_gfx_clear` is an explicit operation inside an open pass. Its borrowed
 `nt_clear_desc_t` selects color and depth independently with `color`/`depth`

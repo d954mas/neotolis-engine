@@ -652,7 +652,7 @@ typedef struct {
     uint64_t texture_upload_calls;
     uint64_t texture_upload_bytes;
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
-    uint64_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
+    uint32_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
 
@@ -1009,7 +1009,7 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
  * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets);
  * asserted. Re-bind per draw to re-point. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
-/* Inside a pass; the value is not reset at the next pass. */
+/* Inside a pass. */
 void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* ---- Uniform buffer ---- */
@@ -1018,8 +1018,7 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
  * multiple of gpu_caps.uniform_buffer_offset_alignment, is nonempty and fits the
  * buffer; WebGL also requires it to cover the block's full data size. Upload every
  * range of a frame before the first draw that reads the buffer: Mali/ANGLE stall on
- * a rewrite of any part of a buffer an earlier draw read. Inside a pass; bindings are not
- * reset at the next pass. */
+ * a rewrite of any part of a buffer an earlier draw read. Inside a pass. */
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size);
 

@@ -1,11 +1,9 @@
 #ifndef NT_EXAMPLE_FRAMES_H
 #define NT_EXAMPLE_FRAMES_H
 
-/* `--frames N`: once the example reports ready, run 60 warmup and N measured
- * frames at a fixed 1/60 step, print per-frame means and a checksum of the
- * last frame, then quit. Native only: on web every call is empty, so the tool
- * adds nothing to the shipped wasm. The checksum repeats only with
- * NT_METRICS_ENABLED=OFF: a live metrics HUD changes the pixels. */
+/* `--frames N`: fixed-step measured run, per-frame means, last-frame checksum.
+ * Empty on web so shipped wasm pays nothing; the checksum repeats only with
+ * NT_METRICS_ENABLED=OFF because a live metrics HUD changes the pixels. */
 
 #include "core/nt_platform.h"
 

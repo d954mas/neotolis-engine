@@ -3269,7 +3269,7 @@ void test_stream_executes_draws_in_call_order_at_end_frame(void) {
     TEST_ASSERT_EQUAL_UINT32(second.id, nt_gfx_fake_draw_trace_at(1).pipeline.id);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(1).first_index);
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT64(recorded_bytes, g_nt_gfx.last_frame.stream_bytes);
+    TEST_ASSERT_EQUAL_UINT32(recorded_bytes, g_nt_gfx.last_frame.stream_bytes);
 }
 
 void test_stream_records_a_copy_of_uniform_values(void) {

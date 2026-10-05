@@ -22,7 +22,6 @@ typedef struct {
     uint32_t first_index; /* indexed draws only */
     uint32_t num_indices; /* 0 on a non-indexed draw: the backend gets no vertex count */
     uint32_t instance_count;
-    uint8_t index_type; /* indexed draws only */
 } nt_gfx_fake_draw_t;
 
 void nt_gfx_fake_draw_trace_reset(bool enabled);

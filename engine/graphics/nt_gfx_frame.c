@@ -8,7 +8,7 @@
 nt_gfx_stream_t g_nt_gfx_stream;
 
 void nt_gfx_frame_init(uint32_t capacity_bytes) {
-    NT_ASSERT(capacity_bytes >= 4U && (capacity_bytes & 3U) == 0 && "nt_gfx_desc_t.stream_capacity must be a non-zero multiple of 4 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT(capacity_bytes >= 4U && "nt_gfx_desc_t.stream_capacity is below one word -- use nt_gfx_desc_defaults() or set explicitly");
     g_nt_gfx_stream.capacity = capacity_bytes / 4U;
     g_nt_gfx_stream.words = (uint32_t *)malloc((size_t)g_nt_gfx_stream.capacity * sizeof(uint32_t));
     NT_ASSERT(g_nt_gfx_stream.words != NULL);
@@ -32,7 +32,7 @@ void nt_gfx_frame_execute(void) {
     }
     const uint32_t *w = g_nt_gfx_stream.words;
     const uint32_t *end = w + g_nt_gfx_stream.used;
-    uint64_t bytes = (uint64_t)g_nt_gfx_stream.used * 4U;
+    const uint32_t bytes = g_nt_gfx_stream.used * 4U;
     if (bytes > g_nt_gfx.counters.stream_bytes) {
         g_nt_gfx.counters.stream_bytes = bytes;
     }
@@ -66,9 +66,10 @@ void nt_gfx_frame_execute(void) {
             w += 3;
             break;
         case NT_GFX_CMD_SET_VERTEX_ATTRIB_DEFAULT: {
-            const nt_gfx_cmd_attrib_default_t *c = (const nt_gfx_cmd_attrib_default_t *)w;
-            nt_gfx_backend_set_vertex_attrib_default((uint8_t)c->location, c->value[0], c->value[1], c->value[2], c->value[3]);
-            w += NT_GFX_CMD_WORDS(sizeof(*c));
+            float value[4];
+            memcpy(value, w + 1, sizeof(value));
+            nt_gfx_backend_set_vertex_attrib_default((uint8_t)w[0], value[0], value[1], value[2], value[3]);
+            w += 5;
             break;
         }
         case NT_GFX_CMD_BIND_TEXTURE_UNIT:
@@ -94,43 +95,29 @@ void nt_gfx_frame_execute(void) {
             w += 2 + 1;
             break;
         }
-        case NT_GFX_CMD_SET_UNIFORM_INT: {
-            const nt_gfx_cmd_uniform_int_t *c = (const nt_gfx_cmd_uniform_int_t *)w;
-            nt_gfx_backend_set_uniform_int(c->program, c->name_hash, c->value);
-            w += NT_GFX_CMD_WORDS(sizeof(*c));
+        case NT_GFX_CMD_SET_UNIFORM_INT:
+            nt_gfx_backend_set_uniform_int(w[0], w[1], (int)w[2]);
+            w += 3;
             break;
-        }
-        case NT_GFX_CMD_SET_SCISSOR: {
-            const nt_gfx_cmd_rect_t *c = (const nt_gfx_cmd_rect_t *)w;
-            nt_gfx_backend_set_scissor(c->x, c->y, c->w, c->h);
-            w += NT_GFX_CMD_WORDS(sizeof(*c));
+        case NT_GFX_CMD_SET_SCISSOR:
+            nt_gfx_backend_set_scissor((int)w[0], (int)w[1], (int)w[2], (int)w[3]);
+            w += 4;
             break;
-        }
         case NT_GFX_CMD_SET_SCISSOR_ENABLED:
             nt_gfx_backend_set_scissor_enabled(w[0] != 0);
             w += 1;
             break;
-        case NT_GFX_CMD_SET_VIEWPORT: {
-            const nt_gfx_cmd_rect_t *c = (const nt_gfx_cmd_rect_t *)w;
-            nt_gfx_backend_set_viewport(c->x, c->y, c->w, c->h);
-            w += NT_GFX_CMD_WORDS(sizeof(*c));
+        case NT_GFX_CMD_SET_VIEWPORT:
+            nt_gfx_backend_set_viewport((int)w[0], (int)w[1], (int)w[2], (int)w[3]);
+            w += 4;
             break;
-        }
         case NT_GFX_CMD_DRAW:
-            nt_gfx_backend_draw(w[0], w[1]);
-            w += 2;
+            nt_gfx_backend_draw(w[0], w[1], w[2]);
+            w += 3;
             break;
         case NT_GFX_CMD_DRAW_INDEXED:
-            nt_gfx_backend_draw_indexed(w[0], w[1], (uint8_t)w[2]);
+            nt_gfx_backend_draw_indexed(w[0], w[1], w[2]);
             w += 3;
-            break;
-        case NT_GFX_CMD_DRAW_INSTANCED:
-            nt_gfx_backend_draw_instanced(w[0], w[1], w[2]);
-            w += 3;
-            break;
-        case NT_GFX_CMD_DRAW_INDEXED_INSTANCED:
-            nt_gfx_backend_draw_indexed_instanced(w[0], w[1], w[2], (uint8_t)w[3]);
-            w += 4;
             break;
         case NT_GFX_CMD_BEGIN_SEGMENT: {
             const char *name;
@@ -142,9 +129,6 @@ void nt_gfx_frame_execute(void) {
         case NT_GFX_CMD_END_SEGMENT:
             nt_gfx_backend_end_segment();
             break;
-        default:
-            NT_ASSERT(false && "gfx stream: unknown command");
-            return;
         }
     }
 }
