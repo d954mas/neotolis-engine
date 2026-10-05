@@ -329,7 +329,9 @@ static void test_context_restore_stays_lost_when_the_recreate_meets_a_loss(void)
 }
 
 static void test_context_restore_waits_while_backend_remains_lost(void) {
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor_enabled(true);
+    nt_gfx_end_pass();
     TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
     lose_context();
     nt_gfx_end_frame();

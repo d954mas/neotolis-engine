@@ -955,14 +955,7 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_targe
         }
     }
     if (clear != 0) {
-        bool scissor = nt_gfx_scissor_enabled();
-        if (scissor) {
-            NT_GL(glDisable, GL_SCISSOR_TEST);
-        }
-        NT_GL(glClear, clear);
-        if (scissor) {
-            NT_GL(glEnable, GL_SCISSOR_TEST);
-        }
+        NT_GL(glClear, clear); /* scissor is off: the front-end disables it before every pass */
     }
 }
 

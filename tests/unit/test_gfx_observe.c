@@ -239,6 +239,49 @@ static void test_begin_pass_needs_an_open_frame_without_a_pass_also_on_a_loss(vo
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "begin_pass: needs an open frame with no open pass"));
 }
+
+static void test_scissor_and_viewport_require_an_open_pass(void) {
+    NT_TEST_EXPECT_ASSERT(nt_gfx_set_scissor(0, 0, 1, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "set_scissor: must be called inside a pass"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_set_scissor_enabled(true));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "set_scissor_enabled: must be called inside a pass"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_set_viewport(0, 0, 1, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "set_viewport: must be called inside a pass"));
+}
+
+static void test_bindings_require_an_open_pass(void) {
+    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 256});
+    NT_TEST_EXPECT_ASSERT(nt_gfx_set_vertex_attrib_default(0, 0.0F, 0.0F, 0.0F, 1.0F));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "set_vertex_attrib_default: must be called inside a pass"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, 0));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "bind_uniform_buffer: must be called inside a pass"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 256));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "bind_uniform_buffer: must be called inside a pass"));
+}
+
+static void test_draw_state_in_a_pass_on_a_lost_context_does_not_assert(void) {
+    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 256});
+    nt_gfx_end_frame();
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    /* The game's pass does not open on a lost context; its draw state calls return quietly. */
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_set_scissor(0, 0, 1, 1);
+    nt_gfx_set_scissor_enabled(true);
+    nt_gfx_set_viewport(0, 0, 1, 1);
+    nt_gfx_set_vertex_attrib_default(0, 0.0F, 0.0F, 0.0F, 1.0F);
+    nt_gfx_bind_uniform_buffer(ubo, 0);
+    nt_gfx_end_pass();
+}
+
+static void test_segments_require_an_open_frame(void) {
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_segment("frame"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "begin_segment: must be called inside a frame"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_end_segment());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "end_segment: must be called inside a frame"));
+}
 #endif
 
 #if NT_GFX_CAPTURE_ENABLED
@@ -784,6 +827,10 @@ int main(void) {
     RUN_TEST(test_begin_frame_needs_the_open_frame_ended);
     RUN_TEST(test_end_frame_needs_an_open_frame_without_a_pass);
     RUN_TEST(test_begin_pass_needs_an_open_frame_without_a_pass_also_on_a_loss);
+    RUN_TEST(test_scissor_and_viewport_require_an_open_pass);
+    RUN_TEST(test_bindings_require_an_open_pass);
+    RUN_TEST(test_draw_state_in_a_pass_on_a_lost_context_does_not_assert);
+    RUN_TEST(test_segments_require_an_open_frame);
 #endif
 #if NT_GFX_CAPTURE_ENABLED
     RUN_TEST(test_clear_copies_requests_and_skips_known_loss);

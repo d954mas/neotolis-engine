@@ -282,26 +282,6 @@ static void test_mixed_size_targets_assert_without_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
-static void test_enabled_scissor_asserts_without_draw(void) {
-    nt_render_target_t source_rt = make_blur_target(64, 32);
-    nt_render_target_t temp = make_blur_target(64, 32);
-    nt_render_target_t dest = make_blur_target(64, 32);
-
-    nt_gfx_set_scissor(0, 0, 1, 1);
-    nt_gfx_set_scissor_enabled(true);
-    NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
-        .source = nt_gfx_render_target_color(source_rt),
-        .temp = temp,
-        .dest = dest,
-        .radius = 4.0F,
-    }));
-    TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
-    nt_gfx_set_scissor_enabled(false);
-
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_pass_target_count());
-}
-
 static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void) {
     nt_render_target_t source_rt = make_blur_target(64, 32);
     nt_render_target_t temp = make_blur_target(64, 32);
@@ -442,7 +422,6 @@ int main(void) {
     RUN_TEST(test_blur_inside_active_pass_asserts_without_closing_it);
     RUN_TEST(test_stale_target_asserts_without_draw);
     RUN_TEST(test_mixed_size_targets_assert_without_draw);
-    RUN_TEST(test_enabled_scissor_asserts_without_draw);
     RUN_TEST(test_valid_blur_uses_two_passes_and_no_hidden_target_allocation);
     RUN_TEST(test_blur_binds_its_own_nearest_clamp_sampler);
     RUN_TEST(test_blur_lifecycle_misuse_asserts);

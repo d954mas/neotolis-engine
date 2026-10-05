@@ -606,7 +606,9 @@ static void test_compressed_create_keeps_texture_cache_truthful(void) {
 /* Ground state is real GL calls, so scissor left enabled by a previous gfx
  * lifetime cannot survive into the next one on the same native context. */
 static void test_ground_state_disables_scissor(void) {
+    begin_black_pass();
     nt_gfx_set_scissor_enabled(true);
+    nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_INT(GL_TRUE, (int)glIsEnabled(GL_SCISSOR_TEST));
 
     nt_gfx_shutdown();

@@ -1541,7 +1541,7 @@ static void test_pass_load_preserves_color_and_depth_independently(void) {
     destroy_test_target(&target);
 }
 
-static void test_pass_clear_covers_attachment_and_preserves_draw_scissor(void) {
+static void test_pass_clear_covers_attachment_and_starts_with_scissor_off(void) {
     test_target_t target = make_test_target(4, 3, NT_TEXTURE_FORMAT_RGBA8, NT_TEXTURE_FORMAT_DEPTH24);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_depth = 0.25F});
     nt_gfx_set_scissor(1, 1, 1, 1);
@@ -1557,14 +1557,8 @@ static void test_pass_clear_covers_attachment_and_preserves_draw_scissor(void) {
     for (uint32_t i = 0; i < 12; i++) {
         TEST_ASSERT_UINT32_WITHIN(1, 750, (uint32_t)((depth[i] * 1000.0F) + 0.5F));
     }
-    TEST_ASSERT_TRUE(nt_gfx_scissor_enabled());
-    TEST_ASSERT_TRUE(glIsEnabled(GL_SCISSOR_TEST));
-    GLint box[4] = {0};
-    glGetIntegerv(GL_SCISSOR_BOX, box);
-    for (uint32_t i = 0; i < 4; i++) {
-        TEST_ASSERT_EQUAL_INT(1, box[i]);
-    }
-    nt_gfx_set_scissor_enabled(false);
+    TEST_ASSERT_FALSE(nt_gfx_scissor_enabled());
+    TEST_ASSERT_FALSE(glIsEnabled(GL_SCISSOR_TEST));
     nt_gfx_end_pass();
     destroy_test_target(&target);
 }
@@ -1703,7 +1697,7 @@ int main(void) {
     RUN_TEST(test_explicit_clear_preserves_unselected_pixels_and_draw_state);
     RUN_TEST(test_pass_discard_maps_attachments_and_finishes_before_unbind);
     RUN_TEST(test_pass_load_preserves_color_and_depth_independently);
-    RUN_TEST(test_pass_clear_covers_attachment_and_preserves_draw_scissor);
+    RUN_TEST(test_pass_clear_covers_attachment_and_starts_with_scissor_off);
     RUN_TEST(test_render_target_recreate_at_new_size_without_spare_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format);
     RUN_TEST(test_custom_blend_state_reaches_gl_unchanged);

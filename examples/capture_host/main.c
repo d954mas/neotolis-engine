@@ -38,20 +38,17 @@ static uint16_t resolve_port(void) {
 }
 
 /* Draw the known two-tone pattern: full-frame background, then a scissored centered sub-rect in the
-   foreground color. glClear honors GL_SCISSOR_TEST, so the second pass only clears the sub-rect. */
+   foreground color. An explicit clear honors the scissor, so it only fills the sub-rect. */
 static void render_pattern(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_bg_color[0], k_bg_color[1], k_bg_color[2], k_bg_color[3]}, .clear_depth = 1.0F});
-    nt_gfx_end_pass();
-
     const int fb_w = (int)g_nt_window.fb_width;
     const int fb_h = (int)g_nt_window.fb_height;
     const int rw = fb_w / 2;
     const int rh = fb_h / 2;
     nt_gfx_set_scissor(fb_w / 4, fb_h / 4, rw, rh); /* GL bottom-left; placement is irrelevant to not-blank. */
     nt_gfx_set_scissor_enabled(true);
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_fg_color[0], k_fg_color[1], k_fg_color[2], k_fg_color[3]}, .clear_depth = 1.0F});
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {k_fg_color[0], k_fg_color[1], k_fg_color[2], k_fg_color[3]}});
     nt_gfx_end_pass();
-    nt_gfx_set_scissor_enabled(false); /* leave scissor off so the next frame's bg clear covers the whole FB. */
 }
 
 static void frame(void) {

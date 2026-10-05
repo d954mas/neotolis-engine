@@ -2461,7 +2461,9 @@ void test_bind_uniform_buffer(void) {
         .size = 256,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_uniform_buffer(buf, 0); /* must not crash */
+    nt_gfx_end_pass();
     nt_gfx_destroy_buffer(buf);
 }
 
@@ -2858,7 +2860,9 @@ void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
     nt_gfx_begin_frame(); /* restore succeeds; the buffer stays a husk */
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
 
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, 0));
+    nt_gfx_end_pass();
 }
 
 /* Render-target attachments are rejected earlier, so an update reaching a husk
@@ -3127,8 +3131,10 @@ static nt_buffer_t make_test_ubo(uint32_t size) { return nt_gfx_make_buffer(&(nt
 
 void test_bind_uniform_buffer_range_reaches_backend(void) {
     nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_uniform_buffer(ubo, 1);
     nt_gfx_bind_uniform_buffer_range(ubo, 7, 768, 256); /* final legal range */
+    nt_gfx_end_pass();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
     nt_gfx_fake_ubo_bind_t whole = nt_gfx_fake_ubo_bind_at(0);
@@ -3144,18 +3150,21 @@ void test_bind_uniform_buffer_range_reaches_backend(void) {
 void test_bind_uniform_buffer_range_asserts(void) {
     nt_buffer_t ubo = make_test_ubo(1024);
     nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 1024});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256));          /* off the 256 B alignment */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 0));             /* empty */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 512));         /* past the end */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0xFFFFFF00U, 512)); /* offset + size wraps */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 2048));          /* larger than the buffer */
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(vbo, 0, 0, 256));
+    nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
 }
 
 void test_bind_uniform_buffer_range_follows_orphaned_storage(void) {
     nt_buffer_t ubo = make_test_ubo(1024);
     nt_gfx_orphan_buffer(ubo, NULL, 256);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256));
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 512));
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
@@ -3169,6 +3178,7 @@ void test_bind_uniform_buffer_range_follows_orphaned_storage(void) {
     nt_gfx_orphan_buffer(ubo, NULL, 1024);
     nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+    nt_gfx_end_pass();
     EXPECT_ASSERT(nt_gfx_orphan_buffer(ubo, NULL, 1280));
 }
 
@@ -3181,8 +3191,10 @@ void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
     TEST_ASSERT_EQUAL_UINT32(16, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
 
     nt_buffer_t ubo = make_test_ubo(1024);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256);
     EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 8, 256));
+    nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
 }
 

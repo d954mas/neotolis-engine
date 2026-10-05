@@ -722,6 +722,11 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     discard_texture_set();
     s_gfx.bound_vertex_input = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
+    /* Scissor is pass-scoped: every pass starts with it off. */
+    if (s_gfx.scissor_enabled) {
+        s_gfx.scissor_enabled = false;
+        nt_gfx_backend_set_scissor_enabled(false);
+    }
     nt_gfx_backend_begin_pass(desc, render_target_backend, width, height);
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -1951,6 +1956,7 @@ static nt_gfx_result_t set_scissor(int x, int y, int w, int h) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_scissor: must be called inside a pass");
     s_gfx.scissor_rect[0] = x;
     s_gfx.scissor_rect[1] = y;
     s_gfx.scissor_rect[2] = w;
@@ -1969,6 +1975,7 @@ static nt_gfx_result_t set_scissor_enabled(bool enabled) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_scissor_enabled: must be called inside a pass");
     /* The mirror owns this state end to end, so the dedup lives here and the backend stays raw. */
     if (s_gfx.scissor_enabled == enabled) {
         return NT_GFX_RESULT_CACHE;
@@ -1991,6 +1998,7 @@ static nt_gfx_result_t set_viewport(int x, int y, int w, int h) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_viewport: must be called inside a pass");
     s_gfx.viewport_rect[0] = x;
     s_gfx.viewport_rect[1] = y;
     s_gfx.viewport_rect[2] = w;
@@ -2286,6 +2294,7 @@ static nt_gfx_result_t set_vertex_attrib_default(uint8_t location, float x, floa
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_vertex_attrib_default: must be called inside a pass");
     nt_gfx_backend_set_vertex_attrib_default(location, x, y, z, w);
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -2304,6 +2313,7 @@ static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint3
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_buffer: must be called inside a pass");
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         NT_LOG_ERROR("bind_uniform_buffer: invalid handle");
         return NT_GFX_RESULT_INVALID_HANDLE;
@@ -2375,6 +2385,7 @@ void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, ui
 }
 
 static nt_gfx_result_t begin_segment(const char *name) {
+    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_ENDED && "begin_segment: must be called inside a frame");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2389,6 +2400,7 @@ void nt_gfx_begin_segment(const char *name) {
 }
 
 static nt_gfx_result_t end_segment(void) {
+    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_ENDED && "end_segment: must be called inside a frame");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
