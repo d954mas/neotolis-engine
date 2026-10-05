@@ -613,7 +613,7 @@ int main(int argc, char **argv) {
 
     /* nt_metrics is the perf store; the overlay HUD is a pure consumer, so init metrics first. */
     nt_metrics_init();
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 
     /* Frame rate cap removed: native engine loop runs uncapped (target_dt=0.0F).
      * dt-scaled physics already produces the same trajectories at any FPS. */

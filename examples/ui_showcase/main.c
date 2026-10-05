@@ -4142,7 +4142,7 @@ int main(int argc, char *argv[]) {
 
     /* nt_metrics is the perf store; the overlay HUD is a pure consumer, so init metrics first. */
     nt_metrics_init();
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();

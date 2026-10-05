@@ -75,18 +75,17 @@ static void push_frame(float frame_ms, float cpu_ms, float gpu_ms, uint32_t draw
 /* ---- Test 1: init + shutdown round-trip ---- */
 
 static void test_stats_init_shutdown(void) {
-    nt_debug_overlay_desc_t desc = nt_debug_overlay_desc_defaults();
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_debug_overlay_init(&desc));
+    nt_debug_overlay_init();
     nt_debug_overlay_shutdown();
     /* Re-init must succeed (asserts not initialized first) */
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_debug_overlay_init(NULL));
+    nt_debug_overlay_init();
     nt_debug_overlay_shutdown();
 }
 
 /* ---- Test 2: format_lines schema (reads nt_metrics) ---- */
 
 static void test_stats_format_lines_schema(void) {
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 
     char buf[512];
     uint32_t n = nt_debug_overlay_format_lines(buf, sizeof(buf));
@@ -107,7 +106,7 @@ static void test_stats_format_lines_schema(void) {
    (labels present), and draw-bind tests stay live in both configs. */
 
 static void test_stats_format_reflects_last_frame(void) {
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 
     push_frame(1000.0F / 60.0F, 7.25F, 3.5F, 42U);
     char buf[512];
@@ -123,7 +122,7 @@ static void test_stats_format_reflects_last_frame(void) {
 /* ---- Test 4: fps line reflects the nt_metrics rolling avg ---- */
 
 static void test_stats_format_reflects_fps(void) {
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 
     for (int i = 0; i < 60; i++) {
         push_frame(1000.0F / 60.0F, 5.0F, -1.0F, 0U); /* 60 fps frames */
@@ -139,7 +138,7 @@ static void test_stats_format_reflects_fps(void) {
 /* ---- Test 5: user counters in the HUD, exact int + decimals for floats ---- */
 
 static void test_stats_user_counters(void) {
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 
     nt_metrics_count("bunnies", 1000U);
     nt_metrics_count("bunnies", 2000U);
@@ -162,7 +161,7 @@ static void test_stats_user_counters(void) {
 /* ---- Test 6: int user counter exact past 2^53 in the HUD ---- */
 
 static void test_stats_user_counter_uint64_exact(void) {
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 
     const uint64_t big = (1ULL << 53) + 1ULL; /* a double would lose the low bit */
     nt_metrics_count("ticks", big);
@@ -180,7 +179,7 @@ static void test_stats_user_counter_uint64_exact(void) {
  * nt_debug_overlay_draw must call BOTH setters every time even when the material/font id matches the
  * previous frame, defeating nt_text_renderer's change-detection early-out. */
 static void test_stats_draw_pitfall9_explicit_set_calls(void) {
-    nt_debug_overlay_init(NULL);
+    nt_debug_overlay_init();
 
     nt_text_renderer_test_reset_call_counters();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_material_calls());
