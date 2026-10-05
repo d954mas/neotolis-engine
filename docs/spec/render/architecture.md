@@ -77,9 +77,9 @@ recorded outside a frame.
 Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, `nt_gfx_read_pixels`, the GPU timing toggle and
 polling. Recorded commands keep their mutual order; an immediate operation may
-run before draw-phase calls recorded earlier in the same frame. A texture write
-therefore lands before every draw of its frame: all draws of a frame see the
-texture's final content, as WebGPU `queue.writeTexture` precedes the submit.
+run before draw-phase calls recorded earlier in the same frame. A texture write is
+not ordered against the draws of its frame: a region that a draw of the frame
+samples must not be rewritten in that frame.
 
 `nt_gfx_desc_t.stream_capacity` is the byte budget of draw-phase commands
 recorded between executions, allocated once at init; `nt_gfx_desc_defaults()`

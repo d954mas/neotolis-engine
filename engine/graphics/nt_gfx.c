@@ -2403,7 +2403,11 @@ static nt_gfx_result_t begin_segment(const char *name) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+#if NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_frame_begin_segment(name);
+#else
+    (void)name;
+#endif
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2418,7 +2422,9 @@ static nt_gfx_result_t end_segment(void) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+#if NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_frame_end_segment();
+#endif
     return NT_GFX_RESULT_ACCEPTED;
 }
 
@@ -2443,7 +2449,9 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 }
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
+#if NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_frame_execute();
+#endif
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
