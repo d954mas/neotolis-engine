@@ -627,8 +627,6 @@ static void test_capture_defines_inherited_resources_and_unknown_scissor(void) {
     TEST_ASSERT_TRUE(scissor_unknown);
 }
 
-/* Scissor rectangle and uniform-buffer slots carry over frames: the snapshot
- * shows the state a CACHE bind inside the capture matched. */
 static uint32_t initial_records(nt_gfx_capture_view_t capture, nt_gfx_operation_t operation, nt_gfx_result_t result) {
     uint32_t count = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
@@ -713,6 +711,8 @@ static void test_capture_shows_cache_for_equal_binds_and_merged_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&capture.counters));
 }
 
+/* Scissor rectangle and uniform-buffer slots carry over frames: the snapshot
+ * shows the state a CACHE bind inside the capture matched. */
 static void test_capture_initial_state_holds_carried_over_bindings(void) {
     nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 512});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});

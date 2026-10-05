@@ -658,7 +658,7 @@ typedef struct {
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
 
-/* Accepted draw calls of every kind. */
+/* Recorded draw calls of every kind; merged indexed draws count once. */
 static inline uint32_t nt_gfx_draw_calls(const nt_gfx_counters_t *c) {
     return c->accepted[NT_GFX_OP_DRAW] + c->accepted[NT_GFX_OP_DRAW_INSTANCED] + c->accepted[NT_GFX_OP_DRAW_INDEXED] + c->accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED];
 }
@@ -952,8 +952,8 @@ nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex);
 /* ---- Draw state ---- Pipeline, vertex input, texture set, instance pointers and
  * uniforms are pass-scoped: set them inside a pass (asserted); nt_gfx_begin_pass
  * discards them. Physical texture/sampler and uniform-buffer binds are context state.
- * A bind equal to the current state ends CACHE and records nothing; a texture-set
- * apply always ends ACCEPTED and records only the changed units. */
+ * An equal bind, scissor or viewport ends CACHE and records nothing; an equal texture
+ * set still ends ACCEPTED and records only the changed units. */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
@@ -996,6 +996,7 @@ void nt_gfx_set_uniform_int(nt_hash32_t name, int val);
 
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices);
 void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
+/* A contiguous draw with no command since the previous one joins it and ends CACHE. */
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 

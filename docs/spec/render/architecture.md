@@ -106,7 +106,8 @@ observation for counters and capture.
 
 ### Binding dedup and draw merge
 
-The front-end is the one layer that drops redundant binds. Every binding call
+The front-end is the one layer that drops redundant public binds; the GL backend
+only skips repeated physical state (below). Every binding call
 compares with a front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE` and
 records nothing. A mirror lives exactly as long as the contract keeps its state:
 
@@ -119,14 +120,16 @@ records nothing. A mirror lives exactly as long as the contract keeps its state:
   whose range no longer fits the orphaned storage re-validates;
 - scissor enable is reset to off by `begin_pass`.
 
-`nt_gfx_apply_texture_bindings` is the exception to the CACHE result: it always
-validates and publishes the whole set and ends `ACCEPTED`, but records a unit
-bind only when that unit's texture or sampler changed in the pass.
+`nt_gfx_apply_texture_bindings` never ends `CACHE`: a successful apply validates
+and publishes the whole set and ends `ACCEPTED`, but records a unit bind only
+when that unit's texture or sampler changed in the pass. Uniform-buffer slots
+are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind or
+a global block registration at that slot or above asserts.
 
 The compare runs after the pass check; an equal value was validated when it was
 recorded and every path that could invalidate it clears the mirror. An invalid
-pipeline or vertex-input handle clears its mirror as before; other invalid binds
-change no state and leave theirs. Uniform values and vertex attribute
+pipeline or vertex-input handle clears its mirror (the unbind); other invalid
+binds leave their mirrors unchanged. Uniform values and vertex attribute
 defaults are not deduplicated by the front-end. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
@@ -136,9 +139,8 @@ viewport, clear values and the active unit.
 Indexed draws are whole triangle lists: both indexed draws assert
 `num_indices % 3 == 0`, and index data never holds the primitive-restart value
 (`0xFFFF`/`0xFFFFFFFF`; WebGL2 always restarts on it, native GL draws that
-vertex). Shaders of non-instanced indexed draws do not read `gl_PrimitiveID`
-(native GL only; WebGL2's GLSL ES 3.00 has none), whose numbering a merge would
-continue. `nt_gfx_draw_indexed` therefore extends the previous command when that
+vertex), and their shaders follow the [draw merge rule](shader.md#draw-merge).
+`nt_gfx_draw_indexed` therefore extends the previous command when that
 command is the last one recorded, was recorded by `nt_gfx_draw_indexed`, and
 its range ends where the new one starts (the summed count fits `GLsizei`). The
 merged call ends `CACHE` with its vertices and indices counted, so
@@ -160,7 +162,7 @@ draws; per mesh switch that is a single `glBindVertexArray` instead of
 buffer re-binds plus per-attribute `glVertexAttribPointer` rewrites. The
 object's *static* half — vertex attributes and the index binding — is
 immutable after creation; its *instance* attribute pointers are re-specified
-by `nt_gfx_bind_instance_buffer` into the vertex input the front-end
+by each recorded `nt_gfx_bind_instance_buffer` into the vertex input the front-end
 names explicitly to the backend (WebGL2 has no
 baseInstance, so per-draw instance re-pointing stays). The instance binding is
 pass state: a draw of a vertex input with instance attributes asserts unless the
@@ -578,8 +580,7 @@ Physical texture/sampler GL bindings and uniform-buffer binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
 uniform-buffer binding calls `glBindBufferBase` (`glBindBufferRange` for a
 range) for every recorded request, and the front-end records a slot's binding
-only when buffer, offset or size changed. Slots are below
-`NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a higher slot asserts. A depth clear forces the depth
+only when buffer, offset or size changed. A depth clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color

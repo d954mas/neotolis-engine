@@ -128,9 +128,9 @@ static inline void nt_gfx_frame_draw(uint32_t first_vertex, uint32_t num_vertice
 static inline void nt_gfx_frame_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
     nt_gfx_frame_u32x4(NT_GFX_CMD_DRAW_INDEXED, 4, first_index, num_indices, instance_count, index_type);
 }
-/* Extends the previous single-instance indexed draw when it is still the last command
- * (any other command moves `used` past `merge_end`) and the range continues; whole
- * restart-free triangle lists make the joined draw identical. True when merged. */
+/* Extends the previous nt_gfx_draw_indexed when it is still the last command (any other
+ * command moves `used` past `merge_end`) and the range continues; callers keep index
+ * data restart-free, so the joined draw is identical. True when merged. */
 static inline bool nt_gfx_frame_draw_indexed_merging(uint32_t first_index, uint32_t num_indices, uint8_t index_type) {
     nt_gfx_stream_t *s = &g_nt_gfx_stream;
     if (s->merge_end != 0 && s->merge_end == s->used) {

@@ -172,6 +172,15 @@ Possible globals: view, proj, view_proj, camera_pos, time, light_dir. Start mini
 
 WebGL 2 Uniform Buffer Objects can be used to share globals efficiently across shaders.
 
+## Draw merge
+
+Vertex and fragment shaders used with non-instanced indexed draws do not read
+`gl_PrimitiveID`: gfx joins contiguous indexed draws into one
+([draw merge](architecture.md#binding-dedup-and-draw-merge)), and the joined
+draw continues the primitive numbering. WebGL2's GLSL ES 3.00 has no
+`gl_PrimitiveID`; the rule keeps native GL builds identical. Instanced draws
+never merge, so `gl_InstanceID` keeps its per-draw meaning.
+
 ## Fragment output and blending
 
 The fragment shader defines the source color representation; material blend

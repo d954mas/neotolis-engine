@@ -161,7 +161,7 @@ static struct {
     uint8_t texture_set_state;   /* nt_gfx_texture_set_state_t for the bound pipeline's program */
     bool scissor_enabled;        /* GL_SCISSOR_TEST as recorded */
     /* Binding mirrors: an equal bind records nothing. Each lives as long as the
-     * contract keeps its state (render/architecture.md, Binding dedup and draw merge). */
+     * contract keeps its state. */
     nt_gfx_instance_binding_t bound_instance;
     nt_gfx_unit_binding_t bound_units[NT_GFX_MAX_TEXTURE_SLOTS];
     nt_gfx_ubo_binding_t bound_ubos[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* carry over passes */
@@ -1502,7 +1502,7 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
     if (s_gfx.bound_instance.buffer == buf.id) {
         s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
     }
-    /* GL resets the slots of a deleted buffer; a later buffer in this pool slot is a new bind. */
+    /* GL unbinds a deleted buffer; a stale slot would show in the capture snapshot and could match a recycled id. */
     for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
         if (s_gfx.bound_ubos[i].buffer == buf.id) {
             s_gfx.bound_ubos[i] = (nt_gfx_ubo_binding_t){0};

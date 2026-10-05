@@ -199,7 +199,7 @@ are encoded with the meshopt index codec when `index_type != 0`,
 `index_count > 0` and `index_count % 3 == 0`, and the encoded stream is kept
 only if it is smaller than RAW. The draw count (indices, else vertices) must be a
 multiple of 3 — GL draws only GL_TRIANGLES and the runtime asserts whole
-triangle lists ([draw merge](../render/architecture.md#binding-dedup-and-draw-merge)),
+triangle lists for indexed draws ([draw merge](../render/architecture.md#binding-dedup-and-draw-merge)),
 so a partial trailing triangle is rejected (`NT_BUILD_ERR_VALIDATION`), never packed. Before encoding, every
 index is validated
 `< vertex_count` (`NT_BUILD_ERR_VALIDATION` otherwise — the codec sizes its

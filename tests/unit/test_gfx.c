@@ -3335,7 +3335,8 @@ void test_context_loss_clears_carried_over_bind_mirrors(void) {
     nt_gfx_end_pass();
 }
 
-/* GL resets the slots of a deleted buffer; a buffer re-created in that pool slot binds again. */
+/* A buffer re-created in the same pool slot has a new id and binds again; the slot clear
+ * itself is pinned by the capture snapshot test. */
 void test_destroyed_uniform_buffer_leaves_its_slots(void) {
     nt_buffer_t ubo = make_test_ubo(256);
     begin_stream_test_pass();
