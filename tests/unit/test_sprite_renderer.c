@@ -1594,6 +1594,24 @@ void test_sprite_renderer_stride_change_flushes_pending_batch(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_last_emit_first_vertex());
 }
 
+/* Index 0xFFFF is the WebGL2 primitive-restart value, so a uint16 chunk holds at most 65535 vertices. */
+void test_sprite_renderer_max_vertices_keeps_restart_index_free(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    desc.max_vertices = 65536;
+    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_init(&desc));
+    desc.max_vertices = 65535;
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+}
+
+void test_sprite_renderer_emit_geometry_asserts_partial_triangle(void) {
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(NULL));
+    s_atlas_res = register_test_atlas(0xADULL);
+    nt_sprite_renderer_set_material(create_defaults_test_material(1.0F));
+    const float quad[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const uint16_t idx[4] = {0, 1, 2, 3};
+    NT_TEST_EXPECT_ASSERT(nt_sprite_renderer_emit_geometry(s_atlas_res, nt_atlas_find_region(s_atlas_res, FIXTURE_R0_HASH), quad, 4, idx, 4, NT_MATH_MAT4_IDENTITY, 0xFFFFFFFFU, NULL, 0));
+}
+
 /* With no room for the padding the quad flushes instead and starts the next batch at vertex 0. */
 void test_sprite_renderer_align_without_room_starts_quad_at_zero(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
@@ -2281,6 +2299,8 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_custom_block_size_mismatch_asserts);
     RUN_TEST(test_sprite_renderer_draw_list_bakes_material_defaults);
     RUN_TEST(test_sprite_renderer_stride_change_flushes_pending_batch);
+    RUN_TEST(test_sprite_renderer_max_vertices_keeps_restart_index_free);
+    RUN_TEST(test_sprite_renderer_emit_geometry_asserts_partial_triangle);
     RUN_TEST(test_sprite_renderer_align_without_room_starts_quad_at_zero);
     RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_intrinsic_scale_emit_positions_and_uvs);

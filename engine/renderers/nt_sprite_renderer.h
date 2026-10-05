@@ -10,7 +10,8 @@
 
 _Static_assert(NT_POOL_SLOT_SHIFT == 16 && NT_POOL_SLOT_MASK == UINT16_MAX, "sprite batch key requires 16-bit material slots");
 
-/* Staging buffers for one flush. uint16 indices cap MAX_VERTICES at 65536.
+/* Staging buffers for one flush. uint16 indices cap MAX_VERTICES at 65535: index
+ * 0xFFFF is the primitive-restart value, which WebGL2 never draws as a vertex.
  * Default index ratio (9/4) sized for 8-vertex polygon worst case (18 idx /
  * 8 verts). Pure-rect content needs only 6/4 = 1.5×; polygon-heavy 16-v
  * needs 42/16 ≈ 2.6×. Override either to match the game's content profile. */
@@ -22,7 +23,7 @@ _Static_assert(NT_POOL_SLOT_SHIFT == 16 && NT_POOL_SLOT_MASK == UINT16_MAX, "spr
 #define NT_SPRITE_RENDERER_MAX_INDICES (NT_SPRITE_RENDERER_MAX_VERTICES * 9 / 4)
 #endif
 
-_Static_assert(NT_SPRITE_RENDERER_MAX_VERTICES <= 65536, "MAX_VERTICES must fit uint16 index range");
+_Static_assert(NT_SPRITE_RENDERER_MAX_VERTICES <= 65535, "MAX_VERTICES must fit uint16 indices below the restart value");
 
 #define NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP 64
 

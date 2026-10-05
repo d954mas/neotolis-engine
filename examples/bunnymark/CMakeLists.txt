@@ -16,7 +16,7 @@ target_include_directories(nt_sprite_renderer_xl PUBLIC
 )
 target_compile_definitions(nt_sprite_renderer_xl PRIVATE
     NT_LOG_DOMAIN_DEFAULT="sprite_renderer"
-    NT_SPRITE_RENDERER_MAX_VERTICES=65536
+    NT_SPRITE_RENDERER_MAX_VERTICES=65532 # 16383 quads; uint16 index 0xFFFF is the restart value
 )
 target_link_libraries(nt_sprite_renderer_xl PUBLIC
     nt_core nt_render nt_atlas nt_sprite_comp nt_drawable_comp nt_material_comp

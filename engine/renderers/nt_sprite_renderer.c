@@ -178,7 +178,7 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
         d.custom_max_vertices = 4096;
     }
     NT_ASSERT(d.max_pipelines > 0 && d.max_pipelines <= NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP);
-    NT_ASSERT(d.max_vertices <= 65536 && "sprite max_vertices must fit uint16 index range");
+    NT_ASSERT(d.max_vertices <= 65535 && "sprite max_vertices must fit uint16 indices below the restart value");
     /* Custom flush indexes into indices[] too, so cmv must not exceed the base
      * caps. */
     NT_ASSERT(d.custom_max_vertices <= d.max_vertices && "sprite custom_max_vertices must not exceed max_vertices");
@@ -646,11 +646,11 @@ static NT_ALWAYS_INLINE void emit_region_resolved(const nt_texture_region_t *r, 
     s_sprite.vertex_count += r->vertex_count;
 
     /* Emit indices (rebase to staging base). Each flush chunk is capped to
-     * 65536 vertices, so uint16 indices stay valid. */
+     * 65535 vertices, so uint16 indices stay below the restart value. */
     uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
     for (uint8_t i = 0; i < r->index_count; i++) {
         uint32_t rebased = base + (uint32_t)idx[i];
-        NT_ASSERT(rebased <= UINT16_MAX && "sprite uint16 index chunk overflow");
+        NT_ASSERT(rebased < UINT16_MAX && "sprite uint16 index chunk overflow");
         out_idx[i] = (uint16_t)rebased;
     }
     s_sprite.index_count += r->index_count;
@@ -941,6 +941,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_geometry: atlas must be READY");
     NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_geometry: call nt_sprite_renderer_set_material first");
     NT_ASSERT(vertex_count > 0U && index_count > 0U && "nt_sprite_renderer_emit_geometry: empty geometry");
+    NT_ASSERT(index_count % 3U == 0U && "nt_sprite_renderer_emit_geometry: indices must form whole triangles");
     NT_ASSERT(vertex_count <= s_sprite.max_vertices && "nt_sprite_renderer_emit_geometry: vertex_count exceeds staging capacity");
     NT_ASSERT(index_count <= s_sprite.max_indices && "nt_sprite_renderer_emit_geometry: index_count exceeds staging capacity");
 
@@ -1009,7 +1010,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
     for (uint32_t i = 0; i < index_count; i++) {
         const uint32_t rebased = base + (uint32_t)indices[i];
-        NT_ASSERT(rebased <= UINT16_MAX && "sprite uint16 index chunk overflow");
+        NT_ASSERT(rebased < UINT16_MAX && "sprite uint16 index chunk overflow");
         NT_ASSERT(indices[i] < vertex_count && "nt_sprite_renderer_emit_geometry: index out of range");
         out_idx[i] = (uint16_t)rebased;
     }
