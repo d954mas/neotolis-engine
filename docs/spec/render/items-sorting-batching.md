@@ -86,8 +86,9 @@ Store renderer-helper tokens unchanged. Below the renderers, gfx joins
 contiguous non-instanced indexed draws that have no state change between them
 inside one uninterrupted recording interval
 ([draw merge](architecture.md#binding-dedup-and-draw-merge)); this never changes
-the picture or the order. To force a boundary between otherwise
-compatible items, split them across separate lists (`prepare` or `draw_list()` calls).
+the picture or the order. To force a renderer boundary (separate runs or
+commands) between otherwise compatible items, split them across separate lists
+(`prepare` or `draw_list()` calls); gfx may still join the resulting draws.
 
 `nt_mesh_renderer_batch_key(material, mesh)` packs the two 16-bit pool slot
 indices as `material_slot << 16 | mesh_slot`. This is exact for simultaneously

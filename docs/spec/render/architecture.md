@@ -114,12 +114,14 @@ records nothing. A mirror lives exactly as long as the contract keeps its state:
   the instance buffer and the viewport live for one pass: `begin_pass` discards
   them, so the first bind of each in a pass records;
 - the scissor rectangle and the uniform-buffer binding of each slot carry over
-  passes; destroying a buffer clears the slots it holds, and a context loss
-  clears both;
+  passes; destroying or orphaning a buffer clears the slots it holds (the next
+  bind re-validates its range), and a context loss clears both;
 - scissor enable is reset to off by `begin_pass`.
 
-A bind still validates as before; the compare runs after the pass check, and an
-invalid handle still clears the mirror. Uniform values and vertex attribute
+The compare runs after the pass check; an equal value was validated when it was
+recorded and every path that could invalidate it clears the mirror. An invalid
+pipeline or vertex-input handle clears its mirror as before; other invalid binds
+change no state and leave theirs. Uniform values and vertex attribute
 defaults are not deduplicated by the front-end. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
@@ -154,9 +156,10 @@ immutable after creation; its *instance* attribute pointers are re-specified
 by `nt_gfx_bind_instance_buffer` into the vertex input the front-end
 names explicitly to the backend (WebGL2 has no
 baseInstance, so per-draw instance re-pointing stays). The instance binding is
-pass state for the bound vertex input: a draw of a vertex input with instance
-attributes asserts unless the current pass bound its instance buffer after the
-last vertex-input switch. An empty layout with
+pass state: a draw of a vertex input with instance attributes asserts unless the
+last `nt_gfx_bind_instance_buffer` of the current pass pointed that vertex input.
+Switching to a vertex input without instance attributes and back needs no
+re-point: the VAO keeps its pointer. An empty layout with
 no buffers is the attribute-less `gl_VertexID` path; every draw asserts a
 bound vertex input.
 
@@ -186,8 +189,8 @@ keeps renderer-cached vertex inputs from outliving mesh buffers; mesh caches
 revalidate handles with `nt_gfx_vertex_input_valid` on lookup. Because the
 cascade makes stale handles routine, `nt_gfx_destroy_vertex_input` tolerates
 stale and INVALID handles as no-ops. The dynamically captured instance
-buffer is *not* cascade-destroyed, but destroying one clears the dependents'
-pointed flag: their next draw using that vertex input asserts until
+buffer is *not* cascade-destroyed, but destroying the one the pass pointed clears
+that instance binding: the next draw of that vertex input asserts until
 `nt_gfx_bind_instance_buffer` re-points it, and the GL attachment's storage
 lingers until that re-point or the vertex input's death.
 Buffer *contents* may change at any time for correctness — `update`/`orphan`

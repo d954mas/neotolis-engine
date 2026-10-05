@@ -183,10 +183,20 @@ static const nt_gfx_texture_meta_t *render_target_size_meta(uint32_t rt_slot) {
     return render_target_attachment_meta(rt_slot, has_color ? NT_GFX_RT_COLOR : NT_GFX_RT_DEPTH);
 }
 
+/* Clears the uniform-buffer slot mirrors that hold this buffer. */
+static void forget_uniform_buffer_slots(uint32_t buffer_id) {
+    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
+        if (s_gfx.bound_ubos[i].buffer == buffer_id) {
+            s_gfx.bound_ubos[i] = (nt_gfx_ubo_binding_t){0};
+        }
+    }
+}
+
 /* ---- Global UBO block registration ---- */
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
     NT_ASSERT(name != NULL);
+    NT_ASSERT(binding_slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "register_global_block: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
     nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UNIFORM_BLOCK, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = nt_hash32_str(name).value; event->data.binding.slot = binding_slot);
     NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
@@ -1502,11 +1512,7 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
         s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
     }
     /* GL resets the slots of a deleted buffer; a later buffer in this pool slot is a new bind. */
-    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
-        if (s_gfx.bound_ubos[i].buffer == buf.id) {
-            s_gfx.bound_ubos[i] = (nt_gfx_ubo_binding_t){0};
-        }
-    }
+    forget_uniform_buffer_slots(buf.id);
     uint32_t slot = nt_pool_slot_index(buf.id);
     nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
     s_gfx.buffer_backends[slot] = 0;
@@ -2173,7 +2179,7 @@ static void assert_instance_attribs_pointed(void) {
  * the caller draws indexed on a non-indexed input. */
 static void assert_indexed_draw_has_index_type(void) { NT_ASSERT(s_gfx.bound_index_type != NT_INDEX_NONE && "draw_indexed: bound vertex input is non-indexed"); }
 
-/* Indexed draws are GL_TRIANGLES lists; a partial triangle would change what a merge joins. */
+/* Indexed draws are whole GL_TRIANGLES lists, which a merge relies on. */
 static void assert_whole_triangles(uint32_t num_indices) { NT_ASSERT(num_indices % 3U == 0U && "draw_indexed: index count is not a whole number of triangles"); }
 
 static nt_gfx_result_t draw(uint32_t first_vertex, uint32_t num_vertices) {
@@ -2545,6 +2551,8 @@ static nt_gfx_result_t orphan_buffer(nt_buffer_t buf, const void *data, uint32_t
     NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "orphan_buffer: buffer has no live backend -- recreate it after context restore");
     nt_gfx_backend_orphan_buffer(s_gfx.buffer_backends[slot], data, size);
     s_gfx.buffer_metas[slot].storage_size = size;
+    /* The next bind of a slot re-validates its range against the new storage. */
+    forget_uniform_buffer_slots(buf.id);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
