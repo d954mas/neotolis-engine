@@ -88,7 +88,8 @@ This is one of the most important decisions.
 - render passes
 - render tags
 - sort policy
-- batching choice per pass
+- batching choice per pass (gfx only joins adjacent indexed draws with no state
+  change between them, which leaves the picture and the order unchanged)
 - level/scene logic
 - capture ownership semantics
 - high-level content organization

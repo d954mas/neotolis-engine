@@ -82,7 +82,11 @@ while (run_end < count && items[run_end].batch_key == items[run_start].batch_key
 Equality is authoritative for the state encoded by the token: it allows the
 renderer to reuse that state from the run leader. Equal tokens for incompatible
 encoded state violate the caller contract and may draw with the wrong state.
-Store renderer-helper tokens unchanged. To force a boundary between otherwise
+Store renderer-helper tokens unchanged. Below the renderers, gfx joins
+contiguous non-instanced indexed draws that have no state change between them
+inside one uninterrupted recording interval
+([draw merge](architecture.md#binding-dedup-and-draw-merge)); this never changes
+the picture or the order. To force a boundary between otherwise
 compatible items, split them across separate lists (`prepare` or `draw_list()` calls).
 
 `nt_mesh_renderer_batch_key(material, mesh)` packs the two 16-bit pool slot
