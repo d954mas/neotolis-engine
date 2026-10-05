@@ -65,12 +65,16 @@ typedef struct {
 typedef struct {
     uint32_t vbo_id; /* full buffer handles: destroy_buffer cascades on exact match */
     uint32_t ibo_id;
-    uint32_t inst_buf_id; /* last buffer pointed by bind_instance_buffer; its destruction unpoints */
-    uint8_t index_type;   /* captured from the IBO; NT_INDEX_NONE for non-indexed */
+    uint8_t index_type; /* captured from the IBO; NT_INDEX_NONE for non-indexed */
     uint8_t instance_attr_count;
-    /* Every draw requires declared instance attrs to point at a live buffer. */
-    bool instance_pointed;
 } nt_gfx_vertex_input_meta_t;
+
+/* Pass state: the instance buffer the current pass pointed the bound vertex input at. */
+typedef struct {
+    uint32_t vertex_input; /* full handles, 0 = none */
+    uint32_t buffer;
+    uint32_t offset;
+} nt_gfx_instance_binding_t;
 
 /* ---- Texture metadata (format + dimensions for update_texture validation) ---- */
 
@@ -145,6 +149,7 @@ static struct {
     uint8_t bound_index_type;    /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
     uint8_t texture_set_state;   /* nt_gfx_texture_set_state_t for the bound pipeline's program */
     bool scissor_enabled;        /* GL_SCISSOR_TEST as recorded */
+    nt_gfx_instance_binding_t bound_instance;
 
     /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
      * probes read them; production never does. */
@@ -260,9 +265,7 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 event->data.resource.backend = slot;
                 event->data.resource.related[0] = s_gfx.vertex_input_metas[slot].vbo_id;
                 event->data.resource.related[1] = s_gfx.vertex_input_metas[slot].ibo_id;
-                event->data.resource.related[2] = s_gfx.vertex_input_metas[slot].inst_buf_id;
                 event->data.resource.type = s_gfx.vertex_input_metas[slot].index_type;
-                event->data.resource.flags = s_gfx.vertex_input_metas[slot].instance_pointed;
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
             case NT_GFX_OBJECT_BUFFER:
@@ -728,6 +731,7 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     discard_texture_set();
     s_gfx.bound_vertex_input = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
+    s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
     /* Scissor is pass-scoped: every pass starts with it off. */
     if (s_gfx.scissor_enabled) {
         s_gfx.scissor_enabled = false;
@@ -1040,7 +1044,6 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
         .ibo_id = desc->index_buffer.id,
         .index_type = index_type,
         .instance_attr_count = desc->instance_layout.attr_count,
-        .instance_pointed = false,
     };
 
     out->id = id;
@@ -1461,12 +1464,11 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
     for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
         if (s_gfx.vertex_input_metas[i].vbo_id == buf.id || s_gfx.vertex_input_metas[i].ibo_id == buf.id) {
             nt_gfx_destroy_vertex_input((nt_vertex_input_t){s_gfx.vertex_input_pool.slots[i].id});
-        } else if (s_gfx.vertex_input_metas[i].inst_buf_id == buf.id) {
-            /* Instance storage stays attached, but no draw may reuse it after
-             * destruction without an explicit re-point. */
-            s_gfx.vertex_input_metas[i].instance_pointed = false;
-            s_gfx.vertex_input_metas[i].inst_buf_id = 0;
         }
+    }
+    /* The storage stays attached to the VAO, but no draw may reuse it without a re-point. */
+    if (s_gfx.bound_instance.buffer == buf.id) {
+        s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
     nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
@@ -2111,9 +2113,8 @@ static void assert_instance_attribs_pointed(void) {
     if (s_gfx.bound_vertex_input == 0) {
         return; /* the missing bind itself already trapped */
     }
-    NT_ASSERT(
-        (s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)].instance_attr_count == 0 || s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)].instance_pointed) &&
-        "draw: bound vertex input has instance attribs that bind_instance_buffer has not pointed");
+    NT_ASSERT((s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)].instance_attr_count == 0 || s_gfx.bound_instance.vertex_input == s_gfx.bound_vertex_input) &&
+              "draw: bound vertex input has instance attribs that bind_instance_buffer has not pointed in this pass");
 }
 
 /* The bound vertex input carries its own index type; NT_INDEX_NONE here means
@@ -2292,8 +2293,7 @@ static nt_gfx_result_t bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offse
     }
     uint32_t vi_slot = nt_pool_slot_index(s_gfx.bound_vertex_input);
     NT_ASSERT(s_gfx.vertex_input_metas[vi_slot].instance_attr_count > 0 && "bind_instance_buffer: bound vertex input declares no instance layout");
-    s_gfx.vertex_input_metas[vi_slot].instance_pointed = true;
-    s_gfx.vertex_input_metas[vi_slot].inst_buf_id = buf.id;
+    s_gfx.bound_instance = (nt_gfx_instance_binding_t){.vertex_input = s_gfx.bound_vertex_input, .buffer = buf.id, .offset = byte_offset};
     nt_gfx_frame_bind_instance_buffer(vi_slot, s_gfx.buffer_backends[slot], byte_offset);
     return NT_GFX_RESULT_ACCEPTED;
 }
