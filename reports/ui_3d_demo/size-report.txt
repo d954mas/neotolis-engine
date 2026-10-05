@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: 59840e0
+# Commit: 0286edc
 
 ## WASM Section Sizes
 
@@ -13,25 +13,25 @@ Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                  54 B
-Code              243264 B
+Code              245120 B
 Data               20857 B
 Custom              6866 B
 ---------------- ----------
-TOTAL             272308 B
+TOTAL             274164 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-63144 B   frame
+63190 B   frame
 17650 B   dispatch_command
 16268 B   nt_shape_renderer_init
- 9819 B   main
+ 9849 B   main
  8796 B   Clay__ConfigureOpenElementPtr
  6038 B   Clay__SizeContainersAlongAxis
  5643 B   Clay__InitializeEphemeralMemory
  5300 B   nt_ui_button_begin
- 4867 B   nt_gfx_frame_execute
+ 4877 B   nt_gfx_frame_execute
  4146 B   upload_glyph
  3992 B   Clay__MeasureTextCached
  3366 B   nt_sprite_renderer_set_material
@@ -43,19 +43,19 @@ TOTAL             272308 B
  2428 B   printf_core
  2415 B   nt_shape_renderer_flush
  2368 B   atlas_on_resolve
+ 2335 B   nt_gfx_apply_texture_bindings
  2181 B   nt_gfx_make_program
  1896 B   Clay__InitializePersistentMemory
- 1880 B   nt_gfx_apply_texture_bindings
  1875 B   nt_sprite_renderer_emit_region
  1851 B   __rem_pio2f
  1793 B   wire_template_path
  1747 B   nt_hash64
  1678 B   nt_font_lookup_glyph_offset
  1667 B   emit_glyph_pass
- 1552 B   nt_sprite_renderer_emit_geometry
+ 1559 B   nt_sprite_renderer_emit_geometry
 
 Total functions: 201
-Total code size: 242916 B
+Total code size: 244772 B
 
 ## Built Engine Archives
 
@@ -78,7 +78,7 @@ libnt_drawable_comp.a       4172 B
 libnt_entity.a              6348 B
 libnt_font.a               94198 B
 libnt_frame_arena.a         3074 B
-libnt_gfx.a                90562 B
+libnt_gfx.a                93988 B
 libnt_gfx_stub.a            6130 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -111,7 +111,7 @@ libnt_skin_comp.a           2044 B
 libnt_skinned_mesh_renderer.a   10166 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8864 B
-libnt_sprite_renderer.a    48424 B
+libnt_sprite_renderer.a    48430 B
 libnt_text_renderer.a    1112744 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
@@ -123,7 +123,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         4177374 B
+TOTAL (archives)         4180806 B
 
 ## Data Segments Summary
 
