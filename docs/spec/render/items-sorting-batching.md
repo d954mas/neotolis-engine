@@ -83,7 +83,7 @@ Equality is authoritative for the state encoded by the token: it allows the
 renderer to reuse that state from the run leader. Equal tokens for incompatible
 encoded state violate the caller contract and may draw with the wrong state.
 Store renderer-helper tokens unchanged. Below the renderers, gfx joins
-contiguous non-instanced indexed draws that have no state change between them
+contiguous non-instanced draws that have no state change between them
 and no execution of the stream in between
 ([draw merge](architecture.md#binding-dedup-and-draw-merge)); under that
 section's index and shader contract this leaves the picture and the order unchanged. To force a renderer boundary (separate runs or

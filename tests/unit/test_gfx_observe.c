@@ -69,8 +69,8 @@ static void test_passes_sum_and_begin_frame_resets(void) {
 
 static void test_instanced_products_are_widened_before_multiplication(void) {
     draw_setup();
-    nt_gfx_draw_instanced(0, 65536, 65537);
-    TEST_ASSERT_EQUAL_UINT64(UINT64_C(4295032832), g_nt_gfx.counters.vertices);
+    nt_gfx_draw_instanced(0, 65538, 65537);
+    TEST_ASSERT_EQUAL_UINT64(UINT64_C(4295163906), g_nt_gfx.counters.vertices);
     draw_teardown();
 }
 

@@ -174,8 +174,8 @@ WebGL 2 Uniform Buffer Objects can be used to share globals efficiently across s
 
 ## Draw merge
 
-Vertex and fragment shaders used with non-instanced indexed draws do not read
-`gl_PrimitiveID`: gfx joins contiguous indexed draws into one
+Vertex and fragment shaders used with non-instanced draws do not read
+`gl_PrimitiveID`: gfx joins contiguous draws into one
 ([draw merge](architecture.md#binding-dedup-and-draw-merge)), and the joined
 draw continues the primitive numbering. WebGL2's GLSL ES 3.00 has no
 `gl_PrimitiveID`; the rule keeps native GL builds identical. Instanced draws

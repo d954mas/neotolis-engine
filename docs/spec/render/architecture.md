@@ -136,14 +136,15 @@ different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
 viewport, clear values and the active unit.
 
-Indexed draws are whole triangle lists: both indexed draws assert
-`num_indices % 3 == 0`, and index data never holds the primitive-restart value
+Draws are whole triangle lists: every draw asserts that its vertex or index
+count is a multiple of 3, index data never holds the primitive-restart value
 (`0xFFFF`/`0xFFFFFFFF`; WebGL2 always restarts on it, native GL draws that
-vertex), and their shaders follow the [draw merge rule](shader.md#draw-merge).
-`nt_gfx_draw_indexed` therefore extends the previous command when that
-command is the last one recorded, was recorded by `nt_gfx_draw_indexed`, and
-its range ends where the new one starts (the summed count fits `GLsizei`). The
-merged call ends `CACHE` with its vertices and indices counted, so
+vertex), and shaders follow the [draw merge rule](shader.md#draw-merge).
+`nt_gfx_draw` and `nt_gfx_draw_indexed` therefore extend the previous command
+when that command is the last one recorded, was recorded by the same function,
+and its range of vertices or indices ends where the new one starts (the summed
+count fits `GLsizei`). The merged call ends `CACHE` with its vertices and
+indices counted, so
 `nt_gfx_draw_calls()` counts recorded draws. An execution of the stream ends the
 merge chain. Instanced draws never merge: joining them changes
 `gl_InstanceID`. A merge joins only draws adjacent in call order with no state

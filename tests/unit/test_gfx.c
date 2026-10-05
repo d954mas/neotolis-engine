@@ -3497,10 +3497,28 @@ void test_indexed_draw_merge_keeps_the_count_in_glsizei(void) {
     nt_gfx_end_pass();
 }
 
+/* Plain draws follow the same rule; draws of different kinds never join. */
+void test_contiguous_plain_draws_merge(void) {
+    nt_gfx_fake_draw_trace_reset(true);
+    begin_stream_test_pass();
+    nt_gfx_draw(0, 3);
+    const uint32_t used = g_nt_gfx_stream.used;
+    nt_gfx_draw(3, 6);
+    TEST_ASSERT_EQUAL_UINT32(used, g_nt_gfx_stream.used);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    TEST_ASSERT_EQUAL_UINT64(9, g_nt_gfx.counters.vertices);
+    nt_gfx_draw_indexed(9, 3, 3); /* contiguous numbers, another kind */
+    nt_gfx_draw(9, 3);            /* follows an indexed draw */
+    nt_gfx_draw(15, 3);           /* not contiguous */
+    TEST_ASSERT_EQUAL_UINT32(4, merged_draws_after_end_frame());
+}
+
 void test_indexed_draws_assert_whole_triangles(void) {
     begin_stream_test_pass();
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 4, 3));
     EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 5, 3, 2));
+    EXPECT_ASSERT(nt_gfx_draw(0, 4));
+    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 5, 2));
     nt_gfx_end_pass();
     /* The count is checked before the lost-context return. */
     nt_gfx_fake_set_context_lost(true);
@@ -3733,6 +3751,7 @@ int main(void) {
     RUN_TEST(test_indexed_draw_merge_spans_texture_updates_but_not_passes);
     RUN_TEST(test_indexed_draw_after_failed_texture_set_is_rejected_not_merged);
     RUN_TEST(test_indexed_draw_merge_keeps_the_count_in_glsizei);
+    RUN_TEST(test_contiguous_plain_draws_merge);
     RUN_TEST(test_indexed_draws_assert_whole_triangles);
     RUN_TEST(test_orphaned_uniform_buffer_revalidates_its_range);
     RUN_TEST(test_register_global_block_asserts_unsupported_slot);

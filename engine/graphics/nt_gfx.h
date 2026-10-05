@@ -992,11 +992,12 @@ void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec);
 void nt_gfx_set_uniform_float(nt_hash32_t name, float val);
 void nt_gfx_set_uniform_int(nt_hash32_t name, int val);
 
-/* ---- Draw calls ---- */
+/* ---- Draw calls ---- Every draw is a whole triangle list (count % 3 == 0, asserted). A
+ * non-instanced draw that continues the previous one of the same kind, with no command
+ * in between, joins it and ends CACHE. */
 
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices);
 void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
-/* A contiguous draw with no command since the previous one joins it and ends CACHE. */
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 

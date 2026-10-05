@@ -2174,10 +2174,11 @@ static void assert_instance_attribs_pointed(void) {
  * the caller draws indexed on a non-indexed input. */
 static void assert_indexed_draw_has_index_type(void) { NT_ASSERT(s_gfx.bound_index_type != NT_INDEX_NONE && "draw_indexed: bound vertex input is non-indexed"); }
 
-/* Indexed draws are whole GL_TRIANGLES lists, which a merge relies on. */
-static void assert_whole_triangles(uint32_t num_indices) { NT_ASSERT(num_indices % 3U == 0U && "draw_indexed: index count is not a whole number of triangles"); }
+/* Draws are whole GL_TRIANGLES lists, which a merge relies on. */
+static void assert_whole_triangles(uint32_t count) { NT_ASSERT(count % 3U == 0U && "draw: vertex or index count is not a whole number of triangles"); }
 
 static nt_gfx_result_t draw(uint32_t first_vertex, uint32_t num_vertices) {
+    assert_whole_triangles(num_vertices);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2199,8 +2200,8 @@ static nt_gfx_result_t draw(uint32_t first_vertex, uint32_t num_vertices) {
     assert_instance_attribs_pointed();
 
     g_nt_gfx.counters.vertices += num_vertices;
-    nt_gfx_frame_draw(first_vertex, num_vertices, 1);
-    return NT_GFX_RESULT_ACCEPTED;
+    /* A merged call records nothing new: CACHE keeps it out of accepted[] and draw_calls. */
+    return nt_gfx_frame_draw_merging(NT_GFX_CMD_DRAW, first_vertex, num_vertices, NT_INDEX_NONE) ? NT_GFX_RESULT_CACHE : NT_GFX_RESULT_ACCEPTED;
 }
 
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
@@ -2210,6 +2211,7 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
 }
 
 static nt_gfx_result_t draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
+    assert_whole_triangles(num_vertices);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2268,7 +2270,7 @@ static nt_gfx_result_t draw_indexed(uint32_t first_index, uint32_t num_indices, 
     g_nt_gfx.counters.vertices += num_vertices;
     g_nt_gfx.counters.indices += num_indices;
     /* A merged call records nothing new: CACHE keeps it out of accepted[] and draw_calls. */
-    return nt_gfx_frame_draw_indexed_merging(first_index, num_indices, s_gfx.bound_index_type) ? NT_GFX_RESULT_CACHE : NT_GFX_RESULT_ACCEPTED;
+    return nt_gfx_frame_draw_merging(NT_GFX_CMD_DRAW_INDEXED, first_index, num_indices, s_gfx.bound_index_type) ? NT_GFX_RESULT_CACHE : NT_GFX_RESULT_ACCEPTED;
 }
 
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices) {
