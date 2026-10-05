@@ -38,6 +38,7 @@ void nt_gfx_frame_execute(void) {
         g_nt_gfx.counters.stream_bytes = bytes;
     }
     g_nt_gfx_stream.used = 0;
+    g_nt_gfx_stream.merge_end = 0; /* an executed draw is never extended */
     while (w < end) {
         const nt_gfx_cmd_t op = (nt_gfx_cmd_t)*w++;
         switch (op) {

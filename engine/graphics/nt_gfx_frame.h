@@ -41,8 +41,9 @@ _Static_assert(_Alignof(nt_gfx_cmd_begin_pass_t) <= 4 && _Alignof(nt_clear_desc_
 
 typedef struct {
     uint32_t *words;
-    uint32_t used;     /* words */
-    uint32_t capacity; /* words */
+    uint32_t used;      /* words */
+    uint32_t capacity;  /* words */
+    uint32_t merge_end; /* words up to the end of the last mergeable indexed draw; 0 = none */
 } nt_gfx_stream_t;
 
 extern nt_gfx_stream_t g_nt_gfx_stream;
@@ -126,6 +127,23 @@ static inline void nt_gfx_frame_set_scissor_enabled(bool enabled) { nt_gfx_frame
 static inline void nt_gfx_frame_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) { nt_gfx_frame_u32x4(NT_GFX_CMD_DRAW, 3, first_vertex, num_vertices, instance_count, 0); }
 static inline void nt_gfx_frame_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
     nt_gfx_frame_u32x4(NT_GFX_CMD_DRAW_INDEXED, 4, first_index, num_indices, instance_count, index_type);
+}
+/* Extends the previous single-instance indexed draw when it is still the last command
+ * (any other command moves `used` past `merge_end`) and the range continues; whole
+ * restart-free triangle lists make the joined draw identical. True when merged. */
+static inline bool nt_gfx_frame_draw_indexed_merging(uint32_t first_index, uint32_t num_indices, uint8_t index_type) {
+    nt_gfx_stream_t *s = &g_nt_gfx_stream;
+    if (s->merge_end != 0 && s->merge_end == s->used) {
+        uint32_t *prev = s->words + s->merge_end - 4U; /* first, count, instances, index type */
+        /* The backend passes the count as GLsizei. */
+        if ((uint64_t)prev[0] + prev[1] == first_index && (uint64_t)prev[1] + num_indices <= INT32_MAX) {
+            prev[1] += num_indices;
+            return true;
+        }
+    }
+    nt_gfx_frame_draw_indexed(first_index, num_indices, 1, index_type);
+    s->merge_end = s->used;
+    return false;
 }
 /* The name must have static lifetime; the pointer is stored unaligned, so it goes through memcpy. */
 static inline void nt_gfx_frame_begin_segment(const char *name) { memcpy(nt_gfx_frame_push(NT_GFX_CMD_BEGIN_SEGMENT, sizeof(name)), (const void *)&name, sizeof(name)); }
