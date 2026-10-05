@@ -292,9 +292,13 @@ EMSCRIPTEN_KEEPALIVE int nt_test_diagnostics_config(int field) {
 }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_diagnostics_preset(void) { return NT_TEST_PRESET_NAME; }
 EMSCRIPTEN_KEEPALIVE int nt_test_gpu_supported(void) { return nt_gfx_is_gpu_timing_supported() ? 1 : 0; }
+/* JS calls probes between rAF frames, after the app frame's end_frame: a probe that draws runs as
+ * its own frame and returns with it ended. */
 EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
+    nt_gfx_begin_frame();
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     if ((use_texture != 0 && !caps->has_float_texture_linear) || (use_texture == 0 && !caps->has_float_render_target)) {
+        nt_gfx_end_frame();
         return -1;
     }
     nt_render_target_t target = {0};
@@ -306,11 +310,13 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     } else {
         texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA16F, .min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR});
         if (texture.id == 0) {
+            nt_gfx_end_frame();
             return -2;
         }
         target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = texture});
         if (target.id == 0) {
             nt_gfx_destroy_texture(texture);
+            nt_gfx_end_frame();
             return -2;
         }
     }
@@ -341,6 +347,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(texture);
+    nt_gfx_end_frame();
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
 /* context_loss.spec.ts calls steps 1-3 right after a synchronous loseContext(): the browser already
@@ -418,17 +425,21 @@ EMSCRIPTEN_KEEPALIVE int nt_test_basis_single_pixel_format(void) {
  * or readback failed. */
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     NT_ASSERT(level == 0 || level == 3 || level == 7);
+    nt_gfx_begin_frame();
     const nt_texture_t tex = basis_fixture_texture();
     if (tex.id == 0 || !nt_gfx_texture_ready(tex)) {
+        nt_gfx_end_frame();
         return 0xFFFFFFFFU;
     }
     nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "basis_probe_color"});
     if (color.id == 0) {
+        nt_gfx_end_frame();
         return 0xFFFFFFFFU;
     }
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color, .label = "basis_probe_rt"});
     if (target.id == 0) {
         nt_gfx_destroy_texture(color);
+        nt_gfx_end_frame();
         return 0xFFFFFFFFU;
     }
     nt_sampler_t sampler =
@@ -462,6 +473,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(color);
+    nt_gfx_end_frame();
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
 EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
@@ -589,7 +601,9 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_destroy_render_target(prepass);
     nt_gfx_destroy_texture(color);
     nt_gfx_destroy_texture(depth);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
+    nt_gfx_end_frame();
     return result;
 }
 
@@ -635,6 +649,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
         nt_gfx_destroy_texture(texture);
         nt_gfx_destroy_texture(spare);
         nt_gfx_destroy_buffer(buffer);
+        nt_gfx_end_frame();
         return 0;
     }
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
@@ -672,7 +687,9 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_destroy_texture(texture);
     nt_gfx_destroy_texture(spare);
     nt_gfx_destroy_buffer(buffer);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
+    nt_gfx_end_frame();
     const nt_gfx_counters_t counters = g_nt_gfx.last_frame;
     s_observe_values[1] = NT_GFX_CAPTURE_ENABLED;
     s_observe_values[3] = nt_gfx_draw_calls(&counters);
@@ -730,6 +747,7 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
         break;
     case 4:
         nt_gfx_begin_frame();
+        nt_gfx_end_frame();
         break;
     case 5: {
         uint64_t ns = 0;
@@ -1181,6 +1199,7 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     nt_window_swap_buffers();
 #if defined(__EMSCRIPTEN__) && NT_GFX_CAPTURE_ENABLED

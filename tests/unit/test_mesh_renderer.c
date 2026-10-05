@@ -265,6 +265,7 @@ static nt_entity_t create_test_entity(nt_mesh_t mesh, nt_material_t mat) {
 /* Leaves the pass the tests draw in closed and the arena open for reserves. */
 static void begin_arena_frame(void) {
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_frame_arena_begin_frame();
 }
@@ -323,6 +324,7 @@ void setUp(void) {
         .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS,
         .max_render_targets = 16,
     });
+    nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
     nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = 64});

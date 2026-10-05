@@ -230,10 +230,14 @@ static void frame(void) {
     /* Swap only under the render flag so draw_calls / render.* stay honest. The capture seam runs INSIDE
        nt_window_swap_buffers (post-render, pre-swap GL-valid point); web draws the two-tone pattern first
        so that seam reads a non-blank frame. */
-    if (nt_app_render_enabled()) {
+    const bool render = nt_app_render_enabled();
 #ifdef NT_DEVAPI_HOST_WEB_CAPTURE
+    if (render) {
         render_pattern();
+    }
+    nt_gfx_end_frame();
 #endif
+    if (render) {
         nt_window_swap_buffers();
     }
 

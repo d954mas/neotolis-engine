@@ -961,6 +961,7 @@ static void frame(void) {
     }
 
     render();
+    nt_gfx_end_frame();
     nt_window_swap_buffers();
 
 #ifndef NT_PLATFORM_WEB

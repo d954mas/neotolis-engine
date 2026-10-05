@@ -139,6 +139,7 @@ void setUp(void) {
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
     gfx.max_programs = 8;
     nt_gfx_init(&gfx);
+    nt_gfx_begin_frame();
     nt_http_init();
     nt_fs_init();
     nt_resource_init(&(nt_resource_desc_t){0});
@@ -232,8 +233,10 @@ static void test_context_restore_reassigns_existing_material_handles(void) {
     }
 
     nt_gfx_fake_set_context_lost(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     drop_programs();

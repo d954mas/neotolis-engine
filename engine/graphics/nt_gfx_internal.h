@@ -111,8 +111,9 @@ static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, n
 /* ---- Render state machine ---- */
 
 typedef enum {
-    NT_GFX_STATE_IDLE = 0,
+    NT_GFX_STATE_IDLE = 0, /* frame open, no pass */
     NT_GFX_STATE_PASS,
+    NT_GFX_STATE_ENDED, /* after init or end_frame: passes wait for begin_frame */
 } nt_gfx_render_state_t;
 
 typedef enum {

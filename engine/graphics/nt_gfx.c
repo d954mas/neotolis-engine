@@ -373,7 +373,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.texture_metas = (nt_gfx_texture_meta_t *)calloc(desc->max_textures + 1, sizeof(nt_gfx_texture_meta_t));
     s_gfx.render_target_metas = (nt_gfx_render_target_meta_t *)calloc(max_render_targets + 1, sizeof(nt_gfx_render_target_meta_t));
 
-    s_gfx.render_state = NT_GFX_STATE_IDLE;
+    /* The init frame only loads: passes wait for the host's begin_frame. */
+    s_gfx.render_state = NT_GFX_STATE_ENDED;
 
     /* Mesh pool + data table */
     nt_pool_init(&s_gfx.mesh_pool, desc->max_meshes);
@@ -587,7 +588,8 @@ static nt_gfx_result_t restore_context(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 void nt_gfx_begin_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_frame: a pass is still open");
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "begin_frame: the open frame has no nt_gfx_end_frame");
+    s_gfx.render_state = NT_GFX_STATE_IDLE;
     age_stage_buffer();
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
@@ -625,6 +627,12 @@ void nt_gfx_begin_frame(void) {
         NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
     }
 #endif
+}
+
+void nt_gfx_end_frame(void) {
+    NT_ASSERT(g_nt_gfx.initialized);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "end_frame: needs an open frame with no open pass");
+    s_gfx.render_state = NT_GFX_STATE_ENDED;
 }
 
 /* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
@@ -679,6 +687,7 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_pass: needs an open frame with no open pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -688,12 +697,6 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
         NT_LOG_ERROR("begin_pass: NULL desc");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_pass: a pass is already open");
-    if (s_gfx.render_state != NT_GFX_STATE_IDLE) {
-        NT_LOG_ERROR("begin_pass called inside a pass");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
-
     NT_ASSERT((desc->target.id != 0 || !desc->discard_color) && "begin_pass: discarding the window color loses the presented frame");
 
     uint32_t render_target_backend = 0;

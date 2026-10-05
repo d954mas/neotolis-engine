@@ -11,6 +11,7 @@
 void setUp(void) {
     /* One buffer slot: only the arena creates buffers, so a restore that leaks its old buffer cannot create. */
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 1, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 4});
+    nt_gfx_begin_frame();
 }
 
 void tearDown(void) {
@@ -23,6 +24,7 @@ void tearDown(void) {
 static void arena_init(uint32_t capacity) { TEST_ASSERT_EQUAL(NT_OK, nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = capacity})); }
 
 static void next_frame(void) {
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_frame_arena_begin_frame();
 }
@@ -209,6 +211,7 @@ static void test_buffer_stays_drawable_until_the_next_begin_frame(void) {
     (void)reserve_filled(4, 0xA1);
     nt_frame_arena_upload();
     nt_buffer_t uploaded = nt_frame_arena_buffer();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT32(uploaded.id, nt_frame_arena_buffer().id);
 }

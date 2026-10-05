@@ -547,6 +547,7 @@ static void frame(void) {
     try_bind_ui_resources();
 
     render_frame();
+    nt_gfx_end_frame();
     nt_window_swap_buffers();
 }
 

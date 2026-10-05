@@ -2684,6 +2684,7 @@ static void frame(void) {
     if (render_enabled) {
         nt_gfx_end_pass();
     }
+    nt_gfx_end_frame();
     if (render_enabled) {
         nt_window_swap_buffers();
     }

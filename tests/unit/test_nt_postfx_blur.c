@@ -46,6 +46,7 @@ void setUp(void) {
         .max_vertex_inputs = 8,
         .max_render_targets = 4,
     });
+    nt_gfx_begin_frame();
     nt_gfx_fake_reset();
     nt_gfx_fake_set_samplers((const char *const[]){"u_source"}, 1);
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_init());
@@ -371,8 +372,10 @@ static void test_failed_restore_is_retried_by_the_next_one(void) {
     /* A pass while the rebuild is still pending skips instead of trapping: the
      * state is recoverable, so it must not crash a game that blurs every frame. */
     nt_gfx_fake_draw_trace_reset(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* detects the loss the failed relink met */
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
@@ -387,6 +390,7 @@ static void test_failed_restore_is_retried_by_the_next_one(void) {
     pass.dest = make_blur_target(64, 32);
 
     nt_gfx_fake_draw_trace_reset(true);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());

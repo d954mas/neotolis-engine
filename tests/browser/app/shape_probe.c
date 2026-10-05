@@ -153,6 +153,7 @@ NT_TEST_KEEPALIVE uint32_t nt_test_shape_stroke_probe(void) {
     if (!nt_gfx_render_target_valid(target)) {
         nt_gfx_destroy_texture(depth);
         nt_gfx_destroy_texture(color);
+        nt_gfx_end_frame();
         return 0;
     }
 
@@ -169,6 +170,8 @@ NT_TEST_KEEPALIVE uint32_t nt_test_shape_stroke_probe(void) {
     nt_gfx_destroy_render_target(target);
     nt_gfx_destroy_texture(depth);
     nt_gfx_destroy_texture(color);
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
+    nt_gfx_end_frame();
     return mask;
 }

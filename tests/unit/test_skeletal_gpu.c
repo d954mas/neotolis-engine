@@ -17,6 +17,7 @@ static bool s_gpu_up;
 
 void setUp(void) {
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 8, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 4});
+    nt_gfx_begin_frame();
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 8});
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 4});
     s_gpu_up = false;
@@ -34,6 +35,7 @@ void tearDown(void) {
 }
 
 static void next_frame(void) {
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_skeletal_gpu_begin_frame();
 }

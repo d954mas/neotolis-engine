@@ -599,14 +599,14 @@ static void frame(void) {
     draw_floor_text();
     draw_shapes();
     nt_shape_renderer_flush();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     double t_render_end = nt_time_now();
     float render_ms = (float)(t_render_end - t_render_start) * 1000.0F;
     s_render_sum += render_ms;
     if (render_ms > s_render_max) {
         s_render_max = render_ms;
     }
-
-    nt_gfx_end_pass();
 
     nt_window_swap_buffers();
 
