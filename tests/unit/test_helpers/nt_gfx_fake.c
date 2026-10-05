@@ -394,16 +394,11 @@ static uint32_t s_fake_draw_count;
 static bool s_fake_draw_enabled;
 static bool s_fake_draw_overflow;
 
-/* backend_init resets without executing: commands of the previous context must not replay into the new one. */
-static void fake_draw_trace_reset(bool enabled) {
+void nt_gfx_fake_draw_trace_reset(bool enabled) {
+    nt_gfx_frame_execute();
     s_fake_draw_count = 0;
     s_fake_draw_overflow = false;
     s_fake_draw_enabled = enabled;
-}
-
-void nt_gfx_fake_draw_trace_reset(bool enabled) {
-    nt_gfx_frame_execute();
-    fake_draw_trace_reset(enabled);
 }
 
 uint32_t nt_gfx_fake_draw_trace_count(void) {
@@ -442,7 +437,7 @@ static void fake_record_draw(uint32_t first_index, uint32_t num_indices, uint32_
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc != NULL);
-    fake_draw_trace_reset(false);
+    nt_gfx_fake_draw_trace_reset(false);
     s_fake_bound_pipeline = 0;
     free(s_fake_program_table);
     s_fake_max_programs = desc->max_programs;

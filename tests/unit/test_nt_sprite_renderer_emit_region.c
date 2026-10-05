@@ -3,7 +3,6 @@
  * asserts nt_resource_is_ready(atlas). */
 
 /* System headers before Unity -- avoids __declspec(noreturn) clash on MSVC. */
-#include "test_helpers/nt_gfx_test_desc.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,6 +11,7 @@
 
 /* clang-format off */
 /* NT_TEST_ACCESS / NT_TEST_ACCESS provided via CMake */
+#include "test_helpers/nt_gfx_test_desc.h"
 #include "atlas/nt_atlas.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"

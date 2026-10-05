@@ -1028,7 +1028,7 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* GPU TIME_ELAPSED segments cannot nest: GL allows only one active query.
  * Inside a frame. name must be non-NULL and have static lifetime: the pointer
- * is kept until the frame executes; it also keys the hashed lookup and native
+ * is kept until the recorded commands execute; it also keys the hashed lookup and native
  * debug-group labels. */
 void nt_gfx_begin_segment(const char *name);
 void nt_gfx_end_segment(void);
@@ -1043,7 +1043,7 @@ bool nt_gfx_is_gpu_timing_supported(void);
 
 /* ---- Texture update (uncompressed, non-mipmapped, non-depth textures only, level 0) ---- */
 
-/* Lands before every draw of the frame: do not rewrite a region that a draw of this frame samples. */
+/* Not ordered against this frame's draws: write a sampled region at most once per frame, before its first draw. */
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */

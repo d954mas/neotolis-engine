@@ -171,9 +171,9 @@ display, so a float4 tint would add nothing. An unset style text or image
 material resolves to the ctx default at each walk, not at declaration, so a base
 swapped between two walks of one frame is the one drawn. `set_material` is bound **once per band** (the
 `bound` guard), so **all** of a band's inline images **coalesce into one sprite
-batch** — no per-image flush. Because the sprite renderer emits while the active
-**scroll scissor is GL-live** during the walk, the images are clipped to the
-panel/scroll automatically — by the live scissor, **not** a Clay
+batch** — no per-image flush. Because the sprite renderer emits while the walk's
+**scroll scissor is the current gfx scissor state**, the images are clipped to the
+panel/scroll automatically — by that scissor, **not** a Clay
 `.floating.clipTo`. Caveat: an `fx.scale > 1` image loses its per-image
 self-clip-to-bbox and **over-draws** past its solved box (same as OBJECT atoms;
 consistent and accepted). Images resolve **by atlas + region name** — the atlas
@@ -255,7 +255,7 @@ nt_ui_rich_pop(ctx);
   native source size. A 3D object renders inside the box by remapping its
   clip-space output into the box's NDC sub-rect
   (`clip'.xy = half·clip.xy + center·clip.w`, aspect from box pixels) — it must
-  **not** touch `glViewport`/scissor: the walk's live scroll scissor stays intact.
+  **not** touch `glViewport`/scissor: the walk's current scroll scissor stays intact.
   `color` is the **absolute resolved RGBA**
   the engine resolved for the atom — the run's `<color>` with parent opacity folded
   into alpha plus any per-atom effect tint, the SAME color the TEXT and IMAGE paths

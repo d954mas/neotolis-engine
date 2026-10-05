@@ -1,5 +1,4 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
-#include "test_helpers/nt_gfx_test_desc.h"
 #include <setjmp.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +12,7 @@
 #include "nt_mesh_format.h"
 #include "nt_texture_format.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 #include "unity.h"
 
 /* --- Assert catching (same hookable-handler longjmp as test_gfx.c) --- */

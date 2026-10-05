@@ -58,9 +58,12 @@ for last-call semantics and nested duration boundaries.
 
 GPU timing OFF removes timer rings, timer-extension probes and query calls.
 Segment/toggle calls are inert; supported returns false and poll returns false
-with a zero output. Segment names must have static lifetime: the begin call
-stores the pointer. Segment names and poll output pointers must be non-NULL;
-violations assert even with timing OFF, the stub, or a lost context.
+with a zero output. Segment names must have static lifetime in every
+configuration: with timing ON the begin call records the pointer until the
+stream executes. Segment names and poll output pointers must be non-NULL;
+violations assert even with timing OFF, the stub, or a lost context. Segment
+calls outside an open frame assert with timing OFF or a lost context too, but
+not in the stub.
 With timing compiled ON, the GL implementation leaves output unchanged on an
 unsuccessful poll. `nt_gfx_stub` always returns
 false and zeroes output, regardless of the timing flag.

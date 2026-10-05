@@ -3234,7 +3234,7 @@ void test_stream_executes_draws_in_call_order_at_end_frame(void) {
     TEST_ASSERT_EQUAL_UINT32(recorded_bytes, g_nt_gfx.last_frame.stream_bytes);
 }
 
-/* A fake getter executes the stream, so only the stream itself shows that a call was deferred. */
+/* Fake getters of draw-phase state execute the stream, so only the stream itself shows that a call was deferred. */
 #define EXPECT_RECORDED(call)                                                                                                                                                                          \
     do {                                                                                                                                                                                               \
         const uint32_t before = g_nt_gfx_stream.used;                                                                                                                                                  \

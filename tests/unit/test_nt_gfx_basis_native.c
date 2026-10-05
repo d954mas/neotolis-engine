@@ -1,5 +1,4 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
-#include "test_helpers/nt_gfx_test_desc.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,6 +10,7 @@
 #include "nt_basisu_encoder.h"
 #include "nt_builder.h"
 #include "nt_texture_format.h"
+#include "test_helpers/nt_gfx_test_desc.h"
 #include "unity.h"
 #include "window/nt_window.h"
 

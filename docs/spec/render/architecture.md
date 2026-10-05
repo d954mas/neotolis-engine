@@ -64,8 +64,8 @@ renderer_draw_sprite(...);
 
 ### Draw-phase command stream
 
-Draw-phase calls are deferred. At the call, the front-end validates, updates its
-logical state and counts the accepted operation, then records the
+Draw-phase calls are deferred. At the call, the front-end validates and updates
+its logical state and geometry counters, then records the
 backend-resolved arguments of the backend call into one command stream: begin
 and end pass, clear, pipeline, vertex-input and instance-buffer binds, vertex
 attribute defaults, texture-unit and uniform-buffer binds, the mat4, vec4, float
@@ -78,10 +78,15 @@ recorded outside a frame.
 
 Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, `nt_gfx_read_pixels`, the GPU timing toggle and
-polling. Recorded commands keep their mutual order; an immediate operation may
-run before draw-phase calls recorded earlier in the same frame. A texture write is
-not ordered against the draws of its frame: a region that a draw of the frame
-samples must not be rewritten in that frame.
+polling. Recorded commands keep their mutual order. A temporary rule keeps
+today's order for the operations that need it: `nt_gfx_update_buffer`,
+`nt_gfx_orphan_buffer`, every destroy, `nt_gfx_read_pixels`,
+`nt_gfx_register_global_block` and, with GPU timing compiled ON,
+`nt_gfx_set_gpu_timing_enabled` first execute the commands recorded so far, so
+they see every earlier draw. Other immediate operations may run before
+draw-phase calls recorded earlier in the same frame. A texture write is not
+ordered against the draws of its frame: write a sampled region at most once per
+frame, before the first draw that samples it.
 
 `nt_gfx_desc_t.stream_capacity` is the byte budget of draw-phase commands
 recorded between executions, allocated once at init; `nt_gfx_desc_defaults()`
@@ -94,7 +99,8 @@ GL `begin_pass`
 reads the window framebuffer size at execution, which equals the size at the
 call: the window size changes only in `nt_window_poll`, between frames. GL errors
 and backend asserts without a front-end equivalent fire at execution, inside
-`nt_gfx_end_frame`; see Frame observation for counters and capture.
+`nt_gfx_end_frame` or an operation that executes the stream first; see Frame
+observation for counters and capture.
 
 ### Vertex inputs
 
@@ -187,9 +193,9 @@ redirect another's texture. `nt_gfx_apply_texture_bindings` accepts a complete
 name-keyed set for the bound program, resolves it into those units,
 then publishes the logical set and records its texture-unit binds together.
 A missing or duplicate active name, invalid handle, or sampler-type mismatch
-asserts before backend binds; inactive names are ignored before their handles
+asserts before any bind is recorded; inactive names are ignored before their handles
 are inspected. Context loss, a texture husk, or failed sampler recreation
-publishes no set and issues no backend bind: gfx reports the failure and skips
+publishes no set and records no texture-unit bind: gfx reports the failure and skips
 the following draws of that set. A vec4 param a material
 does not declare still retains the value last written on that program.
 Before each draw, the game and renderer must ensure the program holds every
@@ -476,10 +482,10 @@ bind or unbind render-target state outside the pass descriptor.
 
 Each pass clears color and depth unless `load_color`/`load_depth` keeps the
 attachment's current contents. Every pass starts with scissor disabled, so the
-pass clear initializes the entire attachment and scissor never carries from one
-pass to the next; clear values matter only for a cleared attachment.
-Stencil is never cleared by a pass. Draw state is pass-scoped as
-[API contracts](../core/api-contracts.md) states.
+pass clear initializes the entire attachment; clear values matter only for a
+cleared attachment. Stencil is never cleared by a pass. What else a pass resets
+and what carries over is in
+[API contracts: Passes and draw state](../core/api-contracts.md#passes-and-draw-state).
 
 `nt_gfx_clear` is an explicit operation inside an open pass. Its borrowed
 `nt_clear_desc_t` selects color and depth independently with `color`/`depth`
@@ -717,8 +723,9 @@ configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read` and
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
 through its `NT_GL*` funnel, queries included. Platform context management
 (context create/destroy, loss events, `isContextLost` queries)
-is not counted. Draw-phase calls issue their GL calls when `nt_gfx_end_frame`
-executes the stream, so they count in the frame that recorded them. The funnel
+is not counted. Draw-phase calls issue their GL calls when the stream executes, at
+`nt_gfx_end_frame` or an earlier execution point, always within the frame that
+recorded them. The funnel
 counts with an inline constant-index increment and (with capture) records in the same
 expression that issues the call; a grep gate rejects any bare `gl*` call in
 `engine/graphics/gl`. The funnel does no per-call frame check: a frame is
@@ -791,8 +798,10 @@ Every recorded public operation produces exactly one BEGIN, carrying its
 request arguments, and one RESULT, carrying the outcome `result`; a creator's
 RESULT carries the new handle (zero on failure), while its backend slot and
 names are in the DEFINITION record. BEGIN and RESULT are recorded at the call.
-The BACKEND and backend SKIP records of a draw-phase call are recorded when
-`nt_gfx_end_frame` executes the stream, outside that call's BEGIN/RESULT pair.
+The BACKEND and backend SKIP records of recorded commands appear when the
+stream executes, at `nt_gfx_end_frame` or before the BEGIN of an operation that
+executes it first, outside any BEGIN/RESULT pair. Immediate backend work inside a
+draw-phase call, such as a lazy sampler recreation, stays inside its pair.
 Operations issued inside another operation
 (default samplers, cascaded destroys) nest between its BEGIN and
 RESULT. `ARGUMENT` records are request

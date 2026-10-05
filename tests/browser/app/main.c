@@ -731,7 +731,7 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
     const char *names[] = {"diagnostics-a", "diagnostics-b", "diagnostics-c"};
     NT_ASSERT(segment >= 0 && segment < 3);
     switch (operation) {
-    /* Segment commands record into the frame stream; a frame of their own runs their GL work now. */
+    /* Segment commands are recorded; a frame of their own executes their GL work before the hook returns. */
     case 0:
         nt_gfx_begin_frame();
         nt_gfx_begin_segment(names[segment]);

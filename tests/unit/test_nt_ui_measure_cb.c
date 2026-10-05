@@ -1,7 +1,6 @@
 /* Floats compared via memcmp/integer (UNITY_EXCLUDE_FLOAT). */
 
 /* System headers before Unity -- avoids __declspec(noreturn) clash on MSVC. */
-#include "test_helpers/nt_gfx_test_desc.h"
 #include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -11,6 +10,7 @@
 #include <string.h>
 
 /* clang-format off */
+#include "test_helpers/nt_gfx_test_desc.h"
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"

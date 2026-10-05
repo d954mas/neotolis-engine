@@ -1,11 +1,11 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
-#include "test_helpers/nt_gfx_test_desc.h"
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* clang-format off */
+#include "test_helpers/nt_gfx_test_desc.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "graphics/nt_gfx.h"

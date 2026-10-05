@@ -144,7 +144,7 @@ static struct {
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
     uint8_t bound_index_type;    /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
     uint8_t texture_set_state;   /* nt_gfx_texture_set_state_t for the bound pipeline's program */
-    bool scissor_enabled;        /* mirrors GL_SCISSOR_TEST */
+    bool scissor_enabled;        /* GL_SCISSOR_TEST as recorded */
 
     /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
      * probes read them; production never does. */
