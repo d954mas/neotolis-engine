@@ -341,7 +341,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     add_subdirectory(examples/hello)
     add_subdirectory(examples/bench_shapes)
-    add_subdirectory(examples/bench_stream)
     add_subdirectory(examples/spinning_cube)
     add_subdirectory(examples/textured_quad)
     add_subdirectory(examples/rtt_showcase)

@@ -91,11 +91,11 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_skeletal_gpu PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_skeletal_gpu)
 
-    # One-upload-per-frame arena for prepared vertex data, on the gfx fake.
-    add_executable(test_frame_arena unit/test_frame_arena.c unit/test_helpers/nt_assert_trap.c)
-    target_link_libraries(test_frame_arena PRIVATE nt_frame_arena nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_log_stub unity)
-    target_include_directories(test_frame_arena PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
-    nt_setup_test_target(test_frame_arena)
+    # Frame storage: allocation, upload at execution and restore, on the gfx fake.
+    add_executable(test_gfx_frame_storage unit/test_gfx_frame_storage.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_gfx_frame_storage PRIVATE nt_gfx_fake nt_basisu_transcoder_stub nt_meshwire_stub nt_log_stub unity)
+    target_include_directories(test_gfx_frame_storage PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_gfx_frame_storage)
 
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core nt_log_stub unity)
@@ -377,6 +377,11 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_bind_mirrors_native)
     set_tests_properties(test_nt_gfx_bind_mirrors_native PROPERTIES LABELS "native")
+
+    add_executable(test_nt_gfx_frame_storage_native unit/test_nt_gfx_frame_storage_native.c)
+    target_link_libraries(test_nt_gfx_frame_storage_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    nt_setup_test_target(test_nt_gfx_frame_storage_native)
+    set_tests_properties(test_nt_gfx_frame_storage_native PROPERTIES LABELS "native")
 
     add_executable(test_nt_gfx_observe_native unit/test_nt_gfx_observe_native.c)
     target_link_libraries(test_nt_gfx_observe_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)

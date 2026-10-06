@@ -20,6 +20,7 @@ static void count_error_logs(nt_log_level_t level, const char *domain, const cha
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 64;
+    desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
 }
@@ -154,7 +155,7 @@ static void test_first_frame_counts_initial_resource_creation(void) {
     (void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.frame_sequence);
-    /* The texture also creates its default sampler: four accepted creations. */
+    /* The three loads; the texture also creates its default sampler. Frame storage is off by default. */
     TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
 }
 
@@ -544,6 +545,33 @@ static void test_sampler_cache_hit_defines_nothing(void) {
     TEST_ASSERT_TRUE(cache);
 }
 
+/* Frame storage reaches its buffer inside the execution: one upload operation per storage. */
+static void test_frame_storage_uploads_are_recorded_operations(void) {
+    record_next_frame();
+    uint32_t offset = 0;
+    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 24, 4, &offset), 0, 24);
+    draw_setup();
+    nt_gfx_draw(0, 3);
+    draw_teardown();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t uploads = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind == NT_GFX_EVENT_BEGIN && e->operation == NT_GFX_OP_BUFFER_UPLOAD) {
+            TEST_ASSERT_EQUAL_UINT32(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX).id, e->object);
+            TEST_ASSERT_EQUAL_UINT32(24, e->data.resource.size);
+            TEST_ASSERT_EQUAL_UINT32(0, e->data.resource.related[0]);
+            uploads++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, uploads);
+    TEST_ASSERT_EQUAL_UINT32(1, capture.counters.accepted[NT_GFX_OP_BUFFER_UPLOAD]);
+    TEST_ASSERT_EQUAL_UINT32(24, capture.counters.frame_bytes[NT_GFX_FRAME_VERTEX]);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks nesting, pairing and creator handles
 static void test_every_operation_records_one_begin_and_one_result(void) {
     record_next_frame();
@@ -927,6 +955,7 @@ static void test_exact_capacity_and_one_record_short(void) {
         nt_gfx_shutdown();
         nt_gfx_desc_t desc = nt_gfx_desc_defaults();
         desc.capture_capacity = needed - missing;
+        desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096; /* as in setUp: the recorded frame uploads */
         nt_gfx_init(&desc);
         nt_gfx_begin_frame();
         record_next_frame();
@@ -976,6 +1005,7 @@ int main(void) {
     RUN_TEST(test_link_with_a_stage_left_unready_by_a_loss_ends_unready);
     RUN_TEST(test_restore_defines_no_render_targets);
     RUN_TEST(test_sampler_cache_hit_defines_nothing);
+    RUN_TEST(test_frame_storage_uploads_are_recorded_operations);
     RUN_TEST(test_every_operation_records_one_begin_and_one_result);
     RUN_TEST(test_accepted_counters_match_recorded_results);
     RUN_TEST(test_capture_defines_inherited_resources_and_unknown_scissor);

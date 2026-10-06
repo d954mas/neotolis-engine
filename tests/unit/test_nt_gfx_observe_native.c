@@ -108,6 +108,7 @@ static void GLAD_API_PTR count_attribute_pointer(GLuint index, GLint size, GLenu
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;
+    desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     s_buffer_data = glad_glBufferData;
@@ -330,6 +331,41 @@ static void test_issued_calls_record_floats_names_and_payloads(void) {
     }
     TEST_ASSERT_NOT_EQUAL(0, generated);
     TEST_ASSERT_TRUE(uploaded && cleared);
+}
+
+/* Frame storage reaches its buffer before the replayed draw that reads it, in issued order. */
+static void test_frame_storage_upload_is_issued_before_the_replayed_draw(void) {
+    nt_gfx_capture_request();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; out vec4 color; void main(){color=vec4(1.0);}"});
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    uint32_t offset = 0;
+    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 16, 4, &offset), 0, 16);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t upload = UINT32_MAX;
+    uint32_t draw = UINT32_MAX;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (upload == UINT32_MAX && e->kind == NT_GFX_EVENT_BACKEND && e->detail == NT_GFX_GL_glBufferSubData) {
+            upload = i;
+        }
+        if (draw == UINT32_MAX && e->kind == NT_GFX_EVENT_BACKEND && e->detail == NT_GFX_GL_glDrawArrays) {
+            draw = i;
+        }
+    }
+    TEST_ASSERT_NOT_EQUAL_UINT32(UINT32_MAX, draw);
+    TEST_ASSERT_LESS_THAN_UINT32(draw, upload);
 }
 
 /* Every counted GL call is recorded and every recorded call is counted, per function. */
@@ -733,6 +769,7 @@ int main(void) {
     RUN_TEST(test_new_program_defines_sampler_names_and_inactive_uniforms);
     RUN_TEST(test_initial_uniform_records_cover_only_vec4);
     RUN_TEST(test_issued_calls_record_floats_names_and_payloads);
+    RUN_TEST(test_frame_storage_upload_is_issued_before_the_replayed_draw);
     RUN_TEST(test_complete_capture_matches_gl_counters);
     RUN_TEST(test_readback_is_recorded_as_issued_call);
     RUN_TEST(test_explicit_clear_records_issued_calls_and_skips_empty_selections);

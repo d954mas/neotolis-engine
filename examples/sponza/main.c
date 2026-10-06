@@ -3,7 +3,7 @@
  *
  * Full asset pipeline demo:
  *   Builder packs -> resource loading -> material creation -> entity/components
- *   -> render items -> nt_mesh_renderer_prepare -> frame arena -> nt_mesh_renderer_draw -> GPU
+ *   -> render items -> nt_mesh_renderer_prepare -> frame storage -> nt_mesh_renderer_draw -> GPU
  *
  * Shows: progressive pack loading (core -> geo -> tex -> full), Blinn-Phong
  * shading with normal mapping via Lighting UBO, scene manifest loading, 3
@@ -36,7 +36,6 @@
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
-#include "frame_arena/nt_frame_arena.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
@@ -383,9 +382,6 @@ static void frame(void) {
         });
         /* Materials keep their handles and draw again once their programs relink. */
         nt_mesh_renderer_restore_gpu();
-        const nt_result_t restore_result = nt_frame_arena_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
@@ -572,11 +568,9 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    /* Pack instance data for the whole frame and upload it once, before the first draw */
-    nt_frame_arena_begin_frame();
+    /* Pack instance data for the whole frame */
     static nt_mesh_run_t runs[MAX_SCENE_NODES];
     const uint32_t run_count = nt_mesh_renderer_prepare(items, item_count, runs, MAX_SCENE_NODES);
-    nt_frame_arena_upload();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .clear_color = {0.529F, 0.808F, 0.922F, 1.0F}, /* sky blue */
@@ -660,6 +654,7 @@ int main(int argc, char **argv) {
     gfx_desc.max_meshes = 256;
     /* The vertex-input default is derived from max_meshes(128); scale it too. */
     gfx_desc.max_vertex_inputs = 256 * 4 + 48;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = MAX_SCENE_NODES * 64U; /* 64 = the largest mesh instance stride */
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks */
@@ -695,7 +690,6 @@ int main(int argc, char **argv) {
     /* 10. Mesh renderer init */
     nt_mesh_renderer_desc_t mr_desc = nt_mesh_renderer_desc_defaults();
     nt_mesh_renderer_init(&mr_desc);
-    nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = MAX_SCENE_NODES * NT_INSTANCE_STRIDE_MAX});
 
     /* 11. Request shader resource handles (6 shaders, 3 permutations) */
     s_programs[SPONZA_SHADER_FULL].vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_VERT, NT_ASSET_SHADER_CODE);
@@ -756,7 +750,6 @@ int main(int argc, char **argv) {
 
     /* 19. Shutdown (native only) */
 #ifndef NT_PLATFORM_WEB
-    nt_frame_arena_shutdown();
     nt_mesh_renderer_shutdown();
     nt_drawable_comp_shutdown();
     nt_material_comp_shutdown();

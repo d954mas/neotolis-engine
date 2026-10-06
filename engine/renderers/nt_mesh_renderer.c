@@ -224,9 +224,9 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
     }
 
     // #region pack instances
-    NT_ASSERT(size <= UINT32_MAX && "mesh_renderer_prepare: instance data exceeds the arena address range");
+    NT_ASSERT(size <= UINT32_MAX && "mesh_renderer_prepare: instance data exceeds the frame storage address range");
     uint32_t offset = 0;
-    uint8_t *const base = (uint8_t *)nt_frame_arena_reserve((uint32_t)size, &offset);
+    uint8_t *const base = (uint8_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* bound by offset: 4 is enough */
     uint8_t *dst = base;
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
     for (uint32_t r = 0; r < run_count; r++) {

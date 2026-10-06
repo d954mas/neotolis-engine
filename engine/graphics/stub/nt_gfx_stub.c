@@ -3,6 +3,16 @@
 
 /* This implementation has no GPU resources or draw state. */
 nt_gfx_t g_nt_gfx;
+/* Zero capacity: any frame storage allocation reaches the overflow. */
+nt_gfx_frame_storage_t g_nt_gfx_frame_storage[NT_GFX_FRAME_STREAM_COUNT];
+
+_Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align) {
+    (void)stream;
+    (void)size;
+    (void)align;
+    NT_ASSERT(false && "nt_gfx_stub has no frame storage");
+    __builtin_trap();
+}
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
     (void)name;

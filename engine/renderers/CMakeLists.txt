@@ -11,7 +11,7 @@ nt_add_module(nt_mesh_renderer LOG_DOMAIN "mesh_renderer"
     nt_mesh_run_internal.h
 )
 target_link_libraries(nt_mesh_renderer PUBLIC
-    nt_core nt_render nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_material nt_resource nt_frame_arena
+    nt_core nt_render nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_material nt_resource
 )
 # Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 
@@ -21,7 +21,7 @@ nt_add_module(nt_skinned_mesh_renderer LOG_DOMAIN "skinned_mesh_renderer"
 )
 target_link_libraries(nt_skinned_mesh_renderer PUBLIC
     nt_core nt_render nt_entity nt_transform_comp nt_mesh_comp nt_material_comp
-    nt_drawable_comp nt_material nt_resource nt_skin_comp nt_frame_arena
+    nt_drawable_comp nt_material nt_resource nt_skin_comp
 )
 # Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 

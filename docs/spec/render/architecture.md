@@ -75,14 +75,15 @@ index type of the bound vertex input), and GPU timing
 segment begin and end. Descriptors and uniform values are copied
 into the stream. A binding equal to the current one and an indexed draw that
 continues the previous one record nothing new (see Binding dedup and draw
-merge). `nt_gfx_end_frame` executes the stream in call order. Nothing is
-recorded outside a frame.
+merge). `nt_gfx_end_frame` executes the stream in call order; every execution
+first uploads the frame storage allocated since the previous one (see Frame
+storage). Nothing is recorded outside a frame.
 
 Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, `nt_gfx_read_pixels`, the GPU timing toggle and
 polling. Recorded commands keep their mutual order. A temporary rule keeps
 today's order for the operations that need it: `nt_gfx_update_buffer`,
-`nt_gfx_orphan_buffer`, every destroy, `nt_gfx_read_pixels`,
+`nt_gfx_orphan_buffer`, every destroy of a live handle, `nt_gfx_read_pixels`,
 `nt_gfx_register_global_block` and, with GPU timing compiled ON,
 `nt_gfx_set_gpu_timing_enabled` first execute the commands recorded so far, so
 they see every earlier draw. Other immediate operations may run before
@@ -365,7 +366,7 @@ lookup retries.
 A write into a buffer that an earlier draw of the same frame read is correct
 but not free: Mali drivers under ANGLE track the whole buffer, not the written
 range, so the write waits for those draws or copies around them. Measured on
-the reference phone with `examples/bench_stream`:
+the reference phone:
 
 - appending per-draw data between draws of one frame (the former mesh and
   skinned instance rings, the shape instance rings) costs 2-15x frame time when
@@ -376,68 +377,86 @@ the reference phone with `examples/bench_stream`:
 - orphaning (`nt_gfx_orphan_buffer`) removes the wait but allocates storage on
   every call.
 
-Policy for engine renderers: data known before drawing is **prepared** — packed
-for the whole frame, uploaded once before the first draw that reads the storage,
-and drawn by range in any pass, any number of times. Immediate-mode batches that
-flush between game passes (sprite, text, shape) choose a per-flush policy by
-measurement. The mesh renderers prepare (see Prepared mesh runs); the shape
-instance rings predate this rule. Prepared data lives in the frame arena (see
-Prepared dynamic data).
+Policy: per-frame data lives in frame storage (below). It is written to CPU
+staging at any point of the frame and reaches its buffer when the stream
+executes, before the draws that read it, so a frame that executes once (in
+`nt_gfx_end_frame`) writes each frame buffer once, one frame after its last
+read. A buffer write or destroy that executes the stream earlier (see
+Draw-phase command stream) makes the next execution append to frame buffers
+that earlier draws of the frame read: the waiting case above.
+Immediate-mode batches that flush between game passes (sprite, text, shape)
+still choose a per-flush policy by measurement; the shape instance rings
+predate this rule.
 
 A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
 waits did not raise GPU work per frame, and the phone's governor granted the
 waiting build a higher clock. Compare builds as described in
 [measuring performance on phones](../../perf-measurement.md).
 
-### Prepared dynamic data
+### Frame storage
 
-`nt_frame_arena` holds one frame's prepared per-draw vertex data (instance
-attributes) for every renderer that prepares: engine renderers and game-owned
-ones alike. It is a CPU staging copy plus one `STREAM` vertex buffer of the
-capacity the game passes to `nt_frame_arena_init` (nonzero, a multiple of
-`NT_FRAME_ARENA_ALIGN`, after `nt_gfx_init`); it sits over raw `nt_gfx`, which
-stays unaware of the arena.
+Frame storage holds one frame's per-draw data for engine renderers and the
+game alike, in three streams of `nt_gfx_frame_stream_t`, each a CPU staging
+copy plus one `STREAM` buffer:
 
-The game owns the frame order, once per gfx frame after `nt_gfx_begin_frame`:
+- `NT_GFX_FRAME_VERTEX`: vertex and instance data;
+- `NT_GFX_FRAME_INDEX`: `uint32_t` indices (`NT_INDEX_UINT32`); WebGL never
+  binds an element buffer as anything else, so indices have their own buffer;
+- `NT_GFX_FRAME_UNIFORM`: view blocks and other per-frame uniform data.
 
-1. `nt_frame_arena_begin_frame` resets the cursor.
-2. Renderers `nt_frame_arena_reserve` ranges while preparing and fill the
-   returned staging pointer. A reserve returns a byte offset aligned to
-   `NT_FRAME_ARENA_ALIGN` (16 bytes: one RGBA32F texel, so the same offsets can
-   index a data texture later). Alignment padding has unspecified contents;
-   consumers read only the requested bytes.
-3. `nt_frame_arena_upload` sends every reserved byte in one buffer update,
-   after the last reserve and before the first draw that reads arena data.
-4. Draws bind `nt_frame_arena_buffer()` at a reserved offset, in any pass, any
-   number of times.
+One `STREAM` buffer per stream, rewritten from offset 0 every frame, is the
+policy the phone measurements selected: rotating several buffers showed no
+consistent benefit. The API does not guarantee a stall-free upload.
 
-Assertions reject a second `begin_frame` in one gfx frame, a reserve after
-upload, a second upload, and taking the buffer before upload. They do not track
-draws: the game must prepare and upload before any draw reads the arena buffer
-in that gfx frame, including draws using the previous upload. A frame that skips
-`begin_frame` may reuse the last upload for the whole frame. An offset stays
-valid until the next `begin_frame`. A restore empties the buffer but keeps
-staging and offsets:
-`nt_frame_arena_buffer` asserts until the frame uploads again. Overflowing
-the capacity logs the bytes needed and free, then asserts; the arena never grows
-or chains buffers. `nt_frame_arena_peak` reports the most bytes any frame
-uploaded since init, to size the capacity from a real scene.
+`nt_gfx_frame_alloc(stream, size, align, &offset)` returns `size` bytes of
+staging at an offset that is a multiple of `align`; both are nonzero. It is
+inline and touches no buffer and no recorded command, so it is legal at any
+point between `nt_gfx_begin_frame` and `nt_gfx_end_frame`, in a pass or after UI
+layout, and never ends a draw merge. `end_frame` sends everything allocated in
+the frame; bytes allocated after it would never reach the GPU, so the next
+`begin_frame` asserts on them.
+Execution sends each stream's bytes allocated since the previous execution with
+one buffer update, then replays: fill an allocation before the next `nt_gfx`
+call, since its bytes are sent once. Offsets and pointers stay valid until the
+next `nt_gfx_begin_frame`, which empties the storage. Alignment padding is
+zeroed once at init and keeps old payload bytes afterwards; consumers read only
+the bytes they allocated.
 
-Data created after the first draw that reads arena data (for example 3D built
-while walking UI) is not supported: updating the same buffer between draws can
-wait on earlier reads even when the written ranges are disjoint. Prepare it
-before the first draw that reads arena data.
+Alignment follows the reader:
 
-One `STREAM` buffer is the policy selected from the measurements in #590:
-rotation showed no consistent benefit in the tested workloads. The P40 runs
-also compared full and partial per-frame uploads (`arena` and `arena_headroom`
-in `examples/bench_stream`). The API does not guarantee a stall-free upload.
+- vertex data read by index aligns to its stride, so vertex `i` of an
+  allocation sits at `i * stride` from the buffer start and indices are
+  absolute: WebGL 2 has no `baseVertex`, and a vertex input binds its vertex
+  buffer at offset 0. Consecutive allocations of one stride are contiguous;
+- instance data bound with `nt_gfx_bind_instance_buffer` at its offset aligns to 4;
+- indices align to 4 and are drawn from `first_index = offset / 4`;
+- uniform data aligns to `gpu_caps.uniform_buffer_offset_alignment` and binds
+  with `nt_gfx_bind_uniform_buffer_range(nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM), slot, offset, size)`.
 
-View uniform buffers remain game-owned: upload all their blocks before the
-first draw that reads the buffer, then select ranges with
-`nt_gfx_bind_uniform_buffer_range`.
-Standalone material `vec4` parameters still use the existing per-material
-uniform setters; they are not arena data.
+`nt_gfx_frame_buffer(stream)` returns an ordinary buffer handle; the gfx
+front-end does not know the storage. The handle is borrowed: never update,
+orphan or destroy it, and read it again every frame, because a context restore
+replaces it (vertex inputs over it die with the context anyway). Each enabled
+stream's buffer counts against `nt_gfx_desc_t.max_buffers`.
+
+`nt_gfx_desc_t.frame_capacity[stream]` is the byte budget of a stream per frame,
+allocated once at init as staging plus buffer; `nt_gfx_desc_defaults()` leaves every
+stream at 0, so the game sets the budget of each stream it uses. A zero
+capacity disables the stream: no staging and no buffer, and its allocations stop the program as an
+overflow, so a game pays only for the streams it uses.
+Storage never grows: an overflow logs the stream, the needed and the free bytes
+and stops the program, with assertions OFF too, because the capacity is the
+game's budget. `nt_gfx_counters_t.frame_bytes` reports each stream's use of the
+frame, final after `end_frame`, to size the capacities from a real scene.
+
+Each upload is one `NT_GFX_OP_BUFFER_UPLOAD` operation on its frame buffer,
+recorded and counted where the execution runs (see Frame observation). Every
+execution uploads, also one with no recorded command, so `end_frame` always
+leaves the storage sent. An upload goes through the same checks as
+`nt_gfx_update_buffer`: while the context is lost it ends `CONTEXT_LOST`, and the
+begin_frame that restores the context makes new buffers, which that frame's data
+reaches. A frame buffer that cannot be made asserts unless the context is lost. `nt_gfx_stub` has zero capacity: every allocation
+asserts.
 
 ### Prepared mesh runs
 
@@ -445,26 +464,27 @@ uniform setters; they are not arena data.
 `prepare(items, count, runs, max_runs)` splits the items into runs of adjacent
 equal batch keys (the skinned renderer also splits on the deformation texture),
 resolves each run's pipeline and vertex input — creating them on a cache miss —
-packs the instance data of drawable runs into one arena reserve, and writes
-`nt_mesh_run_t` values into game-owned storage. It writes no buffer. A run
+packs the instance data of drawable runs into one vertex frame storage
+allocation, and writes `nt_mesh_run_t` values into game-owned storage. It writes
+no buffer and may run at any point of the frame before the draws. A run
 whose program is not ready, or whose pipeline or vertex input could not be
 created, is neither packed nor recorded. A list never needs more runs than
 items; a smaller `max_runs` that runs out asserts.
 
 A run holds everything its draw needs: pipeline, vertex input, material, an
 optional supplied texture with its material slot (the skinned deformation
-texture), the arena offset, the instance count, the mesh's index and vertex
+texture), the frame storage offset, the instance count, the mesh's index and vertex
 counts, and the color mode with its attribute location. `draw(runs, run_count)`
 executes runs in order through one executor shared by both renderers and binds
 only what changed. It never merges or reorders runs and reads no entity
 component. Consequences:
 
 - Batching happens at prepare, so the game's item order decides what merges.
-- One list draws in any number of passes (shadow cascades) from one upload.
+- One list draws in any number of passes (shadow cascades) from one allocation.
 - Entity bindings may change after prepare, so one entity can enter several
-  lists with different materials (multipass) before the single upload.
+  lists with different materials (multipass).
 - Runs are frame-scoped values without a stamp: valid until the next
-  `nt_frame_arena_begin_frame` or GPU restore. Skinned runs embed deformation
+  `nt_gfx_begin_frame` or GPU restore. Skinned runs embed deformation
   bindings, so they also expire at the next `nt_skeletal_gpu_begin_frame`.
 - The material, its program and textures, and the mesh stay live until the
   last draw: replacing and destroying the program also destroys the pipeline a
@@ -474,15 +494,14 @@ Runs may be copied, filtered or concatenated, never built by hand.
 
 ### Frame order
 
-One canonical order covers deformation palettes (`nt_skeletal_gpu`), prepared
-instance data (`nt_frame_arena`) and view uniform blocks. Each `begin_frame`
-runs once per gfx frame after `nt_gfx_begin_frame`; every write precedes the
-first draw that reads its storage:
+One canonical order covers deformation palettes (`nt_skeletal_gpu`), instance
+data and view uniform blocks. `nt_gfx_begin_frame` empties frame storage;
+`nt_skeletal_gpu_begin_frame` runs once per gfx frame after it, and the
+palette flush precedes the first draw that reads the palettes:
 
 ```c
 nt_gfx_begin_frame();
 nt_skeletal_gpu_begin_frame();
-nt_frame_arena_begin_frame();
 
 /* Record: no buffer writes (a cache miss creates a pipeline or vertex input).
  * Palettes before the skinned prepare that packs their bindings. */
@@ -495,31 +514,33 @@ uint32_t shadow_n = nt_skinned_mesh_renderer_prepare(shadow_items, shadow_count,
 bind_surface_materials();
 uint32_t skinned_n = nt_skinned_mesh_renderer_prepare(skinned_items, skinned_count, skinned_runs, MAX_ITEMS);
 uint32_t static_n = nt_mesh_renderer_prepare(static_items, static_count, static_runs, MAX_ITEMS);
-
-/* Upload: once per storage. */
 nt_skeletal_gpu_flush();
-nt_frame_arena_upload();
-nt_gfx_update_buffer(view_ubo, 0, views, sizeof views); /* every view block */
+
+/* View blocks: frame storage, any time before the draws that bind them. */
+const uint32_t ubo_align = nt_gfx_gpu_caps()->uniform_buffer_offset_alignment;
+uint32_t view_offset[CASCADES + 1];
+for (uint32_t v = 0; v <= CASCADES; v++) {
+    memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, sizeof(view_t), ubo_align, &view_offset[v]), &views[v], sizeof(view_t));
+}
+const nt_buffer_t ubo = nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM);
 
 /* Execute: game-owned passes. */
 for (uint32_t c = 0; c < CASCADES; c++) {
     nt_gfx_begin_pass(&shadow_pass[c]);
-    nt_gfx_bind_uniform_buffer_range(view_ubo, 0, c * view_stride, sizeof(view_t));
+    nt_gfx_bind_uniform_buffer_range(ubo, 0, view_offset[c], sizeof(view_t));
     nt_skinned_mesh_renderer_draw(shadow_runs, shadow_n);
     nt_gfx_end_pass();
 }
 nt_gfx_begin_pass(&main_pass);
-nt_gfx_bind_uniform_buffer_range(view_ubo, 0, CASCADES * view_stride, sizeof(view_t));
+nt_gfx_bind_uniform_buffer_range(ubo, 0, view_offset[CASCADES], sizeof(view_t));
 nt_skinned_mesh_renderer_draw(skinned_runs, skinned_n);
 nt_mesh_renderer_draw(static_runs, static_n);
 nt_gfx_end_pass();
-nt_gfx_end_frame();
+nt_gfx_end_frame(); /* uploads frame storage, then executes the passes */
 ```
 
-`view_stride` is `sizeof(view_t)` rounded up to
-`gpu_caps.uniform_buffer_offset_alignment`. Immediate-mode renderers (sprite,
-text, shape) flush inside passes under their own policy and do not read the
-arena.
+Immediate-mode renderers (sprite, text, shape) flush inside passes under their
+own policy and do not read frame storage yet.
 
 ### Render targets
 
@@ -703,7 +724,7 @@ the open frame. The frame that init opens only loads and starts ended, so
 pre-loop code that draws opens its own begin_frame/end_frame pair. A frame holds
 any number of passes; their counters sum. begin_frame also does the per-frame
 backend work: it ages the upload staging buffer and, with GPU timing, checks the
-timer disjoint flag on a live context. The stub is stateless: its begin_frame and end_frame are inert and it
+timer disjoint flag on a live context. The stub keeps no frame: its begin_frame and end_frame are inert and it
 never publishes counters.
 
 `g_nt_gfx.counters` holds the live counters of the open frame.
@@ -767,6 +788,13 @@ operations, which are the recorded draws: a merged draw ends `CACHE`. Vertices/i
 counts, multiplied by instance count for instanced calls; instances counts only
 instances in instanced calls. These are not rasterized triangles or
 vertex-shader invocations.
+
+`frame_bytes` holds each frame storage stream's bytes allocated in the frame,
+alignment padding included. Each upload writes it, so it is final after
+end_frame. A
+frame storage upload is an `NT_GFX_OP_BUFFER_UPLOAD` operation on the stream's
+buffer, recorded inside the execution that sends it, so a capture shows each
+upload before the replayed draws that read it.
 
 Backends without GL (the test fake) issue no GL calls, so `gl[]` and the
 upload fields stay zero there. `NT_GFX_CAPTURE_ENABLED` is a numeric interface
@@ -1033,7 +1061,7 @@ Not all renderers carry the same weight. The engine ships three classes; copying
 **Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`,
 `nt_mesh_renderer`, optional `nt_skinned_mesh_renderer`). Single pipeline, fixed
 pattern, one instanced draw per compatible run (see items-sorting-batching.md),
-recorded at prepare and executed by range from the frame arena. Use for 3D
+recorded at prepare and executed by range from frame storage. Use for 3D
 meshes, custom geometry, anything where the game owns batching strategy. Stay
 minimal. The mesh renderers share one run executor and do state-delta tracking through the shared
 `static inline` helper, which costs them no cmd queue and no snapshot machinery.

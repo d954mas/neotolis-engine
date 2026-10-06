@@ -239,6 +239,9 @@ void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uin
 
 bool nt_gfx_backend_recreate_all_resources(void);
 
+/* The checked buffer write behind nt_gfx_update_buffer, without the stream execution; frame storage uploads through it. */
+nt_gfx_result_t nt_gfx_buffer_update(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
+
 /* GPU caps detection — implemented per-backend. */
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
 

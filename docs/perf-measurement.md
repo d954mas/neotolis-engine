@@ -34,7 +34,7 @@ Android 10), Chromium 156 (`org.chromium.chrome`), not rooted.
 
 - A micro-benchmark with an idle GPU (clock at its 166 MHz floor) can invert a
   result: ring appends looked 3x slower than per-frame uploads there and faster
-  under GPU load. Give the benchmark GPU work (`bench_stream` `load=`) matching
+  under GPU load. Give the benchmark GPU work matching
   the target scene, and **confirm every win in the real game** before designing
   on it (see also #587).
 - Vsync caps the page at the display rate (60 Hz here), which hides any arm that
@@ -59,6 +59,6 @@ Energy is therefore not measured directly; equal clocks are the only proxy.
 - One driver at a time. Stopping a background task may leave its shell script
   running; check for leftover drivers before a new run, because two scripts
   restarting the browser corrupt each other's windows.
-- Engine tools: `examples/bench_stream` with `scripts/bench_stream.py serve --adb`
-  (see [build](build.md)); it tags each window with GPU clock and HAL
-  temperatures. Game-level probes live in the game repository.
+- Engine tools: `--frames N` on a real example prints frame time, draws,
+  uploads, stream and frame storage peaks and a checksum on desktop.
+  Game-level and phone probes live in the game repository.

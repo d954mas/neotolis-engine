@@ -26,7 +26,6 @@
 #ifndef NT_PLATFORM_WEB
 #include "fs/nt_fs.h"
 #endif
-#include "frame_arena/nt_frame_arena.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
@@ -1525,9 +1524,6 @@ static void init_mesh_scene(void) {
     /* Static meshes are only the CPU reference: one body and one shirt. */
     result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
-    /* Both ordering passes at the largest skinned stride (76 B) fit one frame. */
-    result = nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = 2U * SKELETAL_SHOWCASE_MAX_INSTANCES * 80U});
-    NT_ASSERT(result == NT_OK);
     result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
     for (uint32_t i = 0; i < SHOWCASE_ENTITY_COUNT; ++i) {
@@ -1595,9 +1591,7 @@ static void init_mesh_scene(void) {
 static void restore_mesh_scene(void) {
     nt_skinned_mesh_renderer_restore_gpu();
     nt_mesh_renderer_restore_gpu();
-    nt_result_t result = nt_frame_arena_restore_gpu();
-    NT_ASSERT(result == NT_OK);
-    result = nt_skeletal_gpu_restore_gpu();
+    nt_result_t result = nt_skeletal_gpu_restore_gpu();
     NT_ASSERT(result == NT_OK);
     nt_program_ref_drop(&s_skin_program);
     nt_program_ref_drop(&s_static_program);
@@ -1620,7 +1614,6 @@ static void restore_mesh_scene(void) {
 
 #ifndef NT_PLATFORM_WEB
 static void shutdown_mesh_scene(void) {
-    nt_frame_arena_shutdown();
     nt_skinned_mesh_renderer_shutdown();
     nt_mesh_renderer_shutdown();
     nt_skeletal_gpu_shutdown();
@@ -2371,10 +2364,8 @@ static void skinned_draw(void) {
             nt_skin_palette_build(skins[i], models[i], p->skel->joint_count, palette, skins[i]->palette_count);
         }
     }
-    /* Every reserve of the frame precedes its single upload; the stage's draws read it afterwards. */
     nt_mesh_run_t runs[2];
     const uint32_t run_count = cpu ? nt_mesh_renderer_prepare(items, ready, runs, 2) : nt_skinned_mesh_renderer_prepare(items, ready, runs, 2);
-    nt_frame_arena_upload();
     if (cpu) {
         nt_mesh_renderer_draw(runs, run_count);
     } else {
@@ -2468,7 +2459,6 @@ static void mixing_draw(void) {
     nt_skeletal_gpu_flush();
     nt_mesh_run_t runs[MIX_ENTITY_COUNT];
     const uint32_t run_count = nt_skinned_mesh_renderer_prepare(items, ready, runs, MIX_ENTITY_COUNT);
-    nt_frame_arena_upload();
     nt_skinned_mesh_renderer_draw(runs, run_count);
 }
 
@@ -2513,7 +2503,6 @@ static void ordering_draw(void) {
         run_counts[pass] = nt_skinned_mesh_renderer_prepare(items, count, runs[pass], SKELETAL_SHOWCASE_MAX_INSTANCES);
     }
     nt_skeletal_gpu_flush();
-    nt_frame_arena_upload();
     for (uint32_t pass = 0; pass < passes; ++pass) {
         stage_viewport(pass, passes);
         const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
@@ -2600,10 +2589,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
     }
-    /* Each stage records and uploads inside the stage pass, before its first arena
-     * draw: legal, since nothing earlier reads the arena. A game with several passes
-     * records before the first pass (render architecture, Frame order). */
-    nt_frame_arena_begin_frame();
 #ifdef NT_DEVAPI_ENABLED
     nt_devapi_update();
 #endif
@@ -2710,6 +2695,7 @@ int main(int argc, char *argv[]) {
     gfx_desc.max_pipelines = 32;
     gfx_desc.max_buffers = 128;
     gfx_desc.max_textures = 16;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 2U * SKELETAL_SHOWCASE_MAX_INSTANCES * 80U; /* skinned and static instances */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
     nt_http_init();

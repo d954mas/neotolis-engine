@@ -383,7 +383,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
         NT_ASSERT(g_nt_gfx_capture.events != NULL);
     }
 #endif
-    nt_gfx_frame_init(desc->stream_capacity);
+    nt_gfx_frame_init(desc);
     /* Init work, like everything after it, belongs to the first frame. */
     open_frame();
 
@@ -426,6 +426,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
 
     g_nt_gfx.initialized = true;
+    nt_gfx_frame_create_buffers();
 }
 
 void nt_gfx_shutdown(void) {
@@ -610,11 +611,12 @@ static nt_gfx_result_t restore_context(void) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     /* getExtension enables the float color attachments the game's render targets may need. */
-    g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
-    /* Restoring onto a new loss would publish dead names; stay lost and retry later. */
+    const nt_gfx_gpu_caps_t caps = nt_gfx_gl_ctx_detect_gpu_caps();
+    /* Restoring onto a new loss would publish dead names and the zero caps a lost context reports; stay lost and retry later. */
     if (nt_gfx_backend_query_context_lost()) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    g_nt_gfx.gpu_caps = caps;
     g_nt_gfx.context_lost = false;
     s_gfx.scissor_enabled = false;
     g_nt_gfx.context_restored = true;
@@ -628,6 +630,7 @@ void nt_gfx_begin_frame(void) {
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "begin_frame: the open frame has no nt_gfx_end_frame");
     s_gfx.render_state = NT_GFX_STATE_IDLE;
     age_stage_buffer();
+    nt_gfx_frame_begin();
     g_nt_gfx.last_frame = g_nt_gfx.counters;
 #if NT_GFX_CAPTURE_ENABLED
     if (g_nt_gfx_capture.recording) {
@@ -656,6 +659,10 @@ void nt_gfx_begin_frame(void) {
     if (g_nt_gfx.context_lost && !nt_gfx_backend_query_context_lost()) {
         NT_GFX_BEGIN(NT_GFX_OP_CONTEXT, NT_GFX_OBJECT_NONE, 0);
         NT_GFX_END(restore_context());
+    }
+    /* After the CONTEXT operation: the remake is ordinary buffer work of the frame. */
+    if (g_nt_gfx.context_restored) {
+        nt_gfx_frame_create_buffers();
     }
 #if NT_GFX_GPU_TIMING_ENABLED
     if (!g_nt_gfx.context_lost) {
@@ -1403,7 +1410,10 @@ static nt_gfx_result_t destroy_shader(nt_shader_t shd) {
 }
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
-    nt_gfx_frame_execute();
+    /* Only a live object can matter to the recorded calls; an invalid or stale handle is a no-op. */
+    if (nt_pool_valid(&s_gfx.shader_pool, shd.id)) {
+        nt_gfx_frame_execute();
+    }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_SHADER, shd.id);
     NT_GFX_END(destroy_shader(shd));
 }
@@ -1432,7 +1442,9 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
 }
 
 void nt_gfx_destroy_program(nt_program_t prog) {
-    nt_gfx_frame_execute();
+    if (nt_pool_valid(&s_gfx.program_pool, prog.id)) {
+        nt_gfx_frame_execute();
+    }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PROGRAM, prog.id);
     NT_GFX_END(destroy_program(prog));
 }
@@ -1454,7 +1466,9 @@ static nt_gfx_result_t destroy_pipeline(nt_pipeline_t pip) {
 }
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
-    nt_gfx_frame_execute();
+    if (nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
+        nt_gfx_frame_execute();
+    }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, pip.id);
     NT_GFX_END(destroy_pipeline(pip));
 }
@@ -1477,7 +1491,9 @@ static nt_gfx_result_t destroy_vertex_input(nt_vertex_input_t vi) {
 }
 
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi) {
-    nt_gfx_frame_execute();
+    if (nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
+        nt_gfx_frame_execute();
+    }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_VERTEX_INPUT, vi.id);
     NT_GFX_END(destroy_vertex_input(vi));
 }
@@ -1517,13 +1533,17 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
-    nt_gfx_frame_execute();
+    if (nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        nt_gfx_frame_execute();
+    }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id);
     NT_GFX_END(destroy_buffer(buf));
 }
 
 void nt_gfx_destroy_texture(nt_texture_t tex) {
-    nt_gfx_frame_execute();
+    if (nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        nt_gfx_frame_execute();
+    }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE, tex.id);
     NT_GFX_END(destroy_texture(tex));
 }
@@ -1547,7 +1567,9 @@ static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
 }
 
 void nt_gfx_destroy_render_target(nt_render_target_t rt) {
-    nt_gfx_frame_execute();
+    if (nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
+        nt_gfx_frame_execute();
+    }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_RENDER_TARGET, rt.id);
     NT_GFX_END(destroy_render_target(rt));
 }
@@ -2450,7 +2472,7 @@ void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t o
 /* ---- Buffer update ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansion, not real branching
-static nt_gfx_result_t update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
+nt_gfx_result_t nt_gfx_buffer_update(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2471,7 +2493,7 @@ static nt_gfx_result_t update_buffer(nt_buffer_t buf, uint32_t offset, const voi
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.related[0] = offset; event->data.resource.flags = data != NULL);
-    NT_GFX_END(update_buffer(buf, offset, data, size));
+    NT_GFX_END(nt_gfx_buffer_update(buf, offset, data, size));
 }
 
 static nt_gfx_result_t begin_segment(const char *name) {

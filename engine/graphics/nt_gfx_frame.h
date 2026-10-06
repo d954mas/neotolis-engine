@@ -49,9 +49,15 @@ typedef struct {
 
 extern nt_gfx_stream_t g_nt_gfx_stream;
 
-void nt_gfx_frame_init(uint32_t capacity_bytes);
+/* Allocates the stream and the frame storage staging; the buffers come later. */
+void nt_gfx_frame_init(const nt_gfx_desc_t *desc);
 void nt_gfx_frame_shutdown(void);
-/* Replays the recorded commands in call order and empties the stream. */
+/* Makes the frame storage buffers: once gfx is initialized and after a context restore. */
+void nt_gfx_frame_create_buffers(void);
+/* Empties the storage; asserts that the closing frame uploaded every allocation. */
+void nt_gfx_frame_begin(void);
+/* Uploads the frame storage allocated since the previous execution, then replays the
+ * recorded commands in call order and empties the stream. */
 void nt_gfx_frame_execute(void);
 /* Cold path: logs needed/free bytes and stops; it never returns, also with asserts OFF. */
 _Noreturn void nt_gfx_frame_overflow(uint32_t needed_words);

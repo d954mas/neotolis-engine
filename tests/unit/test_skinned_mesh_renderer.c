@@ -4,7 +4,6 @@
 #include <string.h>
 
 /* clang-format off */
-#include "frame_arena/nt_frame_arena.h"
 #include "renderers/nt_skinned_mesh_renderer.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
@@ -233,34 +232,26 @@ static uint32_t drawn_instances(void) {
     return total;
 }
 
-/* One gfx frame of the prepared path, ending inside a fresh pass the tests draw in. */
-/* The arena uploads whole aligned reserves. */
-static uint32_t arena_bytes(uint32_t packed) { return (packed + NT_FRAME_ARENA_ALIGN - 1U) & ~(NT_FRAME_ARENA_ALIGN - 1U); }
-
-static void begin_arena_frame(void) {
+/* Leaves the pass the tests draw in closed and opens the next frame with empty frame storage. */
+static void begin_storage_frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_frame_arena_begin_frame();
 }
 
-static void upload_and_begin_pass(void) {
-    nt_frame_arena_upload();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-}
-
+/* One gfx frame of the prepared path, ending inside a fresh pass the tests draw in. */
 static void skinned_draw_list(const nt_render_item_t *items, uint32_t count) {
-    begin_arena_frame();
+    begin_storage_frame();
     const uint32_t run_count = nt_skinned_mesh_renderer_prepare(items, count, s_runs, TEST_MAX_RUNS);
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     s_draw_mark = nt_gfx_fake_draw_trace_count();
     nt_skinned_mesh_renderer_draw(s_runs, run_count);
 }
 
 static void mesh_draw_list(const nt_render_item_t *items, uint32_t count) {
-    begin_arena_frame();
+    begin_storage_frame();
     const uint32_t run_count = nt_mesh_renderer_prepare(items, count, s_runs, TEST_MAX_RUNS);
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     s_draw_mark = nt_gfx_fake_draw_trace_count();
     nt_mesh_renderer_draw(s_runs, run_count);
 }
@@ -286,7 +277,6 @@ void setUp(void) {
     nt_skinned_mesh_renderer_desc_t desc = nt_skinned_mesh_renderer_desc_defaults();
     desc.max_pipelines = 8;
     TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&desc));
-    TEST_ASSERT_EQUAL(NT_OK, nt_frame_arena_init(&(nt_frame_arena_desc_t){.capacity = 4096}));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
     s_draw_mark = 0;
@@ -295,7 +285,6 @@ void setUp(void) {
 void tearDown(void) {
     nt_log_remove_sink(capture_program_warning, NULL);
     nt_gfx_end_pass();
-    nt_frame_arena_shutdown();
     nt_skinned_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_skin_comp_shutdown();
@@ -438,7 +427,7 @@ void test_packed_instances_keep_each_entity_world_and_binding(void) {
 
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
     TEST_ASSERT_NOT_NULL(bytes);
-    TEST_ASSERT_EQUAL_UINT32(arena_bytes(120), nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(120, nt_gfx_fake_last_update_buffer_size());
     uint32_t world_x_bits[2];
     uint16_t origins[2][4];
     const uint16_t expected_origins[2][4] = {{11, 12, 13, 14}, {1, 2, 3, 4}};
@@ -536,7 +525,7 @@ void test_rgba8_and_float4_colors_keep_skin_fields_at_their_layout_offsets(void)
     nt_render_item_t item = make_item(rgba8_entity, rgba8, mesh);
     skinned_draw_list(&item, 1);
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
-    TEST_ASSERT_EQUAL_UINT32(arena_bytes(64), nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(64, nt_gfx_fake_last_update_buffer_size());
     const uint8_t expected_rgba8[4] = {0, 128, 255, 64};
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected_rgba8, bytes + 60, 4);
     uint16_t origins[4];
@@ -553,7 +542,7 @@ void test_rgba8_and_float4_colors_keep_skin_fields_at_their_layout_offsets(void)
     item = make_item(float4_entity, float4, mesh);
     skinned_draw_list(&item, 1);
     bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
-    TEST_ASSERT_EQUAL_UINT32(arena_bytes(76), nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(76, nt_gfx_fake_last_update_buffer_size());
     uint32_t color_bits[4];
     memcpy(color_bits, bytes + 60, sizeof(color_bits));
     TEST_ASSERT_EQUAL_HEX32(0x3E800000U, color_bits[0]);
@@ -579,7 +568,7 @@ void test_mixed_color_modes_pack_canonical_strides_and_offsets(void) {
     skinned_draw_list(items, 3);
 
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
-    TEST_ASSERT_EQUAL_UINT32(arena_bytes(60U + 64U + 76U), nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(60U + 64U + 76U, nt_gfx_fake_last_update_buffer_size());
     TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_update_buffer_offset() + 60U + 64U, nt_gfx_fake_last_instance_offset());
     uint16_t origin;
@@ -612,9 +601,9 @@ void test_zero_deformation_texture_asserts(void) {
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){0});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    begin_arena_frame();
+    begin_storage_frame();
     NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 void test_skinned_mesh_stream_cannot_overlap_active_color_location(void) {
@@ -627,9 +616,9 @@ void test_skinned_mesh_stream_cannot_overlap_active_color_location(void) {
         nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture});
         nt_render_item_t item = make_item(entity, material, mesh);
 
-        begin_arena_frame();
+        begin_storage_frame();
         NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
-        upload_and_begin_pass();
+        nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     }
 }
 
@@ -650,9 +639,9 @@ void test_static_mesh_stream_cannot_overlap_active_color_location(void) {
         nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){0});
         nt_render_item_t item = make_item(entity, material, mesh);
 
-        begin_arena_frame();
+        begin_storage_frame();
         NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
-        upload_and_begin_pass();
+        nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     }
     nt_mesh_renderer_shutdown();
 }
@@ -849,16 +838,16 @@ void test_prepared_lists_draw_their_own_range_from_one_upload(void) {
     nt_render_item_t second[1] = {make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture, .x0 = 3}), material, mesh)};
 
     const uint32_t updates = nt_gfx_fake_update_buffer_count(); /* prepare writes no buffer */
-    begin_arena_frame();
+    begin_storage_frame();
     nt_mesh_run_t a[1];
     nt_mesh_run_t b[1];
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(first, 1, a, 1));
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(second, 1, b, 1));
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     TEST_ASSERT_EQUAL_UINT32(0, a[0].offset);
-    TEST_ASSERT_EQUAL_UINT32(64, b[0].offset); /* 60 bytes rounded up to NT_FRAME_ARENA_ALIGN */
+    TEST_ASSERT_EQUAL_UINT32(60, b[0].offset); /* instance blocks align to 4 */
     uint16_t x0 = 0;
-    memcpy(&x0, (const uint8_t *)nt_gfx_fake_last_update_buffer_data() + b[0].offset + 48, sizeof(x0));
+    memcpy(&x0, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + b[0].offset + 48, sizeof(x0));
     TEST_ASSERT_EQUAL_UINT16(3, x0);
 
     for (int pass = 0; pass < 2; pass++) {
@@ -883,13 +872,13 @@ void test_runs_keep_the_deformation_texture_resolved_at_prepare(void) {
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture_a});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    begin_arena_frame();
+    begin_storage_frame();
     nt_mesh_run_t first[1];
     nt_mesh_run_t second[1];
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(&item, 1, first, 1));
     nt_skin_comp_handle(entity)->texture = texture_b;
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_prepare(&item, 1, second, 1));
-    upload_and_begin_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     nt_gfx_fake_reset();
     nt_skinned_mesh_renderer_draw(first, 1);
@@ -907,7 +896,7 @@ void test_prepare_asserts_when_runs_run_out_and_empty_lists_reserve_nothing(void
         make_item(make_entity(mesh, material, (nt_deformation_binding_t){.texture = make_deformation_texture()}), material, mesh),
     };
 
-    begin_arena_frame();
+    begin_storage_frame();
     nt_mesh_run_t runs[1];
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_prepare(NULL, 0, runs, 1));
     NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_prepare(items, 2, runs, 1));

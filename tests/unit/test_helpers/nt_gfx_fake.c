@@ -868,5 +868,8 @@ bool nt_gfx_backend_recreate_all_resources(void) {
 
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     s_fake_gpu_caps_probe_count++;
+    if (s_fake_context_lost) {
+        return (nt_gfx_gpu_caps_t){0}; /* a lost GL context answers every query with nothing */
+    }
     return (nt_gfx_gpu_caps_t){.max_texture_size = 4096, .has_float_render_target = true, .has_float_texture_linear = true, .uniform_buffer_offset_alignment = s_fake_uniform_buffer_offset_alignment};
 }

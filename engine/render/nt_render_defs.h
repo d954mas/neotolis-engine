@@ -30,7 +30,6 @@ typedef enum {
 #define NT_INSTANCE_STRIDE_NONE 48   /* mat4x3 only */
 #define NT_INSTANCE_STRIDE_RGBA8 56  /* mat4x3 + uint8[4] + 4 pad (aligned to 8) */
 #define NT_INSTANCE_STRIDE_FLOAT4 64 /* mat4x3 + float[4] */
-#define NT_INSTANCE_STRIDE_MAX 64    /* worst-case for buffer sizing */
 
 _Static_assert(NT_INSTANCE_STRIDE_NONE == 3 * 4 * 4, "NONE = 3 rows of vec4");
 _Static_assert(NT_INSTANCE_STRIDE_RGBA8 == 3 * 4 * 4 + 4 + 4, "RGBA8 = mat4x3 + 4 bytes color + 4 pad");

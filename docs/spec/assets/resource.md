@@ -326,10 +326,8 @@ module initialized but unable to draw; the game must retry
 restore drops queued commands and pipeline caches, then the game relinks. The
 mesh renderers own no buffer: their restore only drops the pipeline and
 vertex-input caches and returns void, and runs prepared before it are stale.
-`nt_frame_arena_restore_gpu` recreates the arena buffer empty and keeps the
-staging copy and the frame's offsets; `nt_frame_arena_buffer` asserts until
-the next upload, and a failed restore asserts on that upload until a retry
-succeeds.
+Frame storage needs no game restore: the `nt_gfx_begin_frame` that restores the
+context makes new frame buffers, and that frame's allocations reach them.
 
 `nt_sprite_renderer_restore_gpu()` and
 `nt_text_renderer_restore_gpu()` return `nt_result_t`. They retain CPU

@@ -170,13 +170,13 @@ SpriteRenderer ignores those flags.
 
 MeshRenderer draws consecutive equal-key runs with GPU instancing. Each run
 shares one mesh and material; different meshes are not merged. A run is never
-split: prepare packs every run of a list into one frame arena reserve.
+split: prepare packs every run of a list into one vertex frame storage allocation.
 
 ### Mesh instancing
 
 Each instance supplies its world transform and, when the material's color mode
-requires it, drawable color. Prepare packs these attributes into the frame
-arena, uploaded once per frame; draw issues one `nt_gfx_draw_indexed_instanced` per run for indexed
+requires it, drawable color. Prepare packs these attributes into vertex frame
+storage, uploaded when the stream executes; draw issues one `nt_gfx_draw_indexed_instanced` per run for indexed
 meshes or `nt_gfx_draw_instanced` for non-indexed meshes. Material parameters
 remain shared by the run.
 

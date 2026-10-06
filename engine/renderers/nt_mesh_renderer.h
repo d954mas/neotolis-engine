@@ -32,7 +32,7 @@ typedef struct {
 static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_pipelines = 64, .max_mesh_layouts = 4}; }
 
 /* One resolved instanced draw, written by a mesh renderer's prepare: draw reads
- * no entity component. Valid until the next nt_frame_arena_begin_frame or GPU
+ * no entity component. Valid until the next nt_gfx_begin_frame or GPU
  * restore (skinned runs also until the next nt_skeletal_gpu_begin_frame); the
  * referenced material, its program and textures, and the mesh stay live until
  * the last draw. Fields are renderer-filled; copy, filter or concatenate runs,
@@ -42,7 +42,7 @@ typedef struct {
     nt_vertex_input_t vertex_input;
     nt_material_t material;
     nt_texture_t supplied_texture; /* replaces the material texture at supplied_slot; 0 = none */
-    uint32_t offset;               /* frame arena byte offset of the first instance */
+    uint32_t offset;               /* vertex frame storage byte offset of the first instance */
     uint32_t instance_count;
     uint32_t index_count; /* 0 = non-indexed */
     uint32_t vertex_count;
@@ -67,13 +67,13 @@ void nt_mesh_renderer_restore_gpu(void);
  * equal keys merge into one run. items may be NULL only when count is 0; it is
  * borrowed for the call, and bindings may change after it returns. */
 /* Resolves pipeline and vertex input per run (creating them on a cache miss),
- * packs world and color of drawable runs into one nt_frame_arena reserve and
+ * packs world and color of drawable runs into one vertex frame storage allocation and
  * writes the runs; returns their count. Runs whose program is not ready or
  * whose pipeline/vertex input failed are skipped. Writes no buffer.
- * Call between nt_frame_arena_begin_frame and nt_frame_arena_upload.
+ * Call at any point of the frame before the draws.
  * max_runs >= count always suffices; fewer asserts when exceeded. */
 uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count, nt_mesh_run_t *runs, uint32_t max_runs);
-/* Executes runs in order in the current pass after nt_frame_arena_upload, any
+/* Executes runs of this gfx frame in order in the current pass, any
  * number of times. runs may be NULL only when run_count is 0. */
 void nt_mesh_renderer_draw(const nt_mesh_run_t *runs, uint32_t run_count);
 
