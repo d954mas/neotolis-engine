@@ -1742,7 +1742,7 @@ static void init_ui_styles(void) {
     s_checkbox_style.box_h = 22.0F;
     s_checkbox_style.overlay_w = 18.0F;
     s_checkbox_style.overlay_h = 18.0F;
-    s_checkbox_style.text_base = (nt_ui_label_style_t){.font_id = 0U, .font_size = 14.0F, .color = {215.0F, 220.0F, 230.0F, 255.0F}};
+    s_checkbox_style.text_base = (nt_ui_label_style_t){.font_id = 0U, .font_size = 14.0F, .color = NT_RGBA8(215, 220, 230, 255)};
     const nt_atlas_region_ref_t box = nt_atlas_ref(s_atlas, ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_BOX_OFF.value);
     const nt_atlas_region_ref_t check = nt_atlas_ref(s_atlas, ASSET_ATLAS_REGION_SKELETAL_SHOWCASE_UI_CHECKMARK.value);
     s_checkbox_style.unchecked[NT_UI_CB_IDLE].box = box;
@@ -1755,7 +1755,7 @@ static void init_ui_styles(void) {
 // #endregion
 
 // #region ui
-static const nt_ui_label_style_t *label_style(float size, Clay_Color color) {
+static const nt_ui_label_style_t *label_style(float size, uint32_t color) {
     static nt_ui_label_style_t style;
     style = (nt_ui_label_style_t){.font_id = 0U, .font_size = size, .color = color};
     return &style;
@@ -1765,7 +1765,7 @@ static bool text_button(uint32_t id, const char *text, bool active) {
     const Clay_ElementDeclaration decl = {
         .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(25)}, .padding = CLAY_PADDING_ALL(3), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}};
     nt_ui_button_style_t style = s_button_style;
-    const Clay_Color color = active ? (Clay_Color){100.0F, 170.0F, 230.0F, 255.0F} : (Clay_Color){215.0F, 220.0F, 230.0F, 255.0F};
+    const uint32_t color = active ? NT_RGBA8(100, 170, 230, 255) : NT_RGBA8(215, 220, 230, 255);
     bool clicked = false;
     nt_ui_button_begin(s_ui, NT_UI_DATA_LAYER(3), id, &style, &decl, true, NULL);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, &(nt_ui_label_style_t){.font_id = 0U, .font_size = 14.0F, .color = color});
@@ -1778,7 +1778,7 @@ static bool text_button_fixed(uint32_t id, const char *text, bool active, float 
         .layout = {.sizing = {CLAY_SIZING_FIXED(width), CLAY_SIZING_FIXED(height)}, .padding = CLAY_PADDING_ALL(3), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
     };
     nt_ui_button_style_t style = s_button_style;
-    const Clay_Color color = active ? (Clay_Color){100.0F, 170.0F, 230.0F, 255.0F} : (Clay_Color){215.0F, 220.0F, 230.0F, 255.0F};
+    const uint32_t color = active ? NT_RGBA8(100, 170, 230, 255) : NT_RGBA8(215, 220, 230, 255);
     nt_ui_button_begin(s_ui, NT_UI_DATA_LAYER(3), id, &style, &decl, true, NULL);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, &(nt_ui_label_style_t){.font_id = 0U, .font_size = 14.0F, .color = color});
     return nt_ui_button_end(s_ui);
@@ -1803,8 +1803,8 @@ static void declare_header(void) {
                      .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER},
                      .padding = CLAY_PADDING_ALL(8)},
           .backgroundColor = {25.0F, 35.0F, 54.0F, 245.0F}}) {
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Neotolis Skeletal Showcase", &(nt_ui_label_style_t){.font_id = 0U, .font_size = 22.0F, .color = {240.0F, 246.0F, 255.0F, 255.0F}});
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Scene", label_style(13.0F, (Clay_Color){160.0F, 180.0F, 205.0F, 255.0F}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Neotolis Skeletal Showcase", &(nt_ui_label_style_t){.font_id = 0U, .font_size = 22.0F, .color = NT_RGBA8(240, 246, 255, 255)});
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Scene", label_style(13.0F, NT_RGBA8(160, 180, 205, 255)));
         char scene_preview[96];
         (void)snprintf(scene_preview, sizeof scene_preview, "%s v", s_scene_registry[s_active_scene].title);
         if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("shell/scene_combo"), scene_preview, &s_scene_combo_style, &s_scene_combo_open)) {
@@ -1834,7 +1834,7 @@ static const char *joint_name(uint32_t j, char *buf, size_t size) {
 }
 
 static void declare_rig_combo(void) {
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Rig", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Rig", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     char rig_preview[64];
     (void)snprintf(rig_preview, sizeof rig_preview, "%s v", s_rig_names[s_skeleton_scene.rig_source]);
     if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("skeleton/rig_combo"), rig_preview, &s_scene_combo_style, &s_skeleton_scene.rig_combo_open)) {
@@ -1851,7 +1851,7 @@ static void declare_rig_combo(void) {
 static void declare_pose_controls(const nt_skeletal_skeleton_t *skel) {
     const bool sliders_enabled = !s_skip_scene_interaction_this_frame;
     char name_buf[32];
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pose actions", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pose actions", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
         if (text_button_fixed(nt_ui_id("skeleton/rest"), "Rest", false, 76.0F, 32.0F)) {
             set_rest_pose();
@@ -1863,7 +1863,7 @@ static void declare_pose_controls(const nt_skeletal_skeleton_t *skel) {
     if (text_button(nt_ui_id("skeleton/axes"), s_skeleton_scene.show_axes ? "Axes: on" : "Axes: off", s_skeleton_scene.show_axes)) {
         s_skeleton_scene.show_axes = !s_skeleton_scene.show_axes;
     }
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Selected joint", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Selected joint", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     char joint_preview[64];
     (void)snprintf(joint_preview, sizeof joint_preview, "%s v", joint_name((uint32_t)s_skeleton_scene.selected_joint, name_buf, sizeof name_buf));
     if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("skeleton/joint_combo"), joint_preview, &s_joint_combo_style, &s_skeleton_scene.combo_open)) {
@@ -1886,27 +1886,27 @@ static void declare_pose_controls(const nt_skeletal_skeleton_t *skel) {
     const uint16_t parent = skel->parent[s_skeleton_scene.selected_joint];
     char buf[160];
     (void)snprintf(buf, sizeof buf, "Joint: %s", joint_name((uint32_t)s_skeleton_scene.selected_joint, name_buf, sizeof name_buf));
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(18.0F, (Clay_Color){240.0F, 246.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(18.0F, NT_RGBA8(240, 246, 255, 255)));
     (void)snprintf(buf, sizeof buf, "Parent: %s", parent == NT_SKELETAL_NO_PARENT ? "none" : joint_name(parent, name_buf, sizeof name_buf));
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(13.0F, (Clay_Color){175.0F, 185.0F, 205.0F, 255.0F}));
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Local rotation offset (degrees)", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(13.0F, NT_RGBA8(175, 185, 205, 255)));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Local rotation offset (degrees)", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     static const char *const axes[3] = {"X", "Y", "Z"};
     static const uint32_t angle_ids[3] = {0xD31A7E21U, 0x8C42B917U, 0xF0643AC5U};
     for (int axis = 0; axis < 3; ++axis) {
         float degrees = s_skeleton_scene.angles[s_skeleton_scene.selected_joint][axis] * 57.2957795F;
         char label[32];
         (void)snprintf(label, sizeof label, "%s %+03.0f deg", axes[axis], (double)degrees);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), label, label_style(12.0F, (Clay_Color){190.0F, 205.0F, 225.0F, 255.0F}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), label, label_style(12.0F, NT_RGBA8(190, 205, 225, 255)));
         (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, angle_ids[axis], NULL, &degrees, -180.0F, 180.0F, 1.0F, &s_slider_style,
                                  &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, sliders_enabled);
         s_skeleton_scene.angles[s_skeleton_scene.selected_joint][axis] = degrees * 0.0174532925F;
     }
     (void)snprintf(buf, sizeof buf, "Model position: (%.2f, %.2f, %.2f)", (double)m->r[0][3], (double)m->r[1][3], (double)m->r[2][3]);
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(13.0F, (Clay_Color){220.0F, 225.0F, 235.0F, 255.0F}));
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Model matrix (3x4)", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(13.0F, NT_RGBA8(220, 225, 235, 255)));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Model matrix (3x4)", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     for (int row = 0; row < 3; ++row) {
         (void)snprintf(buf, sizeof buf, "[% .3f % .3f % .3f % .3f]", (double)m->r[row][0], (double)m->r[row][1], (double)m->r[row][2], (double)m->r[row][3]);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(11.0F, (Clay_Color){190.0F, 200.0F, 220.0F, 255.0F}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(11.0F, NT_RGBA8(190, 200, 220, 255)));
     }
 }
 
@@ -1916,14 +1916,14 @@ static void declare_properties(void) {
         if (s_skeleton_scene.view != NULL) {
             declare_pose_controls(s_skeleton_scene.view);
         } else {
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "loading...", label_style(14.0F, (Clay_Color){255.0F, 200.0F, 120.0F, 255.0F}));
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "loading...", label_style(14.0F, NT_RGBA8(255, 200, 120, 255)));
         }
     }
 }
 
 static void declare_player_rig_combo(skinned_scene_state_t *scene) {
     character_player_t *p = &scene->player;
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Character", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Character", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     char rig_preview[64];
     (void)snprintf(rig_preview, sizeof rig_preview, "%s v", s_rig_names[p->rig]);
     if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("player/rig_combo"), rig_preview, &s_scene_combo_style, &scene->rig_combo_open)) {
@@ -1939,7 +1939,7 @@ static void declare_player_rig_combo(skinned_scene_state_t *scene) {
 /* Lists the loaded clips made for the selected rig. */
 static void declare_player_clip_combo(skinned_scene_state_t *scene) {
     character_player_t *p = &scene->player;
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Clip", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Clip", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     char clip_preview[64];
     (void)snprintf(clip_preview, sizeof clip_preview, "%s v", p->clip >= 0 ? s_clips[p->clip].name : "none");
     if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("player/clip_combo"), clip_preview, &s_joint_combo_style, &scene->clip_combo_open)) {
@@ -1962,7 +1962,7 @@ static void declare_player_clip_combo(skinned_scene_state_t *scene) {
 static void declare_player_transport(character_player_t *p) {
     const bool enabled = !s_skip_scene_interaction_this_frame;
     char buf[96];
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Transport", label_style(13.0F, (Clay_Color){120.0F, 205.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Transport", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
         if (!s_cpu_reference && text_button_fixed(nt_ui_id("player/play"), p->paused ? "Play" : "Pause", !p->paused, 76.0F, 32.0F)) {
             p->paused = !p->paused;
@@ -1972,7 +1972,7 @@ static void declare_player_transport(character_player_t *p) {
         }
     }
     (void)snprintf(buf, sizeof buf, "%s  %.3f / %.3f s", p->clip >= 0 ? s_clips[p->clip].name : "no clip", p->track.time, p->track.duration);
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(14.0F, (Clay_Color){240.0F, 246.0F, 255.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(14.0F, NT_RGBA8(240, 246, 255, 255)));
     /* The slider scrubs sample indices; a drag pauses so the clock and the drag do not fight. */
     const int last_frame = p->clip_view != NULL ? clip_last_frame(p) : 0;
     int frame = p->clip_view != NULL ? player_frame(p) : 0;
@@ -1982,7 +1982,7 @@ static void declare_player_transport(character_player_t *p) {
         player_seek_frame(p, frame);
     }
     (void)snprintf(buf, sizeof buf, "Speed x%.2f", (double)p->speed_mag);
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(12.0F, (Clay_Color){190.0F, 205.0F, 225.0F, 255.0F}));
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), buf, label_style(12.0F, NT_RGBA8(190, 205, 225, 255)));
     (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("player/speed"), NULL, &p->speed_mag, 0.0F, 2.0F, 0.05F, &s_slider_style,
                              &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
     const Clay_ElementDeclaration check_row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}}};
@@ -2013,7 +2013,7 @@ static void ordering_declare_controls(void) {
     char text[128];
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
         (void)snprintf(text, sizeof text, "Instances: %d", s_order_count);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(14, (Clay_Color){145, 215, 255, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(14, NT_RGBA8(145, 215, 255, 255)));
         if (nt_ui_slider_int(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("ordering/count"), NULL, &s_order_count, 1, SKELETAL_SHOWCASE_MAX_INSTANCES, 1, &s_slider_style,
                              &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, !s_skip_scene_interaction_this_frame)) {
             s_fit_pending = true;
@@ -2030,21 +2030,21 @@ static void ordering_declare_controls(void) {
         (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("ordering/shared"), "Shared binding", &s_order_shared, &s_checkbox_style, &row, true);
         (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("ordering/passes"), "Two passes", &s_order_two_passes, &s_checkbox_style, &row, true);
         (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("ordering/paused"), "Pause", &s_order_paused, &s_checkbox_style, &row, true);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Last completed frame", label_style(14, (Clay_Color){145, 215, 255, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Last completed frame", label_style(14, NT_RGBA8(145, 215, 255, 255)));
         for (uint32_t pass = 0; pass < s_order_stats.passes; ++pass) {
             (void)snprintf(text, sizeof text, "Pass %u: draws %u / expected %u", pass + 1U, s_order_stats.draws[pass], s_order_stats.expected[pass]);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){240, 246, 255, 255}));
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, NT_RGBA8(240, 246, 255, 255)));
             (void)snprintf(text, sizeof text, "Instances drawn: %u", s_order_stats.instances[pass]);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, NT_RGBA8(190, 205, 225, 255)));
         }
         (void)snprintf(text, sizeof text, "Palette builds: %u", s_order_stats.palettes);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, NT_RGBA8(190, 205, 225, 255)));
         (void)snprintf(text, sizeof text, "Palette bytes: %u", s_order_stats.palettes * HUMANOID_JOINT_COUNT * 48U);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, NT_RGBA8(190, 205, 225, 255)));
         const uint32_t palettes_per_row = SKELETAL_SHOWCASE_MAX_PALETTE / HUMANOID_JOINT_COUNT;
         const uint32_t palette_rows = (s_order_stats.palettes + palettes_per_row - 1U) / palettes_per_row;
         (void)snprintf(text, sizeof text, "Upload bytes: %u", palette_rows * (3U * SKELETAL_SHOWCASE_MAX_PALETTE) * 16U);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, (Clay_Color){190, 205, 225, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12, NT_RGBA8(190, 205, 225, 255)));
     }
 }
 
@@ -2054,7 +2054,7 @@ static void mixing_declare_controls(void) {
     const bool enabled = !s_skip_scene_interaction_this_frame;
     const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}}};
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Mode", label_style(13.0F, (Clay_Color){120, 205, 255, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Mode", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
         if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("mixing/mode"), s_mixing_mode_names[s_mixing_scene.mode], &s_joint_combo_style, &s_mixing_scene.mode_combo_open)) {
             for (uint32_t i = 0; i < MIX_MODE_COUNT; ++i) {
                 if (nt_ui_combo_selectable(s_ui, i, s_mixing_mode_names[i], i == (uint32_t)s_mixing_scene.mode) && i != (uint32_t)s_mixing_scene.mode) {
@@ -2072,9 +2072,9 @@ static void mixing_declare_controls(void) {
             }
         }
         (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/sources"), "Show sources", &s_mixing_scene.show_sources, &s_checkbox_style, &row, enabled);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), s_mixing_scene.show_sources ? "Sources: on" : "Sources: off", label_style(11.0F, (Clay_Color){160, 180, 205, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), s_mixing_scene.show_sources ? "Sources: on" : "Sources: off", label_style(11.0F, NT_RGBA8(160, 180, 205, 255)));
         (void)snprintf(text, sizeof text, "Transition %.2f s", (double)s_mixing_scene.transition_duration);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, NT_RGBA8(190, 205, 225, 255)));
         (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/duration"), NULL, &s_mixing_scene.transition_duration, 0.0F, 2.0F, 0.05F, &s_slider_style,
                                  &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
         switch (s_mixing_scene.mode) {
@@ -2099,24 +2099,24 @@ static void mixing_declare_controls(void) {
             break;
         case MIX_MODE_BLEND_SPACE:
             (void)snprintf(text, sizeof text, "Speed %.2f", (double)s_mixing_scene.blend);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, NT_RGBA8(190, 205, 225, 255)));
             (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/blend"), NULL, &s_mixing_scene.blend, 0.0F, 1.0F, 0.01F, &s_slider_style,
                                      &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
             (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/three_cycles"), "Idle / walk / run", &s_mixing_scene.three_cycles, &s_checkbox_style, &row, enabled);
             (void)snprintf(text, sizeof text, "phase %.8f", (double)s_mixing_scene.phase);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, NT_RGBA8(190, 205, 225, 255)));
             break;
         case MIX_MODE_PARTIAL_BODY:
             (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/strict"), "Strict upper-body isolation", &s_mixing_scene.strict_partial, &s_checkbox_style, &row, enabled);
             nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), s_mixing_scene.strict_partial ? "Lower 0 / upper 1 action" : "Action weight: lower 0.25 / upper 3",
-                        label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+                        label_style(12.0F, NT_RGBA8(190, 205, 225, 255)));
             break;
         case MIX_MODE_OVERRIDE:
             (void)snprintf(text, sizeof text, "Base gain scale %.2f", (double)s_mixing_scene.base_gain_scale);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, NT_RGBA8(190, 205, 225, 255)));
             (void)nt_ui_slider_float(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/base_gain"), NULL, &s_mixing_scene.base_gain_scale, 0.25F, 2.0F, 0.05F, &s_slider_style,
                                      &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, enabled);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Upper-body override alpha: 0.80", label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Upper-body override alpha: 0.80", label_style(12.0F, NT_RGBA8(190, 205, 225, 255)));
             break;
         case MIX_MODE_INTERRUPTION:
             CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 5}}) {
@@ -2132,7 +2132,7 @@ static void mixing_declare_controls(void) {
             }
             (void)nt_ui_checkbox(s_ui, NT_UI_DATA_LAYER(3), 4, nt_ui_id("mixing/repeat"), "Interrupt every 0.3 s", &s_mixing_scene.repeating, &s_checkbox_style, &row, enabled);
             (void)snprintf(text, sizeof text, "%s source; handoffs %u", s_mixing_scene.using_snapshot ? "Frozen snapshot" : "Live", s_mixing_scene.handoff_count);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){190, 205, 225, 255}));
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, NT_RGBA8(190, 205, 225, 255)));
             break;
         default:
             break;
@@ -2144,15 +2144,15 @@ static void mixing_declare_controls(void) {
             }
         }
         (void)snprintf(text, sizeof text, "alpha %.2f | slots %u/%u", (double)mixing_alpha(), occupied, MIX_TRACK_COUNT);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, (Clay_Color){240, 246, 255, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(12.0F, NT_RGBA8(240, 246, 255, 255)));
         (void)snprintf(text, sizeof text, "snapshot %zu B | scene state %zu B", sizeof s_mixing_scene.snapshot, sizeof s_mixing_scene);
-        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(11.0F, (Clay_Color){160, 180, 205, 255}));
+        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(11.0F, NT_RGBA8(160, 180, 205, 255)));
         for (uint32_t i = 0; i < MIX_TRACK_COUNT; ++i) {
             if ((s_mixing_scene.slots[i].track.flags & NT_SKELETAL_TRACK_OCCUPIED) == 0U) {
                 continue;
             }
             (void)snprintf(text, sizeof text, "%s t=%.2f g=%.2f", s_mixing_clip_names[s_mixing_scene.slots[i].clip], s_mixing_scene.slots[i].track.time, (double)s_mixing_scene.slots[i].gain);
-            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(11.0F, (Clay_Color){160, 180, 205, 255}));
+            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), text, label_style(11.0F, NT_RGBA8(160, 180, 205, 255)));
         }
     }
 }
@@ -2166,20 +2166,20 @@ static void declare_ui(const nt_ui_scale_t *scale) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 10}}) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 5, .padding = CLAY_PADDING_ALL(12)}}) {
                 const skeletal_scene_desc_t *scene = &s_scene_registry[s_active_scene];
-                nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), scene->title, label_style(18.0F, (Clay_Color){145.0F, 215.0F, 255.0F, 255.0F}));
-                nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), scene->description, label_style(13.0F, (Clay_Color){165.0F, 180.0F, 200.0F, 255.0F}));
-                nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Camera: LMB orbit, RMB pan, wheel zoom", label_style(12.0F, (Clay_Color){150.0F, 170.0F, 195.0F, 255.0F}));
-                nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), scene->source, label_style(11.0F, (Clay_Color){120.0F, 170.0F, 205.0F, 255.0F}));
+                nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), scene->title, label_style(18.0F, NT_RGBA8(145, 215, 255, 255)));
+                nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), scene->description, label_style(13.0F, NT_RGBA8(165, 180, 200, 255)));
+                nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Camera: LMB orbit, RMB pan, wheel zoom", label_style(12.0F, NT_RGBA8(150, 170, 195, 255)));
+                nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), scene->source, label_style(11.0F, NT_RGBA8(120, 170, 205, 255)));
                 if (s_order_two_passes && scene->draw == ordering_draw) {
                     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
                         CLAY({.layout = {.sizing = {CLAY_SIZING_PERCENT(0.5F), CLAY_SIZING_FIT(0)}}}) {
-                            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pass 1", label_style(13, (Clay_Color){145, 215, 255, 255}));
+                            nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pass 1", label_style(13, NT_RGBA8(145, 215, 255, 255)));
                         }
-                        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pass 2: one tint material", label_style(13, (Clay_Color){145, 215, 255, 255}));
+                        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Pass 2: one tint material", label_style(13, NT_RGBA8(145, 215, 255, 255)));
                     }
                 }
                 if (scene->draw == mixing_draw && s_mixing_scene.show_sources) {
-                    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Active previews: result center | source left | target right | action front", label_style(12.0F, (Clay_Color){145, 215, 255, 255}));
+                    nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Active previews: result center | source left | target right | action front", label_style(12.0F, NT_RGBA8(145, 215, 255, 255)));
                 }
                 CLAY({.id = CLAY_ID(STAGE_ID), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
             }
@@ -2187,7 +2187,7 @@ static void declare_ui(const nt_ui_scale_t *scale) {
                 CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(290), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8, .padding = CLAY_PADDING_ALL(12)},
                       .backgroundColor = {25.0F, 35.0F, 54.0F, 245.0F}}) {
                     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(32)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}}}) {
-                        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Controls", label_style(16.0F, (Clay_Color){145.0F, 215.0F, 255.0F, 255.0F}));
+                        nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Controls", label_style(16.0F, NT_RGBA8(145, 215, 255, 255)));
                         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1)}}}) {}
                         if (text_button_fixed(nt_ui_id("shell/reset"), "Reset", false, 76.0F, 32.0F)) {
                             reset_active_scene();

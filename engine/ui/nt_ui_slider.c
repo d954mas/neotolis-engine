@@ -214,7 +214,7 @@ static void slider_compose(nt_ui_context_t *ctx, const nt_ui_element_data_t *dat
 
     /* Optional label child (after the parts, like checkbox cb_emit_text ordering). */
     if (label != NULL) {
-        nt_ui_label_style_t lbl = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
+        nt_ui_label_style_t lbl = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = NT_RGBA8(255, 255, 255, 255)};
         nt_ui_label(ctx, slider_make_data(NULL, label_layer, -1.0F), label, &lbl);
     }
 

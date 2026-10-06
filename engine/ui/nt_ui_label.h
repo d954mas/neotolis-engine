@@ -6,7 +6,8 @@
 #include <stdint.h>
 
 #include "clay.h"
-#include "ui/nt_ui.h" /* nt_ui_element_data_t */
+#include "color/nt_color.h" /* NT_RGBA8 for style literals */
+#include "ui/nt_ui.h"       /* nt_ui_element_data_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -20,13 +21,12 @@ extern const nt_ui_widget_def_t NT_UI_LABEL_DEF;
 typedef struct {
     uint16_t font_id;         /* asserted < NT_UI_MAX_FONTS */
     float font_size;          /* px; asserted > 0 */
-    Clay_Color color;         /* 0..255 (Clay convention) */
+    uint32_t color;           /* RGBA8 0xAABBGGRR (NT_RGBA8, nt_color_pack) */
     uint16_t line_height;     /* 0 = auto from font metrics */
     uint16_t letter_tracking; /* maps to Clay letterSpacing */
     uint8_t wrap_mode;        /* Clay_TextElementConfigWrapMode; 0 = WORDS */
     uint8_t align;            /* Clay_TextAlignment; 0 = LEFT */
-    /* ---- Decoration; zero-init = plain text. Colors packed AABBGGRR (nt_color_pack) to stay
-     * compact -- a Clay_Color per axis would blow the struct up 16 B each. ---- */
+    /* ---- Decoration; zero-init = plain text. ---- */
     uint8_t variant;        /* NT_UI_LABEL_VARIANT_* (bold/underline/strike) */
     uint8_t _pad;           /* alignment pad */
     float weight;           /* em synthetic weight; 0 + variant BOLD -> default synth-bold weight */

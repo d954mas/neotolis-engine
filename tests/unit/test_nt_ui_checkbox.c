@@ -47,7 +47,7 @@ static nt_ui_checkbox_style_t s_style;
 static const nt_ui_label_style_t s_label_style = {
     .font_id = 0,
     .font_size = 14,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
+    .color = NT_RGBA8(255, 255, 255, 255),
 };
 
 static void init_style(void) {
@@ -338,10 +338,11 @@ static void test_text_color_override(void) {
     text = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT);
     TEST_ASSERT_NOT_NULL(text);
     c = text->renderData.text.textColor;
-    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.r, (int32_t)c.r);
-    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.g, (int32_t)c.g);
-    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.b, (int32_t)c.b);
-    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.a, (int32_t)c.a);
+    const Clay_Color base = nt_ui_unpack_abgr(s_style.text_base.color);
+    TEST_ASSERT_EQUAL_INT32((int32_t)base.r, (int32_t)c.r);
+    TEST_ASSERT_EQUAL_INT32((int32_t)base.g, (int32_t)c.g);
+    TEST_ASSERT_EQUAL_INT32((int32_t)base.b, (int32_t)c.b);
+    TEST_ASSERT_EQUAL_INT32((int32_t)base.a, (int32_t)c.a);
 }
 
 /* ---- Test: nt_ui_checkbox_style_defaults() is a valid baseline that renders. ---- */

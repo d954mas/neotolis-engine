@@ -32,7 +32,7 @@ static const nt_ui_image_style_t s_panel_style = {
 static const nt_ui_label_style_t s_label_style = {
     .font_id = 0,
     .font_size = 14,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
+    .color = NT_RGBA8(255, 255, 255, 255),
 };
 
 void setUp(void) {

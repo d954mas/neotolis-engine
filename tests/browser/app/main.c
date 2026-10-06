@@ -118,8 +118,8 @@ static uint32_t s_rich_composition_mode;
 
 static uint32_t s_id_input_cyrillic; /* nt_ui_id, resolved once */
 
-static const nt_ui_label_style_t s_caption = {.font_id = 0, .font_size = 16, .color = {165.0F, 170.0F, 182.0F, 255.0F}};
-static const nt_ui_label_style_t s_body = {.font_id = 0, .font_size = 22, .color = {225.0F, 228.0F, 235.0F, 255.0F}};
+static const nt_ui_label_style_t s_caption = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(165, 170, 182, 255)};
+static const nt_ui_label_style_t s_body = {.font_id = 0, .font_size = 22, .color = NT_RGBA8(225, 228, 235, 255)};
 static nt_ui_input_style_t s_input_style; /* filled at init (defaults + visible bg/border) */
 // #endregion
 
@@ -1330,10 +1330,10 @@ int main(int argc, char *argv[]) {
     s_input_style = nt_ui_input_style_defaults();
     s_input_style.text.font_id = 0;
     s_input_style.text.font_size = 22.0F;
-    s_input_style.text.color = (Clay_Color){225.0F, 228.0F, 235.0F, 255.0F};
+    s_input_style.text.color = NT_RGBA8(225, 228, 235, 255);
     s_input_style.placeholder.font_id = 0;
     s_input_style.placeholder.font_size = 22.0F;
-    s_input_style.placeholder.color = (Clay_Color){120.0F, 126.0F, 138.0F, 255.0F};
+    s_input_style.placeholder.color = NT_RGBA8(120, 126, 138, 255);
     s_input_style.pad_x = 10.0F;
     s_input_style.pad_y = 8.0F;
     s_input_style.skin[NT_UI_INPUT_IDLE].bg_color = 0xFF303438U;

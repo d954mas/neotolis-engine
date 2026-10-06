@@ -87,23 +87,23 @@ struct nt_ui_context;
 // #endregion
 
 // #region palette label styles (vary by palette)
-static const nt_ui_label_style_t g_h1_dark = {.font_id = 0, .font_size = 40, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
-static const nt_ui_label_style_t g_body_dark = {.font_id = 0, .font_size = 22, .color = {225.0F, 228.0F, 235.0F, 255.0F}};
-static const nt_ui_label_style_t g_caption_dark = {.font_id = 0, .font_size = 16, .color = {165.0F, 170.0F, 182.0F, 255.0F}};
+static const nt_ui_label_style_t g_h1_dark = {.font_id = 0, .font_size = 40, .color = NT_RGBA8(255, 255, 255, 255)};
+static const nt_ui_label_style_t g_body_dark = {.font_id = 0, .font_size = 22, .color = NT_RGBA8(225, 228, 235, 255)};
+static const nt_ui_label_style_t g_caption_dark = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(165, 170, 182, 255)};
 /* Title in the header (smaller than the per-tab h1) + selected tab-row label (near-white pop). */
-static const nt_ui_label_style_t g_title_dark = {.font_id = 0, .font_size = 26, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
-static const nt_ui_label_style_t g_row_sel_dark = {.font_id = 0, .font_size = 16, .color = {245.0F, 247.0F, 252.0F, 255.0F}};
+static const nt_ui_label_style_t g_title_dark = {.font_id = 0, .font_size = 26, .color = NT_RGBA8(255, 255, 255, 255)};
+static const nt_ui_label_style_t g_row_sel_dark = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(245, 247, 252, 255)};
 /* Source-link line: dimmer + distinct from body/caption so it reads as a reference, not copy. */
-static const nt_ui_label_style_t g_link_dark = {.font_id = 0, .font_size = 14, .color = {110.0F, 150.0F, 200.0F, 255.0F}};
+static const nt_ui_label_style_t g_link_dark = {.font_id = 0, .font_size = 14, .color = NT_RGBA8(110, 150, 200, 255)};
 
-static const nt_ui_label_style_t g_h1_light = {.font_id = 0, .font_size = 40, .color = {18.0F, 18.0F, 24.0F, 255.0F}};
-static const nt_ui_label_style_t g_body_light = {.font_id = 0, .font_size = 22, .color = {28.0F, 30.0F, 38.0F, 255.0F}};
-static const nt_ui_label_style_t g_caption_light = {.font_id = 0, .font_size = 16, .color = {90.0F, 92.0F, 104.0F, 255.0F}};
-static const nt_ui_label_style_t g_title_light = {.font_id = 0, .font_size = 26, .color = {18.0F, 18.0F, 24.0F, 255.0F}};
-static const nt_ui_label_style_t g_row_sel_light = {.font_id = 0, .font_size = 16, .color = {12.0F, 28.0F, 56.0F, 255.0F}};
-static const nt_ui_label_style_t g_link_light = {.font_id = 0, .font_size = 14, .color = {56.0F, 100.0F, 170.0F, 255.0F}};
+static const nt_ui_label_style_t g_h1_light = {.font_id = 0, .font_size = 40, .color = NT_RGBA8(18, 18, 24, 255)};
+static const nt_ui_label_style_t g_body_light = {.font_id = 0, .font_size = 22, .color = NT_RGBA8(28, 30, 38, 255)};
+static const nt_ui_label_style_t g_caption_light = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(90, 92, 104, 255)};
+static const nt_ui_label_style_t g_title_light = {.font_id = 0, .font_size = 26, .color = NT_RGBA8(18, 18, 24, 255)};
+static const nt_ui_label_style_t g_row_sel_light = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(12, 28, 56, 255)};
+static const nt_ui_label_style_t g_link_light = {.font_id = 0, .font_size = 14, .color = NT_RGBA8(56, 100, 170, 255)};
 /* Segment-button label: small + bright so multi-char text fits the narrow segment buttons (body 22 spills). */
-static const nt_ui_label_style_t g_seg_label = {.font_id = 0, .font_size = 14, .color = {245.0F, 247.0F, 252.0F, 255.0F}};
+static const nt_ui_label_style_t g_seg_label = {.font_id = 0, .font_size = 14, .color = NT_RGBA8(245, 247, 252, 255)};
 // #endregion
 
 // #region palette widget styles (filled with late-bound atlas refs at init)
@@ -780,7 +780,7 @@ static void init_styles(void) {
     check_base.overlay_h = 26;
     check_base.gap = 14;
     check_base.value_speed = 22.0F;
-    check_base.text_base = (nt_ui_label_style_t){.font_id = 0, .font_size = 22, .color = {220.0F, 223.0F, 230.0F, 255.0F}};
+    check_base.text_base = (nt_ui_label_style_t){.font_id = 0, .font_size = 22, .color = NT_RGBA8(220, 223, 230, 255)};
     check_base.unchecked[NT_UI_CB_IDLE].box = box;
     check_base.checked[NT_UI_CB_IDLE].box = box;
     check_base.checked[NT_UI_CB_IDLE].check = check;
@@ -798,7 +798,7 @@ static void init_styles(void) {
     check_base.mixed[NT_UI_CB_DISABLED].opacity = 0.4F;
     s_check_dark = check_base;
     s_check_light = check_base;
-    s_check_light.text_base.color = (Clay_Color){30.0F, 32.0F, 40.0F, 255.0F};
+    s_check_light.text_base.color = NT_RGBA8(30, 32, 40, 255);
 
     /* ---- Radio: ring + dot. ---- */
     nt_ui_checkbox_style_t radio_base = check_base;
@@ -814,7 +814,7 @@ static void init_styles(void) {
     radio_base.checked[NT_UI_CB_IDLE].check_tint = 0xFF6CC0F0;
     s_radio_dark = radio_base;
     s_radio_light = radio_base;
-    s_radio_light.text_base.color = (Clay_Color){30.0F, 32.0F, 40.0F, 255.0F};
+    s_radio_light.text_base.color = NT_RGBA8(30, 32, 40, 255);
 
     /* ---- Toggle: track recolors off/on; thumb slides. ---- */
     nt_ui_checkbox_style_t switch_base = check_base;
@@ -833,7 +833,7 @@ static void init_styles(void) {
     switch_base.checked[NT_UI_CB_IDLE].check_tint = 0xFFFFFFFF;
     s_switch_dark = switch_base;
     s_switch_light = switch_base;
-    s_switch_light.text_base.color = (Clay_Color){30.0F, 32.0F, 40.0F, 255.0F};
+    s_switch_light.text_base.color = NT_RGBA8(30, 32, 40, 255);
 
     /* ---- Slider: track + smooth fill + thumb. ---- */
     nt_ui_slider_style_t slider_base = nt_ui_slider_style_defaults();
@@ -938,16 +938,16 @@ static void init_styles(void) {
     nt_ui_input_style_t input_base = nt_ui_input_style_defaults();
     input_base.text.font_id = 0;
     input_base.text.font_size = 22.0F;
-    input_base.text.color = (Clay_Color){225.0F, 228.0F, 235.0F, 255.0F};
+    input_base.text.color = NT_RGBA8(225, 228, 235, 255);
     input_base.placeholder.font_id = 0;
     input_base.placeholder.font_size = 22.0F;
     input_base.pad_x = 10.0F;
     input_base.pad_y = 8.0F;
     s_input_dark = input_base;
-    s_input_dark.placeholder.color = (Clay_Color){120.0F, 126.0F, 138.0F, 255.0F}; /* dimmed vs the bright text */
+    s_input_dark.placeholder.color = NT_RGBA8(120, 126, 138, 255); /* dimmed vs the bright text */
     s_input_light = input_base;
-    s_input_light.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
-    s_input_light.placeholder.color = (Clay_Color){150.0F, 154.0F, 162.0F, 255.0F}; /* dimmed grey on the light bg */
+    s_input_light.text.color = NT_RGBA8(28, 30, 38, 255);
+    s_input_light.placeholder.color = NT_RGBA8(150, 154, 162, 255); /* dimmed grey on the light bg */
     s_input_light.skin[NT_UI_INPUT_IDLE].bg_color = 0xFFF0F0F0U;
     s_input_light.skin[NT_UI_INPUT_FOCUSED].bg_color = 0xFFFFFFFFU;
     s_input_light.skin[NT_UI_INPUT_DISABLED] = (nt_ui_input_skin_t){.bg_color = 0xFFD8D8D8U, .border_color = 0xFFB0B0B0U}; /* light-theme greyed */
@@ -977,8 +977,8 @@ static void init_styles(void) {
      * the field shows three distinct frame arts (skin[]) on interaction. bg_color stays 0 (untinted) so
      * each frame draws its natural color; the frames are light enough that the dark text reads. */
     s_input_art = input_base;
-    s_input_art.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
-    s_input_art.placeholder.color = (Clay_Color){90.0F, 80.0F, 70.0F, 255.0F};
+    s_input_art.text.color = NT_RGBA8(28, 30, 38, 255);
+    s_input_art.placeholder.color = NT_RGBA8(90, 80, 70, 255);
     s_input_art.caret_color = 0xFF202020U;
     /* bg_color stays 0 (untinted); each state shows a distinct frame sprite. */
     s_input_art.skin[NT_UI_INPUT_IDLE] = (nt_ui_input_skin_t){.bg_art = s_panel_beige_ref};
@@ -1870,15 +1870,6 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — four side-by-side demos, not deep nesting
 /* HSV(h,1,1) -> 0xAABBGGRR. The dense grid colors each radial per-widget through this
  * (standard sprite color rides v_color), so many distinct colors still batch to one draw. */
-/* Pack a Clay_Color (0..255 floats) into 0xAABBGGRR, the convention rich-text color_abgr expects. */
-static uint32_t showcase_pack_clay_abgr(Clay_Color c) {
-    const uint32_t r = (uint32_t)(c.r + 0.5F);
-    const uint32_t g = (uint32_t)(c.g + 0.5F);
-    const uint32_t b = (uint32_t)(c.b + 0.5F);
-    const uint32_t a = (uint32_t)(c.a + 0.5F);
-    return (a << 24) | (b << 16) | (g << 8) | r;
-}
-
 static uint32_t showcase_hue_abgr(float h) {
     const float x = h * 6.0F;
     const int i = (int)x;
@@ -2393,7 +2384,7 @@ static nt_ui_rich_style_t rich_base_style(void) {
     for (uint32_t i = 0; i < 4U; i++) {
         base.font_id[i] = s_rich_font[i]; /* R/B/I/BI -> real DejaVu faces */
     }
-    base.color_abgr = showcase_pack_clay_abgr(g_current->body->color);
+    base.color_abgr = g_current->body->color;
     /* image_material/text_material left 0: rich defaults them from ctx (nt_ui_set_sprite_material /
      * nt_ui_set_text_material). Set a field only to override the material for THIS block. */
     base.default_atlas = nt_atlas_ref(s_atlas_handle, 0U); /* base atlas for <img=name/> by-name resolve */
@@ -3304,7 +3295,7 @@ static void render_tabs(nt_ui_context_t *ctx, tab_state_t *st) {
  * the "frame" segment and GL_TIME_ELAPSED queries can't nest. */
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const nt_ui_label_style_t stress_label = {.font_id = 0, .font_size = 14, .color = {200.0F, 210.0F, 220.0F, 255.0F}};
+    static const nt_ui_label_style_t stress_label = {.font_id = 0, .font_size = 14, .color = NT_RGBA8(200, 210, 220, 255)};
 
     nt_metrics_frame_t last;
     nt_metrics_last(&last);

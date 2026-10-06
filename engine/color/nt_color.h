@@ -15,6 +15,9 @@
 #include <stddef.h> /* NULL (nt_color_parse_hex) */
 #include <stdint.h>
 
+/* Byte channels 0..255 -> 0xAABBGGRR at compile time, for color literals. */
+#define NT_RGBA8(r, g, b, a) ((uint32_t)(r) | ((uint32_t)(g) << 8) | ((uint32_t)(b) << 16) | ((uint32_t)(a) << 24))
+
 /* Saturate a [0,1] channel. */
 static inline float nt_color_clamp01(float c) {
     if (c < 0.0F) {

@@ -190,13 +190,13 @@ static const Clay_ElementDeclaration s_btn_decl = {
 static nt_ui_label_style_t s_panel_title_style = {
     .font_id = 0,
     .font_size = 40,
-    .color = {255.0F, 240.0F, 180.0F, 255.0F},
+    .color = NT_RGBA8(255, 240, 180, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 static nt_ui_label_style_t s_btn_label_style = {
     .font_id = 0,
     .font_size = 34,
-    .color = {245.0F, 245.0F, 250.0F, 255.0F},
+    .color = NT_RGBA8(245, 245, 250, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 

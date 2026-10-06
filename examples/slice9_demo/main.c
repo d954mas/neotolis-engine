@@ -63,27 +63,27 @@ static const nt_ui_image_style_t g_panel_style = {
 static const nt_ui_label_style_t g_status_style = {
     .font_id = 0,
     .font_size = 16,
-    .color = {200.0F, 200.0F, 210.0F, 255.0F},
+    .color = NT_RGBA8(200, 200, 210, 255),
 };
 
 static const nt_ui_label_style_t g_title_style = {
     .font_id = 0,
     .font_size = 28,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
+    .color = NT_RGBA8(255, 255, 255, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
 static const nt_ui_label_style_t g_panel_label_style = {
     .font_id = 0,
     .font_size = 20,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
+    .color = NT_RGBA8(255, 255, 255, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
 static const nt_ui_label_style_t g_child_label_style = {
     .font_id = 0,
     .font_size = 18,
-    .color = {255.0F, 240.0F, 200.0F, 255.0F},
+    .color = NT_RGBA8(255, 240, 200, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 // #endregion

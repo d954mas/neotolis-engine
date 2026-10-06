@@ -108,7 +108,7 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
     Clay_String s = {.length = (int32_t)text_len, .chars = owned};
     CLAY_TEXT(s, CLAY_TEXT_CONFIG({
                      .userData = (void *)ed,
-                     .textColor = style->color,
+                     .textColor = nt_ui_unpack_abgr(style->color),
                      .fontId = style->font_id,
                      .fontSize = clay_font_size,
                      .letterSpacing = style->letter_tracking,

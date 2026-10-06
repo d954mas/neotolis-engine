@@ -591,7 +591,7 @@ static void test_3d_debug_inspector_walk_draws_real_tree_text(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     nt_ui_set_view_proj(s_fx.ctx, identity_vp);
     CLAY({.id = CLAY_ID("debug_tree_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(120.0F), CLAY_SIZING_FIXED(40.0F)}}}) {
-        nt_ui_label(s_fx.ctx, NT_UI_DATA_LAYER((nt_ui_layer_t)5), "TreeText", &(nt_ui_label_style_t){.font_id = 0, .font_size = 14, .color = {255, 255, 255, 255}});
+        nt_ui_label(s_fx.ctx, NT_UI_DATA_LAYER((nt_ui_layer_t)5), "TreeText", &(nt_ui_label_style_t){.font_id = 0, .font_size = 14, .color = NT_RGBA8(255, 255, 255, 255)});
     }
     nt_ui_end(s_fx.ctx);
 

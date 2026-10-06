@@ -111,13 +111,13 @@ static bool s_font_bound;
 static const nt_ui_label_style_t s_title_style = {
     .font_id = 0,
     .font_size = 16.0F,
-    .color = {232.0F, 238.0F, 248.0F, 255.0F},
+    .color = NT_RGBA8(232, 238, 248, 255),
 };
 
 static const nt_ui_label_style_t s_value_style = {
     .font_id = 0,
     .font_size = 13.0F,
-    .color = {166.0F, 177.0F, 194.0F, 255.0F},
+    .color = NT_RGBA8(166, 177, 194, 255),
 };
 
 static struct {
