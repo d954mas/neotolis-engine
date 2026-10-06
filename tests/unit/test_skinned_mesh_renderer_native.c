@@ -332,36 +332,30 @@ static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t 
     const nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
+    begin_target_pass();
     if (skinned) {
-        nt_mesh_run_t run;
-        const uint32_t run_count = nt_skinned_mesh_renderer_prepare(&item, 1, &run, 1);
-        begin_target_pass();
-        nt_skinned_mesh_renderer_draw(&run, run_count);
+        nt_skinned_mesh_renderer_draw_list(&item, 1);
     } else {
-        nt_mesh_run_t run;
-        const uint32_t run_count = nt_mesh_renderer_prepare(&item, 1, &run, 1);
-        begin_target_pass();
-        nt_mesh_renderer_draw(&run, run_count);
+        nt_mesh_renderer_draw_list(&item, 1);
     }
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
 }
 
-#define RENDER_MAX_RUNS 2
-
+/* The list draws as one instanced draw of all its items. */
 static void render_list(const nt_render_item_t *items, uint32_t count, bool skinned, uint8_t out[FRAME_BYTES]) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_mesh_run_t runs[RENDER_MAX_RUNS];
-    const uint32_t run_count = skinned ? nt_skinned_mesh_renderer_prepare(items, count, runs, RENDER_MAX_RUNS) : nt_mesh_renderer_prepare(items, count, runs, RENDER_MAX_RUNS);
-    TEST_ASSERT_EQUAL_UINT32(1, run_count);
-    TEST_ASSERT_EQUAL_UINT32(count, runs[0].instance_count);
     begin_target_pass();
+    const uint32_t draws = nt_gfx_draw_calls(&g_nt_gfx.counters);
+    const uint64_t instances = g_nt_gfx.counters.instances;
     if (skinned) {
-        nt_skinned_mesh_renderer_draw(runs, run_count);
+        nt_skinned_mesh_renderer_draw_list(items, count);
     } else {
-        nt_mesh_renderer_draw(runs, run_count);
+        nt_mesh_renderer_draw_list(items, count);
     }
+    TEST_ASSERT_EQUAL_UINT32(draws + 1, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    TEST_ASSERT_EQUAL_UINT64(instances + count, g_nt_gfx.counters.instances);
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
 }

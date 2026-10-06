@@ -3,7 +3,7 @@
  *
  * Full asset pipeline demo:
  *   Builder packs -> resource loading -> material creation -> entity/components
- *   -> render items -> nt_mesh_renderer_prepare -> frame storage -> nt_mesh_renderer_draw -> GPU
+ *   -> render items -> nt_mesh_renderer_draw_list -> frame storage -> GPU
  *
  * Shows: progressive pack loading (core -> geo -> tex -> full), Blinn-Phong
  * shading with normal mapping via Lighting UBO, scene manifest loading, 3
@@ -568,10 +568,6 @@ static void frame(void) {
 
     /* ---- Render ---- */
 
-    /* Pack instance data for the whole frame */
-    static nt_mesh_run_t runs[MAX_SCENE_NODES];
-    const uint32_t run_count = nt_mesh_renderer_prepare(items, item_count, runs, MAX_SCENE_NODES);
-
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .clear_color = {0.529F, 0.808F, 0.922F, 1.0F}, /* sky blue */
         .clear_depth = 1.0F,
@@ -593,7 +589,7 @@ static void frame(void) {
         nt_gfx_bind_uniform_buffer(s_light_ubo, 1);
 
         /* Draw all render items */
-        nt_mesh_renderer_draw(runs, run_count);
+        nt_mesh_renderer_draw_list(items, item_count);
 
 #if NT_LOG_MIN_LEVEL == 0
         /* Per-second FPS + render stats */

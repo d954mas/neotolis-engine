@@ -2365,13 +2365,11 @@ static void skinned_draw(void) {
             nt_skin_palette_build(skins[i], models[i], p->skel->joint_count, palette, skins[i]->palette_count);
         }
     }
-    nt_mesh_run_t runs[2];
-    const uint32_t run_count = cpu ? nt_mesh_renderer_prepare(items, ready, runs, 2) : nt_skinned_mesh_renderer_prepare(items, ready, runs, 2);
     if (cpu) {
-        nt_mesh_renderer_draw(runs, run_count);
+        nt_mesh_renderer_draw_list(items, ready);
     } else {
         nt_skeletal_gpu_flush();
-        nt_skinned_mesh_renderer_draw(runs, run_count);
+        nt_skinned_mesh_renderer_draw_list(items, ready);
     }
     if (s_show_bones) {
         nt_shape_renderer_set_depth(false); /* bones are an overlay: most sit inside the mesh */
@@ -2458,9 +2456,7 @@ static void mixing_draw(void) {
         }
     }
     nt_skeletal_gpu_flush();
-    nt_mesh_run_t runs[MIX_ENTITY_COUNT];
-    const uint32_t run_count = nt_skinned_mesh_renderer_prepare(items, ready, runs, MIX_ENTITY_COUNT);
-    nt_skinned_mesh_renderer_draw(runs, run_count);
+    nt_skinned_mesh_renderer_draw_list(items, ready);
 }
 
 static bool ordering_ready(void) {
@@ -2492,10 +2488,10 @@ static void ordering_draw(void) {
             ++s_order_stats.palettes;
         }
     }
-    /* Each pass rebinds the entities' materials; its runs keep what its prepare resolved. */
-    static nt_mesh_run_t runs[2][SKELETAL_SHOWCASE_MAX_INSTANCES];
-    uint32_t run_counts[2] = {0, 0};
+    nt_skeletal_gpu_flush();
+    /* draw_list reads the bindings at the call, so each pass rebinds the entities' materials just before its list. */
     for (uint32_t pass = 0; pass < passes; ++pass) {
+        stage_viewport(pass, passes);
         nt_render_item_t items[SKELETAL_SHOWCASE_MAX_INSTANCES];
         for (uint32_t i = 0; i < count; ++i) {
             const nt_entity_t e = s_order_entities[i];
@@ -2505,14 +2501,9 @@ static void ordering_draw(void) {
             *nt_material_comp_handle(e) = material;
             items[i] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
         }
-        run_counts[pass] = nt_skinned_mesh_renderer_prepare(items, count, runs[pass], SKELETAL_SHOWCASE_MAX_INSTANCES);
-    }
-    nt_skeletal_gpu_flush();
-    for (uint32_t pass = 0; pass < passes; ++pass) {
-        stage_viewport(pass, passes);
         const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
         const uint64_t instances_before = g_nt_gfx.counters.instances;
-        nt_skinned_mesh_renderer_draw(runs[pass], run_counts[pass]);
+        nt_skinned_mesh_renderer_draw_list(items, count);
         s_order_stats.draws[pass] = nt_gfx_draw_calls(&g_nt_gfx.counters) - draws_before;
         s_order_stats.instances[pass] = (uint32_t)(g_nt_gfx.counters.instances - instances_before);
         s_order_stats.expected[pass] = s_order_mode == 0 || (pass == 1 && s_order_mode == 2) ? 1U : count;

@@ -44,7 +44,7 @@ Entity / components
 
 ### RenderItem model
 
-Minimal render item — sorted draw record, not a fat data carrier. Renderers read per-entity data (world matrix, color) from components when consuming items: mesh renderers during `prepare`, the sprite renderer during `draw_list`.
+Minimal render item — sorted draw record, not a fat data carrier. Renderers read per-entity data (world matrix, color) from components when consuming items, in their `draw_list`.
 
 ```c
 typedef struct nt_render_item_t {
@@ -88,19 +88,17 @@ and no execution of the stream in between
 ([draw merge](architecture.md#binding-dedup-and-draw-merge)); under that
 section's index and shader contract this leaves the picture and the order unchanged. To force a renderer boundary (separate runs or
 commands) between otherwise compatible items, split them across separate lists
-(`prepare` or `draw_list()` calls); gfx may still join the resulting draws.
+(`draw_list()` calls); gfx may still join the resulting draws.
 
 `nt_mesh_renderer_batch_key(material, mesh)` packs the two 16-bit pool slot
 indices as `material_slot << 16 | mesh_slot`. This is exact for simultaneously
 live handles without widening the render item. Generation bits are omitted
 because the list has a bounded lifetime: each key is built from the current
 material and mesh bindings of that same `item.entity`; until
-`nt_mesh_renderer_prepare()` returns, the entity and required components stay
+`nt_mesh_renderer_draw_list()` returns, the entity and required components stay
 alive, neither binding changes, and neither referenced live resource is
-destroyed or has its slot reused. The resolved runs it writes no longer read
-the items or the bindings; the material, its textures and the mesh stay live
-until the runs are last drawn (see
-[Prepared mesh runs](architecture.md#prepared-mesh-runs)).
+destroyed or has its slot reused. The material, its textures and the mesh stay
+live until the frame executes (see [Mesh draws](architecture.md#mesh-draws)).
 
 `nt_skinned_mesh_renderer` uses the same material/mesh token, then additionally
 splits runs when the deformation texture changes. Frame origins and alpha stay
@@ -170,7 +168,7 @@ SpriteRenderer ignores those flags.
 
 MeshRenderer draws consecutive equal-key runs with GPU instancing. Each run
 shares one mesh and material; different meshes are not merged. A run is never
-split: prepare packs every run of a list into one vertex frame storage allocation.
+split: `draw_list` packs each run into one vertex frame storage allocation.
 
 ### Mesh instancing
 
@@ -179,8 +177,8 @@ Each instance supplies its world transform and drawable color
 the instance pack reads the transform and drawable views directly and does not
 check item liveness: an item whose entity was destroyed, its index reused, packs
 the new entity's data. Only the first item of each run goes through the asserting
-material and mesh component accessors. Prepare packs these attributes into
-vertex frame storage, uploaded when the stream executes; draw issues one
+material and mesh component accessors. `draw_list` packs these attributes into
+vertex frame storage, uploaded when the stream executes, and records one
 `nt_gfx_draw_indexed_instanced` per run for indexed
 meshes or `nt_gfx_draw_instanced` for non-indexed meshes. Material parameters
 remain shared by the run.

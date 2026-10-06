@@ -142,11 +142,11 @@ mesh renderers ignore them.
 
 A material stores the declared `nt_resource_t` for each texture slot and never a
 resolved handle. Renderers call `nt_resource_get` where they already transition
-material state: the mesh run executor at each material or texture change inside a `draw`,
+material state: the mesh renderers at each material or supplied-texture change inside a draw call,
 the sprite renderer when a command opens. A documented renderer-supplied
 semantic is replaced after resolve: the skinned path ignores the resolved
 declared resource and sampler for `u_skin_matrices`, supplies both from the
-deformation texture its run recorded at prepare, then applies the full declared set. A sprite
+run's deformation texture, then applies the full declared set. A sprite
 command snapshots its textures at open and its params at flush, so a mid-frame
 `nt_material_set_param` also applies to queued commands. Slot 0 of a sprite
 material is the atlas page: the renderer substitutes the page into the open

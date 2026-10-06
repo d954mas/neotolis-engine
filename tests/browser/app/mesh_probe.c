@@ -185,20 +185,20 @@ static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformati
     const nt_render_item_t skinned_items[2] = {make_item(quad, skinned_material, -0.5F, -0.5F, skinned_tint, &binding), make_item(quad, skinned_material, 0.5F, -0.5F, 0xFFFFFFFFU, &binding)};
     nt_transform_comp_update();
 
-    nt_mesh_run_t runs[3];
-    const uint32_t mesh_runs = nt_mesh_renderer_prepare(mesh_items, 2, runs, 1);
-    const uint32_t colorless_runs = nt_mesh_renderer_prepare(&colorless_item, 1, &runs[1], 1);
-    const uint32_t skinned_runs = nt_skinned_mesh_renderer_prepare(skinned_items, 2, &runs[2], 1);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
-    nt_mesh_renderer_draw(runs, mesh_runs);
-    nt_mesh_renderer_draw(&runs[1], colorless_runs);
-    nt_skinned_mesh_renderer_draw(&runs[2], skinned_runs);
+    const uint32_t draws = nt_gfx_draw_calls(&g_nt_gfx.counters);
+    const uint64_t instances = g_nt_gfx.counters.instances;
+    nt_mesh_renderer_draw_list(mesh_items, 2);
+    nt_mesh_renderer_draw_list(&colorless_item, 1);
+    nt_skinned_mesh_renderer_draw_list(skinned_items, 2);
+    /* One instanced draw per list: the two mesh and two skinned instances each share a run. */
+    const bool batched = nt_gfx_draw_calls(&g_nt_gfx.counters) == draws + 3 && g_nt_gfx.counters.instances == instances + 5;
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     const bool read = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
     nt_gfx_end_pass();
 
     uint32_t mask = 0;
-    if (read && mesh_runs == 1 && runs[0].instance_count == 2 && colorless_runs == 1 && skinned_runs == 1 && runs[2].instance_count == 2) {
+    if (read && batched) {
         mask |= pixel_is(frame, -0.5F, 0.5F, tint) ? 1U << 0U : 0;
         mask |= pixel_is(frame, 0.5F, 0.5F, 0xFFFFFFFFU) ? 1U << 1U : 0;
         mask |= pixel_is(frame, 0.0F, 0.0F, 0xFF00FF00U) ? 1U << 2U : 0;

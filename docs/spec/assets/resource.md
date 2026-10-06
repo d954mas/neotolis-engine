@@ -325,7 +325,7 @@ module initialized but unable to draw; the game must retry
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
 restore drops queued commands and pipeline caches, then the game relinks. The
 mesh renderers own no buffer: their restore only drops the pipeline and
-vertex-input caches and returns void, and runs prepared before it are stale.
+vertex-input caches and returns void.
 Frame storage needs no game restore: the `nt_gfx_begin_frame` that restores the
 context makes new frame buffers, and that frame's allocations reach them.
 
@@ -368,7 +368,7 @@ an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
 re-activate on the next step within the activation budget; an evicted pack must
 re-download first. Rebuild resource-dependent render state after publication.
 
-The mesh renderers' `prepare` and the sprite `draw_list` skip a material whose program is not ready and warn
+The mesh renderers and the sprite `draw_list` skip a material whose program is not ready and warn
 once until a pipeline is built again. The skip is normal runtime state, not a
 caller error. The immediate-mode
 `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points

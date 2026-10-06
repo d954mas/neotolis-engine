@@ -246,12 +246,13 @@ A binding is valid until the context's next `begin_frame` or graphics invalidati
 
 ## 13. Renderer (implemented, #523)
 
-`nt_skinned_mesh_renderer_prepare(items, count, runs, max_runs)` consumes existing 16-byte
+`nt_skinned_mesh_renderer_draw_list(items, count)` consumes existing 16-byte
 render items in the given order; through entity it reads
-mesh/material/world/color and `skin_comp`, packs the instances into vertex frame
-storage and writes resolved runs; `nt_skinned_mesh_renderer_draw(runs, run_count)`
-executes them ([Prepared mesh runs](../render/architecture.md#prepared-mesh-runs)). No sampling, FK, mode selection,
-culling or sorting.
+mesh/material/world/color and `skin_comp`, packs each run's instances into vertex
+frame storage and records its draw. `nt_skinned_mesh_renderer_draw(mesh, material,
+deformation, offset, count)` draws instances the caller packed, with no entity
+component ([Mesh draws](../render/architecture.md#mesh-draws)). No sampling, FK,
+mode selection, culling or sorting.
 
 **One skinning vertex program per pass, always two frames.** The shader fetches
 both frame origins and interpolates by alpha; CPU palettes are the case
@@ -276,8 +277,8 @@ that declared slot's resource and sampler with the run's deformation texture
 and its default sampler, resolves the surface slots normally, and applies the
 complete combined set in one `nt_gfx_apply_texture_bindings` call. The declared
 placeholder resource and sampler have no effect in this renderer. Reapply when
-the material, pipeline or deformation texture changes; reset tracking at each
-`draw`.
+the material or deformation texture changes; nothing is tracked across draw
+calls.
 
 **Batching.** `nt_mesh_renderer_batch_key(material, mesh)` stays the exact
 two-slot packing. An equal key is a candidate run, and the run also requires an
@@ -311,7 +312,7 @@ warning, explicit acknowledgement flag and a separate accurate-normal
 material/shader. CPU skeleton math still supports nonuniform scale. The profile
 is a material choice, not a runtime enum or automatic renderer branch.
 
-**Passes.** All passes use the same frame binding. Baseline multipass: per pass assign the pass material → build/sort the list → prepare its runs; then flush the palettes once and draw each pass's runs in its pass ([Frame order](../render/architecture.md#frame-order)). WebGL2 needs only 2D float textures with NEAREST filters, `texelFetch`, instanced attributes; no SSBO/compute/texture arrays/float render targets/float-linear filtering.
+**Passes.** All passes use the same frame binding. Baseline multipass: flush the palettes once; then per pass assign the pass material → build/sort the list → `draw_list` in its pass ([Frame order](../render/architecture.md#frame-order)). WebGL2 needs only 2D float textures with NEAREST filters, `texelFetch`, instanced attributes; no SSBO/compute/texture arrays/float render targets/float-linear filtering.
 
 ## 14. Bounds and culling
 
@@ -331,7 +332,7 @@ The max of two clip radii is *not* a bound for their mix (two 80° bends mixed a
 
 **The v1 adapters** are `nt_skeletal_assets_activate_skeleton/skin_binding/clip` and their deactivators (`engine/skeletal_assets`), registered by the application through `nt_resource_register_type` exactly like textures; resource core references none of them. Each one validates the header before it allocates anything, copies the payload into **one** allocation and points the view of §7.2 into that copy — the wire layout is the runtime layout (§16), so nothing is transposed or re-indexed. A structurally broken payload logs one warning and returns 0, which leaves the asset FAILED: NSKL and NSKN reject from the source bytes and allocate nothing; only the NANM joint tables are checked through the view over the copy, and that rejection takes and releases a slot, where in a full pool the take asserts like any other activation (the capacity is sized for the peak set). The adapters are copy-out consumers in the sense of [Resource](../assets/resource.md): nothing reads the blob after activation. `nt_skeletal_assets_init(max_assets)` allocates **one** pool for all three types, so the game sizes the peak mounted set once instead of guessing three splits; activating past the capacity is an assert, not a load failure. The capacity counts every *activated* asset, not every published one: when one resource id is present in two mounted packs both copies activate and hold a slot, only the winner is published, and the loser is released when its own pack unmounts. The runtime handle is a generational `nt_pool` id, so a stale handle fails `nt_pool_valid` instead of naming a reused slot. `nt_skeletal_assets_skeleton/skin_binding/clip(nt_resource_t)` return the views and assert the asset type and a live handle; a view stays valid until its asset is deactivated (unmount, reload, shutdown), so the game refetches it after `resource_step`. The adapters cross-check no `rig_compat_id` — no second asset exists at activation.
 
-Order per frame: draws finished → `resource_step` → refresh views → advance/compose/prepare palettes → build lists → prepare runs → flush/upload → draw. A borrowed view lasts until its owner is deactivated/republished; a bank borrows the clip, skeleton and binding views it bakes from, so their assets outlive the bank.
+Order per frame: draws finished → `resource_step` → refresh views → advance/compose/prepare palettes → flush palettes → build lists → draw. A borrowed view lasts until its owner is deactivated/republished; a bank borrows the clip, skeleton and binding views it bakes from, so their assets outlive the bank.
 
 **Pack grouping.** Activation and unmount are whole-pack (default `NT_RESOURCE_MAX_PACKS` = 16), and mounting a pack that contains a non-BLOB type whose activator is not registered asserts (`nt_resource.c`, parse). Builder manifests therefore group by **co-residency**: a rig/mesh pack (MESH, NSKL, NSKN); clip-group packs (NANM, e.g. base locomotion vs. dances loaded mid-game). Applications that link animation register the three activators; the manifest keeps peak mounted packs (old + new + prefetch) within the limit or overrides it deliberately.
 
