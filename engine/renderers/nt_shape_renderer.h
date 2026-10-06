@@ -34,8 +34,8 @@ typedef uint16_t nt_shape_index_t;
 /* ---- Vertex format ---- */
 
 typedef struct {
-    float pos[3];     /* world-space position */
-    uint8_t color[4]; /* RGBA packed (0-255, GPU normalizes to 0.0-1.0) */
+    float pos[3];   /* world-space position */
+    uint32_t color; /* RGBA8 0xAABBGGRR, read normalized */
 } nt_shape_renderer_vertex_t;
 
 /* ---- Lifecycle ---- */
@@ -59,63 +59,63 @@ void nt_shape_renderer_set_depth(bool enabled);
 
 /* ---- Line ---- */
 
-void nt_shape_renderer_line(const float a[3], const float b[3], const float color[4]);
+void nt_shape_renderer_line(const float a[3], const float b[3], uint32_t color);
 
 /* Connected finite world-space points, read during the call; consecutive duplicates are skipped.
  * Joins, ends and closing rules: render architecture, "Shape strokes". */
-void nt_shape_renderer_polyline(const float (*points)[3], uint32_t count, bool closed, const float color[4]);
+void nt_shape_renderer_polyline(const float (*points)[3], uint32_t count, bool closed, uint32_t color);
 
 /* ---- Rectangle ---- */
 
-void nt_shape_renderer_rect(const float pos[3], const float size[2], const float color[4]);
-void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], const float color[4]);
-void nt_shape_renderer_rect_rot(const float pos[3], const float size[2], const float rot[4], const float color[4]);
-void nt_shape_renderer_rect_wire_rot(const float pos[3], const float size[2], const float rot[4], const float color[4]);
+void nt_shape_renderer_rect(const float pos[3], const float size[2], uint32_t color);
+void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], uint32_t color);
+void nt_shape_renderer_rect_rot(const float pos[3], const float size[2], const float rot[4], uint32_t color);
+void nt_shape_renderer_rect_wire_rot(const float pos[3], const float size[2], const float rot[4], uint32_t color);
 
 /* ---- Triangle ---- */
 
-void nt_shape_renderer_triangle(const float a[3], const float b[3], const float c[3], const float color[4]);
-void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const float c[3], const float color[4]);
+void nt_shape_renderer_triangle(const float a[3], const float b[3], const float c[3], uint32_t color);
+void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const float c[3], uint32_t color);
 
 /* ---- Circle ---- */
 
-void nt_shape_renderer_circle(const float center[3], float radius, const float color[4]);
-void nt_shape_renderer_circle_wire(const float center[3], float radius, const float color[4]);
-void nt_shape_renderer_circle_rot(const float center[3], float radius, const float rot[4], const float color[4]);
-void nt_shape_renderer_circle_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]);
+void nt_shape_renderer_circle(const float center[3], float radius, uint32_t color);
+void nt_shape_renderer_circle_wire(const float center[3], float radius, uint32_t color);
+void nt_shape_renderer_circle_rot(const float center[3], float radius, const float rot[4], uint32_t color);
+void nt_shape_renderer_circle_wire_rot(const float center[3], float radius, const float rot[4], uint32_t color);
 
 /* ---- Cube ---- */
 
-void nt_shape_renderer_cube(const float center[3], const float size[3], const float color[4]);
-void nt_shape_renderer_cube_wire(const float center[3], const float size[3], const float color[4]);
-void nt_shape_renderer_cube_rot(const float center[3], const float size[3], const float rot[4], const float color[4]);
-void nt_shape_renderer_cube_wire_rot(const float center[3], const float size[3], const float rot[4], const float color[4]);
+void nt_shape_renderer_cube(const float center[3], const float size[3], uint32_t color);
+void nt_shape_renderer_cube_wire(const float center[3], const float size[3], uint32_t color);
+void nt_shape_renderer_cube_rot(const float center[3], const float size[3], const float rot[4], uint32_t color);
+void nt_shape_renderer_cube_wire_rot(const float center[3], const float size[3], const float rot[4], uint32_t color);
 
 /* ---- Sphere ---- */
 
-void nt_shape_renderer_sphere(const float center[3], float radius, const float color[4]);
-void nt_shape_renderer_sphere_wire(const float center[3], float radius, const float color[4]);
-void nt_shape_renderer_sphere_rot(const float center[3], float radius, const float rot[4], const float color[4]);
-void nt_shape_renderer_sphere_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]);
+void nt_shape_renderer_sphere(const float center[3], float radius, uint32_t color);
+void nt_shape_renderer_sphere_wire(const float center[3], float radius, uint32_t color);
+void nt_shape_renderer_sphere_rot(const float center[3], float radius, const float rot[4], uint32_t color);
+void nt_shape_renderer_sphere_wire_rot(const float center[3], float radius, const float rot[4], uint32_t color);
 
 /* ---- Cylinder ---- */
 
-void nt_shape_renderer_cylinder(const float center[3], float radius, float height, const float color[4]);
-void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float height, const float color[4]);
-void nt_shape_renderer_cylinder_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]);
-void nt_shape_renderer_cylinder_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]);
+void nt_shape_renderer_cylinder(const float center[3], float radius, float height, uint32_t color);
+void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float height, uint32_t color);
+void nt_shape_renderer_cylinder_rot(const float center[3], float radius, float height, const float rot[4], uint32_t color);
+void nt_shape_renderer_cylinder_wire_rot(const float center[3], float radius, float height, const float rot[4], uint32_t color);
 
 /* ---- Capsule ---- */
 
-void nt_shape_renderer_capsule(const float center[3], float radius, float height, const float color[4]);
-void nt_shape_renderer_capsule_wire(const float center[3], float radius, float height, const float color[4]);
-void nt_shape_renderer_capsule_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]);
-void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]);
+void nt_shape_renderer_capsule(const float center[3], float radius, float height, uint32_t color);
+void nt_shape_renderer_capsule_wire(const float center[3], float radius, float height, uint32_t color);
+void nt_shape_renderer_capsule_rot(const float center[3], float radius, float height, const float rot[4], uint32_t color);
+void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, float height, const float rot[4], uint32_t color);
 
 /* ---- Mesh ---- */
 
-void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, const float color[4]);
-void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, const float color[4]);
+void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, uint32_t color);
+void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, uint32_t color);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

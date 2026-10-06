@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "clay.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
@@ -26,7 +27,7 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static nt_ui_rich_fx_result_t custom_effect(uint32_t index, nt_rich_atom_kind_t kind, const float xy[2], const float wh[2], const float color[4], float time, bool hovered, void *user) {
+static nt_ui_rich_fx_result_t custom_effect(uint32_t index, nt_rich_atom_kind_t kind, const float xy[2], const float wh[2], uint32_t color, float time, bool hovered, void *user) {
     (void)index;
     (void)kind;
     (void)xy;
@@ -43,7 +44,7 @@ static nt_ui_rich_object_measure_t measure(void *user) {
     return (nt_ui_rich_object_measure_t){.width = 20.0F, .height = 12.0F, .ascent = 12.0F};
 }
 
-static void draw(void *user, float x, float y, float w, float h, const float color[4], const float world[16]) {
+static void draw(void *user, float x, float y, float w, float h, uint32_t color, const float world[16]) {
     (void)user;
     (void)x;
     (void)w;

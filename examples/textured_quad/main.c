@@ -21,6 +21,7 @@
  */
 
 #include "app/nt_app.h"
+#include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -393,7 +394,7 @@ int main(void) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = NUM_CUBES * 64U; /* 64 = the largest mesh instance stride */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = NUM_CUBES * (uint32_t)sizeof(nt_mesh_instance_t);
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks (required after Plan 02 removed auto-bind) */
@@ -447,7 +448,6 @@ int main(void) {
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_BACK,
-        .color_mode = NT_COLOR_MODE_FLOAT4,
         .label = "cube_lenna_instanced",
     });
 
@@ -478,7 +478,7 @@ int main(void) {
         *nt_material_comp_handle(s_cubes[i]) = s_cube_material;
 
         /* Set tint color */
-        nt_drawable_comp_set_color(s_cubes[i], s_cube_colors[i][0], s_cube_colors[i][1], s_cube_colors[i][2], s_cube_colors[i][3]);
+        nt_drawable_comp_set_color(s_cubes[i], nt_color_pack(s_cube_colors[i]));
     }
 
     /* Create frame uniforms UBO (updated each frame) */

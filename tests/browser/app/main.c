@@ -53,6 +53,7 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h> /* EM_JS / EMSCRIPTEN_KEEPALIVE for the window.__nt hooks */
 uint32_t nt_test_shape_stroke_probe(void);
+uint32_t nt_test_mesh_color_probe(void);
 #endif
 
 #include "clay.h"
@@ -117,8 +118,8 @@ static uint32_t s_rich_composition_mode;
 
 static uint32_t s_id_input_cyrillic; /* nt_ui_id, resolved once */
 
-static const nt_ui_label_style_t s_caption = {.font_id = 0, .font_size = 16, .color = {165.0F, 170.0F, 182.0F, 255.0F}};
-static const nt_ui_label_style_t s_body = {.font_id = 0, .font_size = 22, .color = {225.0F, 228.0F, 235.0F, 255.0F}};
+static const nt_ui_label_style_t s_caption = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(165, 170, 182, 255)};
+static const nt_ui_label_style_t s_body = {.font_id = 0, .font_size = 22, .color = NT_RGBA8(225, 228, 235, 255)};
 static nt_ui_input_style_t s_input_style; /* filled at init (defaults + visible bg/border) */
 // #endregion
 
@@ -866,6 +867,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'basis_sample': function(level) { return _nt_test_basis_sample(level) >>> 0; },
         'basis_single_pixel_format': function() { return _nt_test_basis_single_pixel_format(); },
         'shape_stroke_probe': function() { return _nt_test_shape_stroke_probe() >>> 0; },
+        'mesh_color_probe': function() { return _nt_test_mesh_color_probe() >>> 0; },
         'gpu_command': function(operation, segment) { return _nt_test_gpu_command(operation, segment || 0); },
         'hide_probe': function(mode) { _nt_test_hide_probe(mode); },
         'field_visible': function() { return _nt_test_field_visible() !== 0; },
@@ -942,7 +944,7 @@ static void render_rich(nt_ui_context_t *ctx) {
 // #region fixed-time rich composition pixel witness
 static float s_rich_composition_speed = 32.0F;
 
-static nt_ui_rich_fx_result_t composition_effect(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+static nt_ui_rich_fx_result_t composition_effect(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                                  void *user_data) {
     (void)atom_idx;
     (void)kind;
@@ -960,12 +962,12 @@ static nt_ui_rich_object_measure_t composition_object_measure(void *user_data) {
     return (nt_ui_rich_object_measure_t){.width = 320.0F, .height = 32.0F, .ascent = 32.0F};
 }
 
-static void composition_object_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void composition_object_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
     const float positions[4][2] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
     nt_sprite_renderer_set_material(s_sprite_material);
-    nt_sprite_renderer_emit_geometry(s_atlas_handle, s_atlas_white_region, positions, 4U, indices, 6U, world_mat4, nt_color_pack(color), NULL, 0U);
+    nt_sprite_renderer_emit_geometry(s_atlas_handle, s_atlas_white_region, positions, 4U, indices, 6U, world_mat4, color, NULL, 0U);
 }
 
 static void render_rich_composition(nt_ui_context_t *ctx) {
@@ -1240,8 +1242,8 @@ int main(int argc, char *argv[]) {
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_atlas_init();
 
-    nt_material_init(&(nt_material_desc_t){.max_materials = 2});
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 5}); /* base + 4 rich faces */
+    nt_material_init(&(nt_material_desc_t){.max_materials = 5}); /* sprite, text, the mesh color probe's three */
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 5});             /* base + 4 rich faces */
 
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
@@ -1328,10 +1330,10 @@ int main(int argc, char *argv[]) {
     s_input_style = nt_ui_input_style_defaults();
     s_input_style.text.font_id = 0;
     s_input_style.text.font_size = 22.0F;
-    s_input_style.text.color = (Clay_Color){225.0F, 228.0F, 235.0F, 255.0F};
+    s_input_style.text.color = NT_RGBA8(225, 228, 235, 255);
     s_input_style.placeholder.font_id = 0;
     s_input_style.placeholder.font_size = 22.0F;
-    s_input_style.placeholder.color = (Clay_Color){120.0F, 126.0F, 138.0F, 255.0F};
+    s_input_style.placeholder.color = NT_RGBA8(120, 126, 138, 255);
     s_input_style.pad_x = 10.0F;
     s_input_style.pad_y = 8.0F;
     s_input_style.skin[NT_UI_INPUT_IDLE].bg_color = 0xFF303438U;
@@ -1357,7 +1359,7 @@ int main(int argc, char *argv[]) {
         s_nt_hidden_input_style.skin[i].border_color &= 0x00FFFFFFU;
     }
     s_nt_hidden_caption = s_caption;
-    s_nt_hidden_caption.color.a = 0.0F;
+    s_nt_hidden_caption.color &= 0x00FFFFFFU;
     nt_test_install_hooks(); /* window.__nt smoke-test surface */
 #endif
 

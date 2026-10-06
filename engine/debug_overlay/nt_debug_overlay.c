@@ -81,7 +81,7 @@ uint32_t nt_debug_overlay_format_lines(char *buf, uint32_t size) {
     return written;
 }
 
-void nt_debug_overlay_draw(nt_material_t material, nt_font_t font, const float model[16], float size, const float color[4]) {
+void nt_debug_overlay_draw(nt_material_t material, nt_font_t font, const float model[16], float size, uint32_t color) {
     NT_ASSERT(s_overlay.initialized);
     char buf[512];
     (void)nt_debug_overlay_format_lines(buf, sizeof(buf));

@@ -28,6 +28,7 @@
  */
 
 #include "app/nt_app.h"
+#include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -278,7 +279,6 @@ static void load_scene_from_manifest(void) {
             .depth_test = true,
             .depth_write = true,
             .cull_mode = NT_CULL_BACK,
-            .color_mode = NT_COLOR_MODE_RGBA8,
         };
 
         /* Textures and attr_map depend on shader type */
@@ -346,7 +346,7 @@ static void load_scene_from_manifest(void) {
         *nt_material_comp_handle(s_entities[i]) = s_materials[i];
 
         /* Set drawable color from manifest base_color */
-        nt_drawable_comp_set_color(s_entities[i], mn->base_color[0], mn->base_color[1], mn->base_color[2], mn->base_color[3]);
+        nt_drawable_comp_set_color(s_entities[i], nt_color_pack(mn->base_color));
     }
 
     s_entity_count = node_count;
@@ -654,7 +654,7 @@ int main(int argc, char **argv) {
     gfx_desc.max_meshes = 256;
     /* The vertex-input default is derived from max_meshes(128); scale it too. */
     gfx_desc.max_vertex_inputs = 256 * 4 + 48;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = MAX_SCENE_NODES * 64U; /* 64 = the largest mesh instance stride */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = MAX_SCENE_NODES * (uint32_t)sizeof(nt_mesh_instance_t);
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks */

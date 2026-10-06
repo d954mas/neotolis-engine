@@ -613,16 +613,6 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 }
 // #endregion
 
-// #region helpers_color_pack
-/* Clay's RGBA floats are 0..255 unclamped; scale to [0,1] and pack through the canonical
- * nt_color (Clay-free) home. Byte-identical to the prior nt_clamp_f_to_u8 path: the c/255*255
- * round-trip + round-to-nearest reproduces the same byte for every Clay float. */
-static inline uint32_t nt_color_pack_clay(Clay_Color c) {
-    const float rgba[4] = {c.r / 255.0F, c.g / 255.0F, c.b / 255.0F, c.a / 255.0F};
-    return nt_color_pack(rgba);
-}
-// #endregion
-
 // #region element_data_alloc
 const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
     if (user_data == NULL) {
@@ -1117,7 +1107,7 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     NT_ASSERT(top + bot <= bb.height && "nt_ui BORDER: top+bottom widths exceed bbox.height");
     NT_ASSERT(lft + rgt <= bb.width && "nt_ui BORDER: left+right widths exceed bbox.width");
 
-    const uint32_t col = nt_color_pack_clay(b->color);
+    const uint32_t col = nt_ui_pack_clay(b->color);
     float tl = b->cornerRadius.topLeft;
     float tr = b->cornerRadius.topRight;
     float bl = b->cornerRadius.bottomLeft;
@@ -1149,7 +1139,7 @@ static void emit_image(const Clay_RenderCommand *c, const float world_mat4[16], 
     /* Clay {0,0,0,0} backgroundColor means "untinted", not transparent. */
     Clay_Color tint = c->renderData.image.backgroundColor;
     const bool default_untinted = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F);
-    const uint32_t col = default_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(tint);
+    const uint32_t col = default_untinted ? 0xFFFFFFFFU : nt_ui_pack_clay(tint);
 
     const nt_texture_region_t *r = nt_atlas_get_region(p->atlas, p->region_index);
     if (r->vertex_count == 0U) {
@@ -1307,12 +1297,7 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     const float inv_ts = (text_scale > 0.0F) ? (1.0F / text_scale) : 0.0F;
     float m[16];
     nt_ui_sprite_mat4(world_mat4, c->boundingBox.x, baseline_y, inv_ts, inv_ts, m);
-    const float color[4] = {
-        t->textColor.r / 255.0F,
-        t->textColor.g / 255.0F,
-        t->textColor.b / 255.0F,
-        t->textColor.a / 255.0F,
-    };
+    const uint32_t color = nt_ui_pack_clay(t->textColor);
     nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, font_size, color, (float)t->letterSpacing * text_scale, (float)t->lineHeight * text_scale);
 }
 // #endregion
@@ -1493,20 +1478,6 @@ static void walker_state_init(nt_ui_walker_state_t *ws) {
     memcpy(ws->m, id.m, sizeof ws->m);
     ws->accum_opacity = 1.0F;
     ws->hierarchy_depth = 0U;
-}
-
-/* Apply accumulated opacity to a packed AABBGGRR color. */
-static inline uint32_t apply_opacity(uint32_t color_packed, float opacity) {
-    if (opacity >= 1.0F) {
-        return color_packed;
-    }
-    uint32_t a = (color_packed >> 24) & 0xFFU;
-    /* lrintf rounds-to-nearest so 0.5 * 255 → 128, not truncate 127. */
-    a = (uint32_t)lrintf((float)a * opacity);
-    if (a > 255U) {
-        a = 255U;
-    }
-    return (color_packed & 0x00FFFFFFU) | (a << 24);
 }
 
 /* Per-walk counters passed to dispatch helpers. */
@@ -1691,8 +1662,9 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         counters->rect_command_count++;
         prep_sprite_dispatch_mat(ctx->sprite_material, bind);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
-        uint32_t col = nt_color_pack_clay(r->backgroundColor);
-        col = apply_opacity(col, ws->accum_opacity);
+        Clay_Color fill = r->backgroundColor;
+        fill.a *= ws->accum_opacity; /* the one pack rounds the folded alpha, as on every Clay command */
+        const uint32_t col = nt_ui_pack_clay(fill);
         emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col, world_mat4);
         return;
     }
@@ -1700,8 +1672,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         counters->border_command_count++;
         prep_sprite_dispatch_mat(ctx->sprite_material, bind);
         Clay_RenderCommand local = *c;
-        /* Round-to-nearest to match RECT's apply_opacity. */
-        local.renderData.border.color.a = (float)lrintf(local.renderData.border.color.a * ws->accum_opacity);
+        local.renderData.border.color.a *= ws->accum_opacity;
         emit_border(ctx, &local, world_mat4);
         return;
     }
@@ -1710,8 +1681,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         nt_sprite_renderer_flush();
         sprite_bind_barrier(bind);
         Clay_RenderCommand local = *c;
-        /* Round-to-nearest to match RECT's apply_opacity. */
-        local.renderData.text.textColor.a = (float)lrintf(local.renderData.text.textColor.a * ws->accum_opacity);
+        local.renderData.text.textColor.a *= ws->accum_opacity;
         /* Same userData rides every wrapped-line TEXT command, so apply the sticky deco per line and reset
          * after emit so it can't leak onto the next TEXT. */
         const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)c->userData;
@@ -1738,14 +1708,13 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         prep_sprite_dispatch_mat(img_mat, bind);
         Clay_RenderCommand local = *c;
         if (ws->accum_opacity < 1.0F) {
-            Clay_Color tint = local.renderData.image.backgroundColor;
-            const bool untinted = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F);
-            /* Round-to-nearest to match RECT's apply_opacity; truncation would
-             * give image/rect a 1-LSB alpha mismatch at equal accum_opacity. */
-            if (untinted) {
-                local.renderData.image.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = (float)lrintf(255.0F * ws->accum_opacity)};
-            } else {
-                local.renderData.image.backgroundColor.a = (float)lrintf(local.renderData.image.backgroundColor.a * ws->accum_opacity);
+            Clay_Color *tint = &local.renderData.image.backgroundColor;
+            if (tint->r == 0.0F && tint->g == 0.0F && tint->b == 0.0F && tint->a == 0.0F) {
+                *tint = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
+            }
+            tint->a *= ws->accum_opacity;
+            if (nt_ui_pack_clay(*tint) >> 24 == 0U) {
+                return; /* invisible; at opacity 0 a black tint folds to {0,0,0,0}, the untinted-white sentinel */
             }
         }
         /* One generic custom-attr branch (no per-widget identity): custom_bytes>0 → bake
@@ -1757,7 +1726,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
             if (ip->custom->geom_mode == NT_UI_IMAGE_GEOM_GEOMETRY) {
                 const Clay_Color rt = local.renderData.image.backgroundColor;
                 const bool rt_untinted = (rt.r == 0.0F && rt.g == 0.0F && rt.b == 0.0F && rt.a == 0.0F);
-                const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(rt);
+                const uint32_t rcol = rt_untinted ? 0xFFFFFFFFU : nt_ui_pack_clay(rt);
                 emit_custom_geometry(ctx, &local, rcol, world_mat4, blk, blk_bytes);
                 return;
             }

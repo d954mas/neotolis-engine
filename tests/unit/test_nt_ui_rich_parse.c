@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "clay.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "hash/nt_hash.h"
@@ -116,7 +117,7 @@ static void test_tagset_color_atlas_effect(void) {
 }
 
 /* A stub custom effect fn (identity) used only to prove tagset custom registration/lookup. */
-static nt_ui_rich_fx_result_t parse_stub_fx(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+static nt_ui_rich_fx_result_t parse_stub_fx(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                             void *user_data) {
     (void)atom_idx;
     (void)kind;

@@ -1772,8 +1772,6 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
     }
 }
 
-void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) { NT_GL(glVertexAttrib4f, (GLuint)location, x, y, z, w); }
-
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {

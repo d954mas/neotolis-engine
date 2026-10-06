@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
     nt_text_renderer_init();
     puts("font-contract-ready");
     (void)fflush(stdout);
-    const float transparent[4] = {0};
+    const uint32_t transparent = 0U;
     if (argc > 1 && strcmp(argv[1], "outline") == 0) {
         nt_text_renderer_set_outline(0x1p-20F, transparent);
     } else if (argc > 1 && strcmp(argv[1], "negative") == 0) {

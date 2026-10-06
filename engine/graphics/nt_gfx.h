@@ -527,7 +527,6 @@ typedef enum {
     NT_GFX_OP_BUFFER_ORPHAN,
     NT_GFX_OP_TEXTURE_UPLOAD,
     NT_GFX_OP_ATTRIBUTE,
-    NT_GFX_OP_ATTRIBUTE_DEFAULT,
     NT_GFX_OP_INSTANCE_BUFFER,
     NT_GFX_OP_DRAW,
     NT_GFX_OP_DRAW_INSTANCED,
@@ -636,7 +635,6 @@ typedef enum {
     X(glUniformBlockBinding)                                                                                                                                                                           \
     X(glUniformMatrix4fv)                                                                                                                                                                              \
     X(glUseProgram)                                                                                                                                                                                    \
-    X(glVertexAttrib4f)                                                                                                                                                                                \
     X(glVertexAttribDivisor)                                                                                                                                                                           \
     X(glVertexAttribPointer)                                                                                                                                                                           \
     X(glViewport)
@@ -1026,8 +1024,6 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
  * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets);
  * asserted. Re-bind per draw to re-point. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
-/* Inside a pass. */
-void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* ---- Uniform buffer ---- */
 

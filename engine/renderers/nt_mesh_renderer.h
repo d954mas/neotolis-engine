@@ -8,6 +8,8 @@
 #include "pool/nt_pool.h"
 #include "render/nt_render_defs.h"
 
+#include <stddef.h>
+
 _Static_assert(NT_POOL_SLOT_SHIFT == 16 && NT_POOL_SLOT_MASK == UINT16_MAX, "mesh batch key requires 16-bit pool slots");
 
 /* Handles must match the item's current bindings at prepare. Store the returned
@@ -20,12 +22,20 @@ static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mes
     return (material_slot << NT_POOL_SLOT_SHIFT) | mesh_slot;
 }
 
+/* One GPU instance (locations 4-6 world rows, 7 color); the instance buffer stride is its size. */
+typedef struct {
+    float world_rows[3][4];
+    uint32_t color; /* RGBA8 0xAABBGGRR (nt_color_pack) */
+} nt_mesh_instance_t;
+
+_Static_assert(sizeof(nt_mesh_instance_t) == 52 && offsetof(nt_mesh_instance_t, color) == 48, "mesh instance layout");
+
 typedef struct {
     uint16_t max_pipelines; /* pipeline cache capacity, default: 64 */
-    /* Vertex-input versions kept per mesh (one per distinct derived layout x
-     * color mode drawing that mesh). Exceeding it ASSERTS -- silent eviction
-     * would hide re-creation thrash as an invisible perf regression; raise the
-     * knob instead. Default: 4 (3-4 versions is the expected population). */
+    /* Vertex-input versions kept per mesh (one per distinct derived layout
+     * drawing that mesh). Exceeding it ASSERTS -- silent eviction would hide
+     * re-creation thrash as an invisible perf regression; raise the knob
+     * instead. Default: 4. */
     uint16_t max_mesh_layouts;
 } nt_mesh_renderer_desc_t;
 
@@ -47,8 +57,6 @@ typedef struct {
     uint32_t index_count; /* 0 = non-indexed */
     uint32_t vertex_count;
     uint8_t supplied_slot;
-    uint8_t color_mode;     /* nt_color_mode_t */
-    uint8_t color_location; /* the instance color attribute, white for NT_COLOR_MODE_NONE */
 } nt_mesh_run_t;
 
 /* desc is required, non-NULL and borrowed for the duration of the call. */
@@ -65,9 +73,10 @@ void nt_mesh_renderer_restore_gpu(void);
  * the items array. */
 /* batch_key must come from each item's current material/mesh bindings; adjacent
  * equal keys merge into one run. items may be NULL only when count is 0; it is
- * borrowed for the call, and bindings may change after it returns. */
+ * borrowed for the call, and bindings may change after it returns. Every item
+ * needs transform and drawable components. */
 /* Resolves pipeline and vertex input per run (creating them on a cache miss),
- * packs world and color of drawable runs into one vertex frame storage allocation and
+ * packs world and drawable color of every instance into one vertex frame storage allocation and
  * writes the runs; returns their count. Runs whose program is not ready or
  * whose pipeline/vertex input failed are skipped. Writes no buffer.
  * Call at any point of the frame before the draws.

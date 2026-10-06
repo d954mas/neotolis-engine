@@ -21,6 +21,7 @@
 #include "resource/nt_resource.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "time/nt_time.h"
+#include "color/nt_color.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -132,7 +133,8 @@ static void capture_errors(nt_log_level_t level, const char *domain, const char 
 /* ---- Default identity matrix ---- */
 
 static const float s_identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-static const float s_white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+static const uint32_t s_white = 0xFFFFFFFFU;
+#define TEXT_VERTEX_BYTES 52U /* nt_text_vertex_t */
 
 static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
@@ -380,19 +382,33 @@ void test_measure_null_string(void) {
     TEST_ASSERT_TRUE(sz.height == 0.0F);
 }
 
-/* ---- Test 7: Vertex stride is 64 bytes (TEXT-01) ---- */
+/* The vertex carries the draw's packed color at byte 44 and the per-glyph depth bias at byte 48. */
+void test_vertex_color_and_depth_bias_bytes(void) {
+    nt_text_renderer_set_glyph_depth_bias(0.25F);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, NT_RGBA8(10, 20, 30, 40), 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_text_renderer_test_glyph_count());
+    const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
+    uint32_t color = 0;
+    float bias0 = -1.0F;
+    float bias1 = -1.0F;
+    memcpy(&color, v + 44U, sizeof color);
+    memcpy(&bias0, v + 48U, sizeof bias0);
+    memcpy(&bias1, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 48U, sizeof bias1);
+    TEST_ASSERT_EQUAL_HEX32(NT_RGBA8(10, 20, 30, 40), color);
+    TEST_ASSERT_TRUE(bias0 == 0.0F);  /* NOLINT -- exact */
+    TEST_ASSERT_TRUE(bias1 == 0.25F); /* NOLINT -- exact */
+    nt_text_renderer_set_glyph_depth_bias(0.0F);
+}
 
-void test_vertex_stride_64(void) {
-    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_text_renderer_test_glyph_count());
-
-    /* 4 vertices for one glyph, at 64 bytes stride */
-    const uint8_t *verts = (const uint8_t *)nt_text_renderer_test_vertices();
-    TEST_ASSERT_NOT_NULL(verts);
-
-    /* Vertex 0 and vertex 1 should be at offsets 0 and 64 */
-    /* They represent different quad corners, so position data differs */
-    TEST_ASSERT_FALSE(memcmp(verts, verts + 64, 64) == 0);
+/* The GPU reads that color as normalized RGBA8 at byte 44 of a 52-byte vertex. */
+void test_vertex_input_reads_color_as_normalized_rgba8(void) {
+    const nt_vertex_layout_t layout = nt_gfx_fake_last_vertex_input_layout();
+    TEST_ASSERT_EQUAL_UINT16(TEXT_VERTEX_BYTES, layout.stride);
+    TEST_ASSERT_EQUAL_UINT8(4U, layout.attrs[4].location);
+    TEST_ASSERT_EQUAL_INT(NT_VERTEX_UINT8, layout.attrs[4].type);
+    TEST_ASSERT_EQUAL_UINT8(4U, layout.attrs[4].count);
+    TEST_ASSERT_TRUE(layout.attrs[4].normalized);
+    TEST_ASSERT_EQUAL_UINT16(44U, layout.attrs[4].offset);
 }
 
 /* ---- Test 8: 4 vertices per glyph (TEXT-01) ---- */
@@ -440,7 +456,7 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         float tr[5];
         float bounds[4];
         memcpy(bl, verts, sizeof bl);
-        memcpy(tr, verts + ((size_t)2U * 64U), sizeof tr);
+        memcpy(tr, verts + ((size_t)2U * TEXT_VERTEX_BYTES), sizeof tr);
         memcpy(bounds, verts + 28U, sizeof bounds);
         TEST_ASSERT_TRUE(bl[0] <= -0.5F);
         TEST_ASSERT_TRUE(bl[1] <= (cases[i].rounded_bottom * 2.0F) - 0.5F);
@@ -513,8 +529,8 @@ void test_draw_newline_advances_to_next_line(void) {
     float second_y = 0.0F;
     memcpy(&first_x, verts + 0, sizeof(float));
     memcpy(&first_y, verts + 4, sizeof(float));
-    memcpy(&second_x, verts + ((size_t)4U * 64U), sizeof(float));
-    memcpy(&second_y, verts + ((size_t)4U * 64U) + 4U, sizeof(float));
+    memcpy(&second_x, verts + ((size_t)4U * TEXT_VERTEX_BYTES), sizeof(float));
+    memcpy(&second_y, verts + ((size_t)4U * TEXT_VERTEX_BYTES) + 4U, sizeof(float));
 
     TEST_ASSERT_TRUE(first_x == second_x);
     TEST_ASSERT_TRUE(second_y < first_y);
@@ -1018,9 +1034,9 @@ void test_draw_n_matches_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, draw_gcount);
 
     /* Snapshot vertex bytes — flush will zero the staging buffer counters next,
-     * so we copy out before reset. Stride is 64 bytes per nt_text_vertex_t. */
-    const size_t bytes_to_copy = (size_t)draw_vcount * 64U;
-    uint8_t buf_draw[8U * 64U];
+     * so we copy out before reset. Stride is TEXT_VERTEX_BYTES per nt_text_vertex_t. */
+    const size_t bytes_to_copy = (size_t)draw_vcount * TEXT_VERTEX_BYTES;
+    uint8_t buf_draw[8U * TEXT_VERTEX_BYTES];
     memcpy(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);
 
     /* Reset staging counters (no pipeline → flush warns + zeros counters). */
@@ -1045,7 +1061,7 @@ void test_draw_n_letter_spacing_advances_pen(void) {
     TEST_ASSERT_EQUAL_UINT32(8U, nt_text_renderer_test_vertex_count());
     const uint8_t *vraw = (const uint8_t *)nt_text_renderer_test_vertices();
     float base_b_x = 0.0F;
-    memcpy(&base_b_x, vraw + ((size_t)4U * 64U), sizeof(float));
+    memcpy(&base_b_x, vraw + ((size_t)4U * TEXT_VERTEX_BYTES), sizeof(float));
 
     nt_text_renderer_flush();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
@@ -1054,7 +1070,7 @@ void test_draw_n_letter_spacing_advances_pen(void) {
     nt_text_renderer_draw_n("AB", 2U, s_identity, 32.0F, s_white, 7.0F, 0.0F);
     const uint8_t *vspaced = (const uint8_t *)nt_text_renderer_test_vertices();
     float spaced_b_x = 0.0F;
-    memcpy(&spaced_b_x, vspaced + ((size_t)4U * 64U), sizeof(float));
+    memcpy(&spaced_b_x, vspaced + ((size_t)4U * TEXT_VERTEX_BYTES), sizeof(float));
 
     /* UNITY_EXCLUDE_FLOAT in this build: int-truncate to compare. */
     TEST_ASSERT_EQUAL_INT32((int32_t)(base_b_x + 7.0F), (int32_t)spaced_b_x);
@@ -1069,7 +1085,7 @@ void test_draw_n_line_leading_advances_pen_y(void) {
     const uint8_t *vraw = (const uint8_t *)nt_text_renderer_test_vertices();
     /* vertex 0 = A's first corner, vertex 4 = B's first corner. y is float[1]. */
     float base_b_y = 0.0F;
-    memcpy(&base_b_y, vraw + ((size_t)4U * 64U) + sizeof(float), sizeof(float));
+    memcpy(&base_b_y, vraw + ((size_t)4U * TEXT_VERTEX_BYTES) + sizeof(float), sizeof(float));
 
     nt_text_renderer_flush();
 
@@ -1077,7 +1093,7 @@ void test_draw_n_line_leading_advances_pen_y(void) {
     nt_text_renderer_draw_n("A\nB", 3U, s_identity, 32.0F, s_white, 0.0F, 10.0F);
     const uint8_t *vleading = (const uint8_t *)nt_text_renderer_test_vertices();
     float leading_b_y = 0.0F;
-    memcpy(&leading_b_y, vleading + ((size_t)4U * 64U) + sizeof(float), sizeof(float));
+    memcpy(&leading_b_y, vleading + ((size_t)4U * TEXT_VERTEX_BYTES) + sizeof(float), sizeof(float));
 
     /* B drew lower by exactly 10px (pen_y decreases by line_advance, which got +10). */
     TEST_ASSERT_EQUAL_INT32((int32_t)(base_b_y - 10.0F), (int32_t)leading_b_y);
@@ -1091,8 +1107,8 @@ void test_draw_n_does_not_over_read(void) {
     const uint32_t ref_vcount = nt_text_renderer_test_vertex_count();
     TEST_ASSERT_EQUAL_UINT32(8U, ref_vcount);
 
-    const size_t bytes_to_copy = (size_t)ref_vcount * 64U;
-    uint8_t buf_ref[8U * 64U];
+    const size_t bytes_to_copy = (size_t)ref_vcount * TEXT_VERTEX_BYTES;
+    uint8_t buf_ref[8U * TEXT_VERTEX_BYTES];
     memcpy(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
 
     nt_text_renderer_flush();
@@ -1245,7 +1261,7 @@ void test_oblique_leans_glyph_top(void) {
     float bl_x = 0.0F; /* vertex 0 = BL */
     float tl_x = 0.0F; /* vertex 3 = TL */
     memcpy(&bl_x, v + 0, sizeof(float));
-    memcpy(&tl_x, v + ((size_t)3U * 64U), sizeof(float));
+    memcpy(&tl_x, v + ((size_t)3U * TEXT_VERTEX_BYTES), sizeof(float));
     TEST_ASSERT_TRUE(bl_x == tl_x); /* upright: no shear -> top and bottom share x exactly */
 
     nt_text_renderer_flush();
@@ -1254,7 +1270,7 @@ void test_oblique_leans_glyph_top(void) {
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     v = (const uint8_t *)nt_text_renderer_test_vertices();
     memcpy(&bl_x, v + 0, sizeof(float));
-    memcpy(&tl_x, v + ((size_t)3U * 64U), sizeof(float));
+    memcpy(&tl_x, v + ((size_t)3U * TEXT_VERTEX_BYTES), sizeof(float));
     TEST_ASSERT_TRUE_MESSAGE(tl_x > bl_x + 1.0F, "oblique leans the glyph top toward +x");
 
     nt_text_renderer_set_oblique(0.0F); /* restore upright for test isolation */
@@ -1283,7 +1299,7 @@ void test_decoration_persists_across_restore(void) {
 #if NT_FONT_EMBOLDEN_ENABLED
     nt_text_renderer_set_weight(0.25F); /* exactly representable */
 #endif
-    const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
+    const uint32_t red = NT_RGBA8(255, 0, 0, 255);
 #if NT_FONT_EMBOLDEN_ENABLED
     nt_text_renderer_set_outline(0.5F, red);
 #endif
@@ -1295,13 +1311,14 @@ void test_decoration_persists_across_restore(void) {
     TEST_ASSERT_TRUE(nt_text_renderer_test_outline_width() == 0.5F);
 #endif
     TEST_ASSERT_TRUE(nt_text_renderer_test_shadow_dx() == 2.0F);
+    TEST_ASSERT_EQUAL_HEX32(red, nt_text_renderer_test_shadow_color());
     TEST_ASSERT_TRUE(nt_text_renderer_test_underline());
     nt_text_renderer_reset_decoration();
 }
 
 /* reset_decoration clears every axis (weight/outline/shadow/underline) AND oblique in one call. */
 void test_reset_decoration_clears_all(void) {
-    const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
+    const uint32_t red = NT_RGBA8(255, 0, 0, 255);
 #if NT_FONT_EMBOLDEN_ENABLED
     nt_text_renderer_set_weight(0.25F);
     nt_text_renderer_set_outline(0.5F, red);
@@ -1316,6 +1333,8 @@ void test_reset_decoration_clears_all(void) {
     TEST_ASSERT_TRUE(nt_text_renderer_test_weight() == 0.0F);
     TEST_ASSERT_TRUE(nt_text_renderer_test_outline_width() == 0.0F);
     TEST_ASSERT_TRUE(nt_text_renderer_test_shadow_dx() == 0.0F);
+    TEST_ASSERT_EQUAL_HEX32(0U, nt_text_renderer_test_shadow_color());
+    TEST_ASSERT_EQUAL_HEX32(0U, nt_text_renderer_test_outline_color());
     TEST_ASSERT_FALSE(nt_text_renderer_test_underline());
     TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
 }
@@ -1323,7 +1342,7 @@ void test_reset_decoration_clears_all(void) {
 /* Cold shutdown/init clears decoration state (test isolation; no leak across renderer reinit). */
 void test_decoration_resets_on_reinit(void) {
 #if NT_FONT_EMBOLDEN_ENABLED
-    const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
+    const uint32_t red = NT_RGBA8(255, 0, 0, 255);
     nt_text_renderer_set_weight(0.25F);
     nt_text_renderer_set_outline(0.5F, red);
 #endif
@@ -1337,7 +1356,7 @@ void test_decoration_resets_on_reinit(void) {
 
 /* ---- three-pass painter-order emit + sentinel decoration quad ---- */
 
-static const float s_black[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+static const uint32_t s_black = NT_RGBA8(0, 0, 0, 255);
 
 /* Outline adds a second draw span (fill + outline pass) → exactly 2× the fill-only vertex count. */
 #if NT_FONT_EMBOLDEN_ENABLED
@@ -1385,10 +1404,46 @@ void test_shadow_pass_offset(void) {
     float fill_y = 0.0F;
     memcpy(&shadow_x, v + 0, sizeof(float)); /* quad0 v0 = shadow */
     memcpy(&shadow_y, v + sizeof(float), sizeof(float));
-    memcpy(&fill_x, v + ((size_t)4U * 64U), sizeof(float)); /* quad1 v0 = fill */
-    memcpy(&fill_y, v + ((size_t)4U * 64U) + sizeof(float), sizeof(float));
+    memcpy(&fill_x, v + ((size_t)4U * TEXT_VERTEX_BYTES), sizeof(float)); /* quad1 v0 = fill */
+    memcpy(&fill_y, v + ((size_t)4U * TEXT_VERTEX_BYTES) + sizeof(float), sizeof(float));
     TEST_ASSERT_EQUAL_INT32(20, (int32_t)(shadow_x - fill_x));
     TEST_ASSERT_EQUAL_INT32(-10, (int32_t)(shadow_y - fill_y));
+    uint32_t shadow_color = 0;
+    uint32_t fill_color = 0;
+    memcpy(&shadow_color, v + 44U, sizeof shadow_color);
+    memcpy(&fill_color, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 44U, sizeof fill_color);
+    TEST_ASSERT_EQUAL_HEX32(s_black, shadow_color); /* each pass carries its own color */
+    TEST_ASSERT_EQUAL_HEX32(s_white, fill_color);
+    nt_text_renderer_reset_decoration();
+}
+
+#if NT_FONT_EMBOLDEN_ENABLED
+/* An outline color whose alpha byte is 0 is off, whatever its RGB or width. */
+void test_outline_with_zero_alpha_emits_no_pass(void) {
+    nt_text_renderer_set_outline(0.05F, 0x00FFFFFFU);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_vertex_count()); /* fill only */
+    nt_text_renderer_reset_decoration();
+}
+
+/* The shadow keeps the outline silhouette while the outline alpha fades to 0: the width picks it. */
+void test_zero_alpha_outline_keeps_the_shadow_on_the_outline_silhouette(void) {
+    nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, s_black);
+    nt_text_renderer_set_outline(0.05F, 0x00FFFFFFU);
+    nt_text_renderer_draw("A", s_identity, 200.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(8U, nt_text_renderer_test_vertex_count()); /* shadow + fill */
+    const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
+    /* Glyph data and bounds (bytes 20..43) name the cache variant: the shadow's is not the fill's. */
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(v + 20U, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 20U, 24U));
+    nt_text_renderer_reset_decoration();
+}
+#endif
+
+/* A shadow color whose alpha byte is 0 is off, whatever its RGB. */
+void test_shadow_with_zero_alpha_emits_no_pass(void) {
+    nt_text_renderer_set_shadow(2.0F, 2.0F, 0.0F, 0x00FFFFFFU);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_vertex_count()); /* fill only */
     nt_text_renderer_reset_decoration();
 }
 
@@ -1404,10 +1459,10 @@ void test_passes_grouped_not_interleaved(void) {
     float sh_b = 0.0F;
     float fl_a = 0.0F;
     float fl_b = 0.0F;
-    memcpy(&sh_a, v + ((size_t)0U * 4U * 64U), sizeof(float)); /* quad0 = shadow_A */
-    memcpy(&sh_b, v + ((size_t)1U * 4U * 64U), sizeof(float)); /* quad1 = shadow_B */
-    memcpy(&fl_a, v + ((size_t)2U * 4U * 64U), sizeof(float)); /* quad2 = fill_A */
-    memcpy(&fl_b, v + ((size_t)3U * 4U * 64U), sizeof(float)); /* quad3 = fill_B */
+    memcpy(&sh_a, v + ((size_t)0U * 4U * TEXT_VERTEX_BYTES), sizeof(float)); /* quad0 = shadow_A */
+    memcpy(&sh_b, v + ((size_t)1U * 4U * TEXT_VERTEX_BYTES), sizeof(float)); /* quad1 = shadow_B */
+    memcpy(&fl_a, v + ((size_t)2U * 4U * TEXT_VERTEX_BYTES), sizeof(float)); /* quad2 = fill_A */
+    memcpy(&fl_b, v + ((size_t)3U * 4U * TEXT_VERTEX_BYTES), sizeof(float)); /* quad3 = fill_B */
     TEST_ASSERT_EQUAL_INT32(20, (int32_t)(sh_a - fl_a));
     TEST_ASSERT_EQUAL_INT32(20, (int32_t)(sh_b - fl_b)); /* grouping: quad1 is shadow_B, not fill_A */
     nt_text_renderer_reset_decoration();
@@ -1424,7 +1479,7 @@ void test_underline_one_quad_per_segment(void) {
     const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
     uint32_t band_count = 0xFFFFFFFFU;
     /* vertex 8 (quad2 v0), glyph_data at byte offset 20, [1] at +4 = 24. */
-    memcpy(&band_count, v + ((size_t)8U * 64U) + 20U + 4U, sizeof(uint32_t));
+    memcpy(&band_count, v + ((size_t)8U * TEXT_VERTEX_BYTES) + 20U + 4U, sizeof(uint32_t));
     TEST_ASSERT_EQUAL_UINT32(0U, band_count);
     nt_text_renderer_reset_decoration();
 }
@@ -1457,7 +1512,7 @@ void test_reset_decoration_fill_only(void) {
 #if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
 void test_embolden_off_rejects_nonzero_before_drawing(void) {
     const float weights[] = {0.25F, -0.25F, 0x1p-20F, -0x1p-20F};
-    const float transparent[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+    const uint32_t transparent = 0U;
     for (uint32_t i = 0; i < sizeof weights / sizeof weights[0]; i++) {
         NT_TEST_EXPECT_ASSERT(nt_text_renderer_set_weight(weights[i]));
         TEST_ASSERT_TRUE(nt_text_renderer_test_weight() == 0.0F);
@@ -1490,7 +1545,8 @@ int main(void) {
     RUN_TEST(test_measure_returns_nonzero);
     RUN_TEST(test_measure_empty_string);
     RUN_TEST(test_measure_null_string);
-    RUN_TEST(test_vertex_stride_64);
+    RUN_TEST(test_vertex_color_and_depth_bias_bytes);
+    RUN_TEST(test_vertex_input_reads_color_as_normalized_rgba8);
     RUN_TEST(test_vertex_count_4_per_glyph);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
     RUN_TEST(test_text_material_with_textures_asserts_at_flush);
@@ -1534,6 +1590,11 @@ int main(void) {
 #endif
     RUN_TEST(test_shadow_emits_extra_span);
     RUN_TEST(test_shadow_pass_offset);
+    RUN_TEST(test_shadow_with_zero_alpha_emits_no_pass);
+#if NT_FONT_EMBOLDEN_ENABLED
+    RUN_TEST(test_outline_with_zero_alpha_emits_no_pass);
+    RUN_TEST(test_zero_alpha_outline_keeps_the_shadow_on_the_outline_silhouette);
+#endif
     RUN_TEST(test_passes_grouped_not_interleaved);
     RUN_TEST(test_underline_one_quad_per_segment);
     RUN_TEST(test_underline_quad_per_line);

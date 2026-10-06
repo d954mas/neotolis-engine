@@ -67,8 +67,8 @@ renderer_draw_sprite(...);
 Draw-phase calls are deferred. At the call, the front-end validates and updates
 its logical state and geometry counters, then records the
 backend-resolved arguments of the backend call into one command stream: begin
-and end pass, clear, pipeline, vertex-input and instance-buffer binds, vertex
-attribute defaults, texture-unit and uniform-buffer binds, the mat4, vec4, float
+and end pass, clear, pipeline, vertex-input and instance-buffer binds,
+texture-unit and uniform-buffer binds, the mat4, vec4, float
 and int uniform setters, scissor rectangle and enable, viewport, the plain and
 indexed draws (both carry an instance count; the indexed draw also carries the
 index type of the bound vertex input), and GPU timing
@@ -130,8 +130,8 @@ a global block registration at that slot or above asserts.
 The compare runs after the pass check; an equal value was validated when it was
 recorded and every path that could invalidate it clears the mirror. An invalid
 pipeline or vertex-input handle clears its mirror (the unbind); other invalid
-binds leave their mirrors unchanged. Uniform values and vertex attribute
-defaults are not deduplicated by the front-end. The GL backend keeps caches for
+binds leave their mirrors unchanged. Uniform values are not deduplicated by
+the front-end. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
@@ -328,9 +328,8 @@ unconditionally.
 
 The material-driven mesh, skinned mesh, sprite, and text renderer caches build the
 `nt_pipeline_desc_t` from the material's render state and key on its
-`nt_gfx_pipeline_key_t`. Layouts and `color_mode` live on vertex-input
-objects, so materials differing only in layout or color mode share one
-pipeline. The sprite renderer resolves the pipeline once per material change
+`nt_gfx_pipeline_key_t`. Layouts live on vertex-input objects, so materials
+differing only in layout share one pipeline. The sprite renderer resolves the pipeline once per material change
 inside a `draw_list` call, not once per run: runs also split per atlas page,
 and nothing can replace a material's program inside the call.
 
@@ -344,8 +343,8 @@ stream types, counts, offsets and stride are fixed, so entry identity packs only
 what varies: per stream a presence bit and the mapped location (mesh streams ×
 material attr_map — attr_map entries matching no stream do not split; a
 material mapping none of the streams derives an empty layout and takes the
-attribute-less gl_VertexID path) plus the color mode that selects the instance
-layout. The sprite renderer packs the attr_map count and every location the same
+attribute-less gl_VertexID path); each renderer has one fixed instance layout.
+The sprite renderer packs the attr_map count and every location the same
 way. Handles are revalidated on lookup because buffer destruction can invalidate
 cached versions. Exhausting a mesh's version row asserts, naming the knob —
 silent eviction would hide VAO re-creation thrash as an invisible perf
@@ -360,6 +359,34 @@ vertex input died (context loss) is recreated in place, so repeated losses
 cannot grow the cache. A miss creates the vertex input and caches it only on
 success; recoverable creation failures leave the cache unchanged so the next
 lookup retries.
+
+### Color
+
+A tint — a color that multiplies or replaces what a draw shows — is a packed
+`uint32_t` `0xAABBGGRR` everywhere in the engine API. It is straight alpha and
+reaches the GPU as normalized RGBA8 (vertices and instances alike). Literals use
+`NT_RGBA8(r, g, b, a)` with integer bytes 0..255; float color math lives in
+`engine/color/nt_color.h` and packs once at the end. Values are display
+(sRGB-encoded) colors; shaders use them without conversion. Values that are not
+a tint stay float: render-target clear colors, the blend constant color, material
+uniform params (where an unclamped or HDR tint belongs) and lighting. Clay's own
+declarations (`backgroundColor`, `border.color`, a raw `CLAY_TEXT` color) keep
+Clay's `Clay_Color` (0..255 floats); the UI walker packs them when it emits.
+Float math packs once per stage (an opacity fold, then an effect), so a chain of
+stages can differ from a single float product by one step per stage. Every
+float-to-byte conversion saturates and rounds half up (NaN gives 0), so an
+opacity fold gives the same alpha on a packed color and on a Clay color with the
+same byte values.
+
+Every mesh and skinned mesh instance carries the entity's drawable color
+(`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs
+a drawable component. A shader that ignores color does not declare the color
+input; the instance layout still provides it. Instance locations are reserved:
+4–7 for meshes (world rows, color) and 10–15 for skinned meshes (world rows,
+color, frame origins, alpha). A material attribute derived at one of them
+asserts when the vertex input is created; an attr_map entry that matches no
+mesh stream derives nothing and is not checked. The engine sets no generic
+(constant) vertex attribute value.
 
 ### Dynamic data lifetime
 
@@ -464,7 +491,7 @@ asserts.
 `prepare(items, count, runs, max_runs)` splits the items into runs of adjacent
 equal batch keys (the skinned renderer also splits on the deformation texture),
 resolves each run's pipeline and vertex input — creating them on a cache miss —
-packs the instance data of drawable runs into one vertex frame storage
+packs the instance data of every run into one vertex frame storage
 allocation, and writes `nt_mesh_run_t` values into game-owned storage. It writes
 no buffer and may run at any point of the frame before the draws. A run
 whose program is not ready, or whose pipeline or vertex input could not be
@@ -474,7 +501,7 @@ items; a smaller `max_runs` that runs out asserts.
 A run holds everything its draw needs: pipeline, vertex input, material, an
 optional supplied texture with its material slot (the skinned deformation
 texture), the frame storage offset, the instance count, the mesh's index and vertex
-counts, and the color mode with its attribute location. `draw(runs, run_count)`
+counts. `draw(runs, run_count)`
 executes runs in order through one executor shared by both renderers and binds
 only what changed. It never merges or reorders runs and reads no entity
 component. Consequences:

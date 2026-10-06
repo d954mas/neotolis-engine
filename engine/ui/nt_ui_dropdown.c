@@ -236,7 +236,7 @@ static nt_ui_interaction_t combo_emit_row_decl(nt_ui_context_t *ctx, uint8_t fil
 static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t row_id, uint32_t label_id, const char *label, const nt_atlas_region_ref_t *icon, bool selected,
                                  nt_ui_dropdown_style_t *style) {
     (void)combo_emit_row_decl(ctx, fill_layer, row_id, selected, style); /* opens the row element; the engine column follows */
-    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->row_text)};
+    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = style->row_text};
     {
         /* Icon gutter: reserve icon_size px so text stays aligned; draw the icon if its ref is set, else
          * leave the gutter empty (OS-menu icon-column behavior). icon_size==0 -> no gutter at all. */
@@ -294,7 +294,7 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
     nt_atlas_region_ref_t bg;
     const bool has_art = dropdown_resolve_bg(st, &style->trigger_idle, &bg);
 
-    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->trigger_text)};
+    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = style->trigger_text};
     /* combo_begin owns sizing (no caller decl): FIT(min=min_width) wide, a fixed control height. The list
      * anchors to this trigger's bottom edge, so a stable height keeps the open list placement predictable. */
     Clay_ElementDeclaration d = {.id = (Clay_ElementId){.id = id},

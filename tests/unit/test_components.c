@@ -1,3 +1,4 @@
+#include "color/nt_color.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "hash/nt_hash.h"
@@ -101,11 +102,14 @@ void test_drawable_add_defaults_visible(void) {
 void test_drawable_add_defaults_color(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
-    const float *col = nt_drawable_comp_color(e);
-    TEST_ASSERT_TRUE(col[0] == 1.0F); /* NOLINT */
-    TEST_ASSERT_TRUE(col[1] == 1.0F); /* NOLINT */
-    TEST_ASSERT_TRUE(col[2] == 1.0F); /* NOLINT */
-    TEST_ASSERT_TRUE(col[3] == 1.0F); /* NOLINT */
+    TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, nt_drawable_comp_color(e));
+}
+
+void test_drawable_set_color_stores_packed_rgba8(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_drawable_comp_add(e);
+    nt_drawable_comp_set_color(e, nt_color_pack((const float[4]){0.1F, 0.25F, 0.5F, 1.0F}));
+    TEST_ASSERT_EQUAL_HEX32(0xFF80401AU, nt_drawable_comp_color(e));
 }
 
 void test_drawable_set_visible_false(void) {
@@ -169,6 +173,7 @@ void test_swap_and_pop_drawable(void) {
 
     *nt_drawable_comp_tag(e1) = (nt_hash32_t){.value = 10};
     *nt_drawable_comp_tag(e3) = (nt_hash32_t){.value = 30};
+    nt_drawable_comp_set_color(e3, 0x11223344U);
 
     /* Remove middle entity's component */
     nt_drawable_comp_remove(e2);
@@ -180,6 +185,7 @@ void test_swap_and_pop_drawable(void) {
 
     TEST_ASSERT_EQUAL_UINT32(10, nt_drawable_comp_tag(e1)->value);
     TEST_ASSERT_EQUAL_UINT32(30, nt_drawable_comp_tag(e3)->value);
+    TEST_ASSERT_EQUAL_HEX32(0x11223344U, nt_drawable_comp_color(e3));
 }
 
 /* ---- Main ---- */
@@ -201,6 +207,7 @@ int main(void) {
     RUN_TEST(test_drawable_add_defaults_tag);
     RUN_TEST(test_drawable_add_defaults_visible);
     RUN_TEST(test_drawable_add_defaults_color);
+    RUN_TEST(test_drawable_set_color_stores_packed_rgba8);
     RUN_TEST(test_drawable_set_visible_false);
     RUN_TEST(test_drawable_set_visible_setter);
     RUN_TEST(test_drawable_set_tag);

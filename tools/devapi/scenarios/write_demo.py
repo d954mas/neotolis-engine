@@ -4,7 +4,7 @@
 Exercises entity.set end-to-end against a REAL running examples/devapi_host over loopback TCP — the
 layer only a live socket proves: the host seeds entities with transform/drawable, a bot reads their
 named-group shape, WRITES fields through the component apply() hooks (which maintain the engine
-invariants: transform dirty, drawable packed mirror, quaternion normalize), and reads the result back.
+invariants: transform dirty, drawable color packing, quaternion normalize), and reads the result back.
 Also covers the read named-group shape over the wire (the host previously had 0 entities, so that path
 was never socket-tested) and every bad_params path + batch whole-or-nothing atomicity.
 
@@ -143,7 +143,7 @@ def check_write_color_visible(client: DevApiClient) -> None:
     client.result("entity.set", {"id": eid, "component": "drawable", "field": "color", "value": [0.2, 0.4, 0.6, 1]})
     client.result("entity.set", {"id": eid, "component": "drawable", "field": "visible", "value": False})
     dr = _read_entity(client, eid)["drawable"]
-    assert _approx(dr["color"], [0.2, 0.4, 0.6, 1]), f"color read back as {dr['color']}"
+    assert _approx(dr["color"], [0.2, 0.4, 0.6, 1], tol=0.5 / 255), f"color read back as {dr['color']}"  # RGBA8 step
     assert dr["visible"] is False, f"visible read back as {dr['visible']!r}, expected False"
     print("PASS[4/6] entity.set color + visible landed over the wire.")
 

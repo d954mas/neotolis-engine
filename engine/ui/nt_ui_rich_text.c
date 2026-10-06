@@ -11,7 +11,7 @@
 
 #include "atlas/nt_atlas.h" /* inline-image region resolve + inverse-ppu (immediate emit) */
 #include "clay.h"
-#include "color/nt_color.h" /* nt_color_unpack/pack/parse_hex: shared packed<->float color math */
+#include "color/nt_color.h" /* nt_color_scale_alpha, nt_color_parse_hex: packed color math */
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -1932,16 +1932,8 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
 // #endregion
 
 // #region emit
-/* Unpack a packed AABBGGRR color into a normalized RGBA float4 (text renderer order), then fold
- * opacity into alpha. nt_color_unpack owns the packed->[0,1] math (R,G,B,A order matches); the
- * opacity multiply is rich-specific so this stays a thin wrapper. */
-static void rich_unpack_color(uint32_t abgr, float opacity, float out[4]) {
-    nt_color_unpack(abgr, out);
-    out[3] *= opacity;
-}
-
 /* Evaluate the per-atom effect -> visual-only transform; zero means identity. */
-static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, const float base_color[4]) {
+static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, uint32_t base_color) {
     if (s->effect_id == 0U) {
         return nt_ui_rich_fx_identity(base_color);
     }
@@ -1960,9 +1952,7 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
     const float baseline_y = box_y + s->y + s->asc; /* solved y is glyph-box top */
     float model[16];
     nt_ui_sprite_mat4(frame->world_mat4, box_x + s->x, baseline_y, 1.0F, 1.0F, model);
-    float color[4];
-    rich_unpack_color(s->color, frame->opacity, color);
-    nt_text_renderer_draw_n(st->text + s->text_off, s->text_len, model, s->size, color, 0.0F, 0.0F);
+    nt_text_renderer_draw_n(st->text + s->text_off, s->text_len, model, s->size, nt_color_scale_alpha(s->color, frame->opacity), 0.0F, 0.0F);
 #ifdef NT_TEST_ACCESS
     st->emit_span_count++;
 #endif
@@ -1974,8 +1964,7 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
  * Decoration is per-glyph here BY DESIGN: outline/shadow must ride each transformed glyph (a per-run pass
  * would detach from the moving glyphs); underline/strike follow the effect. */
 static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y) {
-    float base_color[4];
-    rich_unpack_color(s->color, frame->opacity, base_color);
+    const uint32_t base_color = nt_color_scale_alpha(s->color, frame->opacity);
     const uint32_t a0 = s->text_off; /* atom byte start: prefix measures are relative to it (kerning chain) */
     const uint32_t gend = s->text_off + s->text_len;
     uint32_t gi = s->text_off;
@@ -2030,8 +2019,7 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
         if (run->object_draw == NULL) {
             continue; /* measure-only object (box reserved, nothing drawn) */
         }
-        float base_color[4];
-        rich_unpack_color(s->color, frame->opacity, base_color);
+        const uint32_t base_color = nt_color_scale_alpha(s->color, frame->opacity);
         const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_color);
         if (!fx.visible) {
             continue; /* fade_in / typewriter: skip the draw_fn call entirely */
@@ -2065,8 +2053,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
         if (reg == NULL || reg->vertex_count == 0U) {
             continue; /* tombstoned region -> skip */
         }
-        float base_color[4];
-        rich_unpack_color(s->color, frame->opacity, base_color); /* fold parent opacity (no walker fold here) */
+        const uint32_t base_color = nt_color_scale_alpha(s->color, frame->opacity); /* fold parent opacity (no walker fold here) */
         const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_color);
         if (!fx.visible) {
             continue; /* fade_in / typewriter: skip the image entirely until its window opens */
@@ -2096,7 +2083,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
             nt_sprite_renderer_set_material(image_mat); /* bind ONCE: all images coalesce into one batch */
             bound = true;
         }
-        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, nt_color_pack(fx.color), 0U, NULL, 0U);
+        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, fx.color, 0U, NULL, 0U);
 #ifdef NT_TEST_ACCESS
         st->image_emit_count++;
 #endif
@@ -2112,22 +2099,16 @@ static void rich_apply_run_decoration(nt_ui_rich_state_t *st, const nt_ui_rich_s
 
     const nt_ui_rich_style_t *stl = &st->styles[st->runs[e->run_idx].style_idx];
     if (stl->outline_w > 0.0F && isfinite(stl->outline_w)) {
-        float oc[4];
-        rich_unpack_color(stl->outline_color_abgr, opacity, oc);
-        nt_text_renderer_set_outline(stl->outline_w, oc);
+        nt_text_renderer_set_outline(stl->outline_w, nt_color_scale_alpha(stl->outline_color_abgr, opacity));
     } else {
-        const float zero[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-        nt_text_renderer_set_outline(0.0F, zero);
+        nt_text_renderer_set_outline(0.0F, 0U);
     }
     if ((stl->shadow_color_abgr >> 24) != 0U) { /* alpha > 0 -> active */
-        float sc[4];
-        rich_unpack_color(stl->shadow_color_abgr, opacity, sc);
         const float sdx = isfinite(stl->shadow_dx) ? stl->shadow_dx : 0.0F;
         const float sdy = isfinite(stl->shadow_dy) ? stl->shadow_dy : 0.0F;
-        nt_text_renderer_set_shadow(sdx, sdy, 0.0F, sc);
+        nt_text_renderer_set_shadow(sdx, sdy, 0.0F, nt_color_scale_alpha(stl->shadow_color_abgr, opacity));
     } else {
-        const float zero[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-        nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, zero);
+        nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, 0U);
     }
     nt_text_renderer_set_underline((e->flags & NT_UI_RICH_RUN_UNDERLINE) != 0U);
     nt_text_renderer_set_strikethrough((e->flags & NT_UI_RICH_RUN_STRIKE) != 0U);

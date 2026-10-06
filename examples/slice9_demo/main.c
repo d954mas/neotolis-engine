@@ -7,6 +7,7 @@
 // #region includes
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -63,27 +64,27 @@ static const nt_ui_image_style_t g_panel_style = {
 static const nt_ui_label_style_t g_status_style = {
     .font_id = 0,
     .font_size = 16,
-    .color = {200.0F, 200.0F, 210.0F, 255.0F},
+    .color = NT_RGBA8(200, 200, 210, 255),
 };
 
 static const nt_ui_label_style_t g_title_style = {
     .font_id = 0,
     .font_size = 28,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
+    .color = NT_RGBA8(255, 255, 255, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
 static const nt_ui_label_style_t g_panel_label_style = {
     .font_id = 0,
     .font_size = 20,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
+    .color = NT_RGBA8(255, 255, 255, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
 static const nt_ui_label_style_t g_child_label_style = {
     .font_id = 0,
     .font_size = 18,
-    .color = {255.0F, 240.0F, 200.0F, 255.0F},
+    .color = NT_RGBA8(255, 240, 200, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 // #endregion
@@ -502,7 +503,7 @@ static void frame(void) {
             mat4 stats_model;
             glm_mat4_identity(stats_model);
             glm_translate(stats_model, (vec3){10.0F, scale.logical_h - 20.0F, 0.0F});
-            const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
+            const uint32_t stats_color = NT_RGBA8(204, 230, 204, 255);
             nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, 14.0F, stats_color);
             /* nt_debug_overlay_draw only stages text; flush before end_pass so the
              * overlay lands in THIS frame, not the next walk's flush. */

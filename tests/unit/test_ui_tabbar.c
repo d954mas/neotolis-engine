@@ -72,7 +72,7 @@ static int tabbar_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tab
 
 /* The begin/end CORE driven directly: the game owns the per-tab content (a single label child here). */
 static int tabbar_core_frame(const nt_pointer_t *p, int count, int *active, nt_ui_tabbar_style_t *st) {
-    static const nt_ui_label_style_t lbl = {.font_id = 0U, .font_size = 14.0F, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
+    static const nt_ui_label_style_t lbl = {.font_id = 0U, .font_size = 14.0F, .color = NT_RGBA8(255, 255, 255, 255)};
     int clicked = -1;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1);
     CLAY({.id = (Clay_ElementId){.id = 0x7AB0F0U},
@@ -100,7 +100,7 @@ static float tab_center_y(const nt_ui_tabbar_style_t *st, int i);
  * across tabs. Reproduces the DUPLICATE_ID (Clay type=4) regression headlessly (no GL). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void two_tabbars_with_content_frame(const ui_walker_fixture_t *fx, const nt_pointer_t *p) {
-    static const nt_ui_label_style_t lbl = {.font_id = 0U, .font_size = 14.0F, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
+    static const nt_ui_label_style_t lbl = {.font_id = 0U, .font_size = 14.0F, .color = NT_RGBA8(255, 255, 255, 255)};
     static const nt_ui_image_style_t img = {.color_packed = 0xFFFFFFFFU, .slice9_scale = 1.0F};
     /* One shared icon ref reused on every demo tab -- the showcase repeats the bunny icon across tabs. */
     nt_atlas_region_ref_t icon = nt_atlas_ref_idx(fx->atlas.handle, 0, fx->atlas.white_region_idx);

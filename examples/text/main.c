@@ -14,6 +14,7 @@
  */
 
 #include "app/nt_app.h"
+#include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "font/nt_font.h"
@@ -161,7 +162,7 @@ static void draw_text_scene(void) {
 
     /* Large "Hello Slug!" centered at Y=3.0, white */
     {
-        float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+        uint32_t white = NT_RGBA8(255, 255, 255, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-5.0F, 3.0F, 0.0F});
         nt_text_renderer_draw(TEXT_EN, (const float *)model, 2.0F, white, 0.0F, 0.0F);
@@ -169,7 +170,7 @@ static void draw_text_scene(void) {
 
     /* Medium Russian text at Y=1.0, light blue */
     {
-        float blue[4] = {0.6F, 0.8F, 1.0F, 1.0F};
+        uint32_t blue = NT_RGBA8(153, 204, 255, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-5.0F, 1.0F, 0.0F});
         nt_text_renderer_draw(TEXT_RU, (const float *)model, 1.5F, blue, 0.0F, 0.0F);
@@ -177,7 +178,7 @@ static void draw_text_scene(void) {
 
     /* Chinese text at Y=-1.0, light green */
     {
-        float green[4] = {0.6F, 1.0F, 0.6F, 1.0F};
+        uint32_t green = NT_RGBA8(153, 255, 153, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-3.0F, -1.0F, 0.0F});
         nt_text_renderer_draw(TEXT_CN, (const float *)model, 1.5F, green, 0.0F, 0.0F);
@@ -185,7 +186,7 @@ static void draw_text_scene(void) {
 
     /* Korean text at Y=-3.0, light yellow */
     {
-        float yellow[4] = {1.0F, 1.0F, 0.6F, 1.0F};
+        uint32_t yellow = NT_RGBA8(255, 255, 153, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-4.0F, -3.0F, 0.0F});
         nt_text_renderer_draw(TEXT_KR, (const float *)model, 1.5F, yellow, 0.0F, 0.0F);
@@ -193,7 +194,7 @@ static void draw_text_scene(void) {
 
     /* Small size reference at bottom */
     {
-        float gray[4] = {0.7F, 0.7F, 0.7F, 1.0F};
+        uint32_t gray = NT_RGBA8(179, 179, 179, 255);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-8.0F, -5.5F, 0.0F});

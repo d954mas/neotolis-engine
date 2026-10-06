@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdlib.h>
 
+#include "color/nt_color.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "hash/nt_hash.h"
@@ -280,8 +281,18 @@ void test_is_visible_not_visible(void) {
 void test_is_visible_zero_alpha(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
-    nt_drawable_comp_set_alpha(e, 0.0F);
+    nt_drawable_comp_set_color(e, 0x00FFFFFFU);
     TEST_ASSERT_FALSE(nt_render_is_visible(e));
+}
+
+/* Visibility reads the stored alpha byte: alpha that packs to 0 (below 1/510) hides the entity. */
+void test_is_visible_alpha_byte_threshold(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_drawable_comp_add(e);
+    nt_drawable_comp_set_color(e, 0x00FFFFFFU); /* RGB does not count */
+    TEST_ASSERT_FALSE(nt_render_is_visible(e));
+    nt_drawable_comp_set_color(e, 0x01000000U);
+    TEST_ASSERT_TRUE(nt_render_is_visible(e));
 }
 
 void test_is_visible_valid(void) {
@@ -345,6 +356,7 @@ int main(void) {
     RUN_TEST(test_is_visible_no_drawable);
     RUN_TEST(test_is_visible_not_visible);
     RUN_TEST(test_is_visible_zero_alpha);
+    RUN_TEST(test_is_visible_alpha_byte_threshold);
     RUN_TEST(test_is_visible_valid);
     /* Drawable tag migration */
     RUN_TEST(test_drawable_tag_default_hash);

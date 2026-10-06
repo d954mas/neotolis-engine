@@ -159,10 +159,9 @@ static void cb_emit_box(const cb_emit_args_t *e) {
 /* gap spacer + the label text child. Per-cell text_color overrides text_base. */
 static void cb_emit_text(const cb_emit_args_t *e) {
     nt_ui_label_style_t text_style = e->style->text_base;
-    /* Literal unpack (text has no image "untinted" rescue): 0xFFFFFFFF = white; the
-     * "inherit text_base" sentinel is text_color==0, guarded here. */
+    /* text_color 0 = inherit text_base; 0xFFFFFFFF is literal white (text has no "untinted" sentinel). */
     if (e->cell->text_color != 0U) {
-        text_style.color = nt_ui_unpack_abgr(e->cell->text_color);
+        text_style.color = e->cell->text_color;
     }
     /* Label draws on its own layer; no transform/opacity of its own (whole-widget
      * opacity inherits from the row; scale stays on the indicator unless scale_label). */
@@ -409,7 +408,7 @@ nt_ui_checkbox_style_t nt_ui_checkbox_style_defaults(void) {
         s.checked[i] = cell;
         s.mixed[i] = cell;
     }
-    s.text_base = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
+    s.text_base = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = NT_RGBA8(255, 255, 255, 255)};
     s.box_w = 32.0F;
     s.box_h = 32.0F;
     s.overlay_w = 24.0F;

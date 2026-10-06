@@ -4,6 +4,7 @@
    entity.list pagination + total, resource.list packs/assets) and every bad_params path. */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -346,6 +347,7 @@ static void test_entity_list_total_and_fields(void) {
     pa[1] = 2.0F;
     pa[2] = 3.0F;
     TEST_ASSERT_TRUE(nt_drawable_comp_add(b));
+    nt_drawable_comp_set_color(b, 0xFF80401AU);
 
     cJSON *root = parse_ok(nt_devapi_submit("{\"method\":\"entity.list\"}"));
     cJSON *r = result_of(root);
@@ -381,7 +383,13 @@ static void test_entity_list_total_and_fields(void) {
     cJSON *dr = cJSON_GetObjectItemCaseSensitive(e1, "drawable");
     TEST_ASSERT_TRUE(cJSON_IsObject(dr));
     TEST_ASSERT_TRUE(cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(dr, "visible")));
-    TEST_ASSERT_TRUE(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(dr, "color")));
+    /* The packed color reads back as [0,1] channels in R,G,B,A order. */
+    const cJSON *color = cJSON_GetObjectItemCaseSensitive(dr, "color");
+    TEST_ASSERT_TRUE(cJSON_IsArray(color));
+    const uint32_t bytes[4] = {0x1AU, 0x40U, 0x80U, 0xFFU};
+    for (int k = 0; k < 4; k++) {
+        TEST_ASSERT_TRUE(fabs(cJSON_GetArrayItem(color, k)->valuedouble - ((double)bytes[k] / 255.0)) < 1e-6);
+    }
     TEST_ASSERT_NULL(cJSON_GetObjectItemCaseSensitive(e1, "transform"));
     cJSON_Delete(root);
 }

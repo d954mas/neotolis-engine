@@ -45,7 +45,7 @@ def main():
         if index == 0:
             assert values == [1.0, 1.0], values
         elif index == 1:
-            assert values == [5.75, 6.0], values
+            assert values == [5.75196075, 6.00196075], values
         else:
             assert values[0] != values[1], (target, values)
         if wasm:

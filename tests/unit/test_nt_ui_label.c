@@ -28,7 +28,7 @@ static ui_walker_fixture_t s_fx;
 
 /* Shared style for happy-path tests: font_id=0 (stub_font), size=14, red. */
 static const nt_ui_label_style_t s_style_body = {
-    .font_id = 0, .font_size = 14, .color = {255.0F, 0.0F, 0.0F, 255.0F},
+    .font_id = 0, .font_size = 14, .color = NT_RGBA8(255, 0, 0, 255),
     /* wrap_mode = 0 = CLAY_TEXT_WRAP_WORDS, align = 0 = CLAY_TEXT_ALIGN_LEFT */
 };
 
@@ -87,7 +87,7 @@ static void test_label_out_of_range_font_asserts(void) {
     static const nt_ui_label_style_t bad = {
         .font_id = NT_UI_MAX_FONTS,
         .font_size = 14,
-        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .color = NT_RGBA8(255, 255, 255, 255),
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -100,7 +100,7 @@ static void test_label_unbound_font_asserts(void) {
     static const nt_ui_label_style_t bad = {
         .font_id = 3,
         .font_size = 14,
-        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .color = NT_RGBA8(255, 255, 255, 255),
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -113,7 +113,7 @@ static void test_label_zero_font_size_asserts(void) {
     static const nt_ui_label_style_t bad = {
         .font_id = 0,
         .font_size = 0,
-        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .color = NT_RGBA8(255, 255, 255, 255),
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -130,7 +130,7 @@ static void test_label_zero_init_wraps_words_left(void) {
     static const nt_ui_label_style_t s = {
         .font_id = 0,
         .font_size = 14,
-        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .color = NT_RGBA8(255, 255, 255, 255),
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -148,7 +148,7 @@ static void test_label_zero_init_wraps_words_left(void) {
  * align are layout-only fields not surfaced post-layout. */
 static void test_label_full_field_passthrough(void) {
     static const nt_ui_label_style_t s = {
-        .font_id = 0, .font_size = 16, .color = {128.0F, 64.0F, 32.0F, 200.0F}, .line_height = 24, .letter_tracking = 4,
+        .font_id = 0, .font_size = 16, .color = NT_RGBA8(128, 64, 32, 200), .line_height = 24, .letter_tracking = 4,
         /* wrap_mode + align left zero-init (WORDS + LEFT). */
     };
     nt_pointer_t mouse = {0};
@@ -176,7 +176,7 @@ static void test_label_full_field_passthrough(void) {
  * goes out of scope (else find_first_text_cmd would walk freed memory). */
 static void test_label_per_call_override(void) {
     nt_ui_label_style_t s = s_style_body; /* copy static const */
-    s.color = (Clay_Color){32.0F, 200.0F, 64.0F, 255.0F};
+    s.color = NT_RGBA8(32, 200, 64, 255);
 
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -284,7 +284,7 @@ static void test_label_decoration_wires_and_resets_setters(void) {
     static const nt_ui_label_style_t s = {
         .font_id = 0,
         .font_size = 16,
-        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .color = NT_RGBA8(255, 255, 255, 255),
         .variant = NT_UI_LABEL_VARIANT_BOLD | NT_UI_LABEL_VARIANT_UNDERLINE,
         .outline_w = 2.0F,
         .outline_color = 0xFF0000FFU,
@@ -314,24 +314,24 @@ static void test_label_deco_folds_parent_opacity(void) {
     nt_ui_label_deco_t d = {0};
 #if NT_FONT_EMBOLDEN_ENABLED
     d.outline_w = 0.06F;
-    d.outline_color = 0xFFFFFFFFU; /* opaque white (AABBGGRR): alpha 1.0 */
+    d.outline_color = 0x80665544U;
 #endif
     d.shadow_dx = 0.1F;
     d.shadow_dy = 0.1F;
-    d.shadow_color = 0xFFFFFFFFU; /* alpha > 0 -> shadow active */
+    d.shadow_color = 0x80332211U; /* alpha > 0 -> shadow active */
 
-    /* Float asserts are excluded in this suite; compare alpha*100 as int (0.5 -> 50, 1.0 -> 100). */
+    /* Opacity multiplies the existing alpha (0x80 * 0.5 = 0x40); RGB bytes stay in place. */
     nt_ui_label_deco_apply(&d, 0.5F); /* half-faded parent */
 #if NT_FONT_EMBOLDEN_ENABLED
-    TEST_ASSERT_EQUAL_INT(50, (int)((nt_text_renderer_test_outline_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_HEX32(0x40665544U, nt_text_renderer_test_outline_color());
 #endif
-    TEST_ASSERT_EQUAL_INT(50, (int)((nt_text_renderer_test_shadow_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_HEX32(0x40332211U, nt_text_renderer_test_shadow_color());
 
     nt_ui_label_deco_apply(&d, 1.0F); /* opaque parent leaves alpha untouched */
 #if NT_FONT_EMBOLDEN_ENABLED
-    TEST_ASSERT_EQUAL_INT(100, (int)((nt_text_renderer_test_outline_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_HEX32(0x80665544U, nt_text_renderer_test_outline_color());
 #endif
-    TEST_ASSERT_EQUAL_INT(100, (int)((nt_text_renderer_test_shadow_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_HEX32(0x80332211U, nt_text_renderer_test_shadow_color());
     nt_text_renderer_reset_decoration();
 }
 
@@ -345,7 +345,7 @@ static void test_label_decoration_applies_to_wrapped_lines(void) {
     static const nt_ui_label_style_t s = {
         .font_id = 0,
         .font_size = 16,
-        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .color = NT_RGBA8(255, 255, 255, 255),
         .variant = NT_UI_LABEL_VARIANT_UNDERLINE | (NT_FONT_EMBOLDEN_ENABLED ? NT_UI_LABEL_VARIANT_BOLD : 0U),
     };
     nt_pointer_t mouse = {0};
@@ -377,7 +377,7 @@ static void test_label_decoration_preserves_element_data(void) {
     static const nt_ui_label_style_t s = {
         .font_id = 0,
         .font_size = 14,
-        .color = {255.0F, 255.0F, 255.0F, 255.0F},
+        .color = NT_RGBA8(255, 255, 255, 255),
         .variant = NT_UI_LABEL_VARIANT_UNDERLINE | (NT_FONT_EMBOLDEN_ENABLED ? NT_UI_LABEL_VARIANT_BOLD : 0U),
     };
     nt_pointer_t mouse = {0};

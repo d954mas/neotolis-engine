@@ -16,6 +16,7 @@
 
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -224,7 +225,7 @@ static void init_bunny_entity(uint32_t i) {
     nt_sprite_comp_add(s_entities[i]);
 
     *nt_material_comp_handle(s_entities[i]) = s_sprite_material;
-    nt_drawable_comp_set_color(s_entities[i], 1.0F, 1.0F, 1.0F, 1.0F);
+    nt_drawable_comp_set_color(s_entities[i], 0xFFFFFFFFU);
 
     float *scale = nt_transform_comp_scale(s_entities[i]);
     scale[0] = 1.0F;
@@ -483,7 +484,7 @@ static void frame(void) {
         mat4 overlay_model;
         glm_mat4_identity(overlay_model);
         glm_translate(overlay_model, (vec3){10.0F, h - overlay_size - 4.0F, 0.0F});
-        const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+        const uint32_t white = NT_RGBA8(255, 255, 255, 255);
 
         char overlay[768];
         uint32_t written = nt_debug_overlay_format_lines(overlay, sizeof(overlay));

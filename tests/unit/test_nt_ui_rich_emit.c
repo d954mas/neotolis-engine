@@ -13,6 +13,7 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
+#include "color/nt_color.h"
 #include "font/nt_font.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
@@ -48,6 +49,9 @@ void setUp(void) {
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool approx(float a, float b) { return fabsf(a - b) < 1e-3F; }
+/* Channel k of a packed 0xAABBGGRR color as [0,1]; approx8 allows the RGBA8 quantization. */
+static float ch(uint32_t c, uint32_t k) { return (float)((c >> (8U * k)) & 0xFFU) / 255.0F; }
+static bool approx8(float a, float b) { return fabsf(a - b) <= (0.5F / 255.0F) + 1e-4F; }
 
 /* Mirror nt_ui_rich_fx.c's rich_fx_clamp01 so the glow params asserts predict the clamped factor. */
 static float rich_fx_clamp01_ref(float v) {
@@ -737,7 +741,7 @@ static void test_inline_image_valign_y(void) {
 /* (9) the stock wave fn returns the deterministic offset.y == A*sin(t*SPEED + idx*PHASE).
  * Tests the fn ABI directly (headless, no walk) -- the contract the emit path folds in. */
 static void test_fx_wave_deterministic(void) {
-    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    uint32_t base_color = NT_RGBA8(255, 255, 255, 255);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     const float t = 0.25F;
@@ -755,17 +759,20 @@ static void test_fx_wave_deterministic(void) {
 /* fade_in returns alpha 0 + visible=false before its window opens; alpha ramps after. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- visibility asserts + params duration override
 static void test_fx_fade_in_visibility(void) {
-    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    uint32_t base_color = NT_RGBA8(255, 255, 255, 255);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     /* atom 0 at time 0: window just opening -> alpha 0 -> not visible. */
     const nt_ui_rich_fx_result_t r0 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 0.0F, false, NULL);
     TEST_ASSERT_FALSE_MESSAGE(r0.visible, "fade_in at t=0 alpha 0 -> atom skipped");
-    TEST_ASSERT_TRUE_MESSAGE(approx(r0.color[3], 0.0F), "fade_in alpha 0 at t=0");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r0.color, 3U), 0.0F), "fade_in alpha 0 at t=0");
     /* later: fully faded in -> visible, alpha 1. */
     const nt_ui_rich_fx_result_t r1 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 1.0F, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(r1.visible, "fade_in fully open -> visible");
-    TEST_ASSERT_TRUE_MESSAGE(approx(r1.color[3], 1.0F), "fade_in alpha 1 when fully open");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r1.color, 3U), 1.0F), "fade_in alpha 1 when fully open");
+    /* Visibility follows the reveal, not the fill alpha: a transparent fill may still carry a shadow. */
+    const nt_ui_rich_fx_result_t clear = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, 0x00FFFFFFU, 1.0F, false, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(clear.visible, "fade_in transparent fill fully open -> visible");
 
     /* PARAMS override: speed = reveal rate (1/sec) -> per-atom duration dur = 1/speed. speed=10 -> a
      * fast 0.1s fade; pick a mid-window time so the ramp is partial (not clamped) and pins 1/speed. */
@@ -775,7 +782,7 @@ static void test_fx_fade_in_visibility(void) {
     const float dur_p = 1.0F / 10.0F;
     const float a_p = (tp - ((float)idx * FX_FADE_STAGGER)) / dur_p;
     const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_fade_in(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, tp, false, &p);
-    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[3], base_color[3] * a_p), "fade_in tuned alpha == base * (t - idx*STAGGER)/(1/speed)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(tuned.color, 3U), ch(base_color, 3U) * a_p), "fade_in tuned alpha == base * (t - idx*STAGGER)/(1/speed)");
     TEST_ASSERT_TRUE_MESSAGE(tuned.visible, "fade_in tuned mid-ramp is visible");
     /* The default duration (FX_FADE_DUR) would give a DIFFERENT alpha at the same time -> override took effect. */
     const float a_def = (tp - ((float)idx * FX_FADE_STAGGER)) / FX_FADE_DUR;
@@ -827,7 +834,7 @@ static void fx_hue_rgb(float hue, float out_rgb[3]) {
  * float->unsigned step quantize goes through a signed intermediate so countdown clocks don't UB). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- deterministic + bounded asserts + params override
 static void test_fx_shake_deterministic(void) {
-    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    uint32_t base_color = NT_RGBA8(255, 255, 255, 255);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     const float t = 0.25F;
@@ -861,7 +868,7 @@ static void test_fx_shake_deterministic(void) {
  * are reachable). The .c quantizes through a signed intermediate so there is no out-of-range
  * float->unsigned conversion UB; the result must equal the same signed-quantize formula. */
 static void test_fx_shake_negative_time_defined(void) {
-    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    uint32_t base_color = NT_RGBA8(255, 255, 255, 255);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     const float tn = -0.25F;
@@ -878,7 +885,7 @@ static void test_fx_shake_negative_time_defined(void) {
 /* (9c) rainbow REPLACES rgb with the hue curve (absolute tint) and keeps base alpha. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-channel hue asserts + params speed override
 static void test_fx_rainbow_deterministic(void) {
-    const float base_color[4] = {0.2F, 0.4F, 0.6F, 0.8F};
+    uint32_t base_color = NT_RGBA8(51, 102, 153, 204);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     const float t = 0.5F;
@@ -888,10 +895,10 @@ static void test_fx_rainbow_deterministic(void) {
     fx_hue_rgb(hue, rgb);
 
     const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_rainbow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
-    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[0], rgb[0]), "rainbow r == hue(idx*PHASE + t*SPEED)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[1], rgb[1]), "rainbow g == hue curve");
-    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[2], rgb[2]), "rainbow b == hue curve");
-    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[3], 0.8F), "rainbow keeps the base alpha (REPLACES rgb only)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 0U), rgb[0]), "rainbow r == hue(idx*PHASE + t*SPEED)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 1U), rgb[1]), "rainbow g == hue curve");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 2U), rgb[2]), "rainbow b == hue curve");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 3U), 0.8F), "rainbow keeps the base alpha (REPLACES rgb only)");
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "rainbow keeps the atom visible");
 
     /* PARAMS override: speed = hue turns/sec tunes the cycle (amp has no axis here -> ignored). */
@@ -900,13 +907,13 @@ static void test_fx_rainbow_deterministic(void) {
     float rgb_p[3];
     fx_hue_rgb(hue_p, rgb_p);
     const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_rainbow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
-    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[0], rgb_p[0]) && approx(tuned.color[1], rgb_p[1]) && approx(tuned.color[2], rgb_p[2]), "rainbow tuned == hue(idx*PHASE + t*speed)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[3], 0.8F), "rainbow tuned keeps the base alpha");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(tuned.color, 0U), rgb_p[0]) && approx8(ch(tuned.color, 1U), rgb_p[1]) && approx8(ch(tuned.color, 2U), rgb_p[2]), "rainbow tuned == hue(idx*PHASE + t*speed)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(tuned.color, 3U), 0.8F), "rainbow tuned keeps the base alpha");
 }
 
 /* (9d) pulse breathes scale = 1 + AMP*sin(t*SPEED), within [1-AMP, 1+AMP], no tint/offset. */
 static void test_fx_pulse_deterministic(void) {
-    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    uint32_t base_color = NT_RGBA8(255, 255, 255, 255);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     const float t = 0.3F;
@@ -927,7 +934,7 @@ static void test_fx_pulse_deterministic(void) {
 /* (9e) bounce hops always-upward (offset_y <= 0), bounded by AMP, with the closed-form
  * -AMP*|sin(t*SPEED + idx*PHASE)|; an amp/speed override produces the same formula tuned. */
 static void test_fx_bounce_deterministic(void) {
-    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    uint32_t base_color = NT_RGBA8(255, 255, 255, 255);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     const float t = 0.25F;
@@ -952,21 +959,19 @@ static void test_fx_bounce_deterministic(void) {
  * tunes the same lerp. Visual-only (no offset). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- per-channel brighten asserts + params override
 static void test_fx_glow_deterministic(void) {
-    const float base_color[4] = {0.2F, 0.4F, 0.6F, 0.8F};
+    uint32_t base_color = NT_RGBA8(51, 102, 153, 204);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     const float t = 0.5F;
     const uint32_t idx = 2U;
     const float g = FX_GLOW_AMP * (0.5F + (0.5F * sinf(t * FX_GLOW_SPEED)));
-    const float er = base_color[0] + ((1.0F - base_color[0]) * g);
+    const float er = ch(base_color, 0U) + ((1.0F - ch(base_color, 0U)) * g);
 
     const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
-    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[0], er), "glow r == base + (1-base)*amp*(0.5+0.5*sin)");
-    TEST_ASSERT_TRUE_MESSAGE(r.color[0] >= base_color[0] - 1e-3F, "glow brightens r (>= base)");
-    TEST_ASSERT_TRUE_MESSAGE(r.color[1] >= base_color[1] - 1e-3F, "glow brightens g (>= base)");
-    TEST_ASSERT_TRUE_MESSAGE(r.color[2] >= base_color[2] - 1e-3F, "glow brightens b (>= base)");
-    TEST_ASSERT_TRUE_MESSAGE(r.color[0] <= 1.0F + 1e-3F && r.color[1] <= 1.0F + 1e-3F && r.color[2] <= 1.0F + 1e-3F, "glow bounded by white");
-    TEST_ASSERT_TRUE_MESSAGE(approx(r.color[3], 0.8F), "glow keeps the base alpha (color-only)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 0U), er), "glow r == base + (1-base)*amp*(0.5+0.5*sin)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 1U), ch(base_color, 1U) + ((1.0F - ch(base_color, 1U)) * g)), "glow g == base + (1-base)*g (channel kept in place)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 2U), ch(base_color, 2U) + ((1.0F - ch(base_color, 2U)) * g)), "glow b == base + (1-base)*g (channel kept in place)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 3U), 0.8F), "glow keeps the base alpha (color-only)");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F) && approx(r.offset_y, 0.0F), "glow has no offset (visual-only color)");
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "glow keeps the atom visible");
 
@@ -974,7 +979,7 @@ static void test_fx_glow_deterministic(void) {
     nt_ui_rich_fx_params_t p = {.amp = 1.0F, .speed = 2.0F};
     const nt_ui_rich_fx_result_t tuned = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &p);
     const float gt = 1.0F * (0.5F + (0.5F * sinf(t * 2.0F)));
-    TEST_ASSERT_TRUE_MESSAGE(approx(tuned.color[0], base_color[0] + ((1.0F - base_color[0]) * gt)), "glow tuned r matches amp/speed override");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(tuned.color, 0U), ch(base_color, 0U) + ((1.0F - ch(base_color, 0U)) * gt)), "glow tuned r matches amp/speed override");
 
     /* PARAMS amp > 1: the brighten factor clamps at 1 so rgb stays bounded by white (not over-driven).
      * speed<=0 selects the DEFAULT speed (FX_GLOW_SPEED), so the real factor is amp*(0.5+0.5*sin(t*SPEED)),
@@ -982,14 +987,13 @@ static void test_fx_glow_deterministic(void) {
     nt_ui_rich_fx_params_t over = {.amp = 2.0F, .speed = 0.0F};
     const nt_ui_rich_fx_result_t big = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &over);
     const float g_over = rich_fx_clamp01_ref(2.0F * (0.5F + (0.5F * sinf(t * FX_GLOW_SPEED))));
-    TEST_ASSERT_TRUE_MESSAGE(big.color[0] <= 1.0F + 1e-3F && big.color[1] <= 1.0F + 1e-3F && big.color[2] <= 1.0F + 1e-3F, "glow amp>1 stays bounded by white (clamp01)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(big.color[0], base_color[0] + ((1.0F - base_color[0]) * g_over)), "glow amp>1 matches the real clamped formula (speed<=0 -> default speed)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(big.color, 0U), ch(base_color, 0U) + ((1.0F - ch(base_color, 0U)) * g_over)), "glow amp>1 matches the real clamped formula (speed<=0 -> default speed)");
 }
 
 /* (9g) sway shifts horizontally within [-AMP, AMP] via AMP*sin(t*SPEED + idx*PHASE); no y/tint.
  * An amp/speed override tunes the same curve. */
 static void test_fx_sway_deterministic(void) {
-    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    uint32_t base_color = NT_RGBA8(255, 255, 255, 255);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     const float t = 0.25F;
@@ -1012,7 +1016,7 @@ static void test_fx_sway_deterministic(void) {
 /* (10) PARAMS: a tuned amp/speed produces a DIFFERENT curve than the default, and NULL params is
  * byte-identical to the default (the plain push_effect path). Tests the stock fn ABI directly. */
 static void test_fx_params_override_vs_default(void) {
-    const float base_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    uint32_t base_color = NT_RGBA8(255, 255, 255, 255);
     const float xy[2] = {0.0F, 0.0F};
     const float wh[2] = {10.0F, 16.0F};
     const float t = 0.25F;
@@ -1520,7 +1524,7 @@ static void test_link_hover_honors_block_transform(void) {
 static uint32_t s_obj_measure_calls;
 static uint32_t s_obj_draw_calls;
 static float s_obj_draw_x, s_obj_draw_y, s_obj_draw_w, s_obj_draw_h;
-static float s_obj_draw_color[4];
+static uint32_t s_obj_draw_color;
 static float s_obj_draw_world[16];
 
 static nt_ui_rich_object_measure_t stub_measure(void *user_data) {
@@ -1529,7 +1533,7 @@ static nt_ui_rich_object_measure_t stub_measure(void *user_data) {
     return (nt_ui_rich_object_measure_t){.width = OBJ_W, .height = OBJ_H, .ascent = OBJ_H};
 }
 
-static void stub_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void stub_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
     TEST_ASSERT_NOT_NULL(world_mat4); /* engine always passes the frame's layout->world matrix */
     s_obj_draw_calls++;
@@ -1537,7 +1541,7 @@ static void stub_draw(void *user_data, float x, float y, float w, float h, const
     s_obj_draw_y = y;
     s_obj_draw_w = w;
     s_obj_draw_h = h;
-    memcpy(s_obj_draw_color, color, sizeof s_obj_draw_color);
+    s_obj_draw_color = color;
     memcpy(s_obj_draw_world, world_mat4, sizeof s_obj_draw_world);
 }
 
@@ -1610,7 +1614,7 @@ static void test_object_draw_receives_resolved_color(void) {
     s_fx.ctx->rich_session_open = false;
     s_obj_measure_calls = 0;
     s_obj_draw_calls = 0;
-    memset(s_obj_draw_color, 0, sizeof s_obj_draw_color);
+    s_obj_draw_color = 0U;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
@@ -1634,11 +1638,11 @@ static void test_object_draw_receives_resolved_color(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_obj_draw_calls, "object drew once");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_color[0], 1.0F), "object color.r == 255/255 (<color> rgb)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_color[1], 128.0F / 255.0F), "object color.g == 128/255 (<color> rgb)");
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_color[2], 0.0F), "object color.b == 0/255 (<color> rgb)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(s_obj_draw_color, 0U), 1.0F), "object color.r == 255/255 (<color> rgb)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(s_obj_draw_color, 1U), 128.0F / 255.0F), "object color.g == 128/255 (<color> rgb)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(s_obj_draw_color, 2U), 0.0F), "object color.b == 0/255 (<color> rgb)");
     /* alpha = base alpha (1.0) * parent opacity (0.5) -- the same fold the TEXT path uses. */
-    TEST_ASSERT_TRUE_MESSAGE(approx(s_obj_draw_color[3], block_opacity), "object color.a == base_alpha * parent_opacity (opacity folded like TEXT)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(s_obj_draw_color, 3U), block_opacity), "object color.a == base_alpha * parent_opacity (opacity folded like TEXT)");
 }
 
 /* (15d) END-TO-END markup path: register an OBJECT tag, then drive the FULL public pipeline via
@@ -1680,7 +1684,7 @@ static void test_object_markup_reaches_draw_fn(void) {
  * with two objects can compare the matrix each receives (proves every emit shares one matrix). */
 static float s_obj2_draw_world[16];
 static uint32_t s_obj2_draw_calls;
-static void stub_draw2(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void stub_draw2(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
     (void)x;
     (void)y;
@@ -1943,7 +1947,7 @@ typedef struct {
 static uint32_t s_custom_fx_calls;
 static void *s_custom_fx_seen_user; /* the user_data the fn actually received at emit */
 
-static nt_ui_rich_fx_result_t custom_fx_param(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+static nt_ui_rich_fx_result_t custom_fx_param(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                               void *user_data) {
     (void)atom_idx;
     (void)kind;
@@ -1962,9 +1966,7 @@ static nt_ui_rich_fx_result_t custom_fx_param(uint32_t atom_idx, nt_rich_atom_ki
         r.offset_x = FX_CUSTOM_NULL_OFF_X;
         r.offset_y = FX_CUSTOM_NULL_OFF_Y;
     }
-    r.color[0] = 1.0F; /* distinctive magenta tint */
-    r.color[1] = 0.0F;
-    r.color[2] = 1.0F;
+    r.color = (r.color & 0xFF000000U) | 0x00FF00FFU; /* distinctive magenta tint */
     return r;
 }
 
@@ -2120,7 +2122,7 @@ static void test_default_layers_by_kind(void) {
  * image emitted AND was drained -> image_emit_count == 1 and staged sprite count == 0 (image landed under it). */
 static uint32_t s_order_img_at_object_draw;
 static uint32_t s_order_sprite_staged_at_object_draw;
-static void order_recording_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void order_recording_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
     (void)x;
     (void)y;
@@ -2453,7 +2455,7 @@ static void test_late_effect_preserves_plain_text_runs(void) {
 static nt_ui_rich_fx_params_t s_seen_tuned_params[NT_UI_RICH_MAX_CUSTOM_FX + 1U];
 static uint32_t s_seen_tuned_count;
 
-static nt_ui_rich_fx_result_t capture_tuned_params(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+static nt_ui_rich_fx_result_t capture_tuned_params(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                                    void *user_data) {
     (void)atom_idx;
     (void)kind;

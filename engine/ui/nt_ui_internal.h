@@ -96,16 +96,18 @@ static inline void nt_ui_sprite_mat4(const float world[16], float ox, float oy, 
     }
 }
 
+/* Clay colors are byte scale, so each byte converts exactly (no /255 round trip). */
 static inline Clay_Color nt_ui_unpack_abgr(uint32_t packed) {
-    float rgba[4];
-    nt_color_unpack(packed, rgba);
     return (Clay_Color){
-        .r = rgba[0] * 255.0F,
-        .g = rgba[1] * 255.0F,
-        .b = rgba[2] * 255.0F,
-        .a = rgba[3] * 255.0F,
+        .r = (float)(packed & 0xFFU),
+        .g = (float)((packed >> 8) & 0xFFU),
+        .b = (float)((packed >> 16) & 0xFFU),
+        .a = (float)(packed >> 24),
     };
 }
+
+/* Clay_Color -> 0xAABBGGRR: Clay's floats are already byte scale (0..255, unclamped), so each rounds straight to a byte. */
+static inline uint32_t nt_ui_pack_clay(Clay_Color c) { return nt_color_round_u8(c.r) | (nt_color_round_u8(c.g) << 8) | (nt_color_round_u8(c.b) << 16) | (nt_color_round_u8(c.a) << 24); }
 
 /* 0xAABBGGRR -> Clay_Color with the IMAGE "no tint" sentinel: 0xFFFFFFFF -> {0}
  * (the walker maps a {0,0,0,0} backgroundColor back to white). Text must NOT use this. */

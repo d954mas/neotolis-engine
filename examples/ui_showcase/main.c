@@ -3,6 +3,7 @@
 // #region includes
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -87,23 +88,23 @@ struct nt_ui_context;
 // #endregion
 
 // #region palette label styles (vary by palette)
-static const nt_ui_label_style_t g_h1_dark = {.font_id = 0, .font_size = 40, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
-static const nt_ui_label_style_t g_body_dark = {.font_id = 0, .font_size = 22, .color = {225.0F, 228.0F, 235.0F, 255.0F}};
-static const nt_ui_label_style_t g_caption_dark = {.font_id = 0, .font_size = 16, .color = {165.0F, 170.0F, 182.0F, 255.0F}};
+static const nt_ui_label_style_t g_h1_dark = {.font_id = 0, .font_size = 40, .color = NT_RGBA8(255, 255, 255, 255)};
+static const nt_ui_label_style_t g_body_dark = {.font_id = 0, .font_size = 22, .color = NT_RGBA8(225, 228, 235, 255)};
+static const nt_ui_label_style_t g_caption_dark = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(165, 170, 182, 255)};
 /* Title in the header (smaller than the per-tab h1) + selected tab-row label (near-white pop). */
-static const nt_ui_label_style_t g_title_dark = {.font_id = 0, .font_size = 26, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
-static const nt_ui_label_style_t g_row_sel_dark = {.font_id = 0, .font_size = 16, .color = {245.0F, 247.0F, 252.0F, 255.0F}};
+static const nt_ui_label_style_t g_title_dark = {.font_id = 0, .font_size = 26, .color = NT_RGBA8(255, 255, 255, 255)};
+static const nt_ui_label_style_t g_row_sel_dark = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(245, 247, 252, 255)};
 /* Source-link line: dimmer + distinct from body/caption so it reads as a reference, not copy. */
-static const nt_ui_label_style_t g_link_dark = {.font_id = 0, .font_size = 14, .color = {110.0F, 150.0F, 200.0F, 255.0F}};
+static const nt_ui_label_style_t g_link_dark = {.font_id = 0, .font_size = 14, .color = NT_RGBA8(110, 150, 200, 255)};
 
-static const nt_ui_label_style_t g_h1_light = {.font_id = 0, .font_size = 40, .color = {18.0F, 18.0F, 24.0F, 255.0F}};
-static const nt_ui_label_style_t g_body_light = {.font_id = 0, .font_size = 22, .color = {28.0F, 30.0F, 38.0F, 255.0F}};
-static const nt_ui_label_style_t g_caption_light = {.font_id = 0, .font_size = 16, .color = {90.0F, 92.0F, 104.0F, 255.0F}};
-static const nt_ui_label_style_t g_title_light = {.font_id = 0, .font_size = 26, .color = {18.0F, 18.0F, 24.0F, 255.0F}};
-static const nt_ui_label_style_t g_row_sel_light = {.font_id = 0, .font_size = 16, .color = {12.0F, 28.0F, 56.0F, 255.0F}};
-static const nt_ui_label_style_t g_link_light = {.font_id = 0, .font_size = 14, .color = {56.0F, 100.0F, 170.0F, 255.0F}};
+static const nt_ui_label_style_t g_h1_light = {.font_id = 0, .font_size = 40, .color = NT_RGBA8(18, 18, 24, 255)};
+static const nt_ui_label_style_t g_body_light = {.font_id = 0, .font_size = 22, .color = NT_RGBA8(28, 30, 38, 255)};
+static const nt_ui_label_style_t g_caption_light = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(90, 92, 104, 255)};
+static const nt_ui_label_style_t g_title_light = {.font_id = 0, .font_size = 26, .color = NT_RGBA8(18, 18, 24, 255)};
+static const nt_ui_label_style_t g_row_sel_light = {.font_id = 0, .font_size = 16, .color = NT_RGBA8(12, 28, 56, 255)};
+static const nt_ui_label_style_t g_link_light = {.font_id = 0, .font_size = 14, .color = NT_RGBA8(56, 100, 170, 255)};
 /* Segment-button label: small + bright so multi-char text fits the narrow segment buttons (body 22 spills). */
-static const nt_ui_label_style_t g_seg_label = {.font_id = 0, .font_size = 14, .color = {245.0F, 247.0F, 252.0F, 255.0F}};
+static const nt_ui_label_style_t g_seg_label = {.font_id = 0, .font_size = 14, .color = NT_RGBA8(245, 247, 252, 255)};
 // #endregion
 
 // #region palette widget styles (filled with late-bound atlas refs at init)
@@ -780,7 +781,7 @@ static void init_styles(void) {
     check_base.overlay_h = 26;
     check_base.gap = 14;
     check_base.value_speed = 22.0F;
-    check_base.text_base = (nt_ui_label_style_t){.font_id = 0, .font_size = 22, .color = {220.0F, 223.0F, 230.0F, 255.0F}};
+    check_base.text_base = (nt_ui_label_style_t){.font_id = 0, .font_size = 22, .color = NT_RGBA8(220, 223, 230, 255)};
     check_base.unchecked[NT_UI_CB_IDLE].box = box;
     check_base.checked[NT_UI_CB_IDLE].box = box;
     check_base.checked[NT_UI_CB_IDLE].check = check;
@@ -798,7 +799,7 @@ static void init_styles(void) {
     check_base.mixed[NT_UI_CB_DISABLED].opacity = 0.4F;
     s_check_dark = check_base;
     s_check_light = check_base;
-    s_check_light.text_base.color = (Clay_Color){30.0F, 32.0F, 40.0F, 255.0F};
+    s_check_light.text_base.color = NT_RGBA8(30, 32, 40, 255);
 
     /* ---- Radio: ring + dot. ---- */
     nt_ui_checkbox_style_t radio_base = check_base;
@@ -814,7 +815,7 @@ static void init_styles(void) {
     radio_base.checked[NT_UI_CB_IDLE].check_tint = 0xFF6CC0F0;
     s_radio_dark = radio_base;
     s_radio_light = radio_base;
-    s_radio_light.text_base.color = (Clay_Color){30.0F, 32.0F, 40.0F, 255.0F};
+    s_radio_light.text_base.color = NT_RGBA8(30, 32, 40, 255);
 
     /* ---- Toggle: track recolors off/on; thumb slides. ---- */
     nt_ui_checkbox_style_t switch_base = check_base;
@@ -833,7 +834,7 @@ static void init_styles(void) {
     switch_base.checked[NT_UI_CB_IDLE].check_tint = 0xFFFFFFFF;
     s_switch_dark = switch_base;
     s_switch_light = switch_base;
-    s_switch_light.text_base.color = (Clay_Color){30.0F, 32.0F, 40.0F, 255.0F};
+    s_switch_light.text_base.color = NT_RGBA8(30, 32, 40, 255);
 
     /* ---- Slider: track + smooth fill + thumb. ---- */
     nt_ui_slider_style_t slider_base = nt_ui_slider_style_defaults();
@@ -938,16 +939,16 @@ static void init_styles(void) {
     nt_ui_input_style_t input_base = nt_ui_input_style_defaults();
     input_base.text.font_id = 0;
     input_base.text.font_size = 22.0F;
-    input_base.text.color = (Clay_Color){225.0F, 228.0F, 235.0F, 255.0F};
+    input_base.text.color = NT_RGBA8(225, 228, 235, 255);
     input_base.placeholder.font_id = 0;
     input_base.placeholder.font_size = 22.0F;
     input_base.pad_x = 10.0F;
     input_base.pad_y = 8.0F;
     s_input_dark = input_base;
-    s_input_dark.placeholder.color = (Clay_Color){120.0F, 126.0F, 138.0F, 255.0F}; /* dimmed vs the bright text */
+    s_input_dark.placeholder.color = NT_RGBA8(120, 126, 138, 255); /* dimmed vs the bright text */
     s_input_light = input_base;
-    s_input_light.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
-    s_input_light.placeholder.color = (Clay_Color){150.0F, 154.0F, 162.0F, 255.0F}; /* dimmed grey on the light bg */
+    s_input_light.text.color = NT_RGBA8(28, 30, 38, 255);
+    s_input_light.placeholder.color = NT_RGBA8(150, 154, 162, 255); /* dimmed grey on the light bg */
     s_input_light.skin[NT_UI_INPUT_IDLE].bg_color = 0xFFF0F0F0U;
     s_input_light.skin[NT_UI_INPUT_FOCUSED].bg_color = 0xFFFFFFFFU;
     s_input_light.skin[NT_UI_INPUT_DISABLED] = (nt_ui_input_skin_t){.bg_color = 0xFFD8D8D8U, .border_color = 0xFFB0B0B0U}; /* light-theme greyed */
@@ -977,8 +978,8 @@ static void init_styles(void) {
      * the field shows three distinct frame arts (skin[]) on interaction. bg_color stays 0 (untinted) so
      * each frame draws its natural color; the frames are light enough that the dark text reads. */
     s_input_art = input_base;
-    s_input_art.text.color = (Clay_Color){28.0F, 30.0F, 38.0F, 255.0F};
-    s_input_art.placeholder.color = (Clay_Color){90.0F, 80.0F, 70.0F, 255.0F};
+    s_input_art.text.color = NT_RGBA8(28, 30, 38, 255);
+    s_input_art.placeholder.color = NT_RGBA8(90, 80, 70, 255);
     s_input_art.caret_color = 0xFF202020U;
     /* bg_color stays 0 (untinted); each state shows a distinct frame sprite. */
     s_input_art.skin[NT_UI_INPUT_IDLE] = (nt_ui_input_skin_t){.bg_art = s_panel_beige_ref};
@@ -1870,15 +1871,6 @@ static void render_events(nt_ui_context_t *ctx, tab_state_t *st) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — four side-by-side demos, not deep nesting
 /* HSV(h,1,1) -> 0xAABBGGRR. The dense grid colors each radial per-widget through this
  * (standard sprite color rides v_color), so many distinct colors still batch to one draw. */
-/* Pack a Clay_Color (0..255 floats) into 0xAABBGGRR, the convention rich-text color_abgr expects. */
-static uint32_t showcase_pack_clay_abgr(Clay_Color c) {
-    const uint32_t r = (uint32_t)(c.r + 0.5F);
-    const uint32_t g = (uint32_t)(c.g + 0.5F);
-    const uint32_t b = (uint32_t)(c.b + 0.5F);
-    const uint32_t a = (uint32_t)(c.a + 0.5F);
-    return (a << 24) | (b << 16) | (g << 8) | r;
-}
-
 static uint32_t showcase_hue_abgr(float h) {
     const float x = h * 6.0F;
     const int i = (int)x;
@@ -2110,7 +2102,7 @@ static const rich_fade_params_t s_rich_fade_params = {.speed = 2.2F, .min_alpha 
 /* A LOOPING opacity fade (the stock fade_in is one-shot -> it freezes on the gallery's continuous
  * clock). atom_idx-INDEPENDENT: atom_idx here is the GLOBAL block index, so a per-glyph stagger
  * would push this late word past its window and blank it (that staggered reveal is the typewriter). */
-static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                              void *user_data) {
     (void)atom_idx;
     (void)kind;
@@ -2122,14 +2114,14 @@ static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kin
     const float min_a = (p != NULL) ? p->min_alpha : 0.15F;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     const float a = min_a + ((1.0F - min_a) * (0.5F + (0.5F * sinf(time * speed))));
-    r.color[3] = base_color[3] * a; /* a >= min_a, so visible stays true (identity) */
+    r.color = nt_color_scale_alpha(base_color, a); /* a >= min_a, so visible stays true (identity) */
     return r;
 }
 
 /* Visual-only horizontal nudge for the z-layer demo: inline images have no offset_x, but the demo needs a
  * REAL same-line overlap (the image atom sits AFTER the word in the flow). Slides the image left by
  * *user_data px so it lands on the preceding word; the layer then decides which is drawn on top. */
-static nt_ui_rich_fx_result_t rich_fx_pull_left(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+static nt_ui_rich_fx_result_t rich_fx_pull_left(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                                 void *user_data) {
     (void)atom_idx;
     (void)kind;
@@ -2160,15 +2152,7 @@ typedef struct {
 } rich_obj_demo_t;
 static rich_obj_demo_t s_rich_obj_demo;
 
-/* draw_fn receives RGBA in 0..1 (the resolved <color> + folded opacity + fx tint). Pack to 0xAABBGGRR. */
-static uint32_t rich_obj_pack_color(const float color[4]) {
-    const uint32_t r = (uint32_t)((color[0] * 255.0F) + 0.5F);
-    const uint32_t g = (uint32_t)((color[1] * 255.0F) + 0.5F);
-    const uint32_t b = (uint32_t)((color[2] * 255.0F) + 0.5F);
-    const uint32_t a = (uint32_t)((color[3] * 255.0F) + 0.5F);
-    return (a << 24) | (b << 16) | (g << 8) | r;
-}
-
+/* draw_fn receives the packed 0xAABBGGRR tint (the resolved <color> + folded opacity + fx tint). */
 #define RICH_OBJ_BAR_W 160.0F
 #define RICH_OBJ_BAR_H 14.0F
 #define RICH_OBJ_SPIN 24.0F
@@ -2178,16 +2162,15 @@ static nt_ui_rich_object_measure_t rich_obj_bar_measure(void *user_data) {
     (void)user_data;
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_BAR_W, .height = RICH_OBJ_BAR_H, .ascent = 11.0F};
 }
-static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     /* emit_custom dirtied the sprite bind cache before this rich emit -> rebind every call. */
     nt_sprite_renderer_set_material(d->material);
     const float t = (d->clock != NULL) ? *d->clock : 0.0F;
     const float progress = 0.5F + (0.5F * sinf(t * 1.5F)); /* loops 0..1 */
-    const uint32_t value_col = rich_obj_pack_color(color);
+    const uint32_t value_col = color;
     /* Track: same color at ~25% alpha so it tints/fades with the text. */
-    float track[4] = {color[0], color[1], color[2], color[3] * 0.25F};
-    const uint32_t track_col = rich_obj_pack_color(track);
+    const uint32_t track_col = nt_color_scale_alpha(color, 0.25F);
     const float track_pos[4][2] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
     const float fill_w = w * progress;
     const float fill_pos[4][2] = {{x, y}, {x + fill_w, y}, {x + fill_w, y + h}, {x, y + h}};
@@ -2205,7 +2188,7 @@ static nt_ui_rich_object_measure_t rich_obj_spin_measure(void *user_data) {
     (void)user_data;
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SPIN, .height = RICH_OBJ_SPIN, .ascent = 18.0F};
 }
-static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     nt_sprite_renderer_set_material(d->material);
     const float t = (d->clock != NULL) ? *d->clock : 0.0F;
@@ -2225,7 +2208,7 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
         pos[i][1] = cy + (dx[i] * sn) + (dy[i] * cs);
     }
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color), NULL, 0U);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, color, NULL, 0U);
 }
 
 /* Perspective cube remapped into the box's NDC sub-rect (no glViewport/scissor touch); the walker's
@@ -2236,7 +2219,7 @@ static nt_ui_rich_object_measure_t rich_obj_cube_measure(void *user_data) {
     /* Square box; ascent ~0.6*h centres the cube on the text line (not floating high above it). */
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_CUBE, .height = RICH_OBJ_CUBE, .ascent = 40.0F};
 }
-static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     if (w <= 0.0F || h <= 0.0F) {
         return;
@@ -2317,7 +2300,7 @@ static void rich_obj_text_model(const float world[16], float ox, float oy, float
         out[12 + r] = (ox * world[r]) + (oy * world[4 + r]) + world[12 + r];
     }
 }
-static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
     (void)w;
     (void)h;
@@ -2393,7 +2376,7 @@ static nt_ui_rich_style_t rich_base_style(void) {
     for (uint32_t i = 0; i < 4U; i++) {
         base.font_id[i] = s_rich_font[i]; /* R/B/I/BI -> real DejaVu faces */
     }
-    base.color_abgr = showcase_pack_clay_abgr(g_current->body->color);
+    base.color_abgr = g_current->body->color;
     /* image_material/text_material left 0: rich defaults them from ctx (nt_ui_set_sprite_material /
      * nt_ui_set_text_material). Set a field only to override the material for THIS block. */
     base.default_atlas = nt_atlas_ref(s_atlas_handle, 0U); /* base atlas for <img=name/> by-name resolve */
@@ -3304,7 +3287,7 @@ static void render_tabs(nt_ui_context_t *ctx, tab_state_t *st) {
  * the "frame" segment and GL_TIME_ELAPSED queries can't nest. */
 static void render_stress(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
-    static const nt_ui_label_style_t stress_label = {.font_id = 0, .font_size = 14, .color = {200.0F, 210.0F, 220.0F, 255.0F}};
+    static const nt_ui_label_style_t stress_label = {.font_id = 0, .font_size = 14, .color = NT_RGBA8(200, 210, 220, 255)};
 
     nt_metrics_frame_t last;
     nt_metrics_last(&last);
@@ -3888,7 +3871,7 @@ static void frame(void) {
             mat4 stats_model;
             glm_mat4_identity(stats_model);
             glm_translate(stats_model, (vec3){scale.logical_w - 170.0F, 92.0F, 0.0F});
-            const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
+            const uint32_t stats_color = NT_RGBA8(204, 230, 204, 255);
             nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
             nt_text_renderer_flush();
         }

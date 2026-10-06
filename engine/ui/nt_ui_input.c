@@ -1250,8 +1250,8 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
 nt_ui_input_style_t nt_ui_input_style_defaults(void) {
     nt_ui_input_style_t s;
     memset(&s, 0, sizeof s); /* memset, not = {0}: emscripten -Werror rejects {0} on aggregate-first */
-    s.text = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = {255.0F, 255.0F, 255.0F, 255.0F}};
-    s.placeholder = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = {128.0F, 128.0F, 128.0F, 255.0F}};
+    s.text = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = NT_RGBA8(255, 255, 255, 255)};
+    s.placeholder = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = NT_RGBA8(128, 128, 128, 255)};
     s.skin[NT_UI_INPUT_IDLE] = (nt_ui_input_skin_t){.bg_color = 0xFF202020U, .border_color = 0xFF505050U};
     s.skin[NT_UI_INPUT_FOCUSED] = (nt_ui_input_skin_t){.bg_color = 0xFF303030U, .border_color = 0xFF80B0E0U};
     s.skin[NT_UI_INPUT_DISABLED] = (nt_ui_input_skin_t){.bg_color = 0xFF181818U, .border_color = 0xFF383838U}; /* dimmer than idle */

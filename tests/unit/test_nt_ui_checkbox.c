@@ -47,7 +47,7 @@ static nt_ui_checkbox_style_t s_style;
 static const nt_ui_label_style_t s_label_style = {
     .font_id = 0,
     .font_size = 14,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
+    .color = NT_RGBA8(255, 255, 255, 255),
 };
 
 static void init_style(void) {
@@ -330,18 +330,37 @@ static void test_text_color_override(void) {
     TEST_ASSERT_EQUAL_INT32(51, (int32_t)c.b);  /* 0x33 */
     TEST_ASSERT_EQUAL_INT32(255, (int32_t)c.a); /* 0xFF */
 
-    /* text_color 0 -> inherit text_base.color (white). */
-    s_style.checked[NT_UI_CB_IDLE].text_color = 0U;
+    /* text_color 0 -> inherit text_base.color (a non-white base, so inherit is not a white fallback). */
+    s_style.text_base.color = NT_RGBA8(10, 20, 30, 200);
+    for (int state = NT_UI_CB_IDLE; state <= NT_UI_CB_DISABLED; ++state) {
+        s_style.checked[state].text_color = 0U; /* whichever state the pointer leaves the row in */
+    }
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);
     text = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT);
     TEST_ASSERT_NOT_NULL(text);
     c = text->renderData.text.textColor;
-    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.r, (int32_t)c.r);
-    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.g, (int32_t)c.g);
-    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.b, (int32_t)c.b);
-    TEST_ASSERT_EQUAL_INT32((int32_t)s_style.text_base.color.a, (int32_t)c.a);
+    TEST_ASSERT_EQUAL_INT32(10, (int32_t)c.r);
+    TEST_ASSERT_EQUAL_INT32(20, (int32_t)c.g);
+    TEST_ASSERT_EQUAL_INT32(30, (int32_t)c.b);
+    TEST_ASSERT_EQUAL_INT32(200, (int32_t)c.a);
+
+    /* 0xFFFFFFFF is literal white, not an "untinted" sentinel. Every state: the pointer at (0,0) now
+     * hovers the laid-out row. */
+    for (int state = NT_UI_CB_IDLE; state <= NT_UI_CB_DISABLED; ++state) {
+        s_style.checked[state].text_color = 0xFFFFFFFFU;
+    }
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
+    nt_ui_end(s_fx.ctx);
+    text = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_TEXT);
+    TEST_ASSERT_NOT_NULL(text);
+    c = text->renderData.text.textColor;
+    TEST_ASSERT_EQUAL_INT32(255, (int32_t)c.r);
+    TEST_ASSERT_EQUAL_INT32(255, (int32_t)c.g);
+    TEST_ASSERT_EQUAL_INT32(255, (int32_t)c.b);
+    TEST_ASSERT_EQUAL_INT32(255, (int32_t)c.a);
 }
 
 /* ---- Test: nt_ui_checkbox_style_defaults() is a valid baseline that renders. ---- */

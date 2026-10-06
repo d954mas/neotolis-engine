@@ -253,8 +253,6 @@ static void test_scissor_and_viewport_require_an_open_pass(void) {
 
 static void test_bindings_require_an_open_pass(void) {
     nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 256});
-    NT_TEST_EXPECT_ASSERT(nt_gfx_set_vertex_attrib_default(0, 0.0F, 0.0F, 0.0F, 1.0F));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "set_vertex_attrib_default: must be called inside a pass"));
     NT_TEST_EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, 0));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "bind_uniform_buffer: must be called inside a pass"));
     NT_TEST_EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 256));
@@ -272,7 +270,6 @@ static void test_draw_state_in_a_pass_on_a_lost_context_does_not_assert(void) {
     nt_gfx_set_scissor(0, 0, 1, 1);
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_set_viewport(0, 0, 1, 1);
-    nt_gfx_set_vertex_attrib_default(0, 0.0F, 0.0F, 0.0F, 1.0F);
     nt_gfx_bind_uniform_buffer(ubo, 0);
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
     nt_gfx_end_pass();

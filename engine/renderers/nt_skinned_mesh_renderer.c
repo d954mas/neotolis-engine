@@ -17,10 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NT_SKINNED_INSTANCE_STRIDE_NONE 60
-#define NT_SKINNED_INSTANCE_STRIDE_RGBA8 64
-#define NT_SKINNED_INSTANCE_STRIDE_FLOAT4 76
-
 static struct {
     nt_renderer_pipeline_entry_t *pipelines;
     uint16_t max_pipelines;
@@ -32,50 +28,19 @@ static struct {
 } s_skinned;
 
 /* clang-format off */
-static const nt_vertex_layout_t s_instance_layouts[3] = {
-    [NT_COLOR_MODE_NONE] = {
-        .attr_count = 5,
-        .stride = NT_SKINNED_INSTANCE_STRIDE_NONE,
-        .attrs = {
-            {.location = 10, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
-            {.location = 11, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
-            {.location = 12, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-            {.location = 14, .type = NT_VERTEX_UINT16, .count = 4, .offset = 48},
-            {.location = 15, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 56},
-        },
-    },
-    [NT_COLOR_MODE_RGBA8] = {
-        .attr_count = 6,
-        .stride = NT_SKINNED_INSTANCE_STRIDE_RGBA8,
-        .attrs = {
-            {.location = 10, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
-            {.location = 11, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
-            {.location = 12, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-            {.location = 14, .type = NT_VERTEX_UINT16, .count = 4, .offset = 48},
-            {.location = 15, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 56},
-            {.location = 13, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 60},
-        },
-    },
-    [NT_COLOR_MODE_FLOAT4] = {
-        .attr_count = 6,
-        .stride = NT_SKINNED_INSTANCE_STRIDE_FLOAT4,
-        .attrs = {
-            {.location = 10, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
-            {.location = 11, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
-            {.location = 12, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-            {.location = 14, .type = NT_VERTEX_UINT16, .count = 4, .offset = 48},
-            {.location = 15, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 56},
-            {.location = 13, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 60},
-        },
+static const nt_vertex_layout_t s_instance_layout = {
+    .attr_count = 6,
+    .stride = sizeof(nt_skinned_mesh_instance_t),
+    .attrs = {
+        {.location = 10, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
+        {.location = 11, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
+        {.location = 12, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
+        {.location = 14, .type = NT_VERTEX_UINT16, .count = 4, .offset = offsetof(nt_skinned_mesh_instance_t, skin_origins)},
+        {.location = 15, .type = NT_VERTEX_FLOAT, .count = 1, .offset = offsetof(nt_skinned_mesh_instance_t, skin_alpha)},
+        {.location = 13, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_skinned_mesh_instance_t, color)},
     },
 };
 /* clang-format on */
-
-static void pack_skin_binding(uint8_t *dst, const nt_deformation_binding_t *binding) {
-    uint16_t origins[4] = {binding->x0, binding->y0, binding->x1, binding->y1};
-    memcpy(dst, origins, sizeof(origins));
-    memcpy(dst + sizeof(origins), &binding->alpha, sizeof(binding->alpha));
-}
 
 static bool run_compatible(const nt_render_item_t *items, uint32_t leader, uint32_t candidate, uint32_t texture_id) {
     if (items[candidate].batch_key != items[leader].batch_key) {
@@ -190,7 +155,6 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
         const nt_material_info_t *material = nt_material_get_info(material_handle);
         const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info(mesh_handle);
         NT_ASSERT(material != NULL && mesh != NULL && "skinned render item references a destroyed material or mesh");
-        NT_ASSERT(material->color_mode <= NT_COLOR_MODE_FLOAT4);
         if (!nt_gfx_program_ready(material->program)) {
             nt_renderer_warn_program_not_ready(&s_skinned.warned_program_not_ready, material);
             continue;
@@ -202,7 +166,7 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
             supplied_slot = skin_slot(material);
         }
         if (material_changed || mesh_handle.id != previous_mesh.id) {
-            vertex_input = pipeline.id != 0 ? nt_renderer_mesh_vi_cache_find_or_create(&s_skinned.vi_cache, material_handle, mesh_handle, material, mesh, s_instance_layouts, "skinned_mesh_vi")
+            vertex_input = pipeline.id != 0 ? nt_renderer_mesh_vi_cache_find_or_create(&s_skinned.vi_cache, material_handle, mesh_handle, material, mesh, &s_instance_layout, "skinned_mesh_vi")
                                             : NT_VERTEX_INPUT_INVALID;
         }
         if (pipeline.id == 0 || vertex_input.id == 0) {
@@ -226,10 +190,8 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
             .index_count = mesh->index_count,
             .vertex_count = mesh->vertex_count,
             .supplied_slot = supplied_slot,
-            .color_mode = (uint8_t)material->color_mode,
-            .color_location = 13,
         };
-        size += (uint64_t)instance_count * s_instance_layouts[material->color_mode].stride;
+        size += (uint64_t)instance_count * sizeof(nt_skinned_mesh_instance_t);
     }
     // #endregion
     if (run_count == 0) {
@@ -239,30 +201,32 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
     // #region pack instances
     NT_ASSERT(size <= UINT32_MAX && "skinned_mesh_renderer_prepare: instance data exceeds the frame storage address range");
     uint32_t offset = 0;
-    uint8_t *const base = (uint8_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* bound by offset: 4 is enough */
-    uint8_t *dst = base;
+    nt_skinned_mesh_instance_t *const base = (nt_skinned_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* attributes need only 4-byte alignment */
+    nt_skinned_mesh_instance_t *dst = base;
+    /* Transform and drawable by inline sparse reads, as the sprite emit does; the skin binding still goes through its asserting accessor. */
+    const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
     for (uint32_t r = 0; r < run_count; r++) {
         nt_mesh_run_t *run = &runs[r];
         const uint32_t first = run->offset;
-        run->offset = offset + (uint32_t)(dst - base);
+        run->offset = offset + (uint32_t)((uint8_t *)dst - (uint8_t *)base);
         const uint32_t end = first + run->instance_count;
-        const uint8_t color_mode = run->color_mode;
-        const uint16_t stride = s_instance_layouts[color_mode].stride;
-        for (uint32_t i = first; i < end; i++) {
-            nt_entity_t entity = {.id = items[i].entity};
+        for (uint32_t i = first; i < end; i++, dst++) {
+            const nt_entity_t entity = {.id = items[i].entity};
+            const uint16_t entity_index = nt_entity_index(entity);
+            const uint16_t transform_index = transform_view.sparse_indices[entity_index];
+            const uint16_t drawable_index = drawable_view.sparse_indices[entity_index];
+            NT_ASSERT(transform_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no transform component");
+            NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no drawable component");
             const nt_deformation_binding_t binding = *nt_skin_comp_handle(entity);
             NT_ASSERT(binding.texture.id != 0 && "skinned draw requires a deformation texture");
-            nt_renderer_pack_world((float *)dst, nt_transform_comp_world_matrix(entity));
-            pack_skin_binding(dst + 48, &binding);
-            if (color_mode == NT_COLOR_MODE_RGBA8) {
-                const uint16_t drawable_index = drawable_view.sparse_indices[nt_entity_index(entity)];
-                NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no drawable component");
-                memcpy(dst + 60, &drawable_view.colors_packed[drawable_index], sizeof(uint32_t));
-            } else if (color_mode == NT_COLOR_MODE_FLOAT4) {
-                memcpy(dst + 60, nt_drawable_comp_color(entity), 16);
-            }
-            dst += stride;
+            nt_renderer_pack_world((float *)dst->world_rows, transform_view.world_matrices[transform_index]);
+            dst->skin_origins[0] = binding.x0;
+            dst->skin_origins[1] = binding.y0;
+            dst->skin_origins[2] = binding.x1;
+            dst->skin_origins[3] = binding.y1;
+            dst->skin_alpha = binding.alpha;
+            dst->color = drawable_view.colors_packed[drawable_index];
         }
     }
     // #endregion

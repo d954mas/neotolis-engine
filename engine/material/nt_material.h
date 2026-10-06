@@ -71,12 +71,11 @@ typedef struct {
     bool has_attr_defaults;
     nt_material_entity_param_desc_t entity_params[NT_MAX_PER_ENTITY_PARAMS];
     uint8_t entity_param_count;
-    nt_blend_state_t blend;
     bool depth_test;
     bool depth_write;
+    nt_blend_state_t blend;
     nt_cull_mode_t cull_mode;
-    nt_color_mode_t color_mode; /* NT_COLOR_MODE_NONE (0) via zero-init */
-    const char *label;          /* debug name — must be string literal or static storage */
+    const char *label; /* debug name — must be string literal or static storage */
 } nt_material_create_desc_t;
 
 /* ---- Init descriptor ---- */
@@ -121,7 +120,6 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     nt_cull_mode_t cull_mode;
-    nt_color_mode_t color_mode;
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 

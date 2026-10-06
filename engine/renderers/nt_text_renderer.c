@@ -11,19 +11,20 @@
 #include "utf8/nt_utf8.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 // #region Vertex format
-/* 64 bytes per vertex, matching slug_text.vert contract */
+/* 52 bytes per vertex, matching slug_text.vert contract */
 typedef struct {
     float position[3];     /* 12B: world-space quad corner (full 3D) */
     float texcoord[2];     /* 8B: em-space coordinate */
     float glyph_data[2];   /* 8B: packed uint via memcpy (band_row, band_count) */
     float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
-    float color[4];        /* 16B: RGBA float */
+    uint32_t color;        /* 4B: RGBA8 0xAABBGGRR, read normalized */
     float depth_bias;      /* 4B: per-glyph clip-space depth bias (subtracted from NDC z in the VS) */
 } nt_text_vertex_t;
-_Static_assert(sizeof(nt_text_vertex_t) == 64, "text vertex stride must be 64 bytes");
+_Static_assert(sizeof(nt_text_vertex_t) == 52, "text vertex stride must be 52 bytes");
 // #endregion
 
 // #region Module state
@@ -33,11 +34,11 @@ _Static_assert(sizeof(nt_text_vertex_t) == 64, "text vertex stride must be 64 by
 typedef struct {
     float weight_em;        /* synthetic-bold em weight (signed); 0 = natural */
     float outline_w;        /* outline width em beyond the fill weight; 0 = no outline */
-    float outline_color[4]; /* outline pass RGBA */
+    uint32_t outline_color; /* outline pass RGBA8 */
     float shadow_dx;        /* hard-shadow offset em (px = dx * size), like weight/outline */
     float shadow_dy;        /* hard-shadow offset em */
     float shadow_blur;      /* stored, UNUSED (reserved for a future soft-shadow mode) */
-    float shadow_color[4];  /* shadow pass RGBA; alpha 0 = no shadow */
+    uint32_t shadow_color;  /* shadow pass RGBA8; alpha 0 = no shadow */
     bool underline;         /* emit an underline sentinel quad per line */
     bool strikethrough;     /* emit a strike sentinel quad per line */
     float oblique;          /* synthetic-oblique shear folded into the model in draw_n (faux-italic lean); 0 = upright */
@@ -157,20 +158,19 @@ static void create_vertex_input(void) {
     if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
         return;
     }
-    /* Slug vertex layout: 6 attributes, stride = 64 bytes */
     s_text.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout =
             {
                 .attr_count = 6,
-                .stride = 64,
+                .stride = (uint16_t)sizeof(nt_text_vertex_t),
                 .attrs =
                     {
-                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},  /* a_position */
-                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12}, /* a_texcoord */
-                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 20}, /* a_glyph_data */
-                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 28}, /* a_glyph_bounds */
-                        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 44}, /* a_color */
-                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 60}, /* a_depth_bias */
+                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},                                                     /* a_position */
+                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12},                                                    /* a_texcoord */
+                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 20},                                                    /* a_glyph_data */
+                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 28},                                                    /* a_glyph_bounds */
+                        {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_text_vertex_t, color)}, /* a_color */
+                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = offsetof(nt_text_vertex_t, depth_bias)},                /* a_depth_bias */
                     },
             },
         .vertex_buffer = s_text.vbo,
@@ -311,7 +311,7 @@ static void transform_point(float out[3], const float model[16], float x, float 
     out[2] = model[2] * x + model[6] * y + model[14];
 }
 
-static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], float glyph_bias) {
+static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, uint32_t color, float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
     }
@@ -355,7 +355,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     v[0].glyph_bounds[1] = (float)g->bbox_y0;
     v[0].glyph_bounds[2] = (float)g->bbox_x1;
     v[0].glyph_bounds[3] = (float)g->bbox_y1;
-    memcpy(v[0].color, color, 16);
+    v[0].color = color;
     v[0].depth_bias = glyph_bias;
     v[1] = v[0];
     v[2] = v[0];
@@ -387,7 +387,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 /* Sentinel "glyph" with band_count=0: the Slug fragment shaders return coverage=1, so it fills solid for
  * underline/strike. Pixel-space corners (already include pen/scale) flow through the same transform_point
  * path as glyphs — correct under any model matrix (world / 3D), no scissor/viewport hijack. */
-static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, const float color[4], float glyph_bias) {
+static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, uint32_t color, float glyph_bias) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
     }
@@ -405,7 +405,7 @@ static void emit_decoration_quad(const float model[16], float x0, float y0, floa
     v[0].glyph_bounds[1] = 0.0F;
     v[0].glyph_bounds[2] = 0.0F;
     v[0].glyph_bounds[3] = 0.0F;
-    memcpy(v[0].color, color, 16);
+    v[0].color = color;
     v[0].depth_bias = glyph_bias;
     v[1] = v[0];
     v[2] = v[0];
@@ -435,7 +435,7 @@ static void emit_decoration_quad(const float model[16], float x0, float y0, floa
  * breaks premultiplied-alpha compositing when glyphs overlap. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, nt_font_slot_t *slot, int16_t key_offset,
-                            const float color[4], float off_x, float off_y, float *glyph_bias) {
+                            uint32_t color, float off_x, float off_y, float *glyph_bias) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
@@ -486,7 +486,7 @@ static void emit_glyph_pass(const uint8_t *p, const uint8_t *end, const float mo
 /* One underline/strike sentinel quad per LINE (continuous per same-style segment; within one
  * draw_n the whole run is one style, so the segment boundary is the newline). Y and thickness come from
  * the scaled v5 metrics. Exact vertical sign is a visual-QA concern. */
-static void emit_line_deco_quads(const float model[16], float scale, float x1, float pen_y, nt_font_metrics_t metrics, const float color[4], float *glyph_bias) {
+static void emit_line_deco_quads(const float model[16], float scale, float x1, float pen_y, nt_font_metrics_t metrics, uint32_t color, float *glyph_bias) {
     if (s_text.deco.underline) {
         float top = pen_y + ((float)metrics.underline_position * scale); /* underline_position = top edge, below baseline */
         float bot = pen_y + ((float)(metrics.underline_position - metrics.underline_thickness) * scale);
@@ -503,7 +503,7 @@ static void emit_line_deco_quads(const float model[16], float scale, float x1, f
 
 /* Walk the run once (advance only) to find each line's pixel extent, then emit its decoration quads. */
 static void emit_line_decorations(const uint8_t *p, const uint8_t *end, const float model[16], float scale, float letter_tracking, float line_advance, nt_font_slot_t *slot, nt_font_metrics_t metrics,
-                                  int16_t key_offset, const float color[4], float *glyph_bias) {
+                                  int16_t key_offset, uint32_t color, float *glyph_bias) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
@@ -555,7 +555,7 @@ static void emit_line_decorations(const uint8_t *p, const uint8_t *end, const fl
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
+void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, uint32_t color, float letter_tracking, float line_leading) {
     NT_ASSERT(s_text.initialized);
 #ifdef NT_TEST_ACCESS
     memcpy(s_text.test_last_model, model, sizeof s_text.test_last_model);
@@ -609,21 +609,20 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     const uint8_t *p = (const uint8_t *)utf8;
     const uint8_t *end = p + len;
 
-    /* Per-pass embolden cache key from the sticky weight (font units). Fill uses the weight; outline
-     * grows by outline_w; shadow reuses the outermost visible variant (outline if active, else fill) so
-     * it adds NO new cache entry. */
+    /* Per-pass embolden cache key from the sticky weight (font units): fill uses the weight, outline
+     * grows by outline_w, and the shadow reuses the outline key. */
 #if NT_FONT_EMBOLDEN_ENABLED
     const float upm = (float)metrics.units_per_em;
     const int16_t fill_key = nt_font_quantize_weight(s_text.deco.weight_em * upm);
-    /* alpha 0 -> invisible: no outline pass, no extra cache variant, and the shadow tracks the fill silhouette (not the dilated outline). */
-    const bool outline_active = (s_text.deco.outline_w > 0.0F && s_text.deco.outline_color[3] > 0.0F);
-    const int16_t outline_key = (int16_t)(outline_active ? nt_font_quantize_weight((s_text.deco.weight_em + s_text.deco.outline_w) * upm) : fill_key);
-    const int16_t shadow_key = (int16_t)(outline_active ? outline_key : fill_key);
+    /* The shadow silhouette follows the outline width, not its alpha, so a fading outline cannot swap it. */
+    const int16_t outline_key = (int16_t)(s_text.deco.outline_w > 0.0F ? nt_font_quantize_weight((s_text.deco.weight_em + s_text.deco.outline_w) * upm) : fill_key);
+    const int16_t shadow_key = outline_key;
+    const bool outline_active = (s_text.deco.outline_w > 0.0F && (s_text.deco.outline_color >> 24) != 0U);
 #else
     const int16_t fill_key = 0;
     const int16_t shadow_key = 0;
 #endif
-    const bool shadow_active = (s_text.deco.shadow_color[3] > 0.0F);
+    const bool shadow_active = (s_text.deco.shadow_color >> 24) != 0U;
 
     float glyph_bias = 0.0F; /* accumulates across ALL passes so they separate in depth-written world text */
 
@@ -673,31 +672,29 @@ void nt_text_renderer_set_weight(float weight_em) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- flat initialization, finite-value and feature preconditions.
-void nt_text_renderer_set_outline(float width, const float color[4]) {
+void nt_text_renderer_set_outline(float width, uint32_t color) {
     NT_ASSERT(s_text.initialized);
-    NT_ASSERT(color != NULL);
-    if (!isfinite(width) || !isfinite(color[0]) || !isfinite(color[1]) || !isfinite(color[2]) || !isfinite(color[3])) {
-        NT_ASSERT(0 && "nt_text_renderer_set_outline: width/color must be finite");
+    if (!isfinite(width)) {
+        NT_ASSERT(0 && "nt_text_renderer_set_outline: width must be finite");
         return;
     }
 #if !NT_FONT_EMBOLDEN_ENABLED
     NT_ASSERT(width <= 0.0F && "outline requires NT_FONT_EMBOLDEN_ENABLED=ON");
 #endif
     s_text.deco.outline_w = width;
-    memcpy(s_text.deco.outline_color, color, sizeof s_text.deco.outline_color);
+    s_text.deco.outline_color = color;
 }
 
-void nt_text_renderer_set_shadow(float dx, float dy, float blur, const float color[4]) {
+void nt_text_renderer_set_shadow(float dx, float dy, float blur, uint32_t color) {
     NT_ASSERT(s_text.initialized);
-    NT_ASSERT(color != NULL);
-    if (!isfinite(dx) || !isfinite(dy) || !isfinite(blur) || !isfinite(color[0]) || !isfinite(color[1]) || !isfinite(color[2]) || !isfinite(color[3])) {
-        NT_ASSERT(0 && "nt_text_renderer_set_shadow: offset/blur/color must be finite");
+    if (!isfinite(dx) || !isfinite(dy) || !isfinite(blur)) {
+        NT_ASSERT(0 && "nt_text_renderer_set_shadow: offset/blur must be finite");
         return;
     }
     s_text.deco.shadow_dx = dx;
     s_text.deco.shadow_dy = dy;
     s_text.deco.shadow_blur = blur; /* stored, UNUSED (reserved for a future soft-shadow mode) */
-    memcpy(s_text.deco.shadow_color, color, sizeof s_text.deco.shadow_color);
+    s_text.deco.shadow_color = color;
 }
 
 void nt_text_renderer_set_underline(bool enabled) {
@@ -715,7 +712,7 @@ void nt_text_renderer_reset_decoration(void) {
     s_text.deco = (nt_text_deco_t){0}; /* one struct clear — every axis's off-state is 0, so a newly-added axis can't leak */
 }
 
-void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
+void nt_text_renderer_draw(const char *utf8, const float model[16], float size, uint32_t color, float letter_tracking, float line_leading) {
     nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color, letter_tracking, line_leading);
 }
 // #endregion
@@ -818,8 +815,8 @@ float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_b
 float nt_text_renderer_test_oblique(void) { return s_text.deco.oblique; }
 float nt_text_renderer_test_weight(void) { return s_text.deco.weight_em; }
 float nt_text_renderer_test_outline_width(void) { return s_text.deco.outline_w; }
-float nt_text_renderer_test_outline_color_a(void) { return s_text.deco.outline_color[3]; }
-float nt_text_renderer_test_shadow_color_a(void) { return s_text.deco.shadow_color[3]; }
+uint32_t nt_text_renderer_test_outline_color(void) { return s_text.deco.outline_color; }
+uint32_t nt_text_renderer_test_shadow_color(void) { return s_text.deco.shadow_color; }
 float nt_text_renderer_test_shadow_dx(void) { return s_text.deco.shadow_dx; }
 bool nt_text_renderer_test_underline(void) { return s_text.deco.underline; }
 float nt_text_renderer_test_max_oblique(void) { return s_text.test_max_oblique; }

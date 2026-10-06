@@ -23,6 +23,7 @@
 // #region includes
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -114,10 +115,10 @@ enum { TPICK_A = 0, TPICK_B, TPICK_COUNT };
 // #region tables
 /* clang-format off */
 static const float s_speed_table[SPEED_COUNT] = { 0.0F, 0.4F, 1.2F, 3.5F };
-static const float s_shape_colors[SHAPE_COUNT][4] = {
-    {0.25F, 0.85F, 0.95F, 1.0F},
-    {0.95F, 0.45F, 1.00F, 1.0F},
-    {1.00F, 0.75F, 0.20F, 1.0F},
+static const uint32_t s_shape_colors[SHAPE_COUNT] = {
+    NT_RGBA8(64, 217, 242, 255),
+    NT_RGBA8(242, 115, 255, 255),
+    NT_RGBA8(255, 191, 51, 255),
 };
 /* clang-format on */
 static const char *const s_shape_labels[SHAPE_COUNT] = {"CUBE", "SPHERE", "CAPSULE"};
@@ -190,13 +191,13 @@ static const Clay_ElementDeclaration s_btn_decl = {
 static nt_ui_label_style_t s_panel_title_style = {
     .font_id = 0,
     .font_size = 40,
-    .color = {255.0F, 240.0F, 180.0F, 255.0F},
+    .color = NT_RGBA8(255, 240, 180, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 static nt_ui_label_style_t s_btn_label_style = {
     .font_id = 0,
     .font_size = 34,
-    .color = {245.0F, 245.0F, 250.0F, 255.0F},
+    .color = NT_RGBA8(245, 245, 250, 255),
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
@@ -335,10 +336,10 @@ static void compute_perspective_vp(mat4 out_vp, float aspect) {
 static void draw_room(void) {
     const float hw = ROOM_W * 0.5F;
     const float hd = ROOM_D * 0.5F;
-    const float floor_col[4] = {0.13F, 0.13F, 0.16F, 1.0F};
-    const float ceil_col[4] = {0.10F, 0.10F, 0.16F, 1.0F};
-    const float wall_col[4] = {0.20F, 0.18F, 0.16F, 1.0F};
-    const float grid_col[4] = {0.30F, 0.30F, 0.36F, 1.0F};
+    const uint32_t floor_col = NT_RGBA8(33, 33, 41, 255);
+    const uint32_t ceil_col = NT_RGBA8(26, 26, 41, 255);
+    const uint32_t wall_col = NT_RGBA8(51, 46, 41, 255);
+    const uint32_t grid_col = NT_RGBA8(77, 77, 92, 255);
     const float floor_pos[3] = {0.0F, 0.0F, 0.0F};
     const float floor_sz[2] = {ROOM_W, ROOM_D};
     const float floor_rot[4] = {0.7071068F, 0.0F, 0.0F, 0.7071068F};
@@ -377,8 +378,8 @@ static void draw_room(void) {
 
 /* Backing board behind each UI panel — visual reference to judge panel fit/alignment. */
 static void draw_boards(void) {
-    const float board_col[4] = {0.42F, 0.28F, 0.14F, 1.0F};
-    const float frame_col[4] = {0.22F, 0.14F, 0.07F, 1.0F};
+    const uint32_t board_col = NT_RGBA8(107, 71, 36, 255);
+    const uint32_t frame_col = NT_RGBA8(56, 36, 18, 255);
     const float hd = ROOM_D * 0.5F;
     const float bz = -hd + 0.03F; /* between wall (-hd) and panel (-hd+0.05) */
     const float fz = bz - 0.01F;
@@ -401,8 +402,8 @@ static void draw_shape(void) {
     vec3 axis = {0.0F, 1.0F, 0.0F};
     glm_quatv(q, s_shape_yaw, axis);
     const float rot[4] = {q[0], q[1], q[2], q[3]};
-    const float *col = s_shape_colors[s_shape_kind];
-    const float wire_col[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+    const uint32_t col = s_shape_colors[s_shape_kind];
+    const uint32_t wire_col = NT_RGBA8(0, 0, 0, 255);
     switch (s_shape_kind) {
     case SHAPE_CUBE: {
         const float sz[3] = {1.6F, 1.6F, 1.6F};
@@ -681,7 +682,7 @@ static void declare_panels(void) {
 // #endregion
 
 // #region hud
-static void draw_hud_block(const char *text, float x, float y, float size, const float color[4]) {
+static void draw_hud_block(const char *text, float x, float y, float size, uint32_t color) {
     mat4 model;
     glm_mat4_identity(model);
     glm_translate(model, (vec3){x, y, 0.0F});
@@ -696,9 +697,9 @@ static void draw_hud(float fb_w, float fb_h) {
     nt_text_renderer_set_material(s_text_material);
     nt_text_renderer_set_font(s_font);
 
-    const float white[4] = {0.95F, 0.95F, 0.98F, 1.0F};
-    const float accent[4] = {1.00F, 0.85F, 0.30F, 1.0F};
-    const float dim[4] = {0.75F, 0.78F, 0.82F, 1.0F};
+    const uint32_t white = NT_RGBA8(242, 242, 250, 255);
+    const uint32_t accent = NT_RGBA8(255, 217, 77, 255);
+    const uint32_t dim = NT_RGBA8(191, 199, 209, 255);
 
     const float left_x = 12.0F;
     float y = fb_h - HUD_TITLE_SIZE - 4.0F;
@@ -755,7 +756,7 @@ static void draw_hud(float fb_w, float fb_h) {
         mat4 stats_model;
         glm_mat4_identity(stats_model);
         glm_translate(stats_model, (vec3){left_x, dbg_y_top - HUD_SIZE - 6.0F, 0.0F});
-        const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
+        const uint32_t stats_color = NT_RGBA8(204, 230, 204, 255);
         nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, HUD_SIZE - 2.0F, stats_color);
     }
 
@@ -947,7 +948,7 @@ static void frame(void) {
         /* World-space depth-writing text. The per-glyph clip-space bias keeps overlapping glyph
          * quads from z-fighting at their AA fringes (set before the draw, reset after). */
         if (s_font_bound) {
-            const float yellow[4] = {1.0F, 1.0F, 0.2F, 1.0F};
+            const uint32_t yellow = NT_RGBA8(255, 255, 51, 255);
             nt_text_renderer_set_material(s_text_material_3d);
             nt_text_renderer_set_font(s_font);
             nt_text_renderer_set_glyph_depth_bias(0.0001F);

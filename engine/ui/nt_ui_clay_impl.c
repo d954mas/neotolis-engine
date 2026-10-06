@@ -12,7 +12,6 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "core/nt_clamp.h"
 #include "log/nt_log.h"
 #include "math/nt_math.h"
 #include "ui/nt_ui_clay_impl.h"
@@ -1211,11 +1210,8 @@ static char cdv_trunc_line_buf[80];
 static Clay_String cdv_color_hex_to_string(Clay_Color c) {
     NT_ASSERT(cdv_hex_buf_cursor < NT_UI_INSPECTOR_INT_BUFS && "inspector hex-string scratch overflow; raise NT_UI_INSPECTOR_INT_BUFS");
     char *buf = cdv_hex_bufs[cdv_hex_buf_cursor++];
-    const uint8_t r = nt_clamp_f_to_u8(c.r);
-    const uint8_t g = nt_clamp_f_to_u8(c.g);
-    const uint8_t b = nt_clamp_f_to_u8(c.b);
-    const uint8_t a = nt_clamp_f_to_u8(c.a);
-    const int n = snprintf(buf, sizeof cdv_hex_bufs[0], "#%02X%02X%02X%02X", r, g, b, a);
+    const uint32_t p = nt_ui_pack_clay(c);
+    const int n = snprintf(buf, sizeof cdv_hex_bufs[0], "#%02X%02X%02X%02X", p & 0xFFU, (p >> 8) & 0xFFU, (p >> 16) & 0xFFU, p >> 24);
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 

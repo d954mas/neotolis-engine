@@ -6,8 +6,8 @@
  * (UI, renderers, materials, future gradients) can include this without pulling
  * in the UI stack. Works on packed uint32_t colors + normalized float channels.
  *
- * Packed convention: 0xAABBGGRR — R in the low byte, A in the high byte (the
- * engine's existing packed format).
+ * Packed convention: 0xAABBGGRR — R in the low byte, A in the high byte, straight
+ * alpha: the engine's one tint format.
  */
 
 #include <math.h>
@@ -15,13 +15,9 @@
 #include <stddef.h> /* NULL (nt_color_parse_hex) */
 #include <stdint.h>
 
-/* Saturate a [0,1] channel. */
-static inline float nt_color_clamp01(float c) {
-    if (c < 0.0F) {
-        return 0.0F;
-    }
-    return (c > 1.0F) ? 1.0F : c;
-}
+/* Integer byte channels 0..255 -> 0xAABBGGRR at compile time, for color literals (floats belong in
+ * nt_color_pack). Each channel keeps its low byte, so an out-of-range literal wraps. */
+#define NT_RGBA8(r, g, b, a) (((uint32_t)(r) & 0xFFU) | (((uint32_t)(g) & 0xFFU) << 8) | (((uint32_t)(b) & 0xFFU) << 16) | (((uint32_t)(a) & 0xFFU) << 24))
 
 /* 0xAABBGGRR -> normalized [0,1] R,G,B,A. */
 static inline void nt_color_unpack(uint32_t packed, float out_rgba[4]) {
@@ -31,10 +27,9 @@ static inline void nt_color_unpack(uint32_t packed, float out_rgba[4]) {
     out_rgba[3] = (float)((packed >> 24) & 0xFFU) / 255.0F;
 }
 
-/* Saturate a [0,1] channel and round-to-nearest into a byte. NaN -> 0 (safe). */
-static inline uint32_t nt_color_channel_to_u8(float c) {
-    const float v = c * 255.0F;
-    if (v <= 0.0F) {
+/* A 0..255-scale value -> byte: saturate and round half up. NaN -> 0 (safe). */
+static inline uint32_t nt_color_round_u8(float v) {
+    if (!(v > 0.0F)) { /* also NaN: converting it to an integer is undefined */
         return 0U;
     }
     if (v >= 255.0F) {
@@ -43,15 +38,18 @@ static inline uint32_t nt_color_channel_to_u8(float c) {
     return (uint32_t)(v + 0.5F);
 }
 
-/* [0,1] R,G,B,A -> 0xAABBGGRR (clamp + round-to-nearest). Matches the engine's
- * 0..255 nt_clamp_f_to_u8 rounding exactly so packing is byte-identical. */
+/* [0,1] R,G,B,A -> 0xAABBGGRR (clamp + round-to-nearest; NaN -> 0). */
 static inline uint32_t nt_color_pack(const float rgba[4]) {
-    const uint32_t r = nt_color_channel_to_u8(rgba[0]);
-    const uint32_t g = nt_color_channel_to_u8(rgba[1]);
-    const uint32_t b = nt_color_channel_to_u8(rgba[2]);
-    const uint32_t a = nt_color_channel_to_u8(rgba[3]);
+    const uint32_t r = nt_color_round_u8(rgba[0] * 255.0F);
+    const uint32_t g = nt_color_round_u8(rgba[1] * 255.0F);
+    const uint32_t b = nt_color_round_u8(rgba[2] * 255.0F);
+    const uint32_t a = nt_color_round_u8(rgba[3] * 255.0F);
     return r | (g << 8) | (b << 16) | (a << 24);
 }
+
+/* Multiplies the alpha of a packed color by `factor` (e.g. a parent opacity); RGB bytes stay exact.
+ * Rounds through nt_color_round_u8, like every color pack. */
+static inline uint32_t nt_color_scale_alpha(uint32_t packed, float factor) { return (packed & 0x00FFFFFFU) | (nt_color_round_u8((float)(packed >> 24) * factor) << 24); }
 
 /* One hex nibble 0..15; 0xFF on a non-hex char. */
 static inline uint8_t nt_color_hex_nibble(char c) {
@@ -156,16 +154,16 @@ static inline nt_oklab_t nt_color_packed_to_oklab(uint32_t packed, bool with_alp
     return o;
 }
 
-/* OKLab (L,a,b) + linear alpha -> packed 0xAABBGGRR. Out-of-sRGB interpolants are gamut-clamped
- * after the sRGB transfer (matches the prior oklab_to_color clamp). */
+/* OKLab (L,a,b) + linear alpha -> packed 0xAABBGGRR. Out-of-sRGB interpolants saturate in the pack,
+ * after the sRGB transfer. */
 static inline uint32_t nt_color_oklab_to_packed(nt_oklab_t o) {
     float rgb[3];
     nt_color_oklab_to_linear_rgb(o, rgb);
     const float rgba[4] = {
-        nt_color_clamp01(nt_color_linear_to_srgb(rgb[0])),
-        nt_color_clamp01(nt_color_linear_to_srgb(rgb[1])),
-        nt_color_clamp01(nt_color_linear_to_srgb(rgb[2])),
-        nt_color_clamp01(o.alpha),
+        nt_color_linear_to_srgb(rgb[0]),
+        nt_color_linear_to_srgb(rgb[1]),
+        nt_color_linear_to_srgb(rgb[2]),
+        o.alpha,
     };
     return nt_color_pack(rgba);
 }

@@ -235,7 +235,7 @@ int main(void) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 64; /* one mesh instance */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (uint32_t)sizeof(nt_mesh_instance_t); /* one mesh instance */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 
@@ -281,7 +281,6 @@ int main(void) {
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_BACK,
-        .color_mode = NT_COLOR_MODE_FLOAT4,
         .label = "atlas_cube",
     });
 
@@ -296,7 +295,7 @@ int main(void) {
     *nt_material_comp_handle(s_cube) = s_material;
 
     /* White tint */
-    nt_drawable_comp_set_color(s_cube, 1.0F, 1.0F, 1.0F, 1.0F);
+    nt_drawable_comp_set_color(s_cube, 0xFFFFFFFFU);
 
     /* Frame uniforms UBO */
     s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){

@@ -1,3 +1,4 @@
+#include "color/nt_color.h"
 #include "graphics/nt_gfx.h"
 #include "renderers/nt_shape_renderer.h"
 
@@ -45,9 +46,9 @@ static bool read_probe_pass(uint8_t frame[RT_W * RT_H * 4U]) {
 }
 
 static bool probe_multi_flush_ring(nt_render_target_t target) {
-    const float red[4] = {1, 0, 0, 1};
-    const float green[4] = {0, 1, 0, 1};
-    const float blue[4] = {0, 0, 1, 1};
+    const uint32_t red = NT_RGBA8(255, 0, 0, 255);
+    const uint32_t green = NT_RGBA8(0, 255, 0, 255);
+    const uint32_t blue = NT_RGBA8(0, 0, 255, 255);
     nt_shape_renderer_set_vp(s_identity_vp);
     nt_shape_renderer_set_depth(false);
     begin_probe_pass(target);
@@ -64,7 +65,7 @@ static bool probe_closed_circle(nt_render_target_t target) {
     nt_shape_renderer_set_vp(s_identity_vp);
     nt_shape_renderer_set_line_width(0.3F);
     begin_probe_pass(target);
-    nt_shape_renderer_circle_wire_rot((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_circle_wire_rot((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(frame) && pixel_is(frame, 32, 12, 255, 255, 255) && pixel_is(frame, 51, 32, 255, 255, 255) && pixel_is(frame, 32, 32, 0, 0, 0);
@@ -75,10 +76,10 @@ static bool probe_overlay_order(nt_render_target_t target) {
     nt_shape_renderer_set_depth(false);
     nt_shape_renderer_set_line_width(0.3F);
     begin_probe_pass(target);
-    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, (float[4]){0, 1, 0, 1});
-    nt_shape_renderer_rect((float[3]){0, 0, 0}, (float[2]){1, 1}, (float[4]){1, 0, 0, 1});
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, NT_RGBA8(0, 255, 0, 255));
+    nt_shape_renderer_rect((float[3]){0, 0, 0}, (float[2]){1, 1}, NT_RGBA8(255, 0, 0, 255));
     nt_shape_renderer_flush();
-    nt_shape_renderer_rect((float[3]){-0.25F, 0, 0}, (float[2]){0.5F, 0.5F}, (float[4]){0, 0, 1, 1});
+    nt_shape_renderer_rect((float[3]){-0.25F, 0, 0}, (float[2]){0.5F, 0.5F}, NT_RGBA8(0, 0, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(frame) && pixel_is(frame, 40, 32, 0, 255, 0) && pixel_is(frame, 40, 20, 255, 0, 0) && pixel_is(frame, 24, 32, 0, 0, 255);
@@ -89,8 +90,8 @@ static bool probe_pixel_width_depth(nt_render_target_t target) {
     nt_shape_renderer_set_vp(perspective);
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
     begin_probe_pass(target);
-    nt_shape_renderer_line((float[3]){-0.75F, -0.5F, -2}, (float[3]){0.75F, -0.5F, -2}, (float[4]){1, 1, 1, 1});
-    nt_shape_renderer_line((float[3]){-1.5F, 1, -4}, (float[3]){1.5F, 1, -4}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_line((float[3]){-0.75F, -0.5F, -2}, (float[3]){0.75F, -0.5F, -2}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-1.5F, 1, -4}, (float[3]){1.5F, 1, -4}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(frame) && lit_column(frame, 32, 0, 32) == 6 && lit_column(frame, 32, 32, 64) == 6;
@@ -101,7 +102,7 @@ static bool probe_pixel_bevel(nt_render_target_t target) {
     nt_shape_renderer_set_vp(s_identity_vp);
     nt_shape_renderer_set_line_width_pixels(8, RT_W, RT_H);
     begin_probe_pass(target);
-    nt_shape_renderer_polyline(points, 3, false, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(frame) && pixel_is(frame, 31, 19, 255, 255, 255) && pixel_is(frame, 32, 5, 0, 0, 0);
@@ -112,8 +113,8 @@ static bool probe_near_clip(nt_render_target_t target) {
     nt_shape_renderer_set_vp(perspective);
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H);
     begin_probe_pass(target);
-    nt_shape_renderer_line((float[3]){-0.5F, 0, 0.2F}, (float[3]){0.75F, 0, -3}, (float[4]){1, 1, 1, 1});
-    nt_shape_renderer_line((float[3]){-1, 0.5F, 0.2F}, (float[3]){1, 0.5F, -0.5F}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0.2F}, (float[3]){0.75F, 0, -3}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_line((float[3]){-1, 0.5F, 0.2F}, (float[3]){1, 0.5F, -0.5F}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(frame) && lit_column(frame, 35, 0, 64) == 6 && pixel_is(frame, 16, 16, 0, 0, 0) && pixel_is(frame, 48, 48, 0, 0, 0);
@@ -126,9 +127,9 @@ static bool probe_outer_corner(nt_render_target_t target) {
     nt_shape_renderer_set_line_width(0.3F);
     begin_probe_pass(target);
     for (uint32_t i = 1; i < NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS; i++) {
-        nt_shape_renderer_polyline(offscreen, 2, false, (float[4]){1, 1, 1, 1});
+        nt_shape_renderer_polyline(offscreen, 2, false, NT_RGBA8(255, 255, 255, 255));
     }
-    nt_shape_renderer_polyline(points, 3, false, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(frame) && pixel_is(frame, 35, 51, 255, 255, 255) && pixel_is(frame, 32, 14, 0, 0, 0);
@@ -139,7 +140,7 @@ static bool probe_active_viewport(nt_render_target_t target) {
     nt_shape_renderer_set_line_width_pixels(6, RT_W, RT_H / 2);
     begin_probe_pass(target);
     nt_gfx_set_viewport(0, 0, RT_W, RT_H / 2);
-    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, (float[4]){1, 1, 1, 1});
+    nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
     return read_probe_pass(frame) && lit_column(frame, 32, 0, RT_H) == 6 && pixel_is(frame, 32, 48, 255, 255, 255);

@@ -2389,21 +2389,6 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     NT_GFX_END(bind_instance_buffer(buf, byte_offset));
 }
 
-static nt_gfx_result_t set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {
-    if (g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_vertex_attrib_default: must be called inside a pass");
-    nt_gfx_frame_set_vertex_attrib_default(location, x, y, z, w);
-    return NT_GFX_RESULT_ACCEPTED;
-}
-
-void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_ATTRIBUTE_DEFAULT, NT_GFX_OBJECT_NONE, 0, event->data.uniform.name = location; event->data.uniform.count = 4; event->data.uniform.values[0] = x;
-                         event->data.uniform.values[1] = y; event->data.uniform.values[2] = z; event->data.uniform.values[3] = w);
-    NT_GFX_END(set_vertex_attrib_default(location, x, y, z, w));
-}
-
 /* ---- Uniform buffer ---- */
 
 /* size 0 binds the whole buffer; the public range entry point rejects it. */

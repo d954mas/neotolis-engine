@@ -492,12 +492,12 @@ that a loss or a cascade may have freed; there is no non-asserting pass-begin
 variant.
 
 Draw-state calls require an open pass. `nt_gfx_set_scissor`, `nt_gfx_set_scissor_enabled`,
-`nt_gfx_set_viewport`, `nt_gfx_set_vertex_attrib_default`,
+`nt_gfx_set_viewport`,
 `nt_gfx_bind_uniform_buffer` and `nt_gfx_bind_uniform_buffer_range` assert
 without an open pass; on a lost context they return before the check, as other
 binds do. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
 target and clears the bound pipeline, vertex input, instance binding and texture
-set. The scissor rectangle, uniform-buffer bindings and vertex attribute defaults
+set. The scissor rectangle and uniform-buffer bindings
 carry over, so a pass sets the scissor rectangle before it enables scissor. A
 bind equal to the current state records nothing; results, the texture-set
 exception and the uniform-buffer slot limit are in

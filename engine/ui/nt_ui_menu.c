@@ -381,7 +381,7 @@ static void menu_declare_check(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
 /* The right-aligned shortcut text cell (e.g. "Ctrl+S") drawn in style->shortcut_text. The cell carries an
  * explicit fmix id so sibling rows' shortcut cells never collide. */
 static void menu_declare_shortcut(nt_ui_context_t *ctx, uint8_t label_layer, uint32_t shortcut_id, const char *shortcut, nt_ui_menu_style_t *style) {
-    const nt_ui_label_style_t sc = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->shortcut_text)};
+    const nt_ui_label_style_t sc = {.font_id = style->font_id, .font_size = style->font_size, .color = style->shortcut_text};
     CLAY({.id = (Clay_ElementId){.id = shortcut_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) { nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), shortcut, &sc); }
 }
 
@@ -486,7 +486,7 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_ctx_t *menu, uint32_t key, con
         bg.a = bg.a * a->value_t;
     }
     const uint32_t txt = enabled ? style->text_color : style->text_disabled;
-    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(txt)};
+    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = txt};
     const Clay_ElementDeclaration row = {
         .id = (Clay_ElementId){.id = row_id},
         .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED((float)style->item_height)},
@@ -793,7 +793,7 @@ void nt_ui_menu_separator_text(nt_ui_menu_ctx_t *menu, const char *label) {
     nt_ui_menu_style_t *style = (nt_ui_menu_style_t *)menu->pending_menu.style;
     const uint8_t fill_layer = menu->pending_menu.fill_layer;
     const uint8_t label_layer = menu->pending_menu.label_layer;
-    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(style->separator_color)};
+    const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = style->separator_color};
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.left = style->pad, .right = style->pad}}, .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), label != NULL ? label : "", &lbl);
     }

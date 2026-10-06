@@ -1,4 +1,5 @@
 #include "app/nt_app.h"
+#include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -56,15 +57,15 @@ static bool s_grabbed;
 /* ---- Shape colors ---- */
 
 /* clang-format off */
-static const float s_shape_colors[SHAPE_COUNT][4] = {
-    {0.2F, 0.9F, 0.9F, 1.0F}, /* Cube: cyan */
-    {0.7F, 0.3F, 1.0F, 1.0F}, /* Sphere: purple */
-    {1.0F, 0.5F, 0.1F, 1.0F}, /* Cylinder: orange */
-    {0.9F, 0.9F, 0.9F, 1.0F}, /* Capsule: white */
+static const uint32_t s_shape_colors[SHAPE_COUNT] = {
+    NT_RGBA8(51, 230, 230, 255), /* Cube: cyan */
+    NT_RGBA8(179, 77, 255, 255), /* Sphere: purple */
+    NT_RGBA8(255, 128, 26, 255), /* Cylinder: orange */
+    NT_RGBA8(230, 230, 230, 255), /* Capsule: white */
 };
 /* clang-format on */
 
-static const float s_wire_color[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+static const uint32_t s_wire_color = NT_RGBA8(0, 0, 0, 255);
 
 /* ---- Shape position (center of room at eye level) ---- */
 
@@ -77,14 +78,14 @@ static void draw_room(void) {
     float hd = ROOM_D * 0.5F;
 
     /* Floor: rect rotated 90 deg around X to lie flat */
-    float floor_col[4] = {0.15F, 0.15F, 0.18F, 1.0F};
+    uint32_t floor_col = NT_RGBA8(38, 38, 46, 255);
     float floor_pos[3] = {0, 0, 0};
     float floor_sz[2] = {ROOM_W, ROOM_D};
     float floor_rot[4] = {0.7071068F, 0, 0, 0.7071068F};
     nt_shape_renderer_rect_rot(floor_pos, floor_sz, floor_rot, floor_col);
 
     /* Grid lines on the floor */
-    float grid_col[4] = {0.25F, 0.25F, 0.30F, 1.0F};
+    uint32_t grid_col = NT_RGBA8(64, 64, 77, 255);
     int grid_nx = (int)(ROOM_W / GRID_STEP) + 1;
     int grid_nz = (int)(ROOM_D / GRID_STEP) + 1;
     for (int ix = 0; ix < grid_nx; ix++) {
@@ -101,12 +102,12 @@ static void draw_room(void) {
     }
 
     /* Ceiling */
-    float ceil_col[4] = {0.12F, 0.12F, 0.20F, 1.0F};
+    uint32_t ceil_col = NT_RGBA8(31, 31, 51, 255);
     float ceil_pos[3] = {0, ROOM_H, 0};
     nt_shape_renderer_rect_rot(ceil_pos, floor_sz, floor_rot, ceil_col);
 
     /* Walls */
-    float wall_col[4] = {0.18F, 0.16F, 0.14F, 1.0F};
+    uint32_t wall_col = NT_RGBA8(46, 41, 36, 255);
 
     /* Front wall (negative Z) */
     {
@@ -145,8 +146,8 @@ static void draw_shape(void) {
 
     float *pos = nt_transform_comp_position(s_shape_entity);
     float *rot = nt_transform_comp_rotation(s_shape_entity);
-    const float *col = nt_drawable_comp_color(s_shape_entity);
-    const float *wcol = s_wire_color;
+    const uint32_t col = nt_drawable_comp_color(s_shape_entity);
+    const uint32_t wcol = s_wire_color;
     bool draw_solid = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_SOLID);
     bool draw_wire = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_WIRE);
 
@@ -245,10 +246,7 @@ static void set_shape_scale(void) {
 
 /* ---- set_shape_color: update render state from shape table ---- */
 
-static void set_shape_color(void) {
-    const float *src = s_shape_colors[s_current_shape];
-    nt_drawable_comp_set_color(s_shape_entity, src[0], src[1], src[2], src[3]);
-}
+static void set_shape_color(void) { nt_drawable_comp_set_color(s_shape_entity, s_shape_colors[s_current_shape]); }
 
 /* ---- frame callback ---- */
 

@@ -7,7 +7,7 @@
 #include "introspect/nt_introspect.h"
 
 /* entity.set: a dev-only DEBUG write. Sets writable component fields through the component's apply()
-   hook (the real setter — dirty flag / packed-mirror repack / quaternion normalize), so it keeps
+   hook (the real setter — dirty flag / color packing / quaternion normalize), so it keeps
    engine invariants but bypasses game logic: a debug/tuning tool, not a control path. */
 
 #ifdef NT_DEVAPI_GROUP_ENTITY_WRITE
@@ -231,7 +231,7 @@ static const nt_devapi_command_desc k_entity_write_cmds[] = {
         .method = "entity.set",
         .group = "entity_write",
         .summary = "DEBUG/INSPECTION write: set writable component field(s) on a live entity through the component's setter "
-                   "(maintains dirty flags / packed mirrors / quaternion normalize); validates type/arity/range -> bad_params. "
+                   "(maintains dirty flags / color packing / quaternion normalize); validates type/arity/range -> bad_params. "
                    "Bypasses game logic -- a debug/tuning tool, not a control path. Single {field,value} or whole-or-nothing {fields:{...}}.",
         .params_shape = "{id:number, component:string, field?:string, value?:<json>, fields?:object}",
         .result_shape = "{component:string, fields:[string]}",

@@ -14,6 +14,7 @@
 #include "transform_comp/nt_transform_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "material_comp/nt_material_comp.h"
+#include "color/nt_color.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "material/nt_material.h"
 #include "resource/nt_resource.h"
@@ -154,7 +155,7 @@ static nt_program_t create_test_program(void) { return nt_gfx_fake_make_program(
 
 static nt_program_t create_test_tex_program(void) { return nt_gfx_fake_make_program((const char *const[]){"u_tex"}, 1); }
 
-static nt_material_t create_test_material_with_attr(nt_program_t program, nt_color_mode_t color_mode, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
+static nt_material_t create_test_material_with_attr(nt_program_t program, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
@@ -166,18 +167,15 @@ static nt_material_t create_test_material_with_attr(nt_program_t program, nt_col
     desc.depth_write = true;
     desc.blend = blend;
     desc.cull_mode = NT_CULL_BACK;
-    desc.color_mode = color_mode;
     desc.label = "test_material";
 
     nt_material_t mat = nt_material_create(&desc);
     return mat;
 }
 
-static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) { return create_test_material_with_attr(create_test_program(), color_mode, "position", 0, nt_blend_opaque()); }
+static nt_material_t create_test_material(void) { return create_test_material_with_attr(create_test_program(), "position", 0, nt_blend_opaque()); }
 
-static nt_material_t create_test_material(void) { return create_test_material_ex(NT_COLOR_MODE_NONE); }
-
-static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) { return create_test_material_with_attr(create_test_program(), NT_COLOR_MODE_NONE, "position", 0, blend); }
+static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) { return create_test_material_with_attr(create_test_program(), "position", 0, blend); }
 
 /* Two textures shared by the textured test materials: materials on the same one
  * measure binding deltas, materials on different ones measure slot changes. */
@@ -257,7 +255,7 @@ static nt_entity_t create_test_entity(nt_mesh_t mesh, nt_material_t mat) {
     nt_transform_comp_update();
 
     /* Set white color */
-    nt_drawable_comp_set_color(e, 1.0F, 1.0F, 1.0F, 1.0F);
+    nt_drawable_comp_set_color(e, 0xFFFFFFFFU);
 
     return e;
 }
@@ -368,7 +366,7 @@ void test_draw_list_null_items_asserts_when_nonempty(void) {
 
 void test_unready_program_warns_once_and_rearms_after_pipeline_creation(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_with_attr(NT_PROGRAM_INVALID, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_material_t mat = create_test_material_with_attr(NT_PROGRAM_INVALID, "position", 0, nt_blend_opaque());
     nt_entity_t entity = create_test_entity(mesh, mat);
     nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
 
@@ -513,7 +511,7 @@ void test_draw_list_skips_a_not_ready_run_without_packing_it(void) {
 
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_update_buffer_offset(), nt_gfx_fake_last_instance_offset());
-    TEST_ASSERT_EQUAL_UINT32(NT_INSTANCE_STRIDE_NONE, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(sizeof(nt_mesh_instance_t), nt_gfx_fake_last_update_buffer_size());
 }
 
 /* The restore window: the game destroyed its program and the material still
@@ -1118,7 +1116,7 @@ void test_state_pipeline_failure_mid_list_rebinds_next_run(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_vec4_count());
     /* The failed run is not packed either. */
-    TEST_ASSERT_EQUAL_UINT32(2 * NT_INSTANCE_STRIDE_NONE, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(2 * sizeof(nt_mesh_instance_t), nt_gfx_fake_last_update_buffer_size());
     nt_gfx_fake_draw_trace_reset(false);
 }
 
@@ -1170,8 +1168,8 @@ void test_pipeline_cache_skips_failed_pipeline(void) {
 void test_pipeline_cache_shared_program_collapses(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t shared = create_test_program();
-    nt_material_t mat_a = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
-    nt_material_t mat_b = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_material_t mat_a = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
     nt_render_item_t items[2] = {
@@ -1184,29 +1182,69 @@ void test_pipeline_cache_shared_program_collapses(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
-/* color_mode is vertex-input identity (it selects the instance layout), not
- * pipeline identity: one program with three color modes is one pipeline. */
-void test_color_modes_on_one_program_share_a_pipeline_and_split_vertex_inputs(void) {
+/* Two runs in one prepare, with the transform and drawable dense indices apart (a transform-only
+ * entity comes first): each instance takes its own world and color, and the second run starts
+ * right after the first run's instances. */
+void test_runs_of_one_prepare_pack_each_entity_world_and_color(void) {
+    nt_entity_t filler = nt_entity_create();
+    nt_transform_comp_add(filler);
     nt_mesh_t mesh = create_test_mesh();
-    nt_program_t shared = create_test_program();
-    nt_material_t mats[3] = {
-        create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque()),
-        create_test_material_with_attr(shared, NT_COLOR_MODE_RGBA8, "position", 0, nt_blend_opaque()),
-        create_test_material_with_attr(shared, NT_COLOR_MODE_FLOAT4, "position", 0, nt_blend_opaque()),
-    };
-    nt_render_item_t items[3];
-    for (uint32_t i = 0; i < 3; i++) {
-        nt_entity_t e = create_test_entity(mesh, mats[i]);
-        items[i] = (nt_render_item_t){.sort_key = i, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mats[i], mesh)};
+    nt_material_t mats[2] = {create_test_material(), create_test_material()};
+    nt_render_item_t items[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        nt_entity_t e = create_test_entity(mesh, mats[i / 2]);
+        nt_transform_comp_set_position(e, (float)(i + 1), 0.0F, 0.0F);
+        nt_drawable_comp_set_color(e, 0x10203000U + i);
+        items[i] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mats[i / 2], mesh)};
     }
+    nt_transform_comp_update();
 
-    nt_gfx_fake_draw_trace_reset(true);
-    draw_list(items, 3);
+    begin_storage_frame();
+    nt_mesh_run_t runs[2];
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_prepare(items, 4, runs, 2));
+    TEST_ASSERT_EQUAL_UINT32(runs[0].offset + (2U * sizeof(nt_mesh_instance_t)), runs[1].offset);
+    for (uint32_t i = 0; i < 4; i++) {
+        const nt_mesh_instance_t *instance = (const nt_mesh_instance_t *)(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + runs[i / 2].offset) + (i % 2);
+        TEST_ASSERT_EQUAL_HEX32(0x10203000U + i, instance->color);
+        TEST_ASSERT_TRUE(instance->world_rows[0][3] == (float)(i + 1)); /* NOLINT -- exact small integer */
+    }
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
 
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_draw_trace_at(0).pipeline.id, nt_gfx_fake_draw_trace_at(2).pipeline.id);
+/* Every render item needs a drawable: its color is instance data. */
+void test_prepare_asserts_on_an_item_without_drawable(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = nt_entity_create();
+    nt_transform_comp_add(e);
+    nt_mesh_comp_add(e);
+    nt_material_comp_add(e);
+    *nt_mesh_comp_handle(e) = mesh;
+    *nt_material_comp_handle(e) = mat;
+    nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    begin_storage_frame();
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "no drawable component"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
+/* The world matrix comes from the transform view: an item without a transform asserts. */
+void test_prepare_asserts_on_an_item_without_transform(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = nt_entity_create();
+    nt_mesh_comp_add(e);
+    nt_material_comp_add(e);
+    nt_drawable_comp_add(e);
+    *nt_mesh_comp_handle(e) = mesh;
+    *nt_material_comp_handle(e) = mat;
+    nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    begin_storage_frame();
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "no transform component"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* Neighbour test for the mesh vertex-input key: one-step changes of each lane
@@ -1216,9 +1254,9 @@ void test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelin
     nt_mesh_t mesh = create_test_mesh_two_streams();
     nt_program_t shared = create_test_program();
     nt_material_t mats[4];
-    mats[0] = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
-    mats[1] = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 1, nt_blend_opaque());
-    mats[2] = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "normal", 0, nt_blend_opaque());
+    mats[0] = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
+    mats[1] = create_test_material_with_attr(shared, "position", 1, nt_blend_opaque());
+    mats[2] = create_test_material_with_attr(shared, "normal", 0, nt_blend_opaque());
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
@@ -1250,8 +1288,8 @@ void test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelin
 void test_pipeline_cache_different_material_attr_maps(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t shared = create_test_program();
-    nt_material_t mat_a = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
-    nt_material_t mat_b = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 1, nt_blend_opaque());
+    nt_material_t mat_a = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_with_attr(shared, "position", 1, nt_blend_opaque());
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
     nt_render_item_t items[2] = {
@@ -1304,7 +1342,7 @@ void test_vertex_input_distinct_per_mesh(void) {
 void test_vertex_input_shared_for_same_derived_layout(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t shared = create_test_program();
-    nt_material_t mat_a = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 0, nt_blend_opaque());
+    nt_material_t mat_a = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
@@ -1318,7 +1356,6 @@ void test_vertex_input_shared_for_same_derived_layout(void) {
     desc.depth_write = true;
     desc.blend = nt_blend_opaque();
     desc.cull_mode = NT_CULL_BACK;
-    desc.color_mode = NT_COLOR_MODE_NONE;
     desc.label = "extra_attr_material";
     nt_material_t mat_b = nt_material_create(&desc);
 
@@ -1338,7 +1375,7 @@ void test_vertex_input_shared_for_same_derived_layout(void) {
  * attribute-less gl_VertexID path draws through a vertex input with no VBO. */
 void test_vertex_input_empty_derived_layout_draws(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_with_attr(create_test_program(), NT_COLOR_MODE_NONE, "not_a_mesh_stream", 0, nt_blend_opaque());
+    nt_material_t mat = create_test_material_with_attr(create_test_program(), "not_a_mesh_stream", 0, nt_blend_opaque());
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
 
@@ -1351,11 +1388,11 @@ void test_vertex_input_empty_derived_layout_draws(void) {
 /* Bufferless versions survive buffer destruction and need row-wide cleanup. */
 void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
     nt_program_t program = create_test_program();
-    nt_material_t mat = create_test_material_with_attr(program, NT_COLOR_MODE_NONE, "not_a_mesh_stream", 0, nt_blend_opaque());
-    nt_material_t colored = create_test_material_with_attr(program, NT_COLOR_MODE_RGBA8, "not_a_mesh_stream", 0, nt_blend_opaque());
+    nt_material_t mat = create_test_material_with_attr(program, "not_a_mesh_stream", 0, nt_blend_opaque());
+    nt_material_t buffered = create_test_material_with_attr(program, "position", 0, nt_blend_opaque());
     nt_mesh_t mesh = create_test_mesh_nonindexed();
     nt_entity_t e = create_test_entity(mesh, mat);
-    nt_entity_t e_colored = create_test_entity(mesh, colored);
+    nt_entity_t e_buffered = create_test_entity(mesh, buffered);
     nt_mesh_t neighbor = create_test_mesh_nonindexed();
     nt_entity_t e_neighbor = create_test_entity(neighbor, mat);
     nt_render_item_t neighbor_item = {.entity = e_neighbor.id, .batch_key = nt_mesh_renderer_batch_key(mat, neighbor)};
@@ -1365,7 +1402,7 @@ void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
     for (int cycle = 0; cycle < 6; cycle++) {
         nt_render_item_t items[2] = {
             {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)},
-            {.entity = e_colored.id, .batch_key = nt_mesh_renderer_batch_key(colored, mesh)},
+            {.entity = e_buffered.id, .batch_key = nt_mesh_renderer_batch_key(buffered, mesh)},
         };
         draw_list(items, 1);
         TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
@@ -1379,11 +1416,11 @@ void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
         TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(old_id), nt_pool_slot_index(mesh.id));
         TEST_ASSERT_NOT_EQUAL(old_id, mesh.id);
         *nt_mesh_comp_handle(e) = mesh;
-        *nt_mesh_comp_handle(e_colored) = mesh;
+        *nt_mesh_comp_handle(e_buffered) = mesh;
     }
 
-    /* Two cached versions and the neighbor own three slots; all others must be free. */
-    for (uint32_t i = 3; i < TEST_MAX_VERTEX_INPUTS; i++) {
+    /* The bufferless version and the neighbor own two slots; all others must be free. */
+    for (uint32_t i = 2; i < TEST_MAX_VERTEX_INPUTS; i++) {
         nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
         TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
     }
@@ -1428,14 +1465,14 @@ void test_vertex_input_versions_overflow_asserts(void) {
     nt_program_t shared = create_test_program();
     nt_render_item_t item;
     for (uint8_t loc = 0; loc < 2; loc++) {
-        nt_material_t mat = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", loc, nt_blend_opaque());
+        nt_material_t mat = create_test_material_with_attr(shared, "position", loc, nt_blend_opaque());
         nt_entity_t e = create_test_entity(mesh, mat);
         item = (nt_render_item_t){.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
         draw_list(&item, 1);
     }
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
 
-    nt_material_t mat3 = create_test_material_with_attr(shared, NT_COLOR_MODE_NONE, "position", 2, nt_blend_opaque());
+    nt_material_t mat3 = create_test_material_with_attr(shared, "position", 2, nt_blend_opaque());
     nt_entity_t e3 = create_test_entity(mesh, mat3);
     item = (nt_render_item_t){.sort_key = 0, .entity = e3.id, .batch_key = nt_mesh_renderer_batch_key(mat3, mesh)};
     begin_storage_frame();
@@ -1505,146 +1542,13 @@ void test_vertex_type_sizes(void) {
     TEST_ASSERT_EQUAL_UINT16(2, nt_vertex_type_size(NT_VERTEX_INT16));
 }
 
-/* ---- Test: FLOAT4 color mode produces valid draw ---- */
-
-void test_draw_list_color_mode_float4(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
-    nt_entity_t e = create_test_entity(mesh, mat);
-
-    nt_render_item_t items[1];
-    items[0].sort_key = 0;
-    items[0].entity = e.id;
-    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
-
-    draw_list(items, 1);
-
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_instances());
-}
-
-/* ---- Test: RGBA8 color mode produces valid draw ---- */
-
-void test_draw_list_color_mode_rgba8(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_ex(NT_COLOR_MODE_RGBA8);
-    nt_entity_t e = create_test_entity(mesh, mat);
-
-    nt_render_item_t items[1];
-    items[0].sort_key = 0;
-    items[0].entity = e.id;
-    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
-
-    draw_list(items, 1);
-
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_instances());
-}
-
-/* ---- Test: different color modes produce different pipeline cache entries ---- */
-
-void test_pipeline_cache_different_color_modes(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat_none = create_test_material_ex(NT_COLOR_MODE_NONE);
-    nt_material_t mat_float4 = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
-
-    nt_entity_t e0 = create_test_entity(mesh, mat_none);
-    nt_entity_t e1 = create_test_entity(mesh, mat_float4);
-
-    nt_render_item_t items[2];
-    items[0].sort_key = 0;
-    items[0].entity = e0.id;
-    items[0].batch_key = nt_mesh_renderer_batch_key(mat_none, mesh);
-    items[1].sort_key = 1;
-    items[1].entity = e1.id;
-    items[1].batch_key = nt_mesh_renderer_batch_key(mat_float4, mesh);
-
-    draw_list(items, 2);
-
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
-}
-
-/* ---- Test: mixed color modes within a single draw_list call ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_draw_list_mixed_color_modes(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat_none = create_test_material_ex(NT_COLOR_MODE_NONE);
-    nt_material_t mat_float4 = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
-
-    nt_entity_t e0 = create_test_entity(mesh, mat_none);
-    nt_entity_t e1 = create_test_entity(mesh, mat_float4);
-
-    nt_render_item_t items[2];
-    items[0].sort_key = 0;
-    items[0].entity = e0.id;
-    items[0].batch_key = nt_mesh_renderer_batch_key(mat_none, mesh);
-    items[1].sort_key = 1;
-    items[1].entity = e1.id;
-    items[1].batch_key = nt_mesh_renderer_batch_key(mat_float4, mesh);
-
-    draw_list(items, 2);
-
-    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(2, drawn_instances());
-}
-
-/* ---- Test: mixed color modes with multiple instances per run ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_draw_list_mixed_color_modes_multi_instance(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat_none = create_test_material_ex(NT_COLOR_MODE_NONE);
-    nt_material_t mat_rgba8 = create_test_material_ex(NT_COLOR_MODE_RGBA8);
-    nt_material_t mat_float4 = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
-
-    /* 3 entities per material = 9 total, 3 runs with different strides */
-    nt_entity_t entities[9];
-    nt_render_item_t items[9];
-    uint32_t idx = 0;
-
-    /* Run 0: 3x NONE (stride 48) */
-    for (int i = 0; i < 3; i++) {
-        entities[idx] = create_test_entity(mesh, mat_none);
-        items[idx].sort_key = idx;
-        items[idx].entity = entities[idx].id;
-        items[idx].batch_key = nt_mesh_renderer_batch_key(mat_none, mesh);
-        idx++;
-    }
-    /* Run 1: 3x RGBA8 (stride 56) */
-    for (int i = 0; i < 3; i++) {
-        entities[idx] = create_test_entity(mesh, mat_rgba8);
-        items[idx].sort_key = idx;
-        items[idx].entity = entities[idx].id;
-        items[idx].batch_key = nt_mesh_renderer_batch_key(mat_rgba8, mesh);
-        idx++;
-    }
-    /* Run 2: 3x FLOAT4 (stride 64) */
-    for (int i = 0; i < 3; i++) {
-        entities[idx] = create_test_entity(mesh, mat_float4);
-        items[idx].sort_key = idx;
-        items[idx].entity = entities[idx].id;
-        items[idx].batch_key = nt_mesh_renderer_batch_key(mat_float4, mesh);
-        idx++;
-    }
-
-    draw_list(items, 9);
-
-    TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(9, drawn_instances());
-    /* 3 programs (one per material) = 3 pipelines */
-    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_pipeline_cache_count());
-    /* Last run's bind offset = upload base + preceding runs (3x NONE + 3x RGBA8) */
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_update_buffer_offset() + (3 * NT_INSTANCE_STRIDE_NONE) + (3 * NT_INSTANCE_STRIDE_RGBA8), nt_gfx_fake_last_instance_offset());
-}
-
 /* ---- Prepared runs ---- */
 
 /* Two lists share one upload; each run binds the range its prepare reserved. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_prepare_and_draw_offsets_agree(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_ex(NT_COLOR_MODE_RGBA8);
+    nt_material_t mat = create_test_material();
     nt_entity_t e0 = create_test_entity(mesh, mat);
     nt_entity_t e1 = create_test_entity(mesh, mat);
     const uint32_t key = nt_mesh_renderer_batch_key(mat, mesh);
@@ -1658,9 +1562,9 @@ void test_prepare_and_draw_offsets_agree(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(second, 2, b, 2));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     TEST_ASSERT_EQUAL_UINT32(0, a[0].offset);
-    TEST_ASSERT_EQUAL_UINT32(NT_INSTANCE_STRIDE_RGBA8, b[0].offset); /* instance blocks align to 4 */
+    TEST_ASSERT_EQUAL_UINT32(sizeof(nt_mesh_instance_t), b[0].offset); /* instance blocks align to 4 */
     TEST_ASSERT_EQUAL_UINT32(2, b[0].instance_count);
-    TEST_ASSERT_EQUAL_UINT32(3U * NT_INSTANCE_STRIDE_RGBA8, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
+    TEST_ASSERT_EQUAL_UINT32(3U * sizeof(nt_mesh_instance_t), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
 
     draw_runs(b, 1);
     TEST_ASSERT_EQUAL_UINT32(b[0].offset, nt_gfx_fake_last_instance_offset());
@@ -1754,16 +1658,16 @@ void test_list_drawn_twice_reads_one_upload(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_runs_keep_state_resolved_at_prepare(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t plain = create_test_material_ex(NT_COLOR_MODE_NONE);
-    nt_material_t colored = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
+    nt_material_t plain = create_test_material();
+    nt_material_t relocated = create_test_material_with_attr(create_test_program(), "position", 1, nt_blend_opaque());
     nt_entity_t e = create_test_entity(mesh, plain);
     nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(plain, mesh)};
 
     begin_storage_frame();
     nt_mesh_run_t first[1];
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(&item, 1, first, 1));
-    *nt_material_comp_handle(e) = colored;
-    item.batch_key = nt_mesh_renderer_batch_key(colored, mesh);
+    *nt_material_comp_handle(e) = relocated;
+    item.batch_key = nt_mesh_renderer_batch_key(relocated, mesh);
     nt_mesh_run_t second[1];
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(&item, 1, second, 1));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -1776,7 +1680,7 @@ void test_runs_keep_state_resolved_at_prepare(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(first_vi, nt_gfx_fake_last_bound_vertex_input());
     draw_runs(first, 1);
     TEST_ASSERT_EQUAL_UINT32(first_vi, nt_gfx_fake_last_bound_vertex_input());
-    TEST_ASSERT_EQUAL_UINT32(NT_INSTANCE_STRIDE_NONE, second[0].offset); /* NONE stride is already 16-aligned */
+    TEST_ASSERT_EQUAL_UINT32(sizeof(nt_mesh_instance_t), second[0].offset); /* instance blocks align to 4 */
 }
 
 /* Concatenated runs of two prepares: the program changed in between, so the
@@ -1839,7 +1743,7 @@ void test_list_drawn_twice_in_one_pass_reads_current_params(void) {
 void test_prepare_asserts_when_runs_run_out(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat_a = create_test_material();
-    nt_material_t mat_b = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
+    nt_material_t mat_b = create_test_material();
     nt_entity_t ea = create_test_entity(mesh, mat_a);
     nt_entity_t eb = create_test_entity(mesh, mat_b);
     nt_render_item_t items[2] = {{.entity = ea.id, .batch_key = nt_mesh_renderer_batch_key(mat_a, mesh)}, {.entity = eb.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)}};
@@ -1882,7 +1786,9 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
     RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
-    RUN_TEST(test_color_modes_on_one_program_share_a_pipeline_and_split_vertex_inputs);
+    RUN_TEST(test_runs_of_one_prepare_pack_each_entity_world_and_color);
+    RUN_TEST(test_prepare_asserts_on_an_item_without_drawable);
+    RUN_TEST(test_prepare_asserts_on_an_item_without_transform);
     RUN_TEST(test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines);
     RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
     RUN_TEST(test_texture_published_after_material_create_binds_at_next_draw);
@@ -1911,12 +1817,6 @@ int main(void) {
     RUN_TEST(test_vertex_input_survives_mesh_slot_reuse);
     RUN_TEST(test_vertex_input_versions_overflow_asserts);
     RUN_TEST(test_restore_gpu);
-    /* Color mode tests */
-    RUN_TEST(test_draw_list_color_mode_float4);
-    RUN_TEST(test_draw_list_color_mode_rgba8);
-    RUN_TEST(test_pipeline_cache_different_color_modes);
-    RUN_TEST(test_draw_list_mixed_color_modes);
-    RUN_TEST(test_draw_list_mixed_color_modes_multi_instance);
     RUN_TEST(test_prepare_and_draw_offsets_agree);
     RUN_TEST(test_prepare_of_a_new_mesh_after_a_draw_executes_nothing);
     RUN_TEST(test_prepare_of_a_mesh_in_a_reused_slot_after_a_draw_executes_nothing);

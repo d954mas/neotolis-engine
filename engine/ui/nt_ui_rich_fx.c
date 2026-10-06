@@ -3,6 +3,7 @@
  * override (NULL -> every compile-time default; a field <=0 keeps that field's default). */
 
 #include "ui/nt_ui_rich_fx.h"
+#include "color/nt_color.h"
 
 #include <math.h>
 
@@ -89,8 +90,7 @@ static void rich_fx_hue_rgb(float h, float out_rgb[3]) {
     out_rgb[2] = b;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
-                                          void *user_data) {
+nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered, void *user_data) {
     (void)kind;
     (void)base_xy;
     (void)base_wh;
@@ -104,7 +104,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_wave(uint32_t atom_idx, nt_rich_atom_kind_t
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                            void *user_data) {
     (void)kind;
     (void)base_xy;
@@ -124,7 +124,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_shake(uint32_t atom_idx, nt_rich_atom_kind_
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                              void *user_data) {
     (void)kind;
     (void)base_xy;
@@ -137,14 +137,11 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kin
     const float hue = ((float)atom_idx * RICH_FX_RAINBOW_PHASE) + (time * speed);
     float rgb[3];
     rich_fx_hue_rgb(hue, rgb);
-    r.color[0] = rgb[0];
-    r.color[1] = rgb[1];
-    r.color[2] = rgb[2];
-    /* keep base alpha (r.color[3] already = base_color[3]) */
+    r.color = nt_color_pack((const float[4]){rgb[0], rgb[1], rgb[2], 0.0F}) | (base_color & 0xFF000000U); /* keep base alpha */
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_pulse(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+nt_ui_rich_fx_result_t nt_ui_rich_fx_pulse(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                            void *user_data) {
     (void)atom_idx;
     (void)kind;
@@ -160,7 +157,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_pulse(uint32_t atom_idx, nt_rich_atom_kind_
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                              void *user_data) {
     (void)kind;
     (void)base_xy;
@@ -173,12 +170,12 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kin
     const float dur = (p != NULL && p->speed > 0.0F) ? (1.0F / p->speed) : RICH_FX_FADE_DUR;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     const float a = rich_fx_clamp01((time - ((float)atom_idx * RICH_FX_FADE_STAGGER)) / dur);
-    r.color[3] = base_color[3] * a;
-    r.visible = (a > 0.0F); /* fully transparent -> skip the atom emit */
+    r.color = nt_color_scale_alpha(base_color, a);
+    r.visible = (a > 0.0F); /* not yet revealed -> skip the atom emit (a transparent fill may still carry a shadow) */
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_bounce(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+nt_ui_rich_fx_result_t nt_ui_rich_fx_bounce(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                             void *user_data) {
     (void)kind;
     (void)base_xy;
@@ -194,8 +191,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_bounce(uint32_t atom_idx, nt_rich_atom_kind
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_glow(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
-                                          void *user_data) {
+nt_ui_rich_fx_result_t nt_ui_rich_fx_glow(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered, void *user_data) {
     (void)atom_idx;
     (void)kind;
     (void)base_xy;
@@ -207,15 +203,16 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_glow(uint32_t atom_idx, nt_rich_atom_kind_t
     const float speed = rich_fx_speed(p, RICH_FX_GLOW_SPEED);
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     const float g = rich_fx_clamp01(amp * (0.5F + (0.5F * sinf(time * speed)))); /* clamp01: keep rgb bounded by white even when params amp > 1 */
-    r.color[0] = base_color[0] + ((1.0F - base_color[0]) * g);
-    r.color[1] = base_color[1] + ((1.0F - base_color[1]) * g);
-    r.color[2] = base_color[2] + ((1.0F - base_color[2]) * g);
-    /* keep base alpha (r.color[3] already = base_color[3]) */
+    float c[4];
+    nt_color_unpack(base_color, c);
+    for (int i = 0; i < 3; i++) {
+        c[i] += (1.0F - c[i]) * g;
+    }
+    r.color = nt_color_pack(c); /* c[3] is the base alpha byte, repacked exactly */
     return r;
 }
 
-nt_ui_rich_fx_result_t nt_ui_rich_fx_sway(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
-                                          void *user_data) {
+nt_ui_rich_fx_result_t nt_ui_rich_fx_sway(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered, void *user_data) {
     (void)kind;
     (void)base_xy;
     (void)base_wh;

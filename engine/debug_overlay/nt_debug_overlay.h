@@ -16,6 +16,6 @@ void nt_debug_overlay_shutdown(void);
 uint32_t nt_debug_overlay_format_lines(char *buf, uint32_t size);
 
 /* ---- Convenience: format + draw via nt_text_renderer ---- */
-void nt_debug_overlay_draw(nt_material_t material, nt_font_t font, const float model[16], float size, const float color[4]);
+void nt_debug_overlay_draw(nt_material_t material, nt_font_t font, const float model[16], float size, uint32_t color);
 
 #endif /* NT_DEBUG_OVERLAY_H */

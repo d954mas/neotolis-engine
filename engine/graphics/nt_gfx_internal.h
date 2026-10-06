@@ -204,7 +204,6 @@ void nt_gfx_backend_bind_texture_unit(uint32_t texture_backend, uint32_t sampler
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
 /* Re-points the named vertex input's instance attribs at byte_offset. */
 void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset);
-void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
 /* Scissor and viewport (see nt_gfx.h for convention).
  * Backend implementations:

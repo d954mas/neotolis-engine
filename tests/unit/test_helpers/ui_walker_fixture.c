@@ -36,7 +36,6 @@ static nt_material_t make_material(bool with_page_sampler) {
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
     /* Sprite materials name the atlas page's sampler; text materials declare nothing --
      * the font textures are the text renderer's own binds. */
     if (with_page_sampler) {

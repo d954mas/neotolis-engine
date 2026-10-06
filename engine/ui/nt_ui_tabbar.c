@@ -311,7 +311,7 @@ int nt_ui_tabbar(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t
         const nt_atlas_region_ref_t *icon = (icons != NULL) ? &icons[i] : NULL;
         tabbar_declare_icon(ctx, fill_layer, icon, style);
         const uint32_t txt = on ? style->text_selected : style->text;
-        const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = nt_ui_unpack_abgr(txt)};
+        const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = txt};
         /* Label cell carries a stable id so tests can probe its aligned x position (icon-gutter probe). */
         CLAY({.id = (Clay_ElementId){.id = tabbar_label_id(base_id, (uint32_t)i)}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
             nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), labels[i], &lbl);
