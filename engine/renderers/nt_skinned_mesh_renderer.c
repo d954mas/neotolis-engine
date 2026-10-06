@@ -56,7 +56,7 @@ nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t 
     NT_ASSERT(desc != NULL);
     memset(&s_skinned, 0, sizeof(s_skinned));
     s_skinned.skin_sampler_hash = nt_hash32_str("u_skin_matrices").value;
-    if (nt_renderer_mesh_caches_init(&s_skinned.caches, desc->max_pipelines, desc->max_mesh_layouts, &s_instance_layout, "skinned_mesh_pipeline", "skinned_mesh_vi") != NT_OK) {
+    if (nt_renderer_mesh_caches_init(&s_skinned.caches, desc->max_pipelines, desc->max_mesh_layouts, &s_instance_layout, "skinned_mesh_renderer") != NT_OK) {
         memset(&s_skinned, 0, sizeof(s_skinned));
         return NT_ERR_INIT_FAILED;
     }
@@ -105,7 +105,8 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
         const nt_texture_t deformation = nt_skin_comp_handle(leader)->texture;
         const nt_material_t material = *nt_material_comp_handle(leader);
         const nt_mesh_t mesh = *nt_mesh_comp_handle(leader);
-        run_end = find_run_end(items, run_start, count, deformation.id);
+        NT_ASSERT(deformation.id != 0 && "skinned draw requires a deformation texture");
+        run_end = find_run_end(items, run_start, count, deformation.id); /* the run shares the leader's texture */
         const nt_material_info_t *mat_info = nt_material_get_info(material);
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
         NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned render item references a destroyed material or mesh");
@@ -125,7 +126,6 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             NT_ASSERT(transform_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no transform component");
             NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no drawable component");
             const nt_deformation_binding_t binding = *nt_skin_comp_handle(entity);
-            NT_ASSERT(binding.texture.id != 0 && "skinned draw requires a deformation texture");
             nt_mesh_instance_world_rows(dst->world_rows, transform_view.world_matrices[transform_index]);
             dst->skin_origins[0] = binding.x0;
             dst->skin_origins[1] = binding.y0;

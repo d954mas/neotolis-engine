@@ -1617,6 +1617,7 @@ void test_core_draw_asserts_outside_a_pass(void) {
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, offset, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "must be called inside a pass"));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
@@ -1724,7 +1725,7 @@ void test_lists_read_bindings_at_the_call(void) {
 /* Two lists with a program change in between: the second binds the new program's pipeline.
  * Each call replays its material; the unit bind is dropped because GL units survive a program change. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_list_after_a_program_change_rebinds_textures(void) {
+void test_list_after_a_program_change_reapplies_the_texture_set(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
     nt_entity_t e = create_test_entity(mesh, mat);
@@ -1857,7 +1858,7 @@ int main(void) {
     RUN_TEST(test_draw_list_of_a_new_mesh_after_a_draw_executes_nothing);
     RUN_TEST(test_draw_list_of_a_mesh_in_a_reused_slot_destroys_nothing);
     RUN_TEST(test_lists_read_bindings_at_the_call);
-    RUN_TEST(test_list_after_a_program_change_rebinds_textures);
+    RUN_TEST(test_list_after_a_program_change_reapplies_the_texture_set);
     RUN_TEST(test_list_drawn_twice_in_one_pass_reads_current_params);
     RUN_TEST(test_skipped_run_allocates_nothing);
     RUN_TEST(test_core_draw_asserts_outside_a_pass);

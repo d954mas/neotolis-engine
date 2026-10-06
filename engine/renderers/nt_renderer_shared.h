@@ -363,18 +363,16 @@ typedef struct {
     nt_renderer_pipeline_entry_t *pipelines; /* [max_pipelines] */
     nt_renderer_mesh_vi_cache_t vi_cache;
     const nt_vertex_layout_t *instance_layout;
-    const char *pipeline_label;
-    const char *vi_label;
+    const char *label; /* pipeline fallback and vertex-input label */
     uint16_t max_pipelines;
     uint16_t pipeline_count;
     /* One-shot so a load-time skip does not spam; re-armed when a pipeline is built. */
     bool warned_program_not_ready;
 } nt_renderer_mesh_caches_t;
 
-static inline nt_result_t nt_renderer_mesh_caches_init(nt_renderer_mesh_caches_t *c, uint16_t max_pipelines, uint16_t max_mesh_layouts, const nt_vertex_layout_t *instance_layout,
-                                                       const char *pipeline_label, const char *vi_label) {
+static inline nt_result_t nt_renderer_mesh_caches_init(nt_renderer_mesh_caches_t *c, uint16_t max_pipelines, uint16_t max_mesh_layouts, const nt_vertex_layout_t *instance_layout, const char *label) {
     NT_ASSERT(max_pipelines > 0);
-    *c = (nt_renderer_mesh_caches_t){.instance_layout = instance_layout, .pipeline_label = pipeline_label, .vi_label = vi_label, .max_pipelines = max_pipelines};
+    *c = (nt_renderer_mesh_caches_t){.instance_layout = instance_layout, .label = label, .max_pipelines = max_pipelines};
     c->pipelines = (nt_renderer_pipeline_entry_t *)calloc(max_pipelines, sizeof(nt_renderer_pipeline_entry_t));
     if (c->pipelines == NULL) {
         NT_LOG_ERROR("failed to allocate pipeline cache");
@@ -429,7 +427,7 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
     const bool material_changed = material.id != d->material.id;
     if (material_changed) {
         /* Layouts live on the vertex-input versions; the pipeline is program x render state. */
-        const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mi, c->pipeline_label);
+        const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mi, c->label);
         const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
         d->pipeline = nt_renderer_pipeline_cache_find(c->pipelines, c->pipeline_count, &key);
         if (d->pipeline.id == 0) {
@@ -438,7 +436,7 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
     }
     /* VI identity is (mesh row, material-derived layout), so a mesh change re-resolves too. */
     if (material_changed || mesh.id != d->mesh.id) {
-        d->vertex_input = (d->pipeline.id != 0) ? nt_renderer_mesh_vi_cache_find_or_create(&c->vi_cache, material, mesh, mi, mesh_info, c->instance_layout, c->vi_label) : NT_VERTEX_INPUT_INVALID;
+        d->vertex_input = (d->pipeline.id != 0) ? nt_renderer_mesh_vi_cache_find_or_create(&c->vi_cache, material, mesh, mi, mesh_info, c->instance_layout, c->label) : NT_VERTEX_INPUT_INVALID;
     }
     if (d->pipeline.id == 0 || d->vertex_input.id == 0) {
         d->material = (nt_material_t){0};
@@ -450,10 +448,8 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
     return true;
 }
 
-/* Records one resolved run: count instances at offset in vertex frame storage. Uniform writes
- * and the texture set need the pipeline bound first. Uniforms replay on a material change, the
- * texture set also when the supplied texture changes; a nonzero supplied texture replaces the
- * declaration named supplied_name. gfx drops equal binds. */
+/* Pipeline first: uniforms and the texture set land on its program. A nonzero supplied texture
+ * replaces the declaration named supplied_name. */
 static inline void nt_renderer_mesh_record(nt_renderer_mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_mesh_info_t *mesh_info, uint32_t supplied_name, nt_texture_t supplied,
                                            uint32_t offset, uint32_t count) {
     nt_gfx_bind_pipeline(d->pipeline);

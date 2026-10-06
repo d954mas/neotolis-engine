@@ -614,6 +614,7 @@ void test_active_skin_sampler_must_be_declared_by_material(void) {
     nt_render_item_t item = make_item(entity, material, mesh);
 
     NT_TEST_EXPECT_ASSERT(skinned_draw_list(&item, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "coverage is incomplete"));
 }
 
 void test_zero_deformation_texture_asserts(void) {

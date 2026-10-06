@@ -30,21 +30,14 @@ typedef struct {
 
 _Static_assert(sizeof(nt_mesh_instance_t) == 52 && offsetof(nt_mesh_instance_t, color) == 48, "mesh instance layout");
 
-/* The instance world rows of both mesh renderers: the transpose of the affine part of a
- * column-major mat4, row r holding (m[r], m[4 + r], m[8 + r], m[12 + r]). */
+/* Instance world rows of both mesh renderers: the transposed affine part of a column-major mat4. */
 static inline void nt_mesh_instance_world_rows(float rows[3][4], const float world[16]) {
-    rows[0][0] = world[0];
-    rows[0][1] = world[4];
-    rows[0][2] = world[8];
-    rows[0][3] = world[12];
-    rows[1][0] = world[1];
-    rows[1][1] = world[5];
-    rows[1][2] = world[9];
-    rows[1][3] = world[13];
-    rows[2][0] = world[2];
-    rows[2][1] = world[6];
-    rows[2][2] = world[10];
-    rows[2][3] = world[14];
+    for (int r = 0; r < 3; r++) {
+        rows[r][0] = world[r];
+        rows[r][1] = world[4 + r];
+        rows[r][2] = world[8 + r];
+        rows[r][3] = world[12 + r];
+    }
 }
 
 typedef struct {
@@ -65,21 +58,16 @@ void nt_mesh_renderer_shutdown(void);
  * caches. Inactive modules are unchanged. */
 void nt_mesh_renderer_restore_gpu(void);
 
-/* Records one instanced draw of mesh with material in the current pass: count instances
- * (nt_mesh_instance_t) at byte offset in NT_GFX_FRAME_VERTEX, from
- * nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, count * sizeof(nt_mesh_instance_t), 4, &offset),
- * filled before the next nt_gfx call. One allocation may be drawn in any number of passes of
- * the frame. A material whose program is not ready, or a pipeline or vertex input that could
- * not be created, records nothing. Resolves pipeline, vertex input and material state per
- * call: draw a batch, not one object per call. count > 0. */
+/* Records one instanced draw in the current pass: count > 0 instances (nt_mesh_instance_t) at
+ * byte offset in NT_GFX_FRAME_VERTEX, filled before the next nt_gfx call; one allocation may be
+ * drawn in any number of passes. Records nothing while the program is not ready or a pipeline
+ * or vertex input cannot be created. */
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t offset, uint32_t count);
 
-/* ECS adapter. Caller filters visibility (nt_render_is_visible) and order; the renderer draws
- * every item. Adjacent equal batch keys form one run: its world and drawable color are packed
- * into vertex frame storage and drawn as one instanced draw in the current pass. Material
- * state is applied once for adjacent runs of one material within the call. batch_key must
- * come from each item's current material/mesh bindings; items may be NULL only when count
- * is 0 and are borrowed for the call. Every item needs transform and drawable components. */
+/* ECS adapter: adjacent equal batch keys form one run, packed from transform and drawable and
+ * drawn as one instanced draw in the current pass. The caller filters visibility
+ * (nt_render_is_visible) and order. batch_key must come from each item's current bindings;
+ * items may be NULL only when count is 0. */
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access

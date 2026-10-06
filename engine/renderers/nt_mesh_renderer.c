@@ -36,7 +36,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     NT_ASSERT(!s_mesh_renderer.initialized);
     NT_ASSERT(desc);
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
-    if (nt_renderer_mesh_caches_init(&s_mesh_renderer.caches, desc->max_pipelines, desc->max_mesh_layouts, &s_instance_layout, "mesh_pipeline", "mesh_vi") != NT_OK) {
+    if (nt_renderer_mesh_caches_init(&s_mesh_renderer.caches, desc->max_pipelines, desc->max_mesh_layouts, &s_instance_layout, "mesh_renderer") != NT_OK) {
         return NT_ERR_INIT_FAILED;
     }
     s_mesh_renderer.initialized = true;
