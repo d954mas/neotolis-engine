@@ -32,38 +32,15 @@ static struct {
     bool initialized;
 } s_mesh_renderer;
 
-/* ---- Instance layout per color mode (locations 4-6 for mat4x3, 7 for color) ---- */
-
 /* clang-format off */
-static const nt_vertex_layout_t s_instance_layouts[3] = {
-    [NT_COLOR_MODE_NONE] = {
-        .attr_count = 3,
-        .stride = NT_INSTANCE_STRIDE_NONE,
-        .attrs = {
-            {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
-            {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
-            {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-        },
-    },
-    [NT_COLOR_MODE_RGBA8] = {
-        .attr_count = 4,
-        .stride = NT_INSTANCE_STRIDE_RGBA8,
-        .attrs = {
-            {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
-            {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
-            {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-            {.location = 7, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 48},
-        },
-    },
-    [NT_COLOR_MODE_FLOAT4] = {
-        .attr_count = 4,
-        .stride = NT_INSTANCE_STRIDE_FLOAT4,
-        .attrs = {
-            {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
-            {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
-            {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-            {.location = 7, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 48},
-        },
+static const nt_vertex_layout_t s_instance_layout = {
+    .attr_count = 4,
+    .stride = sizeof(nt_mesh_instance_t),
+    .attrs = {
+        {.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
+        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
+        {.location = 6, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
+        {.location = 7, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_mesh_instance_t, color)},
     },
 };
 /* clang-format on */
@@ -75,8 +52,8 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
      * state the requirement where the pipeline is actually built. */
     NT_ASSERT(nt_gfx_program_ready(mat_info->program) && "find_or_create_pipeline: caller must gate on nt_gfx_program_ready");
 
-    /* Layouts and color_mode live on the vertex-input versions; the pipeline is
-     * program x render state, keyed by its exact desc identity. */
+    /* Layouts live on the vertex-input versions; the pipeline is program x
+     * render state, keyed by its exact desc identity. */
     const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mat_info, "mesh_pipeline");
     const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
 
@@ -179,7 +156,6 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
         const nt_material_info_t *mat_info = nt_material_get_info(run_mat);
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(run_mesh);
         NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh render item references a destroyed material or mesh");
-        NT_ASSERT(mat_info->color_mode <= NT_COLOR_MODE_FLOAT4); /* corrupted material = programmer error */
         if (!nt_gfx_program_ready(mat_info->program)) {
             nt_renderer_warn_program_not_ready(&s_mesh_renderer.warned_program_not_ready, mat_info);
             continue;
@@ -191,7 +167,7 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
         }
         /* VI identity is (mesh row, material-derived layout), so a mesh change re-resolves too. */
         if (mat_changed || run_mesh.id != prev_mesh.id) {
-            vi = (pip.id != 0) ? nt_renderer_mesh_vi_cache_find_or_create(&s_mesh_renderer.vi_cache, run_mat, run_mesh, mat_info, mesh_info, s_instance_layouts, "mesh_vi") : NT_VERTEX_INPUT_INVALID;
+            vi = (pip.id != 0) ? nt_renderer_mesh_vi_cache_find_or_create(&s_mesh_renderer.vi_cache, run_mat, run_mesh, mat_info, mesh_info, &s_instance_layout, "mesh_vi") : NT_VERTEX_INPUT_INVALID;
         }
         if (pip.id == 0 || vi.id == 0) {
             /* Retry creation on the next run instead of reusing a failure. */
@@ -213,10 +189,8 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
             .index_count = mesh_info->index_count,
             .vertex_count = mesh_info->vertex_count,
             .supplied_slot = NT_MATERIAL_MAX_TEXTURES,
-            .color_mode = (uint8_t)mat_info->color_mode,
-            .color_location = 7,
         };
-        size += (uint64_t)instance_count * s_instance_layouts[mat_info->color_mode].stride;
+        size += (uint64_t)instance_count * sizeof(nt_mesh_instance_t);
     }
     // #endregion
     if (run_count == 0) {
@@ -226,28 +200,23 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
     // #region pack instances
     NT_ASSERT(size <= UINT32_MAX && "mesh_renderer_prepare: instance data exceeds the frame storage address range");
     uint32_t offset = 0;
-    uint8_t *const base = (uint8_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* bound by offset: 4 is enough */
-    uint8_t *dst = base;
+    nt_mesh_instance_t *const base = (nt_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* bound by offset: 4 is enough */
+    nt_mesh_instance_t *dst = base;
+    const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
     for (uint32_t r = 0; r < run_count; r++) {
         nt_mesh_run_t *run = &runs[r];
         const uint32_t first = run->offset;
-        run->offset = offset + (uint32_t)(dst - base);
+        run->offset = offset + (uint32_t)((uint8_t *)dst - (uint8_t *)base);
         const uint32_t end = first + run->instance_count;
-        const uint8_t color_mode = run->color_mode;
-        const uint16_t stride = s_instance_layouts[color_mode].stride;
-        for (uint32_t i = first; i < end; i++) {
-            nt_entity_t e = {.id = items[i].entity};
-            nt_renderer_pack_world((float *)dst, nt_transform_comp_world_matrix(e));
-            if (color_mode == NT_COLOR_MODE_RGBA8) {
-                const uint16_t drawable_index = drawable_view.sparse_indices[nt_entity_index(e)];
-                NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "mesh render item: entity has no drawable component");
-                memcpy(dst + 48, &drawable_view.colors_packed[drawable_index], sizeof(uint32_t));
-            } else if (color_mode == NT_COLOR_MODE_FLOAT4) {
-                memcpy(dst + 48, nt_drawable_comp_color(e), 16);
-            }
-            /* NONE: nothing after the 48 bytes */
-            dst += stride;
+        for (uint32_t i = first; i < end; i++, dst++) {
+            const uint16_t entity_index = nt_entity_index((nt_entity_t){.id = items[i].entity});
+            const uint16_t transform_index = transform_view.sparse_indices[entity_index];
+            const uint16_t drawable_index = drawable_view.sparse_indices[entity_index];
+            NT_ASSERT(transform_index != NT_INVALID_COMP_INDEX && "mesh render item: entity has no transform component");
+            NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "mesh render item: entity has no drawable component");
+            nt_renderer_pack_world(&dst->world_rows[0][0], transform_view.world_matrices[transform_index]);
+            dst->color = drawable_view.colors_packed[drawable_index];
         }
     }
     // #endregion

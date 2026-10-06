@@ -174,8 +174,8 @@ split: prepare packs every run of a list into one vertex frame storage allocatio
 
 ### Mesh instancing
 
-Each instance supplies its world transform and, when the material's color mode
-requires it, drawable color. Prepare packs these attributes into vertex frame
+Each instance supplies its world transform and drawable color
+(`nt_mesh_instance_t`, see [color](architecture.md#color)). Prepare packs these attributes into vertex frame
 storage, uploaded when the stream executes; draw issues one `nt_gfx_draw_indexed_instanced` per run for indexed
 meshes or `nt_gfx_draw_instanced` for non-indexed meshes. Material parameters
 remain shared by the run.

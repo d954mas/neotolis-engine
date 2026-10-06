@@ -328,9 +328,8 @@ unconditionally.
 
 The material-driven mesh, skinned mesh, sprite, and text renderer caches build the
 `nt_pipeline_desc_t` from the material's render state and key on its
-`nt_gfx_pipeline_key_t`. Layouts and `color_mode` live on vertex-input
-objects, so materials differing only in layout or color mode share one
-pipeline. The sprite renderer resolves the pipeline once per material change
+`nt_gfx_pipeline_key_t`. Layouts live on vertex-input objects, so materials
+differing only in layout share one pipeline. The sprite renderer resolves the pipeline once per material change
 inside a `draw_list` call, not once per run: runs also split per atlas page,
 and nothing can replace a material's program inside the call.
 
@@ -344,8 +343,8 @@ stream types, counts, offsets and stride are fixed, so entry identity packs only
 what varies: per stream a presence bit and the mapped location (mesh streams ×
 material attr_map — attr_map entries matching no stream do not split; a
 material mapping none of the streams derives an empty layout and takes the
-attribute-less gl_VertexID path) plus the color mode that selects the instance
-layout. The sprite renderer packs the attr_map count and every location the same
+attribute-less gl_VertexID path); each renderer has one fixed instance layout.
+The sprite renderer packs the attr_map count and every location the same
 way. Handles are revalidated on lookup because buffer destruction can invalidate
 cached versions. Exhausting a mesh's version row asserts, naming the knob —
 silent eviction would hide VAO re-creation thrash as an invisible perf
@@ -360,6 +359,25 @@ vertex input died (context loss) is recreated in place, so repeated losses
 cannot grow the cache. A miss creates the vertex input and caches it only on
 success; recoverable creation failures leave the cache unchanged so the next
 lookup retries.
+
+### Color
+
+Per-vertex and per-instance color reaches the GPU as normalized RGBA8, packed
+`0xAABBGGRR` by `nt_color_pack`, straight alpha, clamped to [0,1]. Data APIs and
+components hold the packed `uint32_t`: the drawable component, sprite `emit_*`,
+UI styles and the mesh instance structs. Immediate-mode convenience calls (shape,
+text) may take `float[4]` and pack once per call. Unclamped or HDR tint lives
+only in material uniform params.
+
+Every mesh and skinned mesh instance carries the entity's drawable color
+(`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs
+a drawable component. A shader that ignores color does not declare the color
+input; the instance layout still provides it. Instance locations are reserved:
+4–7 for meshes (world rows, color) and 10–15 for skinned meshes (world rows,
+color, frame origins, alpha). A material attribute derived at one of them is
+asserts when the vertex input is created; an attr_map entry that matches no
+mesh stream derives nothing and is not checked. The engine sets no generic
+vertex attribute value; WebGPU has none.
 
 ### Dynamic data lifetime
 
@@ -474,7 +492,7 @@ items; a smaller `max_runs` that runs out asserts.
 A run holds everything its draw needs: pipeline, vertex input, material, an
 optional supplied texture with its material slot (the skinned deformation
 texture), the frame storage offset, the instance count, the mesh's index and vertex
-counts, and the color mode with its attribute location. `draw(runs, run_count)`
+counts. `draw(runs, run_count)`
 executes runs in order through one executor shared by both renderers and binds
 only what changed. It never merges or reorders runs and reads no entity
 component. Consequences:

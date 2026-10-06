@@ -1498,7 +1498,6 @@ static nt_material_t make_mesh_material(nt_resource_t texture, bool skinned) {
         .attr_map_count = skinned ? 4 : 2,
         .blend = nt_blend_opaque(),
         .cull_mode = NT_CULL_NONE,
-        .color_mode = NT_COLOR_MODE_RGBA8,
         .depth_test = true,
         .depth_write = true,
         .label = "skeletal_surface",
@@ -2703,7 +2702,8 @@ int main(int argc, char *argv[]) {
     gfx_desc.max_pipelines = 32;
     gfx_desc.max_buffers = 128;
     gfx_desc.max_textures = 16;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 2U * SKELETAL_SHOWCASE_MAX_INSTANCES * 80U; /* skinned and static instances */
+    /* Worst frame: Order & Instancing, two passes of MAX skinned instances; scenes draw exclusively. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t);
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
     nt_http_init();

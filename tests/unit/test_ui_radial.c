@@ -50,7 +50,6 @@ static nt_material_t make_radial_material(void) {
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
     desc.attr_map[0].stream_name = "a_radial";
     desc.attr_map[0].location = 4;
     desc.attr_map[1].stream_name = "a_layout";
@@ -439,7 +438,6 @@ static void test_image_custom_name_bound_reorder_safe(void) {
     memset(&desc, 0, sizeof desc);
     desc.program = nt_gfx_make_program(vs, fs);
     desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
     desc.attr_map[0].stream_name = "a_layout"; /* a_layout FIRST (offset 0..3) */
     desc.attr_map[0].location = 7;
     desc.attr_map[1].stream_name = "a_radial";
@@ -532,7 +530,6 @@ static nt_material_t make_radial_image_material_mode(nt_ui_radial_reveal_mode_t 
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
     desc.attr_map[0].stream_name = "a_radial";
     desc.attr_map[0].location = 4;
     desc.attr_map[1].stream_name = "a_tint";

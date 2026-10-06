@@ -35,10 +35,6 @@ static inline void nt_mesh_runs_draw(const nt_mesh_run_t *runs, uint32_t run_cou
             textured_supplied = run->supplied_texture.id;
         }
         nt_renderer_bind_vertex_input(&bound, run->vertex_input);
-        if (run->color_mode == NT_COLOR_MODE_NONE) {
-            /* Native GL leaves a generic value unspecified after drawing with an enabled array there. */
-            nt_gfx_set_vertex_attrib_default(run->color_location, 1.0F, 1.0F, 1.0F, 1.0F);
-        }
         nt_gfx_bind_instance_buffer(instances, run->offset);
         if (run->index_count > 0) {
             nt_gfx_draw_indexed_instanced(0, run->index_count, run->vertex_count, run->instance_count);

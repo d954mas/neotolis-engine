@@ -172,6 +172,7 @@ static nt_program_t s_skin_program;
 static nt_program_t s_reference_program;
 static uint8_t s_actual[FRAME_BYTES];
 static uint8_t s_expected[FRAME_BYTES];
+static uint8_t s_second_mask[FRAME_BYTES];
 static bool s_initialized;
 
 static bool read_text(const char *path, char **out_text) {
@@ -269,7 +270,7 @@ static nt_mesh_t make_mesh(const test_vertex_t vertices[VERTEX_COUNT]) {
     return (nt_mesh_t){.id = nt_gfx_activate_mesh(blob, sizeof(blob))};
 }
 
-static nt_material_t make_skinned_material(float probe_mode, nt_color_mode_t color_mode) {
+static nt_material_t make_skinned_material(float probe_mode) {
     return nt_material_create(&(nt_material_create_desc_t){
         .program = s_skin_program,
         .textures = {{.name = "u_skin_matrices"}},
@@ -286,7 +287,6 @@ static nt_material_t make_skinned_material(float probe_mode, nt_color_mode_t col
             },
         .attr_map_count = 5,
         .cull_mode = NT_CULL_NONE,
-        .color_mode = color_mode,
         .label = "native_skinned_probe",
     });
 }
@@ -304,7 +304,6 @@ static nt_material_t make_reference_material(float probe_mode) {
             },
         .attr_map_count = 3,
         .cull_mode = NT_CULL_NONE,
-        .color_mode = NT_COLOR_MODE_NONE,
         .label = "native_skin_cpu_reference",
     });
 }
@@ -349,13 +348,19 @@ static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t 
 
 #define RENDER_MAX_RUNS 2
 
-static void render_skinned_list(const nt_render_item_t *items, uint32_t count, uint8_t out[FRAME_BYTES]) {
+static void render_list(const nt_render_item_t *items, uint32_t count, bool skinned, uint8_t out[FRAME_BYTES]) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_mesh_run_t runs[RENDER_MAX_RUNS];
-    const uint32_t run_count = nt_skinned_mesh_renderer_prepare(items, count, runs, RENDER_MAX_RUNS);
+    const uint32_t run_count = skinned ? nt_skinned_mesh_renderer_prepare(items, count, runs, RENDER_MAX_RUNS) : nt_mesh_renderer_prepare(items, count, runs, RENDER_MAX_RUNS);
+    TEST_ASSERT_EQUAL_UINT32(1, run_count);
+    TEST_ASSERT_EQUAL_UINT32(count, runs[0].instance_count);
     begin_target_pass();
-    nt_skinned_mesh_renderer_draw(runs, run_count);
+    if (skinned) {
+        nt_skinned_mesh_renderer_draw(runs, run_count);
+    } else {
+        nt_mesh_renderer_draw(runs, run_count);
+    }
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
 }
@@ -576,7 +581,7 @@ static void test_palette_frames_and_interpolation_match_cpu_reference(void) {
     nt_material_t skinned_material[3];
     nt_material_t reference_material[3];
     for (uint8_t mode = 0; mode < 3; mode++) {
-        skinned_material[mode] = make_skinned_material((float)mode, NT_COLOR_MODE_NONE);
+        skinned_material[mode] = make_skinned_material((float)mode);
         reference_material[mode] = make_reference_material((float)mode);
     }
     nt_deformation_binding_t initial = cases[0];
@@ -609,9 +614,9 @@ static void test_palette_frames_and_interpolation_match_cpu_reference(void) {
 static void test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic(void) {
     const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 0, .y1 = 0, .alpha = 0.0F};
     nt_mesh_t mesh = make_mesh(k_guard_bar);
-    nt_material_t position_material = make_skinned_material(0.0F, NT_COLOR_MODE_NONE);
-    nt_material_t normal_material = make_skinned_material(1.0F, NT_COLOR_MODE_NONE);
-    nt_material_t tangent_material = make_skinned_material(2.0F, NT_COLOR_MODE_NONE);
+    nt_material_t position_material = make_skinned_material(0.0F);
+    nt_material_t normal_material = make_skinned_material(1.0F);
+    nt_material_t tangent_material = make_skinned_material(2.0F);
     nt_entity_t entity = make_entity(mesh, position_material, &binding);
 
     render_entity(entity, position_material, mesh, true, s_expected);
@@ -624,33 +629,53 @@ static void test_degenerate_normal_and_tangent_guards_are_finite_and_determinist
     assert_probe_matches_mask(s_actual, 128, 128, 191); /* deterministic +Z tangent */
 }
 
-static void test_colored_then_none_restores_white_for_both_color_layouts(void) {
-    const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
-    test_vertex_t reference_vertices[VERTEX_COUNT];
-    deform_vertices(binding, false, reference_vertices);
-    nt_mesh_t reference_mesh = make_mesh(reference_vertices);
-    nt_material_t reference_material = make_reference_material(3.0F);
-    nt_entity_t reference_entity = make_entity(reference_mesh, reference_material, NULL);
-    render_entity(reference_entity, reference_material, reference_mesh, false, s_expected);
-
-    const nt_color_mode_t modes[2] = {NT_COLOR_MODE_RGBA8, NT_COLOR_MODE_FLOAT4};
-    for (uint8_t i = 0; i < 2; i++) {
-        nt_mesh_t mesh = make_mesh(k_bar);
-        nt_material_t colored = make_skinned_material(3.0F, modes[i]);
-        nt_material_t none = make_skinned_material(3.0F, NT_COLOR_MODE_NONE);
-        nt_entity_t colored_entity = make_entity(mesh, colored, &binding);
-        nt_entity_t none_entity = make_entity(mesh, none, &binding);
-        nt_drawable_comp_set_color(colored_entity, 0.1F, 0.2F, 0.3F, 1.0F);
-        render_entity(colored_entity, colored, mesh, true, s_actual);
-        assert_probe_matches_mask(s_actual, 26, 51, 77);
-        const nt_render_item_t items[2] = {
-            {.entity = colored_entity.id, .batch_key = nt_mesh_renderer_batch_key(colored, mesh)},
-            {.entity = none_entity.id, .batch_key = nt_mesh_renderer_batch_key(none, mesh)},
-        };
-
-        render_skinned_list(items, 2, s_actual);
-        assert_cpu_gpu_frames_agree();
+/* Each covered pixel drawn by exactly one instance shows that instance's color. */
+static void assert_instance_colors(const uint8_t tinted_mask[FRAME_BYTES], const uint8_t white_mask[FRAME_BYTES], const uint8_t frame[FRAME_BYTES]) {
+    uint32_t tinted = 0;
+    uint32_t white = 0;
+    for (uint32_t pixel = 0; pixel < RT_W * RT_H; pixel++) {
+        const size_t byte_offset = (size_t)pixel * 4U;
+        const bool in_tinted = tinted_mask[byte_offset + 3] != 0;
+        const bool in_white = white_mask[byte_offset + 3] != 0;
+        const uint8_t *actual = &frame[byte_offset];
+        if (in_tinted == in_white) {
+            continue;
+        }
+        const uint8_t expected[3] = {in_tinted ? 26 : 255, in_tinted ? 51 : 255, in_tinted ? 77 : 255};
+        TEST_ASSERT_UINT8_WITHIN(1, expected[0], actual[0]);
+        TEST_ASSERT_UINT8_WITHIN(1, expected[1], actual[1]);
+        TEST_ASSERT_UINT8_WITHIN(1, expected[2], actual[2]);
+        TEST_ASSERT_EQUAL_UINT8(255, actual[3]);
+        tinted += in_tinted ? 1U : 0U;
+        white += in_tinted ? 0U : 1U;
     }
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, tinted, "tinted instance covers no pixel of its own");
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, white, "white instance covers no pixel of its own");
+}
+
+/* One run of two instances: a stride or color offset error shows as the wrong color or position on the second. */
+static void draw_tinted_and_white_instances(nt_mesh_t mesh, nt_material_t material, const nt_deformation_binding_t *binding) {
+    const bool skinned = binding != NULL;
+    nt_entity_t tinted = make_entity(mesh, material, binding);
+    nt_entity_t white = make_entity(mesh, material, binding);
+    nt_drawable_comp_set_color(tinted, 0.1F, 0.2F, 0.3F, 1.0F);
+    nt_transform_comp_set_position(tinted, 0.0F, 0.45F, 0.0F);
+    nt_transform_comp_set_position(white, 0.0F, -0.45F, 0.0F);
+    nt_transform_comp_update();
+    const uint32_t key = nt_mesh_renderer_batch_key(material, mesh);
+    const nt_render_item_t items[2] = {{.entity = tinted.id, .batch_key = key}, {.entity = white.id, .batch_key = key}};
+
+    render_list(&items[0], 1, skinned, s_expected);
+    render_list(&items[1], 1, skinned, s_second_mask);
+    render_list(items, 2, skinned, s_actual);
+    assert_instance_colors(s_expected, s_second_mask, s_actual);
+}
+
+static void test_mesh_instances_draw_their_own_colors(void) { draw_tinted_and_white_instances(make_mesh(k_bar), make_reference_material(3.0F), NULL); }
+
+static void test_skinned_instances_draw_their_own_colors(void) {
+    const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
+    draw_tinted_and_white_instances(make_mesh(k_bar), make_skinned_material(3.0F), &binding);
 }
 
 int main(void) {
@@ -664,7 +689,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_palette_frames_and_interpolation_match_cpu_reference);
     RUN_TEST(test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic);
-    RUN_TEST(test_colored_then_none_restores_white_for_both_color_layouts);
+    RUN_TEST(test_mesh_instances_draw_their_own_colors);
+    RUN_TEST(test_skinned_instances_draw_their_own_colors);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

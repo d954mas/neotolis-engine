@@ -335,7 +335,6 @@ static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) {
     desc.depth_write = false;
     desc.blend = blend;
     desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
     desc.textures[0].name = "u_texture";
     desc.texture_count = 1;
     desc.label = "test_sprite_material";
@@ -354,7 +353,6 @@ static nt_material_t create_test_material_with_param(void) {
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
     desc.textures[0].name = "u_texture";
     desc.texture_count = 1;
     desc.params[0].name = "u_tint";
@@ -374,7 +372,6 @@ static nt_material_t create_test_material_textureless(void) {
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
     desc.label = "test_sprite_material_textureless";
 
     nt_material_t mat = nt_material_create(&desc);
@@ -405,7 +402,6 @@ static nt_material_t create_radial_test_material(const char *stream_name, uint8_
     desc.depth_test = false;
     desc.depth_write = false;
     desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
     desc.label = "radial_test_material";
     if (loc != 0) {
         desc.attr_map[0].stream_name = stream_name;

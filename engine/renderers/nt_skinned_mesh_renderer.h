@@ -6,7 +6,21 @@
 #include "renderers/nt_mesh_renderer.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+
+/* One GPU instance (locations 10-12 world rows, 14 origins, 15 alpha, 13 color);
+ * the instance buffer stride is its size. */
+typedef struct {
+    float world_rows[3][4];
+    uint16_t skin_origins[4]; /* deformation texel origins x0, y0, x1, y1 */
+    float skin_alpha;         /* blend between the two deformation frames */
+    uint32_t color;           /* RGBA8 0xAABBGGRR (nt_color_pack) */
+} nt_skinned_mesh_instance_t;
+
+_Static_assert(sizeof(nt_skinned_mesh_instance_t) == 64 && offsetof(nt_skinned_mesh_instance_t, skin_origins) == 48 && offsetof(nt_skinned_mesh_instance_t, skin_alpha) == 56 &&
+                   offsetof(nt_skinned_mesh_instance_t, color) == 60,
+               "skinned mesh instance layout");
 
 typedef struct {
     uint16_t max_pipelines;
@@ -35,7 +49,7 @@ void nt_skinned_mesh_renderer_restore_gpu(void);
  * the run supplies the entity's deformation texture and its default sampler. */
 /* Splits items into runs of equal batch_key and deformation texture, resolves
  * pipeline and vertex input per run (creating them on a cache miss), packs
- * world, deformation binding and color of drawable runs into one vertex frame
+ * world, deformation binding and drawable color of every instance into one vertex frame
  * storage allocation and writes the runs; returns their count. Runs whose
  * program is not ready or whose pipeline/vertex input failed are skipped.
  * Writes no buffer. Call after the items' nt_skeletal_gpu_reserve, at any
