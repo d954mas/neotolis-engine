@@ -3,6 +3,7 @@
 // #region includes
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -2207,7 +2208,7 @@ static void declare_ui(const nt_ui_scale_t *scale) {
 
 // #region stage rendering
 static void draw_ground(float scale) {
-    const float grid[4] = {0.16F, 0.22F, 0.30F, 1.0F};
+    const uint32_t grid = NT_RGBA8(41, 56, 77, 255);
     nt_shape_renderer_set_line_width(0.02F * scale); /* renderer width is retained across frames */
     const float cell = 0.6F * scale;
     const float half_x = 3.4F * scale;
@@ -2221,12 +2222,12 @@ static void draw_ground(float scale) {
 
 static bool in_selected_subtree(const nt_skeletal_skeleton_t *skel, int selected, uint32_t j) { return selected >= 0 && j >= (uint32_t)selected && j < (uint32_t)skel->subtree_end[selected]; }
 
-static const float s_scaffold_color[4] = {0.45F, 0.50F, 0.58F, 1.0F};
+static const uint32_t s_scaffold_color = NT_RGBA8(115, 128, 148, 255);
 
 /* Parent->child links whose parent is (or is not) origin scaffolding: those
  * draw thin and grey, real bones in the subtree colours. */
 static void draw_links(const nt_skeletal_skeleton_t *skel, const nt_skeletal_mat34_t *model, const bool at_origin[SKELETAL_SHOWCASE_MAX_JOINTS], int selected_joint, bool scaffold_pass, float scale) {
-    static const float bone_colors[2][4] = {{0.35F, 0.70F, 0.95F, 1.0F}, {1.0F, 0.65F, 0.18F, 1.0F}};
+    static const uint32_t bone_colors[2] = {NT_RGBA8(89, 179, 242, 255), NT_RGBA8(255, 166, 46, 255)};
     nt_shape_renderer_set_line_width((scaffold_pass ? 0.006F : 0.02F) * scale);
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
         const uint16_t p = skel->parent[j];
@@ -2235,17 +2236,17 @@ static void draw_links(const nt_skeletal_skeleton_t *skel, const nt_skeletal_mat
         }
         const float a[3] = {model[p].r[0][3], model[p].r[1][3], model[p].r[2][3]};
         const float b[3] = {model[j].r[0][3], model[j].r[1][3], model[j].r[2][3]};
-        const float *color = scaffold_pass ? s_scaffold_color : bone_colors[in_selected_subtree(skel, selected_joint, j) ? 1 : 0];
+        const uint32_t color = scaffold_pass ? s_scaffold_color : bone_colors[in_selected_subtree(skel, selected_joint, j) ? 1 : 0];
         nt_shape_renderer_line(a, b, color);
     }
 }
 
 /* Bones and joint spheres of model[]; selected_joint < 0 highlights nothing. */
 static void draw_skeleton(const nt_skeletal_skeleton_t *skel, const nt_skeletal_mat34_t *model, int selected_joint, bool show_axes, float scale) {
-    static const float joint_colors[3][4] = {
-        {1.0F, 0.9F, 0.2F, 1.0F},
-        {1.0F, 0.55F, 0.15F, 1.0F},
-        {0.30F, 0.85F, 0.95F, 1.0F},
+    static const uint32_t joint_colors[3] = {
+        NT_RGBA8(255, 230, 51, 255),
+        NT_RGBA8(255, 140, 38, 255),
+        NT_RGBA8(77, 217, 242, 255),
     };
     /* The link from origin scaffolding up to the first translated joint would
      * read as a limb, so those joints and links draw thin and grey. */
@@ -2255,7 +2256,7 @@ static void draw_skeleton(const nt_skeletal_skeleton_t *skel, const nt_skeletal_
     draw_links(skel, model, at_origin, selected_joint, false, scale);
     for (uint32_t j = 0; j < skel->joint_count; ++j) {
         const float p[3] = {model[j].r[0][3], model[j].r[1][3], model[j].r[2][3]};
-        const float *color;
+        uint32_t color;
         float radius = 0.075F;
         if ((int)j == selected_joint) {
             color = joint_colors[0];
@@ -2270,7 +2271,7 @@ static void draw_skeleton(const nt_skeletal_skeleton_t *skel, const nt_skeletal_
         }
         nt_shape_renderer_sphere(p, radius * scale, color);
         if (show_axes) {
-            const float axis_colors[3][4] = {{1.0F, 0.2F, 0.2F, 1.0F}, {0.2F, 1.0F, 0.3F, 1.0F}, {0.2F, 0.5F, 1.0F, 1.0F}};
+            const uint32_t axis_colors[3] = {NT_RGBA8(255, 51, 51, 255), NT_RGBA8(51, 255, 77, 255), NT_RGBA8(51, 128, 255, 255)};
             const float axis_len = 0.23F * scale;
             for (int axis = 0; axis < 3; ++axis) {
                 const float end[3] = {p[0] + (model[j].r[0][axis] * axis_len), p[1] + (model[j].r[1][axis] * axis_len), p[2] + (model[j].r[2][axis] * axis_len)};
@@ -2390,7 +2391,7 @@ static void skinned_draw(void) {
                     marker[r] += bones[8].r[r][k] * point[k];
                 }
             }
-            nt_shape_renderer_sphere(marker, 0.11F, (float[4]){1, 0.2F, 0.2F, 1});
+            nt_shape_renderer_sphere(marker, 0.11F, NT_RGBA8(255, 51, 51, 255));
         }
     }
 }

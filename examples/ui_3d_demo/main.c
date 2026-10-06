@@ -115,10 +115,10 @@ enum { TPICK_A = 0, TPICK_B, TPICK_COUNT };
 // #region tables
 /* clang-format off */
 static const float s_speed_table[SPEED_COUNT] = { 0.0F, 0.4F, 1.2F, 3.5F };
-static const float s_shape_colors[SHAPE_COUNT][4] = {
-    {0.25F, 0.85F, 0.95F, 1.0F},
-    {0.95F, 0.45F, 1.00F, 1.0F},
-    {1.00F, 0.75F, 0.20F, 1.0F},
+static const uint32_t s_shape_colors[SHAPE_COUNT] = {
+    NT_RGBA8(64, 217, 242, 255),
+    NT_RGBA8(242, 115, 255, 255),
+    NT_RGBA8(255, 191, 51, 255),
 };
 /* clang-format on */
 static const char *const s_shape_labels[SHAPE_COUNT] = {"CUBE", "SPHERE", "CAPSULE"};
@@ -336,10 +336,10 @@ static void compute_perspective_vp(mat4 out_vp, float aspect) {
 static void draw_room(void) {
     const float hw = ROOM_W * 0.5F;
     const float hd = ROOM_D * 0.5F;
-    const float floor_col[4] = {0.13F, 0.13F, 0.16F, 1.0F};
-    const float ceil_col[4] = {0.10F, 0.10F, 0.16F, 1.0F};
-    const float wall_col[4] = {0.20F, 0.18F, 0.16F, 1.0F};
-    const float grid_col[4] = {0.30F, 0.30F, 0.36F, 1.0F};
+    const uint32_t floor_col = NT_RGBA8(33, 33, 41, 255);
+    const uint32_t ceil_col = NT_RGBA8(26, 26, 41, 255);
+    const uint32_t wall_col = NT_RGBA8(51, 46, 41, 255);
+    const uint32_t grid_col = NT_RGBA8(77, 77, 92, 255);
     const float floor_pos[3] = {0.0F, 0.0F, 0.0F};
     const float floor_sz[2] = {ROOM_W, ROOM_D};
     const float floor_rot[4] = {0.7071068F, 0.0F, 0.0F, 0.7071068F};
@@ -378,8 +378,8 @@ static void draw_room(void) {
 
 /* Backing board behind each UI panel — visual reference to judge panel fit/alignment. */
 static void draw_boards(void) {
-    const float board_col[4] = {0.42F, 0.28F, 0.14F, 1.0F};
-    const float frame_col[4] = {0.22F, 0.14F, 0.07F, 1.0F};
+    const uint32_t board_col = NT_RGBA8(107, 71, 36, 255);
+    const uint32_t frame_col = NT_RGBA8(56, 36, 18, 255);
     const float hd = ROOM_D * 0.5F;
     const float bz = -hd + 0.03F; /* between wall (-hd) and panel (-hd+0.05) */
     const float fz = bz - 0.01F;
@@ -402,8 +402,8 @@ static void draw_shape(void) {
     vec3 axis = {0.0F, 1.0F, 0.0F};
     glm_quatv(q, s_shape_yaw, axis);
     const float rot[4] = {q[0], q[1], q[2], q[3]};
-    const float *col = s_shape_colors[s_shape_kind];
-    const float wire_col[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+    const uint32_t col = s_shape_colors[s_shape_kind];
+    const uint32_t wire_col = NT_RGBA8(0, 0, 0, 255);
     switch (s_shape_kind) {
     case SHAPE_CUBE: {
         const float sz[3] = {1.6F, 1.6F, 1.6F};

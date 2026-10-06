@@ -1935,13 +1935,8 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
 /* Unpack a packed AABBGGRR color into a normalized RGBA float4 (text renderer order), then fold
  * opacity into alpha. nt_color_unpack owns the packed->[0,1] math (R,G,B,A order matches); the
  * opacity multiply is rich-specific so this stays a thin wrapper. */
-static void rich_unpack_color(uint32_t abgr, float opacity, float out[4]) {
-    nt_color_unpack(abgr, out);
-    out[3] *= opacity;
-}
-
 /* Evaluate the per-atom effect -> visual-only transform; zero means identity. */
-static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, const float base_color[4]) {
+static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, uint32_t base_color) {
     if (s->effect_id == 0U) {
         return nt_ui_rich_fx_identity(base_color);
     }
@@ -1972,8 +1967,7 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
  * Decoration is per-glyph here BY DESIGN: outline/shadow must ride each transformed glyph (a per-run pass
  * would detach from the moving glyphs); underline/strike follow the effect. */
 static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y) {
-    float base_color[4];
-    rich_unpack_color(s->color, frame->opacity, base_color);
+    const uint32_t base_color = nt_color_scale_alpha(s->color, frame->opacity);
     const uint32_t a0 = s->text_off; /* atom byte start: prefix measures are relative to it (kerning chain) */
     const uint32_t gend = s->text_off + s->text_len;
     uint32_t gi = s->text_off;
@@ -2005,7 +1999,7 @@ static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_f
             const float baseline_y = box_y + s->y + s->asc + fx.offset_y;
             float model[16];
             nt_ui_sprite_mat4(frame->world_mat4, box_x + scaled_x + fx.offset_x, baseline_y, 1.0F, 1.0F, model);
-            nt_text_renderer_draw_n(st->text + g0, gi - g0, model, s->size * fx.scale, nt_color_pack(fx.color), 0.0F, 0.0F);
+            nt_text_renderer_draw_n(st->text + g0, gi - g0, model, s->size * fx.scale, fx.color, 0.0F, 0.0F);
 #ifdef NT_TEST_ACCESS
             st->emit_span_count++;
 #endif
@@ -2028,8 +2022,7 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
         if (run->object_draw == NULL) {
             continue; /* measure-only object (box reserved, nothing drawn) */
         }
-        float base_color[4];
-        rich_unpack_color(s->color, frame->opacity, base_color);
+        const uint32_t base_color = nt_color_scale_alpha(s->color, frame->opacity);
         const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_color);
         if (!fx.visible) {
             continue; /* fade_in / typewriter: skip the draw_fn call entirely */
@@ -2063,8 +2056,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
         if (reg == NULL || reg->vertex_count == 0U) {
             continue; /* tombstoned region -> skip */
         }
-        float base_color[4];
-        rich_unpack_color(s->color, frame->opacity, base_color); /* fold parent opacity (no walker fold here) */
+        const uint32_t base_color = nt_color_scale_alpha(s->color, frame->opacity); /* fold parent opacity (no walker fold here) */
         const nt_ui_rich_fx_result_t fx = rich_eval_fx(st, s, base_color);
         if (!fx.visible) {
             continue; /* fade_in / typewriter: skip the image entirely until its window opens */
@@ -2094,7 +2086,7 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
             nt_sprite_renderer_set_material(image_mat); /* bind ONCE: all images coalesce into one batch */
             bound = true;
         }
-        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, nt_color_pack(fx.color), 0U, NULL, 0U);
+        nt_sprite_renderer_emit_region(run->image_ref.atlas, run->image_ref.region, m, reg->origin_x, reg->origin_y, fx.color, 0U, NULL, 0U);
 #ifdef NT_TEST_ACCESS
         st->image_emit_count++;
 #endif

@@ -1,5 +1,6 @@
 #include "../shared/nt_example_frames.h"
 #include "app/nt_app.h"
+#include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "graphics/nt_gfx.h"
@@ -42,7 +43,7 @@ typedef struct {
     float c[3];
     float size[3];
     float rot[4];
-    float col[4];
+    uint32_t col; /* RGBA8 */
     float col_b[4];
     float col_c[4];
 } bench_shape_t;
@@ -129,7 +130,7 @@ static void rebuild_shapes(void) {
         s->b[0] = s->a[0] + 0.5F;
         s->b[1] = s->a[1] + 0.5F;
         s->b[2] = s->a[2];
-        set4(s->col, 1.0F, 0.3F, 0.2F, 1.0F);
+        s->col = NT_RGBA8(255, 77, 51, 255);
         set4(s->col_b, 0.3F, 0.5F, 1.0F, 1.0F);
 
         /* Rect */
@@ -140,7 +141,7 @@ static void rebuild_shapes(void) {
         s->size[0] = 0.4F;
         s->size[1] = 0.4F;
         rand_rot(i, 1000, s->rot);
-        set4(s->col, 0.2F, 1.0F, 0.3F, 1.0F);
+        s->col = NT_RGBA8(51, 255, 77, 255);
 
         /* Triangle */
         s = &s_shapes[s_shape_count++];
@@ -159,7 +160,7 @@ static void rebuild_shapes(void) {
             s->c[1] = tc[1] - 0.2F;
             s->c[2] = tc[2];
         }
-        set4(s->col, 0.3F, 0.5F, 1.0F, 1.0F);
+        s->col = NT_RGBA8(77, 128, 255, 255);
         set4(s->col_b, 0.2F, 1.0F, 0.3F, 1.0F);
         set4(s->col_c, 1.0F, 0.3F, 0.2F, 1.0F);
 
@@ -170,7 +171,7 @@ static void rebuild_shapes(void) {
         rand_pos(i, 3000, s->a);
         s->size[0] = 0.3F;
         rand_rot(i, 3000, s->rot);
-        set4(s->col, 1.0F, 0.9F, 0.2F, 1.0F);
+        s->col = NT_RGBA8(255, 230, 51, 255);
 
         /* Cube */
         s = &s_shapes[s_shape_count++];
@@ -181,7 +182,7 @@ static void rebuild_shapes(void) {
         s->size[1] = 0.3F;
         s->size[2] = 0.3F;
         rand_rot(i, 4000, s->rot);
-        set4(s->col, 0.2F, 0.9F, 0.9F, 1.0F);
+        s->col = NT_RGBA8(51, 230, 230, 255);
 
         /* Sphere */
         s = &s_shapes[s_shape_count++];
@@ -189,7 +190,7 @@ static void rebuild_shapes(void) {
         s->variant = (i & 1) ? 0 : 1;
         rand_pos(i, 5000, s->a);
         s->size[0] = 0.2F;
-        set4(s->col, 0.7F, 0.3F, 1.0F, 1.0F);
+        s->col = NT_RGBA8(179, 77, 255, 255);
 
         /* Cylinder */
         s = &s_shapes[s_shape_count++];
@@ -199,7 +200,7 @@ static void rebuild_shapes(void) {
         s->size[0] = 0.15F;
         s->size[1] = 0.5F;
         rand_rot(i, 6000, s->rot);
-        set4(s->col, 1.0F, 0.5F, 0.1F, 1.0F);
+        s->col = NT_RGBA8(255, 128, 26, 255);
 
         /* Capsule */
         s = &s_shapes[s_shape_count++];
@@ -209,7 +210,7 @@ static void rebuild_shapes(void) {
         s->size[0] = 0.1F;
         s->size[1] = 0.4F;
         rand_rot(i, 7000, s->rot);
-        set4(s->col, 0.9F, 0.9F, 0.9F, 1.0F);
+        s->col = NT_RGBA8(230, 230, 230, 255);
     }
 }
 
@@ -344,12 +345,12 @@ static void dispatch_shape(const bench_shape_t *s) {
 
 #define LETTER_MAX_SEGMENTS 5
 
-static void draw_letter_path(const float (*points)[3], uint32_t count, const float color[4]) {
+static void draw_letter_path(const float (*points)[3], uint32_t count, uint32_t color) {
     bool closed = count > 2 && points[0][0] == points[count - 1][0] && points[0][2] == points[count - 1][2];
     nt_shape_renderer_polyline(points, count, closed, color);
 }
 
-static void draw_letter(float ox, float oz, float scale, const float *strokes, int count, const float color[4]) {
+static void draw_letter(float ox, float oz, float scale, const float *strokes, int count, uint32_t color) {
     NT_ASSERT(count <= LETTER_MAX_SEGMENTS);
     float points[LETTER_MAX_SEGMENTS + 1][3];
     uint32_t point_count = 0;
@@ -387,7 +388,7 @@ static const float s_G[] = {1,1.4F, 0,1.4F, 0,1.4F, 0,0, 0,0, 1,0, 1,0, 1,0.7F, 
 /* clang-format on */
 
 static void draw_floor_text(void) {
-    float color[4] = {0.6F, 0.7F, 1.0F, 1.0F};
+    uint32_t color = NT_RGBA8(153, 179, 255, 255);
     nt_shape_renderer_set_line_width(0.05F);
     float scale = 1.2F;
     float gap = 0.3F;
@@ -428,13 +429,13 @@ static void draw_room(void) {
     float hw = ROOM_W * 0.5F;
     float hd = ROOM_D * 0.5F;
 
-    float floor_col[4] = {0.15F, 0.15F, 0.18F, 1.0F};
+    uint32_t floor_col = NT_RGBA8(38, 38, 46, 255);
     float floor_pos[3] = {0, 0, 0};
     float floor_sz[2] = {ROOM_W, ROOM_D};
     float floor_rot[4] = {0.7071068F, 0, 0, 0.7071068F};
     nt_shape_renderer_rect_rot(floor_pos, floor_sz, floor_rot, floor_col);
 
-    float grid_col[4] = {0.25F, 0.25F, 0.30F, 1.0F};
+    uint32_t grid_col = NT_RGBA8(64, 64, 77, 255);
     int grid_nx = (int)(ROOM_W / GRID_STEP) + 1;
     int grid_nz = (int)(ROOM_D / GRID_STEP) + 1;
     for (int ix = 0; ix < grid_nx; ix++) {
@@ -450,11 +451,11 @@ static void draw_room(void) {
         nt_shape_renderer_line(a, b, grid_col);
     }
 
-    float ceil_col[4] = {0.12F, 0.12F, 0.20F, 1.0F};
+    uint32_t ceil_col = NT_RGBA8(31, 31, 51, 255);
     float ceil_pos[3] = {0, ROOM_H, 0};
     nt_shape_renderer_rect_rot(ceil_pos, floor_sz, floor_rot, ceil_col);
 
-    float wall_col[4] = {0.18F, 0.16F, 0.14F, 1.0F};
+    uint32_t wall_col = NT_RGBA8(46, 41, 36, 255);
     {
         float pos[3] = {0, ROOM_H * 0.5F, -hd};
         float sz[2] = {ROOM_W, ROOM_H};

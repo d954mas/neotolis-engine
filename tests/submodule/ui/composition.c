@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 
+#include "color/nt_color.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_label.h"
 
@@ -22,8 +23,7 @@ static rich_text_fn volatile s_rich_text = nt_ui_rich_text;
 static rich_push_fn volatile s_rich_push = nt_ui_rich_push_effect_fn;
 
 #if NT_COMPOSITION_EFFECTS == 0
-static nt_ui_rich_fx_result_t game_effect(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
-                                          void *user_data) {
+static nt_ui_rich_fx_result_t game_effect(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered, void *user_data) {
     (void)kind;
     (void)base_xy;
     (void)base_wh;

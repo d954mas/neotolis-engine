@@ -1,6 +1,7 @@
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
 #include "clay.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -397,24 +398,24 @@ static void draw_scene_contents(void) {
     glm_quatv(cube_rot, t * 0.7F, (vec3){0.3F, 1.0F, 0.1F});
     float cube_pos[3] = {-1.15F, 0.85F, 0.0F};
     float cube_size[3] = {0.85F, 1.55F, 0.65F};
-    float red[4] = {0.95F, 0.15F, 0.10F, 1.0F};
+    uint32_t red = NT_RGBA8(242, 38, 26, 255);
     nt_shape_renderer_cube_rot(cube_pos, cube_size, cube_rot, red);
 
     float sphere_pos[3] = {1.05F, 0.65F, -0.55F};
-    float teal[4] = {0.05F, 0.85F, 0.95F, 1.0F};
+    uint32_t teal = NT_RGBA8(13, 217, 242, 255);
     nt_shape_renderer_sphere(sphere_pos, 0.55F, teal);
 
     float cyl_pos[3] = {0.25F, 1.55F, 0.75F};
-    float yellow[4] = {1.0F, 0.82F, 0.15F, 1.0F};
+    uint32_t yellow = NT_RGBA8(255, 209, 38, 255);
     nt_shape_renderer_cylinder(cyl_pos, 0.26F, 1.25F, yellow);
 
     float floor_pos[3] = {0.0F, -0.02F, 0.0F};
     float floor_size[2] = {5.8F, 3.2F};
     float floor_rot[4] = {0.7071068F, 0.0F, 0.0F, 0.7071068F};
-    float floor_color[4] = {0.12F, 0.14F, 0.18F, 1.0F};
+    uint32_t floor_color = NT_RGBA8(31, 36, 46, 255);
     nt_shape_renderer_rect_rot(floor_pos, floor_size, floor_rot, floor_color);
 
-    float line_color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    uint32_t line_color = NT_RGBA8(255, 255, 255, 255);
     nt_shape_renderer_line((float[3]){-2.7F, 0.04F, -1.4F}, (float[3]){2.4F, 0.04F, 1.25F}, line_color);
     nt_shape_renderer_line((float[3]){-2.4F, 0.04F, 1.15F}, (float[3]){2.8F, 0.04F, -1.25F}, line_color);
     nt_shape_renderer_flush();

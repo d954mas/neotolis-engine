@@ -55,20 +55,17 @@ typedef enum {
 typedef struct {
     float offset_x; /*  0: px shift of the atom quad / draw() x */
     float offset_y; /*  4: px shift of the atom quad / draw() y */
-    float color[4]; /*  8: ABSOLUTE resolved RGBA tint -- REPLACES the base (identity == base_color), never multiplies */
-    float scale;    /* 24: scale about the atom center (1 = identity) */
-    bool visible;   /* 28: false -> skip the atom emit */
+    uint32_t color; /*  8: ABSOLUTE resolved RGBA8 tint -- REPLACES the base (identity == base_color), never multiplies */
+    float scale;    /* 12: scale about the atom center (1 = identity) */
+    bool visible;   /* 16: false -> skip the atom emit */
 } nt_ui_rich_fx_result_t;
-_Static_assert(sizeof(nt_ui_rich_fx_result_t) == 32, "nt_ui_rich_fx_result_t stable ABI (6 float + 1 bool + pad)");
+_Static_assert(sizeof(nt_ui_rich_fx_result_t) == 20, "nt_ui_rich_fx_result_t stable ABI (3 float + 1 u32 + 1 bool + pad)");
 
-static inline nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_color[4]) {
+static inline nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(uint32_t base_color) {
     nt_ui_rich_fx_result_t r;
     r.offset_x = 0.0F;
     r.offset_y = 0.0F;
-    r.color[0] = base_color[0];
-    r.color[1] = base_color[1];
-    r.color[2] = base_color[2];
-    r.color[3] = base_color[3];
+    r.color = base_color;
     r.scale = 1.0F;
     r.visible = true;
     return r;
@@ -76,7 +73,7 @@ static inline nt_ui_rich_fx_result_t nt_ui_rich_fx_identity(const float base_col
 
 /* Per-atom effect callback. hovered is true only for the hovered link's atoms (hover gates
  * effects). Returns a visual-only transform; MUST NOT mutate layout. */
-typedef nt_ui_rich_fx_result_t (*nt_ui_rich_fx_fn)(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+typedef nt_ui_rich_fx_result_t (*nt_ui_rich_fx_fn)(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                                    void *user_data);
 
 /* Runtime tuning for effect functions, passed as user_data. Convention: a
@@ -166,7 +163,7 @@ typedef nt_ui_rich_object_measure_t (*nt_ui_rich_object_measure_fn)(void *user_d
 /* color is the ABSOLUTE resolved RGBA (honours opacity/<color>/fx) -- modulate the draw by it.
  * x,y,w,h are LAYOUT (Clay Y-down) px; apply world_mat4 (it bakes the screen Y-flip) to every
  * position or compose it on the LEFT of your model -- passing identity Y-mirrors the object. */
-typedef void (*nt_ui_rich_object_draw_fn)(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]);
+typedef void (*nt_ui_rich_object_draw_fn)(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]);
 
 /* ---- Builder (code-first push/pop) ---- */
 /* All builder calls operate on the per-call run-list owned by ctx between begin/end.

@@ -2102,7 +2102,7 @@ static const rich_fade_params_t s_rich_fade_params = {.speed = 2.2F, .min_alpha 
 /* A LOOPING opacity fade (the stock fade_in is one-shot -> it freezes on the gallery's continuous
  * clock). atom_idx-INDEPENDENT: atom_idx here is the GLOBAL block index, so a per-glyph stagger
  * would push this late word past its window and blank it (that staggered reveal is the typewriter). */
-static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                              void *user_data) {
     (void)atom_idx;
     (void)kind;
@@ -2114,14 +2114,14 @@ static nt_ui_rich_fx_result_t rich_loop_fade(uint32_t atom_idx, nt_rich_atom_kin
     const float min_a = (p != NULL) ? p->min_alpha : 0.15F;
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     const float a = min_a + ((1.0F - min_a) * (0.5F + (0.5F * sinf(time * speed))));
-    r.color[3] = base_color[3] * a; /* a >= min_a, so visible stays true (identity) */
+    r.color = nt_color_scale_alpha(base_color, a); /* a >= min_a, so visible stays true (identity) */
     return r;
 }
 
 /* Visual-only horizontal nudge for the z-layer demo: inline images have no offset_x, but the demo needs a
  * REAL same-line overlap (the image atom sits AFTER the word in the flow). Slides the image left by
  * *user_data px so it lands on the preceding word; the layer then decides which is drawn on top. */
-static nt_ui_rich_fx_result_t rich_fx_pull_left(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+static nt_ui_rich_fx_result_t rich_fx_pull_left(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                                 void *user_data) {
     (void)atom_idx;
     (void)kind;
@@ -2153,14 +2153,6 @@ typedef struct {
 static rich_obj_demo_t s_rich_obj_demo;
 
 /* draw_fn receives RGBA in 0..1 (the resolved <color> + folded opacity + fx tint). Pack to 0xAABBGGRR. */
-static uint32_t rich_obj_pack_color(const float color[4]) {
-    const uint32_t r = (uint32_t)((color[0] * 255.0F) + 0.5F);
-    const uint32_t g = (uint32_t)((color[1] * 255.0F) + 0.5F);
-    const uint32_t b = (uint32_t)((color[2] * 255.0F) + 0.5F);
-    const uint32_t a = (uint32_t)((color[3] * 255.0F) + 0.5F);
-    return (a << 24) | (b << 16) | (g << 8) | r;
-}
-
 #define RICH_OBJ_BAR_W 160.0F
 #define RICH_OBJ_BAR_H 14.0F
 #define RICH_OBJ_SPIN 24.0F
@@ -2170,16 +2162,15 @@ static nt_ui_rich_object_measure_t rich_obj_bar_measure(void *user_data) {
     (void)user_data;
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_BAR_W, .height = RICH_OBJ_BAR_H, .ascent = 11.0F};
 }
-static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     /* emit_custom dirtied the sprite bind cache before this rich emit -> rebind every call. */
     nt_sprite_renderer_set_material(d->material);
     const float t = (d->clock != NULL) ? *d->clock : 0.0F;
     const float progress = 0.5F + (0.5F * sinf(t * 1.5F)); /* loops 0..1 */
-    const uint32_t value_col = rich_obj_pack_color(color);
+    const uint32_t value_col = color;
     /* Track: same color at ~25% alpha so it tints/fades with the text. */
-    float track[4] = {color[0], color[1], color[2], color[3] * 0.25F};
-    const uint32_t track_col = rich_obj_pack_color(track);
+    const uint32_t track_col = nt_color_scale_alpha(color, 0.25F);
     const float track_pos[4][2] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
     const float fill_w = w * progress;
     const float fill_pos[4][2] = {{x, y}, {x + fill_w, y}, {x + fill_w, y + h}, {x, y + h}};
@@ -2197,7 +2188,7 @@ static nt_ui_rich_object_measure_t rich_obj_spin_measure(void *user_data) {
     (void)user_data;
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SPIN, .height = RICH_OBJ_SPIN, .ascent = 18.0F};
 }
-static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     nt_sprite_renderer_set_material(d->material);
     const float t = (d->clock != NULL) ? *d->clock : 0.0F;
@@ -2217,7 +2208,7 @@ static void rich_obj_spin_draw(void *user_data, float x, float y, float w, float
         pos[i][1] = cy + (dx[i] * sn) + (dy[i] * cs);
     }
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, rich_obj_pack_color(color), NULL, 0U);
+    nt_sprite_renderer_emit_geometry(d->white_atlas, d->white_region, pos, 4, idx, 6, world_mat4, color, NULL, 0U);
 }
 
 /* Perspective cube remapped into the box's NDC sub-rect (no glViewport/scissor touch); the walker's
@@ -2228,7 +2219,7 @@ static nt_ui_rich_object_measure_t rich_obj_cube_measure(void *user_data) {
     /* Square box; ascent ~0.6*h centres the cube on the text line (not floating high above it). */
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_CUBE, .height = RICH_OBJ_CUBE, .ascent = 40.0F};
 }
-static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
     if (w <= 0.0F || h <= 0.0F) {
         return;
@@ -2309,7 +2300,7 @@ static void rich_obj_text_model(const float world[16], float ox, float oy, float
         out[12 + r] = (ox * world[r]) + (oy * world[4 + r]) + world[12 + r];
     }
 }
-static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
     (void)w;
     (void)h;
@@ -2328,10 +2319,10 @@ static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, fl
         float model[16];
         rich_obj_text_model(world_mat4, x, baseline, model);
         nt_text_renderer_set_oblique(0.0F); /* label stays upright */
-        nt_text_renderer_draw_n(label, (size_t)ln, model, size, nt_color_pack(color), 0.0F, 0.0F);
+        nt_text_renderer_draw_n(label, (size_t)ln, model, size, color, 0.0F, 0.0F);
         rich_obj_text_model(world_mat4, x + label_col, baseline, model);
         nt_text_renderer_set_oblique(shears[i]); /* sample leans -- no flush between the two draws */
-        nt_text_renderer_draw_n("The quick brown fox", 19U, model, size, nt_color_pack(color), 0.0F, 0.0F);
+        nt_text_renderer_draw_n("The quick brown fox", 19U, model, size, color, 0.0F, 0.0F);
     }
     nt_text_renderer_set_oblique(0.0F); /* MUST reset: this object-only block has no rich text pass to do it */
 }

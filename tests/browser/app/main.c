@@ -944,7 +944,7 @@ static void render_rich(nt_ui_context_t *ctx) {
 // #region fixed-time rich composition pixel witness
 static float s_rich_composition_speed = 32.0F;
 
-static nt_ui_rich_fx_result_t composition_effect(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], const float base_color[4], float time, bool hovered,
+static nt_ui_rich_fx_result_t composition_effect(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                                  void *user_data) {
     (void)atom_idx;
     (void)kind;
@@ -962,12 +962,12 @@ static nt_ui_rich_object_measure_t composition_object_measure(void *user_data) {
     return (nt_ui_rich_object_measure_t){.width = 320.0F, .height = 32.0F, .ascent = 32.0F};
 }
 
-static void composition_object_draw(void *user_data, float x, float y, float w, float h, const float color[4], const float world_mat4[16]) {
+static void composition_object_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
     const float positions[4][2] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
     nt_sprite_renderer_set_material(s_sprite_material);
-    nt_sprite_renderer_emit_geometry(s_atlas_handle, s_atlas_white_region, positions, 4U, indices, 6U, world_mat4, nt_color_pack(color), NULL, 0U);
+    nt_sprite_renderer_emit_geometry(s_atlas_handle, s_atlas_white_region, positions, 4U, indices, 6U, world_mat4, color, NULL, 0U);
 }
 
 static void render_rich_composition(nt_ui_context_t *ctx) {
