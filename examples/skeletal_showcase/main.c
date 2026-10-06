@@ -351,7 +351,8 @@ typedef struct {
     void (*update)(void);
     void (*cancel_input)(void);
     void (*declare_controls)(void);
-    void (*draw)(void);
+    void (*prepare)(void); /* before the first pass: palettes, CPU work, item lists; NULL when nothing to do */
+    void (*draw)(void);    /* inside the pass: recorded draws only */
 } skeletal_scene_desc_t;
 
 static void cancel_scene_input(void);
@@ -366,16 +367,19 @@ static void skinned_reset(void);
 static void skinned_update(void);
 static void skinned_cancel_input(void);
 static void skinned_declare_controls(void);
+static void skinned_prepare(void);
 static void skinned_draw(void);
 static void ordering_reset(void);
 static void ordering_update(void);
 static void ordering_cancel_input(void);
 static void ordering_declare_controls(void);
+static void ordering_prepare(void);
 static void ordering_draw(void);
 static void mixing_reset(void);
 static void mixing_update(void);
 static void mixing_cancel_input(void);
 static void mixing_declare_controls(void);
+static void mixing_prepare(void);
 static void mixing_draw(void);
 
 static const skeletal_scene_desc_t s_scene_registry[] = {
@@ -397,6 +401,7 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
         .update = skinned_update,
         .cancel_input = skinned_cancel_input,
         .declare_controls = skinned_declare_controls,
+        .prepare = skinned_prepare,
         .draw = skinned_draw,
     },
     {
@@ -407,6 +412,7 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
         .update = ordering_update,
         .cancel_input = ordering_cancel_input,
         .declare_controls = ordering_declare_controls,
+        .prepare = ordering_prepare,
         .draw = ordering_draw,
     },
     {
@@ -417,6 +423,7 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
         .update = mixing_update,
         .cancel_input = mixing_cancel_input,
         .declare_controls = mixing_declare_controls,
+        .prepare = mixing_prepare,
         .draw = mixing_draw,
     },
 };
@@ -2289,9 +2296,9 @@ static void skeleton_draw(void) {
     draw_skeleton(skel, s_skeleton_scene.model, s_skeleton_scene.selected_joint, s_skeleton_scene.show_axes, s_fit_scale);
 }
 
-/* Part `part` of `count` equal side-by-side stage rectangles, all with the same
- * camera and one projection for their aspect ratio. The shell restores the full UI viewport. */
-static void stage_viewport(uint32_t part, uint32_t count) {
+/* Part `part` of `count` equal side-by-side stage rectangles (GL bottom-left x, y, w, h), all with
+ * the same camera and one projection for their aspect ratio: writes s_frame_uniforms.view_proj. */
+static void stage_camera(uint32_t part, uint32_t count, int rect[4]) {
     const nt_ui_viewport_t viewport = nt_ui_viewport_from_scale(&s_ui_scale);
     const int stage_width = (int)(s_stage_bbox.width * s_ui_scale.scale_x) / (int)count;
     const int stage_height = (int)(s_stage_bbox.height * s_ui_scale.scale_y);
@@ -2299,17 +2306,36 @@ static void stage_viewport(uint32_t part, uint32_t count) {
     const int height = stage_height > 0 ? stage_height : 1;
     const int x = (int)(viewport.x + (s_stage_bbox.x * s_ui_scale.scale_x)) + ((int)part * width);
     const int y = (int)g_nt_window.fb_height - (int)(viewport.y + ((s_stage_bbox.y + s_stage_bbox.height) * s_ui_scale.scale_y));
-    nt_gfx_set_viewport(x, y, width, height);
-    nt_gfx_set_scissor(x, y, width, height);
+    rect[0] = x;
+    rect[1] = y;
+    rect[2] = width;
+    rect[3] = height;
     mat4 vp;
     make_camera_vp(vp, (float)width / (float)height, s_frame_uniforms.camera_pos);
     memcpy(s_frame_uniforms.view_proj, vp, sizeof vp);
-    nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
-    nt_shape_renderer_set_vp((const float *)vp);
 }
 
+/* The shell restores the full UI viewport. */
+static void stage_viewport(uint32_t part, uint32_t count) {
+    int rect[4];
+    stage_camera(part, count, rect);
+    nt_gfx_set_viewport(rect[0], rect[1], rect[2], rect[3]);
+    nt_gfx_set_scissor(rect[0], rect[1], rect[2], rect[3]);
+    nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
+    nt_shape_renderer_set_vp(s_frame_uniforms.view_proj);
+}
+
+/* What skinned_prepare leaves for skinned_draw in this frame. */
+static struct {
+    nt_render_item_t items[2];
+    uint32_t count;
+    bool cpu;
+    bool ready;
+} s_skinned_frame;
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void skinned_draw(void) {
+static void skinned_prepare(void) {
+    s_skinned_frame.ready = false;
     const character_player_t *p = &s_skinned_scene.player;
     const bool humanoid = p->rig == RIG_HUMANOID;
     if (p->skel == NULL || (!humanoid && !nt_resource_is_ready(s_skin_resource[p->rig])) || g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F) {
@@ -2341,7 +2367,6 @@ static void skinned_draw(void) {
         nt_transform_comp_set_scale(e, scale, scale, scale);
     }
     nt_transform_comp_update();
-    nt_render_item_t items[2];
     uint32_t ready = 0;
     if (!cpu) {
         nt_skeletal_gpu_begin_frame();
@@ -2357,38 +2382,57 @@ static void skinned_draw(void) {
         const nt_entity_t e = s_mesh_entities[i];
         *nt_mesh_comp_handle(e) = mesh;
         *nt_material_comp_handle(e) = material;
-        items[ready++] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
+        s_skinned_frame.items[ready++] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
         if (!cpu) {
             nt_skeletal_mat34_t *palette = nt_skeletal_gpu_reserve(skins[i]->palette_count, nt_skin_comp_handle(e));
             nt_skin_palette_build(skins[i], models[i], p->skel->joint_count, palette, skins[i]->palette_count);
         }
     }
-    if (cpu) {
-        nt_mesh_renderer_draw_list(items, ready);
-    } else {
+    if (!cpu) {
         nt_skeletal_gpu_flush();
-        nt_skinned_mesh_renderer_draw_list(items, ready);
+    }
+    s_skinned_frame.count = ready;
+    s_skinned_frame.cpu = cpu;
+    s_skinned_frame.ready = true;
+}
+
+/* Bones overlay: most joints sit inside the mesh. */
+static void draw_skinned_bones(void) {
+    const character_player_t *p = &s_skinned_scene.player;
+    nt_shape_renderer_set_depth(false);
+    nt_skeletal_mat34_t world;
+    nt_skeletal_mat34_t bones[SKELETAL_SHOWCASE_MAX_JOINTS];
+    nt_skeletal_mat34_from_mat4(nt_transform_comp_world_matrix(s_mesh_entities[0]), &world);
+    for (uint16_t j = 0; j < p->skel->joint_count; ++j) {
+        nt_skeletal_mat34_mul(&world, &p->model[j], &bones[j]);
+    }
+    draw_skeleton(p->skel, bones, -1, false, s_fit_scale);
+    if (p->rig == RIG_HUMANOID) {
+        const float point[3] = {0.2F, 0.1F, 0.15F};
+        nt_skeletal_mat34_t socket;
+        nt_skeletal_mat34_mul(&world, &p->model[8], &socket);
+        float marker[3];
+        for (uint32_t r = 0; r < 3; ++r) {
+            marker[r] = socket.r[r][3];
+            for (uint32_t k = 0; k < 3; ++k) {
+                marker[r] += socket.r[r][k] * point[k];
+            }
+        }
+        nt_shape_renderer_sphere(marker, 0.11F, NT_RGBA8(255, 51, 51, 255));
+    }
+}
+
+static void skinned_draw(void) {
+    if (!s_skinned_frame.ready) {
+        return;
+    }
+    if (s_skinned_frame.cpu) {
+        nt_mesh_renderer_draw_list(s_skinned_frame.items, s_skinned_frame.count);
+    } else {
+        nt_skinned_mesh_renderer_draw_list(s_skinned_frame.items, s_skinned_frame.count);
     }
     if (s_show_bones) {
-        nt_shape_renderer_set_depth(false); /* bones are an overlay: most sit inside the mesh */
-        nt_skeletal_mat34_t world;
-        nt_skeletal_mat34_t bones[SKELETAL_SHOWCASE_MAX_JOINTS];
-        nt_skeletal_mat34_from_mat4(nt_transform_comp_world_matrix(s_mesh_entities[0]), &world);
-        for (uint16_t j = 0; j < p->skel->joint_count; ++j) {
-            nt_skeletal_mat34_mul(&world, &p->model[j], &bones[j]);
-        }
-        draw_skeleton(p->skel, bones, -1, false, s_fit_scale);
-        if (humanoid) {
-            const float point[3] = {0.2F, 0.1F, 0.15F};
-            float marker[3];
-            for (uint32_t r = 0; r < 3; ++r) {
-                marker[r] = bones[8].r[r][3];
-                for (uint32_t k = 0; k < 3; ++k) {
-                    marker[r] += bones[8].r[r][k] * point[k];
-                }
-            }
-            nt_shape_renderer_sphere(marker, 0.11F, NT_RGBA8(255, 51, 51, 255));
-        }
+        draw_skinned_bones();
     }
 }
 
@@ -2414,7 +2458,15 @@ static float mixing_culling_radius(void) {
     return s_mixing_scene.skin->any_pose_radius + s_mixing_scene.root_radius + weight_margin;
 }
 
-static void mixing_draw(void) {
+/* What mixing_prepare leaves for mixing_draw in this frame. */
+static struct {
+    nt_render_item_t items[MIX_ENTITY_COUNT];
+    uint32_t count;
+    bool ready;
+} s_mixing_frame;
+
+static void mixing_prepare(void) {
+    s_mixing_frame.ready = false;
     if (!mixing_ready() || s_mixing_scene.draw_model[0] == NULL || g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F || !nt_resource_is_ready(s_mix_texture_resource) ||
         !nt_gfx_program_ready(s_skin_program.program)) {
         return;
@@ -2424,9 +2476,9 @@ static void mixing_draw(void) {
             return;
         }
     }
-    draw_ground(s_fit_scale);
+    int rect[4];
+    stage_camera(0, 1, rect); /* culling reads the stage camera */
     const float radius = mixing_culling_radius();
-    nt_render_item_t items[MIX_ENTITY_COUNT];
     bool visible[MIX_CHARACTER_COUNT] = {false};
     uint32_t ready = 0;
     nt_skeletal_gpu_begin_frame();
@@ -2450,11 +2502,20 @@ static void mixing_draw(void) {
             if (mesh > 0) {
                 *nt_skin_comp_handle(e) = *nt_skin_comp_handle(s_mix_entities[character][0]);
             }
-            items[ready++] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(s_mix_material, *nt_mesh_comp_handle(e))};
+            s_mixing_frame.items[ready++] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(s_mix_material, *nt_mesh_comp_handle(e))};
         }
     }
     nt_skeletal_gpu_flush();
-    nt_skinned_mesh_renderer_draw_list(items, ready);
+    s_mixing_frame.count = ready;
+    s_mixing_frame.ready = true;
+}
+
+static void mixing_draw(void) {
+    if (!s_mixing_frame.ready) {
+        return;
+    }
+    draw_ground(s_fit_scale);
+    nt_skinned_mesh_renderer_draw_list(s_mixing_frame.items, s_mixing_frame.count);
 }
 
 static bool ordering_ready(void) {
@@ -2462,9 +2523,11 @@ static bool ordering_ready(void) {
            nt_gfx_program_ready(s_skin_program.program);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void ordering_draw(void) {
-    if (!ordering_ready()) {
+static bool s_ordering_prepared; /* palettes of this frame are flushed */
+
+static void ordering_prepare(void) {
+    s_ordering_prepared = ordering_ready();
+    if (!s_ordering_prepared) {
         return;
     }
     const uint32_t count = (uint32_t)s_order_count;
@@ -2487,9 +2550,19 @@ static void ordering_draw(void) {
         }
     }
     nt_skeletal_gpu_flush();
+}
+
+static void ordering_draw(void) {
+    if (!s_ordering_prepared) {
+        return;
+    }
+    const uint32_t count = (uint32_t)s_order_count;
+    const uint32_t passes = s_order_stats.passes;
     /* draw_list reads the bindings at the call, so each pass rebinds the entities' materials just before its list. */
     for (uint32_t pass = 0; pass < passes; ++pass) {
-        stage_viewport(pass, passes);
+        if (passes > 1U) {
+            stage_viewport(pass, passes); /* one pass draws in the shell's full stage view */
+        }
         nt_render_item_t items[SKELETAL_SHOWCASE_MAX_INSTANCES];
         for (uint32_t i = 0; i < count; ++i) {
             const nt_entity_t e = s_order_entities[i];
@@ -2613,9 +2686,6 @@ static void frame(void) {
 
     nt_font_step();
     const bool render_enabled = nt_app_render_enabled();
-    if (render_enabled) {
-        nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.035F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
-    }
 
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
@@ -2633,10 +2703,11 @@ static void frame(void) {
         s_ui_scale.fb_h = fb_h;
         declare_ui(&s_ui_scale);
     }
-    s_scene_registry[s_active_scene].update();
+    const skeletal_scene_desc_t *scene = &s_scene_registry[s_active_scene];
+    scene->update();
+    const bool split = s_order_two_passes && scene->draw == ordering_draw;
     if (ready) {
         s_stage_bbox = nt_ui_get_bbox(s_ui, nt_ui_id(STAGE_ID));
-        const bool split = s_order_two_passes && s_scene_registry[s_active_scene].draw == ordering_draw;
         const float camera_width = s_stage_bbox.width / (split ? 2.0F : 1.0F);
         const bool stage_resized = fabsf(s_camera_fit_width - camera_width) > 0.5F || fabsf(s_camera_fit_height - s_stage_bbox.height) > 0.5F;
         if (stage_resized && s_stage_bbox.found && s_stage_bbox.height > 1.0F) {
@@ -2645,20 +2716,29 @@ static void frame(void) {
             s_camera_fit_height = s_stage_bbox.height;
         }
         update_stage_camera(&g_nt_input.pointers[0], &s_ui_scale);
-        if (render_enabled) {
-            nt_gfx_set_scissor_enabled(true);
-            nt_shape_renderer_set_depth(true);
+    }
+    const bool draw_stage = ready && render_enabled;
+    if (draw_stage && scene->prepare != NULL) {
+        scene->prepare();
+    }
+    if (render_enabled) {
+        nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.035F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
+    }
+    if (draw_stage) {
+        nt_gfx_set_scissor_enabled(true);
+        nt_shape_renderer_set_depth(true);
+        if (!split) {
             stage_viewport(0, 1);
-            s_scene_registry[s_active_scene].draw();
-            end_stage();
-
-            nt_ui_make_screen_view_proj(s_ui_scale.logical_w, s_ui_scale.logical_h, s_frame_uniforms.view_proj);
-            nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
-            nt_ui_target_t target = nt_ui_scale_make_target(&s_ui_scale);
-            nt_ui_walk(s_ui, &target);
-            nt_sprite_renderer_flush();
-            nt_text_renderer_flush();
         }
+        scene->draw();
+        end_stage();
+
+        nt_ui_make_screen_view_proj(s_ui_scale.logical_w, s_ui_scale.logical_h, s_frame_uniforms.view_proj);
+        nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
+        nt_ui_target_t target = nt_ui_scale_make_target(&s_ui_scale);
+        nt_ui_walk(s_ui, &target);
+        nt_sprite_renderer_flush();
+        nt_text_renderer_flush();
     }
     if (render_enabled) {
         nt_gfx_end_pass();
@@ -2691,7 +2771,7 @@ int main(int argc, char *argv[]) {
     gfx_desc.max_textures = 16;
     /* Worst frame: Order & Instancing, two passes of MAX skinned instances; scenes draw exclusively. */
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t);
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4U * (uint32_t)sizeof(nt_frame_uniforms_t); /* two stage views, the UI view and the shell stage view */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 3U * (uint32_t)sizeof(nt_frame_uniforms_t); /* two stage views and the UI view */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
     nt_http_init();
