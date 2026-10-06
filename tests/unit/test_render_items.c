@@ -281,7 +281,7 @@ void test_is_visible_not_visible(void) {
 void test_is_visible_zero_alpha(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
-    nt_drawable_comp_set_color(e, nt_color_with_alpha(nt_drawable_comp_color(e), 0.0F));
+    nt_drawable_comp_set_color(e, 0x00FFFFFFU);
     TEST_ASSERT_FALSE(nt_render_is_visible(e));
 }
 

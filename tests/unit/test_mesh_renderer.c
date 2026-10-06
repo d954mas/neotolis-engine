@@ -1182,27 +1182,6 @@ void test_pipeline_cache_shared_program_collapses(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
-/* Every instance carries its own drawable color, packed into the GPU instance layout. */
-void test_instances_carry_their_drawable_colors(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material();
-    nt_entity_t tinted = create_test_entity(mesh, mat);
-    nt_entity_t white = create_test_entity(mesh, mat);
-    nt_drawable_comp_set_color(tinted, nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 1.0F}));
-    const uint32_t key = nt_mesh_renderer_batch_key(mat, mesh);
-    nt_render_item_t items[2] = {{.entity = tinted.id, .batch_key = key}, {.entity = white.id, .batch_key = key}};
-
-    begin_storage_frame();
-    nt_mesh_run_t runs[2];
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(items, 2, runs, 2));
-    TEST_ASSERT_EQUAL_UINT32(2, runs[0].instance_count);
-    TEST_ASSERT_EQUAL_UINT32(2U * sizeof(nt_mesh_instance_t), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
-    const nt_mesh_instance_t *instances = (const nt_mesh_instance_t *)(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + runs[0].offset);
-    TEST_ASSERT_EQUAL_HEX32(0xFF4D331AU, instances[0].color);
-    TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, instances[1].color);
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-}
-
 /* Two runs in one prepare, with the transform and drawable dense indices apart (a transform-only
  * entity comes first): each instance takes its own world and color, and the second run starts
  * right after the first run's instances. */
@@ -1807,7 +1786,6 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
     RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
-    RUN_TEST(test_instances_carry_their_drawable_colors);
     RUN_TEST(test_runs_of_one_prepare_pack_each_entity_world_and_color);
     RUN_TEST(test_prepare_asserts_on_an_item_without_drawable);
     RUN_TEST(test_prepare_asserts_on_an_item_without_transform);

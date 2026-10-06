@@ -144,6 +144,7 @@ static uint32_t s_fake_bind_vertex_input_count;
 static uint32_t s_fake_last_bound_vertex_input; /* recorder: last handle bind_vertex_input received */
 static uint32_t s_fake_last_uniform_program;    /* recorder: last program a uniform write named */
 static bool s_fake_fail_next_vertex_input_create;
+static nt_vertex_layout_t s_fake_last_vertex_input_layout; /* recorder: per-vertex layout of the last VI create */
 
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot) {
     nt_gfx_frame_execute();
@@ -313,6 +314,7 @@ uint32_t nt_gfx_fake_last_uniform_program(void) {
     return s_fake_last_uniform_program;
 }
 void nt_gfx_fake_fail_next_vertex_input_create(void) { s_fake_fail_next_vertex_input_create = true; }
+nt_vertex_layout_t nt_gfx_fake_last_vertex_input_layout(void) { return s_fake_last_vertex_input_layout; }
 
 void nt_gfx_fake_reset(void) {
     nt_gfx_frame_execute();
@@ -360,6 +362,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_bound_vertex_input = 0;
     s_fake_last_uniform_program = 0;
     s_fake_fail_next_vertex_input_create = false;
+    s_fake_last_vertex_input_layout = (nt_vertex_layout_t){0};
     s_fake_context_lost = false;
     s_fake_loss_pending = false;
     s_fake_fail_texture_creates = 0;
@@ -571,6 +574,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     (void)vbo_backend;
     (void)ibo_backend;
     s_fake_vertex_input_create_count++;
+    s_fake_last_vertex_input_layout = desc->layout;
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }

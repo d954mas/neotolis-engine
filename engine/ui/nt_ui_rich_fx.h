@@ -26,7 +26,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kin
 /* scale = 1 + AMP * sin(time*SPEED) -- a uniform breathing pulse about each atom's center. */
 nt_ui_rich_fx_result_t nt_ui_rich_fx_pulse(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered, void *user_data);
 /* color.a *= clamp((time - atom_idx*STAGGER) / DUR, 0, 1) -- a staggered per-atom fade-in;
- * alpha 0 -> visible=false so the atom is skipped entirely until its window opens. */
+ * visible=false until the atom's window opens (reveal factor 0), so the atom is skipped entirely. */
 nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kind_t kind, const float base_xy[2], const float base_wh[2], uint32_t base_color, float time, bool hovered,
                                              void *user_data);
 /* offset.y = -AMP * |sin(time*SPEED + atom_idx*PHASE)| -- an always-upward sharp-bottom hop. */

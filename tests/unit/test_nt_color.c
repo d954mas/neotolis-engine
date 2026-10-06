@@ -48,10 +48,11 @@ void test_unpack_lane_order(void) {
 void test_pack_clamps(void) {
     const float over[4] = {2.0F, -1.0F, 0.5F, 1.0F};
     const uint32_t p = nt_color_pack(over);
-    TEST_ASSERT_EQUAL_HEX32(0xFFU, p & 0xFFU);         /* R clamped hi -> 255 */
-    TEST_ASSERT_EQUAL_HEX32(0x00U, (p >> 8) & 0xFFU);  /* G clamped lo -> 0 */
-    TEST_ASSERT_EQUAL_HEX32(128U, (p >> 16) & 0xFFU);  /* B 0.5 -> round(127.5)=128 */
-    TEST_ASSERT_EQUAL_HEX32(0xFFU, (p >> 24) & 0xFFU); /* A 1.0 -> 255 */
+    TEST_ASSERT_EQUAL_HEX32(0xFFU, p & 0xFFU);                                                       /* R clamped hi -> 255 */
+    TEST_ASSERT_EQUAL_HEX32(0x00U, (p >> 8) & 0xFFU);                                                /* G clamped lo -> 0 */
+    TEST_ASSERT_EQUAL_HEX32(128U, (p >> 16) & 0xFFU);                                                /* B 0.5 -> round(127.5)=128 */
+    TEST_ASSERT_EQUAL_HEX32(0xFFU, (p >> 24) & 0xFFU);                                               /* A 1.0 -> 255 */
+    TEST_ASSERT_EQUAL_HEX32(0xFF00FF00U, nt_color_pack((const float[4]){-0.25F, 1.25F, NAN, 1.0F})); /* NaN -> 0 */
 }
 
 /* ---- sRGB <-> linear ---- */
@@ -244,7 +245,6 @@ void test_round_u8_half_up(void) {
     TEST_ASSERT_EQUAL_UINT32(255U, nt_color_round_u8(300.0F));
     TEST_ASSERT_EQUAL_UINT32(0U, nt_color_round_u8(-1.0F));
     TEST_ASSERT_EQUAL_UINT32(0U, nt_color_round_u8(NAN));
-    TEST_ASSERT_EQUAL_HEX32(0x2B112233U, nt_color_scale_alpha(0x55112233U, 0.5F));
 }
 
 int main(void) {

@@ -400,6 +400,17 @@ void test_vertex_color_and_depth_bias_bytes(void) {
     nt_text_renderer_set_glyph_depth_bias(0.0F);
 }
 
+/* The GPU reads that color as normalized RGBA8 at byte 44 of a 52-byte vertex. */
+void test_vertex_input_reads_color_as_normalized_rgba8(void) {
+    const nt_vertex_layout_t layout = nt_gfx_fake_last_vertex_input_layout();
+    TEST_ASSERT_EQUAL_UINT16(TEXT_VERTEX_BYTES, layout.stride);
+    TEST_ASSERT_EQUAL_UINT8(4U, layout.attrs[4].location);
+    TEST_ASSERT_EQUAL_INT(NT_VERTEX_UINT8, layout.attrs[4].type);
+    TEST_ASSERT_EQUAL_UINT8(4U, layout.attrs[4].count);
+    TEST_ASSERT_TRUE(layout.attrs[4].normalized);
+    TEST_ASSERT_EQUAL_UINT16(44U, layout.attrs[4].offset);
+}
+
 /* ---- Test 8: 4 vertices per glyph (TEXT-01) ---- */
 
 void test_vertex_count_4_per_glyph(void) {
@@ -1414,6 +1425,18 @@ void test_outline_with_zero_alpha_emits_no_pass(void) {
     TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_vertex_count()); /* fill only */
     nt_text_renderer_reset_decoration();
 }
+
+/* The shadow keeps the outline silhouette while the outline alpha fades to 0: the width picks it. */
+void test_zero_alpha_outline_keeps_the_shadow_on_the_outline_silhouette(void) {
+    nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, s_black);
+    nt_text_renderer_set_outline(0.05F, 0x00FFFFFFU);
+    nt_text_renderer_draw("A", s_identity, 200.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(8U, nt_text_renderer_test_vertex_count()); /* shadow + fill */
+    const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
+    /* Glyph data and bounds (bytes 20..43) name the cache variant: the shadow's is not the fill's. */
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(v + 20U, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 20U, 24U));
+    nt_text_renderer_reset_decoration();
+}
 #endif
 
 /* A shadow color whose alpha byte is 0 is off, whatever its RGB. */
@@ -1523,6 +1546,7 @@ int main(void) {
     RUN_TEST(test_measure_empty_string);
     RUN_TEST(test_measure_null_string);
     RUN_TEST(test_vertex_color_and_depth_bias_bytes);
+    RUN_TEST(test_vertex_input_reads_color_as_normalized_rgba8);
     RUN_TEST(test_vertex_count_4_per_glyph);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
     RUN_TEST(test_text_material_with_textures_asserts_at_flush);
@@ -1569,6 +1593,7 @@ int main(void) {
     RUN_TEST(test_shadow_with_zero_alpha_emits_no_pass);
 #if NT_FONT_EMBOLDEN_ENABLED
     RUN_TEST(test_outline_with_zero_alpha_emits_no_pass);
+    RUN_TEST(test_zero_alpha_outline_keeps_the_shadow_on_the_outline_silhouette);
 #endif
     RUN_TEST(test_passes_grouped_not_interleaved);
     RUN_TEST(test_underline_one_quad_per_segment);

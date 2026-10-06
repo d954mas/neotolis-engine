@@ -26,7 +26,7 @@ void nt_drawable_comp_remove(nt_entity_t entity);
 
 nt_hash32_t *nt_drawable_comp_tag(nt_entity_t entity);
 bool *nt_drawable_comp_visible(nt_entity_t entity);
-/* RGBA8 0xAABBGGRR (color/nt_color.h: nt_color_pack, nt_color_with_alpha); default white. */
+/* RGBA8 0xAABBGGRR (color/nt_color.h: NT_RGBA8, nt_color_pack); default white. */
 uint32_t nt_drawable_comp_color(nt_entity_t entity);
 void nt_drawable_comp_set_color(nt_entity_t entity, uint32_t color);
 void nt_drawable_comp_set_visible(nt_entity_t entity, bool visible);

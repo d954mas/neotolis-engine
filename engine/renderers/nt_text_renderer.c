@@ -611,15 +611,16 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     const uint8_t *end = p + len;
 
     /* Per-pass embolden cache key from the sticky weight (font units). Fill uses the weight; outline
-     * grows by outline_w; shadow reuses the outermost visible variant (outline if active, else fill) so
+     * grows by outline_w; shadow reuses the outermost variant (outline if outline_w > 0, else fill) so
      * it adds NO new cache entry. */
 #if NT_FONT_EMBOLDEN_ENABLED
     const float upm = (float)metrics.units_per_em;
     const int16_t fill_key = nt_font_quantize_weight(s_text.deco.weight_em * upm);
-    /* alpha 0 -> invisible: no outline pass, no extra cache variant, and the shadow tracks the fill silhouette (not the dilated outline). */
+    /* The shadow silhouette follows the outline width, not its alpha, so a fading outline cannot swap it. */
+    const int16_t outline_key = (int16_t)(s_text.deco.outline_w > 0.0F ? nt_font_quantize_weight((s_text.deco.weight_em + s_text.deco.outline_w) * upm) : fill_key);
+    const int16_t shadow_key = outline_key;
+    /* alpha 0 -> invisible: no outline pass. */
     const bool outline_active = (s_text.deco.outline_w > 0.0F && (s_text.deco.outline_color >> 24) != 0U);
-    const int16_t outline_key = (int16_t)(outline_active ? nt_font_quantize_weight((s_text.deco.weight_em + s_text.deco.outline_w) * upm) : fill_key);
-    const int16_t shadow_key = (int16_t)(outline_active ? outline_key : fill_key);
 #else
     const int16_t fill_key = 0;
     const int16_t shadow_key = 0;

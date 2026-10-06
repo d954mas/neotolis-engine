@@ -366,10 +366,10 @@ A tint — a color that multiplies or replaces what a draw shows — is a packed
 `uint32_t` `0xAABBGGRR` everywhere in the engine API: the drawable component,
 mesh and skinned instance structs, sprite `emit_*`, text (`draw`, outline,
 shadow), shape calls, the debug overlay, UI styles and rich-text effects and
-object callbacks. It is straight alpha, clamped to [0,1] and reaches the GPU as
+object callbacks. It is straight alpha and reaches the GPU as
 normalized RGBA8 (sprite, text and shape vertices, mesh and skinned mesh instances). Literals use
-`NT_RGBA8(r, g, b, a)`; float math (`nt_color_pack`, `nt_color_unpack`,
-`nt_color_with_alpha`, `nt_color_scale_alpha`, OkLab) lives in
+`NT_RGBA8(r, g, b, a)` with integer bytes 0..255; float math (`nt_color_pack`, `nt_color_unpack`,
+`nt_color_scale_alpha`, OkLab) lives in
 `engine/color/nt_color.h` and packs once at the end. Values are display
 (sRGB-encoded) colors; shaders use them without conversion. Values that are not
 a tint stay float: render-target clear colors, the blend constant color, material
@@ -377,10 +377,10 @@ uniform params (where an unclamped or HDR tint belongs) and lighting. Clay's own
 declarations (`backgroundColor`, `border.color`, a raw `CLAY_TEXT` color) keep
 Clay's `Clay_Color` (0..255 floats); the UI walker packs them when it emits.
 Float math packs once per stage (an opacity fold, then an effect), so a chain of
-stages can differ from a single float product by one step per stage. Every byte
-rounding saturates and rounds half up (`nt_color_round_u8`), so an opacity fold
-gives the same alpha on a packed color (`nt_color_scale_alpha`) and on a Clay
-color in the UI walker.
+stages can differ from a single float product by one step per stage. Every
+float-to-byte conversion saturates and rounds half up (NaN gives 0), so an
+opacity fold gives the same alpha on a packed color and on a Clay color in the
+UI walker.
 
 Every mesh and skinned mesh instance carries the entity's drawable color
 (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs

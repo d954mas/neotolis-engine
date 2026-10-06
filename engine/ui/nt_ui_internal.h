@@ -106,6 +106,9 @@ static inline Clay_Color nt_ui_unpack_abgr(uint32_t packed) {
     };
 }
 
+/* Clay_Color -> 0xAABBGGRR: Clay's floats are already byte scale (0..255, unclamped), so each rounds straight to a byte. */
+static inline uint32_t nt_ui_pack_clay(Clay_Color c) { return nt_color_round_u8(c.r) | (nt_color_round_u8(c.g) << 8) | (nt_color_round_u8(c.b) << 16) | (nt_color_round_u8(c.a) << 24); }
+
 /* 0xAABBGGRR -> Clay_Color with the IMAGE "no tint" sentinel: 0xFFFFFFFF -> {0}
  * (the walker maps a {0,0,0,0} backgroundColor back to white). Text must NOT use this. */
 static inline Clay_Color nt_ui_unpack_tint(uint32_t packed) { return (packed == 0xFFFFFFFFU) ? (Clay_Color){0} : nt_ui_unpack_abgr(packed); }

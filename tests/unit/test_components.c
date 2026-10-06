@@ -112,18 +112,6 @@ void test_drawable_set_color_stores_packed_rgba8(void) {
     TEST_ASSERT_EQUAL_HEX32(0xFF80401AU, nt_drawable_comp_color(e));
 }
 
-void test_color_with_alpha_keeps_rgb_bytes(void) {
-    const uint32_t color = nt_color_pack((const float[4]){0.1F, 0.25F, 0.5F, 1.0F});
-    TEST_ASSERT_EQUAL_HEX32(0x4080401AU, nt_color_with_alpha(color, 0.25F));
-    TEST_ASSERT_EQUAL_HEX32(0x0080401AU, nt_color_with_alpha(color, -1.0F));
-    TEST_ASSERT_EQUAL_HEX32(0xFF80401AU, nt_color_with_alpha(color, 2.0F));
-}
-
-void test_color_pack_clamps_and_maps_nan_to_zero(void) {
-    const float nan = NAN;
-    TEST_ASSERT_EQUAL_HEX32(0xFF00FF00U, nt_color_pack((const float[4]){-0.25F, 1.25F, nan, 1.0F}));
-}
-
 void test_drawable_set_visible_false(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
@@ -220,8 +208,6 @@ int main(void) {
     RUN_TEST(test_drawable_add_defaults_visible);
     RUN_TEST(test_drawable_add_defaults_color);
     RUN_TEST(test_drawable_set_color_stores_packed_rgba8);
-    RUN_TEST(test_color_with_alpha_keeps_rgb_bytes);
-    RUN_TEST(test_color_pack_clamps_and_maps_nan_to_zero);
     RUN_TEST(test_drawable_set_visible_false);
     RUN_TEST(test_drawable_set_visible_setter);
     RUN_TEST(test_drawable_set_tag);

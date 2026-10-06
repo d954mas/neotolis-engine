@@ -497,6 +497,27 @@ void test_prepare_asserts_on_an_item_without_drawable(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
+/* The world matrix comes from the transform view: an item without a transform asserts. */
+void test_prepare_asserts_on_an_item_without_transform(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_texture_t texture = make_deformation_texture();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_entity_t entity = nt_entity_create();
+    TEST_ASSERT_TRUE(nt_mesh_comp_add(entity));
+    TEST_ASSERT_TRUE(nt_material_comp_add(entity));
+    TEST_ASSERT_TRUE(nt_drawable_comp_add(entity));
+    TEST_ASSERT_TRUE(nt_skin_comp_add(entity));
+    *nt_mesh_comp_handle(entity) = mesh;
+    *nt_material_comp_handle(entity) = material;
+    *nt_skin_comp_handle(entity) = (nt_deformation_binding_t){.texture = texture};
+    nt_render_item_t item = make_item(entity, material, mesh);
+
+    begin_storage_frame();
+    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "no transform component"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 void test_material_or_mesh_change_splits_runs_in_input_order(void) {
     nt_mesh_t mesh_a = make_mesh();
     nt_mesh_t mesh_b = make_mesh();
@@ -571,7 +592,7 @@ void test_color_keeps_skin_fields_at_their_layout_offsets(void) {
 
     nt_material_t rgba8 = make_material_ex(program, NT_RESOURCE_INVALID, NT_SAMPLER_DEFAULT);
     nt_entity_t rgba8_entity = make_entity(mesh, rgba8, binding);
-    nt_drawable_comp_set_color(rgba8_entity, nt_color_with_alpha(nt_color_pack((const float[4]){-0.25F, 0.5F, 1.25F, 1.0F}), 0.25F));
+    nt_drawable_comp_set_color(rgba8_entity, NT_RGBA8(0, 128, 255, 64));
     nt_render_item_t item = make_item(rgba8_entity, rgba8, mesh);
     skinned_draw_list(&item, 1);
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
@@ -816,6 +837,7 @@ int main(void) {
     RUN_TEST(test_packed_instances_keep_each_entity_world_and_binding);
     RUN_TEST(test_runs_of_one_prepare_pack_each_entity_fields);
     RUN_TEST(test_prepare_asserts_on_an_item_without_drawable);
+    RUN_TEST(test_prepare_asserts_on_an_item_without_transform);
     RUN_TEST(test_material_or_mesh_change_splits_runs_in_input_order);
     RUN_TEST(test_material_transition_reapplies_complete_surface_and_skin_set);
     RUN_TEST(test_indexed_and_nonindexed_meshes_use_matching_draw_paths);

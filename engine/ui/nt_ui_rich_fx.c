@@ -137,7 +137,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_rainbow(uint32_t atom_idx, nt_rich_atom_kin
     const float hue = ((float)atom_idx * RICH_FX_RAINBOW_PHASE) + (time * speed);
     float rgb[3];
     rich_fx_hue_rgb(hue, rgb);
-    r.color = (nt_color_pack((const float[4]){rgb[0], rgb[1], rgb[2], 1.0F}) & 0x00FFFFFFU) | (base_color & 0xFF000000U); /* keep base alpha */
+    r.color = nt_color_pack((const float[4]){rgb[0], rgb[1], rgb[2], 0.0F}) | (base_color & 0xFF000000U); /* keep base alpha */
     return r;
 }
 
