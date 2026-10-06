@@ -3933,6 +3933,8 @@ int main(int argc, char *argv[]) {
     g_nt_window.height = 800;
     nt_window_init();
     nt_example_frames_init(argc, argv);
+    /* --frames skips input, so a measured run picks its tab here. */
+    s_active_tab = (int)nt_example_arg_u32(argc, argv, "--tab", 0);
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
