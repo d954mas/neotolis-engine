@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
     }
     const float xy[2] = {3.0F, 5.0F};
     const float wh[2] = {11.0F, 17.0F};
-    const float color[4] = {0.25F, 0.5F, 0.75F, 1.0F};
+    const uint32_t color = NT_RGBA8(64, 128, 191, 255);
     const float time = (float)argc * 0.125F;
 #if NT_COMPOSITION_EFFECTS == 0
     float magnitude = 2.0F;
@@ -68,7 +68,7 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < sizeof s_effects / sizeof s_effects[0]; i++) {
         const nt_ui_rich_fx_fn fn = s_effects[i];
         const nt_ui_rich_fx_result_t result = fn(i, NT_RICH_ATOM_TEXT, xy, wh, color, time, false, user);
-        checksum += result.offset_x + result.offset_y + result.scale + result.color[0] + result.color[1] + result.color[2] + result.color[3] + (result.visible ? 1.0F : 0.0F);
+        checksum += result.offset_x + result.offset_y + result.scale + ((float)(result.color >> 24) / 255.0F) + (result.visible ? 1.0F : 0.0F);
     }
 #else
     (void)argc;

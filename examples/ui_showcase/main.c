@@ -2152,7 +2152,7 @@ typedef struct {
 } rich_obj_demo_t;
 static rich_obj_demo_t s_rich_obj_demo;
 
-/* draw_fn receives RGBA in 0..1 (the resolved <color> + folded opacity + fx tint). Pack to 0xAABBGGRR. */
+/* draw_fn receives the packed 0xAABBGGRR tint (the resolved <color> + folded opacity + fx tint). */
 #define RICH_OBJ_BAR_W 160.0F
 #define RICH_OBJ_BAR_H 14.0F
 #define RICH_OBJ_SPIN 24.0F

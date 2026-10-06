@@ -11,7 +11,7 @@
 
 #include "atlas/nt_atlas.h" /* inline-image region resolve + inverse-ppu (immediate emit) */
 #include "clay.h"
-#include "color/nt_color.h" /* nt_color_unpack/pack/parse_hex: shared packed<->float color math */
+#include "color/nt_color.h" /* nt_color_scale_alpha, nt_color_parse_hex: packed color math */
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -1932,9 +1932,6 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
 // #endregion
 
 // #region emit
-/* Unpack a packed AABBGGRR color into a normalized RGBA float4 (text renderer order), then fold
- * opacity into alpha. nt_color_unpack owns the packed->[0,1] math (R,G,B,A order matches); the
- * opacity multiply is rich-specific so this stays a thin wrapper. */
 /* Evaluate the per-atom effect -> visual-only transform; zero means identity. */
 static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *s, uint32_t base_color) {
     if (s->effect_id == 0U) {

@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "clay.h"
-#include "color/nt_color.h" /* nt_color_unpack: packed AABBGGRR -> float[4] for the setters */
+#include "color/nt_color.h" /* nt_color_scale_alpha: parent opacity into packed decoration colors */
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "memory/nt_mem_scratch.h"

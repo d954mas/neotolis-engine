@@ -966,10 +966,8 @@ static void test_fx_glow_deterministic(void) {
 
     const nt_ui_rich_fx_result_t r = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 0U), er), "glow r == base + (1-base)*amp*(0.5+0.5*sin)");
-    TEST_ASSERT_TRUE_MESSAGE(ch(r.color, 0U) >= ch(base_color, 0U) - 1e-3F, "glow brightens r (>= base)");
-    TEST_ASSERT_TRUE_MESSAGE(ch(r.color, 1U) >= ch(base_color, 1U) - 1e-3F, "glow brightens g (>= base)");
-    TEST_ASSERT_TRUE_MESSAGE(ch(r.color, 2U) >= ch(base_color, 2U) - 1e-3F, "glow brightens b (>= base)");
-    TEST_ASSERT_TRUE_MESSAGE(ch(r.color, 0U) <= 1.0F + 1e-3F && ch(r.color, 1U) <= 1.0F + 1e-3F && ch(r.color, 2U) <= 1.0F + 1e-3F, "glow bounded by white");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 1U), ch(base_color, 1U) + ((1.0F - ch(base_color, 1U)) * g)), "glow g == base + (1-base)*g (channel kept in place)");
+    TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 2U), ch(base_color, 2U) + ((1.0F - ch(base_color, 2U)) * g)), "glow b == base + (1-base)*g (channel kept in place)");
     TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r.color, 3U), 0.8F), "glow keeps the base alpha (color-only)");
     TEST_ASSERT_TRUE_MESSAGE(approx(r.offset_x, 0.0F) && approx(r.offset_y, 0.0F), "glow has no offset (visual-only color)");
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "glow keeps the atom visible");
@@ -986,7 +984,6 @@ static void test_fx_glow_deterministic(void) {
     nt_ui_rich_fx_params_t over = {.amp = 2.0F, .speed = 0.0F};
     const nt_ui_rich_fx_result_t big = nt_ui_rich_fx_glow(idx, NT_RICH_ATOM_TEXT, xy, wh, base_color, t, false, &over);
     const float g_over = rich_fx_clamp01_ref(2.0F * (0.5F + (0.5F * sinf(t * FX_GLOW_SPEED))));
-    TEST_ASSERT_TRUE_MESSAGE(ch(big.color, 0U) <= 1.0F + 1e-3F && ch(big.color, 1U) <= 1.0F + 1e-3F && ch(big.color, 2U) <= 1.0F + 1e-3F, "glow amp>1 stays bounded by white (clamp01)");
     TEST_ASSERT_TRUE_MESSAGE(approx8(ch(big.color, 0U), ch(base_color, 0U) + ((1.0F - ch(base_color, 0U)) * g_over)), "glow amp>1 matches the real clamped formula (speed<=0 -> default speed)");
 }
 

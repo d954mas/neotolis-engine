@@ -161,8 +161,8 @@ subsystem — decoration reuses the text pipeline and the Slug text shaders (`sl
 An `<img>` atom is **NOT** a Clay child. It emits **immediately** in the rich
 block's CUSTOM self-emit (`rich_emit_images`) via
 `nt_sprite_renderer_emit_region`, positioned at the solver's solved `(x, y)`.
-The composed tint (the run's `<color>` × any per-atom effect tint) is packed to
-the standard **u8** sprite tint, the block's **image material** (plain, or a
+The composed tint (the run's `<color>` × any per-atom effect tint) is already a
+packed RGBA8 color and becomes the standard **u8** sprite tint unchanged, the block's **image material** (plain, or a
 custom-attr material with attr defaults — the emit passes no block) textures the
 region, and the self-emit folds the parent opacity into the tint alpha exactly
 like rich TEXT — there is **no** engine-provided rich material, float4 `a_tint`,

@@ -225,6 +225,21 @@ void test_parse_hex_rich_byte_identity(void) {
 /* Byte-identity pin: rich_unpack_color folds opacity into alpha over nt_color_unpack. This
  * reproduces the old rich math (R,G,B from byte/255, A = byte/255 * opacity) so the migration
  * stays pinned to the text/image/object tint values. */
+/* scale_alpha multiplies the existing alpha byte (it does not replace it); RGB stays exact. */
+void test_scale_alpha_multiplies_existing_alpha(void) {
+    TEST_ASSERT_EQUAL_HEX32(0x40FFFFFFU, nt_color_scale_alpha(0x80FFFFFFU, 0.5F));
+    TEST_ASSERT_EQUAL_HEX32(0x80112233U, nt_color_scale_alpha(0x80112233U, 1.0F));
+    TEST_ASSERT_EQUAL_HEX32(0xFF112233U, nt_color_scale_alpha(0x80112233U, 2.0F)); /* saturates */
+    TEST_ASSERT_EQUAL_HEX32(0x00112233U, nt_color_scale_alpha(0x80112233U, -1.0F));
+    TEST_ASSERT_EQUAL_HEX32(0x00112233U, nt_color_scale_alpha(0x80112233U, nanf("")));
+}
+
+/* NT_RGBA8 keeps each channel's low byte (no carry into the next channel). */
+void test_rgba8_macro_layout(void) {
+    TEST_ASSERT_EQUAL_HEX32(0x40302010U, NT_RGBA8(0x10, 0x20, 0x30, 0x40));
+    TEST_ASSERT_EQUAL_HEX32(0xFF000000U, NT_RGBA8(256, 0, 0, 255));
+}
+
 void test_rich_unpack_color_byte_identity(void) {
     const uint32_t samples[] = {0xFF80B0E0U, 0x8040C0FFU, 0xFFFFFFFFU, 0x00000000U};
     const float opacities[] = {1.0F, 0.5F, 0.25F};
@@ -267,5 +282,7 @@ int main(void) {
     RUN_TEST(test_parse_hex_malformed);
     RUN_TEST(test_parse_hex_rich_byte_identity);
     RUN_TEST(test_rich_unpack_color_byte_identity);
+    RUN_TEST(test_scale_alpha_multiplies_existing_alpha);
+    RUN_TEST(test_rgba8_macro_layout);
     return UNITY_END();
 }

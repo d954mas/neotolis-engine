@@ -159,8 +159,7 @@ static void cb_emit_box(const cb_emit_args_t *e) {
 /* gap spacer + the label text child. Per-cell text_color overrides text_base. */
 static void cb_emit_text(const cb_emit_args_t *e) {
     nt_ui_label_style_t text_style = e->style->text_base;
-    /* Literal unpack (text has no image "untinted" rescue): 0xFFFFFFFF = white; the
-     * "inherit text_base" sentinel is text_color==0, guarded here. */
+    /* text_color 0 = inherit text_base; 0xFFFFFFFF is literal white (text has no "untinted" sentinel). */
     if (e->cell->text_color != 0U) {
         text_style.color = e->cell->text_color;
     }

@@ -15,8 +15,9 @@
 #include <stddef.h> /* NULL (nt_color_parse_hex) */
 #include <stdint.h>
 
-/* Byte channels 0..255 -> 0xAABBGGRR at compile time, for color literals. */
-#define NT_RGBA8(r, g, b, a) ((uint32_t)(r) | ((uint32_t)(g) << 8) | ((uint32_t)(b) << 16) | ((uint32_t)(a) << 24))
+/* Integer byte channels 0..255 -> 0xAABBGGRR at compile time, for color literals (floats belong in
+ * nt_color_pack). Each channel keeps its low byte. */
+#define NT_RGBA8(r, g, b, a) (((uint32_t)(r) & 0xFFU) | (((uint32_t)(g) & 0xFFU) << 8) | (((uint32_t)(b) & 0xFFU) << 16) | (((uint32_t)(a) & 0xFFU) << 24))
 
 /* Saturate a [0,1] channel. */
 static inline float nt_color_clamp01(float c) {
@@ -55,11 +56,20 @@ static inline uint32_t nt_color_pack(const float rgba[4]) {
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
-/* Replaces the alpha byte of a packed color; RGB bytes stay exact. */
+/* Replaces the alpha byte with `a` in [0,1] (clamped, round-to-nearest); RGB bytes stay exact. */
 static inline uint32_t nt_color_with_alpha(uint32_t packed, float a) { return (packed & 0x00FFFFFFU) | (nt_color_channel_to_u8(a) << 24); }
 
 /* Multiplies the alpha of a packed color by `factor` (e.g. a parent opacity); RGB bytes stay exact. */
-static inline uint32_t nt_color_scale_alpha(uint32_t packed, float factor) { return nt_color_with_alpha(packed, ((float)(packed >> 24) / 255.0F) * factor); }
+static inline uint32_t nt_color_scale_alpha(uint32_t packed, float factor) {
+    const float v = (float)(packed >> 24) * factor;
+    uint32_t a = 0U; /* also for NaN */
+    if (v >= 255.0F) {
+        a = 255U;
+    } else if (v > 0.0F) {
+        a = (uint32_t)(v + 0.5F);
+    }
+    return (packed & 0x00FFFFFFU) | (a << 24);
+}
 
 /* One hex nibble 0..15; 0xFF on a non-hex char. */
 static inline uint8_t nt_color_hex_nibble(char c) {

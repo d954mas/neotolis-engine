@@ -471,8 +471,6 @@ static nt_pipeline_t make_cap_inst_pipeline(bool depth) {
     return nt_gfx_make_pipeline(&desc);
 }
 
-/* ---- Color packing: float [0,1] → uint8 [0,255] ---- */
-
 /* ---- Push instance helper ---- */
 
 static void push_instance(int type, const float center[3], const float scale[3], const float *rot, uint32_t color) {

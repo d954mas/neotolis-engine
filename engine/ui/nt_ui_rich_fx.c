@@ -171,7 +171,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kin
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     const float a = rich_fx_clamp01((time - ((float)atom_idx * RICH_FX_FADE_STAGGER)) / dur);
     r.color = nt_color_scale_alpha(base_color, a);
-    r.visible = (a > 0.0F); /* fully transparent -> skip the atom emit */
+    r.visible = (r.color >> 24) != 0U; /* fully transparent -> skip the atom emit */
     return r;
 }
 

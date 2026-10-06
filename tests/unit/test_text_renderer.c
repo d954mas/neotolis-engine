@@ -384,17 +384,32 @@ void test_measure_null_string(void) {
 
 /* ---- Test 7: Vertex stride is 64 bytes (TEXT-01) ---- */
 
-void test_vertex_stride_64(void) {
+void test_vertex_stride_52(void) {
     nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1, nt_text_renderer_test_glyph_count());
 
-    /* 4 vertices for one glyph, at 64 bytes stride */
+    /* 4 vertices for one glyph, 52 bytes apart: the quad corners differ in position. */
     const uint8_t *verts = (const uint8_t *)nt_text_renderer_test_vertices();
     TEST_ASSERT_NOT_NULL(verts);
+    TEST_ASSERT_FALSE(memcmp(verts, verts + TEXT_VERTEX_BYTES, 12U) == 0);
+}
 
-    /* Vertex 0 and vertex 1 should be at offsets 0 and 64 */
-    /* They represent different quad corners, so position data differs */
-    TEST_ASSERT_FALSE(memcmp(verts, verts + 64, 64) == 0);
+/* The vertex carries the draw's packed color at byte 44 and the per-glyph depth bias at byte 48. */
+void test_vertex_color_and_depth_bias_bytes(void) {
+    nt_text_renderer_set_glyph_depth_bias(0.25F);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, NT_RGBA8(10, 20, 30, 40), 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_text_renderer_test_glyph_count());
+    const uint8_t *v = (const uint8_t *)nt_text_renderer_test_vertices();
+    uint32_t color = 0;
+    float bias0 = -1.0F;
+    float bias1 = -1.0F;
+    memcpy(&color, v + 44U, sizeof color);
+    memcpy(&bias0, v + 48U, sizeof bias0);
+    memcpy(&bias1, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 48U, sizeof bias1);
+    TEST_ASSERT_EQUAL_HEX32(NT_RGBA8(10, 20, 30, 40), color);
+    TEST_ASSERT_TRUE(bias0 == 0.0F);  /* NOLINT -- exact */
+    TEST_ASSERT_TRUE(bias1 == 0.25F); /* NOLINT -- exact */
+    nt_text_renderer_set_glyph_depth_bias(0.0F);
 }
 
 /* ---- Test 8: 4 vertices per glyph (TEXT-01) ---- */
@@ -1020,7 +1035,7 @@ void test_draw_n_matches_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, draw_gcount);
 
     /* Snapshot vertex bytes — flush will zero the staging buffer counters next,
-     * so we copy out before reset. Stride is 64 bytes per nt_text_vertex_t. */
+     * so we copy out before reset. Stride is TEXT_VERTEX_BYTES per nt_text_vertex_t. */
     const size_t bytes_to_copy = (size_t)draw_vcount * TEXT_VERTEX_BYTES;
     uint8_t buf_draw[8U * TEXT_VERTEX_BYTES];
     memcpy(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);
@@ -1297,6 +1312,7 @@ void test_decoration_persists_across_restore(void) {
     TEST_ASSERT_TRUE(nt_text_renderer_test_outline_width() == 0.5F);
 #endif
     TEST_ASSERT_TRUE(nt_text_renderer_test_shadow_dx() == 2.0F);
+    TEST_ASSERT_EQUAL_HEX32(red, nt_text_renderer_test_shadow_color());
     TEST_ASSERT_TRUE(nt_text_renderer_test_underline());
     nt_text_renderer_reset_decoration();
 }
@@ -1318,6 +1334,8 @@ void test_reset_decoration_clears_all(void) {
     TEST_ASSERT_TRUE(nt_text_renderer_test_weight() == 0.0F);
     TEST_ASSERT_TRUE(nt_text_renderer_test_outline_width() == 0.0F);
     TEST_ASSERT_TRUE(nt_text_renderer_test_shadow_dx() == 0.0F);
+    TEST_ASSERT_EQUAL_HEX32(0U, nt_text_renderer_test_shadow_color());
+    TEST_ASSERT_EQUAL_HEX32(0U, nt_text_renderer_test_outline_color());
     TEST_ASSERT_FALSE(nt_text_renderer_test_underline());
     TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
 }
@@ -1391,6 +1409,20 @@ void test_shadow_pass_offset(void) {
     memcpy(&fill_y, v + ((size_t)4U * TEXT_VERTEX_BYTES) + sizeof(float), sizeof(float));
     TEST_ASSERT_EQUAL_INT32(20, (int32_t)(shadow_x - fill_x));
     TEST_ASSERT_EQUAL_INT32(-10, (int32_t)(shadow_y - fill_y));
+    uint32_t shadow_color = 0;
+    uint32_t fill_color = 0;
+    memcpy(&shadow_color, v + 44U, sizeof shadow_color);
+    memcpy(&fill_color, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 44U, sizeof fill_color);
+    TEST_ASSERT_EQUAL_HEX32(s_black, shadow_color); /* each pass carries its own color */
+    TEST_ASSERT_EQUAL_HEX32(s_white, fill_color);
+    nt_text_renderer_reset_decoration();
+}
+
+/* A shadow color whose alpha byte is 0 is off, whatever its RGB. */
+void test_shadow_with_zero_alpha_emits_no_pass(void) {
+    nt_text_renderer_set_shadow(2.0F, 2.0F, 0.0F, 0x00FFFFFFU);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_vertex_count()); /* fill only */
     nt_text_renderer_reset_decoration();
 }
 
@@ -1492,7 +1524,8 @@ int main(void) {
     RUN_TEST(test_measure_returns_nonzero);
     RUN_TEST(test_measure_empty_string);
     RUN_TEST(test_measure_null_string);
-    RUN_TEST(test_vertex_stride_64);
+    RUN_TEST(test_vertex_stride_52);
+    RUN_TEST(test_vertex_color_and_depth_bias_bytes);
     RUN_TEST(test_vertex_count_4_per_glyph);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
     RUN_TEST(test_text_material_with_textures_asserts_at_flush);
@@ -1536,6 +1569,7 @@ int main(void) {
 #endif
     RUN_TEST(test_shadow_emits_extra_span);
     RUN_TEST(test_shadow_pass_offset);
+    RUN_TEST(test_shadow_with_zero_alpha_emits_no_pass);
     RUN_TEST(test_passes_grouped_not_interleaved);
     RUN_TEST(test_underline_one_quad_per_segment);
     RUN_TEST(test_underline_quad_per_line);

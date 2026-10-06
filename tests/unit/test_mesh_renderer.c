@@ -1250,6 +1250,24 @@ void test_prepare_asserts_on_an_item_without_drawable(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
+/* The world matrix comes from the transform view: an item without a transform asserts. */
+void test_prepare_asserts_on_an_item_without_transform(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = nt_entity_create();
+    nt_mesh_comp_add(e);
+    nt_material_comp_add(e);
+    nt_drawable_comp_add(e);
+    *nt_mesh_comp_handle(e) = mesh;
+    *nt_material_comp_handle(e) = mat;
+    nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    begin_storage_frame();
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "no transform component"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 /* Neighbour test for the mesh vertex-input key: one-step changes of each lane
  * (which stream, its location, the presence bit) are four distinct vertex
  * inputs on one pipeline. {normal->0} vs {position->0} is the presence bit alone. */
@@ -1792,6 +1810,7 @@ int main(void) {
     RUN_TEST(test_instances_carry_their_drawable_colors);
     RUN_TEST(test_runs_of_one_prepare_pack_each_entity_world_and_color);
     RUN_TEST(test_prepare_asserts_on_an_item_without_drawable);
+    RUN_TEST(test_prepare_asserts_on_an_item_without_transform);
     RUN_TEST(test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines);
     RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
     RUN_TEST(test_texture_published_after_material_create_binds_at_next_draw);

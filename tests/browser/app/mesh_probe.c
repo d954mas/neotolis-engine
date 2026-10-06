@@ -174,8 +174,8 @@ static void stop_modules(void) {
  * 4: white skinned instance of the same run. */
 static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformation) {
     const nt_deformation_binding_t binding = {.texture = deformation};
-    const uint32_t tint = nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 1.0F});
-    const uint32_t skinned_tint = nt_color_pack((const float[4]){0.3F, 0.2F, 0.1F, 1.0F});
+    const uint32_t tint = nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 0.5F}); /* alpha 128: blending is off, so it reaches the target */
+    const uint32_t skinned_tint = nt_color_pack((const float[4]){0.3F, 0.2F, 0.1F, 0.5F});
     nt_mesh_t quad = make_quad();
     nt_material_t mesh_material = make_material(s_program[PROBE_MESH], false);
     nt_material_t colorless_material = make_material(s_program[PROBE_COLORLESS], false);

@@ -36,9 +36,7 @@ typedef struct {
     float shadow_dy;        /* em */
     uint32_t shadow_color;  /* AABBGGRR; alpha 0 = no shadow */
 } nt_ui_label_style_t;
-/* 64 B bound: labels are immediate-mode (style passed by pointer, usually static-const), NOT a dense
- * array, so the larger struct is not a density concern. */
-_Static_assert(sizeof(nt_ui_label_style_t) <= 64, "nt_ui_label_style_t fits in 64 B (raised for decoration fields)");
+_Static_assert(sizeof(nt_ui_label_style_t) == 44, "nt_ui_label_style_t stable ABI (embedded in checkbox and input styles)");
 
 /* data may be NULL (= no layer, no user_data); built with NT_UI_DATA_LAYER / _FULL. */
 void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style);

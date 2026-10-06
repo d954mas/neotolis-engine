@@ -650,7 +650,7 @@ static void assert_instance_colors(const uint8_t tinted_mask[FRAME_BYTES], const
         TEST_ASSERT_UINT8_WITHIN(1, expected[0], actual[0]);
         TEST_ASSERT_UINT8_WITHIN(1, expected[1], actual[1]);
         TEST_ASSERT_UINT8_WITHIN(1, expected[2], actual[2]);
-        TEST_ASSERT_EQUAL_UINT8(255, actual[3]);
+        TEST_ASSERT_EQUAL_UINT8(in_tinted ? 128 : 255, actual[3]); /* blending off: alpha reaches the target */
         tinted += in_tinted ? 1U : 0U;
         white += in_tinted ? 0U : 1U;
     }
@@ -663,7 +663,7 @@ static void draw_tinted_and_white_instances(nt_mesh_t mesh, nt_material_t materi
     const bool skinned = binding != NULL;
     nt_entity_t tinted = make_entity(mesh, material, binding);
     nt_entity_t white = make_entity(mesh, material, binding);
-    nt_drawable_comp_set_color(tinted, nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 1.0F}));
+    nt_drawable_comp_set_color(tinted, nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 0.5F}));
     nt_transform_comp_set_position(tinted, 0.0F, 0.45F, 0.0F);
     nt_transform_comp_set_position(white, 0.0F, -0.45F, 0.0F);
     nt_transform_comp_update();

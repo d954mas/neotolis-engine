@@ -11,6 +11,7 @@
 #include "utf8/nt_utf8.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 // #region Vertex format
@@ -165,12 +166,12 @@ static void create_vertex_input(void) {
                 .stride = (uint16_t)sizeof(nt_text_vertex_t),
                 .attrs =
                     {
-                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},                      /* a_position */
-                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12},                     /* a_texcoord */
-                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 20},                     /* a_glyph_data */
-                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 28},                     /* a_glyph_bounds */
-                        {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 44}, /* a_color */
-                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = 48},                     /* a_depth_bias */
+                        {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},                                                     /* a_position */
+                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12},                                                    /* a_texcoord */
+                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 20},                                                    /* a_glyph_data */
+                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 28},                                                    /* a_glyph_bounds */
+                        {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_text_vertex_t, color)}, /* a_color */
+                        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = offsetof(nt_text_vertex_t, depth_bias)},                /* a_depth_bias */
                     },
             },
         .vertex_buffer = s_text.vbo,
