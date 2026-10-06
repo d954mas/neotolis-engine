@@ -65,6 +65,7 @@
 #include "ui/nt_ui_tabbar.h"
 #include "window/nt_window.h"
 
+#include "../shared/nt_example_frames.h"
 #include "clay.h"
 #include "skeletal_showcase_assets.h"
 #include <math.h>
@@ -2462,10 +2463,14 @@ static void mixing_draw(void) {
     nt_skinned_mesh_renderer_draw(runs, run_count);
 }
 
+static bool ordering_ready(void) {
+    return !g_nt_gfx.context_lost && s_stage_bbox.height > 1.0F && nt_resource_is_ready(s_texture_resource[RIG_HUMANOID]) && nt_resource_is_ready(s_texture_resource[RIG_COUNT]) &&
+           nt_gfx_program_ready(s_skin_program.program);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void ordering_draw(void) {
-    if (g_nt_gfx.context_lost || s_stage_bbox.height <= 1.0F || !nt_resource_is_ready(s_texture_resource[RIG_HUMANOID]) || !nt_resource_is_ready(s_texture_resource[RIG_COUNT]) ||
-        !nt_gfx_program_ready(s_skin_program.program)) {
+    if (!ordering_ready()) {
         return;
     }
     const uint32_t count = (uint32_t)s_order_count;
@@ -2573,6 +2578,7 @@ static void mount_pack(const char *name) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
+    nt_example_frames_begin();
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -2592,7 +2598,9 @@ static void frame(void) {
 #ifdef NT_DEVAPI_ENABLED
     nt_devapi_update();
 #endif
-    nt_input_poll();
+    if (!nt_example_frames_on()) {
+        nt_input_poll();
+    }
     nt_mem_scratch_reset();
 #ifndef NT_PLATFORM_WEB
     const bool modal_was_active = nt_ui_modal_active(s_ui);
@@ -2670,14 +2678,13 @@ static void frame(void) {
         nt_gfx_end_pass();
     }
     nt_gfx_end_frame();
+    nt_example_frames_end(ready && ordering_ready());
     if (render_enabled) {
         nt_window_swap_buffers();
     }
 }
 
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
     nt_engine_config_t config = {.app_name = "skeletal_showcase", .version = 1};
     if (nt_engine_init(&config) != NT_OK) {
         return 1;
@@ -2685,6 +2692,7 @@ int main(int argc, char *argv[]) {
     g_nt_window.width = 1280;
     g_nt_window.height = 800;
     nt_window_init();
+    nt_example_frames_init(argc, argv);
     nt_input_init();
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.depth = true;
@@ -2789,7 +2797,8 @@ int main(int argc, char *argv[]) {
     s_skinned_scene.player.rig = RIG_FOX;
     skinned_reset();
     mixing_reset();
-    switch_scene(0);
+    /* --frames measures Order & Instancing: procedural skinned instances, no async rig import. */
+    switch_scene(nt_example_frames_on() ? 2 : 0);
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
 #endif
