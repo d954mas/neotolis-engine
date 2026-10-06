@@ -432,18 +432,11 @@ static void frame(void) {
 
     nt_font_step();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .clear_color = {0.07F, 0.07F, 0.09F, 1.0F},
-        .clear_depth = 1.0F,
-    });
-
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     const bool can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
-        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
-
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
@@ -470,6 +463,15 @@ static void frame(void) {
         // #endregion
 
         nt_ui_end(s_ctx);
+    }
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){
+        .clear_color = {0.07F, 0.07F, 0.09F, 1.0F},
+        .clear_depth = 1.0F,
+    });
+
+    if (can_render) {
+        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);

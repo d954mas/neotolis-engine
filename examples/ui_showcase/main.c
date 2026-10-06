@@ -3795,18 +3795,11 @@ static void frame(void) {
 
     nt_font_step();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .clear_color = {g_current->bg.r / 255.0F, g_current->bg.g / 255.0F, g_current->bg.b / 255.0F, 1.0F},
-        .clear_depth = 1.0F,
-    });
-
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     const bool can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
-        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
-
         ensure_ids();
 
         const nt_material_info_t *base_info = nt_material_get_info(s_base_material);
@@ -3849,6 +3842,15 @@ static void frame(void) {
             s_rich_obj_demo.cube_view.fb_w = scale.fb_w;
             s_rich_obj_demo.cube_view.fb_h = scale.fb_h;
         }
+    }
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){
+        .clear_color = {g_current->bg.r / 255.0F, g_current->bg.g / 255.0F, g_current->bg.b / 255.0F, 1.0F},
+        .clear_depth = 1.0F,
+    });
+
+    if (can_render) {
+        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
