@@ -345,20 +345,6 @@ static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_vi
     nt_gfx_apply_texture_bindings(bindings, v->tex_count);
 }
 
-static inline nt_renderer_material_view_t nt_renderer_material_view(const nt_material_info_t *mi) {
-    nt_renderer_material_view_t view = {
-        .tex_count = mi->tex_count,
-        .tex_name_hashes = mi->tex_name_hashes,
-        .tex_samplers = mi->tex_samplers,
-        .param_count = mi->param_count,
-        .param_name_hashes = mi->param_name_hashes,
-        .params = mi->params,
-    };
-    for (uint8_t t = 0; t < mi->tex_count; t++) {
-        view.resolved_tex[t] = nt_resource_get(mi->tex_resources[t]);
-    }
-    return view;
-}
 // #endregion
 
 /* Warn once to explain skipped draws without per-frame spam; pipeline insertion re-arms the flag. */
@@ -466,10 +452,10 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
 
 /* Records one resolved run: count instances at offset in vertex frame storage. Uniform writes
  * and the texture set need the pipeline bound first. Uniforms replay on a material change, the
- * texture set also when the supplied texture (at supplied_slot; out of range = none) changes;
- * gfx drops equal binds. */
-static inline void nt_renderer_mesh_record(nt_renderer_mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_mesh_info_t *mesh_info, uint8_t supplied_slot, nt_texture_t supplied, uint32_t offset,
-                                           uint32_t count) {
+ * texture set also when the supplied texture changes; a nonzero supplied texture replaces the
+ * declaration named supplied_name. gfx drops equal binds. */
+static inline void nt_renderer_mesh_record(nt_renderer_mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_mesh_info_t *mesh_info, uint32_t supplied_name, nt_texture_t supplied,
+                                           uint32_t offset, uint32_t count) {
     nt_gfx_bind_pipeline(d->pipeline);
     const bool material_changed = d->material.id != d->applied_material;
     if (material_changed) {
@@ -480,15 +466,12 @@ static inline void nt_renderer_mesh_record(nt_renderer_mesh_draw_t *d, const nt_
     if (material_changed || supplied.id != d->applied_supplied) {
         nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES];
         for (uint8_t t = 0; t < mi->tex_count; t++) {
+            const bool replaced = supplied.id != 0 && mi->tex_name_hashes[t] == supplied_name;
             bindings[t] = (nt_gfx_texture_binding_t){
                 .name = {.value = mi->tex_name_hashes[t]},
-                .texture = {.id = nt_resource_get(mi->tex_resources[t])},
-                .sampler = mi->tex_samplers[t],
+                .texture = replaced ? supplied : (nt_texture_t){.id = nt_resource_get(mi->tex_resources[t])},
+                .sampler = replaced ? NT_SAMPLER_DEFAULT : mi->tex_samplers[t],
             };
-        }
-        if (supplied_slot < mi->tex_count) {
-            bindings[supplied_slot].texture = supplied;
-            bindings[supplied_slot].sampler = NT_SAMPLER_DEFAULT;
         }
         nt_gfx_apply_texture_bindings(bindings, mi->tex_count);
     }

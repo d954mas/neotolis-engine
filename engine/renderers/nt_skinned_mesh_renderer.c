@@ -78,17 +78,6 @@ void nt_skinned_mesh_renderer_restore_gpu(void) {
     }
 }
 
-/* The material slot the run's deformation texture replaces; NT_MATERIAL_MAX_TEXTURES
- * when undeclared, which leaves the program sampler uncovered and gfx asserts. */
-static uint8_t skin_slot(const nt_material_info_t *material) {
-    for (uint8_t i = 0; i < material->tex_count; i++) {
-        if (material->tex_name_hashes[i] == s_skinned.skin_sampler_hash) {
-            return i;
-        }
-    }
-    return NT_MATERIAL_MAX_TEXTURES;
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t offset, uint32_t count) {
     NT_ASSERT(s_skinned.initialized);
@@ -99,7 +88,7 @@ void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_te
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned draw references a destroyed material or mesh");
     nt_renderer_mesh_draw_t draw = {0};
     if (nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh, mesh_info)) {
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, skin_slot(mat_info), deformation, offset, count);
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, offset, count);
     }
 }
 
@@ -145,7 +134,7 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             dst->skin_alpha = binding.alpha;
             dst->color = drawable_view.colors_packed[drawable_index];
         }
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, skin_slot(mat_info), deformation, offset, instance_count);
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, offset, instance_count);
     }
 }
 

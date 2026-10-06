@@ -233,8 +233,8 @@ state that *borrows* a program handle — it owns no vertex-input state, and
 pipeline and vertex-input binding are orthogonal: either may change without
 re-binding the other. Two pipelines on one program
 share every uniform value, and binding one does not reset what the other set.
-Renderers replay declared material params on each material or pipeline transition
-inside one mesh draw call, `draw_list` call or flush. Renderer-tracked state is discarded at the
+Renderers replay declared material params on each material transition (sprite: also
+on a pipeline transition) inside one mesh draw call, `draw_list` call or flush. Renderer-tracked state is discarded at the
 end of that call; across calls the front-end drops equal binds and the GL backend
 drops repeated physical state (see Binding dedup and draw merge). Standalone float vec4 writes are skipped when their bytes
 match the last submitted value for that program and uniform; other uniform
@@ -501,9 +501,8 @@ nothing is prepared ahead of the pass. Each has two entry points:
   `nt_skinned_mesh_renderer_draw(mesh, material, deformation, offset, count)`),
   records one instanced draw of `count` instances (`nt_mesh_instance_t`,
   `nt_skinned_mesh_instance_t`) that the caller wrote into vertex frame storage
-  at byte `offset`. It reads no entity component. The instances must be filled
-  before the next operation that executes the stream (see Frame storage); for
-  skinned instances that includes `nt_skeletal_gpu_flush`. One allocation may be
+  at byte `offset`, filled before the next `nt_gfx` call (see Frame storage).
+  It reads no entity component. One allocation may be
   drawn any number of times in any passes of the frame, so shadow cascades draw
   one packing. Each call resolves pipeline, vertex input and material state:
   draw a batch per call, not one object. `nt_mesh_instance_world_rows` writes the
@@ -515,7 +514,7 @@ nothing is prepared ahead of the pass. Each has two entry points:
 
 Both record in the current pass. A run whose program is not ready, or whose
 pipeline or vertex input could not be created (load, context loss), records
-nothing and allocates nothing; the renderer warns once. Both resolve the
+nothing and allocates nothing; an unready program warns once. Both resolve the
 pipeline and vertex input at the call — creating them on a cache miss — and
 read the material's params and texture publications there. Consequences:
 
@@ -536,7 +535,7 @@ palette flush precedes the first skinned draw:
 nt_gfx_begin_frame();
 nt_skeletal_gpu_begin_frame();
 
-/* Palettes, then one flush: the texture update executes the stream. */
+/* Palettes, then one flush before the first skinned draw samples them. */
 for (uint32_t i = 0; i < character_count; i++) {
     nt_skeletal_mat34_t *palette = nt_skeletal_gpu_reserve(palette_count, nt_skin_comp_handle(characters[i]));
     nt_skin_palette_build(skin, model[i], joint_count, palette, palette_count);

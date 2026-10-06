@@ -622,9 +622,8 @@ void test_zero_deformation_texture_asserts(void) {
     nt_entity_t entity = make_entity(mesh, material, (nt_deformation_binding_t){0});
     nt_render_item_t item = make_item(entity, material, mesh);
 
-    begin_storage_frame();
-    NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw_list(&item, 1));
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(skinned_draw_list(&item, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "requires a deformation texture"));
 }
 
 void test_skinned_mesh_stream_cannot_overlap_the_color_location(void) {
@@ -757,8 +756,8 @@ void test_core_draw_supplies_the_deformation_texture_across_passes(void) {
     const float world[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 
     begin_storage_frame();
-    (void)nt_gfx_fake_draw_trace_count(); /* the fake's trace query executes the stream: take it before allocating */
-    nt_gfx_fake_reset();
+    nt_gfx_fake_reset(); /* executes the stream: take it before allocating */
+    s_draw_mark = nt_gfx_fake_draw_trace_count();
     uint32_t offset = 0;
     nt_skinned_mesh_instance_t *instance = (nt_skinned_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_skinned_mesh_instance_t), 4, &offset);
     *instance = (nt_skinned_mesh_instance_t){.skin_origins = {3, 0, 3, 0}, .color = NT_RGBA8(255, 255, 255, 255)};
@@ -769,7 +768,6 @@ void test_core_draw_supplies_the_deformation_texture_across_passes(void) {
         nt_gfx_end_pass();
     }
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count()); /* recording writes no buffer */
-    s_draw_mark = 0;
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_update_buffer_count()); /* one upload for both passes */
     TEST_ASSERT_EQUAL_UINT32(offset, nt_gfx_fake_last_instance_offset());
@@ -781,6 +779,24 @@ void test_core_draw_asserts_on_a_zero_deformation_texture(void) {
     nt_mesh_t mesh = make_mesh();
     nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
     NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw(mesh, material, (nt_texture_t){0}, 0, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "requires a deformation texture"));
+}
+
+/* One material and one deformation texture over two meshes: the mesh change skips material work. */
+void test_mesh_only_change_skips_the_texture_set(void) {
+    nt_texture_t texture = make_deformation_texture();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_mesh_t mesh_a = make_mesh();
+    nt_mesh_t mesh_b = make_mesh();
+    nt_render_item_t items[2] = {
+        make_item(make_entity(mesh_a, material, (nt_deformation_binding_t){.texture = texture}), material, mesh_a),
+        make_item(make_entity(mesh_b, material, (nt_deformation_binding_t){.texture = texture}), material, mesh_b),
+    };
+
+    nt_gfx_fake_reset();
+    skinned_draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
 }
 
 /* draw_list reads the deformation texture at the call, so a rebound entity draws the new one. */
@@ -864,5 +880,6 @@ int main(void) {
     RUN_TEST(test_lists_read_the_deformation_texture_at_the_call);
     RUN_TEST(test_deformation_change_reapplies_textures_not_uniforms);
     RUN_TEST(test_empty_list_reserves_nothing);
+    RUN_TEST(test_mesh_only_change_skips_the_texture_set);
     return UNITY_END();
 }

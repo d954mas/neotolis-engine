@@ -47,8 +47,8 @@ void nt_skinned_mesh_renderer_restore_gpu(void);
  * textures; the renderer supplies the deformation texture there with its default sampler. */
 
 /* nt_mesh_renderer_draw for skinned instances (nt_skinned_mesh_instance_t), whose deformation
- * origins address the deformation texture. Call after nt_skeletal_gpu_flush, so that texture
- * update cannot execute the stream between filling the instances and the draw. */
+ * origins address the deformation texture. Call after nt_skeletal_gpu_flush: a texture write
+ * must precede every recorded draw that samples it (see the gfx texture write rule). */
 void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t offset, uint32_t count);
 
 /* nt_mesh_renderer_draw_list for skinned items: runs also split on the deformation texture,

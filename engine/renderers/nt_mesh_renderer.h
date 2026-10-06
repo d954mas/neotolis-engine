@@ -33,11 +33,18 @@ _Static_assert(sizeof(nt_mesh_instance_t) == 52 && offsetof(nt_mesh_instance_t, 
 /* The instance world rows of both mesh renderers: the transpose of the affine part of a
  * column-major mat4, row r holding (m[r], m[4 + r], m[8 + r], m[12 + r]). */
 static inline void nt_mesh_instance_world_rows(float rows[3][4], const float world[16]) {
-    for (int r = 0; r < 3; r++) {
-        for (int c = 0; c < 4; c++) {
-            rows[r][c] = world[(c * 4) + r];
-        }
-    }
+    rows[0][0] = world[0];
+    rows[0][1] = world[4];
+    rows[0][2] = world[8];
+    rows[0][3] = world[12];
+    rows[1][0] = world[1];
+    rows[1][1] = world[5];
+    rows[1][2] = world[9];
+    rows[1][3] = world[13];
+    rows[2][0] = world[2];
+    rows[2][1] = world[6];
+    rows[2][2] = world[10];
+    rows[2][3] = world[14];
 }
 
 typedef struct {
@@ -60,12 +67,11 @@ void nt_mesh_renderer_restore_gpu(void);
 
 /* Records one instanced draw of mesh with material in the current pass: count instances
  * (nt_mesh_instance_t) at byte offset in NT_GFX_FRAME_VERTEX, from
- * nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, count * sizeof(nt_mesh_instance_t), 4, &offset).
- * Fill them before the next gfx call that executes the stream (buffer writes, destroys,
- * texture updates): bytes written after it are not sent. One allocation may be drawn in any
- * number of passes of the frame. A material whose program is not ready, or a pipeline or
- * vertex input that could not be created, records nothing. Resolves pipeline, vertex input
- * and material state per call: draw a batch, not one object per call. count > 0. */
+ * nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, count * sizeof(nt_mesh_instance_t), 4, &offset),
+ * filled before the next nt_gfx call. One allocation may be drawn in any number of passes of
+ * the frame. A material whose program is not ready, or a pipeline or vertex input that could
+ * not be created, records nothing. Resolves pipeline, vertex input and material state per
+ * call: draw a batch, not one object per call. count > 0. */
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t offset, uint32_t count);
 
 /* ECS adapter. Caller filters visibility (nt_render_is_visible) and order; the renderer draws

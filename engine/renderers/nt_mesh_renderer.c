@@ -67,7 +67,7 @@ void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t offs
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh draw references a destroyed material or mesh");
     nt_renderer_mesh_draw_t draw = {0};
     if (nt_renderer_mesh_resolve(&s_mesh_renderer.caches, &draw, material, mat_info, mesh, mesh_info)) {
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, NT_MATERIAL_MAX_TEXTURES, (nt_texture_t){0}, offset, count);
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, 0, (nt_texture_t){0}, offset, count);
     }
 }
 
@@ -112,7 +112,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             nt_mesh_instance_world_rows(dst->world_rows, transform_view.world_matrices[transform_index]);
             dst->color = drawable_view.colors_packed[drawable_index];
         }
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, NT_MATERIAL_MAX_TEXTURES, (nt_texture_t){0}, offset, instance_count);
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, 0, (nt_texture_t){0}, offset, instance_count);
     }
 }
 

@@ -171,7 +171,7 @@ static void stop_modules(void) {
 
 /* Bit 0: tinted mesh instance; 1: white mesh instance of the same run; 2: mesh shader without
  * a_color; 3: tinted skinned instance (another tint, so the rows cannot stand in for each other);
- * 4: white skinned instance of the same run. */
+ * 4: white skinned instance of the same run; 5: each list drew as one instanced draw. */
 static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformation) {
     const nt_deformation_binding_t binding = {.texture = deformation};
     const uint32_t tint = nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 0.5F}); /* alpha 128: blending is off, so it reaches the target */
@@ -197,8 +197,8 @@ static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformati
     const bool read = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
     nt_gfx_end_pass();
 
-    uint32_t mask = 0;
-    if (read && batched) {
+    uint32_t mask = batched ? 1U << 5U : 0;
+    if (read) {
         mask |= pixel_is(frame, -0.5F, 0.5F, tint) ? 1U << 0U : 0;
         mask |= pixel_is(frame, 0.5F, 0.5F, 0xFFFFFFFFU) ? 1U << 1U : 0;
         mask |= pixel_is(frame, 0.0F, 0.0F, 0xFF00FF00U) ? 1U << 2U : 0;

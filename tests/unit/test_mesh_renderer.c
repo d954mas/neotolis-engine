@@ -857,6 +857,7 @@ void test_state_same_material_three_meshes(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]); /* mesh-only changes skip material work */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_sampler_count());
 }
@@ -1503,9 +1504,8 @@ void test_vertex_input_versions_overflow_asserts(void) {
     nt_material_t mat3 = create_test_material_with_attr(shared, "position", 2, nt_blend_opaque());
     nt_entity_t e3 = create_test_entity(mesh, mat3);
     item = (nt_render_item_t){.sort_key = 0, .entity = e3.id, .batch_key = nt_mesh_renderer_batch_key(mat3, mesh)};
-    begin_storage_frame();
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(&item, 1));
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(draw_list(&item, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "versions exhausted"));
 }
 
 /* ---- Test 9: restore_gpu clears cache and subsequent draw still works ---- */
@@ -1604,7 +1604,43 @@ void test_core_draw_reuses_one_allocation_across_passes(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
-void test_core_draw_asserts_on_zero_count(void) { NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(create_test_mesh(), create_test_material(), 0, 0)); }
+void test_core_draw_asserts_on_zero_count(void) {
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(create_test_mesh(), create_test_material(), 0, 0));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "count > 0"));
+}
+
+/* A core draw records in a pass: outside one, gfx asserts on the first bind. */
+void test_core_draw_asserts_outside_a_pass(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    begin_storage_frame();
+    uint32_t offset = 0;
+    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, offset, 1));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
+/* The core keeps no state between calls: each call applies its material, so a param changed
+ * between two draws of one pass reaches the second. */
+void test_core_draw_applies_the_material_every_call(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
+    begin_storage_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_fake_reset();
+    uint32_t offset = 0;
+    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
+    nt_mesh_renderer_draw(mesh, mat, offset, 1);
+    const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
+    nt_material_set_param(mat, "u_tint", tint2);
+    nt_mesh_renderer_draw(mesh, mat, offset, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    float last[4];
+    nt_gfx_fake_uniform_vec4_value_at(1, last);
+    TEST_ASSERT_EQUAL_INT32(5, (int32_t)last[3]);
+}
 
 /* The instance rows are the transpose of the affine part of a column-major mat4. */
 void test_instance_world_rows_transpose_the_affine_part(void) {
@@ -1634,7 +1670,8 @@ void test_draw_list_of_a_new_mesh_after_a_draw_executes_nothing(void) {
     const uint32_t updates = nt_gfx_fake_update_buffer_count();
     nt_mesh_renderer_draw_list(b, 1);
     TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls()); /* executes the stream */
+    TEST_ASSERT_EQUAL_UINT32(updates + 1, nt_gfx_fake_update_buffer_count());
 }
 
 /* A mesh in the slot of a deactivated one finds the cascade-killed vertex inputs in the cache row:
@@ -1674,16 +1711,18 @@ void test_lists_read_bindings_at_the_call(void) {
     nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(plain, mesh)};
 
     draw_list(&item, 1);
-    const uint32_t first_vi = nt_gfx_fake_last_bound_vertex_input();
     *nt_material_comp_handle(e) = relocated;
     item.batch_key = nt_mesh_renderer_batch_key(relocated, mesh);
     nt_mesh_renderer_draw_list(&item, 1);
-    TEST_ASSERT_NOT_EQUAL_UINT32(first_vi, nt_gfx_fake_last_bound_vertex_input());
+    /* Both lists are recorded before this query executes the stream. */
+    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(plain)->program.id, nt_gfx_fake_draw_trace_at(s_draw_mark).program.id);
+    TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(relocated)->program.id, nt_gfx_fake_draw_trace_at(s_draw_mark + 1).program.id);
     TEST_ASSERT_EQUAL_UINT32(sizeof(nt_mesh_instance_t), nt_gfx_fake_last_instance_offset()); /* instance blocks align to 4 */
 }
 
-/* Two lists with a program change in between: the second binds a new pipeline and fills the
- * new program's units again. */
+/* Two lists with a program change in between: the second binds the new program's pipeline.
+ * Each call replays its material; the unit bind is dropped because GL units survive a program change. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_list_after_a_program_change_rebinds_textures(void) {
     nt_mesh_t mesh = create_test_mesh();
@@ -1703,8 +1742,6 @@ void test_list_after_a_program_change_rebinds_textures(void) {
 
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(p2.id, nt_gfx_fake_draw_trace_at(s_draw_mark + 1).program.id);
-    /* The program change replays uniforms and the texture set, whose unit bind gfx drops:
-     * GL units survive a program change. */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
@@ -1823,5 +1860,7 @@ int main(void) {
     RUN_TEST(test_list_after_a_program_change_rebinds_textures);
     RUN_TEST(test_list_drawn_twice_in_one_pass_reads_current_params);
     RUN_TEST(test_skipped_run_allocates_nothing);
+    RUN_TEST(test_core_draw_asserts_outside_a_pass);
+    RUN_TEST(test_core_draw_applies_the_material_every_call);
     return UNITY_END();
 }
