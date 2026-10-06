@@ -362,12 +362,18 @@ lookup retries.
 
 ### Color
 
-Per-vertex and per-instance color reaches the GPU as normalized RGBA8, packed
-`0xAABBGGRR` by `nt_color_pack`, straight alpha, clamped to [0,1]. Data APIs and
-components hold the packed `uint32_t`: the drawable component, sprite `emit_*`,
-UI styles and the mesh instance structs. Immediate-mode convenience calls (shape,
-text) may take `float[4]` and pack once per call. Unclamped or HDR tint lives
-only in material uniform params.
+A tint — a color that multiplies or replaces what a draw shows — is a packed
+`uint32_t` `0xAABBGGRR` everywhere in the engine API: the drawable component,
+mesh and skinned instance structs, sprite `emit_*`, text (`draw`, outline,
+shadow), shape calls, the debug overlay, UI styles and rich-text effects and
+object callbacks. It is straight alpha, clamped to [0,1] and reaches the GPU as
+normalized RGBA8 (sprite, text and shape vertices, mesh instances). Literals use
+`NT_RGBA8(r, g, b, a)`; float math (`nt_color_pack`, `nt_color_unpack`,
+`nt_color_with_alpha`, `nt_color_scale_alpha`, OkLab) lives in
+`engine/color/nt_color.h` and packs once at the end. Values are display
+(sRGB-encoded) colors; shaders use them without conversion. Values that are not
+a tint stay float: render-target clear colors, material uniform params (where an
+unclamped or HDR tint belongs) and lighting.
 
 Every mesh and skinned mesh instance carries the entity's drawable color
 (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs

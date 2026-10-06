@@ -184,7 +184,8 @@ sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-
 
 - **Per-atom effects** are a pure deterministic curve `fn(atom_idx, kind,
   base_xy, base_wh, base_color, time, hovered, user_data) → {offset, color, scale,
-  visible}` evaluated at emit and folded into the existing position / tint / scale
+  visible}` (colors packed RGBA8, see [color](../render/architecture.md#color))
+  evaluated at emit and folded into the existing position / tint / scale
   (no 5th custom attr). They are **visual-only**: the solver layout never re-flows.
   The animation clock is **passed in by the game** (`time`) — there is no engine
   global frame clock (RESEARCH Pitfall 4). The `user_data` is the pointer the game
