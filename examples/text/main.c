@@ -366,7 +366,11 @@ static void frame(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+#ifdef ASSET_FONT_TEXT_FONT_CJK
     nt_example_frames_end(can_render && s_cjk_loading && nt_resource_pack_state(s_cjk_pack_id) == NT_PACK_STATE_READY);
+#else
+    nt_example_frames_end(can_render && s_cjk_loading); /* the fallback font build ships no CJK pack */
+#endif
 
     nt_window_swap_buffers();
 
