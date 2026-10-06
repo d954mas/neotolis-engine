@@ -73,7 +73,6 @@ static const uint8_t s_checker_4x4[4 * 4 * 4] = {
 /* ---- GFX handles ---- */
 
 static nt_texture_t s_fallback_texture;
-static nt_buffer_t s_frame_ubo;
 
 static nt_texture_t make_fallback_texture(void) {
     return nt_gfx_make_texture(&(nt_texture_desc_t){
@@ -182,14 +181,6 @@ static void frame(void) {
         s_fallback_texture = make_fallback_texture();
         nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
 
-        /* Recreate game-owned GPU resources */
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
         /* Materials keep their handles and draw again once their programs relink. */
         nt_mesh_renderer_restore_gpu();
         nt_program_ref_drop(&s_cube_program);
@@ -359,8 +350,7 @@ static void frame(void) {
 
     if (can_render) {
         /* Upload frame uniforms and bind to slot 0 */
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         /* ---- Draw: mesh renderer handles pipeline, instancing, batching ---- */
         nt_mesh_renderer_draw_list(items, item_count);
@@ -399,6 +389,7 @@ int main(int argc, char *argv[]) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = NUM_CUBES * (uint32_t)sizeof(nt_mesh_instance_t);
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = (uint32_t)sizeof(nt_frame_uniforms_t); /* the view block */
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks (required after Plan 02 removed auto-bind) */
@@ -485,14 +476,6 @@ int main(int argc, char *argv[]) {
         nt_drawable_comp_set_color(s_cubes[i], nt_color_pack(s_cube_colors[i]));
     }
 
-    /* Create frame uniforms UBO (updated each frame) */
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
-
     /* Fallback checkerboard texture */
     s_fallback_texture = make_fallback_texture();
     nt_hash64_t checker_rid = nt_hash64_str("__fallback_checker__");
@@ -532,7 +515,6 @@ int main(int argc, char *argv[]) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_destroy_texture(s_fallback_texture);
     nt_gfx_shutdown();
     nt_input_shutdown();

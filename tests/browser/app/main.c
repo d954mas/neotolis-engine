@@ -1104,10 +1104,7 @@ static void frame(void) {
                             nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
-        /* View data from frame storage: the restore needs no buffer of its own. */
-        uint32_t uniforms_offset = 0;
-        memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, sizeof(uniforms), nt_gfx_gpu_caps()->uniform_buffer_offset_alignment, &uniforms_offset), &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer_range(nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM), 0, uniforms_offset, sizeof(uniforms));
+        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[0], 1);
         nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
@@ -1225,8 +1222,8 @@ int main(int argc, char *argv[]) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.capture_capacity = 16384;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;  /* the mesh probe's instances */
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096; /* the view block */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;                                   /* the mesh probe's instances */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = (uint32_t)sizeof(nt_frame_uniforms_t); /* the view block */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 

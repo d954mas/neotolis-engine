@@ -11,7 +11,7 @@ static PFNGLBUFFERSUBDATAPROC s_buffer_sub_data;
 static PFNGLUSEPROGRAMPROC s_use_program;
 static PFNGLBINDVERTEXARRAYPROC s_bind_vao;
 static PFNGLUNIFORM4FVPROC s_uniform4fv;
-static PFNGLBINDBUFFERBASEPROC s_bind_buffer_base;
+static PFNGLBINDBUFFERRANGEPROC s_bind_buffer_range;
 static PFNGLTEXIMAGE2DPROC s_tex_image;
 static PFNGLTEXSUBIMAGE2DPROC s_tex_sub_image;
 static PFNGLGETERRORPROC s_get_error;
@@ -60,9 +60,9 @@ static void GLAD_API_PTR count_uniform4fv(GLint location, GLsizei count, const G
     s_uniform4fv(location, count, value);
 }
 
-static void GLAD_API_PTR count_bind_buffer_base(GLenum target, GLuint index, GLuint buffer) {
+static void GLAD_API_PTR count_bind_buffer_range(GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size) {
     s_ubo_calls++;
-    s_bind_buffer_base(target, index, buffer);
+    s_bind_buffer_range(target, index, buffer, offset, size);
 }
 
 static void GLAD_API_PTR count_tex_image(GLenum target, GLint level, GLint internal, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels) {
@@ -109,6 +109,7 @@ void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
+    desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     s_buffer_data = glad_glBufferData;
@@ -116,13 +117,13 @@ void setUp(void) {
     s_use_program = glad_glUseProgram;
     s_bind_vao = glad_glBindVertexArray;
     s_uniform4fv = glad_glUniform4fv;
-    s_bind_buffer_base = glad_glBindBufferBase;
+    s_bind_buffer_range = glad_glBindBufferRange;
     glad_glBufferData = count_buffer_data;
     glad_glBufferSubData = count_buffer_sub_data;
     glad_glUseProgram = count_use_program;
     glad_glBindVertexArray = count_bind_vao;
     glad_glUniform4fv = count_uniform4fv;
-    glad_glBindBufferBase = count_bind_buffer_base;
+    glad_glBindBufferRange = count_bind_buffer_range;
     s_tex_image = glad_glTexImage2D;
     s_tex_sub_image = glad_glTexSubImage2D;
     s_get_error = glad_glGetError;
@@ -146,7 +147,7 @@ void tearDown(void) {
     glad_glUseProgram = s_use_program;
     glad_glBindVertexArray = s_bind_vao;
     glad_glUniform4fv = s_uniform4fv;
-    glad_glBindBufferBase = s_bind_buffer_base;
+    glad_glBindBufferRange = s_bind_buffer_range;
     glad_glTexImage2D = s_tex_image;
     glad_glTexSubImage2D = s_tex_sub_image;
     glad_glGetError = s_get_error;
@@ -416,7 +417,7 @@ static void test_complete_capture_matches_gl_counters(void) {
     TEST_ASSERT_EQUAL_UINT32(s_program_calls, c->gl[NT_GFX_GL_glUseProgram]);
     TEST_ASSERT_EQUAL_UINT32(s_vao_calls, c->gl[NT_GFX_GL_glBindVertexArray]);
     TEST_ASSERT_EQUAL_UINT32(s_uniform_calls, c->gl[NT_GFX_GL_glUniform4fv]);
-    TEST_ASSERT_EQUAL_UINT32(s_ubo_calls, c->gl[NT_GFX_GL_glBindBufferBase]);
+    TEST_ASSERT_EQUAL_UINT32(s_ubo_calls, c->gl[NT_GFX_GL_glBindBufferRange]);
     TEST_ASSERT_EQUAL_UINT32(s_attribute_calls, c->gl[NT_GFX_GL_glVertexAttribPointer]);
     TEST_ASSERT_EQUAL_UINT64(s_buffer_calls, c->buffer_upload_calls);
     TEST_ASSERT_EQUAL_UINT64(s_buffer_bytes, c->buffer_upload_bytes);
@@ -640,7 +641,7 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = 64});
+    const float block[16] = {0};
     const float color[4] = {1.0F, 0.5F, 0.0F, 1.0F};
 #if NT_GFX_CAPTURE_ENABLED
     nt_gfx_capture_request();
@@ -654,8 +655,8 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
             nt_gfx_bind_pipeline(pipeline);
             nt_gfx_bind_vertex_input(vi);
             nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), color);
-            nt_gfx_bind_uniform_buffer(ubo, 0);
         }
+        nt_gfx_bind_uniform_block(0, block, sizeof(block));
         nt_gfx_set_uniform_vec4(nt_hash32_str("inactive"), color);
         nt_gfx_draw(0, 3);
         nt_gfx_end_pass();
@@ -685,8 +686,8 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
 #endif
         nt_gfx_counters_t c = g_nt_gfx.last_frame;
         const uint32_t first_frame_only = frame == 0 ? 1U : 0U;
-        /* Equal binds end CACHE: pipeline and vertex input once per pass, the UBO slot
-         * once, since it carries over passes and frames. */
+        /* Equal binds end CACHE: pipeline and vertex input once per pass, the uniform block
+         * once, since its slot carries over frames and the block lands on the same offset. */
         TEST_ASSERT_EQUAL_UINT32(1, c.accepted[NT_GFX_OP_PIPELINE]);
         TEST_ASSERT_EQUAL_UINT32(1, c.accepted[NT_GFX_OP_VERTEX_INPUT]);
         TEST_ASSERT_EQUAL_UINT32(3, c.accepted[NT_GFX_OP_UNIFORM_VEC4]);
@@ -694,10 +695,10 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
         TEST_ASSERT_EQUAL_UINT32(s_program_calls, c.gl[NT_GFX_GL_glUseProgram]);
         TEST_ASSERT_EQUAL_UINT32(s_vao_calls, c.gl[NT_GFX_GL_glBindVertexArray]);
         TEST_ASSERT_EQUAL_UINT32(s_uniform_calls, c.gl[NT_GFX_GL_glUniform4fv]);
-        TEST_ASSERT_EQUAL_UINT32(s_ubo_calls, c.gl[NT_GFX_GL_glBindBufferBase]);
+        TEST_ASSERT_EQUAL_UINT32(s_ubo_calls, c.gl[NT_GFX_GL_glBindBufferRange]);
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.gl[NT_GFX_GL_glUseProgram]);
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.gl[NT_GFX_GL_glUniform4fv]);
-        TEST_ASSERT_EQUAL_UINT32(first_frame_only, c.gl[NT_GFX_GL_glBindBufferBase]);
+        TEST_ASSERT_EQUAL_UINT32(first_frame_only, c.gl[NT_GFX_GL_glBindBufferRange]);
 #if NT_GFX_CAPTURE_ENABLED
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glUseProgram], captured_calls(NT_GFX_GL_glUseProgram));
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glBindVertexArray], captured_calls(NT_GFX_GL_glBindVertexArray));

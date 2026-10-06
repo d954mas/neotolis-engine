@@ -321,7 +321,6 @@ static bool s_skip_scene_interaction_this_frame;
 
 static nt_ui_context_t *s_ui;
 NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
-static nt_buffer_t s_frame_ubo;
 static nt_frame_uniforms_t s_frame_uniforms; /* filled each frame; stage parts set its camera */
 static nt_resource_t s_atlas;
 static nt_resource_t s_atlas_texture;
@@ -2305,8 +2304,7 @@ static void stage_viewport(uint32_t part, uint32_t count) {
     mat4 vp;
     make_camera_vp(vp, (float)width / (float)height, s_frame_uniforms.camera_pos);
     memcpy(s_frame_uniforms.view_proj, vp, sizeof vp);
-    nt_gfx_update_buffer(s_frame_ubo, 0, &s_frame_uniforms, sizeof s_frame_uniforms);
-    nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+    nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
     nt_shape_renderer_set_vp((const float *)vp);
 }
 
@@ -2575,8 +2573,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         nt_resource_invalidate(NT_ASSET_MESH);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof s_frame_uniforms, .label = "skeletal_frame_uniforms"});
         restore_mesh_scene();
         nt_shape_renderer_restore_gpu();
         (void)nt_sprite_renderer_restore_gpu();
@@ -2657,8 +2653,7 @@ static void frame(void) {
             end_stage();
 
             nt_ui_make_screen_view_proj(s_ui_scale.logical_w, s_ui_scale.logical_h, s_frame_uniforms.view_proj);
-            nt_gfx_update_buffer(s_frame_ubo, 0, &s_frame_uniforms, sizeof s_frame_uniforms);
-            nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+            nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
             nt_ui_target_t target = nt_ui_scale_make_target(&s_ui_scale);
             nt_ui_walk(s_ui, &target);
             nt_sprite_renderer_flush();
@@ -2696,6 +2691,7 @@ int main(int argc, char *argv[]) {
     gfx_desc.max_textures = 16;
     /* Worst frame: Order & Instancing, two passes of MAX skinned instances; scenes draw exclusively. */
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t);
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4U * (uint32_t)sizeof(nt_frame_uniforms_t); /* two stage views, the UI view and the shell stage view */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
     nt_http_init();
@@ -2725,7 +2721,6 @@ int main(int argc, char *argv[]) {
     ui_desc.max_elements = 1024;
     s_ui = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
     NT_ASSERT(s_ui != NULL);
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = sizeof(nt_frame_uniforms_t), .label = "skeletal_frame_uniforms"});
 
     mount_pack("skeletal_showcase");
     mount_pack("skeletal_showcase_clips");
@@ -2822,7 +2817,6 @@ int main(int argc, char *argv[]) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

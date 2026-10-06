@@ -75,7 +75,6 @@ static bool s_grabbed;
 static nt_font_t s_font;
 static nt_material_t s_text_material;
 static nt_program_ref_t s_text_program;
-static nt_buffer_t s_frame_ubo;
 
 static nt_hash32_t s_base_pack_id;
 static nt_hash32_t s_cjk_pack_id;
@@ -225,13 +224,6 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_FONT);
 
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
         /* Materials keep their handles and draw again once their programs relink. */
         const nt_result_t restore_result = nt_text_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
@@ -346,8 +338,7 @@ static void frame(void) {
     double t_flush = 0.0;
 #endif
     if (can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         nt_text_renderer_set_material(s_text_material);
         nt_text_renderer_set_font(s_font);
@@ -455,6 +446,7 @@ int main(int argc, char *argv[]) {
 
     /* 4. GFX init */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = (uint32_t)sizeof(nt_frame_uniforms_t); /* the view block */
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO block (slot 0 for Globals: view_proj etc.) */
@@ -479,14 +471,6 @@ int main(int argc, char *argv[]) {
 
     /* 9. Text renderer init */
     nt_text_renderer_init();
-
-    /* 10. Create frame uniforms UBO */
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
 
     /* 11. Mount packs and start base pack loading */
     s_base_pack_id = nt_hash32_str("text_base");
@@ -548,7 +532,6 @@ int main(int argc, char *argv[]) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

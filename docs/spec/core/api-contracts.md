@@ -170,17 +170,16 @@ There is no per-program override. The registry borrows `name` without copying:
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registration
 survives context loss.
 
-`nt_gfx_bind_uniform_buffer_range` binds `[offset, offset + size)` of a uniform
-buffer. The offset is a multiple of `gpu_caps.uniform_buffer_offset_alignment`
-(re-probed at context restore), the size is nonzero and the range fits the
-buffer; each violation asserts, as does a non-uniform buffer, and without
-asserts the bind is rejected with `INVALID_ARGUMENT`. After `nt_gfx_orphan_buffer`,
-the range must fit the replacement storage; orphaning may shrink it and later
-grow it up to the original creation capacity. WebGL additionally rejects
-a draw whose bound range is smaller than the block's data size; gfx does not
-know block sizes, so the caller sizes the range. Upload every range of a frame
-before the first draw that reads the buffer: Mali/ANGLE track a buffer as a
-whole, and rewriting any part of one an earlier draw read stalls the GPU.
+`nt_gfx_bind_uniform_block(slot, data, size)` copies `size` bytes into the
+uniform frame stream at the next multiple of
+`gpu_caps.uniform_buffer_offset_alignment` (re-probed at context restore) and
+binds that range to `slot`. The game owns no uniform buffer: a block is frame
+data, so a draw reads only blocks bound in its own frame. WebGL rejects a draw
+whose bound range is smaller than the block's data size; gfx does not know block
+sizes, so `size` covers the whole block. A slot at or above the limit, NULL
+`data` or a zero `size` asserts; an exhausted stream stops as a frame storage
+overflow. On a lost context, including a new loss that left the frame buffer
+unmade during a restore, the call allocates nothing and ends `CONTEXT_LOST`.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
@@ -489,12 +488,12 @@ that a loss or a cascade may have freed; there is no non-asserting pass-begin
 variant.
 
 Draw-state calls require an open pass. `nt_gfx_set_scissor`, `nt_gfx_set_scissor_enabled`,
-`nt_gfx_set_viewport`,
-`nt_gfx_bind_uniform_buffer` and `nt_gfx_bind_uniform_buffer_range` assert
+`nt_gfx_set_viewport` and
+`nt_gfx_bind_uniform_block` assert
 without an open pass; on a lost context they return before the check, as other
 binds do. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
 target and clears the bound pipeline, vertex input, instance binding and texture
-set. The scissor rectangle and uniform-buffer bindings
+set. The scissor rectangle and uniform-block bindings
 carry over, so a pass sets the scissor rectangle before it enables scissor. A
 bind equal to the current state records nothing; results, the texture-set
 exception and the uniform-buffer slot limit are in

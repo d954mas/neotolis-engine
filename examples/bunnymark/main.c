@@ -74,8 +74,6 @@
 
 /* ---- State ---- */
 
-static nt_buffer_t s_frame_ubo;
-
 static nt_hash32_t s_pack_id;
 static nt_hash32_t s_hd_pack_id;
 
@@ -290,13 +288,6 @@ static void frame(void) {
         /* Before this iteration's steps: they re-resolve what is invalidated here. */
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo); /* free pool slot before reuse */
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
         /* Materials keep their handles and draw again once their programs relink. */
         nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
@@ -444,8 +435,7 @@ static void frame(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
 
     if (can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         // #region build draw list
         nt_sprite_comp_view_t sprites = nt_sprite_comp_view();
@@ -584,6 +574,7 @@ int main(int argc, char **argv) {
     NT_ASSERT(s_initial_count <= BUNNY_MAX && "--count exceeds BUNNY_MAX");
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = (uint32_t)sizeof(nt_frame_uniforms_t); /* the view block */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 
@@ -620,14 +611,6 @@ int main(int argc, char **argv) {
     /* Frame rate cap removed: native engine loop runs uncapped (target_dt=0.0F).
      * dt-scaled physics already produces the same trajectories at any FPS. */
     g_nt_app.target_dt = 0.0F;
-
-    /* Frame UBO */
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
 
     /* Mount + load the SD pack. SD is the base layer (priority 100); HD will
      * stack on top at priority 200 when the user toggles it on — demo starts
@@ -713,7 +696,6 @@ int main(int argc, char **argv) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

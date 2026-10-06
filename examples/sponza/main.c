@@ -95,11 +95,6 @@ static float s_cam_yaw;   /* radians */
 static float s_cam_pitch; /* radians */
 static float s_move_speed = MOVE_SPEED_DEFAULT;
 
-/* ---- GFX handles ---- */
-
-static nt_buffer_t s_frame_ubo;
-static nt_buffer_t s_light_ubo;
-
 /* ---- Resource handles ---- */
 
 static nt_hash32_t s_core_pack_id;
@@ -366,20 +361,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
-        nt_gfx_destroy_buffer(s_light_ubo);
-        s_light_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_lighting_t),
-            .label = "lighting",
-        });
         /* Materials keep their handles and draw again once their programs relink. */
         nt_mesh_renderer_restore_gpu();
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
@@ -575,18 +556,16 @@ static void frame(void) {
     });
 
     if (item_count > 0) {
-        /* Upload and bind frame UBO (slot 0) */
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        /* View block (slot 0) */
+        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
-        /* Upload and bind lighting UBO (slot 1) */
+        /* Lighting block (slot 1) */
         nt_lighting_t lighting = {
             .light_dir = {0.5F, 0.7F, 0.5F, 0.0F},    /* angled sunlight */
             .light_color = {1.0F, 0.95F, 0.9F, 1.2F}, /* warm white, intensity 1.2 */
             .ambient = {0.6F, 0.65F, 0.8F, 0.3F},     /* cool ambient, intensity 0.3 */
         };
-        nt_gfx_update_buffer(s_light_ubo, 0, &lighting, sizeof(lighting));
-        nt_gfx_bind_uniform_buffer(s_light_ubo, 1);
+        nt_gfx_bind_uniform_block(1, &lighting, sizeof(lighting));
 
         /* Draw all render items */
         nt_mesh_renderer_draw_list(items, item_count);
@@ -651,6 +630,7 @@ int main(int argc, char **argv) {
     /* The vertex-input default is derived from max_meshes(128); scale it too. */
     gfx_desc.max_vertex_inputs = 256 * 4 + 48;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = MAX_SCENE_NODES * (uint32_t)sizeof(nt_mesh_instance_t);
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * (uint32_t)sizeof(nt_frame_uniforms_t); /* view and lighting blocks, each within 256 B */
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks */
@@ -702,22 +682,6 @@ int main(int argc, char **argv) {
     s_neutral_white_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_WHITE, NT_ASSET_TEXTURE);
     s_neutral_normal_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_NORMAL, NT_ASSET_TEXTURE);
 
-    /* 13. Create frame uniforms UBO (updated each frame) */
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
-
-    /* Create lighting UBO (updated each frame) */
-    s_light_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_lighting_t),
-        .label = "lighting",
-    });
-
     /* 15. Mount all 4 packs, load core immediately (rest loaded sequentially in frame) */
     s_core_pack_id = nt_hash32_str("sponza_core");
     nt_resource_mount(s_core_pack_id, 5); /* lowest priority — placeholders, overridden by real data */
@@ -763,8 +727,6 @@ int main(int argc, char **argv) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_light_ubo);
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

@@ -127,7 +127,7 @@ typedef enum {
 typedef enum {
     NT_BUFFER_VERTEX = 0,
     NT_BUFFER_INDEX,
-    NT_BUFFER_UNIFORM,
+    NT_BUFFER_UNIFORM, /* the uniform frame stream; blocks bind through nt_gfx_bind_uniform_block */
 } nt_buffer_type_t;
 
 typedef enum {
@@ -553,7 +553,6 @@ typedef enum {
     X(glAttachShader)                                                                                                                                                                                  \
     X(glBeginQuery)                                                                                                                                                                                    \
     X(glBindBuffer)                                                                                                                                                                                    \
-    X(glBindBufferBase)                                                                                                                                                                                \
     X(glBindBufferRange)                                                                                                                                                                               \
     X(glBindFramebuffer)                                                                                                                                                                               \
     X(glBindSampler)                                                                                                                                                                                   \
@@ -798,7 +797,7 @@ typedef struct {
     bool has_float_render_target;             /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
     bool has_float_texture_linear;            /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
     uint32_t max_texture_size;                /* GL_MAX_TEXTURE_SIZE, queried at init */
-    uint32_t uniform_buffer_offset_alignment; /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: ranged UBO binds start at a multiple */
+    uint32_t uniform_buffer_offset_alignment; /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: uniform blocks start at a multiple; size frame_capacity by it */
 } nt_gfx_gpu_caps_t;
 
 /* ---- Global state ---- */
@@ -1025,15 +1024,12 @@ bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_c
  * asserted. Re-bind per draw to re-point. */
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 
-/* ---- Uniform buffer ---- */
+/* ---- Uniform blocks ---- */
 
-/* Binds the whole buffer, or [offset, offset + size) of it. A range starts at a
- * multiple of gpu_caps.uniform_buffer_offset_alignment, is nonempty and fits the
- * buffer; WebGL also requires it to cover the block's full data size. Upload every
- * range of a frame before the first draw that reads the buffer: Mali/ANGLE stall on
- * a rewrite of any part of a buffer an earlier draw read. Inside a pass. */
-void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
-void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size);
+/* Copies size bytes into the uniform frame stream and binds that range to slot.
+ * Inside a pass. size covers the block's full data size (WebGL). The bytes live for
+ * this frame only: bind every block a draw reads in the frame of that draw. */
+void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
  * buffer, data must point to size bytes (NULL only with size 0). Disjoint
@@ -1048,9 +1044,9 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
  * uploads the bytes allocated since the previous one, so fill an allocation before the
  * next nt_gfx call: its bytes are sent once. Offsets and pointers are valid until the
  * next nt_gfx_begin_frame. Align vertex data read by index
- * to its stride (vertex i at i * stride; indices are absolute), instance data to 4,
- * indices to 4 (first_index = offset / 4) and uniform data to
- * gpu_caps.uniform_buffer_offset_alignment. */
+ * to its stride (vertex i at i * stride; indices are absolute), instance data to 4
+ * and indices to 4 (first_index = offset / 4). The uniform stream is filled by
+ * nt_gfx_bind_uniform_block. */
 
 /* Allocator state, public only because the allocation is inline. */
 typedef struct {

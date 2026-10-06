@@ -1776,12 +1776,7 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
-    GLuint buf = s_buffer_gl[backend_handle];
-    if (size != 0) {
-        NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, buf, (GLintptr)offset, (GLsizeiptr)size);
-    } else {
-        NT_GL(glBindBufferBase, GL_UNIFORM_BUFFER, slot, buf);
-    }
+    NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, s_buffer_gl[backend_handle], (GLintptr)offset, (GLsizeiptr)size);
 }
 
 void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {

@@ -1518,12 +1518,6 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
     if (s_gfx.bound_instance.buffer == buf.id) {
         s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
     }
-    /* GL unbinds a deleted buffer; a stale slot would show in the capture snapshot and could match a recycled id. */
-    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
-        if (s_gfx.bound_ubos[i].buffer == buf.id) {
-            s_gfx.bound_ubos[i] = (nt_gfx_ubo_binding_t){0};
-        }
-    }
     uint32_t slot = nt_pool_slot_index(buf.id);
     nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
     s_gfx.buffer_backends[slot] = 0;
@@ -2389,69 +2383,35 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     NT_GFX_END(bind_instance_buffer(buf, byte_offset));
 }
 
-/* ---- Uniform buffer ---- */
+/* ---- Uniform blocks ---- */
 
-/* size 0 binds the whole buffer; the public range entry point rejects it. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static nt_gfx_result_t bind_uniform_buffer(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
-    if (g_nt_gfx.context_lost) {
+static nt_gfx_result_t bind_uniform_block(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+    if (buf.id == 0) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_buffer: must be called inside a pass");
-    NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "bind_uniform_buffer: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
-    if (slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     nt_gfx_ubo_binding_t *bound = &s_gfx.bound_ubos[slot];
-    /* Destroying the buffer clears its slots, so an equal nonzero id is live. An orphan keeps
-     * the GL binding but may shrink the storage: a range that no longer fits re-validates. */
-    if (bound->buffer != 0 && bound->buffer == buf.id && bound->offset == offset && bound->size == size &&
-        (size == 0 || (uint64_t)offset + size <= s_gfx.buffer_metas[nt_pool_slot_index(buf.id)].storage_size)) {
+    if (bound->buffer == buf.id && bound->offset == offset && bound->size == size) {
         return NT_GFX_RESULT_CACHE;
     }
-    if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
-        NT_LOG_ERROR("bind_uniform_buffer: invalid handle");
-        return NT_GFX_RESULT_INVALID_HANDLE;
-    }
-    uint32_t idx = nt_pool_slot_index(buf.id);
-    NT_ASSERT(s_gfx.buffer_metas[idx].type == NT_BUFFER_UNIFORM);
-    if (s_gfx.buffer_metas[idx].type != NT_BUFFER_UNIFORM) {
-        NT_LOG_ERROR("bind_uniform_buffer: buffer is not uniform type");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
-    if (size != 0) {
-        const uint32_t align = g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment;
-        const bool aligned = align != 0 && offset % align == 0;
-        const uint32_t storage_size = s_gfx.buffer_metas[idx].storage_size;
-        const bool fits = size <= storage_size && offset <= storage_size - size;
-        NT_ASSERT(aligned && "bind_uniform_buffer_range: offset is not a multiple of uniform_buffer_offset_alignment");
-        NT_ASSERT(fits && "bind_uniform_buffer_range: range exceeds the buffer");
-        if (!aligned || !fits) {
-            NT_LOG_ERROR("bind_uniform_buffer_range: misaligned or out-of-bounds range");
-            return NT_GFX_RESULT_INVALID_ARGUMENT;
-        }
-    }
-    /* Buffers are never auto-restored: a zeroed backend means the owner skipped
-     * the recreate contract, and binding it would feed the shader garbage. */
-    NT_ASSERT(s_gfx.buffer_backends[idx] != 0 && "bind_uniform_buffer: buffer has no live backend -- recreate it after context restore");
-    if (s_gfx.buffer_backends[idx] == 0) {
-        NT_LOG_ERROR_ONCE("bind_uniform_buffer: buffer has no live backend");
-        return NT_GFX_RESULT_UNREADY;
-    }
     *bound = (nt_gfx_ubo_binding_t){buf.id, offset, size};
-    nt_gfx_frame_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot, offset, size);
+    nt_gfx_frame_bind_uniform_buffer(s_gfx.buffer_backends[nt_pool_slot_index(buf.id)], slot, offset, size);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot);
-    NT_GFX_END(bind_uniform_buffer(buf, slot, 0, 0));
-}
-
-void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
+void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
+    NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && data != NULL && size > 0 && "bind_uniform_block: slot, data or size");
+    const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
+    /* A restore that meets a new loss leaves the frame buffer unmade before the loss is latched.
+     * A disabled stream (zero capacity) reaches the allocator, which stops on the overflow. */
+    const bool lost = g_nt_gfx.context_lost || (storage->buffer.id == 0 && storage->capacity != 0);
+    const nt_buffer_t buf = lost ? (nt_buffer_t){0} : storage->buffer;
+    uint32_t offset = 0;
+    if (!lost) {
+        NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_block: must be called inside a pass");
+        memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, size, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, &offset), data, size);
+    }
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
-    NT_ASSERT(size != 0 && "bind_uniform_buffer_range: empty range");
-    NT_GFX_END(size != 0 ? bind_uniform_buffer(buf, slot, offset, size) : NT_GFX_RESULT_INVALID_ARGUMENT);
+    NT_GFX_END(bind_uniform_block(buf, slot, offset, size));
 }
 
 /* ---- Buffer update ---- */

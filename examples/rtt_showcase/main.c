@@ -84,7 +84,6 @@ static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 
 static nt_ui_context_t *s_ui_ctx;
-static nt_buffer_t s_frame_ubo;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
 static nt_resource_t s_atlas_tex_handle;
@@ -353,8 +352,7 @@ static void draw_ui_overlay(void) {
     uniforms.resolution[3] = (fb_h > 0.0F) ? (1.0F / fb_h) : 0.0F;
     uniforms.near_far[0] = -1.0F;
     uniforms.near_far[1] = 1.0F;
-    nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-    nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+    nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
     char zoom_text[32];
     char blur_text[32];
@@ -492,14 +490,6 @@ static void frame(void) {
         restored = make_quad_resources() && restored;
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "rtt_frame_uniforms",
-        });
-        restored = s_frame_ubo.id != 0 && restored;
         restored = (nt_sprite_renderer_restore_gpu() == NT_OK) && restored;
         restored = (nt_text_renderer_restore_gpu() == NT_OK) && restored;
         nt_program_ref_drop(&s_sprite_program);
@@ -568,6 +558,7 @@ int main(void) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = (uint32_t)sizeof(nt_frame_uniforms_t); /* the view block */
     gfx_desc.max_render_targets = 8;
     gfx_desc.max_textures = 32;
     gfx_desc.max_pipelines = 32;
@@ -592,13 +583,6 @@ int main(void) {
     const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
     s_ui_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
     NT_ASSERT(s_ui_ctx != NULL && "rtt_showcase: failed to create UI context");
-
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "rtt_frame_uniforms",
-    });
 
     s_pack_id = nt_hash32_str("rtt_showcase");
     nt_resource_mount(s_pack_id, 100);
@@ -685,7 +669,6 @@ int main(void) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_postfx_blur_shutdown();
     nt_shape_renderer_shutdown();
     nt_gfx_shutdown();
