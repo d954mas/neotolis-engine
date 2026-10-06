@@ -446,7 +446,7 @@ int main(int argc, char *argv[]) {
 
     /* 4. GFX init */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = (uint32_t)sizeof(nt_frame_uniforms_t); /* the view block */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO block (slot 0 for Globals: view_proj etc.) */

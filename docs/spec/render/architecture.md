@@ -108,24 +108,22 @@ observation for counters and capture.
 ### Binding dedup and draw merge
 
 The front-end is the one layer that drops redundant public binds; the GL backend
-only skips repeated physical state (below). Every binding call
-compares with a front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE` and
-records nothing. A mirror lives exactly as long as the contract keeps its state:
+only skips repeated physical state (below). Every binding call except a uniform
+block compares with a front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE`
+and records nothing. A mirror lives exactly as long as the contract keeps its state:
 
 - pipeline, vertex input, the texture set (per unit: texture and sampler),
   the instance buffer and the viewport live for one pass: `begin_pass` discards
   them, so the first bind of each in a pass records;
-- the scissor rectangle and the uniform-block binding of each slot carry over
-  passes and frames, and a context loss clears both. A block takes a fresh offset
-  of the uniform frame stream, so within a frame every block binds; the first
-  block of a frame that lands on the range its slot holds from the previous frame
-  ends `CACHE`, and its bytes are uploaded as usual;
+- the scissor rectangle carries over passes and frames; a context loss clears it;
 - scissor enable is reset to off by `begin_pass`.
 
 `nt_gfx_apply_texture_bindings` never ends `CACHE`: a successful apply validates
 and publishes the whole set and ends `ACCEPTED`, but records a unit bind only
-when that unit's texture or sampler changed in the pass. Uniform-buffer slots
-are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind or
+when that unit's texture or sampler changed in the pass. A uniform block is
+frame data at a fresh offset of the uniform frame stream, so its bind always
+records and ends `ACCEPTED`; GL keeps the slot binding across passes and frames.
+Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind or
 a global block registration at that slot or above asserts.
 
 The compare runs after the pass check; an equal value was validated when it was
@@ -465,12 +463,13 @@ Alignment follows the reader:
 - instance data bound with `nt_gfx_bind_instance_buffer` at its offset aligns to 4;
 - indices align to 4 and are drawn from `first_index = offset / 4`;
 - uniform data is written and bound by `nt_gfx_bind_uniform_block(slot, data, size)`,
-  which aligns it to `gpu_caps.uniform_buffer_offset_alignment`. The game owns no
-  uniform buffer; the GL binding persists, the bytes live for one frame, so a draw
+  which aligns it to `gpu_caps.uniform_buffer_offset_alignment` (at most 256 on
+  WebGL 2 and GLES 3, not necessarily a power of two): budget each block its size
+  plus 256 bytes. The game owns no uniform buffer; the GL binding persists, the bytes live for one frame, so a draw
   reads only blocks bound in its own frame.
 
-`nt_gfx_frame_buffer(stream)` returns an ordinary buffer handle; the gfx
-front-end does not know the storage. The handle is borrowed: never update,
+`nt_gfx_frame_buffer(stream)` returns an ordinary buffer handle; apart from
+`nt_gfx_bind_uniform_block`, the gfx front-end treats it like any buffer. The handle is borrowed: never update,
 orphan or destroy it, and read it again every frame, because a context restore
 replaces it (vertex inputs over it die with the context anyway). Each enabled
 stream's buffer counts against `nt_gfx_desc_t.max_buffers`.
@@ -626,8 +625,7 @@ Destroying a texture or a live render target inside a pass asserts: pass-scoped
 draw state may still sample it.
 Physical texture/sampler GL bindings and uniform-block binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
-a uniform-block bind calls `glBindBufferRange` for every recorded request, and
-the front-end records a slot's binding only when buffer, offset or size changed. A depth clear forces the depth
+every uniform-block bind records one `glBindBufferRange`. A depth clear forces the depth
 mask on and leaves it on; the pass's first pipeline bind sets its own mask.
 
 A render target is a thin framebuffer object over optional attachments, color
@@ -984,7 +982,7 @@ vertex-input backend slot in `detail`; initial state uses the current raw
 program name. Vertex-input creation copies each static/instance attribute with
 its divisor, layout, and known buffer. The initial SCISSOR record holds the
 carried-over rectangle and the initial UBO records hold each bound slot's
-buffer, offset and size, from the front-end dedup mirrors. The rectangle is
+buffer, offset and size, from the front-end slot records. The rectangle is
 `UNKNOWN` before the first set and after a context loss; an unbound slot has no
 record. A bind inside the capture that
 ends `CACHE` matches this state or one set earlier in the frame. Inherited

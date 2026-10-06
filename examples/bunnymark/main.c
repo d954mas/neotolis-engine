@@ -433,10 +433,9 @@ static void frame(void) {
     nt_font_step();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms)); /* the bunnies and the HUD both read it */
 
     if (can_render) {
-        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
-
         // #region build draw list
         nt_sprite_comp_view_t sprites = nt_sprite_comp_view();
         uint32_t item_count = 0;
@@ -574,7 +573,7 @@ int main(int argc, char **argv) {
     NT_ASSERT(s_initial_count <= BUNNY_MAX && "--count exceeds BUNNY_MAX");
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = (uint32_t)sizeof(nt_frame_uniforms_t); /* the view block */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 

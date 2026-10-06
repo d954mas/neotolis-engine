@@ -685,20 +685,19 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
         }
 #endif
         nt_gfx_counters_t c = g_nt_gfx.last_frame;
-        const uint32_t first_frame_only = frame == 0 ? 1U : 0U;
-        /* Equal binds end CACHE: pipeline and vertex input once per pass, the uniform block
-         * once, since its slot carries over frames and the block lands on the same offset. */
+        /* Equal binds end CACHE: pipeline and vertex input once per pass. A uniform block is
+         * frame data and binds every frame. */
         TEST_ASSERT_EQUAL_UINT32(1, c.accepted[NT_GFX_OP_PIPELINE]);
         TEST_ASSERT_EQUAL_UINT32(1, c.accepted[NT_GFX_OP_VERTEX_INPUT]);
         TEST_ASSERT_EQUAL_UINT32(3, c.accepted[NT_GFX_OP_UNIFORM_VEC4]);
-        TEST_ASSERT_EQUAL_UINT32(first_frame_only, c.accepted[NT_GFX_OP_UBO]);
+        TEST_ASSERT_EQUAL_UINT32(1, c.accepted[NT_GFX_OP_UBO]);
         TEST_ASSERT_EQUAL_UINT32(s_program_calls, c.gl[NT_GFX_GL_glUseProgram]);
         TEST_ASSERT_EQUAL_UINT32(s_vao_calls, c.gl[NT_GFX_GL_glBindVertexArray]);
         TEST_ASSERT_EQUAL_UINT32(s_uniform_calls, c.gl[NT_GFX_GL_glUniform4fv]);
         TEST_ASSERT_EQUAL_UINT32(s_ubo_calls, c.gl[NT_GFX_GL_glBindBufferRange]);
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.gl[NT_GFX_GL_glUseProgram]);
         TEST_ASSERT_EQUAL_UINT32(frame == 0 ? 1 : 0, c.gl[NT_GFX_GL_glUniform4fv]);
-        TEST_ASSERT_EQUAL_UINT32(first_frame_only, c.gl[NT_GFX_GL_glBindBufferRange]);
+        TEST_ASSERT_EQUAL_UINT32(1, c.gl[NT_GFX_GL_glBindBufferRange]);
 #if NT_GFX_CAPTURE_ENABLED
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glUseProgram], captured_calls(NT_GFX_GL_glUseProgram));
         TEST_ASSERT_EQUAL_UINT32(c.gl[NT_GFX_GL_glBindVertexArray], captured_calls(NT_GFX_GL_glBindVertexArray));

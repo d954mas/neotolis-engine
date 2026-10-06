@@ -164,7 +164,7 @@ static struct {
      * contract keeps its state. */
     nt_gfx_instance_binding_t bound_instance;
     nt_gfx_unit_binding_t bound_units[NT_GFX_MAX_TEXTURE_SLOTS];
-    nt_gfx_ubo_binding_t bound_ubos[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* carry over passes */
+    nt_gfx_ubo_binding_t bound_ubos[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* GL keeps it across passes and frames; capture snapshot only */
     int scissor_rect[4];                                              /* GL bottom-left x,y,w,h; carries over passes; w = -1: unknown */
     int viewport_rect[4];                                             /* GL bottom-left x,y,w,h; w = -1: unknown */
 } s_gfx;
@@ -2389,11 +2389,9 @@ static nt_gfx_result_t bind_uniform_block(nt_buffer_t buf, uint32_t slot, uint32
     if (buf.id == 0) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    nt_gfx_ubo_binding_t *bound = &s_gfx.bound_ubos[slot];
-    if (bound->buffer == buf.id && bound->offset == offset && bound->size == size) {
-        return NT_GFX_RESULT_CACHE;
-    }
-    *bound = (nt_gfx_ubo_binding_t){buf.id, offset, size};
+    /* Every block takes a fresh offset, so a bind is never equal to the slot's last one within a frame:
+     * no dedup. The slot record only feeds the capture snapshot. */
+    s_gfx.bound_ubos[slot] = (nt_gfx_ubo_binding_t){buf.id, offset, size};
     nt_gfx_frame_bind_uniform_buffer(s_gfx.buffer_backends[nt_pool_slot_index(buf.id)], slot, offset, size);
     return NT_GFX_RESULT_ACCEPTED;
 }

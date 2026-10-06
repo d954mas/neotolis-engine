@@ -720,19 +720,20 @@ static void test_capture_shows_cache_for_equal_binds_and_merged_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&capture.counters));
 }
 
-/* Scissor rectangle and uniform-block slots carry over frames: the snapshot
- * shows the state a CACHE bind inside the capture matched (the same offset of
- * the uniform frame buffer, rewritten every frame). */
+/* The scissor rectangle and the uniform-block slots carry over frames: the snapshot shows the
+ * state the GL context holds. A block bind always records; its BEGIN carries the resolved range. */
 static void test_capture_initial_state_holds_carried_over_bindings(void) {
     const uint8_t block[128] = {0};
     const nt_buffer_t ubo = nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor(1, 2, 3, 4);
-    nt_gfx_bind_uniform_block(5, block, sizeof(block));
+    nt_gfx_bind_uniform_block(4, block, sizeof(block));
+    nt_gfx_bind_uniform_block(5, block, sizeof(block)); /* offset 256 */
     nt_gfx_end_pass();
     record_next_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor(1, 2, 3, 4);
+    nt_gfx_bind_uniform_block(4, block, sizeof(block));
     nt_gfx_bind_uniform_block(5, block, sizeof(block));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -740,6 +741,7 @@ static void test_capture_initial_state_holds_carried_over_bindings(void) {
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     bool scissor_found = false;
     bool ubo_found = false;
+    uint32_t ubo_begins = 0;
     uint32_t cache_results = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *e = &capture.events[i];
@@ -750,12 +752,17 @@ static void test_capture_initial_state_holds_carried_over_bindings(void) {
             TEST_ASSERT_EQUAL_UINT32(4, e->data.state.integers[3]);
             scissor_found = true;
         }
-        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UBO) {
+        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UBO && e->data.binding.slot == 5) {
             TEST_ASSERT_EQUAL_UINT32(ubo.id, e->object);
-            TEST_ASSERT_EQUAL_UINT32(5, e->data.binding.slot);
-            TEST_ASSERT_EQUAL_UINT32(0, e->data.binding.offset);
+            TEST_ASSERT_EQUAL_UINT32(256, e->data.binding.offset);
             TEST_ASSERT_EQUAL_UINT32(128, e->data.binding.size);
             ubo_found = true;
+        }
+        if (e->kind == NT_GFX_EVENT_BEGIN && e->operation == NT_GFX_OP_UBO && e->data.binding.slot == 5) {
+            TEST_ASSERT_EQUAL_UINT32(ubo.id, e->object);
+            TEST_ASSERT_EQUAL_UINT32(256, e->data.binding.offset);
+            TEST_ASSERT_EQUAL_UINT32(128, e->data.binding.size);
+            ubo_begins++;
         }
         if (e->kind == NT_GFX_EVENT_RESULT && (e->operation == NT_GFX_OP_SCISSOR || e->operation == NT_GFX_OP_UBO) && e->result == NT_GFX_RESULT_CACHE) {
             cache_results++;
@@ -763,7 +770,8 @@ static void test_capture_initial_state_holds_carried_over_bindings(void) {
     }
     TEST_ASSERT_TRUE(scissor_found);
     TEST_ASSERT_TRUE(ubo_found);
-    TEST_ASSERT_EQUAL_UINT32(2, cache_results);
+    TEST_ASSERT_EQUAL_UINT32(1, ubo_begins);
+    TEST_ASSERT_EQUAL_UINT32(1, cache_results); /* the scissor; a block bind never ends CACHE */
 }
 
 /* Size and formats come from the borrowed textures. */

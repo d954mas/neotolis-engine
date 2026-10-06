@@ -630,7 +630,7 @@ int main(int argc, char **argv) {
     /* The vertex-input default is derived from max_meshes(128); scale it too. */
     gfx_desc.max_vertex_inputs = 256 * 4 + 48;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = MAX_SCENE_NODES * (uint32_t)sizeof(nt_mesh_instance_t);
-    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * (uint32_t)sizeof(nt_frame_uniforms_t); /* view and lighting blocks, each within 256 B */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * 512U; /* view and lighting blocks: 256 B or less each, plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks */

@@ -38,7 +38,8 @@ void nt_gfx_frame_shutdown(void) {
 }
 
 void nt_gfx_frame_create_buffers(void) {
-    static const nt_buffer_type_t types[NT_GFX_FRAME_STREAM_COUNT] = {NT_BUFFER_VERTEX, NT_BUFFER_INDEX, NT_BUFFER_UNIFORM};
+    /* GL buffers are untyped; only index data has its own target in WebGL 2, so uniform blocks live in a vertex-type buffer. */
+    static const nt_buffer_type_t types[NT_GFX_FRAME_STREAM_COUNT] = {NT_BUFFER_VERTEX, NT_BUFFER_INDEX, NT_BUFFER_VERTEX};
     static const char *const labels[NT_GFX_FRAME_STREAM_COUNT] = {"frame_vertex", "frame_index", "frame_uniform"};
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[s];

@@ -496,7 +496,7 @@ target and clears the bound pipeline, vertex input, instance binding and texture
 set. The scissor rectangle and uniform-block bindings
 carry over, so a pass sets the scissor rectangle before it enables scissor. A
 bind equal to the current state records nothing; results, the texture-set
-exception and the uniform-buffer slot limit are in
+exception, the always-recording uniform-block bind and the slot limit are in
 [binding dedup](../render/architecture.md#binding-dedup-and-draw-merge).
 `nt_gfx_begin_segment` and `nt_gfx_end_segment` assert outside an open frame.
 

@@ -103,6 +103,11 @@ static void test_zero_capacity_disables_the_stream(void) {
     uint32_t offset = 0;
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, 16, 4, &offset));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame_capacity"));
+    /* A uniform block on a disabled stream is the same overflow, not a quiet context loss. */
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, &offset, sizeof(offset)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame_capacity"));
+    nt_gfx_end_pass();
     next_frame();
 }
 
@@ -283,10 +288,10 @@ static void test_a_uniform_block_without_a_frame_buffer_is_a_lost_context(void) 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_uniform_block(0, block, sizeof(block));
     nt_gfx_end_pass();
+    storage->buffer = made;
     TEST_ASSERT_EQUAL_UINT32(0, storage->used);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
-    storage->buffer = made;
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL

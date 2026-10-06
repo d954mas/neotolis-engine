@@ -1657,21 +1657,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     if (buf == 0) {
         return 0; /* storing name 0 would alias the free-slot sentinel */
     }
-    GLenum target;
-    switch (desc->type) {
-    case NT_BUFFER_VERTEX:
-        target = GL_ARRAY_BUFFER;
-        break;
-    case NT_BUFFER_INDEX:
-        target = GL_ELEMENT_ARRAY_BUFFER;
-        break;
-    case NT_BUFFER_UNIFORM:
-        target = GL_UNIFORM_BUFFER;
-        break;
-    default:
-        target = GL_ARRAY_BUFFER;
-        break;
-    }
+    const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     GLenum usage = map_buffer_usage(desc->usage);
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {

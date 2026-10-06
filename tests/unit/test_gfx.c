@@ -2450,29 +2450,6 @@ void test_activate_mesh_rejects_meshopt_decoded_size_overflow(void) {
 
 /* ---- Uniform buffer tests ---- */
 
-void test_make_uniform_buffer(void) {
-    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
-    nt_gfx_destroy_buffer(buf);
-}
-
-void test_update_uniform_buffer(void) {
-    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
-    uint8_t data[256];
-    memset(data, 0xAB, sizeof(data));
-    nt_gfx_update_buffer(buf, 0, data, 256);
-    nt_gfx_destroy_buffer(buf);
-}
-
 void test_update_buffer_at_offset(void) {
     nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
@@ -2514,26 +2491,6 @@ void test_update_buffer_rejects_immutable(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
     EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0, initial, 64));
     nt_gfx_destroy_buffer(buf);
-}
-
-void test_destroy_uniform_buffer(void) {
-    nt_buffer_t buf1 = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    uint32_t slot1 = buf1.id & 0xFFFF;
-    nt_gfx_destroy_buffer(buf1);
-
-    nt_buffer_t buf2 = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    uint32_t slot2 = buf2.id & 0xFFFF;
-    TEST_ASSERT_EQUAL_UINT32(slot1, slot2);         /* reused slot */
-    TEST_ASSERT_NOT_EQUAL_UINT32(buf1.id, buf2.id); /* different generation */
-    nt_gfx_destroy_buffer(buf2);
 }
 
 /* ---- Global block registration ---- */
@@ -3116,13 +3073,20 @@ void test_bind_uniform_block_copies_and_binds_its_range(void) {
     TEST_ASSERT_EQUAL_UINT32(a.buffer_backend, b.buffer_backend);
     TEST_ASSERT_EQUAL_UINT32(7, b.slot);
     TEST_ASSERT_EQUAL_UINT32(256, b.offset);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(s_block_b), b.size);
     const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
     TEST_ASSERT_EQUAL_MEMORY(s_block_a, staging + a.offset, sizeof(s_block_a));
     TEST_ASSERT_EQUAL_MEMORY(s_block_b, staging + b.offset, sizeof(s_block_b));
+    const uint32_t used = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used;
     EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, s_block_a, sizeof(s_block_a))); /* outside a pass */
+    TEST_ASSERT_EQUAL_UINT32(used, g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, NULL, sizeof(s_block_a)));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, s_block_a, 0));
+    nt_gfx_end_pass();
 }
 
-/* The alignment is a device cap, re-read on every probe; it need not be a power of two. */
+/* The alignment is a device cap, re-read at init and at context restore; it need not be a power of two. */
 void test_bind_uniform_block_follows_probed_alignment(void) {
     const uint32_t alignments[] = {16, 48, 512};
     for (uint32_t i = 0; i < sizeof(alignments) / sizeof(alignments[0]); i++) {
@@ -3140,6 +3104,17 @@ void test_bind_uniform_block_follows_probed_alignment(void) {
         TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
         TEST_ASSERT_EQUAL_UINT32(alignments[i] < 20U ? 2U * alignments[i] : alignments[i], nt_gfx_fake_ubo_bind_at(1).offset);
     }
+    nt_gfx_fake_set_uniform_buffer_offset_alignment(64);
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    TEST_ASSERT_EQUAL_UINT32(64, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_uniform_block(0, s_block_a, 20);
+    nt_gfx_bind_uniform_block(0, s_block_b, 20);
+    nt_gfx_end_pass();
+    TEST_ASSERT_EQUAL_UINT32(64U + 20U, g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used);
 }
 
 // #region deferred draw-phase stream
@@ -3228,9 +3203,9 @@ void test_equal_binds_record_nothing(void) {
     nt_gfx_end_pass();
 }
 
-/* Every block takes a fresh offset, so equal data binds again within a frame. The next frame's
- * second block lands on the range the slot still holds from the last bind: CACHE, and its bytes upload. */
-void test_uniform_block_slots_carry_over_frames(void) {
+/* A block is frame data: every bind records, also the same data again or the same range as the
+ * previous frame, and the frame's own bytes upload to that range. */
+void test_every_uniform_block_binds_and_uploads_its_bytes(void) {
     begin_stream_test_pass();
     EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, sizeof(s_block_a)));
     EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, sizeof(s_block_a)));
@@ -3238,18 +3213,18 @@ void test_uniform_block_slots_carry_over_frames(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     begin_stream_test_pass();
-    nt_gfx_bind_uniform_block(4, s_block_b, sizeof(s_block_b));
-    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, sizeof(s_block_a)));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_b, sizeof(s_block_b))); /* offset 0 again */
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_MEMORY(s_block_a, (const uint8_t *)nt_gfx_fake_last_update_buffer_data() + 256, sizeof(s_block_a));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_update_buffer_offset());
+    TEST_ASSERT_EQUAL_UINT32(sizeof(s_block_b), nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_MEMORY(s_block_b, nt_gfx_fake_last_update_buffer_data(), sizeof(s_block_b));
     nt_gfx_begin_frame();
 }
 
-/* Pipeline, vertex input and viewport are pass state; the scissor rectangle
- * and uniform-buffer slots carry over passes. */
+/* Pipeline, vertex input and viewport are pass state; the scissor rectangle carries over passes. */
 void test_bind_mirrors_follow_their_contract_scope(void) {
     nt_pipeline_t pipeline = begin_stream_test_pass();
     nt_gfx_set_viewport(0, 0, 4, 4);
@@ -3283,7 +3258,7 @@ void test_context_loss_clears_carried_over_bind_mirrors(void) {
     nt_gfx_end_pass();
 }
 
-/* A restore replaces the uniform frame buffer and forgets the slots, so the same range binds again. */
+/* A restore replaces the uniform frame buffer; blocks bind to the new one up to the slot limit. */
 void test_restored_uniform_blocks_bind_again(void) {
     begin_stream_test_pass();
     nt_gfx_bind_uniform_block(0, s_block_a, sizeof(s_block_a));
@@ -3673,14 +3648,13 @@ int main(void) {
     RUN_TEST(test_activate_mesh_rejects_meshopt_undersized_wire);
     RUN_TEST(test_activate_mesh_rejects_meshopt_decoded_size_overflow);
     /* Uniform buffer tests */
-    RUN_TEST(test_make_uniform_buffer);
     RUN_TEST(test_stream_executes_draws_in_call_order_at_end_frame);
     RUN_TEST(test_stream_records_every_draw_phase_call);
     RUN_TEST(test_equal_binds_record_nothing);
     RUN_TEST(test_bind_mirrors_follow_their_contract_scope);
     RUN_TEST(test_context_loss_clears_carried_over_bind_mirrors);
     RUN_TEST(test_restored_uniform_blocks_bind_again);
-    RUN_TEST(test_uniform_block_slots_carry_over_frames);
+    RUN_TEST(test_every_uniform_block_binds_and_uploads_its_bytes);
     RUN_TEST(test_texture_set_records_only_changed_units);
     RUN_TEST(test_contiguous_indexed_draws_merge);
     RUN_TEST(test_indexed_draw_merge_boundaries);
@@ -3694,11 +3668,9 @@ int main(void) {
     RUN_TEST(test_gpu_timing_toggle_mid_frame_executes_the_stream_only_with_gpu_timing);
     RUN_TEST(test_buffer_write_executes_earlier_draws_and_recording_continues);
     RUN_TEST(test_stream_overflow_asserts);
-    RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_update_buffer_at_offset);
     RUN_TEST(test_update_buffer_rejects_out_of_range);
     RUN_TEST(test_update_buffer_rejects_immutable);
-    RUN_TEST(test_destroy_uniform_buffer);
     /* Global block registration tests */
     RUN_TEST(test_register_global_block);
     RUN_TEST(test_register_global_block_max);

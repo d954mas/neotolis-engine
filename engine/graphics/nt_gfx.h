@@ -127,8 +127,7 @@ typedef enum {
 typedef enum {
     NT_BUFFER_VERTEX = 0,
     NT_BUFFER_INDEX,
-    NT_BUFFER_UNIFORM, /* the uniform frame stream; blocks bind through nt_gfx_bind_uniform_block */
-} nt_buffer_type_t;
+} nt_buffer_type_t; /* uniform data has no public buffer: see nt_gfx_bind_uniform_block */
 
 typedef enum {
     NT_USAGE_IMMUTABLE = 0, /* GL: STATIC_DRAW */
@@ -1026,9 +1025,10 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 
 /* ---- Uniform blocks ---- */
 
-/* Copies size bytes into the uniform frame stream and binds that range to slot.
- * Inside a pass. size covers the block's full data size (WebGL). The bytes live for
- * this frame only: bind every block a draw reads in the frame of that draw. */
+/* Copies size bytes into the uniform frame stream and binds that range to slot; every call
+ * records. Inside a pass. size covers the block's full data size (WebGL). The bytes live for
+ * this frame only: bind every block a draw reads in the frame of that draw. Budget
+ * frame_capacity[NT_GFX_FRAME_UNIFORM] at size + 256 per block (offset alignment <= 256). */
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
