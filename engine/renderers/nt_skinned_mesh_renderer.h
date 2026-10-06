@@ -42,13 +42,10 @@ void nt_skinned_mesh_renderer_shutdown(void);
  * caches. Inactive modules are unchanged. */
 void nt_skinned_mesh_renderer_restore_gpu(void);
 
-/* Skinned materials: common/skin.glsl, joints/weights mapped by the material attr_map,
- * positive uniform joint/world scale, and u_skin_matrices declared among the material's
- * textures; the renderer supplies the deformation texture there with its default sampler. */
-
-/* nt_mesh_renderer_draw for skinned instances (nt_skinned_mesh_instance_t), whose deformation
- * origins address the deformation texture. Call after nt_skeletal_gpu_flush: a texture write
- * must precede every recorded draw that samples it (render/architecture.md, Draw-phase command stream). */
+/* nt_mesh_renderer_draw for skinned instances (nt_skinned_mesh_instance_t). The material uses
+ * common/skin.glsl and declares u_skin_matrices, which deformation replaces. Call after
+ * nt_skeletal_gpu_flush: a texture write precedes the draws that sample it (render/architecture.md,
+ * Draw-phase command stream). */
 void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t offset, uint32_t count);
 
 /* nt_mesh_renderer_draw_list for skinned items: runs also split on the deformation texture,

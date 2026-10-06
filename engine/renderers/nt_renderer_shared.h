@@ -287,9 +287,8 @@ typedef struct {
     const float (*params)[4];
 } nt_renderer_material_view_t;
 
-/* Zero-init = nothing bound; lives for ONE sprite draw_list or flush. Material uniforms replay on
- * a material change or a pipeline change. Texture and sampler binds are deduplicated by the
- * GL backend, so the renderer tracks only what it replays itself. */
+/* Zero-init = nothing bound; lives for one sprite draw_list or flush. Material uniforms replay on
+ * a material or pipeline change. */
 typedef struct {
     uint32_t pipeline;
     uint32_t vertex_input;
@@ -434,7 +433,7 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
             d->pipeline = nt_renderer_pipeline_cache_insert(c->pipelines, &c->pipeline_count, c->max_pipelines, &key, &desc, &c->warned_program_not_ready);
         }
     }
-    /* VI identity is (mesh row, material-derived layout), so a mesh change re-resolves too. */
+    /* Vertex-input identity is (mesh row, material-derived layout): a mesh change re-resolves too. */
     if (material_changed || mesh.id != d->mesh.id) {
         d->vertex_input = (d->pipeline.id != 0) ? nt_renderer_mesh_vi_cache_find_or_create(&c->vi_cache, material, mesh, mi, mesh_info, c->instance_layout, c->label) : NT_VERTEX_INPUT_INVALID;
     }

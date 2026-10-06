@@ -1658,8 +1658,8 @@ void test_instance_world_rows_transpose_the_affine_part(void) {
     }
 }
 
-/* A mesh new to its cache slot executes nothing: draw_list after a recorded draw keeps
- * the frame in one execution (and one upload). */
+/* A mesh new to its cache slot forces no mid-frame execution: both lists execute and upload
+ * once, at the trace query. */
 void test_draw_list_of_a_new_mesh_after_a_draw_executes_nothing(void) {
     nt_material_t mat = create_test_material();
     nt_mesh_t mesh_a = create_test_mesh();

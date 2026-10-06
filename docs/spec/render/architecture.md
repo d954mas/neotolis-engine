@@ -299,16 +299,15 @@ uniforms — every vec4 param, keyed by material id — and the per-run draw. Th
 tracked state lives for exactly one `draw_list` call or flush: inside that call
 the renderer is the only writer of GL draw state. Material uniforms replay on a
 material change *or* a pipeline change, because uniform values are program
-state and the new pipeline may sit on another program — one flush can hold one
-material id on two programs when a game replaces the material's program between
+state and the new pipeline may sit on another program. One flush can hold one
+material id on two programs: a game may replace the material's program between
 an immediate-mode emit and an ECS `draw_list`.
 
 The mesh renderers keep no bind tracking: every run binds its pipeline and
 vertex input, and the front-end drops the equal ones. They skip only material
-work — the vec4 param loop and the texture set — between adjacent runs of one
-call that keep the material (and, for the skinned renderer, the deformation
-texture; a deformation-only change applies the texture set, not the params).
-Inside one call the pipeline follows from the material, so a program change is
+work — the vec4 param loop and the texture set — between runs of one call that
+keep the material. In the skinned renderer a deformation-only change applies the
+texture set, not the params. Inside one call the pipeline follows from the material, so a program change is
 a material change. A core draw call applies its material every time.
 Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a material
 without an override selects the texture's asset default. At every material
@@ -494,25 +493,27 @@ asserts.
 
 ### Mesh draws
 
-`nt_mesh_renderer` and `nt_skinned_mesh_renderer` record their draws directly;
-nothing is prepared ahead of the pass. Each has two entry points:
+`nt_mesh_renderer` and `nt_skinned_mesh_renderer` record their draws at the
+call, in the current pass. Each has two entry points:
 
 - the core, `nt_mesh_renderer_draw(mesh, material, offset, count)` (skinned:
   `nt_skinned_mesh_renderer_draw(mesh, material, deformation, offset, count)`),
   records one instanced draw of `count` instances (`nt_mesh_instance_t`,
   `nt_skinned_mesh_instance_t`) that the caller wrote into vertex frame storage
-  at byte `offset`, filled before the next `nt_gfx` call (see Frame storage).
-  It reads no entity component. One allocation may be
-  drawn any number of times in any passes of the frame, so shadow cascades draw
-  one packing. Each call resolves pipeline, vertex input and material state:
-  draw a batch per call, not one object. `nt_mesh_instance_world_rows` writes the
-  instance rows from a column-major world matrix for both instance types;
+  at byte `offset`. It reads no entity component;
 - the ECS adapter, `draw_list(items, count)`, splits the items into runs of
   adjacent equal batch keys (the skinned renderer also splits on the deformation
   texture), allocates and packs each run's instances from the transform,
   drawable (and skin) components, and records it as the core does.
 
-Both record in the current pass. A run whose program is not ready, or whose
+The core's instances are filled before the next `nt_gfx` call (see Frame
+storage). One allocation may be drawn any number of times in any passes of the
+frame, so shadow cascades draw one packing. Each core call resolves pipeline,
+vertex input and material state: draw a batch per call, not one object.
+`nt_mesh_instance_world_rows` writes the instance rows of both instance types
+from a column-major world matrix.
+
+ A run whose program is not ready, or whose
 pipeline or vertex input could not be created (load, context loss), records
 nothing and allocates nothing; an unready program warns once. Both resolve the
 pipeline and vertex input at the call — creating them on a cache miss — and
@@ -521,8 +522,8 @@ read the material's params and texture publications there. Consequences:
 - Batching happens in `draw_list`, so the game's item order decides what merges.
 - Entity bindings are read at the call, so one entity can enter several lists
   with different materials (multipass) by rebinding between the calls.
-- The material, its program and textures, and the mesh stay live until the
-  frame executes.
+- The material is read at the call; its program and textures and the mesh stay
+  live until the recorded draws execute.
 
 ### Frame order
 
@@ -570,7 +571,7 @@ nt_gfx_end_frame(); /* uploads frame storage, then executes the passes */
 A shadow list drawn in several cascades packs once per cascade; to pack once,
 the game writes the instances itself and draws them through the core in each
 cascade. Immediate-mode renderers (sprite, text, shape) flush inside passes
-under their own policy and do not read frame storage yet.
+under their own policy and do not read frame storage.
 
 ### Render targets
 
@@ -1094,7 +1095,7 @@ pattern, one instanced draw per compatible run (see items-sorting-batching.md),
 packed into frame storage and recorded at the call. Use for 3D
 meshes, custom geometry, anything where the game owns batching strategy. Stay
 minimal. The mesh renderers share one resolve-and-record body in
-`nt_renderer_shared.h`, which costs them no cmd queue and no snapshot machinery.
+`nt_renderer_shared.h`.
 
 **Batched dynamic** — high-throughput accumulation renderers (`nt_sprite_renderer`; future particles). Cmd queue, state-delta tracking, overflow recovery via snapshot/replay, multi-page atlas resolution, SIMD path. Optimized for many small draws per frame (1k–60k items). Complex by necessity — the 580 LOC of `nt_sprite_renderer.c` are paid for by measured throughput on bunnymark. Don't simplify away the cmd queue or snapshot recovery without a measured replacement plan.
 

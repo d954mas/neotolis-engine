@@ -336,7 +336,7 @@ Order per frame: draws finished → `resource_step` → refresh views → advanc
 
 **Pack grouping.** Activation and unmount are whole-pack (default `NT_RESOURCE_MAX_PACKS` = 16), and mounting a pack that contains a non-BLOB type whose activator is not registered asserts (`nt_resource.c`, parse). Builder manifests therefore group by **co-residency**: a rig/mesh pack (MESH, NSKL, NSKN); clip-group packs (NANM, e.g. base locomotion vs. dances loaded mid-game). Applications that link animation register the three activators; the manifest keeps peak mounted packs (old + new + prefetch) within the limit or overrides it deliberately.
 
-Not ready → the game continues old playback, holds a pose or omits the item. Planned unload: detach consumers, finish draws, release. Context loss invalidates prepared bindings and lists; CPU poses, tracks and immutable CPU assets survive; owners recreate the dynamic palette texture, programs and vertex inputs and rebake bank textures from their views.
+Not ready → the game continues old playback, holds a pose or omits the item. Planned unload: detach consumers, finish draws, release. Context loss invalidates deformation bindings; CPU poses, tracks and immutable CPU assets survive; owners recreate the dynamic palette texture, programs and vertex inputs and rebake bank textures from their views.
 
 ## 16. Builder, codec, wire formats
 

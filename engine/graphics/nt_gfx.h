@@ -337,9 +337,8 @@ typedef struct {
     uint16_t max_buffers;   /* default: 128; each enabled frame storage stream takes one */
     uint16_t max_textures;  /* default: 64 */
     uint16_t max_meshes;    /* default: 128 */
-    /* default: 560 = max_meshes(128) * max_mesh_layouts(4) + 48 other VIs, which include one
-     * shared bufferless VI per mesh renderer.
-     * Add max_meshes * skinned.max_mesh_layouts when using both mesh renderers;
+    /* default: 560 = max_meshes(128) * max_mesh_layouts(4) + 48 other vertex inputs (one bufferless
+     * per mesh renderer among them). Add max_meshes * skinned.max_mesh_layouts when using both mesh renderers;
      * raise the extra budget near the 64-layout sprite limit. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */

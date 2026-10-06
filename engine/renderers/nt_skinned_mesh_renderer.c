@@ -96,7 +96,7 @@ void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_te
 void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_skinned.initialized);
     NT_ASSERT(count == 0 || items != NULL);
-    /* Transform and drawable by inline sparse reads, as the sprite emit does; the skin binding still goes through its asserting accessor. */
+    /* Transform and drawable by inline sparse reads; the skin binding goes through its asserting accessor. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
     nt_renderer_mesh_draw_t draw = {0};
