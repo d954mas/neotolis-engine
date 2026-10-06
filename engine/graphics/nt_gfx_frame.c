@@ -20,11 +20,15 @@ void nt_gfx_frame_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(g_nt_gfx_stream.words != NULL);
     g_nt_gfx_stream.used = 0;
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
-        NT_ASSERT(desc->frame_capacity[s] > 0 && "nt_gfx_desc_t.frame_capacity is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+        g_nt_gfx_frame_storage[s] = (nt_gfx_frame_storage_t){0};
+        s_uploaded[s] = 0;
+        /* Zero capacity disables the stream: its allocations reach the overflow. */
+        if (desc->frame_capacity[s] == 0) {
+            continue;
+        }
         /* Alignment padding is uploaded too: define it once. */
         g_nt_gfx_frame_storage[s] = (nt_gfx_frame_storage_t){.staging = (uint8_t *)calloc(desc->frame_capacity[s], 1), .capacity = desc->frame_capacity[s]};
         NT_ASSERT(g_nt_gfx_frame_storage[s].staging != NULL && "gfx init: out of memory for frame storage");
-        s_uploaded[s] = 0;
     }
 }
 
@@ -43,6 +47,9 @@ void nt_gfx_frame_create_buffers(void) {
     static const char *const labels[NT_GFX_FRAME_STREAM_COUNT] = {"frame_vertex", "frame_index", "frame_uniform"};
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[s];
+        if (storage->capacity == 0) {
+            continue;
+        }
         /* After a restore the old handle holds a wiped name. */
         if (storage->buffer.id != 0) {
             nt_gfx_destroy_buffer(storage->buffer);
@@ -63,7 +70,8 @@ void nt_gfx_frame_create_buffers(void) {
 // #region storage
 void nt_gfx_frame_begin(void) {
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
-        g_nt_gfx.counters.frame_bytes[s] = g_nt_gfx_frame_storage[s].used;
+        /* end_frame uploads everything allocated in the frame; later bytes would never reach the GPU. */
+        NT_ASSERT(g_nt_gfx_frame_storage[s].used == s_uploaded[s] && "frame storage allocated outside begin_frame..end_frame");
         g_nt_gfx_frame_storage[s].used = 0;
         s_uploaded[s] = 0;
     }
@@ -85,6 +93,7 @@ static void upload_storage(void) {
             continue;
         }
         s_uploaded[s] = storage->used;
+        g_nt_gfx.counters.frame_bytes[s] = storage->used;
         /* Only a context loss leaves no name: nothing draws until the restore makes new buffers. */
         const uint32_t backend = nt_gfx_buffer_backend(storage->buffer);
         NT_ASSERT((backend != 0 || g_nt_gfx.context_lost || nt_gfx_backend_query_context_lost()) && "frame storage buffer destroyed or never made");
@@ -108,6 +117,7 @@ _Noreturn void nt_gfx_frame_overflow(uint32_t needed_words) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one case per recorded backend call
 void nt_gfx_frame_execute(void) {
+    upload_storage();
     if (g_nt_gfx_stream.used == 0) {
         return;
     }
@@ -119,7 +129,6 @@ void nt_gfx_frame_execute(void) {
     }
     g_nt_gfx_stream.used = 0;
     g_nt_gfx_stream.merge_end = 0; /* an executed draw is never extended */
-    upload_storage();
     while (w < end) {
         const nt_gfx_cmd_t op = (nt_gfx_cmd_t)*w++;
         switch (op) {

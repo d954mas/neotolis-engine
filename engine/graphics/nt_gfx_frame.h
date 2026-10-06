@@ -54,7 +54,7 @@ void nt_gfx_frame_init(const nt_gfx_desc_t *desc);
 void nt_gfx_frame_shutdown(void);
 /* Makes the frame storage buffers: once gfx is initialized and after a context restore. */
 void nt_gfx_frame_create_buffers(void);
-/* Publishes the closing frame's storage use into the counters and empties the storage. */
+/* Empties the storage; asserts that the closing frame uploaded every allocation. */
 void nt_gfx_frame_begin(void);
 /* Uploads the frame storage allocated since the previous execution, then replays the
  * recorded commands in call order and empties the stream. */

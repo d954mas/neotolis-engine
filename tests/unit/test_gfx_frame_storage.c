@@ -80,7 +80,9 @@ static void test_overflow_and_bad_arguments_assert(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 0, 4, &offset));
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 4, 0, &offset));
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 4, 4, NULL));
-    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, UINT32_MAX, 4, &offset)); /* no wrap */
+    (void)alloc_filled(NT_GFX_FRAME_VERTEX, 8, 4, 0);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, UINT32_MAX - 4U, 4, &offset)); /* no wrap */
+    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 4, UINT32_MAX, &offset));
     /* The size fits the free bytes, the alignment padding does not. */
     (void)alloc_filled(NT_GFX_FRAME_UNIFORM, g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].capacity - 14U, 1, 0);
     NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, 8, 16, &offset));
@@ -88,27 +90,46 @@ static void test_overflow_and_bad_arguments_assert(void) {
     TEST_ASSERT_EQUAL_UINT32(capacity - 8U, alloc_filled(NT_GFX_FRAME_INDEX, 8, 4, 0));
 }
 
-static void test_zero_capacity_asserts_at_init(void) {
+static void test_zero_capacity_disables_the_stream(void) {
+    nt_gfx_end_frame();
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = TEST_DESC;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 0;
-    NT_TEST_EXPECT_ASSERT(nt_gfx_init(&desc));
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_NULL(g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM).id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_frame_buffer(NT_GFX_FRAME_INDEX).id);
+    uint32_t offset = 0;
+    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, 16, 4, &offset));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame_capacity"));
+    next_frame();
+}
+
+/* Bytes allocated after end_frame are never uploaded: begin_frame catches them. */
+static void test_allocating_outside_the_frame_asserts_at_begin_frame(void) {
+    nt_gfx_end_frame();
+    (void)alloc_filled(NT_GFX_FRAME_VERTEX, 8, 4, 0);
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_frame());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "outside begin_frame..end_frame"));
     nt_gfx_shutdown();
+    nt_gfx_fake_reset();
     nt_gfx_init(&TEST_DESC);
     nt_gfx_begin_frame();
 }
 #endif
 
-static void test_begin_frame_publishes_use_and_empties_the_storage(void) {
+static void test_end_frame_publishes_use_and_begin_frame_empties_the_storage(void) {
     (void)alloc_filled(NT_GFX_FRAME_VERTEX, 40, 4, 0);
+    (void)alloc_filled(NT_GFX_FRAME_INDEX, 8, 4, 0);
     (void)alloc_filled(NT_GFX_FRAME_UNIFORM, 16, 256, 0);
     nt_gfx_end_frame();
-    (void)alloc_filled(NT_GFX_FRAME_INDEX, 8, 4, 0); /* after end_frame: still this frame's use */
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_VERTEX]);
+    TEST_ASSERT_EQUAL_UINT32(40, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_VERTEX]);
+    TEST_ASSERT_EQUAL_UINT32(8, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_INDEX]);
+    TEST_ASSERT_EQUAL_UINT32(16, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_UNIFORM]);
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT32(40, g_nt_gfx.last_frame.frame_bytes[NT_GFX_FRAME_VERTEX]);
-    TEST_ASSERT_EQUAL_UINT32(8, g_nt_gfx.last_frame.frame_bytes[NT_GFX_FRAME_INDEX]);
-    TEST_ASSERT_EQUAL_UINT32(16, g_nt_gfx.last_frame.frame_bytes[NT_GFX_FRAME_UNIFORM]);
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_VERTEX]);
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_frame_storage[s].used);
     }
@@ -131,11 +152,13 @@ static void test_execution_uploads_each_allocated_storage_once_before_its_draws(
     nt_gfx_begin_frame();
 }
 
-static void test_an_empty_stream_uploads_nothing(void) {
+static void test_end_frame_uploads_allocations_without_draws(void) {
     (void)alloc_filled(NT_GFX_FRAME_VERTEX, 24, 4, 0);
     const uint32_t updates = nt_gfx_fake_update_buffer_count();
     next_frame();
-    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(updates + 1U, nt_gfx_fake_update_buffer_count());
+    next_frame();
+    TEST_ASSERT_EQUAL_UINT32(updates + 1U, nt_gfx_fake_update_buffer_count()); /* nothing allocated, nothing sent */
 }
 
 static void test_a_mid_frame_execution_uploads_and_the_next_one_sends_only_the_delta(void) {
@@ -273,11 +296,12 @@ int main(void) {
     RUN_TEST(test_offsets_are_multiples_of_any_align_and_same_stride_runs_are_contiguous);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_overflow_and_bad_arguments_assert);
-    RUN_TEST(test_zero_capacity_asserts_at_init);
+    RUN_TEST(test_zero_capacity_disables_the_stream);
+    RUN_TEST(test_allocating_outside_the_frame_asserts_at_begin_frame);
 #endif
-    RUN_TEST(test_begin_frame_publishes_use_and_empties_the_storage);
+    RUN_TEST(test_end_frame_publishes_use_and_begin_frame_empties_the_storage);
     RUN_TEST(test_execution_uploads_each_allocated_storage_once_before_its_draws);
-    RUN_TEST(test_an_empty_stream_uploads_nothing);
+    RUN_TEST(test_end_frame_uploads_allocations_without_draws);
     RUN_TEST(test_a_mid_frame_execution_uploads_and_the_next_one_sends_only_the_delta);
     RUN_TEST(test_allocating_between_draws_keeps_the_merge);
     RUN_TEST(test_indexed_draws_read_the_index_storage_as_uint32);

@@ -41,6 +41,8 @@ static const float s_right[6] = {1.0F, -1.0F, 0.1F, -1.0F, 1.0F, 3.0F};
 
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.frame_capacity[NT_GFX_FRAME_INDEX] = 64U * 1024U;
+    desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);

@@ -102,10 +102,9 @@ static inline void nt_example_frames_end(bool ready) {
     if (c->stream_bytes > s_example_frames.stream_peak) {
         s_example_frames.stream_peak = c->stream_bytes;
     }
-    /* This frame's use: the counters publish frame_bytes only at the next begin_frame. */
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
-        if (g_nt_gfx_frame_storage[s].used > s_example_frames.frame_peak[s]) {
-            s_example_frames.frame_peak[s] = g_nt_gfx_frame_storage[s].used;
+        if (c->frame_bytes[s] > s_example_frames.frame_peak[s]) {
+            s_example_frames.frame_peak[s] = c->frame_bytes[s];
         }
     }
     if (index + 1 < NT_EXAMPLE_FRAMES_WARMUP + s_example_frames.frames) {

@@ -222,12 +222,9 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
     NT_ASSERT(slot != 0 && slot <= cache->mesh_capacity);
     nt_renderer_mesh_vi_version_t *row = &cache->versions[(size_t)(slot - 1) * cache->max_layouts];
     if (cache->meshes[slot - 1].id != mesh.id) {
-        /* Bufferless vertex inputs have no buffer-destroy cascade hook. An empty entry
-         * skips the destroy, which would execute the recorded stream for nothing. */
+        /* Bufferless vertex inputs have no buffer-destroy cascade hook. */
         for (uint16_t i = 0; i < cache->max_layouts; i++) {
-            if (row[i].vi.id != 0) {
-                nt_gfx_destroy_vertex_input(row[i].vi);
-            }
+            nt_gfx_destroy_vertex_input(row[i].vi);
             row[i] = (nt_renderer_mesh_vi_version_t){0};
         }
         cache->meshes[slot - 1] = mesh;

@@ -334,7 +334,7 @@ typedef struct {
     uint16_t max_shaders;   /* default: 32 */
     uint16_t max_programs;  /* default: 16 */
     uint16_t max_pipelines; /* default: 16 */
-    uint16_t max_buffers;   /* default: 128; frame storage takes NT_GFX_FRAME_STREAM_COUNT of them */
+    uint16_t max_buffers;   /* default: 128; each enabled frame storage stream takes one */
     uint16_t max_textures;  /* default: 64 */
     uint16_t max_meshes;    /* default: 128 */
     /* default: 560 = max_meshes(128) * max_mesh_layouts(4) + 48 other VIs.
@@ -344,8 +344,8 @@ typedef struct {
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes recorded between executions, default: 256 KiB; allocated once at init */
-    /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: vertex 1 MiB, index 256 KiB,
-     * uniform 64 KiB; each is a CPU staging copy plus a GPU buffer, allocated once at init. */
+    /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: vertex 1 MiB, index 0, uniform 0;
+     * each is a CPU staging copy plus a GPU buffer, allocated once at init. 0 disables the stream. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
     bool depth;               /* request depth buffer (default: true) */
     bool stencil;             /* request stencil buffer (default: false) */
@@ -666,8 +666,7 @@ typedef struct {
     uint64_t texture_upload_bytes;
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
     uint32_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
-    /* Frame storage bytes allocated in the frame, padding included: written as begin_frame closes
-     * the frame, so read g_nt_gfx.last_frame (0 in the live counters). */
+    /* Frame storage bytes allocated in the frame, padding included; final after end_frame. */
     uint32_t frame_bytes[NT_GFX_FRAME_STREAM_COUNT];
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
@@ -830,7 +829,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
         .stream_capacity = 256U * 1024U,
-        .frame_capacity = {[NT_GFX_FRAME_VERTEX] = 1024U * 1024U, [NT_GFX_FRAME_INDEX] = 256U * 1024U, [NT_GFX_FRAME_UNIFORM] = 64U * 1024U},
+        .frame_capacity = {[NT_GFX_FRAME_VERTEX] = 1024U * 1024U},
         .depth = true,
         .premultiplied_alpha = true,
     };
@@ -1049,10 +1048,11 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* ---- Frame storage ----
  *
- * Per-frame vertex, index and uniform data at any point of the frame. Executing the
- * recorded calls first uploads every byte allocated since the previous execution, so
- * fill an allocation before the next nt_gfx call: its bytes are sent once. Offsets and
- * pointers are valid until the next nt_gfx_begin_frame. Align vertex data read by index
+ * Per-frame vertex, index and uniform data at any point of the frame. Allocate between
+ * nt_gfx_begin_frame and nt_gfx_end_frame. Every execution of the recorded calls first
+ * uploads the bytes allocated since the previous one, so fill an allocation before the
+ * next nt_gfx call: its bytes are sent once. Offsets and pointers are valid until the
+ * next nt_gfx_begin_frame. Align vertex data read by index
  * to its stride (vertex i at i * stride; indices are absolute), instance data to 4,
  * indices to 4 (first_index = offset / 4) and uniform data to
  * gpu_caps.uniform_buffer_offset_alignment. */

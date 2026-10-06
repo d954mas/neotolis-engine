@@ -83,7 +83,7 @@ Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, `nt_gfx_read_pixels`, the GPU timing toggle and
 polling. Recorded commands keep their mutual order. A temporary rule keeps
 today's order for the operations that need it: `nt_gfx_update_buffer`,
-`nt_gfx_orphan_buffer`, every destroy, `nt_gfx_read_pixels`,
+`nt_gfx_orphan_buffer`, every destroy of a nonzero handle, `nt_gfx_read_pixels`,
 `nt_gfx_register_global_block` and, with GPU timing compiled ON,
 `nt_gfx_set_gpu_timing_enabled` first execute the commands recorded so far, so
 they see every earlier draw. Other immediate operations may run before
@@ -411,7 +411,10 @@ consistent benefit. The API does not guarantee a stall-free upload.
 `nt_gfx_frame_alloc(stream, size, align, &offset)` returns `size` bytes of
 staging at an offset that is a multiple of `align`; both are nonzero. It is
 inline and touches no buffer and no recorded command, so it is legal at any
-point of the frame, in a pass or after UI layout, and never ends a draw merge.
+point between `nt_gfx_begin_frame` and `nt_gfx_end_frame`, in a pass or after UI
+layout, and never ends a draw merge. `end_frame` sends everything allocated in
+the frame; bytes allocated after it would never reach the GPU, so the next
+`begin_frame` asserts on them.
 Execution sends each stream's bytes allocated since the previous execution with
 one buffer update, then replays: fill an allocation before the next `nt_gfx`
 call, since its bytes are sent once. Offsets and pointers stay valid until the
@@ -433,23 +436,25 @@ Alignment follows the reader:
 `nt_gfx_frame_buffer(stream)` returns an ordinary buffer handle; the gfx
 front-end does not know the storage. The handle is borrowed: never update,
 orphan or destroy it, and read it again every frame, because a context restore
-replaces it (vertex inputs over it die with the context anyway). The three
-buffers count against `nt_gfx_desc_t.max_buffers`.
+replaces it (vertex inputs over it die with the context anyway). Each enabled
+stream's buffer counts against `nt_gfx_desc_t.max_buffers`.
 
 `nt_gfx_desc_t.frame_capacity[stream]` is the byte budget of a stream per frame,
 allocated once at init as staging plus buffer; `nt_gfx_desc_defaults()` sets
-1 MiB vertex, 256 KiB index and 64 KiB uniform, and init asserts each is nonzero.
+1 MiB vertex and leaves index and uniform at 0. A zero capacity disables the
+stream: no staging and no buffer, and its allocations stop the program as an
+overflow, so a game pays only for the streams it uses.
 Storage never grows: an overflow logs the stream, the needed and the free bytes
 and stops the program, with assertions OFF too, because the capacity is the
 game's budget. `nt_gfx_counters_t.frame_bytes` reports each stream's use of the
-closed frame, to size the capacities from a real scene.
+frame, final after `end_frame`, to size the capacities from a real scene.
 
 Each upload is one `NT_GFX_OP_BUFFER_UPLOAD` operation on its frame buffer,
-recorded and counted where the execution runs (see Frame observation). An
-execution with no recorded command uploads nothing: no draw can read the data
-yet. While the context is lost, uploads are skipped; the begin_frame that
-restores the context makes three new buffers, and that frame's data reaches
-them. A frame buffer that cannot be made, or a missing one at upload, asserts
+recorded and counted where the execution runs (see Frame observation). Every
+execution uploads, also one with no recorded command, so `end_frame` always
+leaves the storage sent. While the context is lost, uploads are skipped; the
+begin_frame that restores the context makes new buffers, and that frame's data
+reaches them. A frame buffer that cannot be made, or a missing one at upload, asserts
 unless the context is lost. `nt_gfx_stub` has zero capacity: every allocation
 asserts.
 
@@ -785,8 +790,8 @@ instances in instanced calls. These are not rasterized triangles or
 vertex-shader invocations.
 
 `frame_bytes` holds each frame storage stream's bytes allocated in the frame,
-alignment padding included. begin_frame writes it as it closes the frame, so it
-reads 0 in the live counters and covers allocations made after end_frame. A
+alignment padding included. Each upload writes it, so it is final after
+end_frame. A
 frame storage upload is an `NT_GFX_OP_BUFFER_UPLOAD` operation on the stream's
 buffer, recorded inside the execution that sends it, so a capture shows each
 upload before the replayed draws that read it.
