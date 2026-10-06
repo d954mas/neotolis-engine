@@ -117,12 +117,11 @@ The same bounded-lifetime rule applies through
 `nt_sprite_renderer_draw_list()`: the material binding and published GPU texture
 stay live and unchanged from item construction until the call returns. Recompute
 keys for the next list after provider changes; context restore discards old lists.
-A not-yet-loaded page without a placeholder has texture slot zero: sampled
-sprites are skipped at emit, while textureless materials still draw geometry.
-SpriteRenderer still checks the actual page while emitting, so a page
-mismatch inside a run splits safely; this does not relax the material-key
-contract. Transform and drawable color may change after item construction because
-neither renderer's key encodes them.
+A not-yet-loaded page without a placeholder has texture slot zero: a run of a
+sampling material is skipped, while textureless materials still draw geometry.
+A run draws with its first item's page: equal keys share the page by contract,
+so the renderer checks no page per item. Transform and drawable color may change
+after item construction because neither renderer's key encodes them.
 
 ## Sorting Policy
 
@@ -156,11 +155,10 @@ Depth is computed on CPU only when needed. Transparent/depth-sensitive passes co
 
 #### SpriteRenderer
 
-CPU batch: SpriteRenderer consumes consecutive `batch_key` runs, emits dynamic
-sprite vertices into a shared staging VBO, records draw commands on state/page
-changes, and flushes when staging capacity, uint16 index range, or command
-capacity requires it. Rect and polygon sprites share the same generic dynamic
-IBO path — see [Sprite batching strategy](#sprite-batching-strategy). Atlas regions still carry `NT_ATLAS_REGION_FLAG_QUAD_*`
+CPU batch: SpriteRenderer consumes consecutive `batch_key` runs, writes their
+vertices and absolute `uint32_t` indices into frame storage, and records one
+indexed draw per run. Rect and polygon sprites share the same generic indexed
+path — see [Sprite batching strategy](#sprite-batching-strategy). Atlas regions still carry `NT_ATLAS_REGION_FLAG_QUAD_*`
 metadata for a future GPU-instanced rect renderer (Issue #176); the current
 SpriteRenderer ignores those flags.
 
@@ -188,16 +186,18 @@ WebGL 2 provides native `drawArraysInstanced` / `drawElementsInstanced` — no e
 ### Sprite batching strategy
 
 Sprite renderer: gather sorted sprite render items, resolve component SoA views
-once, pack sprite vertices into one dynamic vertex buffer per flush chunk, and
-draw recorded commands. The renderer owns atlas page correctness: `batch_key`
-is the renderer-defined material-and-page compatibility token, while SpriteRenderer
-verifies actual atlas page textures and splits commands when a run crosses
-pages.
+once, and per run of equal `batch_key` record its state once, write each item's
+vertices and indices into frame storage, and record one draw. `batch_key` is the
+renderer-defined material-and-page compatibility token. Immediate emits
+(`emit_region`, `emit_slice9`, `emit_geometry`) record their state and draw at
+each call; the gfx front-end drops the equal binds and merges contiguous draws,
+so adjacent compatible emits from separate calls draw once. Every emit and run
+records at the call, so it needs an open pass, and call order is draw order.
 
-Rect and polygon sprites use the same generic dynamic IBO path. The renderer
+Rect and polygon sprites use the same generic indexed path. The renderer
 does not keep a separate static-quad fast path unless measurements show a clear
 win on the target workload; this keeps the sprite batching code small and makes
-draw splitting depend only on capacity and state changes.
+draw splitting depend only on state changes.
 
 ### Sprite custom-attr block
 
@@ -206,16 +206,15 @@ Each non-ECS emit takes an optional block (`custom`, `custom_bytes`) baked into
 all its vertices, like color. The source per emit is: the emit's block, else the
 material's attr defaults ([Attr defaults](material.md#attr-defaults)), else an
 assert. So plain and custom-attr emits can share one custom-attr material and
-one batch. One staging batch keeps one vertex stride: opening a command
-whose material changes the stride flushes the pending emits first, so immediate
-emits and `draw_list` runs of plain and custom-attr materials mix freely. ECS
-emits pass no block, so a custom-attr material there needs attr defaults.
+one draw. A stride change is a material change, so it starts a new draw; plain
+and custom-attr materials mix freely. ECS emits pass no block, so a custom-attr
+material there needs attr defaults.
 
 A shader that derives a quad corner from `gl_VertexID & 3` needs each quad to
-start at a multiple of four vertices. `nt_sprite_renderer_align_next_vertex_to_4`
-pads the staging with up to 3 unreferenced vertices instead of flushing, so such
-a quad shares the batch with emits of any vertex count. When the padding does
-not fit, the next emit flushes and starts at vertex 0 anyway.
+start at a multiple of four vertices. Every immediate emit starts there: its
+vertex allocation aligns to four vertices, leaving up to 3 unreferenced vertices,
+and indices are absolute, so the padding never splits a merge. A `draw_list` run
+starts there too, but its items follow contiguously.
 
 ## UI draw ordering (nt_ui walker)
 
@@ -223,16 +222,16 @@ The UI walker has **three independent ordering axes** — do not conflate them:
 
 1. **zIndex** — the stacking axis. Draw order is zIndex ascending, then layer
    ascending, then declaration order.
-2. **Scissor / custom commands** — hard flush barriers. A segment is a run of
-   same-zIndex segmentable commands; SCISSOR and CUSTOM cut it, forcing a batch
-   flush on each side.
+2. **Scissor / custom commands** — hard barriers. A segment is a run of
+   same-zIndex segmentable commands; SCISSOR and CUSTOM cut it: staged text is
+   flushed on each side, and sprites, which record at the call, never cross it.
 3. **layer** — batch order *within* a segment (256 layers, `uint8_t`; 240-255
    are engine-reserved for debug overlays; bitmask multipass). Layer comes from
    the **widget call** (`data->layer`, `label_layer`), never from a style — so
    a game can batch e.g. all sprites before all text.
 
 Rich text's [per-atom z-layers](../ui/rich-text.md#per-atom-z-layers-explicit-draw-order)
-are a *different*, block-internal mechanism (band flushes inside one CUSTOM
+are a *different*, block-internal mechanism (bands inside one CUSTOM
 command) — they do not interact with the walker's layer axis.
 
 Floating subtrees that must stay inside a scroll clip declare

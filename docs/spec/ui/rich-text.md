@@ -170,8 +170,8 @@ or per-image custom-attr block. u8 already matches an 8-bit display, so a
 float4 tint would add nothing. An unset style text or image
 material resolves to the ctx default at each walk, not at declaration, so a base
 swapped between two walks of one frame is the one drawn. `set_material` is bound **once per band** (the
-`bound` guard), so **all** of a band's inline images **coalesce into one sprite
-batch** — no per-image flush. Because the sprite renderer emits while the walk's
+`bound` guard), so **all** of a band's inline images **merge into one sprite
+draw**. Because the sprite renderer emits while the walk's
 **scroll scissor is the current gfx scissor state**, the images are clipped to the
 panel/scroll automatically — by that scissor, **not** a Clay
 `.floating.clipTo`. Caveat: an `fx.scale > 1` image loses its per-image
@@ -263,10 +263,10 @@ nt_ui_rich_pop(ctx);
 
 ## Per-atom z-layers (explicit draw order)
 
-UI is **painter-order** (depth test off). Cross-renderer z is therefore **flush
-order**, and every walk barrier flushes **sprite then text** — so within a single
-batch text always lands *on top of* images, and the two are **not reorderable** by
-emit order. To give the game explicit control of overlap z, each atom carries a
+UI is **painter-order** (depth test off). Sprites record their draws at the
+call; text stages until its flush. So text emitted before an image lands *on top
+of* it unless the text is flushed first, and the two are **not reorderable** by
+emit order alone. To give the game explicit control of overlap z, each atom carries a
 **layer** (z-order band):
 
 - **Default by kind** (no `<layer>`): `TEXT = 0`, `IMAGE = 1`, `OBJECT = 2`
@@ -284,27 +284,24 @@ emit order. To give the game explicit control of overlap z, each atom carries a
 - **Layer-ordered self-emit.** The self-emit gathers the **distinct** layers present
   (insertion-sorted ascending, capped at `NT_UI_RICH_MAX_LAYERS = 16` with a hard
   drop guard — the over-cap distinct layers are dropped **by encounter order**, not by
-  value, and the drop asserts in DEBUG), then for each band ascending emits `{font-grouped text → coalesced
-  images → objects}` and **DRAINs** (sprite flush + text flush) before the next band,
-  so band N fully lands before band N+1. The drain runs after **every** band incl. the
+  value, and the drop asserts in DEBUG), then for each band ascending emits `{font-grouped text
+  → text flush → images → objects}` and **flushes text** again before the next band,
+  so band N fully lands before band N+1. The flush runs after **every** band incl. the
   last, making the block a self-contained z island regardless of the walker's global
   flush order.
-- **Within-band z (text < image < object).** Inside ONE band the self-emit drains
+- **Within-band z (text < image < object).** Inside ONE band the self-emit flushes
   **text first** (`nt_text_renderer_flush`) so it lands *behind*, then emits the band's
-  images and objects and drains the sprite renderer — within-band draw order is
+  images and runs its objects' `draw_fn`s in call order — within-band draw order is
   therefore **text behind images behind objects**, matching the per-kind default. To
-  control text-vs-image z explicitly, put them on **separate** layers (one band is one
-  cross-renderer flush boundary, not per-emit). **Caveat:** a shape-renderer object
-  (e.g. a 3D cube) drawn by an `<obj>` `draw_fn` **self-flushes** its own renderer, so
-  an object sharing a non-top band is best-effort z (the rich block sequences sprite +
-  text drains, not third-party renderer flushes).
-- **Cost.** A layer is an explicit **flush boundary** — it buys z-control, **not** a
-  draw-call saving (each band adds one sprite+text flush). The font-group and
-  image-coalesce DC wins are **within** a band and unchanged: the font gather is
-  per-band (a shared face rebinds once per band), image coalescing is per-band. Use
-  distinct layers only where explicit overlap z is needed; non-overlapping content on
-  one default layer pays nothing extra. The per-band `set_material` calls stay direct
-  (the walker bind cache is untouched).
+  control text-vs-image z explicitly, put them on **separate** layers. An object's own
+  sprites and a shape flush inside its `draw_fn` paint at the point of the call; text an
+  object emits lands at the band's closing text flush, above the band's objects.
+- **Cost.** A layer is an explicit **text flush boundary** — it buys z-control, **not**
+  a draw-call saving (each band adds a text flush). The font-group and image-merge DC
+  wins are **within** a band and unchanged: the font gather is per-band (a shared face
+  rebinds once per band), images of a band merge into one draw. Use distinct layers
+  only where explicit overlap z is needed; non-overlapping content on one default
+  layer pays nothing extra. The per-band `set_material` calls stay direct.
 
 ## Spec ↔ #184-proposal divergences (per AGENTS.md)
 

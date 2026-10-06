@@ -197,21 +197,23 @@ per-frame gate needs no assignment latch.
 
 A replace does not reach work already staged. Text captures its pipeline on the
 first quad of an empty staging buffer, including the first quad after an internal
-flush. Sprite captures its pipeline and bindings when a command opens; a capacity
-flush continues that command's snapshot even if the material's program changed.
-An explicit `nt_sprite_renderer_set_material` rechecks the program even for the
-same material handle. Numeric material params remain mutable and are read at
-flush; the snapshot does not freeze the whole material.
-
-For an explicit game-controlled transition, flush, replace the program, then call
-the renderer's `set_material` before emitting more work. If the old program is
+flush; numeric material params remain mutable and are read at flush. For an
+explicit game-controlled transition, flush text, replace the program, then call
+`nt_text_renderer_set_material` before emitting more work. If the old program is
 destroyed rather than merely replaced, its pipelines go with it and the staged
 batch is dropped instead -- there is nothing left to draw it through.
+
+Sprite has no staged work: `nt_sprite_renderer_set_material` resolves the
+material's pipeline and textures for the current gfx frame, and each emit records
+its draw at the call with the params current at that call. A program replaced
+behind the same material handle takes effect at the next `set_material`, which
+compares the program as well as the handle. `draw_list` resolves each run's
+material itself.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
 the first assignment, after context loss is processed, or after program
-destruction. The mesh renderers and the sprite `draw_list` skip unready programs and warn once until
+destruction. The mesh and sprite renderers skip unready programs and warn once until
 a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` /
 `nt_text_renderer_set_material` entry points assert only that a program was
 assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks
@@ -237,9 +239,9 @@ backend units, validates coverage, and publishes only the full valid set. A
 rejected set discards the logical binding state, so a draw cannot reuse the
 previous material's textures.
 
-Sprite and text retain legacy exceptions until #528. A sprite material that
+Sprite and text retain legacy exceptions until #600. A sprite material that
 samples the atlas declares its page sampler at slot 0, but the renderer
-substitutes the page resource per command; a material declaring no textures
+substitutes the page resource per emit and run; a material declaring no textures
 never receives the page and is for analytical coverage. A text material declares
 no textures at all — the font's curve texture is the text renderer's
 own bind. `nt_text_renderer_flush` asserts that the material declares nothing

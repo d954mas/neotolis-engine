@@ -233,10 +233,14 @@ state that *borrows* a program handle — it owns no vertex-input state, and
 pipeline and vertex-input binding are orthogonal: either may change without
 re-binding the other. Two pipelines on one program
 share every uniform value, and binding one does not reset what the other set.
-Renderers replay declared material params on each material transition (sprite: also
-on a pipeline transition) inside one mesh draw call, `draw_list` call or flush. Renderer-tracked state is discarded at the
-end of that call; across calls the front-end drops equal binds and the GL backend
-drops repeated physical state (see Binding dedup and draw merge). Standalone float vec4 writes are skipped when their bytes
+The mesh renderers replay declared material params on each material transition inside one draw
+call and discard that tracking at the end of the call; across calls the front-end drops equal binds and the GL backend
+drops repeated physical state (see Binding dedup and draw merge). The sprite
+renderer instead writes a material's params only when the program, the material or
+the param values differ from what it last wrote, compared at every emit and run,
+because a uniform record between two draws stops them from merging. That memo
+lasts across calls and frames, so nothing but the sprite renderer may write the
+uniforms of a program that sprite materials use. Standalone float vec4 writes are skipped when their bytes
 match the last submitted value for that program and uniform; other uniform
 writes are issued unchanged. The
 backend GL cache persists across passes and frames; ground state is issued once
@@ -292,16 +296,12 @@ the common case, not a corner case. No renderer cache key may fold handles or en
 or hash the whole canonical identity with `nt_hash64` where the identity is
 content rather than a handful of small fields.
 
-**State transitions.** The sprite renderer drives `nt_renderer_bound_t` in
-`engine/renderers/nt_renderer_shared.h`. It separates four transitions, each
-with its own identity: pipeline (handle), vertex input (handle), material
-uniforms — every vec4 param, keyed by material id — and the per-run draw. The
-tracked state lives for exactly one `draw_list` call or flush: inside that call
-the renderer is the only writer of GL draw state. Material uniforms replay on a
-material change *or* a pipeline change, because uniform values are program
-state and the new pipeline may sit on another program. One flush can hold one
-material id on two programs: a game may replace the material's program between
-an immediate-mode emit and an ECS `draw_list`.
+**State transitions.** The sprite renderer keeps no bind tracking: every
+immediate emit and every `draw_list` run binds its pipeline, texture set and
+vertex input and records its draw, and the front-end drops the equal binds and
+merges the contiguous draws. Its one memo is the params memo above, keyed by the
+program the pipeline was built on, so a program replaced behind an unchanged
+material handle writes its params again.
 
 The mesh renderers keep no bind tracking: every run binds its pipeline and
 vertex input, and the front-end drops the equal ones. They skip only material
@@ -312,13 +312,14 @@ a material change. A core draw call applies its material every time.
 Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a material
 without an override selects the texture's asset default. At every material
 transition the renderer resolves the material's declared `nt_resource_t` texture
-handles, and every sprite command submits the complete semantic set once. The
+handles, and every sprite emit and run submits the complete semantic set. The
 skinned renderer replaces the declared `u_skin_matrices` resource and sampler
 with the run's deformation texture and its default sampler, resolves the other
 declarations, and submits the same complete set. The skin declaration still
 counts toward the material's four slots; there is no renderer-only fifth
 binding. The sprite batch key packs the material pool slot and the currently published GPU
-texture pool slot, resolved from the stable page resource index. Both bindings
+texture pool slot, resolved from the stable page resource index; a run draws with
+its first item's page. Both bindings
 remain live and unchanged from list construction through draw completion; a new
 list resolves the current publication again. The
 gfx front-end maps names to the bound program's canonical units,
@@ -358,11 +359,12 @@ regression. The default `max_vertex_inputs` budgets one mesh cache; a game using
 both mesh renderers adds
 `max_meshes * skinned.max_mesh_layouts` to that base budget explicitly.
 
-The sprite renderer owns its vertex/index buffers and clears its entire
-vertex-input cache on shutdown or GPU restore before replacing those buffers.
+The sprite renderer's vertex inputs sit on the vertex and index frame buffers,
+one per layout key; `nt_sprite_renderer_shutdown` destroys them, and it runs
+before `nt_gfx_shutdown` or a gfx re-init, whose new pools reuse handle ids.
 Cache entries are weak: a hit validates the handle, and an entry whose
-vertex input died (context loss) is recreated in place, so repeated losses
-cannot grow the cache. A miss creates the vertex input and caches it only on
+vertex input died (context loss) is recreated in place over the new frame
+buffers, so repeated losses cannot grow the cache and no restore call is needed. A miss creates the vertex input and caches it only on
 success; recoverable creation failures leave the cache unchanged so the next
 lookup retries.
 
@@ -417,9 +419,11 @@ executes, before the draws that read it, so a frame that executes once (in
 read. A buffer write or destroy that executes the stream earlier (see
 Draw-phase command stream) makes the next execution append to frame buffers
 that earlier draws of the frame read: the waiting case above.
-Immediate-mode batches that flush between game passes (sprite, text, shape)
-still choose a per-flush policy by measurement; the shape instance rings
-predate this rule.
+The sprite renderer writes its geometry to frame storage. Immediate-mode batches
+that flush between game passes (text, shape) still choose a per-flush policy by
+measurement; the shape instance rings predate this rule. A text flush updates its
+own buffer, which executes the stream first, so a UI frame with text uploads frame
+storage more than once.
 
 A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
 waits did not raise GPU work per frame, and the phone's governor granted the
@@ -570,8 +574,9 @@ nt_gfx_end_frame(); /* uploads frame storage, then executes the passes */
 
 A shadow list drawn in several cascades packs once per cascade; to pack once,
 the game writes the instances itself and draws them through the core in each
-cascade. Immediate-mode renderers (sprite, text, shape) flush inside passes
-under their own policy and do not read frame storage.
+cascade. The sprite renderer records into frame storage at each emit, inside a
+pass. Text and shape flush inside passes under their own policy and do not read
+frame storage.
 
 ### Render targets
 
@@ -1097,7 +1102,7 @@ meshes, custom geometry, anything where the game owns batching strategy. Stay
 minimal. The mesh renderers share one resolve-and-record body in
 `nt_renderer_shared.h`.
 
-**Batched dynamic** — high-throughput accumulation renderers (`nt_sprite_renderer`; future particles). Cmd queue, state-delta tracking, overflow recovery via snapshot/replay, multi-page atlas resolution, SIMD path. Optimized for many small draws per frame (1k–60k items). Complex by necessity — the 580 LOC of `nt_sprite_renderer.c` are paid for by measured throughput on bunnymark. Don't simplify away the cmd queue or snapshot recovery without a measured replacement plan.
+**Batched dynamic** — high-throughput renderers (`nt_sprite_renderer`; future particles). Many small items per frame (1k–60k): geometry is written straight into frame storage, `draw_list` records one draw per run of equal batch keys, and immediate emits rely on the front-end's bind dedup and draw merge instead of a command queue. Multi-page atlas resolution and the SIMD quad path stay. Measured on bunnymark at 60k against the former queue and staging: draws 16 to 2, GL calls 136 to 24, buffer uploads 32 to 4 per frame; whole-frame CPU in Chrome (ANGLE D3D11) 9.5 to 8.5 ms. The cost moved into one upload of the whole frame's geometry (6.3 MB with `uint32_t` indices): on native desktop GL the frame is 15% slower at 60k and faster below about 5k sprites, because the frame storage no longer stays in the CPU cache the way the former 400 KB staging did.
 
 **Specialized** — domain-specific layout (`nt_text_renderer` glyph atlas + line layout; future debug-line/IM-GUI). Sit between the two — more state than primitives, less throughput pressure than batched dynamic.
 

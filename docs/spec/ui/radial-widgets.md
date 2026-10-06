@@ -63,9 +63,9 @@ is present:
   against the white region via `emit_geometry`. Required by SDF shaders that
   derive a local `[-1,1]` coordinate from `gl_VertexID & 3`; a packed region's
   own winding would break that derivation. Used by `nt_ui_radial` (flat SDF
-  shape on the white pixel). The walker aligns each such quad to four vertices
-  ([Sprite custom-attr block](../render/items-sorting-batching.md#sprite-custom-attr-block)),
-  so it may share a batch with emits of any vertex count.
+  shape on the white pixel). Every sprite emit starts at a multiple of four
+  vertices ([Sprite custom-attr block](../render/items-sorting-batching.md#sprite-custom-attr-block)),
+  so such a quad may share a draw with emits of any vertex count.
 
 ## The four walls (what this path does NOT do)
 

@@ -325,16 +325,17 @@ module initialized but unable to draw; the game must retry
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
 restore drops queued commands and pipeline caches, then the game relinks. The
 mesh renderers own no buffer: their restore only drops the pipeline and
-vertex-input caches and returns void.
+vertex-input caches and returns void. The sprite renderer has no restore entry
+point: it owns no buffer, and its pipeline and vertex-input caches validate on
+lookup and recreate what the loss freed.
 Frame storage needs no game restore: the `nt_gfx_begin_frame` that restores the
 context makes new frame buffers, and that frame's allocations reach them.
 
-`nt_sprite_renderer_restore_gpu()` and
-`nt_text_renderer_restore_gpu()` return `nt_result_t`. They retain CPU
+`nt_text_renderer_restore_gpu()` returns `nt_result_t`. It retains CPU
 allocations, configured capacities, and module initialization; only GPU
 buffers, cached pipelines/vertex inputs, and queued draw state are reset.
 Every restore entry point is an inactive no-op. The `nt_result_t`-returning
-sprite, text, and blur functions return `NT_OK` in that case;
+text and blur functions return `NT_OK` in that case;
 `nt_shape_renderer_restore_gpu` and the mesh renderers return void. Failed GPU creation
 returns `NT_ERR_INIT_FAILED` after releasing partial GPU resources. The module
 stays initialized, so the game can call restore again or shut it down. There
@@ -368,12 +369,12 @@ an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
 re-activate on the next step within the activation budget; an evicted pack must
 re-download first. Rebuild resource-dependent render state after publication.
 
-The mesh renderers and the sprite `draw_list` skip a material whose program is not ready and warn
+The mesh renderers and the sprite renderer skip a material whose program is not ready and warn
 once until a pipeline is built again. The skip is normal runtime state, not a
-caller error. The immediate-mode
-`nt_sprite_renderer_set_material` / `nt_text_renderer_set_material` entry points
-assert only that a program was assigned, not that it is live. The game stops
-feeding them once its program gate goes false. During the UI walk, `nt_ui` calls
+caller error: `nt_sprite_renderer_set_material` asserts only that a program was
+assigned, and its emits draw nothing until the program is ready.
+`nt_text_renderer_set_material` also asserts only assignment, not liveness; the
+game stops feeding it once its program gate goes false. During the UI walk, `nt_ui` calls
 those setters for declared widgets, so gate widget declarations on program
 availability.
 
