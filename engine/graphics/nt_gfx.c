@@ -1895,8 +1895,6 @@ nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
     return s_gfx.texture_metas[nt_pool_slot_index(tex.id)].default_sampler;
 }
 
-uint32_t nt_gfx_buffer_backend(nt_buffer_t buf) { return nt_pool_valid(&s_gfx.buffer_pool, buf.id) ? s_gfx.buffer_backends[nt_pool_slot_index(buf.id)] : 0; }
-
 #ifdef NT_TEST_ACCESS
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s) {
     if (s.id == 0 || s.id > s_gfx.sampler_count) {
@@ -2474,7 +2472,7 @@ void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t o
 /* ---- Buffer update ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansion, not real branching
-static nt_gfx_result_t update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
+nt_gfx_result_t nt_gfx_buffer_update(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2495,7 +2493,7 @@ static nt_gfx_result_t update_buffer(nt_buffer_t buf, uint32_t offset, const voi
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.related[0] = offset; event->data.resource.flags = data != NULL);
-    NT_GFX_END(update_buffer(buf, offset, data, size));
+    NT_GFX_END(nt_gfx_buffer_update(buf, offset, data, size));
 }
 
 static nt_gfx_result_t begin_segment(const char *name) {

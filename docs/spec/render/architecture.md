@@ -452,10 +452,10 @@ frame, final after `end_frame`, to size the capacities from a real scene.
 Each upload is one `NT_GFX_OP_BUFFER_UPLOAD` operation on its frame buffer,
 recorded and counted where the execution runs (see Frame observation). Every
 execution uploads, also one with no recorded command, so `end_frame` always
-leaves the storage sent. While the context is lost, uploads are skipped; the
-begin_frame that restores the context makes new buffers, and that frame's data
-reaches them. A frame buffer that cannot be made, or a missing one at upload, asserts
-unless the context is lost. `nt_gfx_stub` has zero capacity: every allocation
+leaves the storage sent. An upload goes through the same checks as
+`nt_gfx_update_buffer`: while the context is lost it ends `CONTEXT_LOST`, and the
+begin_frame that restores the context makes new buffers, which that frame's data
+reaches. A frame buffer that cannot be made asserts unless the context is lost. `nt_gfx_stub` has zero capacity: every allocation
 asserts.
 
 ### Prepared mesh runs

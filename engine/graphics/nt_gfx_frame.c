@@ -88,17 +88,10 @@ static void upload_storage(void) {
             continue;
         }
         g_nt_gfx.counters.frame_bytes[s] = storage->used;
-        /* Only a context loss leaves no name: nothing draws until the restore makes new buffers. */
-        const uint32_t backend = nt_gfx_buffer_backend(storage->buffer);
-        NT_ASSERT((backend != 0 || g_nt_gfx.context_lost || nt_gfx_backend_query_context_lost()) && "frame storage buffer destroyed or never made");
-        if (backend == 0) {
-            continue;
-        }
         const uint32_t size = storage->used - offset;
         NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, storage->buffer.id, event->data.resource.size = size; event->data.resource.related[0] = offset;
                              event->data.resource.flags = 1);
-        nt_gfx_backend_update_buffer(backend, offset, storage->staging + offset, size);
-        NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
+        NT_GFX_END(nt_gfx_buffer_update(storage->buffer, offset, storage->staging + offset, size));
     }
 }
 // #endregion
