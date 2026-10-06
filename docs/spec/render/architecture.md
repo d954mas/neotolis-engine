@@ -374,7 +374,7 @@ Every mesh and skinned mesh instance carries the entity's drawable color
 a drawable component. A shader that ignores color does not declare the color
 input; the instance layout still provides it. Instance locations are reserved:
 4–7 for meshes (world rows, color) and 10–15 for skinned meshes (world rows,
-color, frame origins, alpha). A material attribute derived at one of them is
+color, frame origins, alpha). A material attribute derived at one of them
 asserts when the vertex input is created; an attr_map entry that matches no
 mesh stream derives nothing and is not checked. The engine sets no generic
 vertex attribute value; WebGPU has none.
@@ -482,7 +482,7 @@ asserts.
 `prepare(items, count, runs, max_runs)` splits the items into runs of adjacent
 equal batch keys (the skinned renderer also splits on the deformation texture),
 resolves each run's pipeline and vertex input — creating them on a cache miss —
-packs the instance data of drawable runs into one vertex frame storage
+packs the instance data of every run into one vertex frame storage
 allocation, and writes `nt_mesh_run_t` values into game-owned storage. It writes
 no buffer and may run at any point of the frame before the draws. A run
 whose program is not ready, or whose pipeline or vertex input could not be

@@ -202,6 +202,7 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
     uint32_t offset = 0;
     nt_mesh_instance_t *const base = (nt_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* bound by offset: 4 is enough */
     nt_mesh_instance_t *dst = base;
+    /* Inline sparse reads, as the sprite emit does: no per-instance accessor call or liveness assert. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
     for (uint32_t r = 0; r < run_count; r++) {
@@ -215,7 +216,7 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
             const uint16_t drawable_index = drawable_view.sparse_indices[entity_index];
             NT_ASSERT(transform_index != NT_INVALID_COMP_INDEX && "mesh render item: entity has no transform component");
             NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "mesh render item: entity has no drawable component");
-            nt_renderer_pack_world(&dst->world_rows[0][0], transform_view.world_matrices[transform_index]);
+            nt_renderer_pack_world((float *)dst->world_rows, transform_view.world_matrices[transform_index]);
             dst->color = drawable_view.colors_packed[drawable_index];
         }
     }

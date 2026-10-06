@@ -2797,8 +2797,12 @@ int main(int argc, char *argv[]) {
     s_skinned_scene.player.rig = RIG_FOX;
     skinned_reset();
     mixing_reset();
-    /* --frames measures Order & Instancing: procedural skinned instances, no async rig import. */
-    switch_scene(nt_example_frames_on() ? 2 : 0);
+    /* --frames measures Order & Instancing: procedural skinned instances that draw no imported rig. */
+    int first_scene = 0;
+    for (int i = 0; nt_example_frames_on() && i < SKELETAL_SCENE_COUNT; ++i) {
+        first_scene = (s_scene_registry[i].draw == ordering_draw) ? i : first_scene;
+    }
+    switch_scene(first_scene);
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
 #endif

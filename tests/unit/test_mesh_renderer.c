@@ -1203,6 +1203,53 @@ void test_instances_carry_their_drawable_colors(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
+/* Two runs in one prepare, with the transform and drawable dense indices apart (a transform-only
+ * entity comes first): each instance takes its own world and color, and the second run starts
+ * right after the first run's instances. */
+void test_runs_of_one_prepare_pack_each_entity_world_and_color(void) {
+    nt_entity_t filler = nt_entity_create();
+    nt_transform_comp_add(filler);
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mats[2] = {create_test_material(), create_test_material()};
+    nt_render_item_t items[4];
+    for (uint32_t i = 0; i < 4; i++) {
+        nt_entity_t e = create_test_entity(mesh, mats[i / 2]);
+        nt_transform_comp_set_position(e, (float)(i + 1), 0.0F, 0.0F);
+        nt_drawable_comp_set_color(e, 0x10203000U + i);
+        items[i] = (nt_render_item_t){.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mats[i / 2], mesh)};
+    }
+    nt_transform_comp_update();
+
+    begin_storage_frame();
+    nt_mesh_run_t runs[2];
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_prepare(items, 4, runs, 2));
+    TEST_ASSERT_EQUAL_UINT32(runs[0].offset + (2U * sizeof(nt_mesh_instance_t)), runs[1].offset);
+    for (uint32_t i = 0; i < 4; i++) {
+        const nt_mesh_instance_t *instance = (const nt_mesh_instance_t *)(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + runs[i / 2].offset) + (i % 2);
+        TEST_ASSERT_EQUAL_HEX32(0x10203000U + i, instance->color);
+        TEST_ASSERT_TRUE(instance->world_rows[0][3] == (float)(i + 1)); /* NOLINT -- exact small integer */
+    }
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
+/* Every render item needs a drawable: its color is instance data. */
+void test_prepare_asserts_on_an_item_without_drawable(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = nt_entity_create();
+    nt_transform_comp_add(e);
+    nt_mesh_comp_add(e);
+    nt_material_comp_add(e);
+    *nt_mesh_comp_handle(e) = mesh;
+    *nt_material_comp_handle(e) = mat;
+    nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    begin_storage_frame();
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_prepare(&item, 1, s_runs, TEST_MAX_RUNS));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "no drawable component"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 /* Neighbour test for the mesh vertex-input key: one-step changes of each lane
  * (which stream, its location, the presence bit) are four distinct vertex
  * inputs on one pipeline. {normal->0} vs {position->0} is the presence bit alone. */
@@ -1375,8 +1422,8 @@ void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
         *nt_mesh_comp_handle(e_buffered) = mesh;
     }
 
-    /* Two cached versions and the neighbor own three slots; all others must be free. */
-    for (uint32_t i = 3; i < TEST_MAX_VERTEX_INPUTS; i++) {
+    /* The bufferless version and the neighbor own two slots; all others must be free. */
+    for (uint32_t i = 2; i < TEST_MAX_VERTEX_INPUTS; i++) {
         nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
         TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
     }
@@ -1743,6 +1790,8 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_different_layouts);
     RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
     RUN_TEST(test_instances_carry_their_drawable_colors);
+    RUN_TEST(test_runs_of_one_prepare_pack_each_entity_world_and_color);
+    RUN_TEST(test_prepare_asserts_on_an_item_without_drawable);
     RUN_TEST(test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines);
     RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
     RUN_TEST(test_texture_published_after_material_create_binds_at_next_draw);

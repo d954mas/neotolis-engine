@@ -31,6 +31,8 @@ enum { RT_W = 64, RT_H = 64 };
 
 uint32_t nt_test_mesh_color_probe(void);
 
+#define MESH_PROBE_NOT_READY 0x80000000U /* programs still linking: the spec polls again */
+
 #define MESH_PROBE_VS_HEAD                                                                                                                                                                             \
     "precision highp float;\n"                                                                                                                                                                         \
     "layout(location = 0) in vec3 a_position;\n"
@@ -168,17 +170,19 @@ static void stop_modules(void) {
 }
 
 /* Bit 0: tinted mesh instance; 1: white mesh instance of the same run; 2: mesh shader without
- * a_color; 3: tinted skinned instance; 4: white skinned instance of the same run. */
+ * a_color; 3: tinted skinned instance (another tint, so the rows cannot stand in for each other);
+ * 4: white skinned instance of the same run. */
 static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformation) {
     const nt_deformation_binding_t binding = {.texture = deformation};
     const uint32_t tint = nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 1.0F});
+    const uint32_t skinned_tint = nt_color_pack((const float[4]){0.3F, 0.2F, 0.1F, 1.0F});
     nt_mesh_t quad = make_quad();
     nt_material_t mesh_material = make_material(s_program[PROBE_MESH], false);
     nt_material_t colorless_material = make_material(s_program[PROBE_COLORLESS], false);
     nt_material_t skinned_material = make_material(s_program[PROBE_SKINNED], true);
     const nt_render_item_t mesh_items[2] = {make_item(quad, mesh_material, -0.5F, 0.5F, tint, NULL), make_item(quad, mesh_material, 0.5F, 0.5F, 0xFFFFFFFFU, NULL)};
     const nt_render_item_t colorless_item = make_item(quad, colorless_material, 0.0F, 0.0F, tint, NULL);
-    const nt_render_item_t skinned_items[2] = {make_item(quad, skinned_material, -0.5F, -0.5F, tint, &binding), make_item(quad, skinned_material, 0.5F, -0.5F, 0xFFFFFFFFU, &binding)};
+    const nt_render_item_t skinned_items[2] = {make_item(quad, skinned_material, -0.5F, -0.5F, skinned_tint, &binding), make_item(quad, skinned_material, 0.5F, -0.5F, 0xFFFFFFFFU, &binding)};
     nt_transform_comp_update();
 
     nt_mesh_run_t runs[3];
@@ -198,7 +202,7 @@ static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformati
         mask |= pixel_is(frame, -0.5F, 0.5F, tint) ? 1U << 0U : 0;
         mask |= pixel_is(frame, 0.5F, 0.5F, 0xFFFFFFFFU) ? 1U << 1U : 0;
         mask |= pixel_is(frame, 0.0F, 0.0F, 0xFF00FF00U) ? 1U << 2U : 0;
-        mask |= pixel_is(frame, -0.5F, -0.5F, tint) ? 1U << 3U : 0;
+        mask |= pixel_is(frame, -0.5F, -0.5F, skinned_tint) ? 1U << 3U : 0;
         mask |= pixel_is(frame, 0.5F, -0.5F, 0xFFFFFFFFU) ? 1U << 4U : 0;
     }
     nt_material_destroy(skinned_material);
@@ -212,7 +216,7 @@ NT_TEST_KEEPALIVE uint32_t nt_test_mesh_color_probe(void) {
     nt_gfx_begin_frame();
     if (!programs_ready()) {
         nt_gfx_end_frame();
-        return 0;
+        return MESH_PROBE_NOT_READY;
     }
     nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = RT_W, .height = RT_H, .format = NT_TEXTURE_FORMAT_RGBA8});
     nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = RT_W, .height = RT_H, .format = NT_TEXTURE_FORMAT_DEPTH24});

@@ -252,7 +252,7 @@ A bot inspects engine state through the devapi **obs** command group — a thin 
 
 ### The `entity_write` group — a dev-only DEBUG write (`entity.set`)
 
-Symmetric to `entity.list` reads, the **`entity_write`** group adds **`entity.set`**: a bot writes a writable field of one component on a live entity. It is the inverse of the read introspection — instead of a component's `describe()` pushing values out to a sink, the component's `apply()` hook receives an already-typed value and writes it **through the component's real setter** (which maintains the engine invariants: the transform dirty flag, the drawable packed-RGBA8 mirror, quaternion normalization). cJSON is parsed into a neutral `nt_write_value` (number→F32, bool→BOOL, array[3]→VEC3, array[4]→VEC4) **inside devapi**; the component never sees cJSON, exactly as the read JSON sink keeps cJSON inside devapi.
+Symmetric to `entity.list` reads, the **`entity_write`** group adds **`entity.set`**: a bot writes a writable field of one component on a live entity. It is the inverse of the read introspection — instead of a component's `describe()` pushing values out to a sink, the component's `apply()` hook receives an already-typed value and writes it **through the component's real setter** (which maintains the engine invariants: the transform dirty flag, the drawable color packing, quaternion normalization). cJSON is parsed into a neutral `nt_write_value` (number→F32, bool→BOOL, array[3]→VEC3, array[4]→VEC4) **inside devapi**; the component never sees cJSON, exactly as the read JSON sink keeps cJSON inside devapi.
 
 | Command | Params | Result | Kind |
 |---|---|---|---|

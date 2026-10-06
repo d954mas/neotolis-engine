@@ -203,6 +203,7 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
     uint32_t offset = 0;
     nt_skinned_mesh_instance_t *const base = (nt_skinned_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* bound by offset: 4 is enough */
     nt_skinned_mesh_instance_t *dst = base;
+    /* Inline sparse reads, as the sprite emit does: no per-instance accessor call or liveness assert. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
     for (uint32_t r = 0; r < run_count; r++) {
@@ -219,7 +220,7 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
             NT_ASSERT(drawable_index != NT_INVALID_COMP_INDEX && "skinned render item: entity has no drawable component");
             const nt_deformation_binding_t binding = *nt_skin_comp_handle(entity);
             NT_ASSERT(binding.texture.id != 0 && "skinned draw requires a deformation texture");
-            nt_renderer_pack_world(&dst->world_rows[0][0], transform_view.world_matrices[transform_index]);
+            nt_renderer_pack_world((float *)dst->world_rows, transform_view.world_matrices[transform_index]);
             dst->skin_origins[0] = binding.x0;
             dst->skin_origins[1] = binding.y0;
             dst->skin_origins[2] = binding.x1;

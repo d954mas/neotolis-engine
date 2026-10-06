@@ -15,15 +15,16 @@ test('mesh and skinned instances carry their RGBA8 color in WebGL2', async ({ pa
     return hooks?.ready && hooks.programs_ready();
   });
 
-  /* Bits: tinted and white mesh instances of one run, a shader without a_color,
+  /* 0x80000000: the probe's programs are still linking. Otherwise one bit per region:
+   * tinted and white mesh instances of one run, a shader without a_color,
    * tinted and white skinned instances of one run. */
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const probe = (window as unknown as { __nt?: MeshHooks }).__nt?.mesh_color_probe;
-        return probe ? probe() >>> 0 : -1;
-      }),
-    )
-    .toBe(0x1f);
+  const NOT_READY = 0x80000000;
+  const probe = () =>
+    page.evaluate(() => {
+      const fn = (window as unknown as { __nt?: MeshHooks }).__nt?.mesh_color_probe;
+      return fn ? fn() >>> 0 : -1;
+    });
+  await expect.poll(probe).not.toBe(NOT_READY);
+  expect(await probe()).toBe(0x1f);
   expect(errors).toEqual([]);
 });

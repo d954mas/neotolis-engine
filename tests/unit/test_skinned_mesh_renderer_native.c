@@ -639,7 +639,11 @@ static void assert_instance_colors(const uint8_t tinted_mask[FRAME_BYTES], const
         const bool in_tinted = tinted_mask[byte_offset + 3] != 0;
         const bool in_white = white_mask[byte_offset + 3] != 0;
         const uint8_t *actual = &frame[byte_offset];
-        if (in_tinted == in_white) {
+        if (!in_tinted && !in_white) {
+            TEST_ASSERT_EQUAL_UINT8(0, actual[3]); /* nothing drawn outside the single-instance coverage */
+            continue;
+        }
+        if (in_tinted && in_white) {
             continue;
         }
         const uint8_t expected[3] = {in_tinted ? 26 : 255, in_tinted ? 51 : 255, in_tinted ? 77 : 255};

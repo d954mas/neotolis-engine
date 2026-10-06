@@ -43,8 +43,7 @@ static inline uint32_t nt_color_channel_to_u8(float c) {
     return (uint32_t)(v + 0.5F);
 }
 
-/* [0,1] R,G,B,A -> 0xAABBGGRR (clamp + round-to-nearest). Matches the engine's
- * 0..255 nt_clamp_f_to_u8 rounding exactly so packing is byte-identical. */
+/* [0,1] R,G,B,A -> 0xAABBGGRR (clamp + round-to-nearest; NaN -> 0). */
 static inline uint32_t nt_color_pack(const float rgba[4]) {
     const uint32_t r = nt_color_channel_to_u8(rgba[0]);
     const uint32_t g = nt_color_channel_to_u8(rgba[1]);

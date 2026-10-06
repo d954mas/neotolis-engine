@@ -59,8 +59,7 @@ static void drawable_describe(nt_entity_t entity, nt_introspect_sink *s) {
 #endif
 
 #if NT_INTROSPECT_WRITE_ENABLED
-/* color rejects components outside [0,1] instead of clamping: the stored RGBA8 holds only that range,
-   and a silently clamped write would read back as a different value. */
+/* color rejects components outside [0,1] at the wire: the RGBA8 setter would clamp them silently. */
 static bool drawable_apply(nt_entity_t entity, const char *key, const nt_write_value *v, bool dry_run, const char **err_msg) {
     if (strcmp(key, "visible") == 0) {
         if (v->kind != NT_WV_BOOL) {

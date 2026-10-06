@@ -185,6 +185,7 @@ void test_swap_and_pop_drawable(void) {
 
     *nt_drawable_comp_tag(e1) = (nt_hash32_t){.value = 10};
     *nt_drawable_comp_tag(e3) = (nt_hash32_t){.value = 30};
+    nt_drawable_comp_set_color(e3, 0x11223344U);
 
     /* Remove middle entity's component */
     nt_drawable_comp_remove(e2);
@@ -196,6 +197,7 @@ void test_swap_and_pop_drawable(void) {
 
     TEST_ASSERT_EQUAL_UINT32(10, nt_drawable_comp_tag(e1)->value);
     TEST_ASSERT_EQUAL_UINT32(30, nt_drawable_comp_tag(e3)->value);
+    TEST_ASSERT_EQUAL_HEX32(0x11223344U, nt_drawable_comp_color(e3));
 }
 
 /* ---- Main ---- */
