@@ -12,7 +12,7 @@
 
 _Static_assert(NT_POOL_SLOT_SHIFT == 16 && NT_POOL_SLOT_MASK == UINT16_MAX, "mesh batch key requires 16-bit pool slots");
 
-/* Handles must match the item's current bindings at prepare. Store the returned
+/* Handles must match the item's current bindings at draw_list. Store the returned
  * token unchanged; use separate lists for an explicit boundary. */
 static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mesh_t mesh) {
     uint32_t material_slot = nt_pool_slot_index(material.id);
@@ -30,6 +30,16 @@ typedef struct {
 
 _Static_assert(sizeof(nt_mesh_instance_t) == 52 && offsetof(nt_mesh_instance_t, color) == 48, "mesh instance layout");
 
+/* Instance world rows of both mesh renderers: the transposed affine part of a column-major mat4. */
+static inline void nt_mesh_instance_world_rows(float rows[3][4], const float world[16]) {
+    for (int r = 0; r < 3; r++) {
+        rows[r][0] = world[r];
+        rows[r][1] = world[4 + r];
+        rows[r][2] = world[8 + r];
+        rows[r][3] = world[12 + r];
+    }
+}
+
 typedef struct {
     uint16_t max_pipelines; /* pipeline cache capacity, default: 64 */
     /* Vertex-input versions kept per mesh (one per distinct derived layout
@@ -41,24 +51,6 @@ typedef struct {
 
 static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_pipelines = 64, .max_mesh_layouts = 4}; }
 
-/* One resolved instanced draw, written by a mesh renderer's prepare: draw reads
- * no entity component. Valid until the next nt_gfx_begin_frame or GPU
- * restore (skinned runs also until the next nt_skeletal_gpu_begin_frame); the
- * referenced material, its program and textures, and the mesh stay live until
- * the last draw. Fields are renderer-filled; copy, filter or concatenate runs,
- * never build them by hand. */
-typedef struct {
-    nt_pipeline_t pipeline;
-    nt_vertex_input_t vertex_input;
-    nt_material_t material;
-    nt_texture_t supplied_texture; /* replaces the material texture at supplied_slot; 0 = none */
-    uint32_t offset;               /* vertex frame storage byte offset of the first instance */
-    uint32_t instance_count;
-    uint32_t index_count; /* 0 = non-indexed */
-    uint32_t vertex_count;
-    uint8_t supplied_slot;
-} nt_mesh_run_t;
-
 /* desc is required, non-NULL and borrowed for the duration of the call. */
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
@@ -66,25 +58,17 @@ void nt_mesh_renderer_shutdown(void);
  * caches. Inactive modules are unchanged. */
 void nt_mesh_renderer_restore_gpu(void);
 
-/* Contract: caller must pre-filter `items` by visibility — the renderer draws
- * every entry unconditionally and does not consult drawable_comp's visible
- * flag, color alpha, or entity-enabled state. Use nt_render_is_visible()
- * (engine/render/nt_render_util.h) as the canonical filter when building
- * the items array. */
-/* batch_key must come from each item's current material/mesh bindings; adjacent
- * equal keys merge into one run. items may be NULL only when count is 0; it is
- * borrowed for the call, and bindings may change after it returns. Every item
- * needs transform and drawable components. */
-/* Resolves pipeline and vertex input per run (creating them on a cache miss),
- * packs world and drawable color of every instance into one vertex frame storage allocation and
- * writes the runs; returns their count. Runs whose program is not ready or
- * whose pipeline/vertex input failed are skipped. Writes no buffer.
- * Call at any point of the frame before the draws.
- * max_runs >= count always suffices; fewer asserts when exceeded. */
-uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count, nt_mesh_run_t *runs, uint32_t max_runs);
-/* Executes runs of this gfx frame in order in the current pass, any
- * number of times. runs may be NULL only when run_count is 0. */
-void nt_mesh_renderer_draw(const nt_mesh_run_t *runs, uint32_t run_count);
+/* Records one instanced draw in the current pass: count > 0 instances (nt_mesh_instance_t) at
+ * byte offset in NT_GFX_FRAME_VERTEX, filled before the next nt_gfx call; one allocation may be
+ * drawn in any number of passes. Records nothing while the program is not ready or a pipeline
+ * or vertex input cannot be created. */
+void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t offset, uint32_t count);
+
+/* ECS adapter: adjacent equal batch keys form one run, packed from transform and drawable and
+ * drawn as one instanced draw in the current pass. The caller filters visibility
+ * (nt_render_is_visible) and order. batch_key must come from each item's current bindings;
+ * items may be NULL only when count is 0. */
+void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

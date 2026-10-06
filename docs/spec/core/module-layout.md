@@ -142,7 +142,7 @@ It consumes the existing render components plus `skin_comp`; it does not sample
 animation or select a graphics implementation. Its current `PUBLIC` CMake
 dependencies include the chain
 `nt_skinned_mesh_renderer → nt_skin_comp → nt_skeletal_gpu → nt_skeletal`.
-Both mesh renderers pack prepared runs into gfx frame storage; they link no extra module for it.
+Both mesh renderers pack instances into gfx frame storage; they link no extra module for it.
 Static archive linking can still discard unused CPU kernel objects. The
 composition-symbol checks that prove the intended variants without LTO remain
 #488 scope.

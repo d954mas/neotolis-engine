@@ -47,8 +47,8 @@ a supported flat replace, and the only runtime shader replacement there is.
 Pipeline cache keys include the program handle. Destroying the old program frees
 its pipelines; renderers remove dead records during insertion after a cache miss
 or on reset. Sprite and text staged work retains its original pipeline and is
-discarded if that pipeline is destroyed. Prepared mesh runs require their
-captured program to stay live until the last draw. Numeric material params
+discarded if that pipeline is destroyed. Mesh draws require the program to
+stay live until the recorded draws execute. Numeric material params
 remain mutable and are read at draw or flush; snapshot timing is specified in
 [API contracts](../core/api-contracts.md#program-handles).
 

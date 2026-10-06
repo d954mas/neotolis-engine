@@ -202,15 +202,12 @@ static void frame(void) {
         items[0].batch_key = nt_mesh_renderer_batch_key(s_material, mesh);
         item_count = 1;
     }
-    nt_mesh_run_t runs[1];
-    const uint32_t run_count = nt_mesh_renderer_prepare(items, item_count, runs, 1);
-
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-        nt_mesh_renderer_draw(runs, run_count);
+        nt_mesh_renderer_draw_list(items, item_count);
     }
 
     nt_gfx_end_pass();

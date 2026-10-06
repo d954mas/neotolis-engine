@@ -2,7 +2,7 @@
  * Textured Cube Demo -- Neotolis Engine
  *
  * Full mesh rendering pipeline demo:
- *   Entity/components → render items → nt_mesh_renderer_prepare → frame storage → nt_mesh_renderer_draw → GPU
+ *   Entity/components → render items → nt_mesh_renderer_draw_list → frame storage → GPU
  *
  * Shows: asset packs, material system, entity system, instanced mesh rendering,
  * UBO frame uniforms, texture hot-swap via resource priorities.
@@ -349,10 +349,6 @@ static void frame(void) {
         nt_sort_by_key(items, item_count, s_sort_scratch);
     }
 
-    /* ---- Prepare: pack instance data ---- */
-    nt_mesh_run_t runs[NUM_CUBES];
-    const uint32_t run_count = nt_mesh_renderer_prepare(items, item_count, runs, NUM_CUBES);
-
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});
 
     if (can_render) {
@@ -361,7 +357,7 @@ static void frame(void) {
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         /* ---- Draw: mesh renderer handles pipeline, instancing, batching ---- */
-        nt_mesh_renderer_draw(runs, run_count);
+        nt_mesh_renderer_draw_list(items, item_count);
 
         /* One-time log to verify batching */
         static bool s_stats_logged;

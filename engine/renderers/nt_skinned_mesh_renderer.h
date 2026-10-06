@@ -42,25 +42,16 @@ void nt_skinned_mesh_renderer_shutdown(void);
  * caches. Inactive modules are unchanged. */
 void nt_skinned_mesh_renderer_restore_gpu(void);
 
-/* Caller controls visibility/sorting. items may be NULL only when count is
- * zero; it is borrowed for the call, and bindings may change after it returns.
- * Every item needs transform, drawable and skin components. */
-/* common/skin.glsl requires joints/weights mapped by material attr_map and
- * positive uniform joint/world scale. Declare u_skin_matrices in the material;
- * the run supplies the entity's deformation texture and its default sampler. */
-/* Splits items into runs of equal batch_key and deformation texture, resolves
- * pipeline and vertex input per run (creating them on a cache miss), packs
- * world, deformation binding and drawable color of every instance into one vertex frame
- * storage allocation and writes the runs; returns their count. Runs whose
- * program is not ready or whose pipeline/vertex input failed are skipped.
- * Writes no buffer. Call after the items' nt_skeletal_gpu_reserve, at any
- * point of the frame before the draws.
- * max_runs >= count always suffices; fewer asserts when exceeded. */
-uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count, nt_mesh_run_t *runs, uint32_t max_runs);
-/* Executes runs of this gfx frame in order in the current pass after
- * nt_skeletal_gpu_flush, any number of times. runs may be NULL only when
- * run_count is 0. */
-void nt_skinned_mesh_renderer_draw(const nt_mesh_run_t *runs, uint32_t run_count);
+/* nt_mesh_renderer_draw for skinned instances (nt_skinned_mesh_instance_t). The material uses
+ * common/skin.glsl and declares u_skin_matrices, which deformation replaces. Call after
+ * nt_skeletal_gpu_flush: a texture write precedes the draws that sample it (render/architecture.md,
+ * Draw-phase command stream). */
+void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t offset, uint32_t count);
+
+/* nt_mesh_renderer_draw_list for skinned items: runs also split on the deformation texture,
+ * and every item also needs a skin component with a deformation binding of this frame. Call
+ * after nt_skeletal_gpu_flush. */
+void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
