@@ -3255,7 +3255,6 @@ void test_stream_records_every_draw_phase_call(void) {
     EXPECT_RECORDED(nt_gfx_set_scissor(0, 0, 4, 4));
     EXPECT_RECORDED(nt_gfx_set_scissor_enabled(true));
     EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
-    EXPECT_RECORDED(nt_gfx_set_vertex_attrib_default(1, 1.0F, 1.0F, 1.0F, 1.0F));
     EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 0));
     EXPECT_RECORDED(nt_gfx_set_uniform_mat4(nt_hash32_str("u_mvp"), m));
     EXPECT_RECORDED(nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), v));

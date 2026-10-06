@@ -15,7 +15,6 @@ typedef enum {
     NT_GFX_CMD_BIND_PIPELINE,
     NT_GFX_CMD_BIND_VERTEX_INPUT,
     NT_GFX_CMD_BIND_INSTANCE_BUFFER,
-    NT_GFX_CMD_SET_VERTEX_ATTRIB_DEFAULT,
     NT_GFX_CMD_BIND_TEXTURE_UNIT,
     NT_GFX_CMD_BIND_UNIFORM_BUFFER,
     NT_GFX_CMD_SET_UNIFORM_MAT4,
@@ -97,12 +96,6 @@ static inline void nt_gfx_frame_bind_pipeline(uint32_t backend_handle) { nt_gfx_
 static inline void nt_gfx_frame_bind_vertex_input(uint32_t backend_handle) { nt_gfx_frame_u32x4(NT_GFX_CMD_BIND_VERTEX_INPUT, 1, backend_handle, 0, 0, 0); }
 static inline void nt_gfx_frame_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset) {
     nt_gfx_frame_u32x4(NT_GFX_CMD_BIND_INSTANCE_BUFFER, 3, vertex_input_backend, buffer_backend, byte_offset, 0);
-}
-static inline void nt_gfx_frame_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {
-    uint32_t *c = (uint32_t *)nt_gfx_frame_push(NT_GFX_CMD_SET_VERTEX_ATTRIB_DEFAULT, 5U * 4U);
-    const float value[4] = {x, y, z, w};
-    c[0] = location;
-    memcpy(c + 1, value, sizeof(value));
 }
 static inline void nt_gfx_frame_bind_texture_unit(uint32_t texture_backend, uint32_t sampler_backend, uint32_t slot) {
     nt_gfx_frame_u32x4(NT_GFX_CMD_BIND_TEXTURE_UNIT, 3, texture_backend, sampler_backend, slot, 0);

@@ -144,12 +144,6 @@ void nt_gfx_frame_execute(void) {
             nt_gfx_backend_bind_instance_buffer(w[0], w[1], w[2]);
             w += 3;
             break;
-        case NT_GFX_CMD_SET_VERTEX_ATTRIB_DEFAULT: {
-            const float *value = (const float *)(w + 1);
-            nt_gfx_backend_set_vertex_attrib_default((uint8_t)w[0], value[0], value[1], value[2], value[3]);
-            w += 5;
-            break;
-        }
         case NT_GFX_CMD_BIND_TEXTURE_UNIT:
             nt_gfx_backend_bind_texture_unit(w[0], w[1], w[2]);
             w += 3;

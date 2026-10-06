@@ -67,8 +67,8 @@ renderer_draw_sprite(...);
 Draw-phase calls are deferred. At the call, the front-end validates and updates
 its logical state and geometry counters, then records the
 backend-resolved arguments of the backend call into one command stream: begin
-and end pass, clear, pipeline, vertex-input and instance-buffer binds, vertex
-attribute defaults, texture-unit and uniform-buffer binds, the mat4, vec4, float
+and end pass, clear, pipeline, vertex-input and instance-buffer binds,
+texture-unit and uniform-buffer binds, the mat4, vec4, float
 and int uniform setters, scissor rectangle and enable, viewport, the plain and
 indexed draws (both carry an instance count; the indexed draw also carries the
 index type of the bound vertex input), and GPU timing
@@ -130,8 +130,8 @@ a global block registration at that slot or above asserts.
 The compare runs after the pass check; an equal value was validated when it was
 recorded and every path that could invalidate it clears the mirror. An invalid
 pipeline or vertex-input handle clears its mirror (the unbind); other invalid
-binds leave their mirrors unchanged. Uniform values and vertex attribute
-defaults are not deduplicated by the front-end. The GL backend keeps caches for
+binds leave their mirrors unchanged. Uniform values are not deduplicated by
+the front-end. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
