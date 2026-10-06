@@ -127,7 +127,7 @@ subsystem — decoration reuses the text pipeline and the Slug text shaders (`sl
   key — a separate entry from the natural glyph, sharing the same curve texture so an emboldened
   or outlined run still batches into ONE draw. This geometry runs only on the glyph-cache **miss path**
   (not per frame); the outline pass grows the fill weight by `outline_w`, the shadow pass reuses the
-  outermost visible variant (no new key). This CPU offset/self-intersection resolution is a **deliberate,
+  outline variant when `outline_w > 0`, else the fill variant. This CPU offset/self-intersection resolution is a **deliberate,
   bounded exception** to "builder does the heavy work; runtime stays simple": it is amortized (once per
   `(codepoint, weight)` variant, then cached), uses only static scratch (no heap), degrades gracefully at
   fixed caps, and is guarded by a worst-case decode-miss budget test. Prebaking a fixed set of weight
@@ -166,8 +166,8 @@ alpha, exactly like rich TEXT; a per-atom effect color, when present, replaces i
 It is the standard **u8** sprite tint, and the block's **image material** (plain, or a
 custom-attr material with attr defaults — the emit passes no block) textures the
 region — there is **no** engine-provided rich material, float4 `a_tint`,
-or per-image custom-attr block. The composed tint is invisible at u8 on an 8-bit
-display, so a float4 tint would add nothing. An unset style text or image
+or per-image custom-attr block. u8 already matches an 8-bit display, so a
+float4 tint would add nothing. An unset style text or image
 material resolves to the ctx default at each walk, not at declaration, so a base
 swapped between two walks of one frame is the one drawn. `set_material` is bound **once per band** (the
 `bound` guard), so **all** of a band's inline images **coalesce into one sprite
@@ -185,7 +185,7 @@ sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-
 - **Per-atom effects** are a pure deterministic curve `fn(atom_idx, kind,
   base_xy, base_wh, base_color, time, hovered, user_data) → {offset, color, scale,
   visible}` (colors packed RGBA8, see [color](../render/architecture.md#color))
-  evaluated at emit and folded into the existing position / tint / scale
+  evaluated at emit and applied to the existing position / tint / scale
   (no 5th custom attr). They are **visual-only**: the solver layout never re-flows.
   The animation clock is **passed in by the game** (`time`) — there is no engine
   global frame clock (RESEARCH Pitfall 4). The `user_data` is the pointer the game
@@ -257,10 +257,8 @@ nt_ui_rich_pop(ctx);
   clip-space output into the box's NDC sub-rect
   (`clip'.xy = half·clip.xy + center·clip.w`, aspect from box pixels) — it must
   **not** touch `glViewport`/scissor: the walk's current scroll scissor stays intact.
-  `color` is the **absolute resolved RGBA**
-  the engine resolved for the atom — the run's `<color>` with parent opacity folded
-  into alpha, or the per-atom effect's replacement color, the SAME color the TEXT and IMAGE paths
-  render with — so a custom object honours opacity / `<color>` / effects consistently
+  `color` is the **absolute resolved RGBA** the engine resolved for the atom,
+  the SAME color the TEXT and IMAGE paths render with, so a custom object honours opacity / `<color>` / effects consistently
   (AGENTS.md "if sprites have it, UI images need it too").
 
 ## Per-atom z-layers (explicit draw order)

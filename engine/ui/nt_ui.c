@@ -1714,7 +1714,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
             }
             tint->a *= ws->accum_opacity;
             if (nt_ui_pack_clay(*tint) >> 24 == 0U) {
-                return; /* faded out: a {0,0,0,0} tint would read as the untinted white sentinel */
+                return; /* invisible; at opacity 0 a black tint folds to {0,0,0,0}, the untinted-white sentinel */
             }
         }
         /* One generic custom-attr branch (no per-widget identity): custom_bytes>0 → bake

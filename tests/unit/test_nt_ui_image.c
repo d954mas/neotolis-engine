@@ -321,7 +321,7 @@ static void test_image_zero_border_override_emits_plain_quad(void) {
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
-/* A black tint faded below one alpha step must not turn into the {0,0,0,0} "untinted" white. */
+/* At opacity 0 a black tint folds to {0,0,0,0}, the "untinted" sentinel: it must draw nothing, not white. */
 static void test_image_black_tint_faded_out_draws_no_opaque_white(void) {
     nt_ui_image_style_t st = nt_ui_image_style_defaults();
     st.color_packed = 0xFF000000U;
@@ -331,7 +331,7 @@ static void test_image_black_tint_faded_out_draws_no_opaque_white(void) {
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}}};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root"), .userData = NT_UI_CLAY_DATA_XFORM(0U, &t, 0.001F)}) { nt_ui_image(s_fx.ctx, NULL, &ref, &st, &decl); }
+    CLAY({.id = CLAY_ID("root"), .userData = NT_UI_CLAY_DATA_XFORM(0U, &t, 0.0F)}) { nt_ui_image(s_fx.ctx, NULL, &ref, &st, &decl); }
     nt_ui_end(s_fx.ctx);
     nt_ui_walk(s_fx.ctx, &target);
     for (uint32_t i = 0; i < nt_sprite_renderer_test_last_emit_vertex_count(); ++i) {

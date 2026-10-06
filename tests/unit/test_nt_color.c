@@ -238,7 +238,7 @@ void test_rgba8_macro_layout(void) {
     TEST_ASSERT_EQUAL_HEX32(0xFF000000U, NT_RGBA8(256, 0, 0, 255));
 }
 
-/* One rounding rule: half up, saturating, NaN -> 0; scale_alpha folds with it (85 * 0.5 -> 43). */
+/* One rounding rule: half up, saturating, NaN -> 0. */
 void test_round_u8_half_up(void) {
     TEST_ASSERT_EQUAL_UINT32(43U, nt_color_round_u8(42.5F));
     TEST_ASSERT_EQUAL_UINT32(128U, nt_color_round_u8(127.5F));

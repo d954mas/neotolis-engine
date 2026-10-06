@@ -27,7 +27,7 @@ set as packed RGBA8 ([color](architecture.md#color)): build it with
 1/510), whatever its material's blend. API lives in
 `engine/drawable_comp/nt_drawable_comp.h`.
 
-Per-entity shader params (`params0`) deferred to ShaderParamsComponent — add when per-entity shader effects are needed (#98).
+Per-entity shader params (`params0`) are not supported; a ShaderParamsComponent is their planned owner.
 
 ## Mesh component
 

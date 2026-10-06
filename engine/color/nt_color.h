@@ -48,7 +48,7 @@ static inline uint32_t nt_color_pack(const float rgba[4]) {
 }
 
 /* Multiplies the alpha of a packed color by `factor` (e.g. a parent opacity); RGB bytes stay exact.
- * Works in byte scale, so it is the one opacity-fold rounding for packed and Clay colors alike. */
+ * Rounds through nt_color_round_u8, like every color pack. */
 static inline uint32_t nt_color_scale_alpha(uint32_t packed, float factor) { return (packed & 0x00FFFFFFU) | (nt_color_round_u8((float)(packed >> 24) * factor) << 24); }
 
 /* One hex nibble 0..15; 0xFF on a non-hex char. */

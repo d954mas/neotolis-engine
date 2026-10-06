@@ -286,7 +286,9 @@ per-instance. Only adjacent compatible items merge; the game's order wins.
 
 **Instance layout** (`nt_skinned_mesh_instance_t`, 64 B) carries three world
 rows, four UINT16 frame origin coordinates, one float alpha and the drawable
-color as normalized RGBA8 (see [color](../render/architecture.md#color)). `joints` arrive through float
+color as normalized RGBA8 (see [color](../render/architecture.md#color)).
+Prepare reads each item's skin binding through its asserting accessor, so a
+stale skinned item asserts. `joints` arrive through float
 attributes with shader integer conversion and `weights` normalized, in the
 stream layouts the builder chapter fixes (Skin streams, under Builder
 validation). FLOAT16 lane sums deviate from 1 by at most `4·2⁻¹¹`, and no

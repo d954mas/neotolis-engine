@@ -179,9 +179,9 @@ Each instance supplies its world transform and drawable color
 the instance pack reads the transform and drawable views directly and does not
 check item liveness: an item whose entity was destroyed, its index reused, packs
 the new entity's data. Only the first item of each run goes through the asserting
-material and mesh component accessors. Skinned prepare also reads each item's skin
-binding through its asserting accessor, so a stale skinned item asserts. Prepare packs these attributes into vertex frame
-storage, uploaded when the stream executes; draw issues one `nt_gfx_draw_indexed_instanced` per run for indexed
+material and mesh component accessors. Prepare packs these attributes into
+vertex frame storage, uploaded when the stream executes; draw issues one
+`nt_gfx_draw_indexed_instanced` per run for indexed
 meshes or `nt_gfx_draw_instanced` for non-indexed meshes. Material parameters
 remain shared by the run.
 

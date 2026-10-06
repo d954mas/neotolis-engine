@@ -200,7 +200,7 @@ uint32_t nt_mesh_renderer_prepare(const nt_render_item_t *items, uint32_t count,
     // #region pack instances
     NT_ASSERT(size <= UINT32_MAX && "mesh_renderer_prepare: instance data exceeds the frame storage address range");
     uint32_t offset = 0;
-    nt_mesh_instance_t *const base = (nt_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* bound by offset: 4 is enough */
+    nt_mesh_instance_t *const base = (nt_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* attributes need only 4-byte alignment */
     nt_mesh_instance_t *dst = base;
     /* Inline sparse reads, as the sprite emit does: no per-instance accessor call or liveness assert. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();

@@ -158,7 +158,6 @@ static void create_vertex_input(void) {
     if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
         return;
     }
-    /* Slug vertex layout: 6 attributes, stride = 52 bytes */
     s_text.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout =
             {
@@ -610,16 +609,14 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     const uint8_t *p = (const uint8_t *)utf8;
     const uint8_t *end = p + len;
 
-    /* Per-pass embolden cache key from the sticky weight (font units). Fill uses the weight; outline
-     * grows by outline_w; shadow reuses the outermost variant (outline if outline_w > 0, else fill) so
-     * it adds NO new cache entry. */
+    /* Per-pass embolden cache key from the sticky weight (font units): fill uses the weight, outline
+     * grows by outline_w, and the shadow reuses the outline key. */
 #if NT_FONT_EMBOLDEN_ENABLED
     const float upm = (float)metrics.units_per_em;
     const int16_t fill_key = nt_font_quantize_weight(s_text.deco.weight_em * upm);
     /* The shadow silhouette follows the outline width, not its alpha, so a fading outline cannot swap it. */
     const int16_t outline_key = (int16_t)(s_text.deco.outline_w > 0.0F ? nt_font_quantize_weight((s_text.deco.weight_em + s_text.deco.outline_w) * upm) : fill_key);
     const int16_t shadow_key = outline_key;
-    /* alpha 0 -> invisible: no outline pass. */
     const bool outline_active = (s_text.deco.outline_w > 0.0F && (s_text.deco.outline_color >> 24) != 0U);
 #else
     const int16_t fill_key = 0;
