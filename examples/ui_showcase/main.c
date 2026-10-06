@@ -3,6 +3,7 @@
 // #region includes
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -2327,10 +2328,10 @@ static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, fl
         float model[16];
         rich_obj_text_model(world_mat4, x, baseline, model);
         nt_text_renderer_set_oblique(0.0F); /* label stays upright */
-        nt_text_renderer_draw_n(label, (size_t)ln, model, size, color, 0.0F, 0.0F);
+        nt_text_renderer_draw_n(label, (size_t)ln, model, size, nt_color_pack(color), 0.0F, 0.0F);
         rich_obj_text_model(world_mat4, x + label_col, baseline, model);
         nt_text_renderer_set_oblique(shears[i]); /* sample leans -- no flush between the two draws */
-        nt_text_renderer_draw_n("The quick brown fox", 19U, model, size, color, 0.0F, 0.0F);
+        nt_text_renderer_draw_n("The quick brown fox", 19U, model, size, nt_color_pack(color), 0.0F, 0.0F);
     }
     nt_text_renderer_set_oblique(0.0F); /* MUST reset: this object-only block has no rich text pass to do it */
 }
@@ -3879,7 +3880,7 @@ static void frame(void) {
             mat4 stats_model;
             glm_mat4_identity(stats_model);
             glm_translate(stats_model, (vec3){scale.logical_w - 170.0F, 92.0F, 0.0F});
-            const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
+            const uint32_t stats_color = NT_RGBA8(204, 230, 204, 255);
             nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
             nt_text_renderer_flush();
         }

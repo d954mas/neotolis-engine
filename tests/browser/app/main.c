@@ -1359,7 +1359,7 @@ int main(int argc, char *argv[]) {
         s_nt_hidden_input_style.skin[i].border_color &= 0x00FFFFFFU;
     }
     s_nt_hidden_caption = s_caption;
-    s_nt_hidden_caption.color.a = 0.0F;
+    s_nt_hidden_caption.color &= 0x00FFFFFFU;
     nt_test_install_hooks(); /* window.__nt smoke-test surface */
 #endif
 

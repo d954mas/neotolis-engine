@@ -9,7 +9,7 @@ precision highp int;
 // location 1: vec2  a_texcoord     - em-space coordinate (float32 x2)
 // location 2: vec2  a_glyph_data   - packed as floatBitsToUint: (band_row, band_count)
 // location 3: vec4  a_glyph_bounds - bbox x0/y0/x1/y1 in em-space (float32 x4)
-// location 4: vec4  a_color        - text color RGBA (float32 x4)
+// location 4: vec4  a_color        - text color RGBA (normalized uint8 x4)
 // location 5: float a_depth_bias   - per-glyph NDC depth bias toward the near plane (float32)
 
 layout(location = 0) in vec3 a_position;

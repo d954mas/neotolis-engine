@@ -5,6 +5,7 @@
 #include <string.h>
 
 /* clang-format off */
+#include "color/nt_color.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
@@ -181,7 +182,7 @@ static void test_stats_draw_pitfall9_explicit_set_calls(void) {
     nt_material_t mat = {0};
     nt_font_t font = {0};
     const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-    const float white[4] = {1, 1, 1, 1};
+    const uint32_t white = NT_RGBA8(255, 255, 255, 255);
 
     /* set_material fail-fast asserts on the {0} handle BEFORE the same-handle early-return, so the
      * counter still increments (proving draw doesn't cache) and set_font is never reached. */

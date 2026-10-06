@@ -320,18 +320,18 @@ static void test_label_deco_folds_parent_opacity(void) {
     d.shadow_dy = 0.1F;
     d.shadow_color = 0xFFFFFFFFU; /* alpha > 0 -> shadow active */
 
-    /* Float asserts are excluded in this suite; compare alpha*100 as int (0.5 -> 50, 1.0 -> 100). */
+    /* Packed alpha byte: 0.5 * 255 rounds to 128. */
     nt_ui_label_deco_apply(&d, 0.5F); /* half-faded parent */
 #if NT_FONT_EMBOLDEN_ENABLED
-    TEST_ASSERT_EQUAL_INT(50, (int)((nt_text_renderer_test_outline_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_HEX32(0x80FFFFFFU, nt_text_renderer_test_outline_color());
 #endif
-    TEST_ASSERT_EQUAL_INT(50, (int)((nt_text_renderer_test_shadow_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_HEX32(0x80FFFFFFU, nt_text_renderer_test_shadow_color());
 
     nt_ui_label_deco_apply(&d, 1.0F); /* opaque parent leaves alpha untouched */
 #if NT_FONT_EMBOLDEN_ENABLED
-    TEST_ASSERT_EQUAL_INT(100, (int)((nt_text_renderer_test_outline_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, nt_text_renderer_test_outline_color());
 #endif
-    TEST_ASSERT_EQUAL_INT(100, (int)((nt_text_renderer_test_shadow_color_a() * 100.0F) + 0.5F));
+    TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, nt_text_renderer_test_shadow_color());
     nt_text_renderer_reset_decoration();
 }
 

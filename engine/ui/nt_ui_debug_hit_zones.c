@@ -183,7 +183,7 @@ static void draw_zone_label(const nt_ui_debug_zone_t *z, const float text_model[
     if (n <= 0) {
         return;
     }
-    const float color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const uint32_t color = 0xFFFFFFFFU;
     nt_text_renderer_set_material(text_mat);
     nt_text_renderer_set_font(font);
     nt_text_renderer_draw_n(buf, (size_t)n, text_model, size, color, 0.0F, 0.0F);

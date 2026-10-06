@@ -114,7 +114,7 @@ static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, 
     overlay_emit_rect(atlas, region, x + w - t, y_top, t, h, color); /* right */
 }
 
-static void overlay_draw_text(nt_material_t text_mat, nt_font_t font, float x, float baseline_y, float size, const float color[4], const char *s, size_t n) {
+static void overlay_draw_text(nt_material_t text_mat, nt_font_t font, float x, float baseline_y, float size, uint32_t color, const char *s, size_t n) {
     if (size <= 0.0F || n == 0U || s == NULL) {
         return;
     }
@@ -168,7 +168,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
      * the resolved one so a depth-off-only inspector material still draws the label. */
     const nt_material_t tmat = (ctx->inspector_text_material.id != 0U) ? ctx->inspector_text_material : ctx->text_material;
     const bool can_label = tmat.id != 0U && font.id != 0U && label_size > 0.0F;
-    const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    const uint32_t white = 0xFFFFFFFFU;
 
     if (ctx->use_raycast_input) {
         /* 3D ctx: every walked element (not only interactive widgets) has its world mat4 snapshotted

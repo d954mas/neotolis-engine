@@ -1307,12 +1307,7 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     const float inv_ts = (text_scale > 0.0F) ? (1.0F / text_scale) : 0.0F;
     float m[16];
     nt_ui_sprite_mat4(world_mat4, c->boundingBox.x, baseline_y, inv_ts, inv_ts, m);
-    const float color[4] = {
-        t->textColor.r / 255.0F,
-        t->textColor.g / 255.0F,
-        t->textColor.b / 255.0F,
-        t->textColor.a / 255.0F,
-    };
+    const uint32_t color = nt_color_pack_clay(t->textColor);
     nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, font_size, color, (float)t->letterSpacing * text_scale, (float)t->lineHeight * text_scale);
 }
 // #endregion

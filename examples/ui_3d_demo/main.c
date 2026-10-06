@@ -23,6 +23,7 @@
 // #region includes
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -681,7 +682,7 @@ static void declare_panels(void) {
 // #endregion
 
 // #region hud
-static void draw_hud_block(const char *text, float x, float y, float size, const float color[4]) {
+static void draw_hud_block(const char *text, float x, float y, float size, uint32_t color) {
     mat4 model;
     glm_mat4_identity(model);
     glm_translate(model, (vec3){x, y, 0.0F});
@@ -696,9 +697,9 @@ static void draw_hud(float fb_w, float fb_h) {
     nt_text_renderer_set_material(s_text_material);
     nt_text_renderer_set_font(s_font);
 
-    const float white[4] = {0.95F, 0.95F, 0.98F, 1.0F};
-    const float accent[4] = {1.00F, 0.85F, 0.30F, 1.0F};
-    const float dim[4] = {0.75F, 0.78F, 0.82F, 1.0F};
+    const uint32_t white = NT_RGBA8(242, 242, 250, 255);
+    const uint32_t accent = NT_RGBA8(255, 217, 77, 255);
+    const uint32_t dim = NT_RGBA8(191, 199, 209, 255);
 
     const float left_x = 12.0F;
     float y = fb_h - HUD_TITLE_SIZE - 4.0F;
@@ -755,7 +756,7 @@ static void draw_hud(float fb_w, float fb_h) {
         mat4 stats_model;
         glm_mat4_identity(stats_model);
         glm_translate(stats_model, (vec3){left_x, dbg_y_top - HUD_SIZE - 6.0F, 0.0F});
-        const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
+        const uint32_t stats_color = NT_RGBA8(204, 230, 204, 255);
         nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, HUD_SIZE - 2.0F, stats_color);
     }
 
@@ -947,7 +948,7 @@ static void frame(void) {
         /* World-space depth-writing text. The per-glyph clip-space bias keeps overlapping glyph
          * quads from z-fighting at their AA fringes (set before the draw, reset after). */
         if (s_font_bound) {
-            const float yellow[4] = {1.0F, 1.0F, 0.2F, 1.0F};
+            const uint32_t yellow = NT_RGBA8(255, 255, 51, 255);
             nt_text_renderer_set_material(s_text_material_3d);
             nt_text_renderer_set_font(s_font);
             nt_text_renderer_set_glyph_depth_bias(0.0001F);

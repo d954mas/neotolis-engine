@@ -16,6 +16,7 @@
 
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "color/nt_color.h"
 #include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -483,7 +484,7 @@ static void frame(void) {
         mat4 overlay_model;
         glm_mat4_identity(overlay_model);
         glm_translate(overlay_model, (vec3){10.0F, h - overlay_size - 4.0F, 0.0F});
-        const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+        const uint32_t white = NT_RGBA8(255, 255, 255, 255);
 
         char overlay[768];
         uint32_t written = nt_debug_overlay_format_lines(overlay, sizeof(overlay));

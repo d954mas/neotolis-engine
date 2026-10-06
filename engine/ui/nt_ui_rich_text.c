@@ -1960,9 +1960,7 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
     const float baseline_y = box_y + s->y + s->asc; /* solved y is glyph-box top */
     float model[16];
     nt_ui_sprite_mat4(frame->world_mat4, box_x + s->x, baseline_y, 1.0F, 1.0F, model);
-    float color[4];
-    rich_unpack_color(s->color, frame->opacity, color);
-    nt_text_renderer_draw_n(st->text + s->text_off, s->text_len, model, s->size, color, 0.0F, 0.0F);
+    nt_text_renderer_draw_n(st->text + s->text_off, s->text_len, model, s->size, nt_color_scale_alpha(s->color, frame->opacity), 0.0F, 0.0F);
 #ifdef NT_TEST_ACCESS
     st->emit_span_count++;
 #endif
@@ -2007,7 +2005,7 @@ static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_f
             const float baseline_y = box_y + s->y + s->asc + fx.offset_y;
             float model[16];
             nt_ui_sprite_mat4(frame->world_mat4, box_x + scaled_x + fx.offset_x, baseline_y, 1.0F, 1.0F, model);
-            nt_text_renderer_draw_n(st->text + g0, gi - g0, model, s->size * fx.scale, fx.color, 0.0F, 0.0F);
+            nt_text_renderer_draw_n(st->text + g0, gi - g0, model, s->size * fx.scale, nt_color_pack(fx.color), 0.0F, 0.0F);
 #ifdef NT_TEST_ACCESS
             st->emit_span_count++;
 #endif
@@ -2112,22 +2110,16 @@ static void rich_apply_run_decoration(nt_ui_rich_state_t *st, const nt_ui_rich_s
 
     const nt_ui_rich_style_t *stl = &st->styles[st->runs[e->run_idx].style_idx];
     if (stl->outline_w > 0.0F && isfinite(stl->outline_w)) {
-        float oc[4];
-        rich_unpack_color(stl->outline_color_abgr, opacity, oc);
-        nt_text_renderer_set_outline(stl->outline_w, oc);
+        nt_text_renderer_set_outline(stl->outline_w, nt_color_scale_alpha(stl->outline_color_abgr, opacity));
     } else {
-        const float zero[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-        nt_text_renderer_set_outline(0.0F, zero);
+        nt_text_renderer_set_outline(0.0F, 0U);
     }
     if ((stl->shadow_color_abgr >> 24) != 0U) { /* alpha > 0 -> active */
-        float sc[4];
-        rich_unpack_color(stl->shadow_color_abgr, opacity, sc);
         const float sdx = isfinite(stl->shadow_dx) ? stl->shadow_dx : 0.0F;
         const float sdy = isfinite(stl->shadow_dy) ? stl->shadow_dy : 0.0F;
-        nt_text_renderer_set_shadow(sdx, sdy, 0.0F, sc);
+        nt_text_renderer_set_shadow(sdx, sdy, 0.0F, nt_color_scale_alpha(stl->shadow_color_abgr, opacity));
     } else {
-        const float zero[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-        nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, zero);
+        nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, 0U);
     }
     nt_text_renderer_set_underline((e->flags & NT_UI_RICH_RUN_UNDERLINE) != 0U);
     nt_text_renderer_set_strikethrough((e->flags & NT_UI_RICH_RUN_STRIKE) != 0U);

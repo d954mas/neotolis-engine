@@ -58,6 +58,9 @@ static inline uint32_t nt_color_pack(const float rgba[4]) {
 /* Replaces the alpha byte of a packed color; RGB bytes stay exact. */
 static inline uint32_t nt_color_with_alpha(uint32_t packed, float a) { return (packed & 0x00FFFFFFU) | (nt_color_channel_to_u8(a) << 24); }
 
+/* Multiplies the alpha of a packed color by `factor` (e.g. a parent opacity); RGB bytes stay exact. */
+static inline uint32_t nt_color_scale_alpha(uint32_t packed, float factor) { return nt_color_with_alpha(packed, ((float)(packed >> 24) / 255.0F) * factor); }
+
 /* One hex nibble 0..15; 0xFF on a non-hex char. */
 static inline uint8_t nt_color_hex_nibble(char c) {
     if (c >= '0' && c <= '9') {
