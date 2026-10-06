@@ -53,6 +53,7 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h> /* EM_JS / EMSCRIPTEN_KEEPALIVE for the window.__nt hooks */
 uint32_t nt_test_shape_stroke_probe(void);
+uint32_t nt_test_mesh_color_probe(void);
 #endif
 
 #include "clay.h"
@@ -866,6 +867,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
         'basis_sample': function(level) { return _nt_test_basis_sample(level) >>> 0; },
         'basis_single_pixel_format': function() { return _nt_test_basis_single_pixel_format(); },
         'shape_stroke_probe': function() { return _nt_test_shape_stroke_probe() >>> 0; },
+        'mesh_color_probe': function() { return _nt_test_mesh_color_probe() >>> 0; },
         'gpu_command': function(operation, segment) { return _nt_test_gpu_command(operation, segment || 0); },
         'hide_probe': function(mode) { _nt_test_hide_probe(mode); },
         'field_visible': function() { return _nt_test_field_visible() !== 0; },
@@ -1240,8 +1242,8 @@ int main(int argc, char *argv[]) {
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_atlas_init();
 
-    nt_material_init(&(nt_material_desc_t){.max_materials = 2});
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 5}); /* base + 4 rich faces */
+    nt_material_init(&(nt_material_desc_t){.max_materials = 5}); /* sprite, text, the mesh color probe's three */
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 5});             /* base + 4 rich faces */
 
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);

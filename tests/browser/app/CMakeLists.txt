@@ -11,12 +11,13 @@ set(UI_SHOWCASE_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/ui_showcase")
 set(BROWSER_FIXTURE_PACK_DIR "${CMAKE_SOURCE_DIR}/build/tests/browser/fixtures/${NT_BASISU_SET_TAG}")
 
 # EXCLUDE_FROM_ALL: browser tests build this target explicitly; regular game builds omit its hooks.
-add_executable(browser_smoke EXCLUDE_FROM_ALL main.c shape_probe.c)
+add_executable(browser_smoke EXCLUDE_FROM_ALL main.c shape_probe.c mesh_probe.c)
 target_link_libraries(browser_smoke PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_atlas
     nt_ui_rich nt_sprite_renderer nt_text_renderer nt_shape_renderer nt_font nt_ui
     nt_render nt_hash nt_mem_scratch nt_metrics
+    nt_mesh_renderer nt_skinned_mesh_renderer
 )
 target_compile_definitions(browser_smoke PRIVATE NT_TEST_PRESET_NAME="${NT_PRESET_NAME}")
 # Reuse the showcase's generated asset header (ui_showcase_assets.h).
