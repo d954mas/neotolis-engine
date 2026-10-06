@@ -282,7 +282,6 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
             draw_zone_label(z, text_model, tmat, font, label_size);
         }
     }
-    nt_sprite_renderer_flush();
     if (can_label) {
         nt_text_renderer_flush();
     }

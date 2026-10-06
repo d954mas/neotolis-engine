@@ -11,6 +11,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "sprite_comp/nt_sprite_comp.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -271,7 +272,7 @@ static uint16_t walk_image_top_edge_v(const nt_ui_image_style_t *style) {
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &ref, style, &decl); }
     nt_ui_end(s_fx.ctx);
     nt_ui_walk(s_fx.ctx, &target);
-    return top_edge_v(nt_sprite_renderer_test_last_emit_vertex_count());
+    return top_edge_v(nt_sprite_test_last_emit().vertex_count);
 }
 
 static void test_image_slice9_orientation_matches_single_quad(void) {
@@ -318,7 +319,7 @@ static void test_image_zero_border_override_emits_plain_quad(void) {
     nt_ui_image_style_t st = nt_ui_image_style_defaults();
     st.flags |= NT_UI_IMAGE_SLICE9_OVERRIDE;
     (void)walk_image_top_edge_v(&st);
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
 }
 
 /* At opacity 0 a black tint folds to {0,0,0,0}, the "untinted" sentinel: it must draw nothing, not white. */
@@ -334,7 +335,7 @@ static void test_image_black_tint_faded_out_draws_no_opaque_white(void) {
     CLAY({.id = CLAY_ID("root"), .userData = NT_UI_CLAY_DATA_XFORM(0U, &t, 0.0F)}) { nt_ui_image(s_fx.ctx, NULL, &ref, &st, &decl); }
     nt_ui_end(s_fx.ctx);
     nt_ui_walk(s_fx.ctx, &target);
-    for (uint32_t i = 0; i < nt_sprite_renderer_test_last_emit_vertex_count(); ++i) {
+    for (uint32_t i = 0; i < nt_sprite_test_last_emit().vertex_count; ++i) {
         uint8_t color[4];
         nt_sprite_renderer_test_last_emit_color(i, color);
         TEST_ASSERT_EQUAL_UINT8(0U, color[3]);

@@ -20,6 +20,7 @@
 #include "input/nt_input.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -252,7 +253,7 @@ static void test_debug_emit_matches_walker_coord_space(void) {
     /* last_emit_* captures the final outline edge (4-vert thin quad). Fill and
      * outline both go through project_to_world; verify Y falls in the flipped
      * band [vy+vh - visual_b, vy+vh - visual_t]. */
-    const uint32_t v_count = nt_sprite_renderer_test_last_emit_vertex_count();
+    const uint32_t v_count = nt_sprite_test_last_emit().vertex_count;
     TEST_ASSERT_EQUAL_UINT32(4U, v_count); /* outline edge = thin quad */
 
     /* All 4 verts of the LAST emit (one outline edge) must have Y inside the

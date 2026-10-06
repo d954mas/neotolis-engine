@@ -12,6 +12,7 @@
 #include "material/nt_material.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
@@ -107,10 +108,10 @@ static void test_defaults_ride_every_base_emit_in_one_batch(void) {
 
     /* The custom REGION is the last emit; everything staged before it is a base emit:
      * rect (4) + border + plain image (4) + slice9 (16). */
-    const uint32_t first_widget_vertex = nt_sprite_renderer_test_last_emit_first_vertex();
+    const uint32_t first_widget_vertex = nt_sprite_test_last_emit().first_vertex;
     TEST_ASSERT_GREATER_THAN_UINT32(4U + 4U + 16U, first_widget_vertex);
     assert_batch_range_carries_defaults(0U, first_widget_vertex);
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     for (uint32_t v = 0; v < 4U; ++v) {
         float got[4] = {0};
         nt_sprite_renderer_test_batch_custom(first_widget_vertex + v, got, 4);
@@ -178,19 +179,30 @@ static void test_geometry_widget_shares_base_batch_aligned(void) {
 
     declare_mixed_frame(mat, false);
     nt_ui_walk(s_fx.ctx, &target);
-    const uint32_t base_end = nt_sprite_renderer_test_last_emit_first_vertex() + nt_sprite_renderer_test_last_emit_vertex_count();
+    const uint32_t base_end = nt_sprite_test_last_emit().first_vertex + nt_sprite_test_last_emit().vertex_count;
     TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0U, base_end % 4U, "the base emits leave the batch off a quad boundary");
 
+    /* A fresh frame: the second walk's vertices start where the first walk's did. */
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     declare_mixed_frame(mat, true);
     nt_ui_walk(s_fx.ctx, &target);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
-    const uint32_t first = nt_sprite_renderer_test_last_emit_first_vertex();
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    const uint32_t first = nt_sprite_test_last_emit().first_vertex;
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     TEST_ASSERT_EQUAL_UINT32(0U, first % 4U);
     TEST_ASSERT_TRUE_MESSAGE(first > base_end && first < base_end + 4U, "padding is 1..3 vertices");
-    for (uint32_t v = 0; v < base_end; ++v) {
+    /* Every emit starts on a quad boundary, so padding also sits between the base emits: check the
+     * vertices the base indices reference. */
+    const uint32_t *indices = (const uint32_t *)g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].staging;
+    const uint32_t base_index_end = nt_sprite_test_last_emit().first_index;
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, base_index_end);
+    for (uint32_t i = 0; i < base_index_end; ++i) {
+        TEST_ASSERT_LESS_THAN_UINT32(base_end, indices[i]);
         float got[8] = {0};
-        nt_sprite_renderer_test_batch_custom(v, got, 8);
+        nt_sprite_renderer_test_batch_custom(indices[i], got, 8);
         TEST_ASSERT_EQUAL_MEMORY_MESSAGE(k_radial_defaults, got, sizeof k_radial_defaults, "base emit bakes the material defaults");
     }
 

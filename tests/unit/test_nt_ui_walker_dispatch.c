@@ -10,6 +10,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
@@ -79,8 +80,8 @@ static void test_dispatch_rectangle(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     /* White region is 4 verts/6 indices -- emit_region preserves it. */
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_renderer_test_last_emit_index_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_test_last_emit().index_count);
     /* Walker element count delta matches frozen_cmds.length. */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_command_count(s_fx.ctx));
 }
@@ -96,18 +97,17 @@ static void test_dispatch_border_emits_4_rects(void) {
     c->renderData.border.width = (Clay_BorderWidth){.left = 2, .right = 2, .top = 2, .bottom = 2, .betweenChildren = 0};
     inject_frozen_cmds(1);
 
-    /* Snapshot draw-call counter before walk. emit_border calls
-     * emit_screen_rect 4 times against the same sprite material + atlas;
-     * they all batch into one cmd that flushes at walk exit. */
-    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+    /* emit_border calls emit_screen_rect 4 times against the same sprite material + atlas page,
+     * so the 4 sides are one compatible sequence. */
+    const uint32_t calls_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     /* Last emit is still a 4-vert white quad. */
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
-    /* All 4 sides batch into one cmd; walker exit flush adds exactly 1 draw call. */
-    TEST_ASSERT_EQUAL_UINT32(calls_before + 1U, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
+    /* Adjacent compatible emits merge into one recorded draw. */
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 1U, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 /* TEXT command with empty font slot is a contract violation -- emit_text
@@ -147,8 +147,8 @@ static void test_dispatch_image(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     /* Polygon hull preservation: emit_image must NOT collapse to 4-vert quad. */
-    TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_renderer_test_last_emit_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(12U, nt_sprite_renderer_test_last_emit_index_count());
+    TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_test_last_emit().vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(12U, nt_sprite_test_last_emit().index_count);
 }
 
 /* SCISSOR_START + SCISSOR_END are dispatched
@@ -243,7 +243,7 @@ static void test_dispatch_image_tinted_packs_color(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
 }
 
 /* Rounded RECT goes through the tessellated-fan path (>4 verts). */
@@ -258,8 +258,8 @@ static void test_dispatch_rectangle_rounded_emits_fan(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_GREATER_THAN_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
-    TEST_ASSERT_GREATER_THAN_UINT32(6U, nt_sprite_renderer_test_last_emit_index_count());
+    TEST_ASSERT_GREATER_THAN_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
+    TEST_ASSERT_GREATER_THAN_UINT32(6U, nt_sprite_test_last_emit().index_count);
 }
 
 /* Zero cornerRadius keeps the 4-vert fast path. */
@@ -274,8 +274,8 @@ static void test_dispatch_rectangle_zero_radius_keeps_fast_path(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_renderer_test_last_emit_index_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_test_last_emit().index_count);
 }
 
 /* Rounded BORDER goes through the ring-strip path (>4 verts). */
@@ -291,7 +291,7 @@ static void test_dispatch_border_rounded_emits_strip(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_GREATER_THAN_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_GREATER_THAN_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
 }
 
 /* emit_geometry samples the centroid (mean of 4 corner UVs) -- NOT vertex[0]'s
@@ -310,7 +310,7 @@ static void test_dispatch_rounded_rect_uv_is_centroid_not_corner(void) {
 
     /* Every emitted vertex must carry the SAME UV (solid-color shape).
      * Spot-check vertex 0 and vertex 1; they share by contract. */
-    const uint32_t emitted = nt_sprite_renderer_test_last_emit_vertex_count();
+    const uint32_t emitted = nt_sprite_test_last_emit().vertex_count;
     TEST_ASSERT_GREATER_THAN_UINT32(2U, emitted);
     uint16_t uv0[2];
     uint16_t uv1[2];
@@ -337,7 +337,7 @@ static void test_dispatch_rect_asymmetric_radii_no_over_clamp(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     /* 1 center + 4 * 7 arc points = 29 verts. */
-    TEST_ASSERT_EQUAL_UINT32(29U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(29U, nt_sprite_test_last_emit().vertex_count);
 
     /* Vertex 1 = TL arc west point with the unswapped TL radius (input=40);
      * py = vh - (y + tl) = 600 - 0 - 40 = 560. Pins both the non-clamp
@@ -365,7 +365,7 @@ static void test_dispatch_border_rounded_partial_widths(void) {
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_sprite_test_last_emit().vertex_count);
 }
 
 /* width > radius: inner radius clamps to 0 (corner "filled" inside). */
@@ -380,7 +380,7 @@ static void test_dispatch_border_width_exceeds_radius(void) {
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_sprite_test_last_emit().vertex_count);
 }
 
 /* Mixed corners (some sharp, some rounded) in one BORDER. Locks current
@@ -401,7 +401,7 @@ static void test_dispatch_border_mixed_radii(void) {
 
     /* SEG=6 (private to nt_ui.c): 2 sharp corners give 2 pairs = 4 verts.
      * 2 rounded corners give 2*(6+1) = 14 pairs = 28 verts. Total 32. */
-    TEST_ASSERT_EQUAL_UINT32(32U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(32U, nt_sprite_test_last_emit().vertex_count);
 }
 
 /* Rounded IMAGE asserts -- rounded edges must be baked into the atlas. */
@@ -527,11 +527,11 @@ static void test_dispatch_3d_main_walk_skips_debug_layer(void) {
     c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
     inject_frozen_cmds(1);
 
-    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+    const uint32_t calls_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 static void test_dispatch_3d_debug_layer_draws_in_screen_space_debug_walk(void) {
@@ -647,12 +647,12 @@ static void test_dispatch_image_not_ready_silent(void) {
     c->renderData.image.imageData = &bad;
     inject_frozen_cmds(1);
 
-    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+    const uint32_t calls_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 int main(void) {

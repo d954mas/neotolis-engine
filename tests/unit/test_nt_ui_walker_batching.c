@@ -5,7 +5,9 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
+#include "graphics/nt_gfx.h"
 #include "renderers/nt_sprite_renderer.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
@@ -52,16 +54,17 @@ static void make_text(int idx, float x) {
 }
 
 static int s_custom_calls;
+static uint32_t s_draws_at_custom;
 static void custom_cb(const nt_ui_custom_frame_t *frame, void *user) {
     (void)frame;
     (void)user;
-    /* Callback may bind its own pipeline -- sprite staging must be empty. */
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_sprite_renderer_test_vertex_count());
+    /* The callback may bind its own pipeline: every sprite before it is already recorded. */
+    s_draws_at_custom = nt_gfx_draw_calls(&g_nt_gfx.counters);
     ++s_custom_calls;
 }
 
-/* RECTs on layer 0 + TEXTs on layer 1: layer sort collapses interleaved
- * RTRTRT to 1 sprite dc (sprites batch, single sprite flush on first TEXT). */
+/* RECTs on layer 0 + TEXTs on layer 1: the layer sort puts the three RECTs ahead of the TEXTs, so they
+ * record 1 sprite draw (the stub-font text draws nothing). */
 static void test_same_z_rect_text_batches(void) {
     make_rect(0, 0);
     make_text(1, 20);
@@ -77,7 +80,7 @@ static void test_same_z_rect_text_batches(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
-/* Each scissor transition force-flushes to preserve clip scope. */
+/* Each scissor transition splits the sprite draws to preserve clip scope. */
 static void test_scissor_is_hard_barrier(void) {
     make_rect(0, 0);
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
@@ -89,15 +92,16 @@ static void test_scissor_is_hard_barrier(void) {
     make_rect(4, 40);
     inject_frozen_cmds(5);
 
-    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+    const uint32_t calls_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(calls_before + 3U, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 3U, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
-/* CUSTOM callback sees clean renderer state (assert inside cb). */
-static void test_custom_is_hard_barrier(void) {
+/* The CUSTOM callback runs after the preceding sprite is recorded. It records nothing here, so the
+ * sprite after it continues the same draw. */
+static void test_custom_runs_after_recorded_sprites(void) {
     s_custom_calls = 0;
     nt_ui_set_custom_handler(s_fx.ctx, custom_cb, NULL);
 
@@ -108,12 +112,13 @@ static void test_custom_is_hard_barrier(void) {
     make_rect(2, 20);
     inject_frozen_cmds(3);
 
-    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+    const uint32_t calls_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_INT(1, s_custom_calls);
-    TEST_ASSERT_EQUAL_UINT32(calls_before + 2U, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 1U, s_draws_at_custom);
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 1U, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 /* Vertex 0 of an IMAGE lands at the bbox centre with the fixture's origin-(0,0) white region, a RECT's
@@ -271,7 +276,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_same_z_rect_text_batches);
     RUN_TEST(test_scissor_is_hard_barrier);
-    RUN_TEST(test_custom_is_hard_barrier);
+    RUN_TEST(test_custom_runs_after_recorded_sprites);
     RUN_TEST(test_band_layer_orders_image_after_rect_inside_overlay);
     RUN_TEST(test_band_base_sprite_does_not_paint_over_overlay_image);
     RUN_TEST(test_same_band_same_layer_keeps_declaration_order);

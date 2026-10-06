@@ -21,6 +21,7 @@
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "resource/nt_resource.h"
 #include "sprite_comp/nt_sprite_comp.h"
 
@@ -296,15 +297,12 @@ void setUp(void) {
 
     nt_material_init(&(nt_material_desc_t){.max_materials = 32});
 
-    /* Begin frame/pass so flush's draw_indexed doesn't trip the gfx-stub
-     * assert (mirrors test_sprite_renderer setUp). */
+    /* Emits record draw_indexed at the call, which needs an open pass. */
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 void tearDown(void) {
-    if (nt_sprite_renderer_test_initialized()) {
-        nt_sprite_renderer_shutdown();
-    }
+    nt_sprite_renderer_shutdown();
     nt_gfx_end_pass();
 
     nt_material_shutdown();
@@ -323,9 +321,6 @@ void tearDown(void) {
 /* ---- Test 1: direct call writes vertex_count verts ---- */
 
 static void test_emit_region_direct_call(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
     s_atlas_res = register_test_atlas(0xA1ULL);
     nt_material_t mat = create_test_material();
 
@@ -341,50 +336,13 @@ static void test_emit_region_direct_call(void) {
     };
     nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, /*flip_bits=*/0U, NULL, 0U);
 
-    /* Probe captured BEFORE flush resets vertex_count. */
-    TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_last_emit_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(6, nt_sprite_renderer_test_last_emit_index_count());
-
-    nt_sprite_renderer_flush();
-}
-
-/* ---- Test 2: capacity guard auto-flush + reopen ---- */
-
-static void test_emit_region_capacity_guard(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
-    s_atlas_res = register_test_atlas(0xA2ULL);
-    nt_material_t mat = create_test_material();
-    nt_sprite_renderer_set_material(mat);
-
-    /* Identity mat4 (col0=1, col1=1, w=1). */
-    const float m[16] = {
-        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-    };
-
-    /* Emit enough quads to overflow staging at least once. 16384/4=4096
-     * quads fit before the capacity guard trips. Emit 4097 to force exactly
-     * one auto-flush+reopen. */
-    const uint32_t quad_capacity = NT_SPRITE_RENDERER_MAX_VERTICES / 4U;
-    const uint32_t emit_count = quad_capacity + 2U;
-    for (uint32_t i = 0; i < emit_count; ++i) {
-        nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
-    }
-    /* Final explicit flush so the per-renderer counter captures the trailing chunk. */
-    nt_sprite_renderer_flush();
-
-    /* At least 2 draw calls must have happened — one from the capacity-
-     * triggered auto-flush mid-loop + one from the final flush. */
-    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(2U, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_test_last_emit().vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(6, nt_sprite_test_last_emit().index_count);
 }
 
 /* ---- Test 3: polygon-hull vertex_count preserved ---- */
 
 static void test_emit_region_polygon_hull_vertex_count_preserved(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
     s_atlas_res = register_test_atlas(0xA3ULL);
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
@@ -394,18 +352,13 @@ static void test_emit_region_polygon_hull_vertex_count_preserved(void) {
     };
     nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_POLYGON_REGION_IDX, m, 0.5F, 0.5F, 0xFFFFFFFFU, 0U, NULL, 0U);
 
-    TEST_ASSERT_EQUAL_UINT32(6, nt_sprite_renderer_test_last_emit_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(12, nt_sprite_renderer_test_last_emit_index_count());
-
-    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(6, nt_sprite_test_last_emit().vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(12, nt_sprite_test_last_emit().index_count);
 }
 
-/* ---- Test 4: set_material auto-flush on change ---- */
+/* ---- Test 4: one material merges, a material change splits ---- */
 
-static void test_set_material_auto_flush_on_change(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
+static void test_set_material_same_merges_change_splits(void) {
     s_atlas_res = register_test_atlas(0xA4ULL);
     nt_material_t mat_a = create_test_material();
     nt_material_t mat_b = create_test_material();
@@ -415,26 +368,22 @@ static void test_set_material_auto_flush_on_change(void) {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
     };
 
+    const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_sprite_renderer_set_material(mat_a);
     nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    TEST_ASSERT_EQUAL_UINT32(draws_before + 1U, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
-    /* Same handle re-binding does NOT flush (current_mat still .id of mat_a,
-     * cmd_count > 0 after the emit above so the no-op branch fires). */
-    const uint32_t calls_before_same = nt_sprite_renderer_test_draw_call_count();
+    /* Re-selecting the same material keeps the index range contiguous: the draw merges. */
     nt_sprite_renderer_set_material(mat_a);
     nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
-    TEST_ASSERT_EQUAL_UINT32(calls_before_same, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(draws_before + 1U, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
-    /* Different .id triggers auto-flush (one extra draw call recorded). */
+    /* Selecting records nothing; the next emit on another material starts a draw. */
     nt_sprite_renderer_set_material(mat_b);
-    const uint32_t calls_after_change = nt_sprite_renderer_test_draw_call_count();
-    TEST_ASSERT_EQUAL_UINT32(calls_before_same + 1U, calls_after_change);
-
-    /* Subsequent emit on mat_b still works (cmd reopened). */
+    TEST_ASSERT_EQUAL_UINT32(draws_before + 1U, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
-    TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_last_emit_vertex_count());
-
-    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_test_last_emit().vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(draws_before + 2U, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 // #region slice9_emit
@@ -507,9 +456,6 @@ static nt_resource_t register_slice9_atlas(uint64_t rid) {
 
 /* Test: basic slice9 emits 16 verts + 54 indices (shared 4x4 grid) */
 static void test_slice9_basic(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
     nt_resource_t atlas = register_slice9_atlas(0xC1ULL);
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
@@ -517,19 +463,14 @@ static void test_slice9_basic(void) {
     const uint16_t b4[4] = {4, 4, 4, 4};
     nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 100.0F, 80.0F, 0.0F, 0.0F, b4, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
 
-    TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_renderer_test_last_emit_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(54, nt_sprite_renderer_test_last_emit_index_count());
-
-    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(16, nt_sprite_test_last_emit().vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(54, nt_sprite_test_last_emit().index_count);
 }
 
 /* Test: verify grid vertex positions match expected splits.
  * 4x4 shared grid: vertex index = row*4 + col. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_slice9_positions(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
     nt_resource_t atlas = register_slice9_atlas(0xC2ULL);
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
@@ -570,16 +511,11 @@ static void test_slice9_positions(void) {
     nt_sprite_renderer_test_last_emit_position(15, pos);
     TEST_ASSERT_TRUE(pos[0] == 100.0F); /* NOLINT */
     TEST_ASSERT_TRUE(pos[1] == 80.0F);  /* NOLINT */
-
-    nt_sprite_renderer_flush();
 }
 
 /* Test: flip mirrors the grid by negating positions; bands and UV cuts ride along.
  * Grid layout: vertex index = row*4 + col. */
 static void test_slice9_flip_x(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
     nt_resource_t atlas = register_slice9_atlas(0xC3ULL);
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
@@ -608,16 +544,11 @@ static void test_slice9_flip_x(void) {
     nt_sprite_renderer_test_last_emit_texcoord(2, uv);
     TEST_ASSERT_TRUE(pos[0] == -92.0F); /* NOLINT */
     TEST_ASSERT_EQUAL_UINT16(4500, uv[0]);
-
-    nt_sprite_renderer_flush();
 }
 
 /* Test: FLIP_Y is the same mirror on the other axis.
  * Grid layout: vertex index = row*4 + col. */
 static void test_slice9_flip_y(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
     nt_resource_t atlas = register_slice9_atlas(0xC4ULL);
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
@@ -644,39 +575,27 @@ static void test_slice9_flip_y(void) {
     nt_sprite_renderer_test_last_emit_texcoord(8, uv);
     TEST_ASSERT_TRUE(pos[1] == -76.0F); /* NOLINT */
     TEST_ASSERT_EQUAL_UINT16(2250, uv[1]);
-
-    nt_sprite_renderer_flush();
 }
 
 /* Test: tombstone region emits nothing */
 static void test_slice9_tombstone_noop(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
     s_atlas_res = register_test_atlas(0xC5ULL);
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
 
-    /* No tombstone region in our fixture, but we can verify vertex count
-     * stays at 0 by checking before/after. First emit a normal region to
-     * confirm setup works, then verify slice9 count was set to 36. */
-    uint32_t vc_before = nt_sprite_renderer_test_vertex_count();
+    /* No tombstone region in our fixture: check that a normal slice9 adds exactly its 16 vertices. */
+    const uint32_t used_before = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used;
 
-    /* Emit a normal slice9 — should work and advance vertex_count by 16. */
     nt_resource_t atlas = register_slice9_atlas(0xC6ULL);
     const uint16_t b2[4] = {2, 2, 2, 2};
     nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 50.0F, 50.0F, 0.0F, 0.0F, b2, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
-    TEST_ASSERT_EQUAL_UINT32(vc_before + 16U, nt_sprite_renderer_test_vertex_count());
-
-    nt_sprite_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_test_last_emit().vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(used_before + (16U * (uint32_t)sizeof(nt_sprite_vertex_t)), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
 }
 
 /* Pins m[12]/m[13] translation handling — every grid vertex shifted (+50, +30). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_slice9_mat4_translation(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
     nt_resource_t atlas = register_slice9_atlas(0xC7ULL);
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
@@ -698,16 +617,11 @@ static void test_slice9_mat4_translation(void) {
     nt_sprite_renderer_test_last_emit_position(15, pos);
     TEST_ASSERT_TRUE(pos[0] == 150.0F); /* NOLINT */
     TEST_ASSERT_TRUE(pos[1] == 110.0F); /* NOLINT */
-
-    nt_sprite_renderer_flush();
 }
 
 /* 90° rotation around Z (column-major). Catches m[1]↔m[4] swap (row-major confusion). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_slice9_mat4_rotation_90(void) {
-    nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&rd));
-
     nt_resource_t atlas = register_slice9_atlas(0xC8ULL);
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
@@ -742,8 +656,6 @@ static void test_slice9_mat4_rotation_90(void) {
     nt_sprite_renderer_test_last_emit_position(15, pos);
     TEST_ASSERT_TRUE(pos[0] == -80.0F); /* NOLINT */
     TEST_ASSERT_TRUE(pos[1] == 100.0F); /* NOLINT */
-
-    nt_sprite_renderer_flush();
 }
 
 // #endregion
@@ -751,9 +663,8 @@ static void test_slice9_mat4_rotation_90(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_emit_region_direct_call);
-    RUN_TEST(test_emit_region_capacity_guard);
     RUN_TEST(test_emit_region_polygon_hull_vertex_count_preserved);
-    RUN_TEST(test_set_material_auto_flush_on_change);
+    RUN_TEST(test_set_material_same_merges_change_splits);
     RUN_TEST(test_slice9_basic);
     RUN_TEST(test_slice9_positions);
     RUN_TEST(test_slice9_flip_x);

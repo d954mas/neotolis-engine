@@ -273,78 +273,13 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
 
 // #endregion
 
-// #region bound state
-/* Owns its resolved texture ids by value; hashes, samplers and params are borrowed from
- * nt_material_info_t, or from a sprite cmd whose slot 0 is the atlas page.
- * Hashes are captured so a cmd whose material died still replays its sampler units. */
-typedef struct {
-    uint8_t tex_count;
-    const uint32_t *tex_name_hashes;                 /* [tex_count] */
-    uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES]; /* [tex_count]; 0 = unresolved */
-    const nt_sampler_t *tex_samplers;                /* [tex_count]; .id == 0 = texture default */
-    uint8_t param_count;
-    const uint32_t *param_name_hashes; /* [param_count] */
-    const float (*params)[4];
-} nt_renderer_material_view_t;
-
-/* Zero-init = nothing bound; lives for one sprite draw_list or flush. Material uniforms replay on
- * a material or pipeline change. */
-typedef struct {
-    uint32_t pipeline;
-    uint32_t vertex_input;
-    uint32_t material;
-} nt_renderer_bound_t;
-
-static inline void nt_renderer_bind_pipeline(nt_renderer_bound_t *b, nt_pipeline_t p) {
-    if (p.id == b->pipeline) {
-        return;
-    }
-    nt_gfx_bind_pipeline(p);
-    b->pipeline = p.id;
-    /* Uniforms are program state and the new pipeline may sit on another program,
-     * so the same material has to write them again. */
-    b->material = 0;
-}
-
-static inline void nt_renderer_bind_vertex_input(nt_renderer_bound_t *b, nt_vertex_input_t vi) {
-    if (vi.id == b->vertex_input) {
-        return;
-    }
-    nt_gfx_bind_vertex_input(vi);
-    b->vertex_input = vi.id;
-}
-
-/* Stateless program state: every vec4 param. Sampler units are fixed at link and
+/* Every declared vec4 param. Uniforms are program state; sampler units are fixed at link and
  * nobody writes them. */
-static inline void nt_renderer_set_material_uniforms(const nt_renderer_material_view_t *v) {
-    for (uint8_t p = 0; p < v->param_count; p++) {
-        nt_gfx_set_uniform_vec4((nt_hash32_t){.value = v->param_name_hashes[p]}, v->params[p]);
+static inline void nt_renderer_set_material_uniforms(const nt_material_info_t *mi) {
+    for (uint8_t p = 0; p < mi->param_count; p++) {
+        nt_gfx_set_uniform_vec4((nt_hash32_t){.value = mi->param_name_hashes[p]}, mi->params[p]);
     }
 }
-
-static inline void nt_renderer_apply_material_uniforms(nt_renderer_bound_t *b, uint32_t material_id, const nt_renderer_material_view_t *v) {
-    if (material_id == b->material) {
-        return;
-    }
-    nt_renderer_set_material_uniforms(v);
-    b->material = material_id;
-}
-
-/* Semantic set: gfx ignores inactive names, validates active coverage, then
- * resolves every texture and sampler before issuing backend binds. */
-static inline void nt_renderer_apply_texture_slots(const nt_renderer_material_view_t *v) {
-    nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES];
-    for (uint8_t t = 0; t < v->tex_count; t++) {
-        bindings[t] = (nt_gfx_texture_binding_t){
-            .name = {.value = v->tex_name_hashes[t]},
-            .texture = {.id = v->resolved_tex[t]},
-            .sampler = v->tex_samplers[t],
-        };
-    }
-    nt_gfx_apply_texture_bindings(bindings, v->tex_count);
-}
-
-// #endregion
 
 /* Warn once to explain skipped draws without per-frame spam; pipeline insertion re-arms the flag. */
 static inline void nt_renderer_warn_program_not_ready(bool *warned, const nt_material_info_t *mat_info) {

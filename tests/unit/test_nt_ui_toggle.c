@@ -20,6 +20,7 @@
 #include "input/nt_input.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"

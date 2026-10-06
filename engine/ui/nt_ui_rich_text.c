@@ -24,7 +24,7 @@
 #include "ui/nt_ui_rich_tagset.h"
 #include "utf8/nt_utf8.h"
 
-/* Distinct z-order bands the self-emit walks (each adds a sprite+text flush boundary). A block with more
+/* Distinct z-order bands the self-emit walks (each adds a text flush boundary). A block with more
  * distinct <layer>s than this drops the over-cap layers BY ENCOUNTER ORDER (not by value) rather than OOB
  * the per-layer scratch. */
 #ifndef NT_UI_RICH_MAX_LAYERS
@@ -2039,7 +2039,7 @@ static void rich_emit_objects(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t
  * over-draws like OBJECT atoms (acceptable). Opacity is folded into the tint here -- no walker fold in self-emit. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- early-out guards + per-atom resolve/fx/model build in one linear pass
 static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer, nt_material_t image_mat) {
-    bool bound = false; /* per-call: each layer is its own drained batch -> rebind once per layer */
+    bool bound = false; /* per band: an earlier band's object draw_fn may have selected another material */
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
         if (s->kind != NT_RICH_ATOM_IMAGE || s->layer != layer) {
@@ -2211,24 +2211,21 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     /* id==0 -> neither style nor ctx gave a sprite material, so skip images. */
     const bool emit_images = image_mat.id != 0U;
 
-    /* Cross-renderer z is flush order (painter-order, depth off): emit ascending by layer and drain after
-     * EVERY band so band N lands before N+1 and the block is a self-contained z island. */
+    /* Painter order, depth off: sprites draw at the call, text at its flush. Emit ascending by layer and
+     * drain text after EVERY band so band N lands before N+1 and the block is a self-contained z island. */
     uint8_t layers[NT_UI_RICH_MAX_LAYERS];
     const uint32_t layer_count = rich_gather_layers(st, layers);
     for (uint32_t li = 0; li < layer_count; li++) {
         const uint8_t L = layers[li];
-        /* Within ONE band, kinds stack text < image < object: flush each batch BEFORE the next kind so it
-         * lands under it (painter-order). Mirrors emit_text's flush-sprites-before-text barrier -- an object
-         * draw_fn is opaque, so the band's images MUST be drained before it runs, not after. */
+        /* Within ONE band, kinds stack text < image < object: staged text lands before the band's images,
+         * which record at the call like everything an object draw_fn draws. */
         rich_emit_text_layer(st, frame, box_x, box_y, L);
         nt_text_renderer_flush(); /* text behind: land it before the band's images */
         if (emit_images) {
             rich_emit_images(st, frame, box_x, box_y, L, image_mat);
         }
-        nt_sprite_renderer_flush(); /* images behind: drain them BEFORE the objects' opaque draw_fns */
         rich_emit_objects(st, frame, box_x, box_y, L);
-        nt_sprite_renderer_flush(); /* safety drain: an object draw_fn that emitted UI sprites; no-op otherwise */
-        nt_text_renderer_flush();   /* safety drain: an object draw_fn that emitted text; no-op otherwise */
+        nt_text_renderer_flush(); /* safety drain: an object draw_fn that emitted text; no-op otherwise */
     }
 }
 // #endregion

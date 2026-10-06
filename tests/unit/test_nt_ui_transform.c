@@ -15,6 +15,7 @@
 #include "memory/nt_mem_scratch.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
@@ -96,7 +97,7 @@ static void test_walker_opacity_multiplies_alpha(void) {
     /* Opacity 0.25 attached via userData (no transform). Build_tree → tree_baked
      * opacity = 0.25 × walker's identity = 0.25. Walker emits with alpha ~ 64. */
     /* Walker emits 4 verts; assert_emit_vertex_count >= 4. */
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     uint8_t col[4];
     nt_sprite_renderer_test_last_emit_color(0U, col);
     char msg[128];

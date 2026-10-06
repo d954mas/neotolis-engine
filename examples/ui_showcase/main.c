@@ -68,6 +68,10 @@
 #endif
 
 #include "clay.h"
+
+/* Frame storage budget of the sprite geometry: the busiest tab peaks at about 67 KB / 37 KB. */
+#define UI_SHOWCASE_VERTEX_BYTES (256U * 1024U)
+#define UI_SHOWCASE_INDEX_BYTES (128U * 1024U)
 // #endregion
 
 // #region layers + reference resolution
@@ -3672,9 +3676,7 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        restore_result = nt_text_renderer_restore_gpu();
+        nt_result_t restore_result = nt_text_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         (void)restore_result;
         nt_shape_renderer_restore_gpu();
@@ -3938,6 +3940,8 @@ int main(int argc, char *argv[]) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = UI_SHOWCASE_VERTEX_BYTES;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = UI_SHOWCASE_INDEX_BYTES;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 
@@ -3959,8 +3963,6 @@ int main(int argc, char *argv[]) {
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});
 
     nt_shape_renderer_init(); /* <obj=cube/> renders a real 3D cube into its inline box (embedded shaders). */
-    nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
-    nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
 
     nt_ui_module_init();

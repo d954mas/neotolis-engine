@@ -39,6 +39,10 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
+/* Frame storage budget of the sprite geometry; the first scene peaks at about 0.6 KB / 0.2 KB. */
+#define RTT_SHOWCASE_VERTEX_BYTES (64U * 1024U)
+#define RTT_SHOWCASE_INDEX_BYTES (32U * 1024U)
+
 typedef struct {
     float position[2];
     float uv[2];
@@ -500,7 +504,6 @@ static void frame(void) {
             .label = "rtt_frame_uniforms",
         });
         restored = s_frame_ubo.id != 0 && restored;
-        restored = (nt_sprite_renderer_restore_gpu() == NT_OK) && restored;
         restored = (nt_text_renderer_restore_gpu() == NT_OK) && restored;
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
@@ -571,6 +574,8 @@ int main(void) {
     gfx_desc.max_render_targets = 8;
     gfx_desc.max_textures = 32;
     gfx_desc.max_pipelines = 32;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = RTT_SHOWCASE_VERTEX_BYTES;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = RTT_SHOWCASE_INDEX_BYTES;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
     nt_http_init();
@@ -585,8 +590,6 @@ int main(void) {
     nt_atlas_init();
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
-    nt_sprite_renderer_desc_t sprite_desc = nt_sprite_renderer_desc_defaults();
-    nt_sprite_renderer_init(&sprite_desc);
     nt_text_renderer_init();
     nt_ui_module_init();
     const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();

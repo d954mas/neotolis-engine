@@ -298,9 +298,7 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        restore_result = nt_text_renderer_restore_gpu();
+        nt_result_t restore_result = nt_text_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         (void)restore_result;
         nt_program_ref_drop(&s_sprite_program);
@@ -584,6 +582,9 @@ int main(int argc, char **argv) {
     NT_ASSERT(s_initial_count <= BUNNY_MAX && "--count exceeds BUNNY_MAX");
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    /* Every bunny is one rect quad: 4 vertices of 20 B and 6 uint32 indices. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = BUNNY_MAX * 4U * 20U;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = BUNNY_MAX * 6U * 4U;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 
@@ -609,8 +610,6 @@ int main(int argc, char **argv) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
-    nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
-    nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
 
     /* nt_metrics is the perf store; the overlay HUD is a pure consumer, so init metrics first. */

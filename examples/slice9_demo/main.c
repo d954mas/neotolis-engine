@@ -53,6 +53,10 @@
 #endif
 
 #include "clay.h"
+
+/* Frame storage budget of the sprite geometry; the first scene peaks at about 3 KB / 2 KB. */
+#define SLICE9_DEMO_VERTEX_BYTES (64U * 1024U)
+#define SLICE9_DEMO_INDEX_BYTES (32U * 1024U)
 // #endregion
 
 // #region styles
@@ -342,9 +346,7 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        restore_result = nt_text_renderer_restore_gpu();
+        nt_result_t restore_result = nt_text_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         (void)restore_result;
         nt_program_ref_drop(&s_sprite_program);
@@ -567,6 +569,8 @@ int main(int argc, char *argv[]) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = SLICE9_DEMO_VERTEX_BYTES;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = SLICE9_DEMO_INDEX_BYTES;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 
@@ -585,8 +589,6 @@ int main(int argc, char *argv[]) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
-    nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
-    nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
 
     nt_ui_module_init();
