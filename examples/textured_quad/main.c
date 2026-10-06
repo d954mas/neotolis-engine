@@ -21,6 +21,7 @@
  */
 
 #include "app/nt_app.h"
+#include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -477,7 +478,7 @@ int main(void) {
         *nt_material_comp_handle(s_cubes[i]) = s_cube_material;
 
         /* Set tint color */
-        nt_drawable_comp_set_color(s_cubes[i], s_cube_colors[i][0], s_cube_colors[i][1], s_cube_colors[i][2], s_cube_colors[i][3]);
+        nt_drawable_comp_set_color(s_cubes[i], nt_color_pack(s_cube_colors[i]));
     }
 
     /* Create frame uniforms UBO (updated each frame) */

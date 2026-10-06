@@ -5,6 +5,7 @@
 
 /* clang-format off */
 #include "renderers/nt_skinned_mesh_renderer.h"
+#include "color/nt_color.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "graphics/nt_gfx.h"
@@ -200,7 +201,7 @@ static nt_entity_t make_entity(nt_mesh_t mesh, nt_material_t material, nt_deform
     *nt_mesh_comp_handle(entity) = mesh;
     *nt_material_comp_handle(entity) = material;
     *nt_skin_comp_handle(entity) = binding;
-    nt_drawable_comp_set_color(entity, 1.0F, 1.0F, 1.0F, 1.0F);
+    nt_drawable_comp_set_color(entity, 0xFFFFFFFFU);
     nt_transform_comp_update();
     return entity;
 }
@@ -518,8 +519,7 @@ void test_color_keeps_skin_fields_at_their_layout_offsets(void) {
 
     nt_material_t rgba8 = make_material_ex(program, NT_RESOURCE_INVALID, NT_SAMPLER_DEFAULT);
     nt_entity_t rgba8_entity = make_entity(mesh, rgba8, binding);
-    nt_drawable_comp_set_color(rgba8_entity, -0.25F, 0.5F, 1.25F, 1.0F);
-    nt_drawable_comp_set_alpha(rgba8_entity, 0.25F);
+    nt_drawable_comp_set_color(rgba8_entity, nt_color_with_alpha(nt_color_pack((const float[4]){-0.25F, 0.5F, 1.25F, 1.0F}), 0.25F));
     nt_render_item_t item = make_item(rgba8_entity, rgba8, mesh);
     skinned_draw_list(&item, 1);
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();

@@ -1,5 +1,6 @@
 /* Real-GL proof for the skinned renderer and the shipped skin.glsl contract. */
 
+#include "color/nt_color.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "graphics/nt_gfx.h"
@@ -316,7 +317,7 @@ static nt_entity_t make_entity(nt_mesh_t mesh, nt_material_t material, const nt_
     TEST_ASSERT_TRUE(nt_drawable_comp_add(entity));
     *nt_mesh_comp_handle(entity) = mesh;
     *nt_material_comp_handle(entity) = material;
-    nt_drawable_comp_set_color(entity, 1.0F, 1.0F, 1.0F, 1.0F);
+    nt_drawable_comp_set_color(entity, 0xFFFFFFFFU);
     if (binding != NULL) {
         TEST_ASSERT_TRUE(nt_skin_comp_add(entity));
         *nt_skin_comp_handle(entity) = *binding;
@@ -658,7 +659,7 @@ static void draw_tinted_and_white_instances(nt_mesh_t mesh, nt_material_t materi
     const bool skinned = binding != NULL;
     nt_entity_t tinted = make_entity(mesh, material, binding);
     nt_entity_t white = make_entity(mesh, material, binding);
-    nt_drawable_comp_set_color(tinted, 0.1F, 0.2F, 0.3F, 1.0F);
+    nt_drawable_comp_set_color(tinted, nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 1.0F}));
     nt_transform_comp_set_position(tinted, 0.0F, 0.45F, 0.0F);
     nt_transform_comp_set_position(white, 0.0F, -0.45F, 0.0F);
     nt_transform_comp_update();

@@ -1,6 +1,6 @@
 /* L2 devapi entity-write group (entity.set) via submit() (no socket): set writable component fields
    through the component apply() hooks. Asserts the happy single + batch paths land through the real
-   setters (dirty / packed mirror / quaternion normalize) and every bad_params path (stale handle,
+   setters (dirty / color packing / quaternion normalize) and every bad_params path (stale handle,
    unknown component/field, read-only field, arity/range/finite/degenerate, batch whole-or-nothing). */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
@@ -95,9 +95,8 @@ static void test_set_rotation_normalized(void) {
 static void test_set_color_and_visible(void) {
     nt_entity_t e = nt_entity_create();
     TEST_ASSERT_TRUE(nt_drawable_comp_add(e));
-    cJSON_Delete(parse_ok(set_submit(e.id, "\"component\":\"drawable\",\"field\":\"color\",\"value\":[0.5,0.25,0,1]")));
-    const float *c = nt_drawable_comp_color(e);
-    TEST_ASSERT_TRUE(fabsf(c[0] - 0.5F) < 0.001F);
+    cJSON_Delete(parse_ok(set_submit(e.id, "\"component\":\"drawable\",\"field\":\"color\",\"value\":[0.1,0.25,0.5,1]")));
+    TEST_ASSERT_EQUAL_HEX32(0xFF80401AU, nt_drawable_comp_color(e)); /* stored as RGBA8 */
     cJSON_Delete(parse_ok(set_submit(e.id, "\"component\":\"drawable\",\"field\":\"visible\",\"value\":false")));
     TEST_ASSERT_FALSE(*nt_drawable_comp_visible(e));
 }
@@ -151,10 +150,10 @@ static void test_degenerate_quaternion_bad_params(void) {
 static void test_color_out_of_range_rejected_no_desync(void) {
     nt_entity_t e = nt_entity_create();
     TEST_ASSERT_TRUE(nt_drawable_comp_add(e));
-    /* color 2.0 would desync the raw float vs the clamped packed byte -> rejected at the wire. */
+    /* color 2.0 is outside the stored RGBA8 range -> rejected at the wire, not silently clamped. */
     assert_bad_params(set_submit(e.id, "\"component\":\"drawable\",\"field\":\"color\",\"value\":[2,0,0,1]"));
     /* unchanged: still the default white. */
-    TEST_ASSERT_TRUE(fabsf(nt_drawable_comp_color(e)[0] - 1.0F) < 0.001F);
+    TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFFU, nt_drawable_comp_color(e));
 }
 
 /* ---- batch (whole-or-nothing) ---- */

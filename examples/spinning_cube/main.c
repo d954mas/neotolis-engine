@@ -1,4 +1,5 @@
 #include "app/nt_app.h"
+#include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -145,7 +146,8 @@ static void draw_shape(void) {
 
     float *pos = nt_transform_comp_position(s_shape_entity);
     float *rot = nt_transform_comp_rotation(s_shape_entity);
-    const float *col = nt_drawable_comp_color(s_shape_entity);
+    float col[4];
+    nt_color_unpack(nt_drawable_comp_color(s_shape_entity), col);
     const float *wcol = s_wire_color;
     bool draw_solid = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_SOLID);
     bool draw_wire = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_WIRE);
@@ -247,7 +249,7 @@ static void set_shape_scale(void) {
 
 static void set_shape_color(void) {
     const float *src = s_shape_colors[s_current_shape];
-    nt_drawable_comp_set_color(s_shape_entity, src[0], src[1], src[2], src[3]);
+    nt_drawable_comp_set_color(s_shape_entity, nt_color_pack(src));
 }
 
 /* ---- frame callback ---- */

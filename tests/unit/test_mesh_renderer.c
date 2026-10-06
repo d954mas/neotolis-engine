@@ -14,6 +14,7 @@
 #include "transform_comp/nt_transform_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "material_comp/nt_material_comp.h"
+#include "color/nt_color.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "material/nt_material.h"
 #include "resource/nt_resource.h"
@@ -254,7 +255,7 @@ static nt_entity_t create_test_entity(nt_mesh_t mesh, nt_material_t mat) {
     nt_transform_comp_update();
 
     /* Set white color */
-    nt_drawable_comp_set_color(e, 1.0F, 1.0F, 1.0F, 1.0F);
+    nt_drawable_comp_set_color(e, 0xFFFFFFFFU);
 
     return e;
 }
@@ -1187,7 +1188,7 @@ void test_instances_carry_their_drawable_colors(void) {
     nt_material_t mat = create_test_material();
     nt_entity_t tinted = create_test_entity(mesh, mat);
     nt_entity_t white = create_test_entity(mesh, mat);
-    nt_drawable_comp_set_color(tinted, 0.1F, 0.2F, 0.3F, 1.0F);
+    nt_drawable_comp_set_color(tinted, nt_color_pack((const float[4]){0.1F, 0.2F, 0.3F, 1.0F}));
     const uint32_t key = nt_mesh_renderer_batch_key(mat, mesh);
     nt_render_item_t items[2] = {{.entity = tinted.id, .batch_key = key}, {.entity = white.id, .batch_key = key}};
 

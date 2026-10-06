@@ -17,12 +17,15 @@ The drawable component is SoA. Fields:
 |---------|---------------|--------------|--------------------------------------|
 | tag     | `nt_hash32_t` | `{0}`        | pass/group filter; set via `nt_hash32_str("world")` etc. |
 | visible | `bool`        | `true`       | render visibility only               |
-| color   | `vec4`        | `(1,1,1,1)`  | object tint / alpha multiplier       |
+| color   | `uint32_t`    | `0xFFFFFFFF` | RGBA8 `0xAABBGGRR` object tint / alpha multiplier |
 
-Accessors for `tag` and `visible` return mutable pointers. Color is mutated
-through `nt_drawable_comp_set_color()` / `nt_drawable_comp_set_alpha()` so the
-module can keep its float SoA and packed RGBA8 mirror in sync for renderers.
-API lives in `engine/drawable_comp/nt_drawable_comp.h`.
+Accessors for `tag` and `visible` return mutable pointers. Color is stored and
+set as packed RGBA8 ([color](architecture.md#color)): build it with
+`nt_color_pack` and change only alpha with `nt_color_with_alpha`
+(`engine/color/nt_color.h`); floats clamp to [0,1] and quantize to 1/255.
+`nt_render_is_visible` hides an entity whose alpha byte is 0 (alpha below
+1/510), whatever its material's blend. API lives in
+`engine/drawable_comp/nt_drawable_comp.h`.
 
 Per-entity shader params (`params0`) deferred to ShaderParamsComponent — add when per-entity shader effects are needed (#98).
 

@@ -4,7 +4,7 @@
 Exercises entity.set end-to-end against a REAL running examples/devapi_host over loopback TCP — the
 layer only a live socket proves: the host seeds entities with transform/drawable, a bot reads their
 named-group shape, WRITES fields through the component apply() hooks (which maintain the engine
-invariants: transform dirty, drawable packed mirror, quaternion normalize), and reads the result back.
+invariants: transform dirty, drawable color packing, quaternion normalize), and reads the result back.
 Also covers the read named-group shape over the wire (the host previously had 0 entities, so that path
 was never socket-tested) and every bad_params path + batch whole-or-nothing atomicity.
 

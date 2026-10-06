@@ -34,7 +34,7 @@ static inline void nt_color_unpack(uint32_t packed, float out_rgba[4]) {
 /* Saturate a [0,1] channel and round-to-nearest into a byte. NaN -> 0 (safe). */
 static inline uint32_t nt_color_channel_to_u8(float c) {
     const float v = c * 255.0F;
-    if (v <= 0.0F) {
+    if (!(v > 0.0F)) { /* also NaN: converting it to an integer is undefined */
         return 0U;
     }
     if (v >= 255.0F) {
@@ -52,6 +52,9 @@ static inline uint32_t nt_color_pack(const float rgba[4]) {
     const uint32_t a = nt_color_channel_to_u8(rgba[3]);
     return r | (g << 8) | (b << 16) | (a << 24);
 }
+
+/* Replaces the alpha byte of a packed color; RGB bytes stay exact. */
+static inline uint32_t nt_color_with_alpha(uint32_t packed, float a) { return (packed & 0x00FFFFFFU) | (nt_color_channel_to_u8(a) << 24); }
 
 /* One hex nibble 0..15; 0xFF on a non-hex char. */
 static inline uint8_t nt_color_hex_nibble(char c) {

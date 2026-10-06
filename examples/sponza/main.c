@@ -28,6 +28,7 @@
  */
 
 #include "app/nt_app.h"
+#include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -345,7 +346,7 @@ static void load_scene_from_manifest(void) {
         *nt_material_comp_handle(s_entities[i]) = s_materials[i];
 
         /* Set drawable color from manifest base_color */
-        nt_drawable_comp_set_color(s_entities[i], mn->base_color[0], mn->base_color[1], mn->base_color[2], mn->base_color[3]);
+        nt_drawable_comp_set_color(s_entities[i], nt_color_pack(mn->base_color));
     }
 
     s_entity_count = node_count;
