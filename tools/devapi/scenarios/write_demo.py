@@ -143,7 +143,7 @@ def check_write_color_visible(client: DevApiClient) -> None:
     client.result("entity.set", {"id": eid, "component": "drawable", "field": "color", "value": [0.2, 0.4, 0.6, 1]})
     client.result("entity.set", {"id": eid, "component": "drawable", "field": "visible", "value": False})
     dr = _read_entity(client, eid)["drawable"]
-    assert _approx(dr["color"], [0.2, 0.4, 0.6, 1]), f"color read back as {dr['color']}"
+    assert _approx(dr["color"], [0.2, 0.4, 0.6, 1], tol=0.5 / 255), f"color read back as {dr['color']}"  # RGBA8 step
     assert dr["visible"] is False, f"visible read back as {dr['visible']!r}, expected False"
     print("PASS[4/6] entity.set color + visible landed over the wire.")
 

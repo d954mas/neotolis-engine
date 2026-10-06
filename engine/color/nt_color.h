@@ -6,8 +6,8 @@
  * (UI, renderers, materials, future gradients) can include this without pulling
  * in the UI stack. Works on packed uint32_t colors + normalized float channels.
  *
- * Packed convention: 0xAABBGGRR — R in the low byte, A in the high byte (the
- * engine's existing packed format).
+ * Packed convention: 0xAABBGGRR — R in the low byte, A in the high byte, straight
+ * alpha: the engine's one tint format.
  */
 
 #include <math.h>
@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 /* Integer byte channels 0..255 -> 0xAABBGGRR at compile time, for color literals (floats belong in
- * nt_color_pack). Each channel keeps its low byte. */
+ * nt_color_pack). Each channel keeps its low byte, so an out-of-range literal wraps. */
 #define NT_RGBA8(r, g, b, a) (((uint32_t)(r) & 0xFFU) | (((uint32_t)(g) & 0xFFU) << 8) | (((uint32_t)(b) & 0xFFU) << 16) | (((uint32_t)(a) & 0xFFU) << 24))
 
 /* Saturate a [0,1] channel. */
@@ -35,9 +35,8 @@ static inline void nt_color_unpack(uint32_t packed, float out_rgba[4]) {
     out_rgba[3] = (float)((packed >> 24) & 0xFFU) / 255.0F;
 }
 
-/* Saturate a [0,1] channel and round-to-nearest into a byte. NaN -> 0 (safe). */
-static inline uint32_t nt_color_channel_to_u8(float c) {
-    const float v = c * 255.0F;
+/* A 0..255-scale value -> byte: saturate and round half up. NaN -> 0 (safe). */
+static inline uint32_t nt_color_round_u8(float v) {
     if (!(v > 0.0F)) { /* also NaN: converting it to an integer is undefined */
         return 0U;
     }
@@ -46,6 +45,9 @@ static inline uint32_t nt_color_channel_to_u8(float c) {
     }
     return (uint32_t)(v + 0.5F);
 }
+
+/* Saturate a [0,1] channel and round-to-nearest into a byte. NaN -> 0 (safe). */
+static inline uint32_t nt_color_channel_to_u8(float c) { return nt_color_round_u8(c * 255.0F); }
 
 /* [0,1] R,G,B,A -> 0xAABBGGRR (clamp + round-to-nearest; NaN -> 0). */
 static inline uint32_t nt_color_pack(const float rgba[4]) {
@@ -59,17 +61,9 @@ static inline uint32_t nt_color_pack(const float rgba[4]) {
 /* Replaces the alpha byte with `a` in [0,1] (clamped, round-to-nearest); RGB bytes stay exact. */
 static inline uint32_t nt_color_with_alpha(uint32_t packed, float a) { return (packed & 0x00FFFFFFU) | (nt_color_channel_to_u8(a) << 24); }
 
-/* Multiplies the alpha of a packed color by `factor` (e.g. a parent opacity); RGB bytes stay exact. */
-static inline uint32_t nt_color_scale_alpha(uint32_t packed, float factor) {
-    const float v = (float)(packed >> 24) * factor;
-    uint32_t a = 0U; /* also for NaN */
-    if (v >= 255.0F) {
-        a = 255U;
-    } else if (v > 0.0F) {
-        a = (uint32_t)(v + 0.5F);
-    }
-    return (packed & 0x00FFFFFFU) | (a << 24);
-}
+/* Multiplies the alpha of a packed color by `factor` (e.g. a parent opacity); RGB bytes stay exact.
+ * Works in byte scale, so it is the one opacity-fold rounding for packed and Clay colors alike. */
+static inline uint32_t nt_color_scale_alpha(uint32_t packed, float factor) { return (packed & 0x00FFFFFFU) | (nt_color_round_u8((float)(packed >> 24) * factor) << 24); }
 
 /* One hex nibble 0..15; 0xFF on a non-hex char. */
 static inline uint8_t nt_color_hex_nibble(char c) {

@@ -68,7 +68,8 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < sizeof s_effects / sizeof s_effects[0]; i++) {
         const nt_ui_rich_fx_fn fn = s_effects[i];
         const nt_ui_rich_fx_result_t result = fn(i, NT_RICH_ATOM_TEXT, xy, wh, color, time, false, user);
-        checksum += result.offset_x + result.offset_y + result.scale + ((float)(result.color >> 24) / 255.0F) + (result.visible ? 1.0F : 0.0F);
+        checksum += result.offset_x + result.offset_y + result.scale +
+                    ((float)((result.color & 0xFFU) + ((result.color >> 8) & 0xFFU) + ((result.color >> 16) & 0xFFU) + (result.color >> 24)) / 255.0F) + (result.visible ? 1.0F : 0.0F);
     }
 #else
     (void)argc;

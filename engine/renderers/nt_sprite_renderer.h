@@ -131,7 +131,7 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  *                   m[0/1/2/4/5/6/12/13/14] are read: columns 0+1 carry
  *                   2D rotation/scale, m[12/13/14] carry translation.
  *   origin_x, _y  - pivot in normalized region-space (e.g. {0.5, 0.5}).
- *   color_packed  - 0xAABBGGRR (premultiplied by caller if needed).
+ *   color_packed  - 0xAABBGGRR, straight alpha (the shader premultiplies).
  *   flip_bits     - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y, 0 = none.
  *
  * Caller MUST have called set_material first so a cmd is open. Capacity

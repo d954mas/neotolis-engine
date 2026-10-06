@@ -43,7 +43,8 @@ void nt_skinned_mesh_renderer_shutdown(void);
 void nt_skinned_mesh_renderer_restore_gpu(void);
 
 /* Caller controls visibility/sorting. items may be NULL only when count is
- * zero; it is borrowed for the call, and bindings may change after it returns. */
+ * zero; it is borrowed for the call, and bindings may change after it returns.
+ * Every item needs transform, drawable and skin components. */
 /* common/skin.glsl requires joints/weights mapped by material attr_map and
  * positive uniform joint/world scale. Declare u_skin_matrices in the material;
  * the run supplies the entity's deformation texture and its default sampler. */

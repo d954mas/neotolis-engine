@@ -73,7 +73,7 @@ void nt_text_renderer_set_oblique(float shear);
 void nt_text_renderer_set_weight(float weight_em);
 
 /* Outline/stroke: subsequent draws emit an extra pass grown by `width` em beyond the fill weight, in
- * `color`, behind the fill (painter order fill on top). width 0 (default) = no outline. */
+ * `color`, behind the fill (painter order fill on top). width 0 (default) or color alpha 0 = no outline. */
 void nt_text_renderer_set_outline(float width, uint32_t color);
 
 /* Hard drop shadow: subsequent draws emit an extra pass offset by (dx,dy) em in `color` (px = d * size,

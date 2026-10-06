@@ -1839,7 +1839,7 @@ int main(void) {
     RUN_TEST(test_vertex_input_survives_mesh_slot_reuse);
     RUN_TEST(test_vertex_input_versions_overflow_asserts);
     RUN_TEST(test_restore_gpu);
-    /* Color mode tests */
+    /* Prepare and draw */
     RUN_TEST(test_prepare_and_draw_offsets_agree);
     RUN_TEST(test_prepare_of_a_new_mesh_after_a_draw_executes_nothing);
     RUN_TEST(test_prepare_of_a_mesh_in_a_reused_slot_after_a_draw_executes_nothing);

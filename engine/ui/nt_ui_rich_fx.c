@@ -171,7 +171,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_fade_in(uint32_t atom_idx, nt_rich_atom_kin
     nt_ui_rich_fx_result_t r = nt_ui_rich_fx_identity(base_color);
     const float a = rich_fx_clamp01((time - ((float)atom_idx * RICH_FX_FADE_STAGGER)) / dur);
     r.color = nt_color_scale_alpha(base_color, a);
-    r.visible = (r.color >> 24) != 0U; /* fully transparent -> skip the atom emit */
+    r.visible = (a > 0.0F); /* not yet revealed -> skip the atom emit (a transparent fill may still carry a shadow) */
     return r;
 }
 
@@ -208,7 +208,7 @@ nt_ui_rich_fx_result_t nt_ui_rich_fx_glow(uint32_t atom_idx, nt_rich_atom_kind_t
     for (int i = 0; i < 3; i++) {
         c[i] += (1.0F - c[i]) * g;
     }
-    r.color = (nt_color_pack(c) & 0x00FFFFFFU) | (base_color & 0xFF000000U); /* keep base alpha */
+    r.color = nt_color_pack(c); /* c[3] is the base alpha byte, repacked exactly */
     return r;
 }
 

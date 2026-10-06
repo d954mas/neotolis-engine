@@ -222,16 +222,13 @@ void test_parse_hex_rich_byte_identity(void) {
     }
 }
 
-/* Byte-identity pin: rich_unpack_color folds opacity into alpha over nt_color_unpack. This
- * reproduces the old rich math (R,G,B from byte/255, A = byte/255 * opacity) so the migration
- * stays pinned to the text/image/object tint values. */
 /* scale_alpha multiplies the existing alpha byte (it does not replace it); RGB stays exact. */
 void test_scale_alpha_multiplies_existing_alpha(void) {
     TEST_ASSERT_EQUAL_HEX32(0x40FFFFFFU, nt_color_scale_alpha(0x80FFFFFFU, 0.5F));
     TEST_ASSERT_EQUAL_HEX32(0x80112233U, nt_color_scale_alpha(0x80112233U, 1.0F));
     TEST_ASSERT_EQUAL_HEX32(0xFF112233U, nt_color_scale_alpha(0x80112233U, 2.0F)); /* saturates */
     TEST_ASSERT_EQUAL_HEX32(0x00112233U, nt_color_scale_alpha(0x80112233U, -1.0F));
-    TEST_ASSERT_EQUAL_HEX32(0x00112233U, nt_color_scale_alpha(0x80112233U, nanf("")));
+    TEST_ASSERT_EQUAL_HEX32(0x00112233U, nt_color_scale_alpha(0x80112233U, NAN));
 }
 
 /* NT_RGBA8 keeps each channel's low byte (no carry into the next channel). */
@@ -240,28 +237,14 @@ void test_rgba8_macro_layout(void) {
     TEST_ASSERT_EQUAL_HEX32(0xFF000000U, NT_RGBA8(256, 0, 0, 255));
 }
 
-void test_rich_unpack_color_byte_identity(void) {
-    const uint32_t samples[] = {0xFF80B0E0U, 0x8040C0FFU, 0xFFFFFFFFU, 0x00000000U};
-    const float opacities[] = {1.0F, 0.5F, 0.25F};
-    for (size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); i++) {
-        for (size_t j = 0; j < sizeof(opacities) / sizeof(opacities[0]); j++) {
-            const uint32_t abgr = samples[i];
-            const float op = opacities[j];
-            float got[4];
-            nt_color_unpack(abgr, got);
-            got[3] *= op;
-            /* old reference math */
-            const float want[4] = {
-                (float)(abgr & 0xFFU) / 255.0F,
-                (float)((abgr >> 8) & 0xFFU) / 255.0F,
-                (float)((abgr >> 16) & 0xFFU) / 255.0F,
-                ((float)((abgr >> 24) & 0xFFU) / 255.0F) * op,
-            };
-            for (int k = 0; k < 4; k++) {
-                TEST_ASSERT_TRUE(approx(got[k], want[k], 0.0F)); /* bit-exact */
-            }
-        }
-    }
+/* One rounding rule: half up, saturating, NaN -> 0; scale_alpha folds with it (85 * 0.5 -> 43). */
+void test_round_u8_half_up(void) {
+    TEST_ASSERT_EQUAL_UINT32(43U, nt_color_round_u8(42.5F));
+    TEST_ASSERT_EQUAL_UINT32(128U, nt_color_round_u8(127.5F));
+    TEST_ASSERT_EQUAL_UINT32(255U, nt_color_round_u8(300.0F));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_color_round_u8(-1.0F));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_color_round_u8(NAN));
+    TEST_ASSERT_EQUAL_HEX32(0x2B112233U, nt_color_scale_alpha(0x55112233U, 0.5F));
 }
 
 int main(void) {
@@ -281,7 +264,7 @@ int main(void) {
     RUN_TEST(test_parse_hex_rrggbbaa);
     RUN_TEST(test_parse_hex_malformed);
     RUN_TEST(test_parse_hex_rich_byte_identity);
-    RUN_TEST(test_rich_unpack_color_byte_identity);
+    RUN_TEST(test_round_u8_half_up);
     RUN_TEST(test_scale_alpha_multiplies_existing_alpha);
     RUN_TEST(test_rgba8_macro_layout);
     return UNITY_END();

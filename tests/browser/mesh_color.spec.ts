@@ -24,7 +24,8 @@ test('mesh and skinned instances carry their RGBA8 color in WebGL2', async ({ pa
       const fn = (window as unknown as { __nt?: MeshHooks }).__nt?.mesh_color_probe;
       return fn ? fn() >>> 0 : -1;
     });
-  await expect.poll(probe).not.toBe(NOT_READY);
-  expect(await probe()).toBe(0x1f);
+  let mask = NOT_READY;
+  await expect.poll(async () => (mask = await probe())).not.toBe(NOT_READY);
+  expect(mask).toBe(0x1f); /* -1: the probe hook is missing */
   expect(errors).toEqual([]);
 });

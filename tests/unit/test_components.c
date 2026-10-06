@@ -120,7 +120,7 @@ void test_color_with_alpha_keeps_rgb_bytes(void) {
 }
 
 void test_color_pack_clamps_and_maps_nan_to_zero(void) {
-    const float nan = nanf("");
+    const float nan = NAN;
     TEST_ASSERT_EQUAL_HEX32(0xFF00FF00U, nt_color_pack((const float[4]){-0.25F, 1.25F, nan, 1.0F}));
 }
 

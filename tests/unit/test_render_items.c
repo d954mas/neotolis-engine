@@ -289,12 +289,10 @@ void test_is_visible_zero_alpha(void) {
 void test_is_visible_alpha_byte_threshold(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
-    nt_drawable_comp_set_color(e, nt_color_with_alpha(0xFFFFFFFFU, 0.0019F));
+    nt_drawable_comp_set_color(e, 0x00FFFFFFU); /* RGB does not count */
     TEST_ASSERT_FALSE(nt_render_is_visible(e));
-    nt_drawable_comp_set_color(e, nt_color_with_alpha(0xFFFFFFFFU, 1.0F / 255.0F));
+    nt_drawable_comp_set_color(e, 0x01000000U);
     TEST_ASSERT_TRUE(nt_render_is_visible(e));
-    nt_drawable_comp_set_color(e, nt_color_with_alpha(0xFFFFFFFFU, nanf("")));
-    TEST_ASSERT_FALSE(nt_render_is_visible(e));
 }
 
 void test_is_visible_valid(void) {

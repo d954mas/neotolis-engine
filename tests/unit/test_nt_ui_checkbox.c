@@ -332,7 +332,9 @@ static void test_text_color_override(void) {
 
     /* text_color 0 -> inherit text_base.color (a non-white base, so inherit is not a white fallback). */
     s_style.text_base.color = NT_RGBA8(10, 20, 30, 200);
-    s_style.checked[NT_UI_CB_IDLE].text_color = 0U;
+    for (int state = NT_UI_CB_IDLE; state <= NT_UI_CB_DISABLED; ++state) {
+        s_style.checked[state].text_color = 0U; /* whichever state the pointer leaves the row in */
+    }
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) { (void)nt_ui_checkbox(s_fx.ctx, NULL, 0, nt_ui_id("cb"), "Enable", &value, &s_style, &s_row_decl, true); }
     nt_ui_end(s_fx.ctx);

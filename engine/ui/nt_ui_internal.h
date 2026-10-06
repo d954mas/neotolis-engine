@@ -96,14 +96,13 @@ static inline void nt_ui_sprite_mat4(const float world[16], float ox, float oy, 
     }
 }
 
+/* Clay colors are byte scale, so each byte converts exactly (no /255 round trip). */
 static inline Clay_Color nt_ui_unpack_abgr(uint32_t packed) {
-    float rgba[4];
-    nt_color_unpack(packed, rgba);
     return (Clay_Color){
-        .r = rgba[0] * 255.0F,
-        .g = rgba[1] * 255.0F,
-        .b = rgba[2] * 255.0F,
-        .a = rgba[3] * 255.0F,
+        .r = (float)(packed & 0xFFU),
+        .g = (float)((packed >> 8) & 0xFFU),
+        .b = (float)((packed >> 16) & 0xFFU),
+        .a = (float)(packed >> 24),
     };
 }
 

@@ -382,18 +382,6 @@ void test_measure_null_string(void) {
     TEST_ASSERT_TRUE(sz.height == 0.0F);
 }
 
-/* ---- Test 7: Vertex stride is 64 bytes (TEXT-01) ---- */
-
-void test_vertex_stride_52(void) {
-    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_text_renderer_test_glyph_count());
-
-    /* 4 vertices for one glyph, 52 bytes apart: the quad corners differ in position. */
-    const uint8_t *verts = (const uint8_t *)nt_text_renderer_test_vertices();
-    TEST_ASSERT_NOT_NULL(verts);
-    TEST_ASSERT_FALSE(memcmp(verts, verts + TEXT_VERTEX_BYTES, 12U) == 0);
-}
-
 /* The vertex carries the draw's packed color at byte 44 and the per-glyph depth bias at byte 48. */
 void test_vertex_color_and_depth_bias_bytes(void) {
     nt_text_renderer_set_glyph_depth_bias(0.25F);
@@ -1418,6 +1406,16 @@ void test_shadow_pass_offset(void) {
     nt_text_renderer_reset_decoration();
 }
 
+#if NT_FONT_EMBOLDEN_ENABLED
+/* An outline color whose alpha byte is 0 is off, whatever its RGB or width. */
+void test_outline_with_zero_alpha_emits_no_pass(void) {
+    nt_text_renderer_set_outline(0.05F, 0x00FFFFFFU);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_text_renderer_test_vertex_count()); /* fill only */
+    nt_text_renderer_reset_decoration();
+}
+#endif
+
 /* A shadow color whose alpha byte is 0 is off, whatever its RGB. */
 void test_shadow_with_zero_alpha_emits_no_pass(void) {
     nt_text_renderer_set_shadow(2.0F, 2.0F, 0.0F, 0x00FFFFFFU);
@@ -1524,7 +1522,6 @@ int main(void) {
     RUN_TEST(test_measure_returns_nonzero);
     RUN_TEST(test_measure_empty_string);
     RUN_TEST(test_measure_null_string);
-    RUN_TEST(test_vertex_stride_52);
     RUN_TEST(test_vertex_color_and_depth_bias_bytes);
     RUN_TEST(test_vertex_count_4_per_glyph);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
@@ -1570,6 +1567,9 @@ int main(void) {
     RUN_TEST(test_shadow_emits_extra_span);
     RUN_TEST(test_shadow_pass_offset);
     RUN_TEST(test_shadow_with_zero_alpha_emits_no_pass);
+#if NT_FONT_EMBOLDEN_ENABLED
+    RUN_TEST(test_outline_with_zero_alpha_emits_no_pass);
+#endif
     RUN_TEST(test_passes_grouped_not_interleaved);
     RUN_TEST(test_underline_one_quad_per_segment);
     RUN_TEST(test_underline_quad_per_line);

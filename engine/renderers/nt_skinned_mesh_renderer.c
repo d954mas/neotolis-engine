@@ -203,7 +203,7 @@ uint32_t nt_skinned_mesh_renderer_prepare(const nt_render_item_t *items, uint32_
     uint32_t offset = 0;
     nt_skinned_mesh_instance_t *const base = (nt_skinned_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (uint32_t)size, 4, &offset); /* bound by offset: 4 is enough */
     nt_skinned_mesh_instance_t *dst = base;
-    /* Transform and drawable by inline sparse reads, as the sprite emit does (no accessor call or liveness assert). */
+    /* Transform and drawable by inline sparse reads, as the sprite emit does; the skin binding still goes through its asserting accessor. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
     for (uint32_t r = 0; r < run_count; r++) {

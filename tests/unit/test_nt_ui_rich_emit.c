@@ -770,6 +770,9 @@ static void test_fx_fade_in_visibility(void) {
     const nt_ui_rich_fx_result_t r1 = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, base_color, 1.0F, false, NULL);
     TEST_ASSERT_TRUE_MESSAGE(r1.visible, "fade_in fully open -> visible");
     TEST_ASSERT_TRUE_MESSAGE(approx8(ch(r1.color, 3U), 1.0F), "fade_in alpha 1 when fully open");
+    /* Visibility follows the reveal, not the fill alpha: a transparent fill may still carry a shadow. */
+    const nt_ui_rich_fx_result_t clear = nt_ui_rich_fx_fade_in(0U, NT_RICH_ATOM_TEXT, xy, wh, 0x00FFFFFFU, 1.0F, false, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(clear.visible, "fade_in transparent fill fully open -> visible");
 
     /* PARAMS override: speed = reveal rate (1/sec) -> per-atom duration dur = 1/speed. speed=10 -> a
      * fast 0.1s fade; pick a mid-window time so the ramp is partial (not clamped) and pins 1/speed. */

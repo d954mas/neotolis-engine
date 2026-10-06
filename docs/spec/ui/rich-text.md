@@ -161,11 +161,11 @@ subsystem — decoration reuses the text pipeline and the Slug text shaders (`sl
 An `<img>` atom is **NOT** a Clay child. It emits **immediately** in the rich
 block's CUSTOM self-emit (`rich_emit_images`) via
 `nt_sprite_renderer_emit_region`, positioned at the solver's solved `(x, y)`.
-The composed tint (the run's `<color>` × any per-atom effect tint) is already a
-packed RGBA8 color and becomes the standard **u8** sprite tint unchanged, the block's **image material** (plain, or a
+The tint is the run's packed `<color>` with the parent opacity folded into its
+alpha, exactly like rich TEXT; a per-atom effect color, when present, replaces it.
+It is the standard **u8** sprite tint, and the block's **image material** (plain, or a
 custom-attr material with attr defaults — the emit passes no block) textures the
-region, and the self-emit folds the parent opacity into the tint alpha exactly
-like rich TEXT — there is **no** engine-provided rich material, float4 `a_tint`,
+region — there is **no** engine-provided rich material, float4 `a_tint`,
 or per-image custom-attr block. The composed tint is invisible at u8 on an 8-bit
 display, so a float4 tint would add nothing. An unset style text or image
 material resolves to the ctx default at each walk, not at declaration, so a base
@@ -259,7 +259,7 @@ nt_ui_rich_pop(ctx);
   **not** touch `glViewport`/scissor: the walk's current scroll scissor stays intact.
   `color` is the **absolute resolved RGBA**
   the engine resolved for the atom — the run's `<color>` with parent opacity folded
-  into alpha plus any per-atom effect tint, the SAME color the TEXT and IMAGE paths
+  into alpha, or the per-atom effect's replacement color, the SAME color the TEXT and IMAGE paths
   render with — so a custom object honours opacity / `<color>` / effects consistently
   (AGENTS.md "if sprites have it, UI images need it too").
 
