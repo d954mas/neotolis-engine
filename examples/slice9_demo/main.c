@@ -37,6 +37,7 @@
 #include "ui/nt_ui_scale.h"
 #include "window/nt_window.h"
 
+#include "../shared/nt_example_frames.h"
 #include "math/nt_math.h"
 #include "memory/nt_mem_scratch.h"
 #include "nt_pack_format.h"
@@ -330,6 +331,7 @@ static void frame(void) {
 #endif
 
     nt_window_poll();
+    nt_example_frames_begin();
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -355,7 +357,9 @@ static void frame(void) {
          * died, and nt_font_step rebuilds those itself. Clearing this would make
          * the gate call nt_font_add twice, which asserts on the duplicate. */
     }
-    nt_input_poll();
+    if (!nt_example_frames_on()) {
+        nt_input_poll();
+    }
     nt_mem_scratch_reset();
 
 #ifndef NT_PLATFORM_WEB
@@ -518,6 +522,7 @@ static void frame(void) {
 #endif
 
     nt_gfx_end_frame();
+    nt_example_frames_end(can_render);
 
 #if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);
@@ -550,8 +555,6 @@ static void frame(void) {
 
 // #region main + init
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
 
     nt_engine_config_t config = {0};
     config.app_name = "slice9_demo";
@@ -565,6 +568,7 @@ int main(int argc, char *argv[]) {
     g_nt_window.height = 640;
     nt_window_init();
     nt_input_init();
+    nt_example_frames_init(argc, argv);
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);

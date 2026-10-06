@@ -34,6 +34,7 @@
 #include "time/nt_time.h"
 #include "window/nt_window.h"
 
+#include "../shared/nt_example_frames.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
 #include "text_assets.h"
@@ -219,6 +220,7 @@ static void draw_text_scene(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
+    nt_example_frames_begin();
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_FONT);
@@ -237,7 +239,9 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
-    nt_input_poll();
+    if (!nt_example_frames_on()) {
+        nt_input_poll();
+    }
     float dt = g_nt_app.dt;
 
 #ifndef NT_PLATFORM_WEB
@@ -371,6 +375,7 @@ static void frame(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    nt_example_frames_end(can_render && s_cjk_loading && nt_resource_pack_state(s_cjk_pack_id) == NT_PACK_STATE_READY);
 
     nt_window_swap_buffers();
 
@@ -428,7 +433,7 @@ static void frame(void) {
 #endif
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
     /* 1. Engine init */
     nt_engine_config_t config = {0};
     config.app_name = "text_demo";
@@ -446,6 +451,7 @@ int main(void) {
 
     /* 3. Input init */
     nt_input_init();
+    nt_example_frames_init(argc, argv);
 
     /* 4. GFX init */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();

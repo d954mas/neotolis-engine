@@ -47,6 +47,7 @@
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
 
+#include "../shared/nt_example_frames.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
 #include "tq_assets.h"
@@ -169,6 +170,7 @@ static void print_status(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
+    nt_example_frames_begin();
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         /* Invalidate all GFX-backed resources so they re-activate from blobs */
@@ -193,7 +195,9 @@ static void frame(void) {
         nt_program_ref_drop(&s_cube_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
-    nt_input_poll();
+    if (!nt_example_frames_on()) {
+        nt_input_poll();
+    }
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
@@ -274,7 +278,9 @@ static void frame(void) {
 
     /* ---- Update entity transforms ---- */
 
-    float angle = (float)nt_time_now() * 0.7F;
+    static float s_time;
+    s_time += g_nt_app.dt;
+    float angle = s_time * 0.7F;
 
     for (int i = 0; i < NUM_CUBES; i++) {
         float *rot = nt_transform_comp_rotation(s_cubes[i]);
@@ -370,11 +376,12 @@ static void frame(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    nt_example_frames_end(can_render && s_base_dumped);
 
     nt_window_swap_buffers();
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
     nt_engine_config_t config = {0};
     config.app_name = "textured_cube";
     config.version = 1;
@@ -388,6 +395,7 @@ int main(void) {
     g_nt_window.height = 600;
     nt_window_init();
     nt_input_init();
+    nt_example_frames_init(argc, argv);
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = NUM_CUBES * (uint32_t)sizeof(nt_mesh_instance_t);
