@@ -102,6 +102,9 @@ typedef struct {
 typedef struct {
     nt_renderer_mesh_vi_version_t *versions;
     nt_mesh_t *meshes; /* row ownership includes the mesh generation */
+    /* No VBO and no IBO: the one version the destroy-buffer cascade cannot reach. It holds
+     * nothing mesh-specific, so rows share it and a row reset never has to destroy. */
+    nt_vertex_input_t bufferless;
     uint16_t max_layouts;
     uint16_t mesh_capacity;
 } nt_renderer_mesh_vi_cache_t;
@@ -152,9 +155,13 @@ static inline void nt_renderer_mesh_vi_cache_reset(nt_renderer_mesh_vi_cache_t *
     }
     const size_t count = (size_t)cache->mesh_capacity * cache->max_layouts;
     for (size_t i = 0; i < count; i++) {
-        nt_gfx_destroy_vertex_input(cache->versions[i].vi);
+        if (cache->versions[i].vi.id != cache->bufferless.id) {
+            nt_gfx_destroy_vertex_input(cache->versions[i].vi);
+        }
         cache->versions[i] = (nt_renderer_mesh_vi_version_t){0};
     }
+    nt_gfx_destroy_vertex_input(cache->bufferless);
+    cache->bufferless = NT_VERTEX_INPUT_INVALID;
     memset(cache->meshes, 0, (size_t)cache->mesh_capacity * sizeof(nt_mesh_t));
 }
 
@@ -169,11 +176,11 @@ static inline uint32_t nt_renderer_mesh_vi_cache_live_count(const nt_renderer_me
     uint32_t live = 0;
     const size_t count = (size_t)cache->mesh_capacity * cache->max_layouts;
     for (size_t i = 0; i < count; i++) {
-        if (nt_gfx_vertex_input_valid(cache->versions[i].vi)) {
+        if (cache->versions[i].vi.id != cache->bufferless.id && nt_gfx_vertex_input_valid(cache->versions[i].vi)) {
             live++;
         }
     }
-    return live;
+    return live + (nt_gfx_vertex_input_valid(cache->bufferless) ? 1U : 0U);
 }
 
 /* The mesh fixes stream types/offsets/stride, so the exact row key needs only
@@ -221,11 +228,8 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
     NT_ASSERT(slot != 0 && slot <= cache->mesh_capacity);
     nt_renderer_mesh_vi_version_t *row = &cache->versions[(size_t)(slot - 1) * cache->max_layouts];
     if (cache->meshes[slot - 1].id != mesh.id) {
-        /* Bufferless vertex inputs have no buffer-destroy cascade hook. */
-        for (uint16_t i = 0; i < cache->max_layouts; i++) {
-            nt_gfx_destroy_vertex_input(row[i].vi);
-            row[i] = (nt_renderer_mesh_vi_version_t){0};
-        }
+        /* The old mesh's buffer destroys took its own versions; the shared bufferless one stays. */
+        memset(row, 0, sizeof(*row) * cache->max_layouts);
         cache->meshes[slot - 1] = mesh;
     }
     /* The generational material id pins attr_map. */
@@ -258,14 +262,22 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
         return NT_VERTEX_INPUT_INVALID;
     }
 
-    const nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
-        .layout = layout,
-        .instance_layout = *instance_layout,
+    nt_vertex_input_t vi;
+    if (layout.attr_count == 0 && mesh_info->ibo.id == 0) {
         /* Empty derived layouts support attribute-less gl_VertexID shaders. */
-        .vertex_buffer = (layout.attr_count > 0) ? mesh_info->vbo : (nt_buffer_t){0},
-        .index_buffer = mesh_info->ibo,
-        .label = label,
-    });
+        if (!nt_gfx_vertex_input_valid(cache->bufferless)) {
+            cache->bufferless = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.instance_layout = *instance_layout, .label = label});
+        }
+        vi = cache->bufferless;
+    } else {
+        vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+            .layout = layout,
+            .instance_layout = *instance_layout,
+            .vertex_buffer = (layout.attr_count > 0) ? mesh_info->vbo : (nt_buffer_t){0},
+            .index_buffer = mesh_info->ibo,
+            .label = label,
+        });
+    }
     if (vi.id == 0) {
         return vi; /* backend/context failure stays uncached so the next miss retries */
     }

@@ -1385,8 +1385,10 @@ void test_vertex_input_empty_derived_layout_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
 }
 
-/* Bufferless versions survive buffer destruction and need row-wide cleanup. */
-void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
+/* The attribute-less version (no VBO, no IBO) escapes the destroy-buffer cascade, so every mesh
+ * shares one; a reused mesh slot drops its row without destroying anything. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_bufferless_vertex_input_shared_and_slot_reuse_destroys_nothing(void) {
     nt_program_t program = create_test_program();
     nt_material_t mat = create_test_material_with_attr(program, "not_a_mesh_stream", 0, nt_blend_opaque());
     nt_material_t buffered = create_test_material_with_attr(program, "position", 0, nt_blend_opaque());
@@ -1399,17 +1401,16 @@ void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
     nt_gfx_fake_reset();
     draw_list(&neighbor_item, 1);
 
-    for (int cycle = 0; cycle < 6; cycle++) {
+    for (uint32_t cycle = 0; cycle < 6; cycle++) {
         nt_render_item_t items[2] = {
             {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)},
             {.entity = e_buffered.id, .batch_key = nt_mesh_renderer_batch_key(buffered, mesh)},
         };
-        draw_list(items, 1);
-        TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
-        draw_list(items, 2);
+        draw_list(items, 2); /* opens a frame: the counters hold only this list */
+        TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.accepted[NT_GFX_OP_DESTROY]);
         draw_list(&neighbor_item, 1);
-        TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_vertex_input_count());
-        TEST_ASSERT_EQUAL_UINT32(1 + (2 * (cycle + 1)), nt_gfx_fake_vertex_input_create_count());
+        TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
+        TEST_ASSERT_EQUAL_UINT32(2 + cycle, nt_gfx_fake_vertex_input_create_count());
         const uint32_t old_id = mesh.id;
         nt_gfx_deactivate_mesh(mesh.id);
         mesh = create_test_mesh_nonindexed(); /* reuses the freed pool slot */
@@ -1419,11 +1420,47 @@ void test_bufferless_vertex_input_purged_on_mesh_slot_reuse(void) {
         *nt_mesh_comp_handle(e_buffered) = mesh;
     }
 
-    /* The bufferless version and the neighbor own two slots; all others must be free. */
-    for (uint32_t i = 2; i < TEST_MAX_VERTEX_INPUTS; i++) {
+    /* Only the shared bufferless version is live; all other slots must be free. */
+    for (uint32_t i = 1; i < TEST_MAX_VERTEX_INPUTS; i++) {
         nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
         TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
     }
+}
+
+/* An empty derived layout on an indexed mesh keeps the mesh's IBO, so it is a per-mesh version
+ * that dies with the mesh's buffers. */
+void test_empty_layout_with_index_buffer_is_per_mesh(void) {
+    nt_material_t mat = create_test_material_with_attr(create_test_program(), "not_a_mesh_stream", 0, nt_blend_opaque());
+    nt_mesh_t mesh_a = create_test_mesh();
+    nt_mesh_t mesh_b = create_test_mesh();
+    nt_render_item_t items[2] = {
+        {.entity = create_test_entity(mesh_a, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_a)},
+        {.entity = create_test_entity(mesh_b, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_b)},
+    };
+    nt_gfx_fake_reset();
+    draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
+    nt_gfx_deactivate_mesh(mesh_a.id);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
+}
+
+/* restore_gpu destroys the shared bufferless version once; the next draw makes a new one. */
+void test_bufferless_vertex_input_recreated_after_restore(void) {
+    nt_material_t mat = create_test_material_with_attr(create_test_program(), "not_a_mesh_stream", 0, nt_blend_opaque());
+    nt_mesh_t mesh_a = create_test_mesh_nonindexed();
+    nt_mesh_t mesh_b = create_test_mesh_nonindexed();
+    nt_render_item_t items[2] = {
+        {.entity = create_test_entity(mesh_a, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_a)},
+        {.entity = create_test_entity(mesh_b, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_b)},
+    };
+    nt_gfx_fake_reset();
+    draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
+    nt_mesh_renderer_restore_gpu();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_vertex_input_count());
+    draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
+    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
 }
 
 /* Mesh slot reuse must not alias the stale vertex input: the versions table
@@ -1813,7 +1850,9 @@ int main(void) {
     RUN_TEST(test_vertex_input_distinct_per_mesh);
     RUN_TEST(test_vertex_input_shared_for_same_derived_layout);
     RUN_TEST(test_vertex_input_empty_derived_layout_draws);
-    RUN_TEST(test_bufferless_vertex_input_purged_on_mesh_slot_reuse);
+    RUN_TEST(test_bufferless_vertex_input_shared_and_slot_reuse_destroys_nothing);
+    RUN_TEST(test_empty_layout_with_index_buffer_is_per_mesh);
+    RUN_TEST(test_bufferless_vertex_input_recreated_after_restore);
     RUN_TEST(test_vertex_input_survives_mesh_slot_reuse);
     RUN_TEST(test_vertex_input_versions_overflow_asserts);
     RUN_TEST(test_restore_gpu);

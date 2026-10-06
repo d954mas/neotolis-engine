@@ -337,8 +337,12 @@ Vertex-input caches use exact identity for *derived* layouts too. The mesh and
 skinned mesh renderers each instantiate the shared internal per-mesh versions
 cache from `nt_renderer_shared.h`; the tables are independent because their
 instance layouts differ. Each row stores its mesh's full generation-checked
-handle. A different generation clears the entire row, including bufferless
-vertex inputs that have no destroy-cascade hook. Within the row the mesh's
+handle. A different generation zeroes the row and destroys nothing: the old
+mesh's deactivation destroyed its buffers, and the cascade took every version
+built on its VBO or IBO. The one version the cascade cannot reach, an empty
+derived layout on a non-indexed mesh (no VBO, no IBO), holds nothing
+mesh-specific, so each renderer creates one and every row that needs it shares
+it; a cache reset destroys it once. Within the row the mesh's
 stream types, counts, offsets and stride are fixed, so entry identity packs only
 what varies: per stream a presence bit and the mapped location (mesh streams ×
 material attr_map — attr_map entries matching no stream do not split; a
