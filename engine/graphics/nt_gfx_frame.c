@@ -8,9 +8,6 @@
 nt_gfx_stream_t g_nt_gfx_stream;
 nt_gfx_frame_storage_t g_nt_gfx_frame_storage[NT_GFX_FRAME_STREAM_COUNT];
 
-/* Bytes of each storage already sent to its buffer this frame. */
-static uint32_t s_uploaded[NT_GFX_FRAME_STREAM_COUNT];
-
 // #region lifecycle
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void nt_gfx_frame_init(const nt_gfx_desc_t *desc) {
@@ -21,7 +18,6 @@ void nt_gfx_frame_init(const nt_gfx_desc_t *desc) {
     g_nt_gfx_stream.used = 0;
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         g_nt_gfx_frame_storage[s] = (nt_gfx_frame_storage_t){0};
-        s_uploaded[s] = 0;
         /* Zero capacity disables the stream: its allocations reach the overflow. */
         if (desc->frame_capacity[s] == 0) {
             continue;
@@ -38,7 +34,6 @@ void nt_gfx_frame_shutdown(void) {
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         free(g_nt_gfx_frame_storage[s].staging);
         g_nt_gfx_frame_storage[s] = (nt_gfx_frame_storage_t){0};
-        s_uploaded[s] = 0;
     }
 }
 
@@ -71,9 +66,8 @@ void nt_gfx_frame_create_buffers(void) {
 void nt_gfx_frame_begin(void) {
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         /* end_frame uploads everything allocated in the frame; later bytes would never reach the GPU. */
-        NT_ASSERT(g_nt_gfx_frame_storage[s].used == s_uploaded[s] && "frame storage allocated outside begin_frame..end_frame");
+        NT_ASSERT(g_nt_gfx_frame_storage[s].used == g_nt_gfx.counters.frame_bytes[s] && "frame storage allocated outside begin_frame..end_frame");
         g_nt_gfx_frame_storage[s].used = 0;
-        s_uploaded[s] = 0;
     }
 }
 
@@ -88,11 +82,11 @@ _Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_
 static void upload_storage(void) {
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[s];
-        const uint32_t offset = s_uploaded[s];
+        /* frame_bytes is the part already sent; open_frame zeroes it with the storage. */
+        const uint32_t offset = g_nt_gfx.counters.frame_bytes[s];
         if (storage->used == offset) {
             continue;
         }
-        s_uploaded[s] = storage->used;
         g_nt_gfx.counters.frame_bytes[s] = storage->used;
         /* Only a context loss leaves no name: nothing draws until the restore makes new buffers. */
         const uint32_t backend = nt_gfx_buffer_backend(storage->buffer);

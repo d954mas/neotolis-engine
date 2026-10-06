@@ -654,6 +654,7 @@ int main(int argc, char **argv) {
     gfx_desc.max_meshes = 256;
     /* The vertex-input default is derived from max_meshes(128); scale it too. */
     gfx_desc.max_vertex_inputs = 256 * 4 + 48;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = MAX_SCENE_NODES * 64U; /* 64 = the largest mesh instance stride */
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks */

@@ -1410,7 +1410,8 @@ static nt_gfx_result_t destroy_shader(nt_shader_t shd) {
 }
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
-    if (shd.id != 0) {
+    /* Only a live object can matter to the recorded calls; an invalid or stale handle is a no-op. */
+    if (nt_pool_valid(&s_gfx.shader_pool, shd.id)) {
         nt_gfx_frame_execute();
     }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_SHADER, shd.id);
@@ -1441,7 +1442,7 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
 }
 
 void nt_gfx_destroy_program(nt_program_t prog) {
-    if (prog.id != 0) {
+    if (nt_pool_valid(&s_gfx.program_pool, prog.id)) {
         nt_gfx_frame_execute();
     }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PROGRAM, prog.id);
@@ -1465,7 +1466,7 @@ static nt_gfx_result_t destroy_pipeline(nt_pipeline_t pip) {
 }
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
-    if (pip.id != 0) {
+    if (nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
         nt_gfx_frame_execute();
     }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, pip.id);
@@ -1490,7 +1491,7 @@ static nt_gfx_result_t destroy_vertex_input(nt_vertex_input_t vi) {
 }
 
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi) {
-    if (vi.id != 0) {
+    if (nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
         nt_gfx_frame_execute();
     }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_VERTEX_INPUT, vi.id);
@@ -1532,7 +1533,7 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
-    if (buf.id != 0) {
+    if (nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
         nt_gfx_frame_execute();
     }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id);
@@ -1540,7 +1541,7 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
 }
 
 void nt_gfx_destroy_texture(nt_texture_t tex) {
-    if (tex.id != 0) {
+    if (nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         nt_gfx_frame_execute();
     }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE, tex.id);
@@ -1566,7 +1567,7 @@ static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
 }
 
 void nt_gfx_destroy_render_target(nt_render_target_t rt) {
-    if (rt.id != 0) {
+    if (nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
         nt_gfx_frame_execute();
     }
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_RENDER_TARGET, rt.id);

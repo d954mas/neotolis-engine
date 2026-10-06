@@ -108,6 +108,7 @@ static void GLAD_API_PTR count_attribute_pointer(GLuint index, GLint size, GLenu
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 4096;
+    desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     s_buffer_data = glad_glBufferData;

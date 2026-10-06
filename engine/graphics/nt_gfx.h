@@ -344,8 +344,8 @@ typedef struct {
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes recorded between executions, default: 256 KiB; allocated once at init */
-    /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: vertex 1 MiB, index 0, uniform 0;
-     * each is a CPU staging copy plus a GPU buffer, allocated once at init. 0 disables the stream. */
+    /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: 0 (disabled);
+     * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
     bool depth;               /* request depth buffer (default: true) */
     bool stencil;             /* request stencil buffer (default: false) */
@@ -666,7 +666,7 @@ typedef struct {
     uint64_t texture_upload_bytes;
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
     uint32_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
-    /* Frame storage bytes allocated in the frame, padding included; final after end_frame. */
+    /* Frame storage bytes allocated in the frame and sent, padding included; final after end_frame. */
     uint32_t frame_bytes[NT_GFX_FRAME_STREAM_COUNT];
     uint32_t gl[NT_GFX_GL_COUNT];
 } nt_gfx_counters_t;
@@ -829,7 +829,6 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
         .stream_capacity = 256U * 1024U,
-        .frame_capacity = {[NT_GFX_FRAME_VERTEX] = 1024U * 1024U},
         .depth = true,
         .premultiplied_alpha = true,
     };

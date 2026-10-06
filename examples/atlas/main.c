@@ -235,6 +235,7 @@ int main(void) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 64; /* one mesh instance */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 

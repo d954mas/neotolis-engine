@@ -83,7 +83,7 @@ Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, `nt_gfx_read_pixels`, the GPU timing toggle and
 polling. Recorded commands keep their mutual order. A temporary rule keeps
 today's order for the operations that need it: `nt_gfx_update_buffer`,
-`nt_gfx_orphan_buffer`, every destroy of a nonzero handle, `nt_gfx_read_pixels`,
+`nt_gfx_orphan_buffer`, every destroy of a live handle, `nt_gfx_read_pixels`,
 `nt_gfx_register_global_block` and, with GPU timing compiled ON,
 `nt_gfx_set_gpu_timing_enabled` first execute the commands recorded so far, so
 they see every earlier draw. Other immediate operations may run before
@@ -440,9 +440,9 @@ replaces it (vertex inputs over it die with the context anyway). Each enabled
 stream's buffer counts against `nt_gfx_desc_t.max_buffers`.
 
 `nt_gfx_desc_t.frame_capacity[stream]` is the byte budget of a stream per frame,
-allocated once at init as staging plus buffer; `nt_gfx_desc_defaults()` sets
-1 MiB vertex and leaves index and uniform at 0. A zero capacity disables the
-stream: no staging and no buffer, and its allocations stop the program as an
+allocated once at init as staging plus buffer; `nt_gfx_desc_defaults()` leaves every
+stream at 0, so the game sets the budget of each stream it uses. A zero
+capacity disables the stream: no staging and no buffer, and its allocations stop the program as an
 overflow, so a game pays only for the streams it uses.
 Storage never grows: an overflow logs the stream, the needed and the free bytes
 and stops the program, with assertions OFF too, because the capacity is the

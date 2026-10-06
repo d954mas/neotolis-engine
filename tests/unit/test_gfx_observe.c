@@ -20,6 +20,7 @@ static void count_error_logs(nt_log_level_t level, const char *domain, const cha
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.capture_capacity = 64;
+    desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
 }
@@ -154,8 +155,8 @@ static void test_first_frame_counts_initial_resource_creation(void) {
     (void)nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT64(1, g_nt_gfx.last_frame.frame_sequence);
-    /* The vertex frame storage buffer (the only stream on by default), then the three loads; the texture also creates its default sampler. */
-    TEST_ASSERT_EQUAL_UINT32(1 + 4, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
+    /* The three loads; the texture also creates its default sampler. Frame storage is off by default. */
+    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CREATE]);
 }
 
 /* The pre-swap capture seam reads after end_frame: work there is legal and counts in the open frame. */
@@ -954,6 +955,7 @@ static void test_exact_capacity_and_one_record_short(void) {
         nt_gfx_shutdown();
         nt_gfx_desc_t desc = nt_gfx_desc_defaults();
         desc.capture_capacity = needed - missing;
+        desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096; /* as in setUp: the recorded frame uploads */
         nt_gfx_init(&desc);
         nt_gfx_begin_frame();
         record_next_frame();

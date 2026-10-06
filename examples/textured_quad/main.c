@@ -393,6 +393,7 @@ int main(void) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = NUM_CUBES * 64U; /* 64 = the largest mesh instance stride */
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks (required after Plan 02 removed auto-bind) */

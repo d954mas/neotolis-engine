@@ -1689,6 +1689,34 @@ void test_prepare_of_a_new_mesh_after_a_draw_executes_nothing(void) {
     TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
 }
 
+/* A mesh in the slot of a deactivated one finds the cascade-killed vertex inputs in the cache row:
+ * dropping them must not execute the recorded draws (and upload frame storage) mid-frame. */
+void test_prepare_of_a_mesh_in_a_reused_slot_after_a_draw_executes_nothing(void) {
+    nt_material_t mat = create_test_material();
+    nt_mesh_t mesh_a = create_test_mesh();
+    nt_mesh_t mesh_c = create_test_mesh();
+    nt_entity_t e = create_test_entity(mesh_a, mat);
+    nt_render_item_t a[1] = {{.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_a)}};
+    nt_render_item_t c[1] = {{.entity = create_test_entity(mesh_c, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_c)}};
+    nt_mesh_run_t runs[1];
+
+    begin_storage_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_mesh_renderer_draw(runs, nt_mesh_renderer_prepare(a, 1, runs, 1));
+    begin_storage_frame();
+    nt_gfx_deactivate_mesh(mesh_a.id);
+    nt_mesh_t mesh_b = create_test_mesh();
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(mesh_a.id), nt_pool_slot_index(mesh_b.id));
+    *nt_mesh_comp_handle(e) = mesh_b;
+    a[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh_b);
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_mesh_renderer_draw(runs, nt_mesh_renderer_prepare(c, 1, runs, 1));
+    const uint32_t updates = nt_gfx_fake_update_buffer_count();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_prepare(a, 1, runs, 1));
+    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
+}
+
 /* Shadow cascades draw one list in several passes: the frame storage uploads once, before the first draw. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_list_drawn_twice_reads_one_upload(void) {
@@ -1891,6 +1919,7 @@ int main(void) {
     RUN_TEST(test_draw_list_mixed_color_modes_multi_instance);
     RUN_TEST(test_prepare_and_draw_offsets_agree);
     RUN_TEST(test_prepare_of_a_new_mesh_after_a_draw_executes_nothing);
+    RUN_TEST(test_prepare_of_a_mesh_in_a_reused_slot_after_a_draw_executes_nothing);
     RUN_TEST(test_list_drawn_twice_reads_one_upload);
     RUN_TEST(test_runs_keep_state_resolved_at_prepare);
     RUN_TEST(test_concatenated_runs_rebind_textures_on_a_pipeline_change);
