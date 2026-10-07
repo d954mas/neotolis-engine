@@ -2830,7 +2830,7 @@ int main(int argc, char *argv[]) {
     s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_text"});
     s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 256, .measure_cache_size = 256});
     nt_ui_set_sprite_material(s_ui, s_sprite_material);
-    nt_ui_set_text_material(s_ui, s_text_material);
+    nt_ui_set_text_material(s_ui, s_text_material, 0.0F);
 
 #ifdef NT_DEVAPI_ENABLED
     if (nt_devapi_init() != NT_OK) {

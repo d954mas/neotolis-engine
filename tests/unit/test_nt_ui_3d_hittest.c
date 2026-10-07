@@ -42,7 +42,7 @@ static void setup_3d_ctx(void) {
     nt_ui_set_font(s_fx.ctx, 0U, s_fx.stub_font);
     nt_ui_set_atlas_white_region(s_fx.ctx, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
     nt_ui_set_sprite_material(s_fx.ctx, s_fx.sprite_material);
-    nt_ui_set_text_material(s_fx.ctx, s_fx.text_material);
+    nt_ui_set_text_material(s_fx.ctx, s_fx.text_material, 0.0F);
 }
 
 void setUp(void) {

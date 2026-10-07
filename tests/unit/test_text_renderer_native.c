@@ -132,10 +132,9 @@ void test_cold_glyph_misses_draw_in_their_first_frame(void) {
     nt_gfx_update_texture(nt_font_get_curve_texture(s_font), 0, 1, 2048, MAX_GLYPHS - 1, zeros);
 
     nt_text_renderer_set_material(s_material);
-    nt_text_renderer_set_font(s_font);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-    nt_text_renderer_draw("AB", identity, 1000.0F, 0xFFFFFFFFU, 0.0F, 0.0F);
+    nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 1000.0F, .color = 0xFFFFFFFFU}, identity, "AB");
 
     const uint32_t w = g_nt_window.fb_width;
     const uint32_t h = g_nt_window.fb_height;

@@ -163,7 +163,7 @@ static void draw_text_scene(void) {
         uint32_t white = NT_RGBA8(255, 255, 255, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-5.0F, 3.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_EN, (const float *)model, 2.0F, white, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 2.0F, .color = white}, (const float *)model, TEXT_EN);
     }
 
     /* Medium Russian text at Y=1.0, light blue */
@@ -171,7 +171,7 @@ static void draw_text_scene(void) {
         uint32_t blue = NT_RGBA8(153, 204, 255, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-5.0F, 1.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_RU, (const float *)model, 1.5F, blue, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 1.5F, .color = blue}, (const float *)model, TEXT_RU);
     }
 
     /* Chinese text at Y=-1.0, light green */
@@ -179,7 +179,7 @@ static void draw_text_scene(void) {
         uint32_t green = NT_RGBA8(153, 255, 153, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-3.0F, -1.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_CN, (const float *)model, 1.5F, green, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 1.5F, .color = green}, (const float *)model, TEXT_CN);
     }
 
     /* Korean text at Y=-3.0, light yellow */
@@ -187,7 +187,7 @@ static void draw_text_scene(void) {
         uint32_t yellow = NT_RGBA8(255, 255, 153, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-4.0F, -3.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_KR, (const float *)model, 1.5F, yellow, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 1.5F, .color = yellow}, (const float *)model, TEXT_KR);
     }
 
     /* Small size reference at bottom */
@@ -196,19 +196,19 @@ static void draw_text_scene(void) {
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-8.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_EN, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 0.5F, .color = gray}, (const float *)model, TEXT_EN);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-2.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_RU, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 0.5F, .color = gray}, (const float *)model, TEXT_RU);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){4.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_CN, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 0.5F, .color = gray}, (const float *)model, TEXT_CN);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){8.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_KR, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 0.5F, .color = gray}, (const float *)model, TEXT_KR);
     }
 }
 
@@ -335,7 +335,6 @@ static void frame(void) {
         nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         nt_text_renderer_set_material(s_text_material);
-        nt_text_renderer_set_font(s_font);
 
 #if NT_LOG_MIN_LEVEL == 0
         t_draw = nt_time_now();

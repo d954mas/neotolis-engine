@@ -637,7 +637,7 @@ int main(void) {
         .label = "rtt_showcase_ui_text",
     });
     nt_ui_set_sprite_material(s_ui_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ui_ctx, s_text_material);
+    nt_ui_set_text_material(s_ui_ctx, s_text_material, 0.0F);
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 256,
         .measure_cache_size = 256,

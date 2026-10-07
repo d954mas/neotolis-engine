@@ -122,8 +122,8 @@ static void overlay_draw_text(nt_material_t text_mat, nt_font_t font, float x, f
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, x, baseline_y, 0.0F, 1.0F,
     };
     nt_text_renderer_set_material(text_mat);
-    nt_text_renderer_set_font(font);
-    nt_text_renderer_draw_n(s, n, model, size, color, 0.0F, 0.0F);
+    const nt_text_style_t style = {.font = font, .size = size, .color = color};
+    nt_text_renderer_draw_n(&style, model, s, n);
 }
 // #endregion
 
@@ -227,8 +227,8 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                         tm[12 + rr] = (ox * m[rr]) + (oy * m[4 + rr]) + m[12 + rr];
                     }
                     nt_text_renderer_set_material(tmat);
-                    nt_text_renderer_set_font(font);
-                    nt_text_renderer_draw_n(buf, (size_t)n, tm, label_size, white, 0.0F, 0.0F);
+                    const nt_text_style_t style = {.font = font, .size = label_size, .color = white};
+                    nt_text_renderer_draw_n(&style, tm, buf, (size_t)n);
                 }
             }
         }

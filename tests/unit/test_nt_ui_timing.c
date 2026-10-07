@@ -183,7 +183,7 @@ static void test_context_timing_is_independent(void) {
     TEST_ASSERT_NOT_NULL(s_other_ctx);
     nt_ui_set_atlas_white_region(s_other_ctx, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
     nt_ui_set_sprite_material(s_other_ctx, s_fx.sprite_material);
-    nt_ui_set_text_material(s_other_ctx, s_fx.text_material);
+    nt_ui_set_text_material(s_other_ctx, s_fx.text_material, 0.0F);
     assert_timings(s_other_ctx, 0, 0);
 
     s_clock_step = 0.25;

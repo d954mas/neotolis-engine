@@ -215,7 +215,7 @@ static nt_font_t make_stub_font(void) {
 }
 
 /* Build a block that interleaves the 4 font faces R B R I R BI R as separate runs (each <color>-split so
- * the solver keeps them as distinct atoms). With 4 distinct fonts in the family, set_font must be called
+ * the solver keeps them as distinct atoms). With 4 distinct fonts in the family, the font must switch
  * once PER DISTINCT FONT (4) -- NOT once per transition (7) -- proving the font-grouped multi-pass. */
 static void frame_multi_face(const nt_font_t fam[4]) {
     nt_mem_scratch_reset();
@@ -257,7 +257,7 @@ static void frame_multi_face(const nt_font_t fam[4]) {
 }
 
 /* (1c) FONT-GROUPED emit: a block interleaving 4 distinct faces (R B R I R BI R, 7 transitions in source
- * order) calls set_font exactly 4 times -- once per DISTINCT font, NOT once per transition (7) -- because
+ * order) switches the font exactly 4 times -- once per DISTINCT font, NOT once per transition (7) -- because
  * emit groups atoms by font.id. Pinning 4 proves the per-transition flushes collapse. */
 static void test_emit_groups_text_by_font(void) {
     /* font pool cap is 4 and the fixture already holds slot 1 (stub_font): reuse it as the regular face,
@@ -270,7 +270,7 @@ static void test_emit_groups_text_by_font(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_multi_face(fam);
 
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_set_font_calls(), "set_font called once per DISTINCT font (4), not once per transition (7)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_font_switches(), "the font switches once per DISTINCT font (4), not once per transition (7)");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "multi-face block still emits draw_n spans");
 
     /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
@@ -281,12 +281,12 @@ static void test_emit_groups_text_by_font(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
-/* (1d) a SINGLE-face block (one font, two color runs) calls set_font exactly once (no per-run regression
+/* (1d) a SINGLE-face block (one font, two color runs) switches the font exactly once (no per-run regression
  * from the grouping pass -- distinct-font count is 1). */
-static void test_emit_single_face_one_set_font(void) {
+static void test_emit_single_face_one_font_switch(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT); /* two color runs, ONE font */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_text_renderer_test_set_font_calls(), "single-face block calls set_font once (one distinct font)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_text_renderer_test_font_switches(), "single-face block switches the font once (one distinct font)");
 }
 
 /* Build a block whose LAST run is italic on a family with NO italic face -> NT_UI_RICH_RUN_SYNTH_ITALIC.
@@ -316,14 +316,12 @@ static void frame_synth_italic(void) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (1f) WIRING + LEAK-GUARD: an italic run on a family with no italic face raises NT_UI_RICH_RUN_SYNTH_ITALIC,
- * which the emit pass feeds to nt_text_renderer_set_oblique as NT_UI_RICH_SYNTH_ITALIC_SHEAR, then resets to
- * 0 at end of pass. Pins both halves: the shear reaches the renderer, and it does NOT leak past the block. */
-static void test_emit_synth_italic_wires_and_resets_oblique(void) {
+/* (1f) WIRING: an italic run on a family with no italic face raises NT_UI_RICH_RUN_SYNTH_ITALIC, which the
+ * emit pass puts in the run's style as NT_UI_RICH_SYNTH_ITALIC_SHEAR. */
+static void test_emit_synth_italic_wires_oblique(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_synth_italic();
     TEST_ASSERT_TRUE_MESSAGE(approx(nt_text_renderer_test_max_oblique(), NT_UI_RICH_SYNTH_ITALIC_SHEAR), "SYNTH_ITALIC run feeds NT_UI_RICH_SYNTH_ITALIC_SHEAR to the renderer during emit");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_oblique() == 0.0F, "emit resets oblique to 0 after the pass (no lean leak onto the next caller)");
 }
 
 /* (1g) NEGATIVE: a family WITH a real italic face uses it -> no synthetic shear ever reaches the renderer. */
@@ -336,7 +334,6 @@ static void test_emit_real_italic_face_no_oblique(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_multi_face(fam); /* pushes italic / bold-italic against a family that HAS those faces */
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_oblique() == 0.0F, "real italic face -> no synthetic shear reaches the renderer");
-    TEST_ASSERT_TRUE(nt_text_renderer_test_oblique() == 0.0F);
     /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
     nt_gfx_end_pass();
     for (int i = 1; i < 4; i++) {
@@ -373,15 +370,13 @@ static void frame_synth_bold(void) {
 }
 #endif
 
-/* WIRING + LEAK-GUARD: a <b> run on a family with no bold face raises NT_UI_RICH_RUN_SYNTH_BOLD,
- * which the emit pass feeds to nt_text_renderer_set_weight as NT_TEXT_SYNTH_BOLD_WEIGHT, then resets to
- * 0 after the pass. Mirrors the SYNTH_ITALIC wire-and-reset. */
+/* WIRING: a <b> run on a family with no bold face raises NT_UI_RICH_RUN_SYNTH_BOLD, which the emit pass
+ * puts in the run's style as NT_TEXT_SYNTH_BOLD_WEIGHT. */
 #if NT_FONT_EMBOLDEN_ENABLED
-static void test_emit_synth_bold_wires_and_resets_weight(void) {
+static void test_emit_synth_bold_wires_weight(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_synth_bold();
     TEST_ASSERT_TRUE_MESSAGE(approx(nt_text_renderer_test_max_weight(), NT_TEXT_SYNTH_BOLD_WEIGHT), "SYNTH_BOLD run feeds the shared weight to the renderer during emit");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_weight() == 0.0F, "emit resets weight to 0 after the pass (no synth-bold leak onto the next caller)");
 }
 #endif
 
@@ -436,8 +431,8 @@ static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (1e) REGRESSION: a band with SIX distinct fonts emits ALL six runs' text -- one set_font per distinct
- * font, NO cap, NO drop. Pin set_font==6 AND span_count==TEXT-atom count (every TEXT atom emits a span;
+/* (1e) REGRESSION: a band with SIX distinct fonts emits ALL six runs' text -- one font switch per distinct
+ * font, NO cap, NO drop. Pin font switches==6 AND span_count==TEXT-atom count (every TEXT atom emits a span;
  * none dropped past a font limit). */
 static void test_emit_more_than_four_fonts_no_drop(void) {
     nt_font_t fam[6];
@@ -456,7 +451,7 @@ static void test_emit_more_than_four_fonts_no_drop(void) {
             text_atoms++;
         }
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(6U, nt_text_renderer_test_set_font_calls(), "six distinct fonts -> set_font called six times (no cap)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(6U, nt_text_renderer_test_font_switches(), "six distinct fonts -> six font switches (no cap)");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(text_atoms, nt_ui_rich_test_emit_span_count(s_fx.ctx), "every TEXT atom emits a span -> no font dropped past 4");
 
     /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
@@ -2245,7 +2240,7 @@ static void test_later_band_text_reselects_block_text_material(void) {
 }
 
 /* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on
- * layer 1. The font-group gather is PER-LAYER, so set_font is called (distinct fonts in layer 0 = 2) +
+ * layer 1. The font-group gather is PER-LAYER, so the font switches (distinct fonts in layer 0 = 2) +
  * (distinct fonts in layer 1 = 2) = 4 -- proving the gather scopes to the band, not the whole block. */
 static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
     nt_mem_scratch_reset();
@@ -2287,7 +2282,7 @@ static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
 }
 
 /* (L3) font-group gather is per-band, not per-block: {R,B} on layer 0 + {I,BI} on layer 1
- * still costs 4 set_font calls (the layer split does not collapse the per-band grouping). */
+ * still costs 4 font switches (the layer split does not collapse the per-band grouping). */
 static void test_font_group_per_layer(void) {
     nt_font_t fam[4];
     fam[0] = s_fx.stub_font;   /* R */
@@ -2298,8 +2293,8 @@ static void test_font_group_per_layer(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_multi_face_two_layers(fam);
 
-    /* Per-band gather: layer 0 = {R,B} (2) + layer 1 = {I,BI} (2) = 4 set_font calls. */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_set_font_calls(), "font gather is per-layer: 2 fonts in band 0 + 2 in band 1 = 4 set_font calls");
+    /* Per-band gather: layer 0 = {R,B} (2) + layer 1 = {I,BI} (2) = 4 font switches. */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_font_switches(), "font gather is per-layer: 2 fonts in band 0 + 2 in band 1 = 4 font switches");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "layered multi-face block still emits draw_n spans");
 
     /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
@@ -2308,39 +2303,6 @@ static void test_font_group_per_layer(void) {
         nt_font_destroy(fam[i]);
     }
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-}
-
-/* (L4) a SINGLE face reused across TWO layers calls set_font ONCE PER BAND (2 total), not once for the
- * whole block (1) -- the clean proof that the gather re-scopes per layer (the same font.id rebinds in
- * the second band because the first band drained between them). */
-static void test_font_rebinds_per_layer_for_shared_face(void) {
-    nt_mem_scratch_reset();
-    s_fx.ctx->pending_rich = NULL;
-    s_fx.ctx->rich_session_open = false;
-
-    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-    base.font_id[0] = s_fx.stub_font;
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
-
-    nt_text_renderer_test_reset_call_counters();
-    nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("rich_sf_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
-        nt_ui_rich_begin(s_fx.ctx, &base);
-        nt_ui_rich_push_layer(s_fx.ctx, 0U);
-        nt_ui_rich_text_n(s_fx.ctx, "a ", 2);
-        nt_ui_rich_pop(s_fx.ctx);
-        nt_ui_rich_push_layer(s_fx.ctx, 1U);
-        nt_ui_rich_text_n(s_fx.ctx, "b", 1);
-        nt_ui_rich_pop(s_fx.ctx);
-        nt_ui_rich_end(s_fx.ctx);
-        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_sf").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
-    }
-    nt_ui_end(s_fx.ctx);
-    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_ui_walk(s_fx.ctx, &target);
-
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_text_renderer_test_set_font_calls(), "one face across two layers -> set_font once per band (2), not once for the whole block");
 }
 
 /* Build two inline images on DISTINCT explicit layers: a red image on layer 0 (lower band) and a green
@@ -2661,18 +2623,17 @@ int main(void) {
     RUN_TEST(test_single_style_one_span_per_line);
     RUN_TEST(test_double_walk_is_deterministic);
     RUN_TEST(test_emit_groups_text_by_font);
-    RUN_TEST(test_emit_single_face_one_set_font);
-    RUN_TEST(test_emit_synth_italic_wires_and_resets_oblique);
+    RUN_TEST(test_emit_single_face_one_font_switch);
+    RUN_TEST(test_emit_synth_italic_wires_oblique);
     RUN_TEST(test_emit_real_italic_face_no_oblique);
 #if NT_FONT_EMBOLDEN_ENABLED
-    RUN_TEST(test_emit_synth_bold_wires_and_resets_weight);
+    RUN_TEST(test_emit_synth_bold_wires_weight);
 #endif
     RUN_TEST(test_emit_real_bold_face_no_weight);
     RUN_TEST(test_emit_more_than_four_fonts_no_drop);
     RUN_TEST(test_default_layers_by_kind);
     RUN_TEST(test_layer_override);
     RUN_TEST(test_font_group_per_layer);
-    RUN_TEST(test_font_rebinds_per_layer_for_shared_face);
     RUN_TEST(test_layer_drain_orders_ascending);
     RUN_TEST(test_default_mixed_block_paints_bands_in_order);
     RUN_TEST(test_mixed_auto_and_explicit_layers);

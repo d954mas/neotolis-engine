@@ -98,7 +98,7 @@ _Static_assert(sizeof(nt_ui_rich_fx_params_t) == 8, "nt_ui_rich_fx_params_t stab
 #define NT_UI_RICH_RUN_UNDERLINE (1U << 2)
 #define NT_UI_RICH_RUN_STRIKE (1U << 3)
 
-/* Faux-italic lean fed to nt_text_renderer_set_oblique for a SYNTH_ITALIC run (text-local x += k*y). */
+/* Faux-italic lean of a SYNTH_ITALIC run's text style (text-local x += k*y). */
 #define NT_UI_RICH_SYNTH_ITALIC_SHEAR 0.2F
 
 /* Image vertical alignment against the line. */

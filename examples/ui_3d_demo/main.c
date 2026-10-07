@@ -689,7 +689,7 @@ static void draw_hud_block(const char *text, float x, float y, float size, uint3
     mat4 model;
     glm_mat4_identity(model);
     glm_translate(model, (vec3){x, y, 0.0F});
-    nt_text_renderer_draw(text, (const float *)model, size, color, 0.0F, 0.0F);
+    nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = size, .color = color}, (const float *)model, text);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -698,7 +698,6 @@ static void draw_hud(float fb_w, float fb_h) {
         return;
     }
     nt_text_renderer_set_material(s_text_material);
-    nt_text_renderer_set_font(s_font);
 
     const uint32_t white = NT_RGBA8(242, 242, 250, 255);
     const uint32_t accent = NT_RGBA8(255, 217, 77, 255);
@@ -926,24 +925,18 @@ static void frame(void) {
     if (ui_can_render) {
         nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
 
-        /* UI labels now write depth (world panels sort by depth) → bias glyph quads apart so their AA
-         * fringes don't z-fight; the walker emits text with the renderer's current bias. Reset after. */
-        nt_text_renderer_set_glyph_depth_bias(0.0001F);
         nt_ui_walk(s_ctx, &target);
-        nt_text_renderer_set_glyph_depth_bias(0.0F);
 
         /* World-space depth-writing text. The per-glyph clip-space bias keeps overlapping glyph
-         * quads from z-fighting at their AA fringes (set before the draw, reset after). */
+         * quads from z-fighting at their AA fringes. */
         if (s_font_bound) {
             const uint32_t yellow = NT_RGBA8(255, 255, 51, 255);
             nt_text_renderer_set_material(s_text_material_3d);
-            nt_text_renderer_set_font(s_font);
-            nt_text_renderer_set_glyph_depth_bias(0.0001F);
             mat4 text_model;
             glm_mat4_identity(text_model);
             glm_translate(text_model, (vec3){-7.0F, 4.0F, 0.0F});
-            nt_text_renderer_draw("HELLO 3D WORLD", (const float *)text_model, 0.8F, yellow, 0.0F, 0.0F);
-            nt_text_renderer_set_glyph_depth_bias(0.0F);
+            const nt_text_style_t style = {.font = s_font, .size = 0.8F, .color = yellow, .glyph_depth_bias = 0.0001F};
+            nt_text_renderer_draw(&style, (const float *)text_model, "HELLO 3D WORLD");
         }
     }
 
@@ -1111,7 +1104,8 @@ int main(int argc, char *argv[]) {
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
     /* UI labels use the depth-writing text material so they sort with the panels (overlapping world
      * panels). The HUD/stats keep s_text_material (depth_write=false) — they're a flat screen overlay. */
-    nt_ui_set_text_material(s_ctx, s_text_material_3d);
+    /* UI labels write depth (world panels sort by depth): bias glyph quads apart so their AA fringes don't z-fight. */
+    nt_ui_set_text_material(s_ctx, s_text_material_3d, 0.0001F);
     /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
      * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
     s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){

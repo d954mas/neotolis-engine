@@ -303,12 +303,11 @@ static void test_label_decoration_wires_and_resets_setters(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_weight() > 0.0F, "bold label feeds a synthetic weight to the renderer during emit");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_outline_width() > 0.0F, "label outline width reaches the renderer");
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_saw_underline(), "label underline reaches the renderer");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_weight() == 0.0F, "decoration reset after the label draw (no leak onto later text)");
 }
 #endif
 
 /* Parent opacity must fold into outline/shadow alpha (not just the fill): the walker pre-multiplies
- * only textColor.a, so nt_ui_label_deco_apply folds accum_opacity into the decoration colors — else a
+ * only textColor.a, so nt_ui_label_deco_style folds accum_opacity into the decoration colors — else a
  * faded panel keeps opaque outline/shadow. */
 static void test_label_deco_folds_parent_opacity(void) {
     nt_ui_label_deco_t d = {0};
@@ -321,18 +320,19 @@ static void test_label_deco_folds_parent_opacity(void) {
     d.shadow_color = 0x80332211U; /* alpha > 0 -> shadow active */
 
     /* Opacity multiplies the existing alpha (0x80 * 0.5 = 0x40); RGB bytes stay in place. */
-    nt_ui_label_deco_apply(&d, 0.5F); /* half-faded parent */
+    nt_text_style_t half = {0};
+    nt_ui_label_deco_style(&d, 0.5F, &half); /* half-faded parent */
 #if NT_FONT_EMBOLDEN_ENABLED
-    TEST_ASSERT_EQUAL_HEX32(0x40665544U, nt_text_renderer_test_outline_color());
+    TEST_ASSERT_EQUAL_HEX32(0x40665544U, half.outline_color);
 #endif
-    TEST_ASSERT_EQUAL_HEX32(0x40332211U, nt_text_renderer_test_shadow_color());
+    TEST_ASSERT_EQUAL_HEX32(0x40332211U, half.shadow_color);
 
-    nt_ui_label_deco_apply(&d, 1.0F); /* opaque parent leaves alpha untouched */
+    nt_text_style_t opaque = {0};
+    nt_ui_label_deco_style(&d, 1.0F, &opaque); /* opaque parent leaves alpha untouched */
 #if NT_FONT_EMBOLDEN_ENABLED
-    TEST_ASSERT_EQUAL_HEX32(0x80665544U, nt_text_renderer_test_outline_color());
+    TEST_ASSERT_EQUAL_HEX32(0x80665544U, opaque.outline_color);
 #endif
-    TEST_ASSERT_EQUAL_HEX32(0x80332211U, nt_text_renderer_test_shadow_color());
-    nt_text_renderer_reset_decoration();
+    TEST_ASSERT_EQUAL_HEX32(0x80332211U, opaque.shadow_color);
 }
 
 /* A decorated label that breaks into multiple lines (embedded '\n') must decorate EVERY emitted line.
@@ -366,7 +366,6 @@ static void test_label_decoration_applies_to_wrapped_lines(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)text_cmds, nt_ui_test_deco_applied_count(), "decoration must apply to EVERY line (uniform element_data), not just the first");
-    nt_text_renderer_reset_decoration();
 }
 
 /* Headline property of the special-data design: a decorated label built WITH game data keeps the caller's

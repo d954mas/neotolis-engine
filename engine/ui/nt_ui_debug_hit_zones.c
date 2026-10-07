@@ -185,8 +185,8 @@ static void draw_zone_label(const nt_ui_debug_zone_t *z, const float text_model[
     }
     const uint32_t color = 0xFFFFFFFFU;
     nt_text_renderer_set_material(text_mat);
-    nt_text_renderer_set_font(font);
-    nt_text_renderer_draw_n(buf, (size_t)n, text_model, size, color, 0.0F, 0.0F);
+    const nt_text_style_t style = {.font = font, .size = size, .color = color};
+    nt_text_renderer_draw_n(&style, text_model, buf, (size_t)n);
 }
 // #endregion
 

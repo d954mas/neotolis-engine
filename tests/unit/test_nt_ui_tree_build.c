@@ -489,7 +489,7 @@ static void test_multi_ctx_tree_storage_isolated(void) {
     TEST_ASSERT_NOT_NULL(ctx_b);
     nt_ui_set_atlas_white_region(ctx_b, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
     nt_ui_set_sprite_material(ctx_b, s_fx.sprite_material);
-    nt_ui_set_text_material(ctx_b, s_fx.text_material);
+    nt_ui_set_text_material(ctx_b, s_fx.text_material, 0.0F);
     nt_ui_set_font(ctx_b, 0U, s_fx.stub_font);
 
     /* ctx A: declare a rotated container. ctx B: empty layout. */

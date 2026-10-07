@@ -86,7 +86,7 @@ void nt_debug_overlay_draw(nt_material_t material, nt_font_t font, const float m
     char buf[512];
     (void)nt_debug_overlay_format_lines(buf, sizeof(buf));
     nt_text_renderer_set_material(material);
-    nt_text_renderer_set_font(font);
-    nt_text_renderer_draw(buf, model, size, color, 0.0F, 0.0F);
+    const nt_text_style_t style = {.font = font, .size = size, .color = color};
+    nt_text_renderer_draw(&style, model, buf);
 }
 // #endregion

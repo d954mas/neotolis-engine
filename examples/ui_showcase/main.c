@@ -2284,9 +2284,9 @@ static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float
     nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW */
 }
 
-/* SHEAR SWEEP: the SAME word drawn at oblique 0.1/0.2/0.3/0.4 via nt_text_renderer_set_oblique, proving
- * faux-italic is a free renderer lean at ANY angle (the rich markup path is fixed at 0.2). The label column
- * stays upright; only the sample leans -- demonstrates set_oblique toggling per draw_n with no flush. */
+/* SHEAR SWEEP: the SAME word drawn at oblique 0.1/0.2/0.3/0.4 via the text style, proving faux-italic is a
+ * free renderer lean at ANY angle (the rich markup path is fixed at 0.2). The label column stays upright;
+ * only the sample leans -- the oblique changes per draw. */
 #define RICH_OBJ_SWEEP_W 360.0F
 #define RICH_OBJ_SWEEP_H 112.0F
 static nt_ui_rich_object_measure_t rich_obj_oblique_measure(void *user_data) {
@@ -2313,21 +2313,20 @@ static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, fl
     static const float shears[4] = {0.1F, 0.2F, 0.3F, 0.4F};
     const float size = 18.0F;
     const float line_h = 26.0F;
-    const float label_col = 104.0F;            /* upright label column width (px) */
-    nt_text_renderer_set_font(s_rich_font[0]); /* regular face -> the slant is purely synthetic */
+    const float label_col = 104.0F;                                                 /* upright label column width (px) */
+    nt_text_style_t style = {.font = s_rich_font[0], .size = size, .color = color}; /* regular face -> the slant is purely synthetic */
     for (int i = 0; i < 4; ++i) {
         char label[16];
         const int ln = snprintf(label, sizeof label, "shear %.1f", (double)shears[i]);
         const float baseline = y + size + ((float)i * line_h);
         float model[16];
         rich_obj_text_model(world_mat4, x, baseline, model);
-        nt_text_renderer_set_oblique(0.0F); /* label stays upright */
-        nt_text_renderer_draw_n(label, (size_t)ln, model, size, color, 0.0F, 0.0F);
+        style.oblique = 0.0F; /* label stays upright */
+        nt_text_renderer_draw_n(&style, model, label, (size_t)ln);
         rich_obj_text_model(world_mat4, x + label_col, baseline, model);
-        nt_text_renderer_set_oblique(shears[i]); /* sample leans -- no flush between the two draws */
-        nt_text_renderer_draw_n("The quick brown fox", 19U, model, size, color, 0.0F, 0.0F);
+        style.oblique = shears[i]; /* sample leans */
+        nt_text_renderer_draw_n(&style, model, "The quick brown fox", 19U);
     }
-    nt_text_renderer_set_oblique(0.0F); /* MUST reset: this object-only block has no rich text pass to do it */
 }
 
 /* Build the markup-front vocabulary once the font + materials are ready: the named colours, the stock
@@ -4093,7 +4092,7 @@ int main(int argc, char *argv[]) {
     });
 
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ctx, s_text_material);
+    nt_ui_set_text_material(s_ctx, s_text_material, 0.0F);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 256,

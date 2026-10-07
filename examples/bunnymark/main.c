@@ -488,8 +488,8 @@ static void frame(void) {
                            BUNNY_CLICK_SPAWN_COUNT, BUNNY_HOLD_SPAWN_RATE, BUNNY_BULK_ADD, BUNNY_BULK_ADD_BIG);
         }
         nt_text_renderer_set_material(s_text_material);
-        nt_text_renderer_set_font(s_overlay_font);
-        nt_text_renderer_draw(overlay, (const float *)overlay_model, overlay_size, white, 0.0F, 0.0F);
+        const nt_text_style_t overlay_style = {.font = s_overlay_font, .size = overlay_size, .color = white};
+        nt_text_renderer_draw(&overlay_style, (const float *)overlay_model, overlay);
     }
     // #endregion
 

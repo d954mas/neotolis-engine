@@ -1271,13 +1271,13 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
 // #endregion
 
 // #region helper_emit_text
-static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16]) {
+/* deco is the label decoration of the element (NULL: plain), faded by opacity like the fill. */
+static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16], const nt_ui_label_deco_t *deco, float opacity) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
     NT_ASSERT(nt_font_valid(font) && "nt_ui TEXT: font slot empty; call nt_ui_set_font first");
 
-    nt_text_renderer_set_font(font);
     nt_text_renderer_set_material(ctx->text_material);
 
     const float font_size = (float)t->fontSize * text_scale;
@@ -1295,8 +1295,18 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     const float inv_ts = (text_scale > 0.0F) ? (1.0F / text_scale) : 0.0F;
     float m[16];
     nt_ui_sprite_mat4(world_mat4, c->boundingBox.x, baseline_y, inv_ts, inv_ts, m);
-    const uint32_t color = nt_ui_pack_clay(t->textColor);
-    nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, font_size, color, (float)t->letterSpacing * text_scale, (float)t->lineHeight * text_scale);
+    nt_text_style_t style = {
+        .font = font,
+        .size = font_size,
+        .color = nt_ui_pack_clay(t->textColor),
+        .letter_tracking = (float)t->letterSpacing * text_scale,
+        .line_leading = (float)t->lineHeight * text_scale,
+        .glyph_depth_bias = ctx->text_glyph_depth_bias,
+    };
+    if (deco != NULL) {
+        nt_ui_label_deco_style(deco, opacity, &style);
+    }
+    nt_text_renderer_draw_n(&style, m, t->stringContents.chars, (size_t)t->stringContents.length);
 }
 // #endregion
 
@@ -1640,20 +1650,15 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         counters->text_command_count++;
         Clay_RenderCommand local = *c;
         local.renderData.text.textColor.a *= ws->accum_opacity;
-        /* Same userData rides every wrapped-line TEXT command, so apply the sticky deco per line and reset
-         * after emit so it can't leak onto the next TEXT. */
+        /* Same userData rides every wrapped-line TEXT command, so every line carries the decoration. */
         const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)c->userData;
-        const bool decorated = (ed != NULL && ed->special_kind == NT_UI_SPECIAL_TEXT_DECO);
-        if (decorated) {
-            nt_ui_label_deco_apply(ed->special.text_deco, ws->accum_opacity);
+        const nt_ui_label_deco_t *deco = (ed != NULL && ed->special_kind == NT_UI_SPECIAL_TEXT_DECO) ? ed->special.text_deco : NULL;
 #ifdef NT_TEST_ACCESS
+        if (deco != NULL) {
             s_test_deco_applied_count++; /* per decorated TEXT command (wrapped lines count each) */
+        }
 #endif
-        }
-        emit_text(ctx, &local, text_scale, world_mat4);
-        if (decorated) {
-            nt_text_renderer_reset_decoration();
-        }
+        emit_text(ctx, &local, text_scale, world_mat4, deco, ws->accum_opacity);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
@@ -2033,11 +2038,12 @@ void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_materi
     ctx->sprite_material = sprite_material;
 }
 
-void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material) {
+void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material, float glyph_depth_bias) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_text_material: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_text_material: must be called outside begin/end");
     NT_ASSERT(text_material.id != 0 && "nt_ui_set_text_material: invalid material handle");
     ctx->text_material = text_material;
+    ctx->text_glyph_depth_bias = glyph_depth_bias;
 }
 
 void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, void *userdata) {

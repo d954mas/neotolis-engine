@@ -100,7 +100,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
         nt_ui_set_sprite_material(fx->ctx, fx->sprite_material);
     }
     if ((bind & UI_WALKER_FX_BIND_TEXT_MATERIAL) != 0U) {
-        nt_ui_set_text_material(fx->ctx, fx->text_material);
+        nt_ui_set_text_material(fx->ctx, fx->text_material, 0.0F);
     }
     nt_ui_set_custom_handler(fx->ctx, NULL, NULL);
 }

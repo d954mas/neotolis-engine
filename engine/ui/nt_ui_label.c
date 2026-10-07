@@ -45,32 +45,27 @@ static const nt_ui_element_data_t *label_attach_decoration(const nt_ui_element_d
     return ed;
 }
 
-void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d, float opacity) {
-    /* Normalize non-finite caller fields to off here (mirrors rich push clamp): a raw NaN/Inf reaches the
-     * renderer setter, which guards by returning early -> the previous label's sticky value LEAKS. */
+void nt_ui_label_deco_style(const nt_ui_label_deco_t *d, float opacity, nt_text_style_t *style) {
+    /* Non-finite caller fields turn that axis off (mirrors the rich push clamp); the renderer asserts finite values. */
     /* A label has one font_id (no B/I family), so bold is always synthesized to weight (cascade
      * degenerates to synth). Explicit weight overrides; else the BOLD bit picks the shared synth weight. */
-    float weight = isfinite(d->weight) ? d->weight : 0.0F;
-    if (weight == 0.0F && (d->variant & NT_UI_LABEL_VARIANT_BOLD) != 0U) {
-        weight = NT_TEXT_SYNTH_BOLD_WEIGHT;
+    style->weight_em = isfinite(d->weight) ? d->weight : 0.0F;
+    if (style->weight_em == 0.0F && (d->variant & NT_UI_LABEL_VARIANT_BOLD) != 0U) {
+        style->weight_em = NT_TEXT_SYNTH_BOLD_WEIGHT;
     }
-    nt_text_renderer_set_weight(weight);
     /* Fold parent opacity into outline/shadow alpha to match the walker's fill fade (the walker
      * pre-multiplies only textColor.a) — else a fading panel keeps opaque outline/shadow. */
     if (d->outline_w > 0.0F && isfinite(d->outline_w)) {
-        nt_text_renderer_set_outline(d->outline_w, nt_color_scale_alpha(d->outline_color, opacity));
-    } else {
-        nt_text_renderer_set_outline(0.0F, 0U);
+        style->outline_w = d->outline_w;
+        style->outline_color = nt_color_scale_alpha(d->outline_color, opacity);
     }
     if ((d->shadow_color >> 24) != 0U) { /* alpha > 0 -> active */
-        const float sdx = isfinite(d->shadow_dx) ? d->shadow_dx : 0.0F;
-        const float sdy = isfinite(d->shadow_dy) ? d->shadow_dy : 0.0F;
-        nt_text_renderer_set_shadow(sdx, sdy, 0.0F, nt_color_scale_alpha(d->shadow_color, opacity));
-    } else {
-        nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, 0U);
+        style->shadow_dx = isfinite(d->shadow_dx) ? d->shadow_dx : 0.0F;
+        style->shadow_dy = isfinite(d->shadow_dy) ? d->shadow_dy : 0.0F;
+        style->shadow_color = nt_color_scale_alpha(d->shadow_color, opacity);
     }
-    nt_text_renderer_set_underline((d->variant & NT_UI_LABEL_VARIANT_UNDERLINE) != 0U);
-    nt_text_renderer_set_strikethrough((d->variant & NT_UI_LABEL_VARIANT_STRIKE) != 0U);
+    style->underline = (d->variant & NT_UI_LABEL_VARIANT_UNDERLINE) != 0U;
+    style->strikethrough = (d->variant & NT_UI_LABEL_VARIANT_STRIKE) != 0U;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
