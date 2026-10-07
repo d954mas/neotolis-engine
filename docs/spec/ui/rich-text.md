@@ -73,12 +73,11 @@ forms; pure-intrinsic markup parses with a `NULL` tagset.
   `<size=N>` stays deferred.
 - **Synthetic italic (faux-italic).** An italic-requested run whose resolved family has no italic
   face (the `BI→B→R` variant fallback drops the italic member) raises
-  `NT_UI_RICH_RUN_SYNTH_ITALIC`; the emit pass leans it via
-  `nt_text_renderer_set_oblique(NT_UI_RICH_SYNTH_ITALIC_SHEAR)` (0.2 — text-local `x += k·y` about
-  the baseline) instead of a real italic glyph. The shear is **renderer-level state** (sibling of
-  `glyph_depth_bias`; survives `restore_gpu`, cleared on cold init) folded into the model on the CPU
-  per draw — no flush, mixes within one batch — and the pass resets it to 0 so the lean never leaks
-  onto later text. Bold has no free analog (weight is contour *coverage*, not an affine transform);
+  `NT_UI_RICH_RUN_SYNTH_ITALIC`; the emit pass leans it with the run style's
+  `oblique = NT_UI_RICH_SYNTH_ITALIC_SHEAR` (0.2 — text-local `x += k·y` about
+  the baseline) instead of a real italic glyph. The shear is a per-call `nt_text_style_t` field
+  (sibling of `glyph_depth_bias`) folded into the model on the CPU per draw, so it mixes within one
+  batch and never carries onto later text. Bold has no free analog (weight is contour *coverage*, not an affine transform);
   synthetic bold instead emits an emboldened glyph variant — see the decoration contract in [Text decoration](#text-decoration-weight--outline--shadow--underline--strike).
 
 ## Text decoration (weight / outline / shadow / underline / strike)
@@ -97,8 +96,8 @@ without the synthetic `NT_UI_LABEL_VARIANT_BOLD` bit.
 
 Under OFF, every finite nonzero renderer weight (positive, negative or below
 the quantization step) and every positive outline width violates the contract,
-even with transparent outline color. Setters assert before storing that state;
-zero and reset remain legal. Rich outline pushes and base styles enforce the
+even with transparent outline color. `nt_text_renderer_draw_n` asserts it at
+entry; zero remains legal. Rich outline pushes and base styles enforce the
 same requirement. This also applies to syntactically valid markup: a positive
 `<outline>` width or `<b>` that requires missing synthetic support is a game
 configuration error and asserts. Malformed tags and values still warn and are
@@ -110,10 +109,10 @@ input normalization remains unchanged.
 The showcase displays an opt-in instruction in the synthetic weight/outline
 sections under OFF and keeps real font styles and other decorations active.
 
-Five decoration axes are **renderer-level sticky state** on `nt_text_renderer`, set via
-`set_weight` / `set_outline` / `set_shadow` / `set_underline` / `set_strikethrough`. Both authoring
-fronts feed the SAME setters at emit: `nt_ui_label` from `nt_ui_label_style_t` fields, and rich text
-from composed run state (variant bits + `push_outline/shadow/underline/strikethrough`). No new
+Five decoration axes travel with each draw in `nt_text_style_t`: `weight_em`, `outline_w` /
+`outline_color`, `shadow_dx` / `shadow_dy` / `shadow_color`, `underline` and `strikethrough`. Both
+authoring fronts fill the SAME style at emit: `nt_ui_label` from `nt_ui_label_style_t` fields, and rich
+text from composed run state (variant bits + `push_outline/shadow/underline/strikethrough`). No new
 subsystem — decoration reuses the text pipeline and the Slug text shaders (`slug_text.frag`, or
 `slug_text_depth.frag` for depth-writing text).
 
@@ -144,13 +143,12 @@ subsystem — decoration reuses the text pipeline and the Slug text shaders (`sl
   continuous per-line quad (so a multi-word underline is segmented at word gaps, and cross-atom painter
   order is only approximate where atoms overlap). Known limitation; a continuous per-line rich underline
   would need a per-line decoration emit (renderer span API), tracked separately.
-- **Reset & leak-safety.** Decoration state is sticky (survives `restore_gpu`, cleared on cold
-  init/shutdown). Because it persists, the UI calls `nt_text_renderer_reset_decoration()` after each
-  decorated run so nothing leaks onto the next. Every float setter is hard-guarded with a real
-  `if (!isfinite)` (NOT an assert — `NT_ASSERT` is a no-op in shipping, and a NaN would poison the
-  offset/quantize math).
+- **No sticky state.** Decoration is per call: a zero style is plain text, so nothing carries onto
+  the next draw and there is nothing to reset. `nt_text_renderer_draw_n` asserts every style float
+  finite at entry. The label and rich base style turn a non-finite outline width or shadow offset off
+  before drawing.
 - **Parent opacity** folds into the fill AND the outline/shadow alpha (the walker pre-multiplies only
-  the fill's `textColor.a`, so `nt_ui_label_deco_apply` / the rich emit multiply the decoration colors
+  the fill's `textColor.a`, so `nt_ui_label_deco_style` / the rich emit multiply the decoration colors
   by the accumulated opacity too — a faded panel fades its outline/shadow consistently).
 - **Fallback (explicit).** Bold with no bold family member requires embolden ON for synthetic weight; italic with no italic
   member → faux-italic oblique ([Design — synthetic italic](#design-flat-run-list--solver--one-fixed-block)); underline/strike are decoration toggles needing no family
@@ -265,11 +263,9 @@ nt_ui_rich_pop(ctx);
 
 ## Per-atom z-layers (explicit draw order)
 
-UI is **painter-order** (depth test off). Sprites record their draws at the
-call; text stages until its flush. So text emitted before an image lands *on top
-of* it unless the text is flushed first, and the two are **not reorderable** by
-emit order alone. To give the game explicit control of overlap z, each atom carries a
-**layer** (z-order band):
+UI is **painter-order** (depth test off). Sprites and text record their draws at
+the call, so call order is draw order. To give the game explicit control of overlap
+z, each atom carries a **layer** (z-order band):
 
 - **Default by kind** (no `<layer>`): `TEXT = 0`, `IMAGE = 1`, `OBJECT = 2`
   (ascending = further back → further front). So by default text draws *behind*
@@ -287,21 +283,20 @@ emit order alone. To give the game explicit control of overlap z, each atom carr
   (insertion-sorted ascending, capped at `NT_UI_RICH_MAX_LAYERS = 16` with a hard
   drop guard — the over-cap distinct layers are dropped **by encounter order**, not by
   value, and the drop asserts in DEBUG), then for each band ascending emits `{font-grouped text
-  → text flush → images → objects}` and **flushes text** again before the next band,
-  so band N fully lands before band N+1. The flush runs after **every** band incl. the
-  last, making the block a self-contained z island regardless of the walker's global
-  flush order.
-- **Within-band z (text < image < object).** Inside ONE band the self-emit flushes
-  **text first** (`nt_text_renderer_flush`) so it lands *behind*, then emits the band's
-  images and runs its objects' `draw_fn`s in call order — within-band draw order is
-  therefore **text behind images behind objects**, matching the per-kind default. To
-  control text-vs-image z explicitly, put them on **separate** layers. An object's own
-  sprites and a shape flush inside its `draw_fn` paint at the point of the call; text an
-  object emits lands at the band's closing text flush, above the band's objects.
-- **Cost.** A layer is an explicit **text flush boundary** — it buys z-control, **not**
-  a draw-call saving (each band adds a text flush). The font-group and image-merge DC
-  wins are **within** a band and unchanged: the font gather is per-band (a shared face
-  rebinds once per band), images of a band merge into one draw. Use distinct layers
+  → images → objects}` in call order, so band N fully lands before band N+1 and the block is
+  a self-contained z island.
+- **Within-band z (text < image < object).** Inside ONE band the self-emit draws the
+  band's **text first**, then its images, then runs its objects' `draw_fn`s in call order —
+  within-band draw order is therefore **text behind images behind objects**, matching the
+  per-kind default. To control text-vs-image z explicitly, put them on **separate** layers.
+  Everything an object's `draw_fn` emits (sprites, text, a shape flush) paints at the point
+  of the call; text that must be on top goes to a higher layer or is drawn last. A
+  `draw_fn` that draws text selects its own text material first; the next band selects the
+  block's text material again.
+- **Cost.** A layer buys z-control, **not** a draw-call saving, and costs no flush: draws
+  split only where state changes between them (material, font, page, scissor). The font-group and image-merge
+  DC wins are **within** a band: the font gather is per-band (a shared face's draws stay
+  adjacent and merge), images of a band on one page merge into one draw. Use distinct layers
   only where explicit overlap z is needed; non-overlapping content on one default
   layer pays nothing extra. The per-band `set_material` calls stay direct.
 
@@ -321,5 +316,5 @@ proposal is not misled.
 | D-67-26 | game effect callback looked up in an extensible tagset catalog | `nt_ui_rich_fx_fn` interned into a per-block table at build/solve and addressed by `effect_id = slot + 1` — the tagset is game-owned and may be absent during the walk |
 | D-67-27 | per-effect tuning is compile-time constants, never tag params | catalogue constants are defaults; stock effects take `nt_ui_rich_fx_params_t` via `push_effect_ex` or `<fx=name amp=.. speed=..>` |
 | D-67-28 | `draw_fn(user_data, x, y, w, h)` | `draw_fn(..., color, world_mat4)` so a game-drawn object lands under the same transform as TEXT/IMAGE |
-| D-67-29 | per-atom z-layers as a draw-call saving | layers are an explicit flush boundary for overlap order (one flush per band); DC wins stay within a band |
+| D-67-29 | per-atom z-layers as a draw-call saving | layers order overlap by call order; draws split only where state changes, and DC wins stay within a band |
 | D-67-30 | `font_size` as a call parameter | `font_size` is a `nt_ui_rich_style_t` field, mirroring `nt_ui_label_style_t` |

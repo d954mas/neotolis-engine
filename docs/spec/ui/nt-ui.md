@@ -41,13 +41,20 @@ The command and payload must outlive every consuming walk. Frame-scratch data
 is invalidated by `nt_mem_scratch_reset`; the engine never frees user data.
 Repeated walks may invoke the callback again. A callback must not re-enter walk,
 change the layout tree, or reset scratch. It preserves active clipping and owns
-the GPU state it touches. The walker flushes staged text before the callback, and
-every later sprite command selects its own material, so a callback may leave
-another sprite material selected. A callback that emits sprites calls
-`nt_sprite_renderer_set_material` first: the selection it finds is whatever an
-earlier command left. The walk's draw count (`nt_ui_get_last_walk_draw_calls`)
-counts recorded draws, so a walk whose first draw continues the caller's last
-draw in the same pass adds nothing for it.
+the GPU state it touches. Sprites and text record at the call, so call order is
+draw order and the walker drains nothing around the callback. Every later sprite
+and text command selects its own material, so a callback may leave another
+sprite or text material selected. A callback that emits sprites or text calls
+`nt_sprite_renderer_set_material` or `nt_text_renderer_set_material` first: the
+selection it finds is whatever an earlier command left. The walk's draw count (`nt_ui_get_last_walk_draw_calls`)
+counts the draws the walk added, so a walk whose first sprite or text draw merges
+into the caller's preceding draw in the same pass adds nothing for it.
+`nt_ui_set_text_material(ctx, material, glyph_depth_bias)` pairs the walker's text
+material with its glyph depth bias: text drawn with that material uses the bias, so
+a depth-writing text material gets its bias here. Text drawn with any other material
+(a rich block's own `text_material`, the inspector and hit-zone overlay materials)
+uses none: the bias accumulates per glyph in clip space and would shift text it was
+not chosen for.
 The supplied frame contains the composed world matrix, opacity, context and
 layout-space Clay command.
 

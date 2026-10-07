@@ -1,5 +1,4 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
-#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,46 +9,23 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "graphics/nt_gfx.h"
+#include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "metrics/nt_metrics.h"
 #include "renderers/nt_text_renderer.h"
+#include "resource/nt_resource.h"
 #include "debug_overlay/nt_debug_overlay.h"
+#include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_test_font_blob.h"
 #include "unity.h"
 /* clang-format on */
 
 /* Overlay reads its display data from nt_metrics: format_lines reads fps/cpu/gpu/draws + user
- * counters, so these tests feed nt_metrics (count + sample) and assert the HUD text reflects it.
- * The draw test still exercises the text_renderer bind path (gfx-backed). */
-
-/* ---- Assert catching (setjmp/longjmp via hookable handler) ---- */
-
-static jmp_buf s_assert_jmp;
-
-static void test_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
-    (void)file;
-    (void)line;
-    longjmp(s_assert_jmp, 1);
-}
-
-/* clang-format off */
-#define EXPECT_ASSERT(code)                                                                    \
-    do {                                                                                       \
-        nt_assert_handler = test_assert_handler;                                               \
-        if (setjmp(s_assert_jmp) == 0) {                                                       \
-            code;                                                                              \
-            nt_assert_handler = NULL;                                                          \
-            TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire");                                   \
-        }                                                                                      \
-        nt_assert_handler = NULL;                                                              \
-    } while (0)
-/* clang-format on */
+ * counters, so these tests feed nt_metrics (count + sample) and assert the HUD text reflects it. */
 
 void setUp(void) {
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
-    nt_text_renderer_init();
-    nt_text_renderer_test_reset_call_counters();
     nt_metrics_init();
 }
 
@@ -66,7 +42,7 @@ static void push_frame(float frame_ms, float cpu_ms, float gpu_ms, uint32_t draw
 }
 #endif
 
-/* ---- Test 1: init + shutdown round-trip ---- */
+/* ---- init + shutdown round-trip ---- */
 
 static void test_stats_init_shutdown(void) {
     nt_debug_overlay_init();
@@ -76,7 +52,7 @@ static void test_stats_init_shutdown(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 2: format_lines schema (reads nt_metrics) ---- */
+/* ---- format_lines schema (reads nt_metrics) ---- */
 
 static void test_stats_format_lines_schema(void) {
     nt_debug_overlay_init();
@@ -94,7 +70,7 @@ static void test_stats_format_lines_schema(void) {
 }
 
 #if NT_METRICS_ENABLED
-/* ---- Test 3: format reflects the last-frame cpu/gpu/draws from nt_metrics ----
+/* ---- format reflects the last-frame cpu/gpu/draws from nt_metrics ----
    The format tests below need real nt_metrics bodies; the OFF mirror (NT_METRICS_ENABLED=0) has no-op
    stubs (fps 0 / gpu sentinel / no counters), so they are gated out there — the init/shutdown, schema
    (labels present), and draw-bind tests stay live in both configs. */
@@ -113,7 +89,7 @@ static void test_stats_format_reflects_last_frame(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 4: fps line reflects the nt_metrics rolling avg ---- */
+/* ---- fps line reflects the nt_metrics rolling avg ---- */
 
 static void test_stats_format_reflects_fps(void) {
     nt_debug_overlay_init();
@@ -129,7 +105,7 @@ static void test_stats_format_reflects_fps(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 5: user counters in the HUD, exact int + decimals for floats ---- */
+/* ---- user counters in the HUD, exact int + decimals for floats ---- */
 
 static void test_stats_user_counters(void) {
     nt_debug_overlay_init();
@@ -152,7 +128,7 @@ static void test_stats_user_counters(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 6: int user counter exact past 2^53 in the HUD ---- */
+/* ---- int user counter exact past 2^53 in the HUD ---- */
 
 static void test_stats_user_counter_uint64_exact(void) {
     nt_debug_overlay_init();
@@ -169,32 +145,39 @@ static void test_stats_user_counter_uint64_exact(void) {
 }
 #endif /* NT_METRICS_ENABLED */
 
-/* ---- explicit set_material AND set_font on draw ----
- * nt_debug_overlay_draw must call BOTH setters every time even when the material/font id matches the
- * previous frame, defeating nt_text_renderer's change-detection early-out. */
-static void test_stats_draw_pitfall9_explicit_set_calls(void) {
+/* ---- draw records the HUD through the text renderer ---- */
+
+static void test_draw_records_a_text_draw(void) {
+    nt_hash_init(&(nt_hash_desc_t){0});
+    nt_resource_init(&(nt_resource_desc_t){0});
+    nt_material_init(&(nt_material_desc_t){.max_materials = 4});
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
     nt_debug_overlay_init();
 
-    nt_text_renderer_test_reset_call_counters();
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_material_calls());
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
+    const nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_curve_texture"}, 1);
+    const nt_material_t material = nt_material_create(&(nt_material_create_desc_t){.program = program, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
+    uint32_t blob_size = 0;
+    uint8_t *blob = nt_test_font_blob('F', 'F', &blob_size); /* the HUD starts with "FPS:" */
+    const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
+    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
+    nt_resource_step();
+    nt_font_step();
 
-    nt_material_t mat = {0};
-    nt_font_t font = {0};
-    const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-    const uint32_t white = NT_RGBA8(255, 255, 255, 255);
-
-    /* set_material fail-fast asserts on the {0} handle BEFORE the same-handle early-return, so the
-     * counter still increments (proving draw doesn't cache) and set_font is never reached. */
-    EXPECT_ASSERT(nt_debug_overlay_draw(mat, font, identity, 16.0F, white));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_set_material_calls());
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
-
-    EXPECT_ASSERT(nt_debug_overlay_draw(mat, font, identity, 16.0F, white));
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_text_renderer_test_set_material_calls());
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_debug_overlay_draw(material, font, identity, 16.0F, NT_RGBA8(255, 255, 255, 255));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(program.id, nt_gfx_fake_draw_trace_at(0).program.id);
+    nt_gfx_end_pass();
 
     nt_debug_overlay_shutdown();
+    nt_font_destroy(font);
+    nt_font_shutdown();
+    free(blob);
+    nt_material_shutdown();
+    nt_resource_shutdown();
+    nt_hash_shutdown();
 }
 
 /* ---- main ---- */
@@ -205,12 +188,12 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_stats_init_shutdown);
     RUN_TEST(test_stats_format_lines_schema);
+    RUN_TEST(test_draw_records_a_text_draw);
 #if NT_METRICS_ENABLED
     RUN_TEST(test_stats_format_reflects_last_frame);
     RUN_TEST(test_stats_format_reflects_fps);
     RUN_TEST(test_stats_user_counters);
     RUN_TEST(test_stats_user_counter_uint64_exact);
 #endif
-    RUN_TEST(test_stats_draw_pitfall9_explicit_set_calls);
     return UNITY_END();
 }

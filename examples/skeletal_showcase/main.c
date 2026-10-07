@@ -80,8 +80,8 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
-/* Frame storage budget of the sprite geometry; the first scene peaks at about 3 KB / 1.6 KB. */
-#define SKELETAL_SHOWCASE_UI_VERTEX_BYTES (64U * 1024U)
+/* Frame storage budget of the UI sprite and text geometry; the first scene peaks at about 80 KB / 10 KB with the skinned instances. */
+#define SKELETAL_SHOWCASE_UI_VERTEX_BYTES (128U * 1024U)
 #define SKELETAL_SHOWCASE_UI_INDEX_BYTES (32U * 1024U)
 // #endregion
 
@@ -2652,7 +2652,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_MESH);
         restore_mesh_scene();
         nt_shape_renderer_restore_gpu();
-        (void)nt_text_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
@@ -2740,7 +2739,6 @@ static void frame(void) {
         nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
         nt_ui_target_t target = nt_ui_scale_make_target(&s_ui_scale);
         nt_ui_walk(s_ui, &target);
-        nt_text_renderer_flush();
     }
     if (render_enabled) {
         nt_gfx_end_pass();
@@ -2796,7 +2794,6 @@ int main(int argc, char *argv[]) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
     nt_shape_renderer_init();
-    nt_text_renderer_init();
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
     ui_desc.max_elements = 1024;
@@ -2833,7 +2830,7 @@ int main(int argc, char *argv[]) {
     s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "skeletal_showcase_text"});
     s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 256, .measure_cache_size = 256});
     nt_ui_set_sprite_material(s_ui, s_sprite_material);
-    nt_ui_set_text_material(s_ui, s_text_material);
+    nt_ui_set_text_material(s_ui, s_text_material, 0.0F);
 
 #ifdef NT_DEVAPI_ENABLED
     if (nt_devapi_init() != NT_OK) {

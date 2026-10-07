@@ -55,9 +55,10 @@
 
 #include "clay.h"
 
-/* Frame storage budget of the sprite geometry; the first scene peaks at about 3 KB / 2 KB. */
-#define SLICE9_DEMO_VERTEX_BYTES (64U * 1024U)
-#define SLICE9_DEMO_INDEX_BYTES (32U * 1024U)
+/* Frame storage budget of the sprite and text geometry; the first scene peaks at about 53 KB / 8 KB, and with
+ * the inspector open at about 205 KB / 35 KB. */
+#define SLICE9_DEMO_VERTEX_BYTES (512U * 1024U)
+#define SLICE9_DEMO_INDEX_BYTES (128U * 1024U)
 // #endregion
 
 // #region styles
@@ -340,9 +341,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_result_t restore_result = nt_text_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
@@ -504,9 +502,6 @@ static void frame(void) {
             glm_translate(stats_model, (vec3){10.0F, scale.logical_h - 20.0F, 0.0F});
             const uint32_t stats_color = NT_RGBA8(204, 230, 204, 255);
             nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, 14.0F, stats_color);
-            /* nt_debug_overlay_draw only stages text; flush before end_pass so the
-             * overlay lands in THIS frame, not the next walk's flush. */
-            nt_text_renderer_flush();
         }
         // #endregion
     }
@@ -587,8 +582,6 @@ int main(int argc, char *argv[]) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
-    nt_text_renderer_init();
-
     nt_ui_module_init();
     const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
     s_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
@@ -633,7 +626,7 @@ int main(int argc, char *argv[]) {
     });
 
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ctx, s_text_material);
+    nt_ui_set_text_material(s_ctx, s_text_material, 0.0F);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 256,

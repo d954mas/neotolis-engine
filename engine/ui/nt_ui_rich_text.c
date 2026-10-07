@@ -24,7 +24,7 @@
 #include "ui/nt_ui_rich_tagset.h"
 #include "utf8/nt_utf8.h"
 
-/* Distinct z-order bands the self-emit walks (each adds a text flush boundary). A block with more
+/* Distinct z-order bands the self-emit walks. A block with more
  * distinct <layer>s than this drops the over-cap layers BY ENCOUNTER ORDER (not by value) rather than OOB
  * the per-layer scratch. */
 #ifndef NT_UI_RICH_MAX_LAYERS
@@ -1948,11 +1948,13 @@ static nt_ui_rich_fx_result_t rich_eval_fx(const nt_ui_rich_state_t *st, const n
 }
 
 /* Emit one TEXT atom WITHOUT an effect: one span per atom (batch-friendly). */
-static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y) {
+static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y, nt_text_style_t *style) {
     const float baseline_y = box_y + s->y + s->asc; /* solved y is glyph-box top */
     float model[16];
     nt_ui_sprite_mat4(frame->world_mat4, box_x + s->x, baseline_y, 1.0F, 1.0F, model);
-    nt_text_renderer_draw_n(st->text + s->text_off, s->text_len, model, s->size, nt_color_scale_alpha(s->color, frame->opacity), 0.0F, 0.0F);
+    style->size = s->size;
+    style->color = nt_color_scale_alpha(s->color, frame->opacity);
+    nt_text_renderer_draw_n(style, model, st->text + s->text_off, s->text_len);
 #ifdef NT_TEST_ACCESS
     st->emit_span_count++;
 #endif
@@ -1963,7 +1965,7 @@ static void rich_emit_text_plain(nt_ui_rich_state_t *st, const nt_ui_custom_fram
  * stays in the reserved box). O(N^2) but N is one word/line-chunk, so tiny.
  * Decoration is per-glyph here BY DESIGN: outline/shadow must ride each transformed glyph (a per-run pass
  * would detach from the moving glyphs); underline/strike follow the effect. */
-static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y) {
+static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *s, float box_x, float box_y, nt_text_style_t *style) {
     const uint32_t base_color = nt_color_scale_alpha(s->color, frame->opacity);
     const uint32_t a0 = s->text_off; /* atom byte start: prefix measures are relative to it (kerning chain) */
     const uint32_t gend = s->text_off + s->text_len;
@@ -1996,7 +1998,9 @@ static void rich_emit_text_effected(nt_ui_rich_state_t *st, const nt_ui_custom_f
             const float baseline_y = box_y + s->y + s->asc + fx.offset_y;
             float model[16];
             nt_ui_sprite_mat4(frame->world_mat4, box_x + scaled_x + fx.offset_x, baseline_y, 1.0F, 1.0F, model);
-            nt_text_renderer_draw_n(st->text + g0, gi - g0, model, s->size * fx.scale, fx.color, 0.0F, 0.0F);
+            style->size = s->size * fx.scale;
+            style->color = fx.color;
+            nt_text_renderer_draw_n(style, model, st->text + g0, gi - g0);
 #ifdef NT_TEST_ACCESS
             st->emit_span_count++;
 #endif
@@ -2090,33 +2094,33 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
     }
 }
 
-/* Set every decoration axis explicitly (0/off when absent) so nothing leaks between runs; caller resets
- * once after the band. Non-finite outline_w/shadow offsets normalize to off here -- the base style bypasses
- * the push_* clamps, and a raw NaN/Inf would make the setter early-return and leak the prior run's axis. */
-static void rich_apply_run_decoration(nt_ui_rich_state_t *st, const nt_ui_rich_solved_atom_t *e, float opacity) {
-    nt_text_renderer_set_oblique((e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F);
-    nt_text_renderer_set_weight((e->flags & NT_UI_RICH_RUN_SYNTH_BOLD) != 0U ? NT_TEXT_SYNTH_BOLD_WEIGHT : 0.0F);
-
+/* The style of one TEXT run: its font and decoration, and the block's glyph depth bias. A non-finite
+ * outline width or shadow offset turns that decoration off: the base style bypasses the push_* clamps. */
+static nt_text_style_t rich_run_style(const nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *e, float glyph_depth_bias) {
     const nt_ui_rich_style_t *stl = &st->styles[st->runs[e->run_idx].style_idx];
+    nt_text_style_t style = {
+        .font = e->font,
+        .weight_em = (e->flags & NT_UI_RICH_RUN_SYNTH_BOLD) != 0U ? NT_TEXT_SYNTH_BOLD_WEIGHT : 0.0F,
+        .oblique = (e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F,
+        .glyph_depth_bias = glyph_depth_bias,
+        .underline = (e->flags & NT_UI_RICH_RUN_UNDERLINE) != 0U,
+        .strikethrough = (e->flags & NT_UI_RICH_RUN_STRIKE) != 0U,
+    };
     if (stl->outline_w > 0.0F && isfinite(stl->outline_w)) {
-        nt_text_renderer_set_outline(stl->outline_w, nt_color_scale_alpha(stl->outline_color_abgr, opacity));
-    } else {
-        nt_text_renderer_set_outline(0.0F, 0U);
+        style.outline_w = stl->outline_w;
+        style.outline_color = nt_color_scale_alpha(stl->outline_color_abgr, frame->opacity);
     }
-    if ((stl->shadow_color_abgr >> 24) != 0U) { /* alpha > 0 -> active */
-        const float sdx = isfinite(stl->shadow_dx) ? stl->shadow_dx : 0.0F;
-        const float sdy = isfinite(stl->shadow_dy) ? stl->shadow_dy : 0.0F;
-        nt_text_renderer_set_shadow(sdx, sdy, 0.0F, nt_color_scale_alpha(stl->shadow_color_abgr, opacity));
-    } else {
-        nt_text_renderer_set_shadow(0.0F, 0.0F, 0.0F, 0U);
+    if ((stl->shadow_color_abgr >> 24) != 0U && isfinite(stl->shadow_dx) && isfinite(stl->shadow_dy)) { /* alpha > 0 -> active */
+        style.shadow_dx = stl->shadow_dx;
+        style.shadow_dy = stl->shadow_dy;
+        style.shadow_color = nt_color_scale_alpha(stl->shadow_color_abgr, frame->opacity);
     }
-    nt_text_renderer_set_underline((e->flags & NT_UI_RICH_RUN_UNDERLINE) != 0U);
-    nt_text_renderer_set_strikethrough((e->flags & NT_UI_RICH_RUN_STRIKE) != 0U);
+    return style;
 }
 
-/* Group same-band TEXT by font.id so set_font fires once per distinct font, not per face transition
- * (the text renderer flushes on every set_font). No distinct-font cap -> a >4-family block never drops a face. */
-static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
+/* Group same-band TEXT by font.id so the draws of one font are adjacent and merge: every font change
+ * records a texture set and splits the draw. No distinct-font cap -> a >4-family block never drops a face. */
+static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer, float glyph_depth_bias) {
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
         if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U || s->layer != layer) {
@@ -2133,23 +2137,19 @@ static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_fram
         if (!first) {
             continue; /* this font's pass already emitted every same-band atom that shares it */
         }
-        nt_text_renderer_set_font(s->font); /* once per distinct font on the band: collapses per-transition flushes */
         for (uint32_t k = i; k < st->solved_count; k++) {
             const nt_ui_rich_solved_atom_t *e = &st->solved[k];
             if (e->kind != NT_RICH_ATOM_TEXT || e->text_len == 0U || e->layer != layer || e->font.id != s->font.id) {
                 continue; /* other kinds/layers/fonts -> their own pass */
             }
-            /* Decoration for this run: faux-italic lean + synth-bold weight + outline/shadow/underline/
-             * strike, all set explicitly per run (no flush) so nothing carries between runs. */
-            rich_apply_run_decoration(st, e, frame->opacity);
+            nt_text_style_t style = rich_run_style(st, frame, e, glyph_depth_bias);
             if (e->effect_id == 0U) {
-                rich_emit_text_plain(st, frame, e, box_x, box_y);
+                rich_emit_text_plain(st, frame, e, box_x, box_y, &style);
             } else {
-                rich_emit_text_effected(st, frame, e, box_x, box_y);
+                rich_emit_text_effected(st, frame, e, box_x, box_y, &style);
             }
         }
     }
-    nt_text_renderer_reset_decoration(); /* leave clean: don't leak decoration onto object-drawn text or the next walker element */
 }
 
 /* Gather the DISTINCT layers present across the solved atoms, insertion-sorted ascending, into out[].
@@ -2206,28 +2206,26 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
      * stored: the game may swap the ctx materials between two walks of one declared frame. */
     const nt_ui_context_t *ctx = frame->ctx;
     const nt_material_t text_mat = st->text_material.id != 0U ? st->text_material : ctx->text_material;
+    const float text_bias = nt_ui_internal_text_bias(ctx, text_mat);
     const nt_material_t image_mat = st->image_material.id != 0U ? st->image_material : ctx->sprite_material;
 
     /* id==0 -> neither style nor ctx gave a sprite material, so skip images. */
     const bool emit_images = image_mat.id != 0U;
 
-    /* Painter order, depth off: sprites draw at the call, text at its flush. Emit ascending by layer and
-     * drain text after EVERY band so band N lands before N+1 and the block is a self-contained z island. */
+    /* Painter order, depth off: call order is draw order. Emit ascending by layer so band N lands before
+     * N+1 and the block is a self-contained z island. */
     uint8_t layers[NT_UI_RICH_MAX_LAYERS];
     const uint32_t layer_count = rich_gather_layers(st, layers);
     for (uint32_t li = 0; li < layer_count; li++) {
         const uint8_t L = layers[li];
-        /* Within ONE band, kinds stack text < image < object: staged text lands before the band's images,
-         * which record at the call like everything an object draw_fn draws. */
-        /* Per band: an earlier band's object draw_fn may have selected another text material. */
+        /* Within ONE band, kinds stack text < image < object. An earlier band's object draw_fn may have
+         * selected another text material; an object draw_fn that draws text selects its own. */
         nt_text_renderer_set_material(text_mat);
-        rich_emit_text_layer(st, frame, box_x, box_y, L);
-        nt_text_renderer_flush(); /* text behind: land it before the band's images */
+        rich_emit_text_layer(st, frame, box_x, box_y, L, text_bias);
         if (emit_images) {
             rich_emit_images(st, frame, box_x, box_y, L, image_mat);
         }
         rich_emit_objects(st, frame, box_x, box_y, L);
-        nt_text_renderer_flush(); /* safety drain: an object draw_fn that emitted text; no-op otherwise */
     }
 }
 // #endregion

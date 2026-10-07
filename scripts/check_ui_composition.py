@@ -84,7 +84,7 @@ def main():
         rejected = subprocess.run(command + [mode], capture_output=True, text=True, encoding="utf-8", errors="replace")
         assert "font-contract-ready" in rejected.stdout, (mode, rejected.stdout, rejected.stderr)
         assert rejected.returncode != 0 and "font-contract-accepted" not in rejected.stdout, mode
-    print("PASS: font zero/reset accepted; nonzero weight and transparent outline rejected in subprocesses")
+    print("PASS: font zero weight accepted; nonzero weight and transparent outline rejected in subprocesses")
     print("PASS: selected modules, effect execution, archive references and missing-rich rejection")
 
 

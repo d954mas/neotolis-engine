@@ -428,6 +428,16 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_sprite_renderer_native)
     set_tests_properties(test_sprite_renderer_native PROPERTIES LABELS "native")
 
+    add_executable(test_text_renderer_native unit/test_text_renderer_native.c unit/test_helpers/nt_test_font_blob.c)
+    target_link_libraries(test_text_renderer_native PRIVATE
+        nt_text_renderer nt_font nt_material nt_resource nt_hash nt_pool nt_gfx nt_basisu_transcoder_stub
+        nt_window nt_input_stub nt_http_stub nt_fs_stub nt_log unity glad nt_meshwire_stub
+    )
+    target_compile_definitions(test_text_renderer_native PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_include_directories(test_text_renderer_native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_text_renderer_native)
+    set_tests_properties(test_text_renderer_native PROPERTIES LABELS "native")
+
     # --- Post-FX blur tests ---
     add_executable(test_nt_postfx_blur unit/test_nt_postfx_blur.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_postfx_blur PRIVATE nt_postfx_blur nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)
@@ -609,7 +619,7 @@ if(NOT EMSCRIPTEN)
     # --- Text renderer module tests ---
     # nt_assert_trap.c backs the dead-program death-test; needs unit/ on the include
     # path so it resolves "test_helpers/nt_assert_trap.h".
-    add_executable(test_text_renderer unit/test_text_renderer.c unit/test_helpers/nt_assert_trap.c)
+    add_executable(test_text_renderer unit/test_text_renderer.c unit/test_helpers/nt_assert_trap.c unit/test_helpers/nt_test_font_blob.c)
     target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_fake nt_basisu_transcoder_stub nt_resource nt_hash nt_pool nt_material nt_time nt_http_stub nt_fs_stub nt_log unity nt_meshwire_stub)
     target_include_directories(test_text_renderer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_text_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -1353,12 +1363,13 @@ if(NOT EMSCRIPTEN)
     # --- Debug overlay module tests (overlay as nt_metrics consumer + draw bind) ---
     # The overlay reads nt_metrics for the HUD, so the test feeds nt_metrics (count + sample); the
     # draw test still needs the text_renderer/gfx bind chain.
-    add_executable(test_debug_overlay unit/test_debug_overlay.c)
+    add_executable(test_debug_overlay unit/test_debug_overlay.c unit/test_helpers/nt_test_font_blob.c)
     target_link_libraries(test_debug_overlay PRIVATE
         nt_debug_overlay nt_metrics nt_text_renderer nt_font nt_material nt_resource
         nt_gfx_fake nt_basisu_transcoder_stub nt_hash nt_pool nt_http_stub nt_fs_stub nt_log_stub unity
      nt_meshwire_stub)
     target_compile_definitions(test_debug_overlay PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_include_directories(test_debug_overlay PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_debug_overlay)
 
     # --- nt_ui module + walker tests ---
@@ -1368,6 +1379,7 @@ if(NOT EMSCRIPTEN)
         unit/test_helpers/ui_atlas.c
         unit/test_helpers/nt_assert_trap.c
         unit/test_helpers/ui_walker_fixture.c
+        unit/test_helpers/nt_test_font_blob.c
         # In-memory clipboard impl: nt_ui now references nt_clipboard_get/set_text
         # (Ctrl+C/X/V). The real native backend is headless-flaky and the stub never
         # round-trips, so the test exes link a deterministic fake instead.

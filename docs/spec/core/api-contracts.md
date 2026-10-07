@@ -194,25 +194,22 @@ and traps.
 from or to `NT_PROGRAM_INVALID`. Assigning the same handle is a no-op, so a
 per-frame gate needs no assignment latch.
 
-A replace does not reach work already staged. Text captures its pipeline on the
-first quad of an empty staging buffer, including the first quad after an internal
-flush; numeric material params remain mutable and are read at flush. For an
-explicit game-controlled transition, flush text, replace the program, then call
-`nt_text_renderer_set_material` before emitting more work. If the old program is
-destroyed rather than merely replaced, its pipelines go with it and the staged
-batch is dropped instead -- there is nothing left to draw it through.
-
-Sprite has no staged work: `nt_sprite_renderer_set_material` resolves the
-material's pipeline and textures for the current gfx frame, and each emit records
+Sprite and text have no staged work: `nt_sprite_renderer_set_material` and
+`nt_text_renderer_set_material` resolve the material for the current gfx frame,
+are called every frame before drawing (asserted), and each emit or draw records
 its draw at the call with the params current at that call. A program replaced
 behind the same material handle takes effect at the next `set_material`, which
-compares the program as well as the handle. `draw_list` resolves each run's
-material itself.
+compares the program as well as the handle; draws already recorded keep their
+pipeline. Sprite `draw_list` resolves each run's material itself. The text
+renderer writes material params only when `{program, material, params}` differ
+from its last write, so nothing else may write the uniforms of a program that
+text materials use. A program is not destroyed between `set_material` and the
+frame's draws through it: the draw would bind a dead pipeline and assert.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
 the first assignment, after context loss is processed, or after program
-destruction. The mesh and sprite renderers skip unready programs and warn once until
+destruction. The mesh, sprite and text renderers skip unready programs and warn once until
 a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` /
 `nt_text_renderer_set_material` entry points assert only that a program was
 assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks
@@ -243,8 +240,8 @@ samples the atlas declares its page sampler at slot 0, but the renderer
 substitutes the page resource per emit and run; a material declaring no textures
 never receives the page and is for analytical coverage. A text material declares
 no textures at all — the font's curve texture is the text renderer's
-own bind. `nt_text_renderer_flush` asserts that the material declares nothing
-and submits its font set unconditionally; gfx's coverage check confirms every
+own bind. `nt_text_renderer_set_material` asserts that the material declares
+nothing, and each draw records its font set; gfx's coverage check confirms every
 sampler the program actually links.
 
 A text material picks its fragment shader by depth writes. `slug_text.frag` has

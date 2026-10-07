@@ -65,6 +65,7 @@
  * BUNNY_MAX is bounded by uint16_t entity/component storage. Keep spare slots
  * below 65535 for non-bunny demo entities and future overlays. */
 #define BUNNY_MAX 60000
+#define BUNNY_OVERLAY_BYTES 768U /* HUD text buffer; one glyph per byte at most */
 
 #define BUNNY_INITIAL_COUNT 500
 #define BUNNY_CLICK_SPAWN_COUNT 500
@@ -289,9 +290,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_result_t restore_result = nt_text_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
@@ -473,7 +471,7 @@ static void frame(void) {
         glm_translate(overlay_model, (vec3){10.0F, h - overlay_size - 4.0F, 0.0F});
         const uint32_t white = NT_RGBA8(255, 255, 255, 255);
 
-        char overlay[768];
+        char overlay[BUNNY_OVERLAY_BYTES];
         uint32_t written = nt_debug_overlay_format_lines(overlay, sizeof(overlay));
         if (written < sizeof(overlay)) {
             (void)snprintf(overlay + written, sizeof(overlay) - written,
@@ -491,9 +489,8 @@ static void frame(void) {
                            BUNNY_CLICK_SPAWN_COUNT, BUNNY_HOLD_SPAWN_RATE, BUNNY_BULK_ADD, BUNNY_BULK_ADD_BIG);
         }
         nt_text_renderer_set_material(s_text_material);
-        nt_text_renderer_set_font(s_overlay_font);
-        nt_text_renderer_draw(overlay, (const float *)overlay_model, overlay_size, white, 0.0F, 0.0F);
-        nt_text_renderer_flush();
+        const nt_text_style_t overlay_style = {.font = s_overlay_font, .size = overlay_size, .color = white};
+        nt_text_renderer_draw(&overlay_style, (const float *)overlay_model, overlay);
     }
     // #endregion
 
@@ -571,9 +568,10 @@ int main(int argc, char **argv) {
     NT_ASSERT(s_initial_count <= BUNNY_MAX && "--count exceeds BUNNY_MAX");
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    /* Every bunny is one rect quad: 4 vertices of 20 B and 6 uint32 indices. */
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = BUNNY_MAX * 4U * 20U;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = BUNNY_MAX * 6U * 4U;
+    /* Every bunny is one rect quad: 4 vertices of 20 B and 6 uint32 indices; the HUD text adds
+     * 208 B of vertices and 24 B of indices per glyph of its overlay buffer. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (BUNNY_MAX * 4U * 20U) + (BUNNY_OVERLAY_BYTES * 208U);
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = (BUNNY_MAX * 6U * 4U) + (BUNNY_OVERLAY_BYTES * 24U);
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
@@ -599,8 +597,6 @@ int main(int argc, char **argv) {
 
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
-
-    nt_text_renderer_init();
 
     /* nt_metrics is the perf store; the overlay HUD is a pure consumer, so init metrics first. */
     nt_metrics_init();

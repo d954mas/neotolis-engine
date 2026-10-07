@@ -323,27 +323,20 @@ module initialized but unable to draw; the game must retry
 `nt_postfx_blur_restore_gpu` until it succeeds. `nt_mesh_renderer`,
 `nt_skinned_mesh_renderer`,
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
-the game relinks them; the text renderer's restore drops queued commands and
-its pipeline cache. The
+the game relinks them. The
 mesh renderers own no buffer: their restore only drops the pipeline and
-vertex-input caches and returns void. The sprite renderer has no restore entry
-point: it owns no buffer, and its pipeline and vertex-input caches validate on
-lookup and recreate what the loss freed.
+vertex-input caches and returns void. The sprite and text renderers have no
+restore entry point: they own no buffer, and their pipeline and vertex-input
+caches validate on lookup and recreate what the loss freed.
 Frame storage needs no game restore: the `nt_gfx_begin_frame` that restores the
 context makes new frame buffers, and that frame's allocations reach them.
 
-`nt_text_renderer_restore_gpu()` returns `nt_result_t`. It retains CPU
-allocations, configured capacities, and module initialization; only GPU
-buffers, cached pipelines/vertex inputs, and queued draw state are reset.
-Every restore entry point is an inactive no-op. The `nt_result_t`-returning
-text and blur functions return `NT_OK` in that case;
+Every restore entry point is an inactive no-op. `nt_postfx_blur_restore_gpu`
+returns `NT_OK` in that case;
 `nt_shape_renderer_restore_gpu` and the mesh renderers return void. Failed GPU creation
 returns `NT_ERR_INIT_FAILED` after releasing partial GPU resources. The module
 stays initialized, so the game can call restore again or shut it down. There
-is no automatic retry, with one narrow exception: the text renderer's vertex
-input bakes over buffers it owns, so a recoverable backend failure there is
-retried lazily in flush and does not fail the restore. The text renderer
-discards staged glyphs while its buffers are missing. Examples may explicitly
+is no automatic retry. Examples may explicitly
 choose fail-fast handling, while a game that needs retries owns that policy.
 
 Materials survive teardown and retain their old program handles. Destroying a
@@ -368,7 +361,7 @@ an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
 re-activate on the next step within the activation budget; an evicted pack must
 re-download first. Rebuild resource-dependent render state after publication.
 
-The mesh renderers and the sprite renderer skip a material whose program is not ready and warn
+The mesh, sprite and text renderers skip a material whose program is not ready and warn
 once until a pipeline is built again. The skip is normal runtime state, not a
 caller error: `nt_sprite_renderer_set_material` asserts only that a program was
 assigned, and its emits draw nothing until the program is ready.

@@ -114,7 +114,7 @@ static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, 
     overlay_emit_rect(atlas, region, x + w - t, y_top, t, h, color); /* right */
 }
 
-static void overlay_draw_text(nt_material_t text_mat, nt_font_t font, float x, float baseline_y, float size, uint32_t color, const char *s, size_t n) {
+static void overlay_draw_text(nt_material_t text_mat, float bias, nt_font_t font, float x, float baseline_y, float size, uint32_t color, const char *s, size_t n) {
     if (size <= 0.0F || n == 0U || s == NULL) {
         return;
     }
@@ -122,8 +122,8 @@ static void overlay_draw_text(nt_material_t text_mat, nt_font_t font, float x, f
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, x, baseline_y, 0.0F, 1.0F,
     };
     nt_text_renderer_set_material(text_mat);
-    nt_text_renderer_set_font(font);
-    nt_text_renderer_draw_n(s, n, model, size, color, 0.0F, 0.0F);
+    const nt_text_style_t style = {.font = font, .size = size, .color = color, .glyph_depth_bias = bias};
+    nt_text_renderer_draw_n(&style, model, s, n);
 }
 // #endregion
 
@@ -167,6 +167,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     /* Inspector text material when set, else the game's (mirrors draw_hit_zones). Gate can_label on
      * the resolved one so a depth-off-only inspector material still draws the label. */
     const nt_material_t tmat = (ctx->inspector_text_material.id != 0U) ? ctx->inspector_text_material : ctx->text_material;
+    const float tbias = nt_ui_internal_text_bias(ctx, tmat);
     const bool can_label = tmat.id != 0U && font.id != 0U && label_size > 0.0F;
     const uint32_t white = 0xFFFFFFFFU;
 
@@ -227,9 +228,8 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                         tm[12 + rr] = (ox * m[rr]) + (oy * m[4 + rr]) + m[12 + rr];
                     }
                     nt_text_renderer_set_material(tmat);
-                    nt_text_renderer_set_font(font);
-                    nt_text_renderer_draw_n(buf, (size_t)n, tm, label_size, white, 0.0F, 0.0F);
-                    nt_text_renderer_flush();
+                    const nt_text_style_t style = {.font = font, .size = label_size, .color = white, .glyph_depth_bias = tbias};
+                    nt_text_renderer_draw_n(&style, tm, buf, (size_t)n);
                 }
             }
         }
@@ -290,10 +290,9 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                 n = snprintf(buf, sizeof buf, "id=#%08X", ctx->inspector_highlight_id);
             }
             if (n > 0) {
-                overlay_draw_text(tmat, font, top_x + 4.0F, top_y - label_size - 2.0F, label_size, white, buf, (size_t)n);
+                overlay_draw_text(tmat, tbias, font, top_x + 4.0F, top_y - label_size - 2.0F, label_size, white, buf, (size_t)n);
             }
         }
-        nt_text_renderer_flush();
         if (scissor_w > 0 && scissor_h > 0) {
             nt_gfx_set_scissor_enabled(false);
         }
@@ -337,13 +336,10 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
             n = snprintf(buf, sizeof buf, "id=#%08X", ctx->inspector_highlight_id);
         }
         if (n > 0) {
-            overlay_draw_text(tmat, font, gl_x + 4.0F, gl_y_top - label_size - 2.0F, label_size, white, buf, (size_t)n);
+            overlay_draw_text(tmat, tbias, font, gl_x + 4.0F, gl_y_top - label_size - 2.0F, label_size, white, buf, (size_t)n);
         }
     }
 
-    if (can_label) {
-        nt_text_renderer_flush();
-    }
     if (scissor_w > 0 && scissor_h > 0) {
         nt_gfx_set_scissor_enabled(false);
     }

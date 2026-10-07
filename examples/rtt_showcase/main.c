@@ -39,7 +39,7 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
-/* Frame storage budget of the sprite geometry; the first scene peaks at about 0.6 KB / 0.2 KB. */
+/* Frame storage budget of the sprite and text geometry. */
 #define RTT_SHOWCASE_VERTEX_BYTES (64U * 1024U)
 #define RTT_SHOWCASE_INDEX_BYTES (32U * 1024U)
 
@@ -510,7 +510,6 @@ static void frame(void) {
         restored = make_quad_resources() && restored;
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        restored = (nt_text_renderer_restore_gpu() == NT_OK) && restored;
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
@@ -599,7 +598,6 @@ int main(void) {
     nt_atlas_init();
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
-    nt_text_renderer_init();
     nt_ui_module_init();
     const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
     s_ui_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
@@ -639,7 +637,7 @@ int main(void) {
         .label = "rtt_showcase_ui_text",
     });
     nt_ui_set_sprite_material(s_ui_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ui_ctx, s_text_material);
+    nt_ui_set_text_material(s_ui_ctx, s_text_material, 0.0F);
     s_font = nt_font_create(&(nt_font_create_desc_t){
         .max_glyphs = 256,
         .measure_cache_size = 256,

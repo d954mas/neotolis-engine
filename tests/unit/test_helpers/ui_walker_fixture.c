@@ -1,6 +1,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_test_font_blob.h"
 
 /* Empty TU when NT_TEST_ACCESS undefined (helper compiled into non-UI binaries). */
 #ifdef NT_TEST_ACCESS
@@ -9,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "atlas/nt_atlas.h"
@@ -60,7 +62,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 16}); /* rich multi-face tests create >4 distinct stub fonts */
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 16}); /* rich multi-face tests create up to 6 distinct fonts */
     nt_material_init(&(nt_material_desc_t){.max_materials = 32});
 
     /* Open a frame/pass so sprite/text renderers can draw_indexed without
@@ -68,7 +70,6 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
      * test_nt_sprite_renderer setUp). */
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
-    nt_text_renderer_init();
     nt_ui_module_init();
 
     /* nt_debug_overlay is NOT init'd here -- nt_ui_walk does not depend on it.
@@ -79,6 +80,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     fx->atlas = minimal_ui_atlas_create();
     fx->sprite_material = make_material(true);
     fx->text_material = make_material(false);
+    fx->text_material_b = make_material(false);
 
     /* Stub font: valid pool slot, no resource attached. nt_font_valid() is
      * true so walker's contract assert passes, but units_per_em stays 0 so
@@ -100,7 +102,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
         nt_ui_set_sprite_material(fx->ctx, fx->sprite_material);
     }
     if ((bind & UI_WALKER_FX_BIND_TEXT_MATERIAL) != 0U) {
-        nt_ui_set_text_material(fx->ctx, fx->text_material);
+        nt_ui_set_text_material(fx->ctx, fx->text_material, 0.0F);
     }
     nt_ui_set_custom_handler(fx->ctx, NULL, NULL);
 }
@@ -131,11 +133,62 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
 
     nt_material_shutdown();
     nt_font_shutdown();
+    free(fx->real_font_blob);
+    fx->real_font_blob = NULL;
     nt_atlas_test_reset();
     nt_resource_shutdown();
     nt_gfx_shutdown();
     nt_mem_scratch_shutdown();
     nt_hash_shutdown();
+}
+
+nt_font_t ui_walker_fixture_make_real_font(ui_walker_fixture_t *fx) {
+    if (fx->real_font_blob == NULL) {
+        fx->real_font_blob = nt_test_font_blob(32U, 126U, &fx->real_font_blob_size);
+    }
+    const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
+    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(fx->real_font_blob, fx->real_font_blob_size)));
+    nt_resource_step();
+    nt_font_step();
+    return font;
+}
+
+uint32_t ui_walker_fx_draw_count(nt_program_t program) {
+    uint32_t count = 0;
+    const uint32_t n = nt_gfx_fake_draw_trace_count();
+    for (uint32_t i = 0; i < n; i++) {
+        count += (nt_gfx_fake_draw_trace_at(i).program.id == program.id) ? 1U : 0U;
+    }
+    return count;
+}
+
+nt_gfx_fake_draw_t ui_walker_fx_draw_at(nt_program_t program, uint32_t n) {
+    const uint32_t total = nt_gfx_fake_draw_trace_count();
+    for (uint32_t i = 0; i < total; i++) {
+        const nt_gfx_fake_draw_t d = nt_gfx_fake_draw_trace_at(i);
+        if (d.program.id == program.id) {
+            if (n == 0U) {
+                return d;
+            }
+            n--;
+        }
+    }
+    TEST_FAIL_MESSAGE("no such draw of the program in the trace");
+    return (nt_gfx_fake_draw_t){0};
+}
+
+const uint8_t *ui_walker_fx_text_vertex(nt_gfx_fake_draw_t draw, uint32_t quad, uint32_t corner) {
+    TEST_ASSERT_TRUE(quad < ui_walker_fx_quads(draw));
+    uint32_t vertex = 0;
+    memcpy(&vertex, g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].staging + ((size_t)(draw.first_index + (quad * 6U)) * sizeof vertex), sizeof vertex);
+    vertex += corner; /* index 0 of a quad is its BL */
+    return g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + ((size_t)vertex * UI_WALKER_FX_TEXT_VERTEX_BYTES);
+}
+
+float ui_walker_fx_vertex_float(const uint8_t *vertex, uint32_t byte_offset) {
+    float v = 0.0F;
+    memcpy(&v, vertex + byte_offset, sizeof v);
+    return v;
 }
 
 #endif /* NT_TEST_ACCESS */

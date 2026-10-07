@@ -223,8 +223,8 @@ The UI walker has **three independent ordering axes** — do not conflate them:
 1. **zIndex** — the stacking axis. Draw order is zIndex ascending, then layer
    ascending, then declaration order.
 2. **Scissor / custom commands** — hard barriers. A segment is a run of
-   same-zIndex segmentable commands; SCISSOR and CUSTOM cut it: staged text is
-   flushed on each side, and sprites, which record at the call, never cross it.
+   same-zIndex segmentable commands; SCISSOR and CUSTOM cut it. Sprites and
+   text record at the call, so neither crosses it.
 3. **layer** — batch order *within* a segment (256 layers, `uint8_t`; 240-255
    are engine-reserved for debug overlays; bitmask multipass). Layer comes from
    the **widget call** (`data->layer`, `label_layer`), never from a style — so
