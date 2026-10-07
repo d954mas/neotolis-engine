@@ -19,10 +19,10 @@ typedef struct {
 } nt_postfx_blur_pass_t;
 
 /* The module owns only shader, program, pipeline, and fullscreen primitive state. */
-nt_result_t nt_postfx_blur_init(void);
+void nt_postfx_blur_init(void);
 void nt_postfx_blur_shutdown(void);
-/* Rebuilds GPU resources after context restore. */
-nt_result_t nt_postfx_blur_restore_gpu(void);
+/* Rebuilds GPU resources after context restore; a loss during it is retried by the next restore. */
+void nt_postfx_blur_restore_gpu(void);
 /* Borrows a ready source texture and valid temp/dest targets of matching dimensions; source must be
  * R8/RG8/RGB8/RGBA8/RGBA16F/RGBA32F (sampler2D).
  * The source is sampled NEAREST with clamped edges; taps land on texel centres.

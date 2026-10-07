@@ -278,22 +278,6 @@ static void test_a_retried_restore_reuses_the_frame_buffer_slots(void) {
     }
 }
 
-/* A restore that meets a new loss leaves the frame buffers unmade before the loss is latched:
- * a uniform block then binds nothing and allocates nothing, like on a latched loss. */
-static void test_a_uniform_block_without_a_frame_buffer_is_a_lost_context(void) {
-    const float block[4] = {1.0F, 2.0F, 3.0F, 4.0F};
-    nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
-    const nt_buffer_t made = storage->buffer;
-    storage->buffer = (nt_buffer_t){0};
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_uniform_block(0, block, sizeof(block));
-    nt_gfx_end_pass();
-    storage->buffer = made;
-    TEST_ASSERT_EQUAL_UINT32(0, storage->used);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
-}
-
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* On a live context a frame buffer that cannot be made is a bug, not a loss. */
 static void test_a_failed_frame_buffer_creation_on_a_live_context_asserts(void) {
@@ -328,7 +312,6 @@ int main(void) {
     RUN_TEST(test_indexed_draws_read_the_index_storage_as_uint32);
     RUN_TEST(test_restore_makes_new_buffers_and_a_lost_frame_uploads_nothing);
     RUN_TEST(test_a_retried_restore_reuses_the_frame_buffer_slots);
-    RUN_TEST(test_a_uniform_block_without_a_frame_buffer_is_a_lost_context);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_a_failed_frame_buffer_creation_on_a_live_context_asserts);
 #endif

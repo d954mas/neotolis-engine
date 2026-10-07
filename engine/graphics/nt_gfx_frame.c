@@ -58,7 +58,7 @@ void nt_gfx_frame_create_buffers(void) {
             .index_type = s == NT_GFX_FRAME_INDEX ? NT_INDEX_UINT32 : NT_INDEX_NONE,
             .label = labels[s],
         });
-        NT_ASSERT((storage->buffer.id != 0 || g_nt_gfx.context_lost || nt_gfx_backend_query_context_lost()) && "frame storage buffer creation failed");
+        NT_ASSERT((storage->buffer.id != 0 || g_nt_gfx.context_lost) && "frame storage buffer creation failed");
     }
 }
 // #endregion

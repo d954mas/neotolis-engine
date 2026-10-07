@@ -1361,11 +1361,9 @@ static void deform_cpu_mesh(cpu_mesh_t *source, const nt_skin_binding_t *skin, c
             }
         }
     }
-    if (source->reference.id != 0) {
-        nt_gfx_deactivate_mesh(source->reference.id);
-    }
+    nt_gfx_deactivate_mesh(source->reference.id);
+    /* 0 on a lost context; drawing skips while lost and the restore remakes it. */
     source->reference = (nt_mesh_t){nt_gfx_activate_mesh(source->output, source->size)};
-    NT_ASSERT(source->reference.id != 0);
 }
 
 /* Three rings per bone include a half-weight ring, so bending exercises blending. */
@@ -1530,8 +1528,7 @@ static void init_mesh_scene(void) {
     NT_ASSERT(result == NT_OK);
     result = nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = SHOWCASE_ENTITY_COUNT});
     NT_ASSERT(result == NT_OK);
-    result = nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 3 * SKELETAL_SHOWCASE_MAX_PALETTE, .height = SKELETAL_SHOWCASE_MAX_INSTANCES});
-    NT_ASSERT(result == NT_OK);
+    nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 3 * SKELETAL_SHOWCASE_MAX_PALETTE, .height = SKELETAL_SHOWCASE_MAX_INSTANCES});
     /* Static meshes are only the CPU reference: one body and one shirt. */
     result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_layouts = 4});
     NT_ASSERT(result == NT_OK);
@@ -1602,23 +1599,21 @@ static void init_mesh_scene(void) {
 static void restore_mesh_scene(void) {
     nt_skinned_mesh_renderer_restore_gpu();
     nt_mesh_renderer_restore_gpu();
-    nt_result_t result = nt_skeletal_gpu_restore_gpu();
-    NT_ASSERT(result == NT_OK);
+    nt_skeletal_gpu_restore_gpu();
     nt_program_ref_drop(&s_skin_program);
     nt_program_ref_drop(&s_static_program);
     const uint32_t sources[3] = {RIG_HUMANOID, CPU_CLOTHES, CPU_ORDER_CLOTHES};
     for (uint32_t i = 0; i < 3; ++i) {
         nt_gfx_deactivate_mesh(s_procedural_mesh[i].id);
         const cpu_mesh_t *source = &s_cpu_mesh[sources[i]];
+        /* 0 on a new loss; the next restore remakes it. */
         s_procedural_mesh[i] = (nt_mesh_t){nt_gfx_activate_mesh(source->data, source->size)};
-        NT_ASSERT(s_procedural_mesh[i].id != 0);
     }
     for (uint32_t i = 0; i < CPU_SOURCE_COUNT; ++i) {
         cpu_mesh_t *source = &s_cpu_mesh[i];
         if (source->reference.id != 0) {
             nt_gfx_deactivate_mesh(source->reference.id);
             source->reference = (nt_mesh_t){nt_gfx_activate_mesh(source->output, source->size)};
-            NT_ASSERT(source->reference.id != 0);
         }
     }
 }

@@ -178,17 +178,17 @@ data, so a draw reads only blocks bound in its own frame. WebGL rejects a draw
 whose bound range is smaller than the block's data size; gfx does not know block
 sizes, so `size` covers the whole block. A slot at or above the limit, NULL
 `data` or a zero `size` asserts; an exhausted stream stops as a frame storage
-overflow. On a lost context, including a new loss that left the frame buffer
-unmade during a restore, the call allocates nothing and ends `CONTEXT_LOST`.
+overflow. On a lost context the call allocates nothing and ends `CONTEXT_LOST`.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
-`nt_gfx_begin_frame` has synced, or a link the browser reports lost. The second
+already latched (by `nt_gfx_begin_frame` or an earlier failed call, which also
+covers a stage the loss left 0), or a link the browser reports lost, which latches it. The second
 is a stage handle that is still live but whose GPU object that loss discarded —
 permanently unready (END result `UNREADY`), so the owner recreates the stage and
 links again. Both are
-recoverable and neither asserts. A stale stage handle remains a developer error
-and traps.
+recoverable and neither asserts. On a live context a 0 or stale stage handle
+remains a developer error and traps.
 
 `nt_material_set_program` is the only setter for the borrowed handle, including assignment
 from or to `NT_PROGRAM_INVALID`. Assigning the same handle is a no-op, so a
@@ -347,8 +347,8 @@ sampler recreation publishes no
 logical set and issues no backend bind. Those failures are
 recoverable, so gfx reports them and skips the following draws of that set instead
 of returning a status the caller would have to branch on. Context loss means loss
-already synced by `nt_gfx_begin_frame`; material transitions do not poll the
-platform.
+already latched, by `nt_gfx_begin_frame` or by a failed backend call; material
+transitions do not poll the platform.
 
 The sampler class is part of the linked interface:
 
@@ -430,14 +430,18 @@ Render targets have no resize. A size change destroys the attachment textures,
 which destroys their targets, and makes new textures and targets at the new
 size. The engine never recreates a target and never preserves pixels: consumers
 redraw offscreen contents after making a target.
-Context loss is synced at `nt_gfx_begin_frame`, at the start of the host
-iteration; pass calls on a lost context do nothing. Work issued
-after a loss inside an iteration is issued but does nothing, and the next
-begin_frame wipes. While the browser reports the context lost, begin_frame does
+Context loss latches at `nt_gfx_begin_frame`, at the start of the host
+iteration, or at the first backend call inside an iteration that fails on it;
+calls after the latch take their lost path, pass calls on a lost context do
+nothing, and `end_pass` still closes a pass opened before the latch. Work issued
+before the latch is issued but does nothing, and the next begin_frame that takes
+the lost event wipes. While the browser reports the context lost, begin_frame does
 not attempt recreation. A failed recreation is a context-creation failure: it
 logs one error, and on the web it leaves no context and no loss listener, so the
 engine stays lost and no later iteration recovers it. Backend failures caused by
-a loss are reported as `CONTEXT_LOST` without an error log.
+a loss are reported as `CONTEXT_LOST`; only the one that latches it logs an error.
+A sampler cache hit whose recreate meets the loss keeps its stable id and ends
+`CONTEXT_LOST`; a texture whose default sampler met it is not made.
 A loss frees every render-target slot, as it frees pipelines and vertex inputs;
 the attachment textures stay as husks. After restore the owner destroys the
 husks and makes new textures and targets. A restore that meets a new loss is

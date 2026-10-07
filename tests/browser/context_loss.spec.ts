@@ -396,8 +396,9 @@ function trackErrors(page: Page): string[] {
   return errors;
 }
 
-// Chrome reports isContextLost() at once but queues webglcontextlost as a task, so every step runs
-// before the engine has heard of the loss.
+// Chrome reports isContextLost() at once but queues webglcontextlost as a task, so the steps start
+// before the lost event. The first step that fails confirms the loss and latches it; the last entry
+// reports the latch (1 = the engine knows of the loss).
 async function createInLossWindow(page: Page, steps: number[]): Promise<number[]> {
   return page.evaluate((list) => {
     const loss = document.querySelector('canvas')!.getContext('webgl2')!.getExtension('WEBGL_lose_context');
@@ -407,7 +408,7 @@ async function createInLossWindow(page: Page, steps: number[]): Promise<number[]
     loss.loseContext();
     // A step that ran on an already-known loss would pass through the known-loss path instead.
     if (window.__nt!.loss_seen()) throw new Error('the engine saw the loss before the steps ran');
-    return [stages, ...list.map((step) => window.__nt!.loss_window(step))];
+    return [stages, ...list.map((step) => window.__nt!.loss_window(step)), window.__nt!.loss_seen() ? 1 : 0];
   }, steps);
 }
 
@@ -472,7 +473,18 @@ for (const nullCreates of [false, true]) {
     if (nullCreates) await returnNullCreatesWhenLost(page);
     await page.goto('/index.html');
     await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
-    expect(await createInLossWindow(page, [1, 2]), 'stages compile live; program and shader report the loss').toEqual([1, 0, 0]);
+    expect(await createInLossWindow(page, [1, 2]), 'stages compile live; the program link latches the loss, the shader takes the lost path').toEqual([1, 0, 0, 1]);
+    await restoreAndDraw(page, errors);
+    expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+  });
+
+  test('context loss: a shader create before the lost event latches the loss' + variant, async ({ page }) => {
+    test.setTimeout(60_000);
+    const errors = trackErrors(page);
+    if (nullCreates) await returnNullCreatesWhenLost(page);
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
+    expect(await createInLossWindow(page, [2]), 'the shader create asks the browser and latches').toEqual([1, 0, 1]);
     await restoreAndDraw(page, errors);
     expect(errors, 'unexpected browser/gfx errors').toEqual([]);
   });
@@ -483,7 +495,7 @@ for (const nullCreates of [false, true]) {
     if (nullCreates) await returnNullCreatesWhenLost(page);
     await page.goto('/index.html');
     await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready() && window.__nt.basis_ready(), null, { timeout: 30_000 });
-    expect(await createInLossWindow(page, [3]), 'the texture reports the loss').toEqual([1, 0]);
+    expect(await createInLossWindow(page, [3]), 'the texture latches the loss').toEqual([1, 0, 1]);
     // Restore must rebuild the textures and draw without errors from the dead context.
     await restoreAndDraw(page, errors);
     expect(errors, 'unexpected browser/gfx errors').toEqual([]);
@@ -514,7 +526,7 @@ test('context loss: texture creation rejects loss during upload', async ({ page 
       gl.texImage2D = upload;
     }
   });
-  expect(result).toEqual({ texture: 0, injected: true, synced: false });
+  expect(result).toEqual({ texture: 0, injected: true, synced: true });
   await restoreAndDraw(page, errors);
   expect(errors, 'unexpected browser/gfx errors').toEqual([]);
 });

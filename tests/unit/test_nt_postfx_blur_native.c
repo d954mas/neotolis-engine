@@ -19,15 +19,16 @@ void setUp(void) {
 
 void tearDown(void) { nt_gfx_shutdown(); }
 
+/* A failed compile or link asserts inside gfx, so returning is the proof. */
 static void test_blur_program_links_on_real_gl(void) {
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_init());
+    nt_postfx_blur_init();
     nt_postfx_blur_shutdown();
 }
 
 /* Restore must rebuild and link the embedded shader pair through the real GL backend. */
 static void test_blur_program_relinks_on_restore(void) {
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_init());
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_restore_gpu());
+    nt_postfx_blur_init();
+    nt_postfx_blur_restore_gpu();
     nt_postfx_blur_shutdown();
 }
 

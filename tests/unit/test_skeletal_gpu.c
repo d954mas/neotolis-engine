@@ -42,7 +42,7 @@ static void next_frame(void) {
 }
 
 static void gpu_init(uint16_t width, uint16_t height) {
-    TEST_ASSERT_EQUAL(NT_OK, nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = width, .height = height}));
+    nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = width, .height = height});
     s_gpu_up = true;
 }
 
@@ -99,6 +99,20 @@ static void test_init_width_zero_is_min_2048_max_texture_size(void) {
     /* The fake reports max_texture_size 4096. */
     gpu_init(0, 1);
     TEST_ASSERT_EQUAL_UINT16(2048, nt_gfx_fake_last_texture_desc().width);
+}
+
+/* A context lost during the caps probe reports max_texture_size 0; the default width still applies. */
+static void test_init_width_zero_with_unknown_caps_takes_the_default(void) {
+    nt_gfx_fake_set_context_lost(true);
+    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}); /* the failed create latches the loss */
+    const uint32_t max_size = g_nt_gfx.gpu_caps.max_texture_size;
+    g_nt_gfx.gpu_caps.max_texture_size = 0;
+    gpu_init(0, 1);
+    g_nt_gfx.gpu_caps.max_texture_size = max_size;
+    nt_deformation_binding_t b;
+    next_frame();
+    TEST_ASSERT_NOT_NULL(nt_skeletal_gpu_reserve(600, &b)); /* 1800 texels need the 2048 default */
+    nt_gfx_fake_set_context_lost(false);
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
@@ -257,7 +271,7 @@ static void test_restore_recreates_the_texture_and_new_bindings_use_it(void) {
     nt_deformation_binding_t before;
     (void)nt_skeletal_gpu_reserve(1, &before);
 
-    TEST_ASSERT_EQUAL(NT_OK, nt_skeletal_gpu_restore_gpu());
+    nt_skeletal_gpu_restore_gpu();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_create_count());
     nt_texture_desc_t d = nt_gfx_fake_last_texture_desc();
@@ -272,34 +286,30 @@ static void test_restore_recreates_the_texture_and_new_bindings_use_it(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(before.texture.id, after.texture.id);
 }
 
-static void test_restore_when_inactive_is_ok(void) { TEST_ASSERT_EQUAL(NT_OK, nt_skeletal_gpu_restore_gpu()); }
-
-static void test_failed_restore_is_retried_before_the_next_reserve(void) {
-    gpu_init(12, 2);
-    nt_gfx_fake_fail_texture_creates(1);
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_skeletal_gpu_restore_gpu());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
-    nt_deformation_binding_t b;
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-    next_frame();
-    nt_test_assert_install();
-    NT_TEST_EXPECT_ASSERT((void)nt_skeletal_gpu_reserve(1, &b));
-#endif
-    /* The retry creates a fresh texture without destroying the husk twice. */
-    TEST_ASSERT_EQUAL(NT_OK, nt_skeletal_gpu_restore_gpu());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_texture_destroy_count());
-    next_frame();
-    (void)nt_skeletal_gpu_reserve(1, &b);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, b.texture.id);
+static void test_restore_when_inactive_is_a_no_op(void) {
+    nt_skeletal_gpu_restore_gpu();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_create_count());
 }
 
-static void test_failed_init_leaves_the_module_down(void) {
-    nt_gfx_fake_fail_texture_creates(1);
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 12, .height = 2}));
-    nt_skeletal_gpu_shutdown(); /* no-op on an inactive module */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_texture_destroy_count());
+/* A loss during restore leaves the texture 0; frames keep reserving into staging, and the next restore makes it again. */
+static void test_a_loss_during_restore_is_retried_by_the_next_one(void) {
     gpu_init(12, 2);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_create_count());
+    nt_gfx_fake_set_context_lost(true);
+    nt_skeletal_gpu_restore_gpu();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_deformation_binding_t b;
+    next_frame();
+    TEST_ASSERT_NOT_NULL(nt_skeletal_gpu_reserve(1, &b));
+    TEST_ASSERT_EQUAL_UINT32(0, b.texture.id);
+    const uint32_t uploads = nt_gfx_fake_update_texture_count();
+    nt_skeletal_gpu_flush();
+    TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count());
+    nt_gfx_fake_set_context_lost(false);
+    next_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_skeletal_gpu_restore_gpu();
+    (void)nt_skeletal_gpu_reserve(1, &b);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, b.texture.id);
 }
 // #endregion
 
@@ -413,6 +423,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_creates_one_nearest_rgba32f_texture);
     RUN_TEST(test_init_width_zero_is_min_2048_max_texture_size);
+    RUN_TEST(test_init_width_zero_with_unknown_caps_takes_the_default);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_init_rejects_zero_height);
 #endif
@@ -425,9 +436,8 @@ int main(void) {
     RUN_TEST(test_flush_twice_re_uploads_the_same_rectangle);
     RUN_TEST(test_flush_of_an_empty_frame_uploads_nothing);
     RUN_TEST(test_restore_recreates_the_texture_and_new_bindings_use_it);
-    RUN_TEST(test_restore_when_inactive_is_ok);
-    RUN_TEST(test_failed_restore_is_retried_before_the_next_reserve);
-    RUN_TEST(test_failed_init_leaves_the_module_down);
+    RUN_TEST(test_restore_when_inactive_is_a_no_op);
+    RUN_TEST(test_a_loss_during_restore_is_retried_by_the_next_one);
     RUN_TEST(test_skin_comp_add_starts_from_the_zero_binding);
     RUN_TEST(test_skin_comp_swap_and_pop_keeps_every_remaining_value);
     RUN_TEST(test_skin_comp_entity_destroy_frees_the_slot);

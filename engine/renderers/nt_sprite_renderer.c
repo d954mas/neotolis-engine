@@ -263,8 +263,8 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(mat.id != 0 && "nt_sprite_renderer_set_material: invalid material handle");
     const nt_material_info_t *mi = nt_material_get_info(mat);
     /* Assignment, not liveness: on the frame the context dies the program is
-     * already dead here, and trapping on that would crash a recoverable event. */
-    NT_ASSERT(mi != NULL && mi->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
+     * already dead here, and a relink that met a new loss left it unassigned. */
+    NT_ASSERT(mi != NULL && (mi->program.id != 0 || g_nt_gfx.context_lost) && "nt_sprite_renderer_set_material: material has no program");
     nt_sprite_material_t *c = &s_sprite.current;
     /* Params are compared when recorded, and resources are not stepped between draws of a frame.
      * A failed resolve (pipeline 0) retries next frame; a destroyed program takes its pipeline

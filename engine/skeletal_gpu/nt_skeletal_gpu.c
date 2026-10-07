@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "log/nt_log.h"
 
 #define NT_SKELETAL_GPU_DEFAULT_WIDTH 2048U
 #define NT_SKELETAL_GPU_TEXEL_FLOATS 4U
@@ -24,7 +23,7 @@ static struct {
 } s_skeletal_gpu;
 
 // #region lifecycle
-static nt_result_t create_texture(void) {
+static void create_texture(void) {
     s_skeletal_gpu.texture = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = s_skeletal_gpu.width,
         .height = s_skeletal_gpu.height,
@@ -35,64 +34,49 @@ static nt_result_t create_texture(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "skeletal_gpu_palettes",
     });
-    return s_skeletal_gpu.texture.id != 0 ? NT_OK : NT_ERR_INIT_FAILED;
-}
-
-/* Handle 0 after a failed restore: gfx logs an error for it, unlike buffers. */
-static void destroy_texture(void) {
-    if (s_skeletal_gpu.texture.id != 0) {
-        nt_gfx_destroy_texture(s_skeletal_gpu.texture);
-    }
-    s_skeletal_gpu.texture = (nt_texture_t){0};
+    NT_ASSERT((s_skeletal_gpu.texture.id != 0 || g_nt_gfx.context_lost) && "skeletal_gpu: palette texture creation failed");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-nt_result_t nt_skeletal_gpu_init(const nt_skeletal_gpu_desc_t *desc) {
+void nt_skeletal_gpu_init(const nt_skeletal_gpu_desc_t *desc) {
     NT_ASSERT(!s_skeletal_gpu.initialized);
     NT_ASSERT(desc != NULL);
     NT_ASSERT(desc->height > 0);
     NT_ASSERT(g_nt_gfx.initialized && "nt_skeletal_gpu_init: nt_gfx_init must run first");
 
     memset(&s_skeletal_gpu, 0, sizeof(s_skeletal_gpu));
+    /* A context lost during the caps probe reports 0; WebGL 2 guarantees at least the default width. */
     uint32_t max_size = nt_gfx_gpu_caps()->max_texture_size;
     uint32_t width = desc->width;
     if (width == 0) {
-        width = max_size < NT_SKELETAL_GPU_DEFAULT_WIDTH ? max_size : NT_SKELETAL_GPU_DEFAULT_WIDTH;
+        width = (max_size != 0 && max_size < NT_SKELETAL_GPU_DEFAULT_WIDTH) ? max_size : NT_SKELETAL_GPU_DEFAULT_WIDTH;
     }
+    NT_ASSERT((g_nt_gfx.context_lost || (width <= max_size && desc->height <= max_size)) && "skeletal_gpu: palette texture exceeds max_texture_size");
     s_skeletal_gpu.width = (uint16_t)width;
     s_skeletal_gpu.height = desc->height;
 
     size_t texels = (size_t)s_skeletal_gpu.width * s_skeletal_gpu.height;
     s_skeletal_gpu.staging = (float *)calloc(texels, NT_SKELETAL_GPU_TEXEL_FLOATS * sizeof(float));
-    if (!s_skeletal_gpu.staging) {
-        NT_LOG_ERROR("failed to allocate palette staging");
-        return NT_ERR_INIT_FAILED;
-    }
-    if (create_texture() != NT_OK) {
-        free(s_skeletal_gpu.staging);
-        s_skeletal_gpu.staging = NULL;
-        NT_LOG_ERROR("failed to create palette texture");
-        return NT_ERR_INIT_FAILED;
-    }
+    NT_ASSERT(s_skeletal_gpu.staging != NULL && "skeletal_gpu: palette staging allocation failed");
+    create_texture();
     s_skeletal_gpu.initialized = true;
-    return NT_OK;
 }
 
 void nt_skeletal_gpu_shutdown(void) {
     if (!s_skeletal_gpu.initialized) {
         return;
     }
-    destroy_texture();
+    nt_gfx_destroy_texture(s_skeletal_gpu.texture);
     free(s_skeletal_gpu.staging);
     memset(&s_skeletal_gpu, 0, sizeof(s_skeletal_gpu));
 }
 
-nt_result_t nt_skeletal_gpu_restore_gpu(void) {
+void nt_skeletal_gpu_restore_gpu(void) {
     if (!s_skeletal_gpu.initialized) {
-        return NT_OK;
+        return;
     }
-    destroy_texture();
-    return create_texture();
+    nt_gfx_destroy_texture(s_skeletal_gpu.texture);
+    create_texture();
 }
 // #endregion
 
@@ -109,7 +93,6 @@ void nt_skeletal_gpu_begin_frame(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 nt_skeletal_mat34_t *nt_skeletal_gpu_reserve(uint16_t count, nt_deformation_binding_t *out_binding) {
     NT_ASSERT(s_skeletal_gpu.initialized);
-    NT_ASSERT(s_skeletal_gpu.texture.id != 0 && "retry failed GPU restore before reserving");
     NT_ASSERT(out_binding != NULL);
     NT_ASSERT(count > 0);
     uint32_t texels = 3U * count;

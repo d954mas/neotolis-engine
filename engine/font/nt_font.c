@@ -1410,11 +1410,7 @@ static void create_font_textures(nt_font_slot_t *slot) {
     });
 }
 
-static void destroy_font_textures(nt_font_slot_t *slot) {
-    if (slot->curve_texture.id != 0) {
-        nt_gfx_destroy_texture(slot->curve_texture);
-    }
-}
+static void destroy_font_textures(nt_font_slot_t *slot) { nt_gfx_destroy_texture(slot->curve_texture); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_font_init(const nt_font_desc_t *desc) {

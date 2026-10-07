@@ -853,6 +853,17 @@ void test_empty_list_reserves_nothing(void) {
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
 }
 
+/* A loss during restore can leave the deformation texture and meshes 0; draws on a lost context return before checking them. */
+static void test_draws_on_a_lost_context_skip_their_handle_checks(void) {
+    nt_gfx_fake_set_context_lost(true);
+    (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}); /* the failed create latches the loss */
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    const nt_render_item_t item = {.entity = 0xFFFFU};
+    nt_skinned_mesh_renderer_draw((nt_mesh_t){0}, (nt_material_t){0}, (nt_texture_t){0}, 0, 1);
+    nt_skinned_mesh_renderer_draw_list(&item, 1);
+    nt_gfx_fake_set_context_lost(false);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_one_compatible_item_draws_with_supplied_deformation_texture);
@@ -882,5 +893,6 @@ int main(void) {
     RUN_TEST(test_deformation_change_reapplies_textures_not_uniforms);
     RUN_TEST(test_empty_list_reserves_nothing);
     RUN_TEST(test_mesh_only_change_skips_the_texture_set);
+    RUN_TEST(test_draws_on_a_lost_context_skip_their_handle_checks);
     return UNITY_END();
 }

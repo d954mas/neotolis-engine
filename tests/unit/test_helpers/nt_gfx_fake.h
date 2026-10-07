@@ -107,8 +107,8 @@ void nt_gfx_fake_fail_next_backend_restore_lost(void);
 /* The recreate succeeds but the context is lost again before begin_frame finishes. */
 void nt_gfx_fake_lose_context_during_next_restore(void);
 void nt_gfx_fake_fail_next_render_target_create(void);
-/* Live loss state and the lost-event latch together; the lose_context_on_* knobs
- * set both too. Creates fail on a lost context, as GL's do. */
+/* Live loss state; true also queues the lost event, which stays until begin_frame takes it, as in a
+ * browser. The lose_context_on_* knobs do the same. Creates fail on a lost context, as GL's do. */
 void nt_gfx_fake_set_context_lost(bool lost);
 /* The browser lost and restored the context before begin_frame: only the latch is set. */
 void nt_gfx_fake_lose_and_restore_context(void);

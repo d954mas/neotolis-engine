@@ -41,7 +41,7 @@ void setUp(void) {
     nt_gfx_begin_frame();
     nt_gfx_fake_reset();
     nt_gfx_fake_set_samplers((const char *const[]){"u_source"}, 1);
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_init());
+    nt_postfx_blur_init();
     nt_gfx_fake_draw_trace_reset(true);
 }
 
@@ -325,36 +325,35 @@ static void test_blur_lifecycle_misuse_asserts(void) {
     nt_postfx_blur_shutdown();
     /* Restoring an inactive module is a no-op, not a trap: a game restores every
      * module it might own without tracking which ones it turned off. */
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_restore_gpu());
+    nt_postfx_blur_restore_gpu();
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(NULL));
 }
 
 /* A second context loss can land between begin_frame's recovery and the restore
- * call, so the relink inside restore fails. The module has to stay active and
- * rebuild on the next restore instead of going dark for the session. */
-static void test_failed_restore_is_retried_by_the_next_one(void) {
+ * call, so the relink inside restore fails. The failure latches the loss, a pass
+ * meanwhile draws nothing without asserting, and the next restore rebuilds. */
+static void test_a_loss_during_restore_is_retried_by_the_next_one(void) {
     /* setUp already initialized the module. Lose the context during the relink
      * inside restore, which is what a second browser loss does. */
     nt_render_target_t source_rt = make_blur_target(64, 32);
     nt_postfx_blur_pass_t pass = {.source = nt_gfx_render_target_color(source_rt), .temp = make_blur_target(64, 32), .dest = make_blur_target(64, 32), .radius = 4.0F};
 
     nt_gfx_fake_lose_context_on_program_create();
-    TEST_ASSERT_EQUAL_INT(NT_ERR_INIT_FAILED, nt_postfx_blur_restore_gpu());
+    nt_postfx_blur_restore_gpu();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
 
-    /* A pass while the rebuild is still pending skips instead of trapping: the
-     * state is recoverable, so it must not crash a game that blurs every frame. */
     nt_gfx_fake_draw_trace_reset(true);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame(); /* detects the loss the failed relink met */
-    nt_gfx_fake_set_context_lost(false);
+    nt_postfx_blur_gaussian(&pass);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 
-    /* Still active, only its GPU objects are gone: the next restore rebuilds
-     * rather than asserting on a module that shut itself down. */
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_postfx_blur_restore_gpu());
+    nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_postfx_blur_restore_gpu();
     TEST_ASSERT_FALSE(nt_gfx_render_target_valid(pass.temp));
     source_rt = make_blur_target(64, 32);
     pass.source = nt_gfx_render_target_color(source_rt);
@@ -417,7 +416,7 @@ int main(void) {
     RUN_TEST(test_valid_blur_uses_two_passes_and_no_hidden_target_allocation);
     RUN_TEST(test_blur_binds_its_own_nearest_clamp_sampler);
     RUN_TEST(test_blur_lifecycle_misuse_asserts);
-    RUN_TEST(test_failed_restore_is_retried_by_the_next_one);
+    RUN_TEST(test_a_loss_during_restore_is_retried_by_the_next_one);
     RUN_TEST(test_blur_fs_keeps_the_masked_kernel_index);
     RUN_TEST(test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets);
     return UNITY_END();

@@ -35,14 +35,14 @@ typedef struct {
 /* 2048 x 4 texels = 128 KB staging + 128 KB texture: 24 frames of 100 joints; raise height for crowds. */
 static inline nt_skeletal_gpu_desc_t nt_skeletal_gpu_desc_defaults(void) { return (nt_skeletal_gpu_desc_t){.width = 0, .height = 4}; }
 
-/* Requires nt_gfx_init. Allocates the staging buffer and creates the texture;
+/* Requires nt_gfx_init. Allocates the staging buffer (asserts on failure) and creates the texture;
  * no other allocation afterwards. */
-nt_result_t nt_skeletal_gpu_init(const nt_skeletal_gpu_desc_t *desc);
+void nt_skeletal_gpu_init(const nt_skeletal_gpu_desc_t *desc);
 void nt_skeletal_gpu_shutdown(void);
 /* Destroys and recreates the texture after a context loss; staging survives
- * but the next frame rewrites it. Failure returns NT_ERR_INIT_FAILED: retry
- * before reserving, or shut down. Inactive module returns NT_OK. */
-nt_result_t nt_skeletal_gpu_restore_gpu(void);
+ * but the next frame rewrites it. A loss during it is retried by the next restore.
+ * No-op on an inactive module. */
+void nt_skeletal_gpu_restore_gpu(void);
 
 /* Resets the frame cursor; every earlier binding and reserved pointer is invalid.
  * Once per gfx frame after nt_gfx_begin_frame; a second call in one gfx frame asserts. */

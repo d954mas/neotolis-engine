@@ -287,7 +287,8 @@ void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend
 void nt_gfx_fake_lose_context_during_next_restore(void) { s_fake_lose_context_during_next_restore = true; }
 void nt_gfx_fake_set_context_lost(bool lost) {
     s_fake_context_lost = lost;
-    s_fake_loss_pending = lost;
+    /* Like the browser: the lost event waits until begin_frame takes it, even after the context is back. */
+    s_fake_loss_pending = s_fake_loss_pending || lost;
 }
 void nt_gfx_fake_lose_and_restore_context(void) { s_fake_loss_pending = true; }
 uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update_buffer_offset; }
