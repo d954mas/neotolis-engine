@@ -170,8 +170,8 @@ or per-image custom-attr block. u8 already matches an 8-bit display, so a
 float4 tint would add nothing. An unset style text or image
 material resolves to the ctx default at each walk, not at declaration, so a base
 swapped between two walks of one frame is the one drawn. `set_material` is bound **once per band** (the
-`bound` guard), so **all** of a band's inline images **merge into one sprite
-draw**. Because the sprite renderer emits while the walk's
+`bound` guard), so a band's adjacent inline images on one atlas page **merge into
+one sprite draw**; an image on another page starts a new draw. Because the sprite renderer emits while the walk's
 **scroll scissor is the current gfx scissor state**, the images are clipped to the
 panel/scroll automatically — by that scissor, **not** a Clay
 `.floating.clipTo`. Caveat: an `fx.scale > 1` image loses its per-image

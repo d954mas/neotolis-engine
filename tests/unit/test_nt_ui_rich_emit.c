@@ -2207,6 +2207,45 @@ static void test_layer_override(void) {
     TEST_ASSERT_TRUE_MESSAGE(trace_is_sprite_draw(1U, image, 1U), "within band: image paints after text");
 }
 
+/* An object draw_fn that selects a foreign text material, as a game object drawing its own text may. */
+static void foreign_text_material_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
+    (void)user_data;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)color;
+    (void)world_mat4;
+    nt_text_renderer_set_material(s_fx.sprite_material);
+}
+
+/* (L2b) text in a band after an object that selected another text material draws with the block's. */
+static void test_later_band_text_reselects_block_text_material(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_tm_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_layer(s_fx.ctx, 0U);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, foreign_text_material_draw, NULL);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_push_layer(s_fx.ctx, 1U);
+        nt_ui_rich_text_n(s_fx.ctx, "after", 5);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_tm").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.text_material.id, nt_text_renderer_test_material_id(), "band 1 text is drawn with the block's text material, not the object's");
+}
+
 /* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on
  * layer 1. The font-group gather is PER-LAYER, so set_font is called (distinct fonts in layer 0 = 2) +
  * (distinct fonts in layer 1 = 2) = 4 -- proving the gather scopes to the band, not the whole block. */
@@ -2619,6 +2658,7 @@ int main(void) {
     RUN_TEST(test_markup_effect_capacity_keeps_prior_params_and_balances_close);
     RUN_TEST(test_emit_produces_text_spans);
     RUN_TEST(test_rich_only_frame_binds_text_material);
+    RUN_TEST(test_later_band_text_reselects_block_text_material);
     RUN_TEST(test_fixed_block_size_matches_solved);
     RUN_TEST(test_single_style_one_span_per_line);
     RUN_TEST(test_double_walk_is_deterministic);

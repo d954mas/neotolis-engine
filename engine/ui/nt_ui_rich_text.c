@@ -2205,7 +2205,7 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     /* The style overrides; an unset (id==0) field falls back to the ctx default. Resolved per walk, never
      * stored: the game may swap the ctx materials between two walks of one declared frame. */
     const nt_ui_context_t *ctx = frame->ctx;
-    nt_text_renderer_set_material(st->text_material.id != 0U ? st->text_material : ctx->text_material);
+    const nt_material_t text_mat = st->text_material.id != 0U ? st->text_material : ctx->text_material;
     const nt_material_t image_mat = st->image_material.id != 0U ? st->image_material : ctx->sprite_material;
 
     /* id==0 -> neither style nor ctx gave a sprite material, so skip images. */
@@ -2219,6 +2219,8 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
         const uint8_t L = layers[li];
         /* Within ONE band, kinds stack text < image < object: staged text lands before the band's images,
          * which record at the call like everything an object draw_fn draws. */
+        /* Per band: an earlier band's object draw_fn may have selected another text material. */
+        nt_text_renderer_set_material(text_mat);
         rich_emit_text_layer(st, frame, box_x, box_y, L);
         nt_text_renderer_flush(); /* text behind: land it before the band's images */
         if (emit_images) {
