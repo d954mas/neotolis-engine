@@ -229,7 +229,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                     nt_text_renderer_set_material(tmat);
                     nt_text_renderer_set_font(font);
                     nt_text_renderer_draw_n(buf, (size_t)n, tm, label_size, white, 0.0F, 0.0F);
-                    nt_text_renderer_flush();
                 }
             }
         }
@@ -293,7 +292,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                 overlay_draw_text(tmat, font, top_x + 4.0F, top_y - label_size - 2.0F, label_size, white, buf, (size_t)n);
             }
         }
-        nt_text_renderer_flush();
         if (scissor_w > 0 && scissor_h > 0) {
             nt_gfx_set_scissor_enabled(false);
         }
@@ -341,9 +339,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         }
     }
 
-    if (can_label) {
-        nt_text_renderer_flush();
-    }
     if (scissor_w > 0 && scissor_h > 0) {
         nt_gfx_set_scissor_enabled(false);
     }

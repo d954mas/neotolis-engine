@@ -191,6 +191,38 @@ static void draw_zone_label(const nt_ui_debug_zone_t *z, const float text_model[
 // #endregion
 
 // #region public draw
+/* 3D: Clay-px baseline at the top-left, mapped by z->m, col1 negated so glyphs read upright.
+ * 2D: the projected padding corner with max y (GL-Y-up top-left), baseline inside the top edge. */
+static void zone_label_model(const nt_ui_debug_zone_t *z, bool is_3d, float vy, float vh, float label_size, float out[16]) {
+    if (is_3d) {
+        const float ox = z->visual_l + 2.0F;
+        const float oy = z->visual_t + label_size + 2.0F;
+        for (int rr = 0; rr < 4; ++rr) {
+            out[rr] = z->m[rr];
+            out[4 + rr] = -z->m[4 + rr];
+            out[8 + rr] = z->m[8 + rr];
+            out[12 + rr] = (ox * z->m[rr]) + (oy * z->m[4 + rr]) + z->m[12 + rr];
+        }
+        return;
+    }
+    const float pad[4][2] = {{z->layout_l, z->layout_t}, {z->layout_r, z->layout_t}, {z->layout_r, z->layout_b}, {z->layout_l, z->layout_b}};
+    float top_x = 0.0F;
+    float top_y = 0.0F;
+    for (uint32_t k = 0; k < 4U; ++k) {
+        float x = 0.0F;
+        float y = 0.0F;
+        nt_ui_internal_project_layout_to_world(z->m, vy, vh, pad[k][0], pad[k][1], &x, &y);
+        if (k == 0U || y > top_y) {
+            top_x = x;
+            top_y = y;
+        }
+    }
+    const float m[16] = {
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, top_x + 2.0F, top_y - label_size - 2.0F, 0.0F, 1.0F,
+    };
+    memcpy(out, m, sizeof m);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_ui_debug_hit_mode_t mode, nt_font_t font, float label_size) {
     NT_ASSERT(ctx != NULL && "nt_ui_debug_draw_hit_zones: ctx must be non-NULL");
@@ -212,7 +244,6 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
     const nt_material_t tmat = (is_3d && ctx->inspector_text_material.id != 0U) ? ctx->inspector_text_material : ctx->text_material;
     nt_sprite_renderer_set_material(smat);
 
-    const bool can_label = (tmat.id != 0U) && (font.id != 0U) && (label_size > 0.0F);
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
 
@@ -239,19 +270,6 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
             nt_ui_internal_emit_filled_quad_m(ctx->atlas, ctx->white_region, pad_corners, z->m, fill);
             /* Outline visual bbox so padding is visually distinct. */
             nt_ui_internal_emit_outline_m(ctx->atlas, ctx->white_region, vis_corners, 2.0F, z->m, DEBUG_OUTLINE_COLOR);
-            if (can_label) {
-                /* Clay-px baseline at the top-left, mapped by z->m; col1 negated so glyphs read upright. */
-                const float ox = z->visual_l + 2.0F;
-                const float oy = z->visual_t + label_size + 2.0F;
-                float text_model[16];
-                for (int rr = 0; rr < 4; ++rr) {
-                    text_model[rr] = z->m[rr];
-                    text_model[4 + rr] = -z->m[4 + rr];
-                    text_model[8 + rr] = z->m[8 + rr];
-                    text_model[12 + rr] = (ox * z->m[rr]) + (oy * z->m[4 + rr]) + z->m[12 + rr];
-                }
-                draw_zone_label(z, text_model, tmat, font, label_size);
-            }
             continue;
         }
 
@@ -264,26 +282,20 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
             nt_ui_internal_project_layout_to_world(z->m, vy, vh, vis_corners[k][0], vis_corners[k][1], &vis_corners[k][0], &vis_corners[k][1]);
         }
         nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, vis_corners, 2.0F, DEBUG_OUTLINE_COLOR);
-
-        /* Label at corner with max y after Y-flip (GL-Y-up top-left). */
-        if (can_label) {
-            float top_x = pad_corners[0][0];
-            float top_y = pad_corners[0][1];
-            for (uint32_t k = 1; k < 4U; ++k) {
-                if (pad_corners[k][1] > top_y) {
-                    top_y = pad_corners[k][1];
-                    top_x = pad_corners[k][0];
-                }
-            }
-            /* GL Y-up: baseline sits inside the top edge. */
-            const float text_model[16] = {
-                1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, top_x + 2.0F, top_y - label_size - 2.0F, 0.0F, 1.0F,
-            };
-            draw_zone_label(z, text_model, tmat, font, label_size);
-        }
     }
-    if (can_label) {
-        nt_text_renderer_flush();
+
+    if (tmat.id == 0U || font.id == 0U || label_size <= 0.0F) {
+        return;
+    }
+    /* Labels after every fill: a later zone's fill must not cover an earlier zone's label. */
+    for (uint32_t i = 0; i < ctx->debug_zone_count; ++i) {
+        const nt_ui_debug_zone_t *z = &ctx->debug_zones[i];
+        if (!zone_passes_mode(z, mode)) {
+            continue;
+        }
+        float text_model[16];
+        zone_label_model(z, is_3d, vy, vh, label_size, text_model);
+        draw_zone_label(z, text_model, tmat, font, label_size);
     }
 }
 // #endregion

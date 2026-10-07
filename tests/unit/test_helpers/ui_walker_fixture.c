@@ -68,7 +68,6 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
      * test_nt_sprite_renderer setUp). */
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
-    nt_text_renderer_init();
     nt_ui_module_init();
 
     /* nt_debug_overlay is NOT init'd here -- nt_ui_walk does not depend on it.
@@ -79,6 +78,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     fx->atlas = minimal_ui_atlas_create();
     fx->sprite_material = make_material(true);
     fx->text_material = make_material(false);
+    fx->text_material_b = make_material(false);
 
     /* Stub font: valid pool slot, no resource attached. nt_font_valid() is
      * true so walker's contract assert passes, but units_per_em stays 0 so

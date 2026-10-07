@@ -289,9 +289,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_result_t restore_result = nt_text_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
@@ -493,7 +490,6 @@ static void frame(void) {
         nt_text_renderer_set_material(s_text_material);
         nt_text_renderer_set_font(s_overlay_font);
         nt_text_renderer_draw(overlay, (const float *)overlay_model, overlay_size, white, 0.0F, 0.0F);
-        nt_text_renderer_flush();
     }
     // #endregion
 
@@ -571,9 +567,10 @@ int main(int argc, char **argv) {
     NT_ASSERT(s_initial_count <= BUNNY_MAX && "--count exceeds BUNNY_MAX");
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    /* Every bunny is one rect quad: 4 vertices of 20 B and 6 uint32 indices. */
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = BUNNY_MAX * 4U * 20U;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = BUNNY_MAX * 6U * 4U;
+    /* Every bunny is one rect quad: 4 vertices of 20 B and 6 uint32 indices; the HUD text adds
+     * 208 B of vertices and 24 B of indices per glyph. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (BUNNY_MAX * 4U * 20U) + (64U * 1024U);
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = (BUNNY_MAX * 6U * 4U) + (8U * 1024U);
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
@@ -599,8 +596,6 @@ int main(int argc, char **argv) {
 
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
-
-    nt_text_renderer_init();
 
     /* nt_metrics is the perf store; the overlay HUD is a pure consumer, so init metrics first. */
     nt_metrics_init();

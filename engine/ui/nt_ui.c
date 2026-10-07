@@ -1271,7 +1271,6 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
 // #endregion
 
 // #region helper_emit_text
-/* Text stages until its flush; dispatch_command flushes it before the next sprite command. */
 static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16]) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
@@ -1424,9 +1423,6 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
         ++(*clip_cache_len);
     }
 
-    /* Flush BEFORE scissor switch so staged text keeps the prior clip. */
-    nt_text_renderer_flush();
-
     stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
     nt_ui_internal_apply_scissor_logical_to_physical(target, x, y, wp, hp);
@@ -1435,7 +1431,6 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
 
 static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT(*depth > 0 && "scissor underflow");
-    nt_text_renderer_flush();
     (*depth)--;
     if (*depth == 0) {
         nt_gfx_set_scissor_enabled(false);
@@ -1478,7 +1473,6 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
     if (cd->type == NT_UI_CUSTOM_TYPE_NONE) {
         return;
     }
-    nt_text_renderer_flush();
 
     nt_ui_custom_frame_t frame;
     frame.ctx = ctx;
@@ -1561,14 +1555,6 @@ static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mod
 }
 #endif
 
-/* desired = ctx->sprite_material or a per-element override (radial reveal). Staged text lands
- * first: sprites record at the call, text at its flush. A CUSTOM handler may have selected
- * another sprite material, so every sprite command selects its own. */
-static inline void prep_sprite_dispatch_mat(nt_material_t desired) {
-    nt_text_renderer_flush();
-    nt_sprite_renderer_set_material(desired);
-}
-
 static inline void mat4_mul_vec4_flat(const float m[16], const float v[4], float out[4]) {
     out[0] = (m[0] * v[0]) + (m[4] * v[1]) + (m[8] * v[2]) + (m[12] * v[3]);
     out[1] = (m[1] * v[0]) + (m[5] * v[1]) + (m[9] * v[2]) + (m[13] * v[3]);
@@ -1628,12 +1614,13 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     /* X-column magnitude; Y dropped on purpose so glyph atlas stays crisp on the X axis. */
     const float text_scale = sqrtf((ws->m[0] * ws->m[0]) + (ws->m[1] * ws->m[1]));
 
+    /* A CUSTOM handler may have selected another sprite material, so every sprite command selects its own. */
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
         return;
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
         counters->rect_command_count++;
-        prep_sprite_dispatch_mat(ctx->sprite_material);
+        nt_sprite_renderer_set_material(ctx->sprite_material);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         Clay_Color fill = r->backgroundColor;
         fill.a *= ws->accum_opacity; /* the one pack rounds the folded alpha, as on every Clay command */
@@ -1643,7 +1630,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         counters->border_command_count++;
-        prep_sprite_dispatch_mat(ctx->sprite_material);
+        nt_sprite_renderer_set_material(ctx->sprite_material);
         Clay_RenderCommand local = *c;
         local.renderData.border.color.a *= ws->accum_opacity;
         emit_border(ctx, &local, world_mat4);
@@ -1675,7 +1662,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
          * emits of one material merge in gfx. */
         const nt_ui_image_payload_t *ip = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
         const nt_material_t img_mat = (ip != NULL && ip->material.id != 0) ? ip->material : ctx->sprite_material;
-        prep_sprite_dispatch_mat(img_mat);
+        nt_sprite_renderer_set_material(img_mat);
         Clay_RenderCommand local = *c;
         if (ws->accum_opacity < 1.0F) {
             Clay_Color *tint = &local.renderData.image.backgroundColor;
@@ -1771,9 +1758,8 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     // #endregion
     const bool update_metrics = mode == NT_UI_WALK_MODE_MAIN;
 
-    // #region entry-flush
-    /* Walker owns GL scissor across the call; drain BEFORE early returns so leaked staging dies with the frame. */
-    nt_text_renderer_flush();
+    // #region entry-scissor
+    /* Walker owns GL scissor across the call. */
     nt_gfx_set_scissor_enabled(false);
     // #endregion
 
@@ -1834,7 +1820,6 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     // #endregion
 
     // #region walker-state-init
-    /* After entry flush so walk_ms excludes the caller's staged text. */
 #if NT_UI_TIMING_ENABLED
     const double walk_t0 = nt_time_now();
 #endif
@@ -1850,7 +1835,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
 
     nt_ui_walk_counters_t counters = {0};
 
-    /* AFTER entry flush so per-walk delta excludes the caller's staged text. */
+    /* Draws the walk adds: a first text draw that merges into the caller's preceding text counts none. */
     const uint32_t calls_at_entry = nt_gfx_draw_calls(&g_nt_gfx.counters);
     // #endregion
 
@@ -1868,7 +1853,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
 #if NT_UI_DEBUG_TOOLS
     /* DEBUG_INSPECTOR: render with the inspector's own overlay materials (typically depth-off) when the
      * game supplied them, so the debug view stays on top without touching the game scene's depth.
-     * Restored at exit-flush. After the early-outs, the path to exit has no further returns. */
+     * Restored at walk exit. After the early-outs, the path to exit has no further returns. */
     const nt_material_t saved_sprite_mat = ctx->sprite_material;
     const nt_material_t saved_text_mat = ctx->text_material;
     if (mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR) {
@@ -1982,8 +1967,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     }
     // #endregion
 
-    // #region exit-flush + metrics
-    nt_text_renderer_flush();
+    // #region exit + metrics
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
     nt_gfx_set_scissor_enabled(false);
 

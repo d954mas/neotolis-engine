@@ -177,6 +177,24 @@ static void test_scissor_change_splits_sprite_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(draws_before + 2U, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
+/* Text on both sides of a clip change: each keeps its own clip, so the two runs do not merge. */
+static void test_scissor_change_splits_text_draws(void) {
+    bind_real_font();
+    make_text(0, 0);
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 800, .height = 600};
+    s_test_cmds[1].renderData.clip.horizontal = true;
+    s_test_cmds[1].renderData.clip.vertical = true;
+    make_text(2, 20);
+    s_test_cmds[3].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(4);
+
+    const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
+    walk();
+
+    TEST_ASSERT_EQUAL_UINT32(draws_before + 2U, nt_gfx_draw_calls(&g_nt_gfx.counters));
+}
+
 /* The same two rects without a clip change merge into one draw: the split above is the scissor's. */
 static void test_compatible_sprites_merge(void) {
     make_rect(0, 0);
@@ -217,6 +235,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_sprite_text_sprite_records_in_command_order);
     RUN_TEST(test_scissor_change_splits_sprite_draws);
+    RUN_TEST(test_scissor_change_splits_text_draws);
     RUN_TEST(test_compatible_sprites_merge);
     RUN_TEST(test_one_material_two_passes_rebinds);
     return UNITY_END();

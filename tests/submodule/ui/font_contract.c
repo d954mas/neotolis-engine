@@ -14,7 +14,6 @@ int main(int argc, char **argv) {
         return 1;
     }
     nt_gfx_init(&(nt_gfx_desc_t){0});
-    nt_text_renderer_init();
     puts("font-contract-ready");
     (void)fflush(stdout);
     const uint32_t transparent = 0U;

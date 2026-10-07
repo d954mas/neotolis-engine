@@ -32,6 +32,7 @@ typedef struct {
     minimal_ui_atlas_t atlas;
     nt_material_t sprite_material;
     nt_material_t text_material;
+    nt_material_t text_material_b; /* a second text material, never bound to the ctx */
     /* Empty font handle bound to ctx->fonts[0]. Passes nt_font_valid check
      * (pool slot occupied) but has no resource data, so nt_text_renderer
      * silently skips at the units_per_em==0 guard. Lets walker tests

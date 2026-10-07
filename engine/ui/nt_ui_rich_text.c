@@ -24,7 +24,7 @@
 #include "ui/nt_ui_rich_tagset.h"
 #include "utf8/nt_utf8.h"
 
-/* Distinct z-order bands the self-emit walks (each adds a text flush boundary). A block with more
+/* Distinct z-order bands the self-emit walks. A block with more
  * distinct <layer>s than this drops the over-cap layers BY ENCOUNTER ORDER (not by value) rather than OOB
  * the per-layer scratch. */
 #ifndef NT_UI_RICH_MAX_LAYERS
@@ -2114,8 +2114,8 @@ static void rich_apply_run_decoration(nt_ui_rich_state_t *st, const nt_ui_rich_s
     nt_text_renderer_set_strikethrough((e->flags & NT_UI_RICH_RUN_STRIKE) != 0U);
 }
 
-/* Group same-band TEXT by font.id so set_font fires once per distinct font, not per face transition
- * (the text renderer flushes on every set_font). No distinct-font cap -> a >4-family block never drops a face. */
+/* Group same-band TEXT by font.id so the draws of one font are adjacent and merge: every font change
+ * records a texture set and splits the draw. No distinct-font cap -> a >4-family block never drops a face. */
 static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
@@ -2133,14 +2133,14 @@ static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_fram
         if (!first) {
             continue; /* this font's pass already emitted every same-band atom that shares it */
         }
-        nt_text_renderer_set_font(s->font); /* once per distinct font on the band: collapses per-transition flushes */
+        nt_text_renderer_set_font(s->font); /* once per distinct font on the band */
         for (uint32_t k = i; k < st->solved_count; k++) {
             const nt_ui_rich_solved_atom_t *e = &st->solved[k];
             if (e->kind != NT_RICH_ATOM_TEXT || e->text_len == 0U || e->layer != layer || e->font.id != s->font.id) {
                 continue; /* other kinds/layers/fonts -> their own pass */
             }
             /* Decoration for this run: faux-italic lean + synth-bold weight + outline/shadow/underline/
-             * strike, all set explicitly per run (no flush) so nothing carries between runs. */
+             * strike, all set explicitly per run so nothing carries between runs. */
             rich_apply_run_decoration(st, e, frame->opacity);
             if (e->effect_id == 0U) {
                 rich_emit_text_plain(st, frame, e, box_x, box_y);
@@ -2211,23 +2211,20 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
     /* id==0 -> neither style nor ctx gave a sprite material, so skip images. */
     const bool emit_images = image_mat.id != 0U;
 
-    /* Painter order, depth off: sprites draw at the call, text at its flush. Emit ascending by layer and
-     * drain text after EVERY band so band N lands before N+1 and the block is a self-contained z island. */
+    /* Painter order, depth off: call order is draw order. Emit ascending by layer so band N lands before
+     * N+1 and the block is a self-contained z island. */
     uint8_t layers[NT_UI_RICH_MAX_LAYERS];
     const uint32_t layer_count = rich_gather_layers(st, layers);
     for (uint32_t li = 0; li < layer_count; li++) {
         const uint8_t L = layers[li];
-        /* Within ONE band, kinds stack text < image < object: staged text lands before the band's images,
-         * which record at the call like everything an object draw_fn draws. */
-        /* Per band: an earlier band's object draw_fn may have selected another text material. */
+        /* Within ONE band, kinds stack text < image < object. An earlier band's object draw_fn may have
+         * selected another text material; an object draw_fn that draws text selects its own. */
         nt_text_renderer_set_material(text_mat);
         rich_emit_text_layer(st, frame, box_x, box_y, L);
-        nt_text_renderer_flush(); /* text behind: land it before the band's images */
         if (emit_images) {
             rich_emit_images(st, frame, box_x, box_y, L, image_mat);
         }
         rich_emit_objects(st, frame, box_x, box_y, L);
-        nt_text_renderer_flush(); /* safety drain: an object draw_fn that emitted text; no-op otherwise */
     }
 }
 // #endregion

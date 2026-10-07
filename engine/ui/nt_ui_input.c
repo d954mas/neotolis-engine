@@ -602,7 +602,7 @@ static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, fl
     nt_ui_clay_priv_close_element();
 }
 
-/* Each field's content-clip + per-float scissor flushes the batch (~4 draw calls/focused field);
+/* Each field's content-clip + per-float scissor splits draws (~4 draw calls/focused field);
  * the clip is required since a field can straddle an outer scroll. */
 /* Open a non-floating child that fills the field's content box and clips both axes (pad_x-inset
  * horizontally, full field height vertically). The selection/text/caret floats attach to it and clip to

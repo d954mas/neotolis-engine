@@ -1018,7 +1018,7 @@ static void render_rich_composition(nt_ui_context_t *ctx) {
 static bool s_gpu_restore_pending;
 
 static bool gpu_restore_step(void) {
-    bool ok = nt_text_renderer_restore_gpu() == NT_OK;
+    bool ok = true;
     nt_shape_renderer_restore_gpu();
     /* The probe's mesh and vertex input died with the context. */
     mesh_probe_destroy();
@@ -1179,7 +1179,6 @@ static void frame(void) {
         }
 #endif /* __EMSCRIPTEN__ */
 
-        nt_text_renderer_flush();
         mesh_probe_draw(); /* on top of the UI so the spec can pixel-probe it */
 #ifdef __EMSCRIPTEN__
         /* Count frames that actually submitted geometry: reaching the draw path
@@ -1223,7 +1222,7 @@ int main(int argc, char *argv[]) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.capture_capacity = 16384;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U; /* the mesh probe's instances and the sprites */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U; /* the mesh probe's instances, the sprites and the text */
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = 128U * 1024U;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
@@ -1244,7 +1243,6 @@ int main(int argc, char *argv[]) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 5}); /* sprite, text, the mesh color probe's three */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});             /* base + 4 rich faces */
 
-    nt_text_renderer_init();
     nt_shape_renderer_init();
     const bool probe_ok = mesh_probe_create();
     NT_ASSERT(probe_ok && "mesh probe creation failed at startup"); /* cold start: the context is alive */

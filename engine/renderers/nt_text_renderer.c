@@ -28,9 +28,8 @@ _Static_assert(sizeof(nt_text_vertex_t) == 52, "text vertex stride must be 52 by
 // #endregion
 
 // #region Module state
-/* Per-run sticky decoration axes bundled so reset/restore is one struct op and a newly-added axis can't
- * be forgotten in reset. Every axis's off-state is 0, so (nt_text_deco_t){0} is the correct clear.
- * Logical-state lifetime: preserved by restore_gpu, cleared by cold init/shutdown and reset_decoration. */
+/* Per-run sticky decoration axes bundled so a reset is one struct op and a newly-added axis can't
+ * be forgotten in reset. Every axis's off-state is 0, so (nt_text_deco_t){0} is the correct clear. */
 typedef struct {
     float weight_em;        /* synthetic-bold em weight (signed); 0 = natural */
     float outline_w;        /* outline width em beyond the fill weight; 0 = no outline */
@@ -45,40 +44,46 @@ typedef struct {
 } nt_text_deco_t;
 
 static struct {
-    /* GPU resources */
     nt_renderer_pipeline_entry_t pipelines[NT_TEXT_RENDERER_MAX_PIPELINES];
     uint16_t pipeline_count;
-    nt_buffer_t vbo;                /* dynamic vertex buffer */
-    nt_buffer_t ibo;                /* immutable index buffer (pre-generated quad pattern) */
-    nt_vertex_input_t vertex_input; /* slug layout baked over vbo+ibo */
+    /* Weak: a context loss frees it, and the next resolve recreates it over the current frame buffers. */
+    nt_vertex_input_t vertex_input;
 
-    /* CPU staging buffer (compile-time arrays) */
-    nt_text_vertex_t vertices[NT_TEXT_RENDERER_MAX_VERTICES];
-    uint32_t vertex_count;
-    uint32_t glyph_count;
+    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is built. */
+    bool warned_program_not_ready;
 
-    /* Current state */
-    nt_material_t material;
-    /* Resolved once when the batch opens: the staged glyphs belong to it, so a
-     * program replaced under them cannot redirect them. Zero, or invalidated by
-     * a destroyed program, means flush has nothing to draw through. */
-    nt_pipeline_t batch_pipeline;
+    /* set_material; draws read it */
+    struct {
+        nt_material_t material;
+        const nt_material_info_t *info;
+        nt_program_t program; /* the program `pipeline` was built on: a replace keeps the material handle */
+        nt_pipeline_t pipeline;
+        uint64_t frame; /* gfx frame of the selection */
+        nt_hash32_t curve_name;
+    } current;
+
+    /* Params last written, per program: equal params record nothing, so adjacent draws merge. */
+    struct {
+        nt_program_t program;
+        nt_material_t material;
+        float params[NT_MATERIAL_MAX_PARAMS][4];
+    } recorded;
+
+    /* Quads of the draw_n in progress: contiguous from first_offset, drawn once. */
+    struct {
+        uint32_t first_offset;
+        uint32_t quads;
+    } run;
+
     nt_font_t font;
     /* Per-glyph clip-space NDC z bias so depth-writing glyph quads don't z-fight at overlapping AA
-     * fringes; 0 = off, signed. Logical state: cleared by cold init/shutdown, preserved by restore_gpu. */
+     * fringes; 0 = off, signed. Cleared by shutdown. */
     float glyph_depth_bias;
     /* Per-run decoration axes (weight/outline/shadow/underline/strike/oblique); reset as one unit. */
     nt_text_deco_t deco;
 
-    bool initialized;
-    /* One-shot so a load-time discard does not spam; re-armed when a pipeline is
-     * built, i.e. when something became drawable again. */
-    bool warned_no_pipeline;
-
 #ifdef NT_TEST_ACCESS
-    /* Count every set_material / set_font entry regardless of early-out so
-     * nt_debug_overlay tests can prove explicit calls. */
-    uint32_t test_set_material_calls;
+    /* Count every set_font entry so tests can prove explicit calls. */
     uint32_t test_set_font_calls;
     /* Captures the model matrix passed to draw_n on every call, even when the
      * font has no glyph data (units_per_em == 0). Lets walker tests pin the
@@ -96,45 +101,20 @@ static struct {
     float test_max_outline_w;
     bool test_saw_underline;
     bool test_saw_strike;
-    /* Counts flushes that issued a draw; empty no-op flushes excluded. */
-    uint32_t test_nonempty_flush_calls;
 #endif
 } s_text;
-
-static uint16_t s_quad_indices[NT_TEXT_RENDERER_MAX_INDICES];
-// #endregion
-
-// #region Index buffer generation
-static void generate_quad_indices(void) {
-    for (uint32_t i = 0; i < NT_TEXT_RENDERER_MAX_GLYPHS; i++) {
-        uint16_t base = (uint16_t)(i * 4);
-        uint32_t idx = i * 6;
-        s_quad_indices[idx + 0] = base;
-        s_quad_indices[idx + 1] = (uint16_t)(base + 1);
-        s_quad_indices[idx + 2] = (uint16_t)(base + 2);
-        s_quad_indices[idx + 3] = (uint16_t)(base + 2);
-        s_quad_indices[idx + 4] = (uint16_t)(base + 3);
-        s_quad_indices[idx + 5] = base;
-    }
-}
 // #endregion
 
 // #region Pipeline cache
-/* Keyed by the exact desc identity; vertex input is a separate owned object,
- * not pipeline state. */
-static nt_pipeline_t find_or_create_pipeline(void) {
-    const nt_material_info_t *info = nt_material_get_info(s_text.material);
-    const nt_program_t program = (info != NULL) ? info->program : NT_PROGRAM_INVALID;
+static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *info) {
     /* One query covers every state: no program yet, a program that died with the
      * context, and a program its owner destroyed. */
-    if (!info || !nt_gfx_program_ready(program)) {
-        nt_renderer_warn_program_not_ready(&s_text.warned_no_pipeline, info);
+    if (!nt_gfx_program_ready(info->program)) {
+        nt_renderer_warn_program_not_ready(&s_text.warned_program_not_ready, info);
         return (nt_pipeline_t){0};
     }
-
-    /* Read render state from material — same pattern as mesh_renderer */
     const nt_pipeline_desc_t desc = {
-        .program = program,
+        .program = info->program,
         .depth_test = info->depth_test,
         .depth_write = info->depth_write,
         .depth_func = NT_DEPTH_LEQUAL,
@@ -147,16 +127,17 @@ static nt_pipeline_t find_or_create_pipeline(void) {
     if (cached.id != 0) {
         return cached;
     }
-    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc, &s_text.warned_no_pipeline);
+    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc, &s_text.warned_program_not_ready);
 }
-// #endregion
 
-// #region Lifecycle
-/* Missing buffers make VI creation invalid; restore reports their failure.
- * A VI-only backend failure remains lazy and flush retries it. */
-static void create_vertex_input(void) {
-    if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
-        return;
+static nt_vertex_input_t find_or_create_vertex_input(void) {
+    if (nt_gfx_vertex_input_valid(s_text.vertex_input)) {
+        return s_text.vertex_input;
+    }
+    const nt_buffer_t vbo = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX);
+    const nt_buffer_t ibo = nt_gfx_frame_buffer(NT_GFX_FRAME_INDEX);
+    if (vbo.id == 0 || ibo.id == 0) {
+        return NT_VERTEX_INPUT_INVALID; /* lost context: the frame buffers come back at restore */
     }
     s_text.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout =
@@ -173,130 +154,63 @@ static void create_vertex_input(void) {
                         {.location = 5, .type = NT_VERTEX_FLOAT, .count = 1, .offset = offsetof(nt_text_vertex_t, depth_bias)},                /* a_depth_bias */
                     },
             },
-        .vertex_buffer = s_text.vbo,
-        .index_buffer = s_text.ibo,
+        .vertex_buffer = vbo,
+        .index_buffer = ibo,
         .label = "text_vi",
     });
+    return s_text.vertex_input;
 }
+// #endregion
 
-/* GPU resources only — pipelines are built lazily on a cache miss, so this owns just the buffers +
- * index pattern. Must not touch s_text's logical fields; restore_gpu rebuilds these without wiping them. */
-static void create_gpu_resources(void) {
-    generate_quad_indices();
-    s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_VERTEX,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = NT_TEXT_RENDERER_MAX_VERTICES * (uint32_t)sizeof(nt_text_vertex_t),
-        .label = "text_vbo",
-    });
-    s_text.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_INDEX,
-        .usage = NT_USAGE_IMMUTABLE,
-        .data = s_quad_indices,
-        .size = (uint32_t)sizeof(s_quad_indices),
-        .index_type = NT_INDEX_UINT16,
-        .label = "text_ibo",
-    });
-    create_vertex_input();
-}
-
-static void destroy_gpu_resources(void) {
+// #region Lifecycle
+void nt_text_renderer_shutdown(void) {
     for (uint16_t i = 0; i < s_text.pipeline_count; i++) {
         nt_gfx_destroy_pipeline(s_text.pipelines[i].pipeline);
-        s_text.pipelines[i] = (nt_renderer_pipeline_entry_t){0};
     }
-    s_text.pipeline_count = 0;
-    s_text.batch_pipeline = (nt_pipeline_t){0}; /* the cache it pointed into is gone */
     nt_gfx_destroy_vertex_input(s_text.vertex_input);
-    nt_gfx_destroy_buffer(s_text.vbo);
-    nt_gfx_destroy_buffer(s_text.ibo);
-    s_text.vertex_input = NT_VERTEX_INPUT_INVALID;
-    s_text.vbo = (nt_buffer_t){0};
-    s_text.ibo = (nt_buffer_t){0};
-}
-
-/* Fixed font uniform names: hashed once, since the flush path sets them every time. */
-static nt_hash32_t s_u_curve_texture;
-
-void nt_text_renderer_init(void) {
-    NT_ASSERT(!s_text.initialized);
-    memset(&s_text, 0, sizeof(s_text)); /* cold start: clear everything, GPU + logical */
-
-    s_u_curve_texture = nt_hash32_str("u_curve_texture");
-
-    create_gpu_resources();
-    s_text.initialized = true;
-}
-
-void nt_text_renderer_shutdown(void) {
-    if (!s_text.initialized) {
-        return;
-    }
-    destroy_gpu_resources();
     memset(&s_text, 0, sizeof(s_text));
-}
-
-nt_result_t nt_text_renderer_restore_gpu(void) {
-    if (!s_text.initialized) {
-        return NT_OK;
-    }
-    /* Context-loss recovery: rebuild ONLY GPU resources. Logical state (material, font,
-     * glyph_depth_bias, oblique, sticky decoration) is left untouched, so it survives by default — no
-     * save/restore list to forget when a field is added. */
-    destroy_gpu_resources();
-    create_gpu_resources();
-    s_text.vertex_count = 0; /* in-flight staging is dropped across context loss */
-    s_text.glyph_count = 0;  /* The first quad of the next batch resolves a new pipeline. */
-    if (s_text.vbo.id == 0 || s_text.ibo.id == 0) {
-        /* Restore contract: failure releases partial GPU resources. */
-        destroy_gpu_resources();
-        return NT_ERR_INIT_FAILED;
-    }
-    /* The vertex input is not part of the verdict: flush retries it lazily. */
-    return NT_OK;
 }
 // #endregion
 
 // #region State setters
-void nt_text_renderer_set_material(nt_material_t mat) {
-    NT_ASSERT(s_text.initialized);
-#ifdef NT_TEST_ACCESS
-    s_text.test_set_material_calls++;
-#endif
-    /* Validate BEFORE same-handle early return: stale handle (destroyed material,
-     * bumped generation) must assert even if the id still matches what we cached. */
-    const nt_material_info_t *info = nt_material_get_info(mat);
-    NT_ASSERT(info != NULL && "nt_text_renderer_set_material: invalid material handle");
-    /* Assignment, not liveness: on the frame the context dies the program is
-     * already dead here, and trapping on that would crash a recoverable event.
-     * make_pipeline polls the lost context and hands back an invalid pipeline. */
-    NT_ASSERT(info->program.id != 0 && "nt_text_renderer_set_material: material has no program");
+/* A failed pipeline or vertex input leaves the selection not drawable (pipeline 0) until the next
+ * resolve retries. */
+static void resolve_material(nt_material_t mat, const nt_material_info_t *info) {
+    /* A zero budget would make all text silently vanish. */
+    NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].capacity > 0 &&
+              "text renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX] and [NT_GFX_FRAME_INDEX]");
+    NT_ASSERT(info->tex_count == 0 && "text material declares textures: every sampler unit belongs to the font");
+    s_text.current.material = mat;
+    s_text.current.info = info;
+    s_text.current.program = info->program;
+    s_text.current.pipeline = find_or_create_pipeline(info);
+    if (s_text.current.pipeline.id != 0 && find_or_create_vertex_input().id == 0) {
+        s_text.current.pipeline = (nt_pipeline_t){0};
+    }
+    s_text.current.curve_name = nt_hash32_str("u_curve_texture");
+}
 
-    if (s_text.material.id == mat.id) {
+void nt_text_renderer_set_material(nt_material_t mat) {
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    /* Assignment, not liveness: on the frame the context dies the program is
+     * already dead here, and trapping on that would crash a recoverable event. */
+    NT_ASSERT(info != NULL && info->program.id != 0 && "nt_text_renderer_set_material: invalid material or material has no program");
+    /* Params are compared when recorded, and resources are not stepped between draws of a frame.
+     * A failed resolve (pipeline 0) retries next frame; a destroyed program takes its pipeline
+     * with it, so that selection resolves again. */
+    const uint64_t frame = g_nt_gfx.counters.frame_sequence;
+    if (mat.id == s_text.current.material.id && info->program.id == s_text.current.program.id && frame == s_text.current.frame &&
+        (s_text.current.pipeline.id == 0 || nt_gfx_pipeline_valid(s_text.current.pipeline))) {
         return;
     }
-
-    if (s_text.glyph_count > 0) {
-        nt_text_renderer_flush();
-    }
-
-    s_text.material = mat;
+    resolve_material(mat, info);
+    s_text.current.frame = frame;
 }
 
 void nt_text_renderer_set_font(nt_font_t font) {
-    NT_ASSERT(s_text.initialized);
 #ifdef NT_TEST_ACCESS
     s_text.test_set_font_calls++;
 #endif
-    if (s_text.font.id == font.id) {
-        return;
-    }
-
-    /* Auto-flush on font change */
-    if (s_text.glyph_count > 0) {
-        nt_text_renderer_flush();
-    }
-
     s_text.font = font;
 }
 // #endregion
@@ -311,14 +225,20 @@ static void transform_point(float out[3], const float model[16], float x, float 
     out[2] = model[2] * x + model[6] * y + model[14];
 }
 
+/* The first quad aligns the run to the stride; the rest follow contiguously, since glyph lookups
+ * between quads allocate no frame storage. */
+static nt_text_vertex_t *alloc_quad(void) {
+    uint32_t offset = 0;
+    nt_text_vertex_t *v =
+        (nt_text_vertex_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 4U * (uint32_t)sizeof(nt_text_vertex_t), (s_text.run.quads == 0) ? (uint32_t)sizeof(nt_text_vertex_t) : 1U, &offset);
+    if (s_text.run.quads == 0) {
+        s_text.run.first_offset = offset;
+    }
+    s_text.run.quads++;
+    return v;
+}
+
 static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, uint32_t color, float glyph_bias) {
-    if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
-        nt_text_renderer_flush();
-    }
-    /* Glyph lookup may have flushed staging through the font cache callback. */
-    if (s_text.glyph_count == 0) {
-        s_text.batch_pipeline = (s_text.material.id != 0) ? find_or_create_pipeline() : (nt_pipeline_t){0};
-    }
 
     /* FP16 rounding can move controls past bbox by at most maxabs/2048.
      * Add 0.5 px for coverage falloff; assumes 1 world unit = 1 screen pixel. */
@@ -344,8 +264,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     pack_uint_as_float(&gd1, (uint32_t)g->band_count);
 
     /* 4 vertices per quad: BL, BR, TR, TL */
-    uint32_t vi = s_text.vertex_count;
-    nt_text_vertex_t *v = &s_text.vertices[vi];
+    nt_text_vertex_t *v = alloc_quad();
 
     /* Shared fields — fill once in v[0], copy to v[1..3]. glyph_bounds is the
      * UNDILATED glyph bbox so the shader's band lookup stays correct. */
@@ -377,9 +296,6 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     transform_point(v[3].position, model, x0, y1); /* TL */
     v[3].texcoord[0] = em_x0;
     v[3].texcoord[1] = em_y1;
-
-    s_text.vertex_count += 4;
-    s_text.glyph_count++;
 }
 // #endregion
 
@@ -388,13 +304,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
  * underline/strike. Pixel-space corners (already include pen/scale) flow through the same transform_point
  * path as glyphs — correct under any model matrix (world / 3D), no scissor/viewport hijack. */
 static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, uint32_t color, float glyph_bias) {
-    if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
-        nt_text_renderer_flush();
-    }
-    if (s_text.glyph_count == 0) {
-        s_text.batch_pipeline = (s_text.material.id != 0) ? find_or_create_pipeline() : (nt_pipeline_t){0};
-    }
-    nt_text_vertex_t *v = &s_text.vertices[s_text.vertex_count];
+    nt_text_vertex_t *v = alloc_quad();
 
     float band0;
     pack_uint_as_float(&band0, 0U); /* band_count=0 = decoration sentinel */
@@ -423,9 +333,48 @@ static void emit_decoration_quad(const float model[16], float x0, float y0, floa
     v[2].texcoord[1] = 0.0F;
     v[3].texcoord[0] = 0.0F;
     v[3].texcoord[1] = 0.0F;
+}
+// #endregion
 
-    s_text.vertex_count += 4;
-    s_text.glyph_count++;
+// #region Record
+/* Pipeline first: uniforms and the texture set land on its program. */
+static void record_state(void) {
+    const nt_material_info_t *mi = s_text.current.info;
+    nt_gfx_bind_pipeline(s_text.current.pipeline);
+    const size_t param_bytes = (size_t)mi->param_count * sizeof(mi->params[0]);
+    if (s_text.recorded.program.id != s_text.current.program.id || s_text.recorded.material.id != s_text.current.material.id || memcmp(s_text.recorded.params, mi->params, param_bytes) != 0) {
+        nt_renderer_set_material_uniforms(mi);
+        s_text.recorded.program = s_text.current.program;
+        s_text.recorded.material = s_text.current.material;
+        memcpy(s_text.recorded.params, mi->params, param_bytes);
+    }
+    const nt_gfx_texture_binding_t curve = {.name = s_text.current.curve_name, .texture = nt_font_get_curve_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT};
+    nt_gfx_apply_texture_bindings(&curve, 1);
+    nt_gfx_bind_vertex_input(s_text.vertex_input);
+}
+
+/* Indices are written once the quad count is known; a run that emitted nothing records nothing. */
+static void draw_run(void) {
+    const uint32_t quads = s_text.run.quads;
+    if (quads == 0) {
+        return;
+    }
+    NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used == s_text.run.first_offset + (quads * 4U * (uint32_t)sizeof(nt_text_vertex_t)) && "text run: allocation not contiguous");
+    const uint32_t base = s_text.run.first_offset / (uint32_t)sizeof(nt_text_vertex_t);
+    uint32_t offset = 0;
+    uint32_t *idx = (uint32_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_INDEX, quads * 6U * 4U, 4U, &offset);
+    for (uint32_t q = 0; q < quads; q++) {
+        const uint32_t v = base + (q * 4U);
+        idx[0] = v;
+        idx[1] = v + 1U;
+        idx[2] = v + 2U;
+        idx[3] = v + 2U;
+        idx[4] = v + 3U;
+        idx[5] = v;
+        idx += 6;
+    }
+    record_state();
+    nt_gfx_draw_indexed(offset / 4U, quads * 6U, quads * 4U);
 }
 // #endregion
 
@@ -556,7 +505,6 @@ static void emit_line_decorations(const uint8_t *p, const uint8_t *end, const fl
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, uint32_t color, float letter_tracking, float line_leading) {
-    NT_ASSERT(s_text.initialized);
 #ifdef NT_TEST_ACCESS
     memcpy(s_text.test_last_model, model, sizeof s_text.test_last_model);
     s_text.test_draw_n_calls++;
@@ -572,7 +520,8 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     s_text.test_saw_underline = s_text.test_saw_underline || s_text.deco.underline;
     s_text.test_saw_strike = s_text.test_saw_strike || s_text.deco.strikethrough;
 #endif
-    if (len == 0U || utf8 == NULL) {
+    NT_ASSERT(s_text.current.frame == g_nt_gfx.counters.frame_sequence && "nt_text_renderer_draw_n: call nt_text_renderer_set_material in this frame");
+    if (len == 0U || utf8 == NULL || s_text.current.pipeline.id == 0) {
         return;
     }
     NT_ASSERT(s_text.font.id != 0 && "nt_text_renderer_draw_n: call set_font before draw");
@@ -626,9 +575,9 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
     float glyph_bias = 0.0F; /* accumulates across ALL passes so they separate in depth-written world text */
 
-    /* Painter order: shadow (behind) → outline → fill (top), each grouped over the whole run. A staging
-     * self-flush mid-pass does NOT reorder: passes emit in global order and flush draws the FIFO prefix,
-     * so no shadow/outline quad is ever drawn after a later pass's quad. */
+    /* Painter order: shadow (behind) → outline → fill (top), each grouped over the whole run. One draw
+     * keeps it: triangles of a draw blend in index order. */
+    s_text.run.quads = 0;
     if (shadow_active) {
         emit_glyph_pass(p, end, m, scale, letter_tracking, line_advance, slot, shadow_key, s_text.deco.shadow_color, s_text.deco.shadow_dx * size, s_text.deco.shadow_dy * size, &glyph_bias);
     }
@@ -643,24 +592,22 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     if (s_text.deco.underline || s_text.deco.strikethrough) {
         emit_line_decorations(p, end, m, scale, letter_tracking, line_advance, slot, metrics, fill_key, color, &glyph_bias);
     }
+    draw_run();
 }
 
 void nt_text_renderer_set_glyph_depth_bias(float bias_per_glyph) {
-    NT_ASSERT(s_text.initialized);
     NT_ASSERT(isfinite(bias_per_glyph) && "nt_text_renderer_set_glyph_depth_bias: bias must be finite");
     s_text.glyph_depth_bias = bias_per_glyph; /* signed: subtracted from NDC z in the VS */
 }
 
 void nt_text_renderer_set_oblique(float shear) {
-    NT_ASSERT(s_text.initialized);
     NT_ASSERT(isfinite(shear) && "nt_text_renderer_set_oblique: shear must be finite");
-    s_text.deco.oblique = shear; /* folded into the model in draw_n; no flush -- CPU-baked per vertex, mixes in a batch */
+    s_text.deco.oblique = shear; /* folded into the model in draw_n: CPU-baked per vertex */
 }
 
 /* HARD isfinite guards (real if, not NT_ASSERT) — NT_ASSERT is a no-op in shipping and a NaN would
  * poison offset_points / quantize where NaN != 0.0F. */
 void nt_text_renderer_set_weight(float weight_em) {
-    NT_ASSERT(s_text.initialized);
     if (!isfinite(weight_em)) {
         NT_ASSERT(0 && "nt_text_renderer_set_weight: weight must be finite");
         return;
@@ -673,7 +620,6 @@ void nt_text_renderer_set_weight(float weight_em) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- flat initialization, finite-value and feature preconditions.
 void nt_text_renderer_set_outline(float width, uint32_t color) {
-    NT_ASSERT(s_text.initialized);
     if (!isfinite(width)) {
         NT_ASSERT(0 && "nt_text_renderer_set_outline: width must be finite");
         return;
@@ -686,7 +632,6 @@ void nt_text_renderer_set_outline(float width, uint32_t color) {
 }
 
 void nt_text_renderer_set_shadow(float dx, float dy, float blur, uint32_t color) {
-    NT_ASSERT(s_text.initialized);
     if (!isfinite(dx) || !isfinite(dy) || !isfinite(blur)) {
         NT_ASSERT(0 && "nt_text_renderer_set_shadow: offset/blur must be finite");
         return;
@@ -697,107 +642,21 @@ void nt_text_renderer_set_shadow(float dx, float dy, float blur, uint32_t color)
     s_text.deco.shadow_color = color;
 }
 
-void nt_text_renderer_set_underline(bool enabled) {
-    NT_ASSERT(s_text.initialized);
-    s_text.deco.underline = enabled;
-}
+void nt_text_renderer_set_underline(bool enabled) { s_text.deco.underline = enabled; }
 
-void nt_text_renderer_set_strikethrough(bool enabled) {
-    NT_ASSERT(s_text.initialized);
-    s_text.deco.strikethrough = enabled;
-}
+void nt_text_renderer_set_strikethrough(bool enabled) { s_text.deco.strikethrough = enabled; }
 
-void nt_text_renderer_reset_decoration(void) {
-    NT_ASSERT(s_text.initialized);
-    s_text.deco = (nt_text_deco_t){0}; /* one struct clear — every axis's off-state is 0, so a newly-added axis can't leak */
-}
+void nt_text_renderer_reset_decoration(void) { s_text.deco = (nt_text_deco_t){0}; /* one struct clear — every axis's off-state is 0, so a newly-added axis can't leak */ }
 
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, uint32_t color, float letter_tracking, float line_leading) {
     nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color, letter_tracking, line_leading);
 }
 // #endregion
 
-// #region Flush
-static void bind_font_textures(void) {
-    const nt_gfx_texture_binding_t bindings[] = {
-        {.name = s_u_curve_texture, .texture = nt_font_get_curve_texture(s_text.font), .sampler = NT_SAMPLER_DEFAULT},
-    };
-    nt_gfx_apply_texture_bindings(bindings, 1);
-}
-
-void nt_text_renderer_flush(void) {
-    if (s_text.glyph_count == 0) {
-        return;
-    }
-    /* A recoverable creation failure (backend VAO alloc) must not disable
-     * text until the next restore -- retry lazily, like the pipeline cache. */
-    if (!nt_gfx_vertex_input_valid(s_text.vertex_input)) {
-        create_vertex_input();
-    }
-    /* Resolved when the batch opened. Re-checked rather than trusted: destroying
-     * a program destroys the pipelines built on it, and that can happen between
-     * the first glyph and here. The vertex input stays invalid when the retry
-     * above failed (context still lost / backend failure). */
-    const nt_pipeline_t pipeline = s_text.batch_pipeline;
-    if (!nt_gfx_pipeline_valid(pipeline) || !nt_gfx_vertex_input_valid(s_text.vertex_input)) {
-        /* Unready programs were reported at batch open; destruction of a captured
-         * pipeline or backend allocation failure still needs a warning. */
-        if (!s_text.warned_no_pipeline) {
-            NT_LOG_WARN("nt_text_renderer_flush: no usable pipeline or vertex input -- discarding %u glyphs", s_text.glyph_count);
-            s_text.warned_no_pipeline = true;
-        }
-        s_text.vertex_count = 0;
-        s_text.glyph_count = 0;
-        s_text.batch_pipeline = (nt_pipeline_t){0};
-        return;
-    }
-
-    /* Upload staging buffer to GPU. Orphan-style upload (glBufferData with
-     * GL_DYNAMIC_DRAW) so the driver allocates fresh storage and avoids
-     * stalling on the previous frame's draw of the same VBO. */
-    nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
-
-    nt_gfx_bind_pipeline(pipeline);
-    nt_gfx_bind_vertex_input(s_text.vertex_input);
-
-    bind_font_textures();
-
-    /* Stateless: other renderers draw between two text flushes. */
-    if (s_text.material.id != 0) {
-        const nt_material_info_t *mi = nt_material_get_info(s_text.material);
-        if (mi != NULL) {
-            NT_ASSERT(mi->tex_count == 0 && "text material declares textures: every sampler unit belongs to the font");
-            nt_renderer_set_material_uniforms(mi);
-        }
-    }
-
-    /* Single draw call per flush */
-    nt_gfx_draw_indexed(0, s_text.glyph_count * 6, s_text.vertex_count);
-#ifdef NT_TEST_ACCESS
-    s_text.test_nonempty_flush_calls++;
-#endif
-
-    /* Reset staging buffer. The next glyph opens a new batch and resolves its
-     * own pipeline, so an overflow flush mid-draw cannot pin the rest of the
-     * run to this one. */
-    s_text.vertex_count = 0;
-    s_text.glyph_count = 0;
-    s_text.batch_pipeline = (nt_pipeline_t){0};
-    /* Recovered: a later distinct failure warns again instead of going silent. */
-    s_text.warned_no_pipeline = false;
-}
-// #endregion
-
 // #region Test accessors
 #ifdef NT_TEST_ACCESS
-uint32_t nt_text_renderer_test_vertex_count(void) { return s_text.vertex_count; }
-uint32_t nt_text_renderer_test_glyph_count(void) { return s_text.glyph_count; }
-const void *nt_text_renderer_test_vertices(void) { return s_text.vertices; }
-bool nt_text_renderer_test_initialized(void) { return s_text.initialized; }
-uint32_t nt_text_renderer_test_set_material_calls(void) { return s_text.test_set_material_calls; }
 uint32_t nt_text_renderer_test_set_font_calls(void) { return s_text.test_set_font_calls; }
 void nt_text_renderer_test_reset_call_counters(void) {
-    s_text.test_set_material_calls = 0;
     s_text.test_set_font_calls = 0;
     s_text.test_draw_n_calls = 0;
     s_text.test_max_oblique = 0.0F;
@@ -805,9 +664,7 @@ void nt_text_renderer_test_reset_call_counters(void) {
     s_text.test_max_outline_w = 0.0F;
     s_text.test_saw_underline = false;
     s_text.test_saw_strike = false;
-    s_text.test_nonempty_flush_calls = 0;
 }
-uint32_t nt_text_renderer_test_nonempty_flush_calls(void) { return s_text.test_nonempty_flush_calls; }
 const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 float nt_text_renderer_test_glyph_depth_bias(void) { return s_text.glyph_depth_bias; }
@@ -823,7 +680,7 @@ float nt_text_renderer_test_max_weight(void) { return s_text.test_max_weight; }
 float nt_text_renderer_test_max_outline_width(void) { return s_text.test_max_outline_w; }
 bool nt_text_renderer_test_saw_underline(void) { return s_text.test_saw_underline; }
 bool nt_text_renderer_test_saw_strike(void) { return s_text.test_saw_strike; }
-uint32_t nt_text_renderer_test_material_id(void) { return s_text.material.id; }
+uint32_t nt_text_renderer_test_material_id(void) { return s_text.current.material.id; }
 
 uint16_t nt_text_renderer_test_pipeline_cache_count(void) { return s_text.pipeline_count; }
 #endif

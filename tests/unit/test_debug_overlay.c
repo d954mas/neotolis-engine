@@ -1,5 +1,4 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
-#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,35 +20,9 @@
  * counters, so these tests feed nt_metrics (count + sample) and assert the HUD text reflects it.
  * The draw test still exercises the text_renderer bind path (gfx-backed). */
 
-/* ---- Assert catching (setjmp/longjmp via hookable handler) ---- */
-
-static jmp_buf s_assert_jmp;
-
-static void test_assert_handler(const char *expr, const char *file, int line) {
-    (void)expr;
-    (void)file;
-    (void)line;
-    longjmp(s_assert_jmp, 1);
-}
-
-/* clang-format off */
-#define EXPECT_ASSERT(code)                                                                    \
-    do {                                                                                       \
-        nt_assert_handler = test_assert_handler;                                               \
-        if (setjmp(s_assert_jmp) == 0) {                                                       \
-            code;                                                                              \
-            nt_assert_handler = NULL;                                                          \
-            TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire");                                   \
-        }                                                                                      \
-        nt_assert_handler = NULL;                                                              \
-    } while (0)
-/* clang-format on */
-
 void setUp(void) {
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 16, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
-    nt_text_renderer_init();
-    nt_text_renderer_test_reset_call_counters();
     nt_metrics_init();
 }
 
@@ -169,34 +142,6 @@ static void test_stats_user_counter_uint64_exact(void) {
 }
 #endif /* NT_METRICS_ENABLED */
 
-/* ---- explicit set_material AND set_font on draw ----
- * nt_debug_overlay_draw must call BOTH setters every time even when the material/font id matches the
- * previous frame, defeating nt_text_renderer's change-detection early-out. */
-static void test_stats_draw_pitfall9_explicit_set_calls(void) {
-    nt_debug_overlay_init();
-
-    nt_text_renderer_test_reset_call_counters();
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_material_calls());
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
-
-    nt_material_t mat = {0};
-    nt_font_t font = {0};
-    const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-    const uint32_t white = NT_RGBA8(255, 255, 255, 255);
-
-    /* set_material fail-fast asserts on the {0} handle BEFORE the same-handle early-return, so the
-     * counter still increments (proving draw doesn't cache) and set_font is never reached. */
-    EXPECT_ASSERT(nt_debug_overlay_draw(mat, font, identity, 16.0F, white));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_set_material_calls());
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
-
-    EXPECT_ASSERT(nt_debug_overlay_draw(mat, font, identity, 16.0F, white));
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_text_renderer_test_set_material_calls());
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
-
-    nt_debug_overlay_shutdown();
-}
-
 /* ---- main ---- */
 
 int main(void) {
@@ -211,6 +156,5 @@ int main(void) {
     RUN_TEST(test_stats_user_counters);
     RUN_TEST(test_stats_user_counter_uint64_exact);
 #endif
-    RUN_TEST(test_stats_draw_pitfall9_explicit_set_calls);
     return UNITY_END();
 }

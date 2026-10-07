@@ -69,8 +69,8 @@
 
 #include "clay.h"
 
-/* Frame storage budget of the sprite geometry: the busiest tab peaks at about 67 KB / 37 KB. */
-#define UI_SHOWCASE_VERTEX_BYTES (256U * 1024U)
+/* Frame storage budget of the sprite and text geometry: the busiest tab peaks at about 410 KB / 64 KB. */
+#define UI_SHOWCASE_VERTEX_BYTES (1024U * 1024U)
 #define UI_SHOWCASE_INDEX_BYTES (128U * 1024U)
 // #endregion
 
@@ -3668,9 +3668,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_result_t restore_result = nt_text_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
         nt_shape_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
@@ -3868,7 +3865,6 @@ static void frame(void) {
             glm_translate(stats_model, (vec3){scale.logical_w - 170.0F, 92.0F, 0.0F});
             const uint32_t stats_color = NT_RGBA8(204, 230, 204, 255);
             nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
-            nt_text_renderer_flush();
         }
     }
 
@@ -3957,7 +3953,6 @@ int main(int argc, char *argv[]) {
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});
 
     nt_shape_renderer_init(); /* <obj=cube/> renders a real 3D cube into its inline box (embedded shaders). */
-    nt_text_renderer_init();
 
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
