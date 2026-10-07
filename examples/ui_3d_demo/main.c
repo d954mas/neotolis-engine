@@ -348,8 +348,8 @@ static void draw_room(void) {
     const float floor_sz[2] = {ROOM_W, ROOM_D};
     const float floor_rot[4] = {0.7071068F, 0.0F, 0.0F, 0.7071068F};
     const float ceil_pos[3] = {0.0F, ROOM_H, 0.0F};
-    nt_shape_renderer_rect_rot(floor_pos, floor_sz, floor_rot, floor_col);
-    nt_shape_renderer_rect_rot(ceil_pos, floor_sz, floor_rot, ceil_col);
+    nt_shape_renderer_rect(floor_pos, floor_sz, floor_rot, floor_col);
+    nt_shape_renderer_rect(ceil_pos, floor_sz, floor_rot, ceil_col);
 
     const int nx = (int)(ROOM_W / GRID_STEP) + 1;
     const int nz = (int)(ROOM_D / GRID_STEP) + 1;
@@ -368,16 +368,16 @@ static void draw_room(void) {
 
     const float wall_sz_fb[2] = {ROOM_W, ROOM_H};
     const float front_pos[3] = {0.0F, ROOM_H * 0.5F, -hd};
-    nt_shape_renderer_rect(front_pos, wall_sz_fb, wall_col);
+    nt_shape_renderer_rect(front_pos, wall_sz_fb, NULL, wall_col);
     const float back_pos[3] = {0.0F, ROOM_H * 0.5F, hd};
-    nt_shape_renderer_rect(back_pos, wall_sz_fb, wall_col);
+    nt_shape_renderer_rect(back_pos, wall_sz_fb, NULL, wall_col);
 
     const float side_rot[4] = {0.0F, 0.7071068F, 0.0F, 0.7071068F};
     const float wall_sz_lr[2] = {ROOM_D, ROOM_H};
     const float left_pos[3] = {-hw, ROOM_H * 0.5F, 0.0F};
-    nt_shape_renderer_rect_rot(left_pos, wall_sz_lr, side_rot, wall_col);
+    nt_shape_renderer_rect(left_pos, wall_sz_lr, side_rot, wall_col);
     const float right_pos[3] = {hw, ROOM_H * 0.5F, 0.0F};
-    nt_shape_renderer_rect_rot(right_pos, wall_sz_lr, side_rot, wall_col);
+    nt_shape_renderer_rect(right_pos, wall_sz_lr, side_rot, wall_col);
 }
 
 /* Backing board behind each UI panel — visual reference to judge panel fit/alignment. */
@@ -395,8 +395,8 @@ static void draw_boards(void) {
     for (int i = 0; i < 2; ++i) {
         const float frame_pos[3] = {xs[i], 2.8F, fz};
         const float board_pos[3] = {xs[i], 2.8F, bz};
-        nt_shape_renderer_rect(frame_pos, frame_sz, frame_col);
-        nt_shape_renderer_rect(board_pos, board_sz, board_col);
+        nt_shape_renderer_rect(frame_pos, frame_sz, NULL, frame_col);
+        nt_shape_renderer_rect(board_pos, board_sz, NULL, board_col);
     }
 }
 
@@ -411,17 +411,17 @@ static void draw_shape(void) {
     switch (s_shape_kind) {
     case SHAPE_CUBE: {
         const float sz[3] = {1.6F, 1.6F, 1.6F};
-        nt_shape_renderer_cube_rot(pos, sz, rot, col);
-        nt_shape_renderer_cube_wire_rot(pos, sz, rot, wire_col);
+        nt_shape_renderer_cube(pos, sz, rot, col);
+        nt_shape_renderer_cube_wire(pos, sz, rot, wire_col);
         break;
     }
     case SHAPE_SPHERE:
-        nt_shape_renderer_sphere_rot(pos, 1.0F, rot, col);
-        nt_shape_renderer_sphere_wire_rot(pos, 1.0F, rot, wire_col);
+        nt_shape_renderer_sphere(pos, 1.0F, rot, col);
+        nt_shape_renderer_sphere_wire(pos, 1.0F, rot, wire_col);
         break;
     case SHAPE_CAPSULE:
-        nt_shape_renderer_capsule_rot(pos, 0.5F, 2.0F, rot, col);
-        nt_shape_renderer_capsule_wire_rot(pos, 0.5F, 2.0F, rot, wire_col);
+        nt_shape_renderer_capsule(pos, 0.5F, 2.0F, rot, col);
+        nt_shape_renderer_capsule_wire(pos, 0.5F, 2.0F, rot, wire_col);
         break;
     default:
         break;

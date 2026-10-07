@@ -184,10 +184,6 @@ enum {
     NT_SHAPE_TYPE_COUNT,
 };
 
-#ifndef NT_SHAPE_RENDERER_MAX_INSTANCES
-#define NT_SHAPE_RENDERER_MAX_INSTANCES 2048
-#endif
-
 enum { NT_WIRE_CIRCLE, NT_WIRE_SPHERE, NT_WIRE_CYLINDER, NT_WIRE_CAPSULE, NT_WIRE_COUNT };
 #define NT_WIRE_MAX_INSTANCES ((NT_SHAPE_RENDERER_MAX_INSTANCES + NT_WIRE_COUNT - 1) / NT_WIRE_COUNT)
 /* Capsule meridian: a full ring plus the equator angle repeated on each straight side. */
@@ -1343,52 +1339,34 @@ void nt_shape_renderer_polyline(const float (*points)[3], uint32_t count, bool c
 
 /* ---- Rectangle ---- */
 
-void nt_shape_renderer_rect(const float pos[3], const float size[2], uint32_t color) {
-    float scale[3] = {size[0], size[1], 1.0F};
-    push_instance(NT_SHAPE_RECT, pos, scale, NULL, color);
-}
-
-void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], uint32_t color) {
-    float hx = size[0] * 0.5F;
-    float hy = size[1] * 0.5F;
-
-    const float corners[4][3] = {
-        {pos[0] - hx, pos[1] - hy, pos[2]},
-        {pos[0] + hx, pos[1] - hy, pos[2]},
-        {pos[0] + hx, pos[1] + hy, pos[2]},
-        {pos[0] - hx, pos[1] + hy, pos[2]},
-    };
-    nt_shape_renderer_polyline(corners, 4, true, color);
-}
-
-void nt_shape_renderer_rect_rot(const float pos[3], const float size[2], const float rot[4], uint32_t color) {
+void nt_shape_renderer_rect(const float pos[3], const float size[2], const float rot[4], uint32_t color) {
     float scale[3] = {size[0], size[1], 1.0F};
     push_instance(NT_SHAPE_RECT, pos, scale, rot, color);
 }
 
-void nt_shape_renderer_rect_wire_rot(const float pos[3], const float size[2], const float rot[4], uint32_t color) {
+/* Corners are center + offset, rotated when rot is given. */
+static void place_corners(const float center[3], const float (*offsets)[3], uint32_t count, const float *rot, float (*out)[3]) {
+    float rm[3][3];
+    if (rot) {
+        quat_to_mat3(rot, rm);
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        float rotated[3] = {offsets[i][0], offsets[i][1], offsets[i][2]};
+        if (rot) {
+            mat3_mulv(rm, offsets[i], rotated);
+        }
+        out[i][0] = center[0] + rotated[0];
+        out[i][1] = center[1] + rotated[1];
+        out[i][2] = center[2] + rotated[2];
+    }
+}
+
+void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], const float rot[4], uint32_t color) {
     float hx = size[0] * 0.5F;
     float hy = size[1] * 0.5F;
-
-    float offsets[4][3] = {
-        {-hx, -hy, 0.0F},
-        {+hx, -hy, 0.0F},
-        {+hx, +hy, 0.0F},
-        {-hx, +hy, 0.0F},
-    };
-
-    float rm[3][3];
-    quat_to_mat3(rot, rm);
-
+    const float offsets[4][3] = {{-hx, -hy, 0.0F}, {+hx, -hy, 0.0F}, {+hx, +hy, 0.0F}, {-hx, +hy, 0.0F}};
     float corners[4][3];
-    for (int i = 0; i < 4; i++) {
-        float rotated[3];
-        mat3_mulv(rm, offsets[i], rotated);
-        corners[i][0] = pos[0] + rotated[0];
-        corners[i][1] = pos[1] + rotated[1];
-        corners[i][2] = pos[2] + rotated[2];
-    }
-
+    place_corners(pos, offsets, 4, rot, corners);
     nt_shape_renderer_polyline((const float(*)[3])corners, 4, true, color);
 }
 
@@ -1422,213 +1400,70 @@ void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const f
 
 /* ---- Circle ---- */
 
-void nt_shape_renderer_circle(const float center[3], float radius, uint32_t color) {
-    float scale[3] = {radius, 1.0F, radius};
-    push_instance(NT_SHAPE_CIRCLE, center, scale, NULL, color);
-}
-
-void nt_shape_renderer_circle_wire(const float center[3], float radius, uint32_t color) { push_wire_instance(NT_WIRE_CIRCLE, center, radius, 0.0F, NULL, color); }
-
-void nt_shape_renderer_circle_rot(const float center[3], float radius, const float rot[4], uint32_t color) {
+void nt_shape_renderer_circle(const float center[3], float radius, const float rot[4], uint32_t color) {
     float scale[3] = {radius, 1.0F, radius};
     push_instance(NT_SHAPE_CIRCLE, center, scale, rot, color);
 }
 
-void nt_shape_renderer_circle_wire_rot(const float center[3], float radius, const float rot[4], uint32_t color) { push_wire_instance(NT_WIRE_CIRCLE, center, radius, 0.0F, rot, color); }
+void nt_shape_renderer_circle_wire(const float center[3], float radius, const float rot[4], uint32_t color) { push_wire_instance(NT_WIRE_CIRCLE, center, radius, 0.0F, rot, color); }
 
 /* ---- Cube ---- */
 
-void nt_shape_renderer_cube(const float center[3], const float size[3], uint32_t color) { push_instance(NT_SHAPE_CUBE, center, size, NULL, color); }
+void nt_shape_renderer_cube(const float center[3], const float size[3], const float rot[4], uint32_t color) { push_instance(NT_SHAPE_CUBE, center, size, rot, color); }
 
-void nt_shape_renderer_cube_wire(const float center[3], const float size[3], uint32_t color) {
+void nt_shape_renderer_cube_wire(const float center[3], const float size[3], const float rot[4], uint32_t color) {
     float hx = size[0] * 0.5F;
     float hy = size[1] * 0.5F;
     float hz = size[2] * 0.5F;
-
-    float c[8][3] = {
-        {center[0] - hx, center[1] - hy, center[2] - hz}, {center[0] + hx, center[1] - hy, center[2] - hz}, {center[0] + hx, center[1] + hy, center[2] - hz},
-        {center[0] - hx, center[1] + hy, center[2] - hz}, {center[0] - hx, center[1] - hy, center[2] + hz}, {center[0] + hx, center[1] - hy, center[2] + hz},
-        {center[0] + hx, center[1] + hy, center[2] + hz}, {center[0] - hx, center[1] + hy, center[2] + hz},
-    };
-
-    /* 12 edges */
-    /* Bottom face */
-    nt_shape_renderer_line(c[0], c[1], color);
-    nt_shape_renderer_line(c[1], c[5], color);
-    nt_shape_renderer_line(c[5], c[4], color);
-    nt_shape_renderer_line(c[4], c[0], color);
-    /* Top face */
-    nt_shape_renderer_line(c[3], c[2], color);
-    nt_shape_renderer_line(c[2], c[6], color);
-    nt_shape_renderer_line(c[6], c[7], color);
-    nt_shape_renderer_line(c[7], c[3], color);
-    /* Vertical edges */
-    nt_shape_renderer_line(c[0], c[3], color);
-    nt_shape_renderer_line(c[1], c[2], color);
-    nt_shape_renderer_line(c[5], c[6], color);
-    nt_shape_renderer_line(c[4], c[7], color);
-}
-
-void nt_shape_renderer_cube_rot(const float center[3], const float size[3], const float rot[4], uint32_t color) { push_instance(NT_SHAPE_CUBE, center, size, rot, color); }
-
-void nt_shape_renderer_cube_wire_rot(const float center[3], const float size[3], const float rot[4], uint32_t color) {
-    float hx = size[0] * 0.5F;
-    float hy = size[1] * 0.5F;
-    float hz = size[2] * 0.5F;
-
-    float offsets[8][3] = {
+    const float offsets[8][3] = {
         {-hx, -hy, -hz}, {+hx, -hy, -hz}, {+hx, +hy, -hz}, {-hx, +hy, -hz}, {-hx, -hy, +hz}, {+hx, -hy, +hz}, {+hx, +hy, +hz}, {-hx, +hy, +hz},
     };
-
-    float rm[3][3];
-    quat_to_mat3(rot, rm);
-
     float c[8][3];
-    for (int i = 0; i < 8; i++) {
-        float rotated[3];
-        mat3_mulv(rm, offsets[i], rotated);
-        c[i][0] = center[0] + rotated[0];
-        c[i][1] = center[1] + rotated[1];
-        c[i][2] = center[2] + rotated[2];
-    }
+    place_corners(center, offsets, 8, rot, c);
 
-    nt_shape_renderer_line(c[0], c[1], color);
-    nt_shape_renderer_line(c[1], c[5], color);
-    nt_shape_renderer_line(c[5], c[4], color);
-    nt_shape_renderer_line(c[4], c[0], color);
-    nt_shape_renderer_line(c[3], c[2], color);
-    nt_shape_renderer_line(c[2], c[6], color);
-    nt_shape_renderer_line(c[6], c[7], color);
-    nt_shape_renderer_line(c[7], c[3], color);
-    nt_shape_renderer_line(c[0], c[3], color);
-    nt_shape_renderer_line(c[1], c[2], color);
-    nt_shape_renderer_line(c[5], c[6], color);
-    nt_shape_renderer_line(c[4], c[7], color);
+    /* 12 independent edges: bottom face, top face, verticals. */
+    static const uint8_t edges[12][2] = {{0, 1}, {1, 5}, {5, 4}, {4, 0}, {3, 2}, {2, 6}, {6, 7}, {7, 3}, {0, 3}, {1, 2}, {5, 6}, {4, 7}};
+    for (uint32_t i = 0; i < 12; i++) {
+        nt_shape_renderer_line(c[edges[i][0]], c[edges[i][1]], color);
+    }
 }
 
 /* ---- Sphere ---- */
 
-void nt_shape_renderer_sphere(const float center[3], float radius, uint32_t color) {
-    float scale[3] = {radius, radius, radius};
-    push_instance(NT_SHAPE_SPHERE, center, scale, NULL, color);
-}
-
-void nt_shape_renderer_sphere_wire(const float center[3], float radius, uint32_t color) { push_wire_instance(NT_WIRE_SPHERE, center, radius, 0.0F, NULL, color); }
-
-void nt_shape_renderer_sphere_rot(const float center[3], float radius, const float rot[4], uint32_t color) {
+void nt_shape_renderer_sphere(const float center[3], float radius, const float rot[4], uint32_t color) {
     float scale[3] = {radius, radius, radius};
     push_instance(NT_SHAPE_SPHERE, center, scale, rot, color);
 }
 
-void nt_shape_renderer_sphere_wire_rot(const float center[3], float radius, const float rot[4], uint32_t color) { push_wire_instance(NT_WIRE_SPHERE, center, radius, 0.0F, rot, color); }
+void nt_shape_renderer_sphere_wire(const float center[3], float radius, const float rot[4], uint32_t color) { push_wire_instance(NT_WIRE_SPHERE, center, radius, 0.0F, rot, color); }
 
 /* ---- Cylinder ---- */
 
-void nt_shape_renderer_cylinder(const float center[3], float radius, float height, uint32_t color) {
-    float scale[3] = {radius, height, radius};
-    push_instance(NT_SHAPE_CYLINDER, center, scale, NULL, color);
-}
-
-void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float height, uint32_t color) { push_wire_instance(NT_WIRE_CYLINDER, center, radius, height * 0.5F, NULL, color); }
-
-void nt_shape_renderer_cylinder_rot(const float center[3], float radius, float height, const float rot[4], uint32_t color) {
+void nt_shape_renderer_cylinder(const float center[3], float radius, float height, const float rot[4], uint32_t color) {
     float scale[3] = {radius, height, radius};
     push_instance(NT_SHAPE_CYLINDER, center, scale, rot, color);
 }
 
-void nt_shape_renderer_cylinder_wire_rot(const float center[3], float radius, float height, const float rot[4], uint32_t color) {
+void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float height, const float rot[4], uint32_t color) {
     push_wire_instance(NT_WIRE_CYLINDER, center, radius, height * 0.5F, rot, color);
 }
 
 /* ---- Capsule ---- */
 
-void nt_shape_renderer_capsule(const float center[3], float radius, float height, uint32_t color) {
-    float body_half = (height - 2.0F * radius) * 0.5F;
-    if (body_half < 0.0F) {
-        body_half = 0.0F;
-    }
-    float scale[3] = {radius, body_half, 0.0F};
-    push_instance(NT_SHAPE_CAPSULE, center, scale, NULL, color);
-}
-
-void nt_shape_renderer_capsule_wire(const float center[3], float radius, float height, uint32_t color) {
-    float body_half = fmaxf(0.0F, (height - 2.0F * radius) * 0.5F);
-    push_wire_instance(body_half > 0.0F ? NT_WIRE_CAPSULE : NT_WIRE_SPHERE, center, radius, body_half, NULL, color);
-}
-
-void nt_shape_renderer_capsule_rot(const float center[3], float radius, float height, const float rot[4], uint32_t color) {
-    float body_half = (height - 2.0F * radius) * 0.5F;
-    if (body_half < 0.0F) {
-        body_half = 0.0F;
-    }
-    float scale[3] = {radius, body_half, 0.0F};
+void nt_shape_renderer_capsule(const float center[3], float radius, float height, const float rot[4], uint32_t color) {
+    float scale[3] = {radius, fmaxf(0.0F, (height - 2.0F * radius) * 0.5F), 0.0F};
     push_instance(NT_SHAPE_CAPSULE, center, scale, rot, color);
 }
 
-void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, float height, const float rot[4], uint32_t color) {
+void nt_shape_renderer_capsule_wire(const float center[3], float radius, float height, const float rot[4], uint32_t color) {
     float body_half = fmaxf(0.0F, (height - 2.0F * radius) * 0.5F);
     push_wire_instance(body_half > 0.0F ? NT_WIRE_CAPSULE : NT_WIRE_SPHERE, center, radius, body_half, rot, color);
-}
-
-/* ---- Mesh ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, uint32_t color) {
-    if (s_shape.vertex_count + num_vertices > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + num_indices > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-    if (num_vertices > NT_SHAPE_RENDERER_MAX_VERTICES || num_indices > NT_SHAPE_RENDERER_MAX_INDICES) {
-        NT_ASSERT(0 && "mesh exceeds batch limits");
-        NT_LOG_ERROR("mesh too large for batch, dropped");
-        return;
-    }
-
-    /* Validate indices are within bounds */
-    for (uint32_t i = 0; i < num_indices; i++) {
-        if (indices[i] >= num_vertices) {
-            NT_ASSERT(0 && "mesh index out of bounds");
-            NT_LOG_ERROR("mesh index out of bounds, dropped");
-            return;
-        }
-    }
-
-    nt_shape_index_t base = (nt_shape_index_t)s_shape.vertex_count;
-
-    /* Copy positions into vertex buffer with color */
-    for (uint32_t i = 0; i < num_vertices; i++) {
-        const float *pos = &positions[(size_t)i * 3];
-        set_vertex(&s_shape.vertices[s_shape.vertex_count], pos, color);
-        s_shape.vertex_count++;
-    }
-
-    /* Copy indices with base offset */
-    for (uint32_t i = 0; i < num_indices; i++) {
-        s_shape.indices[s_shape.index_count++] = (nt_shape_index_t)(base + indices[i]);
-    }
-}
-
-void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, uint32_t color) {
-    /* For each triangle (3 consecutive indices), emit 3 wireframe edges */
-    for (uint32_t i = 0; (i + 2) < num_indices; i += 3) {
-        if (indices[i] >= num_vertices || indices[i + 1] >= num_vertices || indices[i + 2] >= num_vertices) {
-            NT_ASSERT(0 && "mesh_wire index out of bounds");
-            NT_LOG_ERROR("mesh_wire index out of bounds, skipped triangle");
-            continue;
-        }
-        const float *a = &positions[(ptrdiff_t)indices[i] * 3];
-        const float *b = &positions[(ptrdiff_t)indices[i + 1] * 3];
-        const float *c = &positions[(ptrdiff_t)indices[i + 2] * 3];
-        nt_shape_renderer_line(a, b, color);
-        nt_shape_renderer_line(b, c, color);
-        nt_shape_renderer_line(c, a, color);
-    }
 }
 
 /* ---- Test accessors (always compiled; header guards visibility) ---- */
 
 uint32_t nt_shape_renderer_test_instance_count(int type) { return s_shape.inst_counts[type]; }
 
-uint32_t nt_shape_renderer_test_instance_capacity(void) { return NT_SHAPE_RENDERER_MAX_INSTANCES; }
 uint32_t nt_shape_renderer_test_vertex_count(void) { return s_shape.vertex_count; }
 uint32_t nt_shape_renderer_test_index_count(void) { return s_shape.index_count; }
 uint32_t nt_shape_renderer_test_stroke_count(void) {

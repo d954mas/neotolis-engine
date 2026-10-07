@@ -2281,7 +2281,7 @@ static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float
     nt_shape_renderer_set_vp((const float *)cube_vp);
     /* color = the draw_fn-resolved RGBA (<color> + folded opacity + fx tint) -> cube tints/fades with text.
      * size 1.5 (not 1.0) so the cube fills more of its reserved box -- a unit cube projects to only ~36%. */
-    nt_shape_renderer_cube_rot((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.5F, 1.5F, 1.5F}, rot, color);
+    nt_shape_renderer_cube((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.5F, 1.5F, 1.5F}, rot, color);
     nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW */
 }
 

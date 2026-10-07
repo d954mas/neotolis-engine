@@ -224,16 +224,16 @@ static void dispatch_shape(const bench_shape_t *s) {
     case BENCH_RECT:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_rect(s->a, s->size, s->col);
+            nt_shape_renderer_rect(s->a, s->size, NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_rect_wire(s->a, s->size, s->col);
+            nt_shape_renderer_rect_wire(s->a, s->size, NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_rect_rot(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_rect(s->a, s->size, s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_rect_wire_rot(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_rect_wire(s->a, s->size, s->rot, s->col);
             break;
         default:
             break;
@@ -260,16 +260,16 @@ static void dispatch_shape(const bench_shape_t *s) {
     case BENCH_CIRCLE:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_circle(s->a, s->size[0], s->col);
+            nt_shape_renderer_circle(s->a, s->size[0], NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_circle_wire(s->a, s->size[0], s->col);
+            nt_shape_renderer_circle_wire(s->a, s->size[0], NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_circle_rot(s->a, s->size[0], s->rot, s->col);
+            nt_shape_renderer_circle(s->a, s->size[0], s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_circle_wire_rot(s->a, s->size[0], s->rot, s->col);
+            nt_shape_renderer_circle_wire(s->a, s->size[0], s->rot, s->col);
             break;
         default:
             break;
@@ -278,16 +278,16 @@ static void dispatch_shape(const bench_shape_t *s) {
     case BENCH_CUBE:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_cube(s->a, s->size, s->col);
+            nt_shape_renderer_cube(s->a, s->size, NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_cube_wire(s->a, s->size, s->col);
+            nt_shape_renderer_cube_wire(s->a, s->size, NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_cube_rot(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_cube(s->a, s->size, s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_cube_wire_rot(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_cube_wire(s->a, s->size, s->rot, s->col);
             break;
         default:
             break;
@@ -295,24 +295,24 @@ static void dispatch_shape(const bench_shape_t *s) {
         break;
     case BENCH_SPHERE:
         if (s->variant == 0) {
-            nt_shape_renderer_sphere(s->a, s->size[0], s->col);
+            nt_shape_renderer_sphere(s->a, s->size[0], NULL, s->col);
         } else {
-            nt_shape_renderer_sphere_wire(s->a, s->size[0], s->col);
+            nt_shape_renderer_sphere_wire(s->a, s->size[0], NULL, s->col);
         }
         break;
     case BENCH_CYL:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_cylinder(s->a, s->size[0], s->size[1], s->col);
+            nt_shape_renderer_cylinder(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], s->col);
+            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_cylinder_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_cylinder(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_cylinder_wire_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         default:
             break;
@@ -321,16 +321,16 @@ static void dispatch_shape(const bench_shape_t *s) {
     case BENCH_CAP:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_capsule(s->a, s->size[0], s->size[1], s->col);
+            nt_shape_renderer_capsule(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], s->col);
+            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_capsule_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_capsule(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_capsule_wire_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         default:
             break;
@@ -433,7 +433,7 @@ static void draw_room(void) {
     float floor_pos[3] = {0, 0, 0};
     float floor_sz[2] = {ROOM_W, ROOM_D};
     float floor_rot[4] = {0.7071068F, 0, 0, 0.7071068F};
-    nt_shape_renderer_rect_rot(floor_pos, floor_sz, floor_rot, floor_col);
+    nt_shape_renderer_rect(floor_pos, floor_sz, floor_rot, floor_col);
 
     uint32_t grid_col = NT_RGBA8(64, 64, 77, 255);
     int grid_nx = (int)(ROOM_W / GRID_STEP) + 1;
@@ -453,30 +453,30 @@ static void draw_room(void) {
 
     uint32_t ceil_col = NT_RGBA8(31, 31, 51, 255);
     float ceil_pos[3] = {0, ROOM_H, 0};
-    nt_shape_renderer_rect_rot(ceil_pos, floor_sz, floor_rot, ceil_col);
+    nt_shape_renderer_rect(ceil_pos, floor_sz, floor_rot, ceil_col);
 
     uint32_t wall_col = NT_RGBA8(46, 41, 36, 255);
     {
         float pos[3] = {0, ROOM_H * 0.5F, -hd};
         float sz[2] = {ROOM_W, ROOM_H};
-        nt_shape_renderer_rect(pos, sz, wall_col);
+        nt_shape_renderer_rect(pos, sz, NULL, wall_col);
     }
     {
         float pos[3] = {0, ROOM_H * 0.5F, hd};
         float sz[2] = {ROOM_W, ROOM_H};
-        nt_shape_renderer_rect(pos, sz, wall_col);
+        nt_shape_renderer_rect(pos, sz, NULL, wall_col);
     }
     {
         float pos[3] = {-hw, ROOM_H * 0.5F, 0};
         float sz[2] = {ROOM_D, ROOM_H};
         float rot[4] = {0, 0.7071068F, 0, 0.7071068F};
-        nt_shape_renderer_rect_rot(pos, sz, rot, wall_col);
+        nt_shape_renderer_rect(pos, sz, rot, wall_col);
     }
     {
         float pos[3] = {hw, ROOM_H * 0.5F, 0};
         float sz[2] = {ROOM_D, ROOM_H};
         float rot[4] = {0, 0.7071068F, 0, 0.7071068F};
-        nt_shape_renderer_rect_rot(pos, sz, rot, wall_col);
+        nt_shape_renderer_rect(pos, sz, rot, wall_col);
     }
 }
 

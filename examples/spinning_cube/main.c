@@ -82,7 +82,7 @@ static void draw_room(void) {
     float floor_pos[3] = {0, 0, 0};
     float floor_sz[2] = {ROOM_W, ROOM_D};
     float floor_rot[4] = {0.7071068F, 0, 0, 0.7071068F};
-    nt_shape_renderer_rect_rot(floor_pos, floor_sz, floor_rot, floor_col);
+    nt_shape_renderer_rect(floor_pos, floor_sz, floor_rot, floor_col);
 
     /* Grid lines on the floor */
     uint32_t grid_col = NT_RGBA8(64, 64, 77, 255);
@@ -104,7 +104,7 @@ static void draw_room(void) {
     /* Ceiling */
     uint32_t ceil_col = NT_RGBA8(31, 31, 51, 255);
     float ceil_pos[3] = {0, ROOM_H, 0};
-    nt_shape_renderer_rect_rot(ceil_pos, floor_sz, floor_rot, ceil_col);
+    nt_shape_renderer_rect(ceil_pos, floor_sz, floor_rot, ceil_col);
 
     /* Walls */
     uint32_t wall_col = NT_RGBA8(46, 41, 36, 255);
@@ -113,27 +113,27 @@ static void draw_room(void) {
     {
         float pos[3] = {0, ROOM_H * 0.5F, -hd};
         float sz[2] = {ROOM_W, ROOM_H};
-        nt_shape_renderer_rect(pos, sz, wall_col);
+        nt_shape_renderer_rect(pos, sz, NULL, wall_col);
     }
     /* Back wall (positive Z) */
     {
         float pos[3] = {0, ROOM_H * 0.5F, hd};
         float sz[2] = {ROOM_W, ROOM_H};
-        nt_shape_renderer_rect(pos, sz, wall_col);
+        nt_shape_renderer_rect(pos, sz, NULL, wall_col);
     }
     /* Left wall */
     {
         float pos[3] = {-hw, ROOM_H * 0.5F, 0};
         float sz[2] = {ROOM_D, ROOM_H};
         float rot[4] = {0, 0.7071068F, 0, 0.7071068F};
-        nt_shape_renderer_rect_rot(pos, sz, rot, wall_col);
+        nt_shape_renderer_rect(pos, sz, rot, wall_col);
     }
     /* Right wall */
     {
         float pos[3] = {hw, ROOM_H * 0.5F, 0};
         float sz[2] = {ROOM_D, ROOM_H};
         float rot[4] = {0, 0.7071068F, 0, 0.7071068F};
-        nt_shape_renderer_rect_rot(pos, sz, rot, wall_col);
+        nt_shape_renderer_rect(pos, sz, rot, wall_col);
     }
 }
 
@@ -157,20 +157,20 @@ static void draw_shape(void) {
     case SHAPE_CUBE: {
         float sz[3] = {scl[0], scl[1], scl[2]};
         if (draw_solid) {
-            nt_shape_renderer_cube_rot(pos, sz, rot, col);
+            nt_shape_renderer_cube(pos, sz, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_cube_wire_rot(pos, sz, rot, wcol);
+            nt_shape_renderer_cube_wire(pos, sz, rot, wcol);
         }
         break;
     }
     case SHAPE_SPHERE: {
         float radius = scl[0];
         if (draw_solid) {
-            nt_shape_renderer_sphere_rot(pos, radius, rot, col);
+            nt_shape_renderer_sphere(pos, radius, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_sphere_wire_rot(pos, radius, rot, wcol);
+            nt_shape_renderer_sphere_wire(pos, radius, rot, wcol);
         }
         break;
     }
@@ -178,10 +178,10 @@ static void draw_shape(void) {
         float radius = scl[0];
         float height = scl[1];
         if (draw_solid) {
-            nt_shape_renderer_cylinder_rot(pos, radius, height, rot, col);
+            nt_shape_renderer_cylinder(pos, radius, height, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_cylinder_wire_rot(pos, radius, height, rot, wcol);
+            nt_shape_renderer_cylinder_wire(pos, radius, height, rot, wcol);
         }
         break;
     }
@@ -189,10 +189,10 @@ static void draw_shape(void) {
         float radius = scl[0];
         float height = scl[1];
         if (draw_solid) {
-            nt_shape_renderer_capsule_rot(pos, radius, height, rot, col);
+            nt_shape_renderer_capsule(pos, radius, height, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_capsule_wire_rot(pos, radius, height, rot, wcol);
+            nt_shape_renderer_capsule_wire(pos, radius, height, rot, wcol);
         }
         break;
     }

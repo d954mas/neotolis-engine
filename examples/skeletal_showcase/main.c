@@ -2274,7 +2274,7 @@ static void draw_skeleton(const nt_skeletal_skeleton_t *skel, const nt_skeletal_
         } else {
             color = joint_colors[2];
         }
-        nt_shape_renderer_sphere(p, radius * scale, color);
+        nt_shape_renderer_sphere(p, radius * scale, NULL, color);
         if (show_axes) {
             const uint32_t axis_colors[3] = {NT_RGBA8(255, 51, 51, 255), NT_RGBA8(51, 255, 77, 255), NT_RGBA8(51, 128, 255, 255)};
             const float axis_len = 0.23F * scale;
@@ -2417,7 +2417,7 @@ static void draw_skinned_bones(void) {
                 marker[r] += socket.r[r][k] * point[k];
             }
         }
-        nt_shape_renderer_sphere(marker, 0.11F, NT_RGBA8(255, 51, 51, 255));
+        nt_shape_renderer_sphere(marker, 0.11F, NULL, NT_RGBA8(255, 51, 51, 255));
     }
 }
 

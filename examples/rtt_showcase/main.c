@@ -405,21 +405,21 @@ static void draw_scene_contents(void) {
     float cube_pos[3] = {-1.15F, 0.85F, 0.0F};
     float cube_size[3] = {0.85F, 1.55F, 0.65F};
     uint32_t red = NT_RGBA8(242, 38, 26, 255);
-    nt_shape_renderer_cube_rot(cube_pos, cube_size, cube_rot, red);
+    nt_shape_renderer_cube(cube_pos, cube_size, cube_rot, red);
 
     float sphere_pos[3] = {1.05F, 0.65F, -0.55F};
     uint32_t teal = NT_RGBA8(13, 217, 242, 255);
-    nt_shape_renderer_sphere(sphere_pos, 0.55F, teal);
+    nt_shape_renderer_sphere(sphere_pos, 0.55F, NULL, teal);
 
     float cyl_pos[3] = {0.25F, 1.55F, 0.75F};
     uint32_t yellow = NT_RGBA8(255, 209, 38, 255);
-    nt_shape_renderer_cylinder(cyl_pos, 0.26F, 1.25F, yellow);
+    nt_shape_renderer_cylinder(cyl_pos, 0.26F, 1.25F, NULL, yellow);
 
     float floor_pos[3] = {0.0F, -0.02F, 0.0F};
     float floor_size[2] = {5.8F, 3.2F};
     float floor_rot[4] = {0.7071068F, 0.0F, 0.0F, 0.7071068F};
     uint32_t floor_color = NT_RGBA8(31, 36, 46, 255);
-    nt_shape_renderer_rect_rot(floor_pos, floor_size, floor_rot, floor_color);
+    nt_shape_renderer_rect(floor_pos, floor_size, floor_rot, floor_color);
 
     uint32_t line_color = NT_RGBA8(255, 255, 255, 255);
     nt_shape_renderer_line((float[3]){-2.7F, 0.04F, -1.4F}, (float[3]){2.4F, 0.04F, 1.25F}, line_color);
