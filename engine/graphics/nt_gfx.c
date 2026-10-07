@@ -215,14 +215,16 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 /* ---- Lifecycle ---- */
 
-/* A backend failure caused by a loss is the recoverable CONTEXT_LOST and logs
- * nothing; only a failure on a live context is an error. The browser is asked
- * because the loss event may still be queued. */
+/* A backend failure caused by a loss is the recoverable CONTEXT_LOST; only a failure on a
+ * live context is an error. The browser is asked because the loss event may still be queued,
+ * and a confirmed loss latches at once so every later call takes its lost path. */
 static nt_gfx_result_t backend_failed(const char *what) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     if (nt_gfx_backend_query_context_lost()) {
+        g_nt_gfx.context_lost = true;
+        NT_LOG_ERROR("WebGL context lost");
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     if (what != NULL) {
@@ -518,6 +520,9 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }
 static bool texture_filter_uses_linear(nt_texture_filter_t filter) { return filter != NT_FILTER_NEAREST && filter != NT_FILTER_NEAREST_MIPMAP_NEAREST; }
 
 static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
+    if (tex.id == 0) {
+        return NT_GFX_RESULT_INVALID_HANDLE; /* invalid-zero is a first-class value, as for buffers */
+    }
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         NT_LOG_ERROR("destroy_texture: invalid handle");
         return NT_GFX_RESULT_INVALID_HANDLE;
@@ -605,6 +610,9 @@ static void wipe_backend_handles(void) {
 
 /* The whole restore is one operation; its backend calls sit inside it. */
 static nt_gfx_result_t restore_context(void) {
+    /* A loss latched by a failed call wipes when its event is taken; wiping here as well keeps a
+     * restore from publishing stale tables whatever order the events took. */
+    wipe_backend_handles();
     /* A failed recreate leaves no context, so the query keeps reporting lost for good. */
     if (!nt_gfx_backend_recreate_all_resources()) {
         NT_LOG_ERROR("WebGL context restore failed");
@@ -641,10 +649,12 @@ void nt_gfx_begin_frame(void) {
     g_nt_gfx.context_restored = false;
     /* Browser loss events are separate tasks, so this sync holds for the whole iteration. The latch
      * is always taken: a loss and restore between two iterations must still wipe the tables. */
-    if (nt_gfx_backend_take_context_loss() && !g_nt_gfx.context_lost) {
+    if (nt_gfx_backend_take_context_loss()) {
         wipe_backend_handles();
-        g_nt_gfx.context_lost = true;
-        NT_LOG_ERROR("WebGL context lost");
+        if (!g_nt_gfx.context_lost) {
+            g_nt_gfx.context_lost = true;
+            NT_LOG_ERROR("WebGL context lost");
+        }
     }
     open_frame();
 #if NT_GFX_CAPTURE_ENABLED
@@ -702,7 +712,8 @@ static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uin
     if (need > (uint64_t)out_cap) {
         return NT_GFX_RESULT_CAPACITY;
     }
-    if (!nt_gfx_backend_read_pixels(x, y, w, h, out)) {
+    /* WebGL reports a loss once through glGetError and the drain before the read eats it: ask the browser too. */
+    if (!nt_gfx_backend_read_pixels(x, y, w, h, out) || nt_gfx_backend_query_context_lost()) {
         return backend_failed(NULL); /* GL read error -> capture_failed, not an encode of uninitialized memory. */
     }
 
@@ -795,7 +806,8 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
 }
 
 static nt_gfx_result_t end_pass(void) {
-    if (g_nt_gfx.context_lost) {
+    /* A pass opened before a loss latched still closes: the frame state machine ignores loss. */
+    if (s_gfx.render_state != NT_GFX_STATE_PASS && g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
 
@@ -875,12 +887,12 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t *out) {
-    NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, vs.id) && "make_program: invalid vertex shader handle");
-    NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, fs.id) && "make_program: invalid fragment shader handle");
-
+    /* First: a stage the loss failed is 0, and the loss latched when it failed. */
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
+    NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, vs.id) && "make_program: invalid vertex shader handle");
+    NT_ASSERT(nt_pool_valid(&s_gfx.shader_pool, fs.id) && "make_program: invalid fragment shader handle");
 
     uint32_t vs_backend = s_gfx.shader_backends[nt_pool_slot_index(vs.id)];
     uint32_t fs_backend = s_gfx.shader_backends[nt_pool_slot_index(fs.id)];
@@ -1992,6 +2004,9 @@ static nt_gfx_result_t make_sampler(const nt_sampler_desc_t *desc, nt_sampler_t 
                 s_gfx.sampler_cache[i].backend = nt_gfx_backend_create_sampler(&s_gfx.sampler_cache[i].desc);
                 if (s_gfx.sampler_cache[i].backend != 0) {
                     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, i + 1);
+                } else {
+                    /* The entry stays: bind-time recreate retries it. */
+                    (void)backend_failed("make_sampler: backend failed");
                 }
             }
             out->id = i + 1;
@@ -2399,9 +2414,8 @@ static nt_gfx_result_t bind_uniform_block(nt_buffer_t buf, uint32_t slot, uint32
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && data != NULL && size > 0 && "bind_uniform_block: slot, data or size");
     const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
-    /* A restore that meets a new loss leaves the frame buffer unmade before the loss is latched.
-     * A disabled stream (zero capacity) reaches the allocator, which stops on the overflow. */
-    const bool lost = g_nt_gfx.context_lost || (storage->buffer.id == 0 && storage->capacity != 0);
+    /* A disabled stream (zero capacity) reaches the allocator, which stops on the overflow. */
+    const bool lost = g_nt_gfx.context_lost;
     const nt_buffer_t buf = lost ? (nt_buffer_t){0} : storage->buffer;
     uint32_t offset = 0;
     if (!lost) {
@@ -2460,9 +2474,6 @@ void nt_gfx_begin_segment(const char *name) {
 
 static nt_gfx_result_t end_segment(void) {
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_ENDED && "end_segment: must be called inside a frame");
-    if (g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
 #if NT_GFX_GPU_TIMING_ENABLED
     nt_gfx_frame_end_segment();
 #endif
@@ -2927,8 +2938,7 @@ static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_dat
         .label = NULL,
     });
     if (out_ibo->id == 0) {
-        NT_LOG_ERROR("activate_mesh: IBO creation failed");
-        return false;
+        return false; /* make_buffer logged a live failure; a loss is quiet */
     }
     return true;
 }
@@ -2972,8 +2982,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         .label = NULL,
     });
     if (vbo.id == 0) {
-        NT_LOG_ERROR("activate_mesh: VBO creation failed");
-        return 0;
+        return 0; /* make_buffer logged a live failure; a loss is quiet */
     }
 
     nt_buffer_t ibo;
@@ -3060,6 +3069,9 @@ void nt_gfx_deactivate_texture(uint32_t handle) {
 }
 
 void nt_gfx_deactivate_mesh(uint32_t handle) {
+    if (handle == 0) {
+        return;
+    }
     if (!nt_pool_valid(&s_gfx.mesh_pool, handle)) {
         NT_LOG_ERROR("deactivate_mesh: invalid or stale handle");
         return;

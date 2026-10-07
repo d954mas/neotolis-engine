@@ -465,25 +465,28 @@ void test_gfx_program_link_context_loss_releases_every_slot(void) {
         nt_gfx_fake_set_context_lost(false);
         TEST_FAIL_MESSAGE("Context loss during program link must return invalid without asserting");
     }
+    /* The failed link confirms the loss and latches it; later links stop before the backend. */
+    nt_gfx_fake_lose_context_on_program_create();
     for (uint32_t attempt = 0; attempt < 12; attempt++) {
-        /* Each attempt starts on a live context. */
-        nt_gfx_fake_set_context_lost(false);
-        nt_gfx_fake_lose_context_on_program_create();
         nt_program_t program = nt_gfx_make_program(vs, fs);
         TEST_ASSERT_EQUAL_UINT32(0, program.id);
         TEST_ASSERT_FALSE(nt_gfx_program_valid(program));
-        TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-        TEST_ASSERT_TRUE(nt_gfx_backend_query_context_lost());
-        TEST_ASSERT_EQUAL_UINT32(attempt + 1, nt_gfx_fake_program_create_count());
+        TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+        TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_program_create_count());
     }
 
     nt_gfx_fake_set_context_lost(false);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    vs = make_test_vs();
+    fs = make_test_fs();
     for (uint32_t i = 0; i < 4; i++) {
         programs[i] = nt_gfx_make_program(vs, fs);
         TEST_ASSERT_TRUE(nt_gfx_program_ready(programs[i]));
     }
     nt_assert_handler = NULL;
-    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_program_create_count());
+    TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_fake_program_create_count());
     for (uint32_t i = 0; i < 4; i++) {
         TEST_ASSERT_TRUE(nt_gfx_program_valid(programs[i]));
         nt_gfx_destroy_program(programs[i]);
