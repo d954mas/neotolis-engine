@@ -129,7 +129,7 @@ static void test_creates_on_a_loss_fail_quietly(void) {
         TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_texture(&texture_desc).id);
         TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_render_target(&rt_desc).id);
         TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_shader(&shader_desc).id);
-        TEST_ASSERT_EQUAL_UINT32(known == 0 ? 1U : 0U, s_error_logs);
+        TEST_ASSERT_EQUAL_UINT32(known == 0 && NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_error_logs);
         nt_gfx_end_frame();
         nt_gfx_begin_frame();
         s_error_logs = 0;
@@ -167,7 +167,7 @@ static void test_a_latched_loss_carries_a_whole_creation_chain(void) {
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    TEST_ASSERT_EQUAL_UINT32(1, s_error_logs);
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_error_logs);
     nt_gfx_destroy_vertex_input(vi);
     nt_gfx_destroy_buffer(vbo);
     nt_gfx_destroy_pipeline(pipeline);
@@ -176,7 +176,7 @@ static void test_a_latched_loss_carries_a_whole_creation_chain(void) {
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture((nt_texture_t){0});
     nt_gfx_deactivate_mesh(0);
-    TEST_ASSERT_EQUAL_UINT32(1, s_error_logs);
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_error_logs);
 }
 
 /* A pass that opened before the loss latched still closes, so the frame ends normally. */
