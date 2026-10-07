@@ -44,7 +44,6 @@ static struct {
         nt_program_t program; /* the program `pipeline` was built on: a replace keeps the material handle */
         nt_pipeline_t pipeline;
         uint64_t frame; /* gfx frame of the selection */
-        nt_hash32_t curve_name;
     } current;
 
     /* Params last written, per program: equal params record nothing, so adjacent draws merge. */
@@ -60,17 +59,13 @@ static struct {
         uint32_t quads;
     } run;
 
+    nt_hash32_t curve_name; /* hashed at the first resolve */
+
 #ifdef NT_TEST_ACCESS
     /* Observed at every draw_n entry, even when the font has no glyph data (units_per_em == 0), so
-     * walker and emit tests pin the model and style the UI built without a real font fixture. */
+     * walker tests pin the model the UI built without a real font fixture. */
     float test_last_model[16];
     uint32_t test_draw_n_calls;
-    uint32_t test_font_switches; /* draw_n calls whose font differs from the previous call's */
-    nt_font_t test_prev_font;
-    float test_max_oblique;
-    float test_max_weight;
-    float test_max_outline_w;
-    bool test_saw_underline;
 #endif
 } s_text;
 // #endregion
@@ -157,7 +152,9 @@ static void resolve_material(nt_material_t mat, const nt_material_info_t *info) 
     if (s_text.current.pipeline.id != 0 && find_or_create_vertex_input().id == 0) {
         s_text.current.pipeline = (nt_pipeline_t){0};
     }
-    s_text.current.curve_name = nt_hash32_str("u_curve_texture");
+    if (s_text.curve_name.value == 0) {
+        s_text.curve_name = nt_hash32_str("u_curve_texture");
+    }
 }
 
 void nt_text_renderer_set_material(nt_material_t mat) {
@@ -192,11 +189,15 @@ static void transform_point(float out[3], const float model[16], float x, float 
 /* The first quad aligns the run to the stride; the rest follow contiguously, since glyph lookups
  * between quads allocate no frame storage. */
 static nt_text_vertex_t *alloc_quad(void) {
+    const uint32_t size = 4U * (uint32_t)sizeof(nt_text_vertex_t);
     uint32_t offset = 0;
-    nt_text_vertex_t *v =
-        (nt_text_vertex_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 4U * (uint32_t)sizeof(nt_text_vertex_t), (s_text.run.quads == 0) ? (uint32_t)sizeof(nt_text_vertex_t) : 1U, &offset);
+    nt_text_vertex_t *v = NULL;
+    /* Constant alignments keep the inline allocator free of a runtime divide per quad. */
     if (s_text.run.quads == 0) {
+        v = (nt_text_vertex_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, size, (uint32_t)sizeof(nt_text_vertex_t), &offset);
         s_text.run.first_offset = offset;
+    } else {
+        v = (nt_text_vertex_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, size, 1U, &offset);
     }
     s_text.run.quads++;
     return v;
@@ -312,7 +313,7 @@ static void record_state(nt_font_t font) {
         s_text.recorded.material = s_text.current.material;
         memcpy(s_text.recorded.params, mi->params, param_bytes);
     }
-    const nt_gfx_texture_binding_t curve = {.name = s_text.current.curve_name, .texture = nt_font_get_curve_texture(font), .sampler = NT_SAMPLER_DEFAULT};
+    const nt_gfx_texture_binding_t curve = {.name = s_text.curve_name, .texture = nt_font_get_curve_texture(font), .sampler = NT_SAMPLER_DEFAULT};
     nt_gfx_apply_texture_bindings(&curve, 1);
     nt_gfx_bind_vertex_input(s_text.vertex_input);
 }
@@ -467,21 +468,6 @@ static void emit_line_decorations(const nt_text_style_t *style, const uint8_t *p
     }
 }
 
-#ifdef NT_TEST_ACCESS
-static void observe_call(const nt_text_style_t *style, const float model[16]) {
-    memcpy(s_text.test_last_model, model, sizeof s_text.test_last_model);
-    s_text.test_draw_n_calls++;
-    if (style->font.id != s_text.test_prev_font.id) {
-        s_text.test_font_switches++;
-        s_text.test_prev_font = style->font;
-    }
-    s_text.test_max_oblique = fmaxf(s_text.test_max_oblique, style->oblique);
-    s_text.test_max_weight = fmaxf(s_text.test_max_weight, style->weight_em);
-    s_text.test_max_outline_w = fmaxf(s_text.test_max_outline_w, style->outline_w);
-    s_text.test_saw_underline = s_text.test_saw_underline || style->underline;
-}
-#endif
-
 /* Values the font math cannot take: offset and quantize would turn a NaN into garbage geometry. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- flat finite-value and feature preconditions.
 static void assert_style(const nt_text_style_t *style) {
@@ -498,7 +484,8 @@ static void assert_style(const nt_text_style_t *style) {
 void nt_text_renderer_draw_n(const nt_text_style_t *style, const float model[16], const char *utf8, size_t len) {
     NT_ASSERT(style != NULL && "nt_text_renderer_draw_n: style is required");
 #ifdef NT_TEST_ACCESS
-    observe_call(style, model);
+    memcpy(s_text.test_last_model, model, sizeof s_text.test_last_model);
+    s_text.test_draw_n_calls++;
 #endif
     NT_ASSERT(s_text.current.frame == g_nt_gfx.counters.frame_sequence && "nt_text_renderer_draw_n: call nt_text_renderer_set_material in this frame");
     assert_style(style);
@@ -581,24 +568,9 @@ void nt_text_renderer_draw(const nt_text_style_t *style, const float model[16], 
 
 // #region Test accessors
 #ifdef NT_TEST_ACCESS
-uint32_t nt_text_renderer_test_font_switches(void) { return s_text.test_font_switches; }
-void nt_text_renderer_test_reset_call_counters(void) {
-    s_text.test_font_switches = 0;
-    s_text.test_prev_font = (nt_font_t){0};
-    s_text.test_draw_n_calls = 0;
-    s_text.test_max_oblique = 0.0F;
-    s_text.test_max_weight = 0.0F;
-    s_text.test_max_outline_w = 0.0F;
-    s_text.test_saw_underline = false;
-}
+void nt_text_renderer_test_reset_call_counters(void) { s_text.test_draw_n_calls = 0; }
 const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
 uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
-float nt_text_renderer_test_max_oblique(void) { return s_text.test_max_oblique; }
-float nt_text_renderer_test_max_weight(void) { return s_text.test_max_weight; }
-float nt_text_renderer_test_max_outline_width(void) { return s_text.test_max_outline_w; }
-bool nt_text_renderer_test_saw_underline(void) { return s_text.test_saw_underline; }
-uint32_t nt_text_renderer_test_material_id(void) { return s_text.current.material.id; }
-
 uint16_t nt_text_renderer_test_pipeline_cache_count(void) { return s_text.pipeline_count; }
 #endif
 // #endregion

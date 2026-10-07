@@ -1861,12 +1861,14 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
      * Restored at walk exit. After the early-outs, the path to exit has no further returns. */
     const nt_material_t saved_sprite_mat = ctx->sprite_material;
     const nt_material_t saved_text_mat = ctx->text_material;
+    const float saved_text_bias = ctx->text_glyph_depth_bias;
     if (mode == NT_UI_WALK_MODE_DEBUG_INSPECTOR) {
         if (ctx->inspector_sprite_material.id != 0) {
             ctx->sprite_material = ctx->inspector_sprite_material;
         }
         if (ctx->inspector_text_material.id != 0) {
             ctx->text_material = ctx->inspector_text_material;
+            ctx->text_glyph_depth_bias = 0.0F; /* the bias belongs to the game's text material */
         }
     }
 #endif
@@ -1999,6 +2001,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     /* Restore the game's materials swapped in for the inspector pass. */
     ctx->sprite_material = saved_sprite_mat;
     ctx->text_material = saved_text_mat;
+    ctx->text_glyph_depth_bias = saved_text_bias;
     /* Inspector strings backed by module-level rings are now consumed; release ownership. */
     if (should_release_inspector_strings(ctx, mode)) {
         nt_ui_internal_inspector_strings_release(ctx);

@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "atlas/nt_atlas.h"
@@ -20,6 +21,7 @@
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
+#include "nt_font_format.h"
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
@@ -60,7 +62,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 16}); /* rich multi-face tests create >4 distinct stub fonts */
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 16}); /* rich multi-face tests create up to 6 distinct fonts */
     nt_material_init(&(nt_material_desc_t){.max_materials = 32});
 
     /* Open a frame/pass so sprite/text renderers can draw_indexed without
@@ -131,11 +133,104 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
 
     nt_material_shutdown();
     nt_font_shutdown();
+    free(fx->real_font_blob);
+    fx->real_font_blob = NULL;
     nt_atlas_test_reset();
     nt_resource_shutdown();
     nt_gfx_shutdown();
     nt_mem_scratch_shutdown();
     nt_hash_shutdown();
+}
+
+#define REAL_FONT_FIRST_CP 32U
+#define REAL_FONT_LAST_CP 126U
+
+static void build_real_font_blob(ui_walker_fixture_t *fx) {
+    const uint32_t glyph_count = REAL_FONT_LAST_CP - REAL_FONT_FIRST_CP + 1U;
+    const uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
+    const uint32_t contour_offset = header_size + (glyph_count * (uint32_t)sizeof(NtFontGlyphEntry));
+    /* contour_count 1, point_count 3, all on-curve: clockwise (a TrueType outer) triangle spanning the
+     * bbox, so an emboldened variant grows past it. First point (0,-200), int16 deltas (0,1000) (400,-1000). */
+    const uint8_t esc = NT_FONT_DELTA_SENTINEL;
+    const uint8_t contour[] = {1, 0, 3, 0, 0x07, 0x00, 0x00, 0x00, 0x38, 0xFF, 0, esc, 0xE8, 0x03, esc, 0x90, 0x01, esc, 0x18, 0xFC};
+    fx->real_font_blob_size = contour_offset + (uint32_t)sizeof contour;
+    fx->real_font_blob = (uint8_t *)calloc(fx->real_font_blob_size, 1);
+    TEST_ASSERT_NOT_NULL(fx->real_font_blob);
+
+    NtFontAssetHeader hdr;
+    memset(&hdr, 0, sizeof hdr);
+    hdr.magic = NT_FONT_MAGIC;
+    hdr.version = NT_FONT_VERSION;
+    hdr.glyph_count = (uint16_t)glyph_count;
+    hdr.units_per_em = 1000;
+    hdr.ascent = 800;
+    hdr.descent = -200;
+    memcpy(fx->real_font_blob, &hdr, sizeof hdr);
+
+    for (uint32_t i = 0; i < glyph_count; i++) {
+        NtFontGlyphEntry entry;
+        memset(&entry, 0, sizeof entry);
+        entry.codepoint = REAL_FONT_FIRST_CP + i;
+        entry.data_offset = contour_offset;
+        entry.advance = 500;
+        if (entry.codepoint != ' ') {
+            entry.bbox_y0 = -200;
+            entry.bbox_x1 = 400;
+            entry.bbox_y1 = 800;
+            entry.curve_count = 3;
+        }
+        memcpy(fx->real_font_blob + header_size + ((size_t)i * sizeof entry), &entry, sizeof entry);
+    }
+    memcpy(fx->real_font_blob + contour_offset, contour, sizeof contour);
+}
+
+nt_font_t ui_walker_fixture_make_real_font(ui_walker_fixture_t *fx) {
+    if (fx->real_font_blob == NULL) {
+        build_real_font_blob(fx);
+    }
+    const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
+    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(fx->real_font_blob, fx->real_font_blob_size)));
+    nt_resource_step();
+    nt_font_step();
+    return font;
+}
+
+uint32_t ui_walker_fx_draw_count(nt_program_t program) {
+    uint32_t count = 0;
+    const uint32_t n = nt_gfx_fake_draw_trace_count();
+    for (uint32_t i = 0; i < n; i++) {
+        count += (nt_gfx_fake_draw_trace_at(i).program.id == program.id) ? 1U : 0U;
+    }
+    return count;
+}
+
+nt_gfx_fake_draw_t ui_walker_fx_draw_at(nt_program_t program, uint32_t n) {
+    const uint32_t total = nt_gfx_fake_draw_trace_count();
+    for (uint32_t i = 0; i < total; i++) {
+        const nt_gfx_fake_draw_t d = nt_gfx_fake_draw_trace_at(i);
+        if (d.program.id == program.id) {
+            if (n == 0U) {
+                return d;
+            }
+            n--;
+        }
+    }
+    TEST_FAIL_MESSAGE("no such draw of the program in the trace");
+    return (nt_gfx_fake_draw_t){0};
+}
+
+const uint8_t *ui_walker_fx_text_vertex(nt_gfx_fake_draw_t draw, uint32_t quad, uint32_t corner) {
+    TEST_ASSERT_TRUE(quad < ui_walker_fx_quads(draw));
+    uint32_t vertex = 0;
+    memcpy(&vertex, g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].staging + ((size_t)(draw.first_index + (quad * 6U)) * sizeof vertex), sizeof vertex);
+    vertex += corner; /* index 0 of a quad is its BL */
+    return g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + ((size_t)vertex * UI_WALKER_FX_TEXT_VERTEX_BYTES);
+}
+
+float ui_walker_fx_vertex_float(const uint8_t *vertex, uint32_t byte_offset) {
+    float v = 0.0F;
+    memcpy(&v, vertex + byte_offset, sizeof v);
+    return v;
 }
 
 #endif /* NT_TEST_ACCESS */

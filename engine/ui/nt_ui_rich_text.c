@@ -2102,7 +2102,7 @@ static nt_text_style_t rich_run_style(const nt_ui_rich_state_t *st, const nt_ui_
         .font = e->font,
         .weight_em = (e->flags & NT_UI_RICH_RUN_SYNTH_BOLD) != 0U ? NT_TEXT_SYNTH_BOLD_WEIGHT : 0.0F,
         .oblique = (e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F,
-        .glyph_depth_bias = frame->ctx->text_glyph_depth_bias,
+        .glyph_depth_bias = nt_ui_internal_text_bias(frame->ctx, (st->text_material.id != 0U) ? st->text_material : frame->ctx->text_material),
         .underline = (e->flags & NT_UI_RICH_RUN_UNDERLINE) != 0U,
         .strikethrough = (e->flags & NT_UI_RICH_RUN_STRIKE) != 0U,
     };
@@ -2110,9 +2110,9 @@ static nt_text_style_t rich_run_style(const nt_ui_rich_state_t *st, const nt_ui_
         style.outline_w = stl->outline_w;
         style.outline_color = nt_color_scale_alpha(stl->outline_color_abgr, frame->opacity);
     }
-    if ((stl->shadow_color_abgr >> 24) != 0U) { /* alpha > 0 -> active */
-        style.shadow_dx = isfinite(stl->shadow_dx) ? stl->shadow_dx : 0.0F;
-        style.shadow_dy = isfinite(stl->shadow_dy) ? stl->shadow_dy : 0.0F;
+    if ((stl->shadow_color_abgr >> 24) != 0U && isfinite(stl->shadow_dx) && isfinite(stl->shadow_dy)) { /* alpha > 0 -> active */
+        style.shadow_dx = stl->shadow_dx;
+        style.shadow_dy = stl->shadow_dy;
         style.shadow_color = nt_color_scale_alpha(stl->shadow_color_abgr, frame->opacity);
     }
     return style;

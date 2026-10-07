@@ -1,8 +1,8 @@
 /* nt_ui_rich_text emit: the widget declares ONE Clay FIXED block and self-emits
  * its solved TEXT atoms as positioned nt_text_renderer_draw_n spans during the walk. No GL:
  * the fixture's stub font (units_per_em=0) makes draw_n a counted no-op, so the walker-command
- * probe + the draw_n call counter prove emit without a real glyph atlas. Modeled on
- * test_ui_radial.c (ui_walker_fixture, no GL capture). */
+ * probe + the draw_n call counter prove emit without a real glyph atlas; tests that inspect the
+ * recorded glyph draws use the fixture's real font and the fake backend's draw trace. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -39,8 +39,12 @@ static ui_walker_fixture_t s_fx;
 /* White region's name_hash in the minimal fixture atlas (ui_atlas.c "WHITEENU"). */
 #define FX_WHITE_NAME_HASH 0x57484954454E4555ULL
 
+/* The regular face of the frame builders below; tests that inspect glyph draws set a real font. */
+static nt_font_t s_body_font;
+
 void setUp(void) {
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
+    s_body_font = s_fx.stub_font;
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
@@ -51,6 +55,19 @@ void setUp(void) {
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool approx(float a, float b) { return fabsf(a - b) < 1e-3F; }
+
+static nt_program_t text_program(void) { return nt_material_get_info(s_fx.text_material)->program; }
+
+/* Horizontal lean of quad `q` of a text draw: its TL corner x minus its BL corner x. */
+static float quad_lean(nt_gfx_fake_draw_t d, uint32_t q) { return ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, q, 3), 0) - ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, q, 0), 0); }
+
+static float quad_glyph_x1(nt_gfx_fake_draw_t d, uint32_t q) { return ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, q, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1); }
+
+static void make_real_fonts(nt_font_t *fonts, int count) {
+    for (int i = 0; i < count; i++) {
+        fonts[i] = ui_walker_fixture_make_real_font(&s_fx);
+    }
+}
 
 /* Walks with the fake backend's draw trace armed, so the trace holds exactly this walk's draws in painter
  * order. s_walk_draws is the walk's recorded draw count (merged draws count once). */
@@ -87,7 +104,7 @@ static float rich_fx_clamp01_ref(float v) {
 /* Build a 2-run text-only block, declare the rich-text widget, walk once. */
 static void frame_two_run_text(float container_w, nt_rich_align_t align) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-    base.font_id[0] = s_fx.stub_font;
+    base.font_id[0] = s_body_font;
 
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -127,15 +144,14 @@ static void test_emit_produces_text_spans(void) {
  * text pipeline stays id==0 and the glyphs are dropped. Force a foreign material before the walk
  * so the assertion proves a REBIND, not a leftover. */
 static void test_rich_only_frame_binds_text_material(void) {
-    /* Bind a different material into the text renderer so a missing rebind is detectable. */
+    s_body_font = ui_walker_fixture_make_real_font(&s_fx);
     nt_text_renderer_set_material(s_fx.text_material_b);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.text_material_b.id, nt_text_renderer_test_material_id(), "precondition: text renderer holds the foreign material");
 
-    nt_text_renderer_test_reset_call_counters();
+    nt_gfx_fake_draw_trace_reset(true);
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT); /* rich block only, no nt_ui_label */
 
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "rich-only frame emits draw_n spans");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.text_material.id, nt_text_renderer_test_material_id(), "rich-only frame leaves the ctx text material bound (glyphs not discarded)");
+    TEST_ASSERT_TRUE_MESSAGE(ui_walker_fx_draw_count(text_program()) > 0U, "rich-only frame draws its glyphs with the ctx text material");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, ui_walker_fx_draw_count(nt_material_get_info(s_fx.text_material_b)->program), "no glyph draws with the foreign material");
 }
 
 /* (2) the FIXED block size equals the solved total size. */
@@ -205,18 +221,8 @@ static void test_double_walk_is_deterministic(void) {
 
 /* ===== Font-grouped text emit ===== */
 
-/* Make a distinct stub font (own pool slot -> own .id) so a multi-face block has real font transitions.
- * units_per_em stays 0 so draw_n is a counted no-op (no glyph atlas needed). */
-static nt_font_t make_stub_font(void) {
-    return nt_font_create(&(nt_font_create_desc_t){
-        .max_glyphs = 16,
-        .measure_cache_size = 0,
-    });
-}
-
 /* Build a block that interleaves the 4 font faces R B R I R BI R as separate runs (each <color>-split so
- * the solver keeps them as distinct atoms). With 4 distinct fonts in the family, the font must switch
- * once PER DISTINCT FONT (4) -- NOT once per transition (7) -- proving the font-grouped multi-pass. */
+ * the solver keeps them as distinct atoms). */
 static void frame_multi_face(const nt_font_t fam[4]) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -225,7 +231,6 @@ static void frame_multi_face(const nt_font_t fam[4]) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     for (int i = 0; i < 4; i++) {
         base.font_id[i] = fam[i];
-        nt_font_test_set_metrics(fam[i], 1000, 800, -200, 1000);
     }
 
     nt_pointer_t mouse = {0};
@@ -257,48 +262,33 @@ static void frame_multi_face(const nt_font_t fam[4]) {
 }
 
 /* (1c) FONT-GROUPED emit: a block interleaving 4 distinct faces (R B R I R BI R, 7 transitions in source
- * order) switches the font exactly 4 times -- once per DISTINCT font, NOT once per transition (7) -- because
- * emit groups atoms by font.id. Pinning 4 proves the per-transition flushes collapse. */
+ * order) records one text draw per DISTINCT font (4), not one per transition (7), because emit groups
+ * atoms by font.id and a font change is what splits a text draw. */
 static void test_emit_groups_text_by_font(void) {
-    /* font pool cap is 4 and the fixture already holds slot 1 (stub_font): reuse it as the regular face,
-     * create the other 3 distinct faces -> 4 distinct font.id within the cap. */
     nt_font_t fam[4];
-    fam[0] = s_fx.stub_font;
-    for (int i = 1; i < 4; i++) {
-        fam[i] = make_stub_font();
-    }
-    nt_text_renderer_test_reset_call_counters();
+    make_real_fonts(fam, 4);
+    nt_gfx_fake_draw_trace_reset(true);
     frame_multi_face(fam);
 
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_font_switches(), "the font switches once per DISTINCT font (4), not once per transition (7)");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "multi-face block still emits draw_n spans");
-
-    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
-    nt_gfx_end_pass();
-    for (int i = 1; i < 4; i++) {
-        nt_font_destroy(fam[i]);
-    }
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, ui_walker_fx_draw_count(text_program()), "one text draw per DISTINCT font (4), not per transition (7)");
 }
 
-/* (1d) a SINGLE-face block (one font, two color runs) switches the font exactly once (no per-run regression
- * from the grouping pass -- distinct-font count is 1). */
+/* (1d) a SINGLE-face block (one font, two color runs) records one text draw. */
 static void test_emit_single_face_one_font_switch(void) {
-    nt_text_renderer_test_reset_call_counters();
+    s_body_font = ui_walker_fixture_make_real_font(&s_fx);
+    nt_gfx_fake_draw_trace_reset(true);
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT); /* two color runs, ONE font */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_text_renderer_test_font_switches(), "single-face block switches the font once (one distinct font)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, ui_walker_fx_draw_count(text_program()), "single-face block: the two runs merge into one text draw");
 }
 
-/* Build a block whose LAST run is italic on a family with NO italic face -> NT_UI_RICH_RUN_SYNTH_ITALIC.
- * Italic is last so a MISSING reset would leave the renderer at the shear, not 0 -- making the leak guard
- * observable after the walk. */
+/* Build a block whose second run is italic on a family with NO italic face -> NT_UI_RICH_RUN_SYNTH_ITALIC. */
 static void frame_synth_italic(void) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-    base.font_id[0] = s_fx.stub_font; /* only the regular face; font_id[1..3] stay {0} -> no italic member */
+    base.font_id[0] = s_body_font; /* only the regular face; font_id[1..3] stay {0} -> no italic member */
 
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -317,33 +307,41 @@ static void frame_synth_italic(void) {
 }
 
 /* (1f) WIRING: an italic run on a family with no italic face raises NT_UI_RICH_RUN_SYNTH_ITALIC, which the
- * emit pass puts in the run's style as NT_UI_RICH_SYNTH_ITALIC_SHEAR. */
+ * emit pass puts in the run's style as a synthetic shear: exactly the 4 "lean" glyph quads lean. */
 static void test_emit_synth_italic_wires_oblique(void) {
-    nt_text_renderer_test_reset_call_counters();
+    s_body_font = ui_walker_fixture_make_real_font(&s_fx);
+    nt_gfx_fake_draw_trace_reset(true);
     frame_synth_italic();
-    TEST_ASSERT_TRUE_MESSAGE(approx(nt_text_renderer_test_max_oblique(), NT_UI_RICH_SYNTH_ITALIC_SHEAR), "SYNTH_ITALIC run feeds NT_UI_RICH_SYNTH_ITALIC_SHEAR to the renderer during emit");
+
+    uint32_t leaning = 0;
+    for (uint32_t i = 0; i < ui_walker_fx_draw_count(text_program()); i++) {
+        const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), i);
+        for (uint32_t q = 0; q < ui_walker_fx_quads(d); q++) {
+            const float lean = quad_lean(d, q);
+            TEST_ASSERT_TRUE_MESSAGE(lean > 1.0F || lean == 0.0F, "a quad is either sheared or upright");
+            leaning += (lean > 1.0F) ? 1U : 0U;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, leaning, "the synthetic-italic run's glyphs lean; the upright run's do not");
 }
 
-/* (1g) NEGATIVE: a family WITH a real italic face uses it -> no synthetic shear ever reaches the renderer. */
+/* (1g) NEGATIVE: a family WITH a real italic face uses it -> no glyph quad leans. */
 static void test_emit_real_italic_face_no_oblique(void) {
     nt_font_t fam[4];
-    fam[0] = s_fx.stub_font;
-    for (int i = 1; i < 4; i++) {
-        fam[i] = make_stub_font();
-    }
-    nt_text_renderer_test_reset_call_counters();
+    make_real_fonts(fam, 4);
+    nt_gfx_fake_draw_trace_reset(true);
     frame_multi_face(fam); /* pushes italic / bold-italic against a family that HAS those faces */
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_oblique() == 0.0F, "real italic face -> no synthetic shear reaches the renderer");
-    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
-    nt_gfx_end_pass();
-    for (int i = 1; i < 4; i++) {
-        nt_font_destroy(fam[i]);
+    const uint32_t draws = ui_walker_fx_draw_count(text_program());
+    TEST_ASSERT_TRUE(draws > 0U);
+    for (uint32_t i = 0; i < draws; i++) {
+        const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), i);
+        for (uint32_t q = 0; q < ui_walker_fx_quads(d); q++) {
+            TEST_ASSERT_TRUE_MESSAGE(quad_lean(d, q) == 0.0F, "real italic face -> no synthetic shear");
+        }
     }
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
-/* Build a block whose LAST run is <b> on a family with NO bold face -> NT_UI_RICH_RUN_SYNTH_BOLD.
- * Bold is last so a MISSING reset would leave the renderer at the synth weight, not 0. */
+/* Build a block whose second run is <b> on a family with NO bold face -> NT_UI_RICH_RUN_SYNTH_BOLD. */
 #if NT_FONT_EMBOLDEN_ENABLED
 static void frame_synth_bold(void) {
     nt_mem_scratch_reset();
@@ -351,7 +349,7 @@ static void frame_synth_bold(void) {
     s_fx.ctx->rich_session_open = false;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-    base.font_id[0] = s_fx.stub_font; /* only the regular face; font_id[1..3] stay {0} -> no bold member */
+    base.font_id[0] = s_body_font; /* only the regular face; font_id[1..3] stay {0} -> no bold member */
 
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -371,32 +369,39 @@ static void frame_synth_bold(void) {
 #endif
 
 /* WIRING: a <b> run on a family with no bold face raises NT_UI_RICH_RUN_SYNTH_BOLD, which the emit pass
- * puts in the run's style as NT_TEXT_SYNTH_BOLD_WEIGHT. */
+ * puts in the run's style as NT_TEXT_SYNTH_BOLD_WEIGHT: exactly the 4 "bold" glyphs use a grown variant. */
 #if NT_FONT_EMBOLDEN_ENABLED
 static void test_emit_synth_bold_wires_weight(void) {
-    nt_text_renderer_test_reset_call_counters();
+    s_body_font = ui_walker_fixture_make_real_font(&s_fx);
+    nt_gfx_fake_draw_trace_reset(true);
     frame_synth_bold();
-    TEST_ASSERT_TRUE_MESSAGE(approx(nt_text_renderer_test_max_weight(), NT_TEXT_SYNTH_BOLD_WEIGHT), "SYNTH_BOLD run feeds the shared weight to the renderer during emit");
+
+    uint32_t grown = 0;
+    for (uint32_t i = 0; i < ui_walker_fx_draw_count(text_program()); i++) {
+        const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), i);
+        for (uint32_t q = 0; q < ui_walker_fx_quads(d); q++) {
+            grown += (quad_glyph_x1(d, q) > 400.0F) ? 1U : 0U;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, grown, "the synthetic-bold run's glyphs are emboldened; the regular run's are not");
 }
 #endif
 
-/* NEGATIVE: a family WITH a real bold face selects it -> no synthetic weight ever reaches the renderer.
+/* NEGATIVE: a family WITH a real bold face selects it -> every glyph keeps the plain bbox (x1 400).
  * frame_multi_face pushes <b> against a family whose font_id[1] IS a distinct bold face. */
 static void test_emit_real_bold_face_no_weight(void) {
     nt_font_t fam[4];
-    fam[0] = s_fx.stub_font;
-    for (int i = 1; i < 4; i++) {
-        fam[i] = make_stub_font();
-    }
-    nt_text_renderer_test_reset_call_counters();
+    make_real_fonts(fam, 4);
+    nt_gfx_fake_draw_trace_reset(true);
     frame_multi_face(fam); /* pushes bold / italic / bold-italic against a family that HAS those faces */
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_weight() == 0.0F, "real bold face -> no synthetic weight reaches the renderer");
-    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
-    nt_gfx_end_pass();
-    for (int i = 1; i < 4; i++) {
-        nt_font_destroy(fam[i]);
+    const uint32_t draws = ui_walker_fx_draw_count(text_program());
+    TEST_ASSERT_TRUE(draws > 0U);
+    for (uint32_t i = 0; i < draws; i++) {
+        const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), i);
+        for (uint32_t q = 0; q < ui_walker_fx_quads(d); q++) {
+            TEST_ASSERT_TRUE_MESSAGE(quad_glyph_x1(d, q) == 400.0F, "real bold face -> no synthetic weight");
+        }
     }
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* Build a block with SIX distinct font families on one band (one regular-face text run each), more than
@@ -408,9 +413,6 @@ static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = fam[0];
-    for (int i = 0; i < 6; i++) {
-        nt_font_test_set_metrics(fam[i], 1000, 800, -200, 1000);
-    }
 
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -431,16 +433,13 @@ static void frame_six_distinct_fonts(const nt_font_t fam[6]) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (1e) REGRESSION: a band with SIX distinct fonts emits ALL six runs' text -- one font switch per distinct
- * font, NO cap, NO drop. Pin font switches==6 AND span_count==TEXT-atom count (every TEXT atom emits a span;
+/* (1e) REGRESSION: a band with SIX distinct fonts emits ALL six runs' text -- one text draw per distinct
+ * font, NO cap, NO drop. Pin 6 text draws AND span_count==TEXT-atom count (every TEXT atom emits a span;
  * none dropped past a font limit). */
 static void test_emit_more_than_four_fonts_no_drop(void) {
     nt_font_t fam[6];
-    fam[0] = s_fx.stub_font;
-    for (int i = 1; i < 6; i++) {
-        fam[i] = make_stub_font();
-    }
-    nt_text_renderer_test_reset_call_counters();
+    make_real_fonts(fam, 6);
+    nt_gfx_fake_draw_trace_reset(true);
     frame_six_distinct_fonts(fam);
 
     /* Count the band's TEXT atoms: every one must produce a span (no drop). */
@@ -451,15 +450,8 @@ static void test_emit_more_than_four_fonts_no_drop(void) {
             text_atoms++;
         }
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(6U, nt_text_renderer_test_font_switches(), "six distinct fonts -> six font switches (no cap)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(6U, ui_walker_fx_draw_count(text_program()), "six distinct fonts -> six text draws (no cap)");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(text_atoms, nt_ui_rich_test_emit_span_count(s_fx.ctx), "every TEXT atom emits a span -> no font dropped past 4");
-
-    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
-    nt_gfx_end_pass();
-    for (int i = 1; i < 6; i++) {
-        nt_font_destroy(fam[i]);
-    }
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 /* ===== Inline IMAGE emit ===== */
@@ -2219,7 +2211,7 @@ static void test_later_band_text_reselects_block_text_material(void) {
     s_fx.ctx->rich_session_open = false;
 
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-    base.font_id[0] = s_fx.stub_font;
+    base.font_id[0] = ui_walker_fixture_make_real_font(&s_fx);
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("rich_tm_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
@@ -2235,13 +2227,13 @@ static void test_later_band_text_reselects_block_text_material(void) {
     }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_gfx_fake_draw_trace_reset(true);
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.text_material.id, nt_text_renderer_test_material_id(), "band 1 text is drawn with the block's text material, not the object's");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, ui_walker_fx_draw_count(text_program()), "band 1 text is drawn with the block's text material");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, ui_walker_fx_draw_count(nt_material_get_info(s_fx.text_material_b)->program), "not with the object's");
 }
 
-/* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on
- * layer 1. The font-group gather is PER-LAYER, so the font switches (distinct fonts in layer 0 = 2) +
- * (distinct fonts in layer 1 = 2) = 4 -- proving the gather scopes to the band, not the whole block. */
+/* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on layer 1. */
 static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -2250,7 +2242,6 @@ static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     for (int i = 0; i < 4; i++) {
         base.font_id[i] = fam[i];
-        nt_font_test_set_metrics(fam[i], 1000, 800, -200, 1000);
     }
 
     nt_pointer_t mouse = {0};
@@ -2281,28 +2272,47 @@ static void frame_multi_face_two_layers(const nt_font_t fam[4]) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (L3) font-group gather is per-band, not per-block: {R,B} on layer 0 + {I,BI} on layer 1
- * still costs 4 font switches (the layer split does not collapse the per-band grouping). */
+/* (L3) font-group gather is per-band: {R,B} on layer 0 + {I,BI} on layer 1 records 4 text draws. */
 static void test_font_group_per_layer(void) {
     nt_font_t fam[4];
-    fam[0] = s_fx.stub_font;   /* R */
-    fam[1] = make_stub_font(); /* B */
-    fam[2] = make_stub_font(); /* I */
-    fam[3] = make_stub_font(); /* BI */
-
-    nt_text_renderer_test_reset_call_counters();
+    make_real_fonts(fam, 4);
+    nt_gfx_fake_draw_trace_reset(true);
     frame_multi_face_two_layers(fam);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, ui_walker_fx_draw_count(text_program()), "2 fonts in band 0 + 2 in band 1 = 4 text draws");
+}
 
-    /* Per-band gather: layer 0 = {R,B} (2) + layer 1 = {I,BI} (2) = 4 font switches. */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_text_renderer_test_font_switches(), "font gather is per-layer: 2 fonts in band 0 + 2 in band 1 = 4 font switches");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "layered multi-face block still emits draw_n spans");
+/* (L3b) the gather does not reach across bands: layer 0 {R,B} then layer 1 {R} records R, B, R -- a
+ * whole-block gather would pull both R runs together into 2 draws. */
+static void test_font_group_does_not_cross_layers(void) {
+    nt_font_t fam[2];
+    make_real_fonts(fam, 2);
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = fam[0];
+    base.font_id[1] = fam[1];
 
-    /* Texture destruction is pass-forbidden; the fixture keeps its pass open. */
-    nt_gfx_end_pass();
-    for (int i = 1; i < 4; i++) {
-        nt_font_destroy(fam[i]);
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_xl_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_layer(s_fx.ctx, 0U);
+        nt_ui_rich_text_n(s_fx.ctx, "r ", 2);
+        nt_ui_rich_push_bold(s_fx.ctx);
+        nt_ui_rich_text_n(s_fx.ctx, "b ", 2);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_push_layer(s_fx.ctx, 1U);
+        nt_ui_rich_text_n(s_fx.ctx, "r", 1);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_xl").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
     }
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    walk_traced(&target);
+    TEST_ASSERT_EQUAL_UINT32(3U, ui_walker_fx_draw_count(text_program()));
 }
 
 /* Build two inline images on DISTINCT explicit layers: a red image on layer 0 (lower band) and a green
@@ -2587,13 +2597,13 @@ static void test_markup_effect_capacity_keeps_prior_params_and_balances_close(vo
 }
 
 static void test_nonfinite_base_outline_emits_plain_text(void) {
+    const nt_font_t font = ui_walker_fixture_make_real_font(&s_fx);
     const float widths[] = {INFINITY, NAN};
     for (uint32_t i = 0; i < 2U; i++) {
         nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
-        base.font_id[0] = s_fx.stub_font;
+        base.font_id[0] = font;
         base.outline_w = widths[i];
         base.outline_color_abgr = 0xFFFFFFFFU;
-        nt_text_renderer_test_reset_call_counters();
         nt_pointer_t mouse = {0};
         nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
         CLAY({.id = CLAY_ID("nonfinite_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
@@ -2604,9 +2614,8 @@ static void test_nonfinite_base_outline_emits_plain_text(void) {
         }
         nt_ui_end(s_fx.ctx);
         nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-        nt_ui_walk(s_fx.ctx, &target);
-        TEST_ASSERT_TRUE(nt_text_renderer_test_draw_n_calls() > 0U);
-        TEST_ASSERT_TRUE(nt_text_renderer_test_max_outline_width() == 0.0F);
+        walk_traced(&target);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, ui_walker_fx_quads(ui_walker_fx_draw_at(text_program(), 0)), "one fill quad, no outline pass");
     }
 }
 
@@ -2634,6 +2643,7 @@ int main(void) {
     RUN_TEST(test_default_layers_by_kind);
     RUN_TEST(test_layer_override);
     RUN_TEST(test_font_group_per_layer);
+    RUN_TEST(test_font_group_does_not_cross_layers);
     RUN_TEST(test_layer_drain_orders_ascending);
     RUN_TEST(test_default_mixed_block_paints_bands_in_order);
     RUN_TEST(test_mixed_auto_and_explicit_layers);

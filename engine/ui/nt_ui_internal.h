@@ -508,6 +508,9 @@ struct nt_ui_label_deco {
  * underline/strike. */
 void nt_ui_label_deco_style(const nt_ui_label_deco_t *d, float opacity, nt_text_style_t *style);
 
+/* The glyph depth bias pairs with the context's text material; any other text material draws without it. */
+static inline float nt_ui_internal_text_bias(const nt_ui_context_t *ctx, nt_material_t text_material) { return (text_material.id == ctx->text_material.id) ? ctx->text_glyph_depth_bias : 0.0F; }
+
 /* Flat row borrowing id_string from Clay (valid through next nt_ui_begin). */
 typedef struct nt_ui_inspector_tree_row {
     const char *id_string;

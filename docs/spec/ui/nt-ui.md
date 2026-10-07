@@ -50,8 +50,11 @@ selection it finds is whatever an earlier command left. The walk's draw count (`
 counts the draws the walk added, so a walk whose first sprite or text draw merges
 into the caller's preceding draw in the same pass adds nothing for it.
 `nt_ui_set_text_material(ctx, material, glyph_depth_bias)` pairs the walker's text
-material with its glyph depth bias: the walker's text uses that bias, so a
-depth-writing text material gets its bias here.
+material with its glyph depth bias: text drawn with that material uses the bias, so
+a depth-writing text material gets its bias here. Text drawn with any other material
+(a rich block's own `text_material`, the inspector and hit-zone overlay materials)
+uses none: the bias accumulates per glyph in clip space and would shift text it was
+not chosen for.
 The supplied frame contains the composed world matrix, opacity, context and
 layout-space Clay command.
 

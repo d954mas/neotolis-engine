@@ -10,7 +10,7 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "memory/nt_mem_scratch.h"
-#include "renderers/nt_text_renderer.h" /* sticky decoration setters */
+#include "renderers/nt_text_renderer.h"
 #include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 
@@ -59,9 +59,9 @@ void nt_ui_label_deco_style(const nt_ui_label_deco_t *d, float opacity, nt_text_
         style->outline_w = d->outline_w;
         style->outline_color = nt_color_scale_alpha(d->outline_color, opacity);
     }
-    if ((d->shadow_color >> 24) != 0U) { /* alpha > 0 -> active */
-        style->shadow_dx = isfinite(d->shadow_dx) ? d->shadow_dx : 0.0F;
-        style->shadow_dy = isfinite(d->shadow_dy) ? d->shadow_dy : 0.0F;
+    if ((d->shadow_color >> 24) != 0U && isfinite(d->shadow_dx) && isfinite(d->shadow_dy)) { /* alpha > 0 -> active */
+        style->shadow_dx = d->shadow_dx;
+        style->shadow_dy = d->shadow_dy;
         style->shadow_color = nt_color_scale_alpha(d->shadow_color, opacity);
     }
     style->underline = (d->variant & NT_UI_LABEL_VARIANT_UNDERLINE) != 0U;

@@ -316,5 +316,5 @@ proposal is not misled.
 | D-67-26 | game effect callback looked up in an extensible tagset catalog | `nt_ui_rich_fx_fn` interned into a per-block table at build/solve and addressed by `effect_id = slot + 1` — the tagset is game-owned and may be absent during the walk |
 | D-67-27 | per-effect tuning is compile-time constants, never tag params | catalogue constants are defaults; stock effects take `nt_ui_rich_fx_params_t` via `push_effect_ex` or `<fx=name amp=.. speed=..>` |
 | D-67-28 | `draw_fn(user_data, x, y, w, h)` | `draw_fn(..., color, world_mat4)` so a game-drawn object lands under the same transform as TEXT/IMAGE |
-| D-67-29 | per-atom z-layers as a draw-call saving | layers are an explicit flush boundary for overlap order (one flush per band); DC wins stay within a band |
+| D-67-29 | per-atom z-layers as a draw-call saving | layers order overlap by call order; draws split only where state changes, and DC wins stay within a band |
 | D-67-30 | `font_size` as a call parameter | `font_size` is a `nt_ui_rich_style_t` field, mirroring `nt_ui_label_style_t` |

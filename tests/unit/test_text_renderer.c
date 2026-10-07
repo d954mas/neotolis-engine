@@ -1,6 +1,7 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <math.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -508,10 +509,15 @@ void test_text_material_with_textures_asserts_at_set_material(void) {
 /* A zero frame storage budget would make every text draw silently vanish. */
 void test_zero_frame_capacity_asserts_at_set_material(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_opaque());
-    const uint32_t capacity = g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].capacity;
-    g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].capacity = 0;
-    NT_TEST_EXPECT_ASSERT(nt_text_renderer_set_material(material));
-    g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].capacity = capacity;
+    const nt_gfx_frame_stream_t kinds[] = {NT_GFX_FRAME_VERTEX, NT_GFX_FRAME_INDEX};
+    for (uint32_t i = 0; i < 2U; i++) {
+        const uint32_t capacity = g_nt_gfx_frame_storage[kinds[i]].capacity;
+        g_nt_gfx_frame_storage[kinds[i]].capacity = 0;
+        nt_test_assert_last_expr[0] = 0;
+        NT_TEST_EXPECT_ASSERT(nt_text_renderer_set_material(material));
+        g_nt_gfx_frame_storage[kinds[i]].capacity = capacity;
+        TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame_capacity"));
+    }
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
@@ -587,6 +593,7 @@ void test_equal_draws_merge_and_a_font_change_splits(void) {
     TEST_ASSERT_EQUAL_UINT32(6U, nt_gfx_fake_draw_trace_at(1).num_indices);
     TEST_ASSERT_EQUAL_UINT32(6U, nt_gfx_fake_draw_trace_at(2).num_indices);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_bind_pipeline_count()); /* the font switch binds no pipeline */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_bind_vertex_input_count());
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
 
     nt_gfx_end_pass();
@@ -614,6 +621,13 @@ void test_material_params_record_once_per_change(void) {
     draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(3U, nt_gfx_fake_uniform_vec4_count());
+
+    /* Unchanged params on the next frame write nothing. */
+    next_frame();
+    nt_gfx_fake_reset();
+    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_gfx_frame_execute();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_uniform_vec4_count());
 
     /* A param changed between frames reaches the next frame's draw. */
     const float green[4] = {0, 1, 0, 1};
@@ -1255,8 +1269,8 @@ void test_underline_quad_per_line(void) {
     reset_style();
 }
 
-/* After reset_decoration a draw emits fill-only vertices (no pass/quad leak). */
-void test_reset_decoration_fill_only(void) {
+/* Decoration is per call: a plain draw after a decorated one in the same frame adds one fill quad. */
+void test_plain_draw_after_decorated_draw_is_fill_only(void) {
 #if NT_FONT_EMBOLDEN_ENABLED
     s_style.outline_w = 0.05F;
     s_style.outline_color = s_black;
@@ -1265,11 +1279,24 @@ void test_reset_decoration_fill_only(void) {
     s_style.shadow_dy = 2.0F;
     s_style.shadow_color = s_black;
     s_style.underline = true;
+    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    const uint32_t decorated = text_quad_count();
     reset_style();
 
     draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(4U, text_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(decorated + 1U, text_quad_count());
 }
+
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* A NaN offset would become garbage geometry, so the style is rejected at draw. */
+void test_nonfinite_shadow_offset_asserts_at_draw(void) {
+    s_style.shadow_dx = NAN;
+    s_style.shadow_color = s_black;
+    NT_TEST_EXPECT_ASSERT(draw_text("A", 32.0F, s_white, 0.0F, 0.0F));
+    reset_style();
+    TEST_ASSERT_EQUAL_UINT32(0U, text_vertex_count());
+}
+#endif
 
 /* ---- main ---- */
 
@@ -1354,7 +1381,10 @@ int main(void) {
     RUN_TEST(test_passes_grouped_not_interleaved);
     RUN_TEST(test_underline_one_quad_per_segment);
     RUN_TEST(test_underline_quad_per_line);
-    RUN_TEST(test_reset_decoration_fill_only);
+    RUN_TEST(test_plain_draw_after_decorated_draw_is_fill_only);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_nonfinite_shadow_offset_asserts_at_draw);
+#endif
     RUN_TEST(bench_draw_short_warm);
     RUN_TEST(bench_draw_mixed_ui);
     return UNITY_END();

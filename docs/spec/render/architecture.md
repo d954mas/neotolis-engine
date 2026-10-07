@@ -365,7 +365,8 @@ Cache entries are weak: a hit validates the handle, and an entry whose
 vertex input died (context loss) is recreated in place over the new frame
 buffers, so repeated losses cannot grow the cache and no restore call is needed. A miss creates the vertex input and caches it only on
 success; recoverable creation failures leave the cache unchanged so the next
-lookup retries.
+lookup retries. The text renderer has one fixed layout and keeps a single vertex
+input under the same rules; `nt_text_renderer_shutdown` destroys it.
 
 ### Color
 

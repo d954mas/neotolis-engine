@@ -65,6 +65,7 @@
  * BUNNY_MAX is bounded by uint16_t entity/component storage. Keep spare slots
  * below 65535 for non-bunny demo entities and future overlays. */
 #define BUNNY_MAX 60000
+#define BUNNY_OVERLAY_BYTES 768U /* HUD text buffer; one glyph per byte at most */
 
 #define BUNNY_INITIAL_COUNT 500
 #define BUNNY_CLICK_SPAWN_COUNT 500
@@ -470,7 +471,7 @@ static void frame(void) {
         glm_translate(overlay_model, (vec3){10.0F, h - overlay_size - 4.0F, 0.0F});
         const uint32_t white = NT_RGBA8(255, 255, 255, 255);
 
-        char overlay[768];
+        char overlay[BUNNY_OVERLAY_BYTES];
         uint32_t written = nt_debug_overlay_format_lines(overlay, sizeof(overlay));
         if (written < sizeof(overlay)) {
             (void)snprintf(overlay + written, sizeof(overlay) - written,
@@ -568,9 +569,9 @@ int main(int argc, char **argv) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     /* Every bunny is one rect quad: 4 vertices of 20 B and 6 uint32 indices; the HUD text adds
-     * 208 B of vertices and 24 B of indices per glyph. */
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (BUNNY_MAX * 4U * 20U) + (64U * 1024U);
-    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = (BUNNY_MAX * 6U * 4U) + (8U * 1024U);
+     * 208 B of vertices and 24 B of indices per glyph of its overlay buffer. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (BUNNY_MAX * 4U * 20U) + (BUNNY_OVERLAY_BYTES * 208U);
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = (BUNNY_MAX * 6U * 4U) + (BUNNY_OVERLAY_BYTES * 24U);
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);

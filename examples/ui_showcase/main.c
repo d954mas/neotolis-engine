@@ -2294,7 +2294,7 @@ static nt_ui_rich_object_measure_t rich_obj_oblique_measure(void *user_data) {
     return (nt_ui_rich_object_measure_t){.width = RICH_OBJ_SWEEP_W, .height = RICH_OBJ_SWEEP_H, .ascent = 20.0F};
 }
 /* LAYOUT(Y-down) pen -> world text model with the text Y-up<->layout Y-down flip on col1 (mirrors the
- * engine's rich_span_model). The lean is added by set_oblique, NOT baked here. */
+ * engine's rich_span_model). The lean is the style's oblique, NOT baked here. */
 static void rich_obj_text_model(const float world[16], float ox, float oy, float out[16]) {
     for (int r = 0; r < 4; ++r) {
         out[r] = world[r];
@@ -2314,6 +2314,7 @@ static void rich_obj_oblique_draw(void *user_data, float x, float y, float w, fl
     const float size = 18.0F;
     const float line_h = 26.0F;
     const float label_col = 104.0F;                                                 /* upright label column width (px) */
+    nt_text_renderer_set_material(s_text_material);                                 /* a draw_fn selects its own text material */
     nt_text_style_t style = {.font = s_rich_font[0], .size = size, .color = color}; /* regular face -> the slant is purely synthetic */
     for (int i = 0; i < 4; ++i) {
         char label[16];

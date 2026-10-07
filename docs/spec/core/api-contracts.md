@@ -203,7 +203,8 @@ compares the program as well as the handle; draws already recorded keep their
 pipeline. Sprite `draw_list` resolves each run's material itself. The text
 renderer writes material params only when `{program, material, params}` differ
 from its last write, so nothing else may write the uniforms of a program that
-text materials use.
+text materials use. A program is not destroyed between `set_material` and the
+frame's draws through it: the draw would bind a dead pipeline and assert.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before

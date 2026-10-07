@@ -1,13 +1,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "clay.h"
 #include "font/nt_font.h"
 #include "graphics/nt_gfx.h"
-#include "nt_font_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -27,20 +25,13 @@ static ui_walker_fixture_t s_fx;
 #define MAX_TEST_CMDS 8
 static Clay_RenderCommand s_test_cmds[MAX_TEST_CMDS];
 
-static uint8_t *s_font_blob;
-
 void setUp(void) {
     nt_test_assert_install();
     memset(s_test_cmds, 0, sizeof s_test_cmds);
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
-/* nt_font_shutdown in the fixture destroys the real font outside the pass; its blob outlives it. */
-void tearDown(void) {
-    ui_walker_fixture_shutdown(&s_fx);
-    free(s_font_blob);
-    s_font_blob = NULL;
-}
+void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static void inject_frozen_cmds(int32_t count) { ui_walker_fixture_inject_cmds(&s_fx, s_test_cmds, count, MAX_TEST_CMDS); }
 
@@ -63,43 +54,8 @@ static void make_text(int idx, float x) {
     c->renderData.text.fontSize = 14;
 }
 
-/* One triangle glyph 'X', so TEXT records a real draw (the fixture's stub font draws nothing). */
-static void bind_real_font(void) {
-    const uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
-    /* contour_count 1, point_count 3, all on-curve, first point (0,0), deltas (50,0) (-50,50). */
-    static const uint8_t contour[14] = {1, 0, 3, 0, 0x07, 0x00, 0, 0, 0, 0, 50, 0, (uint8_t)(int8_t)-50, 50};
-    const uint32_t total_size = header_size + (uint32_t)sizeof(NtFontGlyphEntry) + (uint32_t)sizeof contour;
-    s_font_blob = (uint8_t *)calloc(total_size, 1);
-    TEST_ASSERT_NOT_NULL(s_font_blob);
-
-    NtFontAssetHeader hdr;
-    memset(&hdr, 0, sizeof hdr);
-    hdr.magic = NT_FONT_MAGIC;
-    hdr.version = NT_FONT_VERSION;
-    hdr.glyph_count = 1;
-    hdr.units_per_em = 1000;
-    hdr.ascent = 800;
-    hdr.descent = -200;
-    memcpy(s_font_blob, &hdr, sizeof hdr);
-
-    NtFontGlyphEntry entry;
-    memset(&entry, 0, sizeof entry);
-    entry.codepoint = 'X';
-    entry.data_offset = header_size + (uint32_t)sizeof(NtFontGlyphEntry);
-    entry.advance = 500;
-    entry.bbox_y0 = -200;
-    entry.bbox_x1 = 400;
-    entry.bbox_y1 = 800;
-    entry.curve_count = 3;
-    memcpy(s_font_blob + header_size, &entry, sizeof entry);
-    memcpy(s_font_blob + entry.data_offset, contour, sizeof contour);
-
-    const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(s_font_blob, total_size)));
-    nt_resource_step();
-    nt_font_step();
-    nt_ui_set_font(s_fx.ctx, 0U, font);
-}
+/* The fixture's stub font draws nothing; TEXT needs a font with glyphs. */
+static void bind_real_font(void) { nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx)); }
 
 static uint32_t material_program_id(nt_material_t mat) { return nt_material_get_info(mat)->program.id; }
 
@@ -195,6 +151,41 @@ static void test_scissor_change_splits_text_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(draws_before + 2U, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
+/* The same two texts without a clip change merge into one draw: the split above is the scissor's. */
+static void test_compatible_texts_merge(void) {
+    bind_real_font();
+    make_text(0, 0);
+    make_text(1, 20);
+    inject_frozen_cmds(2);
+
+    nt_gfx_fake_draw_trace_reset(true);
+    walk();
+
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(2U, ui_walker_fx_quads(nt_gfx_fake_draw_trace_at(0)));
+}
+
+static const char s_text_two[] = "XY";
+
+/* The ctx text depth bias reaches the renderer per glyph: the second glyph sits one bias step nearer. */
+static void test_text_material_depth_bias_reaches_glyphs(void) {
+    bind_real_font();
+    nt_ui_set_text_material(s_fx.ctx, s_fx.text_material, 0.25F);
+    make_text(0, 0);
+    s_test_cmds[0].renderData.text.stringContents = (Clay_StringSlice){.length = 2, .chars = s_text_two, .baseChars = s_text_two};
+    inject_frozen_cmds(1);
+
+    nt_gfx_fake_draw_trace_reset(true);
+    walk();
+
+    const nt_gfx_fake_draw_t d = nt_gfx_fake_draw_trace_at(0);
+    TEST_ASSERT_EQUAL_UINT32(2U, ui_walker_fx_quads(d));
+    for (uint32_t corner = 0; corner < 4U; corner++) {
+        TEST_ASSERT_TRUE(ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 0, corner), UI_WALKER_FX_TEXT_DEPTH_BIAS) == 0.0F);
+        TEST_ASSERT_TRUE(ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 1, corner), UI_WALKER_FX_TEXT_DEPTH_BIAS) == 0.25F);
+    }
+}
+
 /* The same two rects without a clip change merge into one draw: the split above is the scissor's. */
 static void test_compatible_sprites_merge(void) {
     make_rect(0, 0);
@@ -236,6 +227,8 @@ int main(void) {
     RUN_TEST(test_sprite_text_sprite_records_in_command_order);
     RUN_TEST(test_scissor_change_splits_sprite_draws);
     RUN_TEST(test_scissor_change_splits_text_draws);
+    RUN_TEST(test_compatible_texts_merge);
+    RUN_TEST(test_text_material_depth_bias_reaches_glyphs);
     RUN_TEST(test_compatible_sprites_merge);
     RUN_TEST(test_one_material_two_passes_rebinds);
     return UNITY_END();

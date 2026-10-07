@@ -7,6 +7,7 @@
 
 #include "font/nt_font.h"
 #include "material/nt_material.h"
+#include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/ui_atlas.h"
 #include "test_helpers/ui_test_arena.h"
 #include "ui/nt_ui.h"
@@ -38,13 +39,32 @@ typedef struct {
      * silently skips at the units_per_em==0 guard. Lets walker tests
      * traverse TEXT commands without setting up real font blob/atlas. */
     nt_font_t stub_font;
+    uint8_t *real_font_blob; /* shared by every ui_walker_fixture_make_real_font font; freed at shutdown */
+    uint32_t real_font_blob_size;
 } ui_walker_fixture_t;
+
+/* Text vertex layout in frame storage (nt_text_renderer's vertex). */
+#define UI_WALKER_FX_TEXT_VERTEX_BYTES 52U
+#define UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1 36U /* glyph_bounds[2] */
+#define UI_WALKER_FX_TEXT_DEPTH_BIAS 48U
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind);
 void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx);
 /* Installs a hand-built command stream as the frozen frame. Runs an empty frame first so the stream's
  * nt_layout_index 0 (zeroed) resolves to the baked root: identity transform, band 0. */
 void ui_walker_fixture_inject_cmds(ui_walker_fixture_t *fx, Clay_RenderCommand *cmds, int32_t count, int32_t capacity);
+
+/* A new font that really draws: one triangle glyph (bbox 0..400 x -200..800, advance 500) for each of ASCII
+ * 33..126, an advance-only space; units_per_em 1000, ascent 800, descent -200. */
+nt_font_t ui_walker_fixture_make_real_font(ui_walker_fixture_t *fx);
+
+/* Fake-backend draw trace probes (arm it with nt_gfx_fake_draw_trace_reset). */
+uint32_t ui_walker_fx_draw_count(nt_program_t program);
+nt_gfx_fake_draw_t ui_walker_fx_draw_at(nt_program_t program, uint32_t n);
+/* Bytes of corner `corner` (0 BL, 1 BR, 2 TR, 3 TL) of quad `quad` of an indexed text draw. */
+const uint8_t *ui_walker_fx_text_vertex(nt_gfx_fake_draw_t draw, uint32_t quad, uint32_t corner);
+float ui_walker_fx_vertex_float(const uint8_t *vertex, uint32_t byte_offset);
+static inline uint32_t ui_walker_fx_quads(nt_gfx_fake_draw_t draw) { return draw.num_indices / 6U; }
 
 #ifdef __cplusplus
 }
