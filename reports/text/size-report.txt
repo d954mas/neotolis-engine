@@ -1,61 +1,61 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: 62bbe69
+# Commit: ea3d3ee
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 227 B
+Type                 221 B
 Import               584 B
-Function             120 B
+Function             116 B
 Table                  5 B
 Memory                 7 B
-Global                 9 B
+Global                 8 B
 Export                89 B
 Elem                  34 B
-Code               84164 B
-Data                8647 B
-Custom              4486 B
+Code               82666 B
+Data                8559 B
+Custom              4385 B
 ---------------- ----------
-TOTAL              98372 B
+TOTAL              96674 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-17145 B   frame
- 5816 B   main
- 5041 B   nt_gfx_frame_execute
- 4502 B   nt_text_renderer_flush
- 4083 B   upload_glyph
+20550 B   frame
+ 5588 B   main
+ 5567 B   nt_text_renderer_draw_n
+ 4813 B   nt_gfx_frame_execute
+ 4050 B   upload_glyph
+ 3044 B   nt_gfx_make_texture
  3002 B   fmt_fp
- 2906 B   nt_gfx_make_texture
- 2624 B   nt_http_request_ex
- 2426 B   printf_core
- 1900 B   find_or_create_pipeline
+ 2619 B   nt_http_request_ex
+ 2425 B   printf_core
  1843 B   __rem_pio2f
- 1664 B   nt_font_lookup_glyph_offset
- 1531 B   emit_glyph_pass
- 1459 B   nt_gfx_make_vertex_input
- 1190 B   nt_text_renderer_draw
+ 1662 B   nt_font_lookup_glyph_offset
+ 1456 B   emit_glyph_pass
  1099 B   nt_hash32_str
  1024 B   nt_input_web_on_blur
  1009 B   decode_contours
-  877 B   emit_decoration_quad
-  844 B   nt_gfx_gl_cache_ground_state
   809 B   nt_input_web_on_pointer_move
+  778 B   nt_gfx_gl_cache_ground_state
   769 B   nt_input_web_on_pointer_down
+  765 B   emit_decoration_quad
   690 B   pop_arg_long_double
-  687 B   nt_gfx_make_buffer
-  557 B   nt_gfx_activate_shader
-  540 B   claim_more_memory
+  680 B   nt_gfx_make_buffer
+  581 B   nt_gfx_activate_shader
+  533 B   claim_more_memory
   519 B   __memcpy
-  504 B   emmalloc_memalign
-  488 B   nt_gfx_buffer_update
+  492 B   emmalloc_memalign
   483 B   find_pack
+  457 B   nt_gfx_buffer_update
+  436 B   nt_log_write
+  436 B   vsnprintf
+  434 B   nt_resource_request
 
-Total functions: 119
-Total code size: 83967 B
+Total functions: 115
+Total code size: 82478 B
 
 ## Built Engine Archives
 
@@ -73,11 +73,11 @@ libnt_clipboard.a           6906 B
 libnt_clipboard_stub.a       840 B
 libnt_comp_storage.a        2008 B
 libnt_core.a                2180 B
-libnt_debug_overlay.a       2204 B
+libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
-libnt_font.a               94198 B
-libnt_gfx.a                94814 B
+libnt_font.a               94204 B
+libnt_gfx.a                95654 B
 libnt_gfx_stub.a            6172 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -92,39 +92,39 @@ libnt_material.a            4486 B
 libnt_material_comp.a       2104 B
 libnt_mem_scratch.a         2016 B
 libnt_mesh_comp.a           2028 B
-libnt_mesh_renderer.a       9308 B
+libnt_mesh_renderer.a       9352 B
 libnt_meshwire.a            3326 B
 libnt_meshwire_encoder.a    3540 B
 libnt_meshwire_stub.a        722 B
 libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
-libnt_postfx_blur.a         8676 B
+libnt_postfx_blur.a         7720 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
 libnt_shape_renderer.a   1310094 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
-libnt_skeletal_gpu.a        2950 B
+libnt_skeletal_gpu.a        2622 B
 libnt_skin_comp.a           2044 B
-libnt_skinned_mesh_renderer.a    9820 B
+libnt_skinned_mesh_renderer.a    9866 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8926 B
-libnt_sprite_renderer.a    18996 B
-libnt_text_renderer.a     915440 B
+libnt_sprite_renderer.a    19018 B
+libnt_text_renderer.a      10030 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                350958 B
-libnt_ui_rich.a            39432 B
+libnt_ui.a                350464 B
+libnt_ui_rich.a            39054 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1324 B
 libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         3948206 B
+TOTAL (archives)         3041612 B
 
 ## Data Segments Summary
 
 Segments: 22
-Total data size: 8493 B
+Total data size: 8405 B
