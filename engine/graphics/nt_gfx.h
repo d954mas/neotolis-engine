@@ -342,7 +342,7 @@ typedef struct {
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
-    uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 256 KiB; allocated once at init */
+    uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
     /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: 0 (disabled);
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
@@ -824,7 +824,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_meshes = 128,
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
-        .stream_capacity = 256U * 1024U,
+        .stream_capacity = 32U * 1024U, /* whole-frame peaks: sponza 8.9 KB, ui_showcase 2.3 KB */
         .depth = true,
         .premultiplied_alpha = true,
     };

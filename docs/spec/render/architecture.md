@@ -108,8 +108,9 @@ context records nothing but still opens the pass. The check is one compare per
 destroy; draws pay nothing.
 
 `nt_gfx_desc_t.stream_capacity` is the byte budget of the draw-phase commands of
-one frame, allocated once at init; `nt_gfx_desc_defaults()` sets 256 KiB, and
-init asserts at least 4 bytes. The stream never grows: an overflow logs the
+one frame, allocated once at init; `nt_gfx_desc_defaults()` sets 32 KiB (twice
+the largest measured frame, Sponza at 8.9 KB; a mesh run records 60-100 bytes),
+and init asserts at least 4 bytes. The stream never grows: an overflow logs the
 needed and free bytes and stops the program, with assertions OFF too, because
 the capacity is the game's budget. `nt_gfx_counters_t.stream_bytes` reports the
 bytes the frame recorded, to size the capacity from a real scene.
