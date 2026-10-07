@@ -492,12 +492,21 @@ void setUp(void) {
     setup_with_gfx_desc(&desc);
 }
 
-/* Closes the pass and the frame and opens the next ones. */
-static void next_frame(void) {
+static void close_frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+}
+
+static void open_frame(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
+/* Closes the pass and the frame and opens the next ones; the fake observes a frame once
+ * nt_gfx_end_frame has executed it. */
+static void next_frame(void) {
+    close_frame();
+    open_frame();
 }
 
 static uint32_t recorded_draws(void) { return nt_gfx_draw_calls(&g_nt_gfx.counters); }
@@ -512,8 +521,9 @@ static uint32_t draw_list_draws(const nt_render_item_t *items, uint32_t count) {
 }
 
 void tearDown(void) {
-    nt_sprite_renderer_shutdown();
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_sprite_renderer_shutdown();
 
     nt_material_shutdown();
     nt_sprite_comp_shutdown();
@@ -652,6 +662,7 @@ void test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelin
 
     nt_gfx_fake_draw_trace_reset(true);
     nt_sprite_renderer_draw_list(items, 2);
+    next_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
@@ -666,7 +677,9 @@ void test_sprite_renderer_set_material_survives_a_destroyed_program(void) {
     nt_material_t mat = create_test_material();
     const nt_program_t dead = nt_material_get_info(mat)->program;
 
-    nt_gfx_destroy_program(dead);         /* game destroys its program */
+    close_frame();
+    nt_gfx_destroy_program(dead); /* game destroys its program */
+    open_frame();
     nt_sprite_renderer_set_material(mat); /* material still names it */
     const uint32_t draws_before = recorded_draws();
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
@@ -690,6 +703,7 @@ void test_sprite_renderer_forwards_material_blend_state(void) {
     nt_render_item_t item = {.entity = entity.id, .batch_key = sprite_batch_key(entity, mat)};
 
     nt_sprite_renderer_draw_list(&item, 1);
+    next_frame();
 
     nt_blend_state_t actual = nt_gfx_fake_last_pipeline_blend();
     TEST_ASSERT_EQUAL_MEMORY(&blend, &actual, sizeof(blend));
@@ -741,6 +755,7 @@ void test_sprite_renderer_same_material_two_pages_state(void) {
 
     nt_gfx_fake_reset();
     TEST_ASSERT_EQUAL_UINT32(2, draw_list_draws(items, 2));
+    next_frame();
     /* Two pages => two texture binds on the program's u_texture unit; no sampler int. */
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
@@ -785,6 +800,7 @@ void test_sprite_renderer_keys_follow_unloaded_placeholder_and_replaced_pages(vo
     TEST_ASSERT_EQUAL_HEX32(items[0].batch_key, items[1].batch_key);
     nt_gfx_fake_reset();
     TEST_ASSERT_EQUAL_UINT32(1, draw_list_draws(items, 2));
+    next_frame();
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(placeholder), nt_gfx_fake_bound_texture_at(0));
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(page_pack, (nt_hash64_t){FIXTURE_PAGE0_RID}, NT_ASSET_TEXTURE, textures[0]));
@@ -797,6 +813,7 @@ void test_sprite_renderer_keys_follow_unloaded_placeholder_and_replaced_pages(vo
     TEST_ASSERT_NOT_EQUAL(items[0].batch_key, items[1].batch_key);
     nt_gfx_fake_reset();
     TEST_ASSERT_EQUAL_UINT32(2, draw_list_draws(items, 2));
+    next_frame();
     for (uint32_t i = 0; i < 2; i++) {
         TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id((nt_texture_t){textures[i]}), nt_gfx_fake_bound_texture_at(i));
     }
@@ -809,6 +826,7 @@ void test_sprite_renderer_keys_follow_unloaded_placeholder_and_replaced_pages(vo
     TEST_ASSERT_NOT_EQUAL(old_key, items[0].batch_key);
     nt_gfx_fake_reset();
     TEST_ASSERT_EQUAL_UINT32(2, draw_list_draws(items, 2));
+    next_frame();
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(placeholder), nt_gfx_fake_bound_texture_at(0));
 }
 
@@ -825,6 +843,7 @@ void test_sprite_renderer_textureless_material_ignores_page_change(void) {
     /* Region 0 lives on page 0, region 1 on page 1. */
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_emit_region(s_atlas_res, 1, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    next_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
@@ -849,6 +868,7 @@ void test_sprite_renderer_textureless_material_emits_without_page(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    next_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
@@ -877,6 +897,7 @@ void test_sprite_renderer_page_lands_on_its_program_unit(void) {
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    next_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
@@ -910,6 +931,7 @@ void test_sprite_renderer_non_page_slot_resolves_per_frame(void) {
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    next_frame();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     const uint32_t before = nt_gfx_fake_bound_texture_at(0);
@@ -918,7 +940,6 @@ void test_sprite_renderer_non_page_slot_resolves_per_frame(void) {
     nt_texture_t replacement = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .format = NT_TEXTURE_FORMAT_RGBA8, .label = "page1_v2"});
     TEST_ASSERT_TRUE(replacement.id != 0);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(nt_hash32_str("sprite_renderer_pages"), (nt_hash64_t){FIXTURE_PAGE1_RID}, NT_ASSET_TEXTURE, replacement.id));
-    next_frame();
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(replacement.id, nt_resource_get(nt_atlas_get_page_resource(s_atlas_res, 1)));
 
@@ -926,18 +947,19 @@ void test_sprite_renderer_non_page_slot_resolves_per_frame(void) {
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    next_frame();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(replacement), nt_gfx_fake_bound_texture_at(0));
     TEST_ASSERT_NOT_EQUAL_UINT32(before, nt_gfx_fake_bound_texture_at(0));
 
     /* Frame 3: a page change keeps unit 0, so gfx drops its equal bind, while unit 1 follows the page. */
-    next_frame();
     nt_gfx_fake_reset();
     nt_sprite_renderer_set_material(mat);
     /* Region 0 lives on page 0, region 1 on page 1. */
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     nt_sprite_renderer_emit_region(s_atlas_res, 1, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    next_frame();
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
@@ -968,11 +990,12 @@ void test_sprite_renderer_program_replace_between_immediate_and_draw_list(void) 
     nt_material_set_program(mat, program_b);
     /* draw_list resolves the material itself, so it draws on the new program. */
     nt_sprite_renderer_draw_list(&item, 1);
+    next_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(program_b.id, nt_gfx_fake_draw_trace_at(1).program.id);
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET] - sets_before);
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET] - sets_before);
     /* Each draw applies its set; gfx drops the second, equal unit bind of the pass.
      * Params are program state and go out twice. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
@@ -1050,6 +1073,7 @@ void test_sprite_renderer_unknown_sampler_name_is_ignored(void) {
     nt_sprite_renderer_emit_region(s_atlas_res, 0, identity, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
 
     TEST_ASSERT_EQUAL_UINT32(1, recorded_draws() - draws_before);
+    next_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
 }
 
@@ -1485,6 +1509,7 @@ void test_sprite_renderer_sampler_override_does_not_stick(void) {
 
     nt_gfx_fake_reset();
     nt_sprite_renderer_draw_list(items, 2);
+    next_frame();
 
     /* Resolve the page texture's default sampler (what the second draw should
      * leave bound). page0.id was registered under FIXTURE_PAGE0_RID; FIXTURE_R0
@@ -1868,7 +1893,9 @@ static uint32_t emit_params(void) {
     return recorded_params() - before;
 }
 
+/* Ends the frame so the fake has executed the recorded uniforms. */
 static float last_recorded_tint(void) {
+    next_frame();
     const uint32_t count = nt_gfx_fake_uniform_vec4_count();
     TEST_ASSERT_TRUE(count > 0);
     float value[4];
@@ -1939,6 +1966,7 @@ void test_sprite_renderer_set_program_applies_at_next_set_material(void) {
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
     nt_sprite_renderer_set_material(mat);
     TEST_ASSERT_EQUAL_UINT32(1, emit_params());
+    next_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(program_a.id, nt_gfx_fake_draw_trace_at(0).program.id);
@@ -2103,14 +2131,15 @@ void test_sprite_renderer_draws_after_context_restore_without_a_restore_call(voi
     nt_gfx_fake_draw_trace_reset(true);
     nt_sprite_renderer_set_material(mat);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, emit_params(), "the relinked program gets the params once");
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
-    TEST_ASSERT_EQUAL_UINT32(relinked.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(vi_creates + 1U, nt_gfx_fake_vertex_input_create_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_vertex_input_cache_count());
     const uint32_t params_before = recorded_params();
-    TEST_ASSERT_EQUAL_UINT32(1, draw_list_draws(&item, 1));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, draw_list_draws(&item, 1), "the list merges into the emit's draw");
     TEST_ASSERT_EQUAL_UINT32(params_before, recorded_params());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    next_frame();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(relinked.id, nt_gfx_fake_draw_trace_at(0).program.id);
+    TEST_ASSERT_EQUAL_UINT32(12, nt_gfx_fake_draw_trace_at(0).num_indices);
     nt_gfx_fake_draw_trace_reset(false);
 }
 
@@ -2136,13 +2165,17 @@ void test_sprite_renderer_new_layout_after_context_restore_reuses_a_dead_vertex_
 }
 
 /* A program destroyed after the selection takes its pipeline with it: selecting again in the
- * same frame resolves anew and leaves the material not drawable. */
+ * same frame resolves anew and leaves the material not drawable. The destroy precedes the
+ * frame's first pass, as the frame rule requires. */
 void test_sprite_renderer_reselect_after_program_destroyed_in_frame_draws_nothing(void) {
     s_atlas_res = register_test_atlas(0xDDULL);
     const nt_material_t mat = create_test_material();
+    close_frame();
+    nt_gfx_begin_frame();
     nt_sprite_renderer_set_material(mat);
     nt_gfx_destroy_program(nt_material_get_info(mat)->program);
     nt_sprite_renderer_set_material(mat);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     const uint32_t draws_before = recorded_draws();
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
     TEST_ASSERT_EQUAL_UINT32(draws_before, recorded_draws());
@@ -2181,6 +2214,7 @@ void test_sprite_renderer_draws_after_gfx_reinit(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_sprite_renderer_set_material(mat);
     nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    next_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(mat)->program.id, nt_gfx_fake_draw_trace_at(0).program.id);

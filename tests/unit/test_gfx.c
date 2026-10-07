@@ -252,6 +252,7 @@ void test_gfx_pipeline_survives_shader_destroy(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     nt_gfx_destroy_pipeline(pip);
 }
@@ -600,7 +601,11 @@ static void begin_texture_binding_test_pass(nt_program_t program) {
     nt_gfx_bind_pipeline(pipeline);
 }
 
-static void end_texture_binding_test_pass(void) { nt_gfx_end_pass(); }
+/* Fake binds are observable once end_frame executes the recorded pass. */
+static void end_texture_binding_test_pass(void) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
 
 static void apply_texture_set(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
     nt_gfx_apply_texture_bindings(bindings, count);
@@ -618,13 +623,13 @@ void test_gfx_apply_texture_bindings_maps_names_to_canonical_units(void) {
         {.name = nt_hash32_str("u_a"), .texture = texture_a, .sampler = NT_SAMPLER_DEFAULT},
     };
     apply_texture_set(bindings, 2);
+    end_texture_binding_test_pass();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_a), nt_gfx_fake_bound_texture_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_b), nt_gfx_fake_bound_texture_at(1));
-    end_texture_binding_test_pass();
 }
 
 void test_gfx_apply_texture_bindings_skips_backend_for_textureless_program(void) {
@@ -637,9 +642,9 @@ void test_gfx_apply_texture_bindings_skips_backend_for_textureless_program(void)
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     apply_texture_set(NULL, 0);
+    end_texture_binding_test_pass();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
-    end_texture_binding_test_pass();
 }
 
 void test_gfx_apply_texture_bindings_rejects_partial_set_before_backend_bind(void) {
@@ -653,16 +658,15 @@ void test_gfx_apply_texture_bindings_rejects_partial_set_before_backend_bind(voi
         {.name = nt_hash32_str("u_b"), .texture = texture_b, .sampler = NT_SAMPLER_DEFAULT},
     };
     apply_texture_set(bindings, 2);
-    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
-    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
 
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 1));
     EXPECT_ASSERT((void)nt_gfx_apply_texture_bindings(NULL, 0));
-
-    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
     end_texture_binding_test_pass();
+
+    /* Only the complete set reached the backend. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_sampler_count());
 }
 
 void test_gfx_apply_texture_bindings_ignores_inactive_entry_before_handle(void) {
@@ -675,10 +679,10 @@ void test_gfx_apply_texture_bindings_ignores_inactive_entry_before_handle(void) 
         {.name = nt_hash32_str("u_active"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT},
     };
     apply_texture_set(bindings, 2);
+    end_texture_binding_test_pass();
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture), nt_gfx_fake_bound_texture_at(0));
-    end_texture_binding_test_pass();
 }
 
 void test_gfx_apply_texture_bindings_rejects_duplicate_active_name_before_bind(void) {
@@ -691,10 +695,10 @@ void test_gfx_apply_texture_bindings_rejects_duplicate_active_name_before_bind(v
         {.name = nt_hash32_str("u_active"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT},
     };
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(bindings, 2));
+    end_texture_binding_test_pass();
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
-    end_texture_binding_test_pass();
 }
 
 void test_gfx_apply_texture_bindings_enforces_uint_sampler_class(void) {
@@ -706,12 +710,12 @@ void test_gfx_apply_texture_bindings_enforces_uint_sampler_class(void) {
 
     nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_ids"), .texture = color, .sampler = NT_SAMPLER_DEFAULT};
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
 
     binding.texture = integer;
     apply_texture_set(&binding, 1);
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(integer), nt_gfx_fake_bound_texture_at(0));
     end_texture_binding_test_pass();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count()); /* the rejected set bound nothing */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(integer), nt_gfx_fake_bound_texture_at(0));
 }
 
 void test_gfx_apply_texture_bindings_enforces_shadow_sampler_class(void) {
@@ -728,12 +732,12 @@ void test_gfx_apply_texture_bindings_enforces_shadow_sampler_class(void) {
     /* Raw depth without comparison is a plain sampler2D read; a shadow sampler must compare. */
     nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_shadow"), .texture = depth, .sampler = NT_SAMPLER_DEFAULT};
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
 
     binding.sampler = compare;
     apply_texture_set(&binding, 1);
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_bound_texture_at(0));
     end_texture_binding_test_pass();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count()); /* the rejected set bound nothing */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_bound_texture_at(0));
 }
 
 /* sampler2D accepts colour and raw depth, but neither an integer texture nor a comparison sampler. */
@@ -753,12 +757,12 @@ void test_gfx_apply_texture_bindings_enforces_float_sampler_class(void) {
     binding.texture = depth;
     binding.sampler = compare;
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
 
     binding.sampler = NT_SAMPLER_DEFAULT;
     apply_texture_set(&binding, 1);
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_bound_texture_at(0));
     end_texture_binding_test_pass();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count()); /* the rejected sets bound nothing */
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_bound_texture_at(0));
 }
 
 void test_gfx_apply_texture_bindings_requires_pass_and_pipeline(void) {
@@ -780,9 +784,9 @@ void test_gfx_apply_texture_bindings_requires_pass_and_pipeline(void) {
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(NULL, 1));
     EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&stale_binding, 1));
 
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
     end_texture_binding_test_pass();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
 }
 
 void test_gfx_pipeline_change_preserves_texture_set_only_for_same_program(void) {
@@ -834,13 +838,13 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     const nt_gfx_texture_binding_t other = {.name = binding.name, .texture = make_binding_test_texture(2), .sampler = NT_SAMPLER_DEFAULT};
     nt_gfx_fake_set_context_lost(true);
     apply_texture_set(&other, 1); /* another texture, so the apply must record a bind */
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     nt_gfx_fake_set_context_lost(false);
+    end_texture_binding_test_pass();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
 
     const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
     const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
-    end_texture_binding_test_pass();
-
+    nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -849,6 +853,7 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
 
     nt_gfx_apply_texture_bindings(NULL, 0);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
 }
@@ -872,20 +877,19 @@ void test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds(
         {.name = nt_hash32_str("u_b"), .texture = live, .sampler = NT_SAMPLER_DEFAULT},
     };
     apply_texture_set(bindings, 2);
-    const uint32_t texture_binds = nt_gfx_fake_bound_texture_count();
-    const uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
     const uint32_t draw_calls = nt_gfx_draw_calls(&g_nt_gfx.counters);
 
     bindings[1].texture = husk;
     nt_gfx_apply_texture_bindings(bindings, 2);
 
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_FAILED, nt_gfx_test_texture_set_state());
-    TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
     /* A reported failure skips the draw instead of drawing the previous set. */
     nt_gfx_draw(0, 0);
     TEST_ASSERT_EQUAL_UINT32(draw_calls, nt_gfx_draw_calls(&g_nt_gfx.counters));
     end_texture_binding_test_pass();
+    /* Only the first, complete set reached the backend. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_sampler_count());
 }
 
 void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
@@ -908,8 +912,6 @@ void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
     nt_gfx_apply_texture_bindings(bindings, 2);
 
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_FAILED, nt_gfx_test_texture_set_state());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bind_sampler_count());
     nt_gfx_draw(0, 3);
     nt_gfx_draw_instanced(0, 3, 1);
     nt_gfx_draw_indexed(0, 3, 3);
@@ -917,11 +919,13 @@ void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     apply_texture_set(bindings, 2);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_sampler(1));
     nt_gfx_draw_indexed(0, 3, 3);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     end_texture_binding_test_pass();
+    /* The failed set bound nothing; the retry bound both units. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_sampler_count());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_sampler(1));
 }
 
 void test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy(void) {
@@ -943,16 +947,19 @@ void test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy(v
 
     nt_gfx_bind_pipeline(pipeline);
     apply_texture_set(&binding, 1);
+    end_texture_binding_test_pass();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_destroy_program(program);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
-    end_texture_binding_test_pass();
 }
 
-/* A pass may still sample the texture; lifetime changes belong outside passes. */
+/* Recorded commands may still sample the texture until end_frame; lifetime changes wait for the frame. */
 void test_gfx_destroy_texture_inside_pass_asserts(void) {
     nt_texture_t texture = make_binding_test_texture(1);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "frame rule"));
     TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_gfx_texture_format(texture)); /* still alive */
     end_texture_binding_test_pass();
 }
@@ -1069,9 +1076,8 @@ void test_gfx_destroy_program_destroys_its_pipelines(void) {
     nt_gfx_end_pass();
 }
 
-/* The bind-time check is not enough on its own: the program can die while its
- * pipeline is already bound, and draw only looks at bound_pipeline. */
-void test_gfx_draw_asserts_when_bound_program_is_destroyed(void) {
+/* The program of a bound pipeline cannot die mid-frame: recorded binds still name it. */
+void test_gfx_destroying_the_bound_program_in_a_pass_asserts_the_frame_rule(void) {
     nt_shader_t vs = make_test_vs();
     nt_shader_t fs = make_test_fs();
     nt_program_t prog = nt_gfx_make_program(vs, fs);
@@ -1079,8 +1085,10 @@ void test_gfx_draw_asserts_when_bound_program_is_destroyed(void) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
-    nt_gfx_destroy_program(prog);
-    EXPECT_ASSERT(nt_gfx_draw(0, 3));
+    EXPECT_ASSERT(nt_gfx_destroy_program(prog));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "frame rule"));
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
+    TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip));
     nt_gfx_end_pass();
 }
 
@@ -1554,6 +1562,7 @@ void test_gfx_make_texture_compressed_binds_with_color_samplers(void) {
     }
     end_texture_binding_test_pass();
 
+    nt_gfx_begin_frame();
     nt_program_t uint_program = nt_gfx_fake_make_program_typed((const char *const[]){"u_ids"}, &uint_class, 1);
     begin_texture_binding_test_pass(uint_program);
     for (size_t i = 0; i < format_count; i++) {
@@ -1955,6 +1964,139 @@ void test_activate_mesh_valid_blob(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_gfx_deactivate_mesh(handle);
 }
+
+// #region frame rule
+typedef struct {
+    nt_shader_t vs;
+    nt_shader_t fs;
+    nt_program_t prog;
+    nt_pipeline_t pip;
+    nt_buffer_t vbo;
+    nt_vertex_input_t vi;
+    nt_texture_t tex;
+    nt_texture_t color;
+    nt_render_target_t rt;
+    uint32_t mesh;
+} frame_rule_objects_t;
+
+static frame_rule_objects_t make_frame_rule_objects(void) {
+    static const float verts[9] = {0};
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    frame_rule_objects_t o = {.vs = make_test_vs(), .fs = make_test_fs()};
+    o.prog = nt_gfx_make_program(o.vs, o.fs);
+    o.pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = o.prog});
+    o.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = verts, .size = sizeof(verts)});
+    o.vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}},
+        .vertex_buffer = o.vbo,
+    });
+    o.tex = make_binding_test_texture(1);
+    o.color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8});
+    o.rt = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = o.color});
+    o.mesh = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
+    TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(o.pip) && nt_gfx_vertex_input_valid(o.vi) && nt_gfx_render_target_valid(o.rt) && o.mesh != 0);
+    return o;
+}
+
+#define EXPECT_FRAME_RULE(code)                                                                                                                                                                        \
+    do {                                                                                                                                                                                               \
+        EXPECT_ASSERT(code);                                                                                                                                                                           \
+        TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "frame rule"));                                                                                                                                     \
+    } while (0)
+
+/* From the first pass until end_frame recorded commands may name any live object; nothing is freed. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- EXPECT_ASSERT expansion inflates the metric
+void test_frame_rule_rejects_every_live_destroy_while_drawn(void) {
+    frame_rule_objects_t o = make_frame_rule_objects();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_FRAME_RULE(nt_gfx_destroy_texture(o.tex));
+    nt_gfx_end_pass();
+
+    EXPECT_FRAME_RULE(nt_gfx_destroy_shader(o.vs));
+    EXPECT_FRAME_RULE(nt_gfx_destroy_program(o.prog));
+    EXPECT_FRAME_RULE(nt_gfx_destroy_pipeline(o.pip));
+    EXPECT_FRAME_RULE(nt_gfx_destroy_vertex_input(o.vi));
+    EXPECT_FRAME_RULE(nt_gfx_destroy_buffer(o.vbo));
+    EXPECT_FRAME_RULE(nt_gfx_destroy_texture(o.tex));
+    EXPECT_FRAME_RULE(nt_gfx_destroy_render_target(o.rt));
+    EXPECT_FRAME_RULE(nt_gfx_deactivate_texture(o.color.id));
+    EXPECT_FRAME_RULE(nt_gfx_deactivate_shader(o.fs.id));
+    EXPECT_FRAME_RULE(nt_gfx_deactivate_mesh(o.mesh));
+    TEST_ASSERT_TRUE(nt_gfx_shader_ready(o.vs) && nt_gfx_shader_ready(o.fs) && nt_gfx_program_valid(o.prog) && nt_gfx_pipeline_valid(o.pip));
+    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(o.vi) && nt_gfx_texture_ready(o.tex) && nt_gfx_texture_ready(o.color) && nt_gfx_render_target_valid(o.rt));
+    TEST_ASSERT_NOT_NULL(nt_gfx_get_mesh_info((nt_mesh_t){o.mesh}));
+
+    /* Between frames every destroy runs, cascades included. */
+    nt_gfx_end_frame();
+    nt_gfx_deactivate_mesh(o.mesh);
+    nt_gfx_destroy_texture(o.color);
+    nt_gfx_destroy_buffer(o.vbo);
+    nt_gfx_destroy_program(o.prog);
+    TEST_ASSERT_FALSE(nt_gfx_render_target_valid(o.rt));
+    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(o.vi));
+    TEST_ASSERT_FALSE(nt_gfx_pipeline_valid(o.pip));
+    nt_gfx_begin_frame();
+}
+
+/* Stale and invalid handles name nothing a recorded command uses: their destroys keep their contracts. */
+void test_frame_rule_ignores_stale_destroys_and_allows_the_frame_before_its_first_pass(void) {
+    frame_rule_objects_t o = make_frame_rule_objects();
+    nt_gfx_destroy_vertex_input(o.vi);
+    nt_gfx_destroy_pipeline(o.pip);
+    nt_gfx_destroy_texture(o.tex);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_destroy_vertex_input(o.vi);
+    nt_gfx_destroy_pipeline(o.pip);
+    nt_gfx_destroy_texture((nt_texture_t){0});
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+}
+
+/* A frame that starts lost records nothing but keeps the pass order and the rule. */
+void test_frame_rule_holds_in_a_lost_frame(void) {
+    frame_rule_objects_t o = make_frame_rule_objects();
+    nt_gfx_end_frame();
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
+    EXPECT_ASSERT(nt_gfx_end_frame());
+    nt_gfx_end_pass();
+    EXPECT_FRAME_RULE(nt_gfx_destroy_program(o.prog));
+    nt_gfx_end_frame();
+}
+
+/* An activation that fails after making its vertex buffer frees it inside a drawn frame without asserting. */
+void test_failed_mesh_activation_in_a_drawn_frame_frees_its_buffer(void) {
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    const uint32_t accepted = g_nt_gfx.counters.accepted[NT_GFX_OP_DESTROY];
+    nt_gfx_fake_fail_buffer_creates(2); /* the index buffer */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    TEST_ASSERT_EQUAL_UINT32(accepted + 1U, g_nt_gfx.counters.accepted[NT_GFX_OP_DESTROY]);
+}
+
+/* Lifetime work before the first pass does not execute what the frame recorded so far. */
+void test_destroys_before_the_first_pass_leave_the_stream_pending(void) {
+    frame_rule_objects_t o = make_frame_rule_objects();
+    nt_gfx_begin_segment("frame");
+    const uint32_t used = g_nt_gfx_stream.used;
+#if NT_GFX_GPU_TIMING_ENABLED
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, used);
+#endif
+    nt_gfx_destroy_program(o.prog);
+    nt_gfx_deactivate_mesh(o.mesh);
+    TEST_ASSERT_EQUAL_UINT32(used, g_nt_gfx_stream.used);
+    nt_gfx_end_segment();
+}
+// #endregion
 
 /* ---- Activator: mesh bad magic ---- */
 
@@ -2561,19 +2703,15 @@ void test_gfx_rgba32f_sampler_overrides_require_capability(void) {
         {.min_filter = NT_FILTER_LINEAR}, {.min_filter = NT_FILTER_LINEAR_MIPMAP_NEAREST}, {.min_filter = NT_FILTER_NEAREST_MIPMAP_LINEAR}, {.min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR},
         {.mag_filter = NT_FILTER_LINEAR},
     };
-    for (uint32_t i = 0; i < sizeof(filtered) / sizeof(filtered[0]); i++) {
+    const uint32_t filtered_count = sizeof(filtered) / sizeof(filtered[0]);
+    for (uint32_t i = 0; i < filtered_count; i++) {
         binding.sampler = nt_gfx_make_sampler(&filtered[i]);
         g_nt_gfx.gpu_caps.has_float_texture_linear = false;
-        uint32_t binds = nt_gfx_fake_bound_texture_count();
-        uint32_t sampler_binds = nt_gfx_fake_bind_sampler_count();
         EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
         TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
-        TEST_ASSERT_EQUAL_UINT32(binds, nt_gfx_fake_bound_texture_count());
-        TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
 
         g_nt_gfx.gpu_caps.has_float_texture_linear = true;
         apply_texture_set(&binding, 1);
-        TEST_ASSERT_EQUAL_UINT32(binds + 1, nt_gfx_fake_bound_texture_count());
     }
     g_nt_gfx.gpu_caps.has_float_texture_linear = false;
     binding.sampler = NT_SAMPLER_DEFAULT;
@@ -2581,6 +2719,9 @@ void test_gfx_rgba32f_sampler_overrides_require_capability(void) {
     binding.sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST_MIPMAP_NEAREST});
     apply_texture_set(&binding, 1);
     end_texture_binding_test_pass();
+    /* One bind per accepted apply; the rejected ones reached nothing. */
+    TEST_ASSERT_EQUAL_UINT32(filtered_count + 2U, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(filtered_count + 2U, nt_gfx_fake_bind_sampler_count());
 }
 
 /* ---- RG16UI texture creation ---- */
@@ -2722,7 +2863,9 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip); /* stale: ordinary invalid path, no trap */
     nt_gfx_end_pass();
-    nt_gfx_destroy_pipeline(pip); /* stale: tolerated no-op */
+    nt_gfx_destroy_pipeline(pip); /* stale: tolerated no-op, also after a pass */
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
 
     /* Programs survive as husks; relink before building new pipelines. */
     nt_gfx_destroy_program(prog);
@@ -2849,6 +2992,7 @@ void test_gfx_failed_bind_drops_the_previous_pipeline(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
 
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     nt_gfx_destroy_pipeline(live);
     nt_gfx_destroy_program(prog);
@@ -2914,6 +3058,7 @@ void test_gfx_uniform_records_hash_and_value(void) {
     nt_gfx_set_uniform_int(nt_hash32_str("u_slot"), 3);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_slot").value, nt_gfx_fake_uniform_int_hash_at(0));
@@ -3008,6 +3153,7 @@ void test_bind_uniform_block_copies_and_binds_its_range(void) {
     nt_gfx_bind_uniform_block(1, s_block_a, sizeof(s_block_a));
     nt_gfx_bind_uniform_block(7, s_block_b, sizeof(s_block_b));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
     nt_gfx_fake_ubo_bind_t a = nt_gfx_fake_ubo_bind_at(0);
@@ -3025,6 +3171,7 @@ void test_bind_uniform_block_copies_and_binds_its_range(void) {
     const uint32_t used = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used;
     EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, s_block_a, sizeof(s_block_a))); /* outside a pass */
     TEST_ASSERT_EQUAL_UINT32(used, g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used);
+    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, NULL, sizeof(s_block_a)));
     EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, s_block_a, 0));
@@ -3046,8 +3193,10 @@ void test_bind_uniform_block_follows_probed_alignment(void) {
         nt_gfx_bind_uniform_block(0, s_block_a, 20);
         nt_gfx_bind_uniform_block(0, s_block_b, 20);
         nt_gfx_end_pass();
+        nt_gfx_end_frame();
         TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
         TEST_ASSERT_EQUAL_UINT32(alignments[i] < 20U ? 2U * alignments[i] : alignments[i], nt_gfx_fake_ubo_bind_at(1).offset);
+        nt_gfx_begin_frame();
     }
     nt_gfx_fake_set_uniform_buffer_offset_alignment(64);
     nt_gfx_fake_lose_and_restore_context();
@@ -3095,7 +3244,7 @@ void test_stream_executes_draws_in_call_order_at_end_frame(void) {
     TEST_ASSERT_EQUAL_UINT32(recorded_bytes, g_nt_gfx.last_frame.stream_bytes);
 }
 
-/* Fake getters of draw-phase state execute the stream, so only the stream itself shows that a call was deferred. */
+/* Fake getters see draw-phase calls only after end_frame executes them; the stream shows that a call was recorded. */
 #define EXPECT_RECORDED(call)                                                                                                                                                                          \
     do {                                                                                                                                                                                               \
         const uint32_t before = g_nt_gfx_stream.used;                                                                                                                                                  \
@@ -3235,13 +3384,14 @@ void test_texture_set_records_only_changed_units(void) {
     EXPECT_NOT_RECORDED(apply_texture_set(set, 2));
     set[1].texture = c;
     apply_texture_set(set, 2);
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
     end_texture_binding_test_pass();
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bound_texture_count());
 
+    nt_gfx_begin_frame();
     begin_texture_binding_test_pass(program);
     apply_texture_set(set, 2); /* begin_pass discards the units */
-    TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_fake_bound_texture_count());
     end_texture_binding_test_pass();
+    TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_fake_bound_texture_count());
 }
 
 static uint32_t merged_draws_after_end_frame(void) {
@@ -3269,9 +3419,8 @@ void test_contiguous_indexed_draws_merge(void) {
     TEST_ASSERT_EQUAL_UINT32(12, nt_gfx_fake_draw_trace_at(0).num_indices);
 }
 
-/* Any recorded command, a gap in the range or an execution of the stream ends the merge. */
+/* Any recorded command or a gap in the range ends the merge. */
 void test_indexed_draw_merge_boundaries(void) {
-    nt_buffer_t spare = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
     nt_gfx_fake_draw_trace_reset(true);
     begin_stream_test_pass();
     nt_gfx_draw_indexed(0, 3, 3);
@@ -3281,9 +3430,8 @@ void test_indexed_draw_merge_boundaries(void) {
     nt_gfx_draw_indexed_instanced(12, 3, 3, 1);
     nt_gfx_draw_indexed_instanced(15, 3, 3, 1); /* instanced draws never merge */
     nt_gfx_draw_indexed(18, 3, 3);
-    nt_gfx_destroy_buffer(spare); /* executes the stream */
-    nt_gfx_draw_indexed(21, 3, 3);
-    nt_gfx_draw_indexed(24, 3, 3); /* merges into 21 */
+    nt_gfx_draw_indexed(21, 3, 3); /* merges into 18 */
+    nt_gfx_draw_indexed(24, 3, 3);
     nt_gfx_set_viewport(0, 0, 4, 4);
     nt_gfx_draw_indexed(27, 3, 3);
     nt_gfx_bind_uniform_block(0, s_block_a, sizeof(s_block_a));
@@ -3292,8 +3440,8 @@ void test_indexed_draw_merge_boundaries(void) {
     nt_gfx_begin_segment("merge-boundary");
     nt_gfx_draw_indexed(33, 3, 3);
     nt_gfx_end_segment();
-    /* 0 | 3 | 9 | 12i | 15i | 18 | 21+24 | 27 | 30 [| 33] */
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_GPU_TIMING_ENABLED ? 10U : 9U, merged_draws_after_end_frame());
+    /* 0 | 3 | 9 | 12i | 15i | 18+21+24 | 27 | 30 [| 33] */
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_GPU_TIMING_ENABLED ? 9U : 8U, merged_draws_after_end_frame());
 }
 
 void test_global_block_at_an_unsupported_slot_asserts_at_init(void) {
@@ -3421,36 +3569,42 @@ void test_stream_records_copies_of_descriptors_and_uniform_values(void) {
     nt_gfx_begin_frame();
 }
 
-/* With GPU timing compiled out the toggle is inert and leaves the stream alone. */
-void test_gpu_timing_toggle_mid_frame_executes_the_stream_only_with_gpu_timing(void) {
+/* The toggle is not a stream boundary: recorded draws stay pending until end_frame. */
+void test_gpu_timing_toggle_mid_frame_leaves_the_stream_pending(void) {
+    nt_gfx_fake_draw_trace_reset(true);
     begin_stream_test_pass();
     nt_gfx_draw_indexed(0, 3, 3);
-#if NT_GFX_GPU_TIMING_ENABLED
-    nt_gfx_set_gpu_timing_enabled(true);
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
-#else
     const uint32_t pending = g_nt_gfx_stream.used;
     nt_gfx_set_gpu_timing_enabled(true);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
     TEST_ASSERT_EQUAL_UINT32(pending, g_nt_gfx_stream.used);
-#endif
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    nt_gfx_begin_frame();
 }
 
-void test_buffer_write_executes_earlier_draws_and_recording_continues(void) {
+/* A write is not a stream boundary: earlier draws stay pending until end_frame. */
+void test_buffer_write_leaves_earlier_draws_pending(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
     begin_stream_test_pass();
     nt_gfx_draw_indexed(0, 3, 3);
+    const uint32_t pending = g_nt_gfx_stream.used;
     const uint8_t data[16] = {0};
     nt_gfx_update_buffer(buf, 0, data, sizeof(data));
-    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
-    nt_gfx_draw_indexed(3, 3, 3); /* contiguous, but the first draw already executed */
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
+    TEST_ASSERT_EQUAL_UINT32(pending, g_nt_gfx_stream.used);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
+    nt_gfx_draw_indexed(3, 3, 3); /* contiguous: the write does not end the merge */
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_at(0).first_index);
-    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(1).first_index);
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_at(0).num_indices);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(data), nt_gfx_fake_last_update_buffer_size());
     nt_gfx_begin_frame();
 }
 
@@ -3510,7 +3664,7 @@ int main(void) {
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);
     RUN_TEST(test_gfx_frame_boundary_syncs_loss_before_creates);
     RUN_TEST(test_gfx_destroy_program_destroys_its_pipelines);
-    RUN_TEST(test_gfx_draw_asserts_when_bound_program_is_destroyed);
+    RUN_TEST(test_gfx_destroying_the_bound_program_in_a_pass_asserts_the_frame_rule);
     RUN_TEST(test_gfx_make_program_does_not_dedup);
     RUN_TEST(test_gfx_program_valid_and_ready);
     RUN_TEST(test_gfx_destroy_program_invalidates);
@@ -3583,6 +3737,11 @@ int main(void) {
     RUN_TEST(test_activate_texture_bad_magic);
     RUN_TEST(test_activate_texture_too_small);
     RUN_TEST(test_activate_mesh_valid_blob);
+    RUN_TEST(test_frame_rule_rejects_every_live_destroy_while_drawn);
+    RUN_TEST(test_frame_rule_ignores_stale_destroys_and_allows_the_frame_before_its_first_pass);
+    RUN_TEST(test_frame_rule_holds_in_a_lost_frame);
+    RUN_TEST(test_failed_mesh_activation_in_a_drawn_frame_frees_its_buffer);
+    RUN_TEST(test_destroys_before_the_first_pass_leave_the_stream_pending);
     RUN_TEST(test_activate_mesh_bad_magic);
     RUN_TEST(test_activate_shader_valid_blob);
     RUN_TEST(test_activate_shader_bad_magic);
@@ -3617,8 +3776,8 @@ int main(void) {
     RUN_TEST(test_indexed_draws_assert_whole_triangles);
     RUN_TEST(test_global_block_at_an_unsupported_slot_asserts_at_init);
     RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
-    RUN_TEST(test_gpu_timing_toggle_mid_frame_executes_the_stream_only_with_gpu_timing);
-    RUN_TEST(test_buffer_write_executes_earlier_draws_and_recording_continues);
+    RUN_TEST(test_gpu_timing_toggle_mid_frame_leaves_the_stream_pending);
+    RUN_TEST(test_buffer_write_leaves_earlier_draws_pending);
     RUN_TEST(test_stream_overflow_asserts);
     RUN_TEST(test_update_buffer_at_offset);
     RUN_TEST(test_update_buffer_rejects_out_of_range);

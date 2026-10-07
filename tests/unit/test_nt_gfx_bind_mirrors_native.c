@@ -1037,10 +1037,10 @@ static void test_gl_name_reuse_after_destroying_bound_vertex_input(void) {
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi_a);
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_UINT8_WITHIN(1, 255, center_red_in_pass());
+    TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_vao());
     nt_gfx_destroy_vertex_input(vi_a); /* destroyed while bound */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_vao());
-    nt_gfx_end_pass();
 
     nt_vertex_input_t vi_b = make_vi(vbo, (nt_buffer_t){0});
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi_b));
@@ -1181,7 +1181,8 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
-    nt_gfx_frame_execute();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
 
     GLint old_program = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &old_program);
@@ -1406,6 +1407,8 @@ static void test_vec4_cache_follows_program_lifetime(void) {
         }
     }
     TEST_ASSERT_EQUAL_UINT32(2, s_gl_calls.uniform_vec4);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
     nt_gfx_destroy_program(p);
     p = nt_gfx_make_program(vs, fs);
     pipelines[0] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = p});

@@ -80,7 +80,20 @@ static inline void nt_example_frames_begin(void) { s_example_frames.begin = nt_t
 
 /* Right after nt_gfx_end_frame, before swap. */
 static inline void nt_example_frames_end(bool ready) {
-    if (s_example_frames.frames == 0 || !ready) {
+    if (s_example_frames.frames == 0) {
+        return;
+    }
+    const nt_gfx_counters_t *c = &g_nt_gfx.counters; /* this frame: last_frame changes only at the next begin_frame */
+    /* Peaks size the budgets, so loading and warmup frames count too. */
+    if (c->stream_bytes > s_example_frames.stream_peak) {
+        s_example_frames.stream_peak = c->stream_bytes;
+    }
+    for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
+        if (c->frame_bytes[s] > s_example_frames.frame_peak[s]) {
+            s_example_frames.frame_peak[s] = c->frame_bytes[s];
+        }
+    }
+    if (!ready) {
         return;
     }
     double ms = (nt_time_now() - s_example_frames.begin) * 1000.0;
@@ -89,7 +102,6 @@ static inline void nt_example_frames_end(bool ready) {
     if (index < NT_EXAMPLE_FRAMES_WARMUP) {
         return;
     }
-    const nt_gfx_counters_t *c = &g_nt_gfx.counters; /* this frame: last_frame changes only at the next begin_frame */
     uint64_t gl = 0;
     for (uint32_t i = 0; i < NT_GFX_GL_COUNT; i++) {
         gl += c->gl[i];
@@ -99,14 +111,6 @@ static inline void nt_example_frames_end(bool ready) {
     s_example_frames.gl += (double)gl;
     s_example_frames.uploads += (double)c->buffer_upload_calls;
     s_example_frames.upload_bytes += (double)c->buffer_upload_bytes;
-    if (c->stream_bytes > s_example_frames.stream_peak) {
-        s_example_frames.stream_peak = c->stream_bytes;
-    }
-    for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
-        if (c->frame_bytes[s] > s_example_frames.frame_peak[s]) {
-            s_example_frames.frame_peak[s] = c->frame_bytes[s];
-        }
-    }
     if ((uint64_t)index + 1U < (uint64_t)NT_EXAMPLE_FRAMES_WARMUP + s_example_frames.frames) { /* 64-bit: --frames near UINT32_MAX must not wrap */
         return;
     }

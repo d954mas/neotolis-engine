@@ -236,19 +236,40 @@ static void begin_storage_frame(void) {
     nt_gfx_begin_frame();
 }
 
-/* One gfx frame drawing a single list, ending inside the pass the tests draw in. */
-static void skinned_draw_list(const nt_render_item_t *items, uint32_t count) {
-    begin_storage_frame();
+static void open_frame(void) {
+    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
+static void close_frame(void) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+}
+
+/* The fake observes a frame once nt_gfx_end_frame has executed it; the reopened pass keeps tearDown valid. */
+static void next_frame(void) {
+    close_frame();
+    open_frame();
+}
+
+/* Records a single list in a fresh frame's pass; the frame stays open. */
+static void record_skinned_list(const nt_render_item_t *items, uint32_t count) {
+    next_frame();
     s_draw_mark = nt_gfx_fake_draw_trace_count();
     nt_skinned_mesh_renderer_draw_list(items, count);
 }
 
+/* One gfx frame drawing a single list in one pass, executed before it returns. */
+static void skinned_draw_list(const nt_render_item_t *items, uint32_t count) {
+    record_skinned_list(items, count);
+    next_frame();
+}
+
 static void mesh_draw_list(const nt_render_item_t *items, uint32_t count) {
-    begin_storage_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    next_frame();
     s_draw_mark = nt_gfx_fake_draw_trace_count();
     nt_mesh_renderer_draw_list(items, count);
+    next_frame();
 }
 
 void setUp(void) {
@@ -280,6 +301,7 @@ void setUp(void) {
 void tearDown(void) {
     nt_log_remove_sink(capture_program_warning, NULL);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_skinned_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_skin_comp_shutdown();
@@ -379,7 +401,7 @@ void test_a_b_a_textures_reapply_complete_set_and_ignore_skin_override(void) {
     const uint32_t a_backend = nt_gfx_test_texture_backend_id(texture_a);
     const uint32_t b_backend = nt_gfx_test_texture_backend_id(texture_b);
     /* Every run applies the complete set; gfx records only the units that changed in the pass. */
-    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     const uint32_t expected[4] = {surface_backend, a_backend, b_backend, a_backend};
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_bound_texture_count());
     for (uint32_t i = 0; i < 4; i++) {
@@ -419,7 +441,7 @@ void test_packed_instances_keep_each_entity_world_and_binding(void) {
     nt_render_item_t items[2] = {make_item(entity1, material, mesh), make_item(entity0, material, mesh)};
 
     skinned_draw_list(items, 2);
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls()); /* executes the stream: uploads the instances */
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
     TEST_ASSERT_NOT_NULL(bytes);
@@ -461,7 +483,8 @@ void test_runs_of_one_list_pack_each_entity_fields(void) {
     }
     nt_transform_comp_update();
 
-    skinned_draw_list(items, 4);
+    record_skinned_list(items, 4);
+    close_frame(); /* frame storage keeps the frame's bytes until the next begin_frame */
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(4U * sizeof(nt_skinned_mesh_instance_t), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
     TEST_ASSERT_EQUAL_UINT32(2U * sizeof(nt_skinned_mesh_instance_t), nt_gfx_fake_last_instance_offset());
@@ -471,6 +494,7 @@ void test_runs_of_one_list_pack_each_entity_fields(void) {
         TEST_ASSERT_EQUAL_UINT16(20U + i, instance->skin_origins[0]);
         TEST_ASSERT_TRUE(instance->world_rows[0][3] == (float)(i + 1)); /* NOLINT -- exact small integer */
     }
+    open_frame();
 }
 
 /* Every render item needs a drawable: its color is instance data. */
@@ -559,7 +583,7 @@ void test_material_transition_reapplies_complete_surface_and_skin_set(void) {
     skinned_draw_list(items, 2);
 
     /* The transition applies the complete set again; its unit binds equal the pass state and are dropped. */
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_slot_at(0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_slot_at(1));
@@ -592,7 +616,7 @@ void test_color_keeps_skin_fields_at_their_layout_offsets(void) {
     nt_drawable_comp_set_color(rgba8_entity, NT_RGBA8(0, 128, 255, 64));
     nt_render_item_t item = make_item(rgba8_entity, rgba8, mesh);
     skinned_draw_list(&item, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls()); /* executes the stream: uploads the instances */
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     const uint8_t *bytes = (const uint8_t *)nt_gfx_fake_last_update_buffer_data();
     TEST_ASSERT_EQUAL_UINT32(sizeof(nt_skinned_mesh_instance_t), nt_gfx_fake_last_update_buffer_size());
     const uint8_t expected_rgba8[4] = {0, 128, 255, 64};
@@ -658,8 +682,8 @@ void test_static_mesh_stream_cannot_overlap_the_color_location(void) {
     begin_storage_frame();
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(&item, 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "attribute location used twice"));
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_mesh_renderer_shutdown();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 void test_static_mesh_renderer_ignores_unmapped_skin_streams(void) {
@@ -673,7 +697,9 @@ void test_static_mesh_renderer_ignores_unmapped_skin_streams(void) {
     mesh_draw_list(&item, 1);
 
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+    close_frame();
     nt_mesh_renderer_shutdown();
+    open_frame();
 }
 
 void test_unready_program_warns_once_and_rearms_after_success(void) {
@@ -692,7 +718,9 @@ void test_unready_program_warns_once_and_rearms_after_success(void) {
     skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 
+    close_frame();
     nt_gfx_destroy_program(program);
+    open_frame();
     skinned_draw_list(&item, 1);
     skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 2U : 0U, s_program_warnings);
@@ -731,7 +759,9 @@ void test_restore_drops_caches_and_the_next_draw_rebuilds_them(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
 
+    close_frame();
     nt_skinned_mesh_renderer_restore_gpu();
+    open_frame();
     TEST_ASSERT_TRUE(nt_skinned_mesh_renderer_test_initialized());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_vertex_input_count());
@@ -741,10 +771,12 @@ void test_restore_drops_caches_and_the_next_draw_rebuilds_them(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 
+    close_frame();
     nt_skinned_mesh_renderer_shutdown();
     nt_skinned_mesh_renderer_restore_gpu();
     TEST_ASSERT_FALSE(nt_skinned_mesh_renderer_test_initialized());
     TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 2, .max_mesh_layouts = 2}));
+    open_frame();
 }
 
 /* The core draws caller-packed instances with no entity component and supplies the given
@@ -757,7 +789,7 @@ void test_core_draw_supplies_the_deformation_texture_across_passes(void) {
     const float world[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 
     begin_storage_frame();
-    nt_gfx_fake_reset(); /* executes the stream: take it before allocating */
+    nt_gfx_fake_reset();
     s_draw_mark = nt_gfx_fake_draw_trace_count();
     uint32_t offset = 0;
     nt_skinned_mesh_instance_t *instance = (nt_skinned_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_skinned_mesh_instance_t), 4, &offset);
@@ -769,11 +801,12 @@ void test_core_draw_supplies_the_deformation_texture_across_passes(void) {
         nt_gfx_end_pass();
     }
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count()); /* recording writes no buffer */
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_update_buffer_count()); /* one upload for both passes */
     TEST_ASSERT_EQUAL_UINT32(offset, nt_gfx_fake_last_instance_offset());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture), nt_gfx_fake_bound_texture_at(0));
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    open_frame();
 }
 
 void test_core_draw_asserts_on_a_zero_deformation_texture(void) {
@@ -797,7 +830,7 @@ void test_mesh_only_change_skips_the_texture_set(void) {
     nt_gfx_fake_reset();
     skinned_draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
 }
 
 /* draw_list reads the deformation texture at the call, so a rebound entity draws the new one. */
@@ -810,9 +843,10 @@ void test_lists_read_the_deformation_texture_at_the_call(void) {
     nt_render_item_t item = make_item(entity, material, mesh);
 
     nt_gfx_fake_reset();
-    skinned_draw_list(&item, 1);
+    record_skinned_list(&item, 1);
     nt_skin_comp_handle(entity)->texture = texture_b;
     nt_skinned_mesh_renderer_draw_list(&item, 1);
+    next_frame();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_a), nt_gfx_fake_bound_texture_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_b), nt_gfx_fake_bound_texture_at(1));
@@ -843,13 +877,14 @@ void test_deformation_change_reapplies_textures_not_uniforms(void) {
     nt_gfx_fake_reset();
     skinned_draw_list(items, 3);
     TEST_ASSERT_EQUAL_UINT32(3, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_TEXTURE_SET]);
+    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_uniform_vec4_count());
 }
 
 void test_empty_list_reserves_nothing(void) {
-    skinned_draw_list(NULL, 0);
+    record_skinned_list(NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
+    next_frame();
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
 }
 

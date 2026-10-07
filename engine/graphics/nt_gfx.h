@@ -342,7 +342,7 @@ typedef struct {
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
-    uint32_t stream_capacity;    /* draw-phase command bytes recorded between executions, default: 256 KiB; allocated once at init */
+    uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 256 KiB; allocated once at init */
     /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: 0 (disabled);
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
@@ -661,7 +661,7 @@ typedef struct {
     uint64_t texture_upload_calls;
     uint64_t texture_upload_bytes;
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
-    uint32_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
+    uint32_t stream_bytes;              /* draw-phase command bytes the frame recorded */
     /* Frame storage bytes allocated in the frame and sent, padding included; final after end_frame. */
     uint32_t frame_bytes[NT_GFX_FRAME_STREAM_COUNT];
     uint32_t gl[NT_GFX_GL_COUNT];
@@ -1028,18 +1028,17 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
- * buffer, data must point to size bytes (NULL only with size 0). Disjoint
- * offsets keep in-flight data untouched. orphan_buffer = glBufferData. */
+ * buffer, data must point to size bytes (NULL only with size 0). Allowed at any time:
+ * a write before nt_gfx_end_frame lands before every draw of the frame, so every draw
+ * reads the frame's last write; a write after it belongs to the next frame. */
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* ---- Frame storage ----
  *
- * Per-frame vertex, index and uniform data at any point of the frame. Allocate between
- * nt_gfx_begin_frame and nt_gfx_end_frame. Every execution of the recorded calls first
- * uploads the bytes allocated since the previous one, so fill an allocation before the
- * next nt_gfx call: its bytes are sent once. Offsets and pointers are valid until the
- * next nt_gfx_begin_frame. Align vertex data read by index
+ * Per-frame vertex, index and uniform data at any point of the frame. Allocate and fill between
+ * nt_gfx_begin_frame and nt_gfx_end_frame, which uploads each stream once before the
+ * replay. Offsets and pointers are valid until the next nt_gfx_begin_frame. Align vertex data read by index
  * to its stride (vertex i at i * stride; indices are absolute), instance data to 4
  * and indices to 4 (first_index = offset / 4). The uniform stream is filled by
  * nt_gfx_bind_uniform_block. */

@@ -276,9 +276,29 @@ static void test_custom_blend_state_reaches_gl_unchanged(void) {
     TEST_ASSERT_INT_WITHIN(1, 500, (int)(constant[3] * 1000.0F));
 
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
+}
+
+/* Binds a pipeline with this blend in its own frame and reads one GL blend state mid-pass. */
+static GLint blend_value_in_pass(nt_program_t prog, nt_blend_state_t blend, GLenum query) {
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .program = prog,
+        .blend = blend,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_frame_execute();
+    GLint actual = 0;
+    glGetIntegerv(query, &actual);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_begin_frame();
+    return actual;
 }
 
 static void test_all_public_blend_enums_reach_gl(void) {
@@ -312,39 +332,17 @@ static void test_all_public_blend_enums_reach_gl(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
     for (size_t i = 0; i < sizeof(factor_cases) / sizeof(factor_cases[0]); i++) {
         nt_blend_state_t blend = nt_blend_alpha();
         blend.src_rgb = factor_cases[i].factor;
         blend.dst_rgb = NT_BLEND_ZERO;
-        nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-            .program = prog,
-            .blend = blend,
-        });
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
-        nt_gfx_bind_pipeline(pipeline);
-        nt_gfx_frame_execute();
-        GLint actual = 0;
-        glGetIntegerv(GL_BLEND_SRC_RGB, &actual);
-        TEST_ASSERT_EQUAL_INT((GLint)factor_cases[i].expected, actual);
-        nt_gfx_destroy_pipeline(pipeline);
+        TEST_ASSERT_EQUAL_INT((GLint)factor_cases[i].expected, blend_value_in_pass(prog, blend, GL_BLEND_SRC_RGB));
     }
     for (size_t i = 0; i < sizeof(op_cases) / sizeof(op_cases[0]); i++) {
         nt_blend_state_t blend = nt_blend_alpha();
         blend.op_rgb = op_cases[i].op;
-        nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-            .program = prog,
-            .blend = blend,
-        });
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
-        nt_gfx_bind_pipeline(pipeline);
-        nt_gfx_frame_execute();
-        GLint actual = 0;
-        glGetIntegerv(GL_BLEND_EQUATION_RGB, &actual);
-        TEST_ASSERT_EQUAL_INT((GLint)op_cases[i].expected, actual);
-        nt_gfx_destroy_pipeline(pipeline);
+        TEST_ASSERT_EQUAL_INT((GLint)op_cases[i].expected, blend_value_in_pass(prog, blend, GL_BLEND_EQUATION_RGB));
     }
-    nt_gfx_end_pass();
 
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
@@ -667,6 +665,7 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
     float pixels[4 * 4 * 4] = {0};
     glReadPixels(0, 0, 4, 4, GL_RGBA, GL_FLOAT, pixels);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     /* Unity float asserts are disabled in this build; compare in millis. */
     TEST_ASSERT_INT_WITHIN(10, 3500, (int)(pixels[0] * 1000.0F));
@@ -750,6 +749,7 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);
     TEST_ASSERT_EQUAL_INT(GL_FALSE, depth_write_enabled);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     destroy_test_target(&target);
     nt_gfx_destroy_pipeline(no_depth_write_pipeline);
@@ -789,6 +789,7 @@ static void test_global_block_from_the_desc_binds_in_the_program(void) {
     TEST_ASSERT_EQUAL_INT(3, binding);
 
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_program(prog);
@@ -1565,9 +1566,10 @@ static void test_pass_discard_maps_attachments_and_finishes_before_unbind(void) 
     TEST_ASSERT_EQUAL_HEX32(GL_COLOR_ATTACHMENT0, s_invalidated[0]);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target});
     nt_gfx_end_pass();
-    nt_gfx_frame_execute();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(2, s_invalidate_count);
     destroy_test_target(&target);
+    nt_gfx_begin_frame();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.discard_depth = true});
     nt_gfx_end_pass();

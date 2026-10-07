@@ -522,6 +522,7 @@ static void test_dispatch_text_model_matrix_preserves_y_up(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
 
     float m[16];
     first_glyph_model(10.0F, m);
@@ -594,6 +595,7 @@ static void test_dispatch_3d_debug_text_uses_screen_space_orientation(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_debug_inspector_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
 
     float m[16];
     first_glyph_model(10.0F, m);
@@ -630,18 +632,17 @@ static void test_3d_debug_inspector_walk_draws_real_tree_text(void) {
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
+    ui_walker_fixture_next_frame(&s_fx);
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_debug_inspector_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
 
     TEST_ASSERT_GREATER_THAN_UINT32(0U, ui_walker_fx_draw_count(text_program()));
 }
 
 /* Depth bias of the second glyph of the inspector's first tree text, drawn in a frame of its own. */
 static float inspector_second_glyph_bias(void) {
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    ui_walker_fixture_next_frame(&s_fx);
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("bias_tree_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(120.0F), CLAY_SIZING_FIXED(40.0F)}}}) {
@@ -651,6 +652,7 @@ static float inspector_second_glyph_bias(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_debug_inspector_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
     const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
     TEST_ASSERT_TRUE(ui_walker_fx_quads(d) >= 2U);
     return ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 1, 0), UI_WALKER_FX_TEXT_DEPTH_BIAS);

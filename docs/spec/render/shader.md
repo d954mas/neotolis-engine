@@ -47,8 +47,9 @@ a supported flat replace, and the only runtime shader replacement there is.
 Pipeline cache keys include the program handle. Destroying the old program frees
 its pipelines; renderers remove dead records during insertion after a cache miss
 or on reset. Sprite and text draws record with the pipeline resolved at
-`set_material`; mesh draws with the pipeline resolved at their call. Every
-program must stay live until the recorded draws execute. Numeric material params
+`set_material`; mesh draws with the pipeline resolved at their call. A program
+is destroyed only outside a drawn frame (the frame rule in
+[render architecture](architecture.md#draw-phase-command-stream)). Numeric material params
 remain mutable and are read at the draw; snapshot timing is specified in
 [API contracts](../core/api-contracts.md#program-handles).
 

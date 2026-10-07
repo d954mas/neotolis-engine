@@ -87,6 +87,7 @@ static void test_end_and_main_walk_collect_only_selected_timing(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_command_count(s_fx.ctx));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+    ui_walker_fixture_end_frame(&s_fx);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(6U, nt_gfx_fake_draw_trace_at(0U).num_indices);
 }
@@ -108,6 +109,7 @@ static void test_repeated_frame_replaces_timing(void) {
 #endif
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_command_count(s_fx.ctx));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+    ui_walker_fixture_end_frame(&s_fx);
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
 }
 
@@ -122,13 +124,16 @@ static void test_degenerate_main_walk_resets_only_walk_timing(void) {
         nt_ui_walk(s_fx.ctx, &s_target);
         assert_timings(s_fx.ctx, 125, 125);
         s_clock_reads = 0U;
+        ui_walker_fixture_next_frame(&s_fx);
         nt_gfx_fake_draw_trace_reset(true);
         nt_ui_walk(s_fx.ctx, &targets[i]);
         TEST_ASSERT_EQUAL_UINT32(0U, s_clock_reads);
+        ui_walker_fixture_end_frame(&s_fx);
         TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
         TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_command_count(s_fx.ctx));
         TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
         assert_timings(s_fx.ctx, 125, 0);
+        ui_walker_fixture_next_frame(&s_fx);
     }
 }
 
@@ -138,11 +143,13 @@ static void test_unbound_atlas_resets_only_walk_timing(void) {
     assert_timings(s_fx.ctx, 125, 125);
     s_fx.ctx->atlas = (nt_resource_t){0};
     s_clock_reads = 0U;
+    ui_walker_fixture_next_frame(&s_fx);
     nt_gfx_fake_draw_trace_reset(true);
 
     nt_ui_walk(s_fx.ctx, &s_target);
 
     TEST_ASSERT_EQUAL_UINT32(0U, s_clock_reads);
+    ui_walker_fixture_end_frame(&s_fx);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_command_count(s_fx.ctx));
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
@@ -158,8 +165,10 @@ static void test_inspector_walk_preserves_main_timing(void) {
     s_clock_step = 0.25;
     s_fx.ctx->frozen_cmds.internalArray[0].userData = (void *)NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG_PANEL_BG);
     s_clock_reads = 0U;
+    ui_walker_fixture_next_frame(&s_fx);
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_debug_inspector_walk(s_fx.ctx, &s_target);
+    ui_walker_fixture_end_frame(&s_fx);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     assert_timings(s_fx.ctx, 125, 125);
 #if !NT_UI_TIMING_ENABLED
@@ -167,6 +176,7 @@ static void test_inspector_walk_preserves_main_timing(void) {
 #endif
 
     const nt_ui_target_t zero_target = {0};
+    ui_walker_fixture_next_frame(&s_fx);
     s_clock_reads = 0U;
     nt_ui_debug_inspector_walk(s_fx.ctx, &zero_target);
     TEST_ASSERT_EQUAL_UINT32(0U, s_clock_reads);

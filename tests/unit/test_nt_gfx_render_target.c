@@ -73,10 +73,11 @@ static void test_depth_only_target_passes_its_size_to_the_pass(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_last_depth_texture_backend());
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(rt), nt_gfx_fake_last_pass_target());
     TEST_ASSERT_EQUAL_UINT16(48, nt_gfx_fake_last_pass_width());
     TEST_ASSERT_EQUAL_UINT16(16, nt_gfx_fake_last_pass_height());
-    nt_gfx_end_pass();
 }
 
 static void test_color_depth_target_passes_both_backends(void) {
@@ -89,9 +90,10 @@ static void test_color_depth_target_passes_both_backends(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_last_depth_texture_backend());
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT16(64, nt_gfx_fake_last_pass_width());
     TEST_ASSERT_EQUAL_UINT16(32, nt_gfx_fake_last_pass_height());
-    nt_gfx_end_pass();
 }
 
 static void test_half_float_color_is_accepted(void) {
@@ -221,9 +223,14 @@ static void test_make_and_destroy_reject_active_pass(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(make_target(color, NO_TEXTURE));
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_render_target(rt));
-    /* The pass check runs before the cascade, so the target survives. */
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
+    /* The frame rule runs before the cascade, so the target survives. */
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(color));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
     nt_gfx_end_pass();
+    /* The recorded pass still names both until end_frame. */
+    NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_render_target(rt));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
 
     TEST_ASSERT_TRUE(nt_gfx_render_target_valid(rt));
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(color));
@@ -252,9 +259,10 @@ static void test_recreate_at_new_size_without_spare_slots(void) {
     TEST_ASSERT_TRUE(nt_gfx_render_target_valid(rt));
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT16(128, nt_gfx_fake_last_pass_width());
     TEST_ASSERT_EQUAL_UINT16(64, nt_gfx_fake_last_pass_height());
-    nt_gfx_end_pass();
 }
 // #endregion
 
@@ -346,12 +354,15 @@ static void test_zero_pass_target_routes_to_default_framebuffer_after_render_tar
     nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_color = {0.1F, 0.2F, 0.3F, 1.0F}, .clear_depth = 1.0F});
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_pass_target());
     nt_gfx_end_pass();
-
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = NT_RENDER_TARGET_INVALID, .clear_depth = 1.0F});
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_pass_target());
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pass_target_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(rt), nt_gfx_fake_pass_target_at(0));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_pass_target_at(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_pass_target_at(1));
 }
 
 static void test_begin_pass_asserts_for_invalid_or_stale_target(void) {
@@ -439,9 +450,10 @@ static void test_active_attachments_cannot_be_sampled(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
     binding.texture = depth;
     NT_TEST_EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    nt_gfx_end_pass();
 }
 
 /* Attachments are ordinary textures: NT_SAMPLER_DEFAULT is the sampler of their own desc. */
@@ -458,8 +470,9 @@ static void test_attachments_bind_with_their_default_sampler(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     apply_one_texture(depth, NT_SAMPLER_DEFAULT);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
 }
 
 static void test_depth_texture_rejects_linear_sampler_override(void) {
@@ -556,6 +569,7 @@ static void test_integer_texture_rejects_comparison_sampler(void) {
     NT_TEST_EXPECT_ASSERT(apply_one_texture(integer, comparison));
 
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_destroy_texture(integer);
 }
 

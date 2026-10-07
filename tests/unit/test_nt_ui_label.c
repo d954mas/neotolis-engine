@@ -307,6 +307,7 @@ static void test_label_decoration_reaches_the_renderer(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
 
     TEST_ASSERT_EQUAL_UINT32(1U, ui_walker_fx_draw_count(text_program()));
     const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
@@ -379,6 +380,7 @@ static void test_label_decoration_applies_to_wrapped_lines(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
     uint32_t underlines = 0;
     for (uint32_t i = 0; i < ui_walker_fx_draw_count(text_program()); i++) {
         const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), i);
@@ -427,6 +429,7 @@ static void test_label_plain_no_decoration(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
     const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(5U, ui_walker_fx_quads(d), "plain label: one fill quad per glyph, no underline");
     for (uint32_t q = 0; q < 5U; q++) {

@@ -489,6 +489,11 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }
 
 static bool texture_filter_uses_linear(nt_texture_filter_t filter) { return filter != NT_FILTER_NEAREST && filter != NT_FILTER_NEAREST_MIPMAP_NEAREST; }
 
+/* Frame rule: recorded commands name live objects until nt_gfx_end_frame executes them. Destroys of
+ * stale or invalid handles keep their own contracts. */
+#define NT_GFX_ASSERT_FRAME_RULE(pool, id)                                                                                                                                                             \
+    NT_ASSERT((s_gfx.render_state < NT_GFX_STATE_PASS || !nt_pool_valid((pool), (id))) && "frame rule: destroy live objects before the first nt_gfx_begin_pass or after nt_gfx_end_frame")
+
 static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
     if (tex.id == 0) {
         return NT_GFX_RESULT_INVALID_HANDLE; /* invalid-zero is a first-class value, as for buffers */
@@ -496,12 +501,6 @@ static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
         NT_LOG_ERROR("destroy_texture: invalid handle");
         return NT_GFX_RESULT_INVALID_HANDLE;
-    }
-    /* Pass-scoped draw state may still sample it; lifetime changes stay outside passes. */
-    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS && "destroy_texture called inside a pass");
-    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("destroy_texture called inside a pass");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
     /* Dependent render targets baked this texture into their framebuffer and can
      * never draw correctly again -- reclaim them now. */
@@ -652,7 +651,7 @@ void nt_gfx_begin_frame(void) {
 
 void nt_gfx_end_frame(void) {
     NT_ASSERT(g_nt_gfx.initialized);
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "end_frame: needs an open frame with no open pass");
+    NT_ASSERT((s_gfx.render_state == NT_GFX_STATE_IDLE || s_gfx.render_state == NT_GFX_STATE_DRAWN) && "end_frame: needs an open frame with no open pass");
     nt_gfx_frame_execute();
     s_gfx.render_state = NT_GFX_STATE_ENDED;
 }
@@ -721,8 +720,10 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE && "begin_pass: needs an open frame with no open pass");
+    NT_ASSERT((s_gfx.render_state == NT_GFX_STATE_IDLE || s_gfx.render_state == NT_GFX_STATE_DRAWN) && "begin_pass: needs an open frame with no open pass");
+    /* A lost frame records nothing but keeps the pass order, so its sequencing and the frame rule still assert. */
     if (g_nt_gfx.context_lost) {
+        s_gfx.render_state = NT_GFX_STATE_PASS;
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
 
@@ -783,18 +784,14 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
 }
 
 static nt_gfx_result_t end_pass(void) {
-    /* A pass opened before a loss latched still closes: the frame state machine ignores loss. */
-    if (s_gfx.render_state != NT_GFX_STATE_PASS && g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
-
+    /* Closes a pass also on a lost context; an END without a recorded BEGIN is a backend no-op. */
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("end_pass called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
 
-    s_gfx.render_state = NT_GFX_STATE_IDLE;
+    s_gfx.render_state = NT_GFX_STATE_DRAWN;
     s_gfx.active_render_target = 0;
     nt_gfx_frame_end_pass();
     return NT_GFX_RESULT_ACCEPTED;
@@ -1403,10 +1400,7 @@ static nt_gfx_result_t destroy_shader(nt_shader_t shd) {
 }
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
-    /* Only a live object can matter to the recorded calls; an invalid or stale handle is a no-op. */
-    if (nt_pool_valid(&s_gfx.shader_pool, shd.id)) {
-        nt_gfx_frame_execute();
-    }
+    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.shader_pool, shd.id);
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_SHADER, shd.id);
     NT_GFX_END(destroy_shader(shd));
 }
@@ -1435,9 +1429,7 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
 }
 
 void nt_gfx_destroy_program(nt_program_t prog) {
-    if (nt_pool_valid(&s_gfx.program_pool, prog.id)) {
-        nt_gfx_frame_execute();
-    }
+    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.program_pool, prog.id);
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PROGRAM, prog.id);
     NT_GFX_END(destroy_program(prog));
 }
@@ -1459,9 +1451,7 @@ static nt_gfx_result_t destroy_pipeline(nt_pipeline_t pip) {
 }
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
-    if (nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        nt_gfx_frame_execute();
-    }
+    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.pipeline_pool, pip.id);
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_PIPELINE, pip.id);
     NT_GFX_END(destroy_pipeline(pip));
 }
@@ -1484,9 +1474,7 @@ static nt_gfx_result_t destroy_vertex_input(nt_vertex_input_t vi) {
 }
 
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi) {
-    if (nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
-        nt_gfx_frame_execute();
-    }
+    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.vertex_input_pool, vi.id);
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_VERTEX_INPUT, vi.id);
     NT_GFX_END(destroy_vertex_input(vi));
 }
@@ -1520,17 +1508,13 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
 }
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
-    if (nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
-        nt_gfx_frame_execute();
-    }
+    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.buffer_pool, buf.id);
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id);
     NT_GFX_END(destroy_buffer(buf));
 }
 
 void nt_gfx_destroy_texture(nt_texture_t tex) {
-    if (nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
-        nt_gfx_frame_execute();
-    }
+    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.texture_pool, tex.id);
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE, tex.id);
     NT_GFX_END(destroy_texture(tex));
 }
@@ -1541,11 +1525,6 @@ static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
     if (!nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
         return NT_GFX_RESULT_INVALID_HANDLE;
     }
-    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
-    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("destroy_render_target called inside a pass");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     uint32_t slot = nt_pool_slot_index(rt.id);
     nt_gfx_backend_destroy_render_target(slot);
     memset(&s_gfx.render_target_metas[slot], 0, sizeof(nt_gfx_render_target_meta_t));
@@ -1554,9 +1533,7 @@ static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
 }
 
 void nt_gfx_destroy_render_target(nt_render_target_t rt) {
-    if (nt_pool_valid(&s_gfx.render_target_pool, rt.id)) {
-        nt_gfx_frame_execute();
-    }
+    NT_GFX_ASSERT_FRAME_RULE(&s_gfx.render_target_pool, rt.id);
     NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_RENDER_TARGET, rt.id);
     NT_GFX_END(destroy_render_target(rt));
 }
@@ -2434,7 +2411,6 @@ nt_gfx_result_t nt_gfx_buffer_update(nt_buffer_t buf, uint32_t offset, const voi
 }
 
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
-    nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.related[0] = offset; event->data.resource.flags = data != NULL);
     NT_GFX_END(nt_gfx_buffer_update(buf, offset, data, size));
 }
@@ -2487,9 +2463,6 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 }
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
-#if NT_GFX_GPU_TIMING_ENABLED /* OFF keeps the toggle inert */
-    nt_gfx_frame_execute();
-#endif
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
@@ -2516,7 +2489,6 @@ static nt_gfx_result_t orphan_buffer(nt_buffer_t buf, const void *data, uint32_t
 }
 
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
-    nt_gfx_frame_execute();
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_ORPHAN, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.flags = data != NULL);
     NT_GFX_END(orphan_buffer(buf, data, size));
 }
@@ -2929,6 +2901,12 @@ static bool mesh_make_ibo(const NtMeshAssetHeader *hdr, const uint8_t *index_dat
     return true;
 }
 
+/* A failed activation frees the buffers it made; no recorded command can name them yet, so the frame rule does not apply. */
+static void destroy_unpublished_buffer(nt_buffer_t buf) {
+    NT_GFX_BEGIN(NT_GFX_OP_DESTROY, NT_GFX_OBJECT_BUFFER, buf.id);
+    NT_GFX_END(destroy_buffer(buf));
+}
+
 uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     if (!mesh_blob_valid(data, size)) {
         return 0;
@@ -2973,15 +2951,15 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
 
     nt_buffer_t ibo;
     if (!mesh_make_ibo(hdr, index_data, &ibo)) {
-        nt_gfx_destroy_buffer(vbo);
+        destroy_unpublished_buffer(vbo);
         return 0;
     }
 
     uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);
     if (mesh_id == 0) {
         NT_LOG_ERROR("activate_mesh: mesh pool full");
-        nt_gfx_destroy_buffer(ibo);
-        nt_gfx_destroy_buffer(vbo);
+        destroy_unpublished_buffer(ibo);
+        destroy_unpublished_buffer(vbo);
         return 0;
     }
 

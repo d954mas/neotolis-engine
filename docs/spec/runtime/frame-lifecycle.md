@@ -40,9 +40,11 @@ fixed_update loop
 game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
 game_render           ← nt_ui_walk reads scratch pointers; any number of
-                        gfx passes
-nt_gfx_end_frame      ← after the last pass, also when nothing renders; executes
-                        the recorded draw-phase calls
+                        gfx passes; from the first pass no live GPU object is
+                        destroyed (the frame rule)
+nt_gfx_end_frame      ← after the last pass, also when nothing renders; uploads
+                        frame storage and executes the recorded draw-phase calls
+                        (nt_gfx_read_pixels reads the window here, before the swap)
 nt_window_swap_buffers
 ```
 

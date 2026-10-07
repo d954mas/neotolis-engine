@@ -387,6 +387,11 @@ static void test_begin_pass_needs_an_open_frame_without_a_pass_also_on_a_loss(vo
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    /* A lost pass records nothing but still opens, so nesting asserts and end_pass closes it. */
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "begin_pass: needs an open frame with no open pass"));
+    nt_gfx_end_pass();
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "begin_pass: needs an open frame with no open pass"));
@@ -413,7 +418,7 @@ static void test_draw_state_in_a_pass_on_a_lost_context_does_not_assert(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    /* The game's pass does not open on a lost context; its draw state calls return quietly. */
+    /* On a lost context the game's pass opens without recording; its draw state calls return quietly. */
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor(0, 0, 1, 1);
     nt_gfx_set_scissor_enabled(true);
@@ -511,17 +516,23 @@ static void test_render_target_work_on_a_known_loss_ends_context_lost(void) {
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* FULL traps before the rejection returns, so the recorded operation has a BEGIN and no RESULT. */
+/* The frame rule traps before the destroy is recorded, so the capture holds no DESTROY at all. */
 static void test_rejected_destroys_assert_inside_a_recorded_frame(void) {
     nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
     record_next_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "inside a pass"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
     nt_gfx_end_pass();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(texture)); /* after the pass, the frame still names it */
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, result_of(nt_gfx_capture_read(), NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE));
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    for (uint32_t i = 0; i < capture.count; i++) {
+        TEST_ASSERT_FALSE(capture.events[i].operation == NT_GFX_OP_DESTROY && capture.events[i].object_kind == NT_GFX_OBJECT_TEXTURE);
+    }
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_gfx_texture_format(texture)); /* still alive */
 }
 #endif
 

@@ -75,6 +75,7 @@ static void test_sprite_text_sprite_records_in_command_order(void) {
 
     nt_gfx_fake_draw_trace_reset(true);
     walk();
+    ui_walker_fixture_end_frame(&s_fx);
 
     TEST_ASSERT_EQUAL_UINT32(3U, nt_gfx_fake_draw_trace_count());
     const nt_gfx_fake_draw_t first = nt_gfx_fake_draw_trace_at(0);
@@ -160,6 +161,7 @@ static void test_compatible_texts_merge(void) {
 
     nt_gfx_fake_draw_trace_reset(true);
     walk();
+    ui_walker_fixture_end_frame(&s_fx);
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(2U, ui_walker_fx_quads(nt_gfx_fake_draw_trace_at(0)));
@@ -177,6 +179,7 @@ static void test_text_material_depth_bias_reaches_glyphs(void) {
 
     nt_gfx_fake_draw_trace_reset(true);
     walk();
+    ui_walker_fixture_end_frame(&s_fx);
 
     const nt_gfx_fake_draw_t d = nt_gfx_fake_draw_trace_at(0);
     TEST_ASSERT_EQUAL_UINT32(2U, ui_walker_fx_quads(d));
@@ -207,14 +210,12 @@ static void test_one_material_two_passes_rebinds(void) {
     nt_gfx_fake_draw_trace_reset(true);
     const uint32_t binds_before = nt_gfx_fake_bind_pipeline_count();
     walk();
-    const uint32_t binds_first = nt_gfx_fake_bind_pipeline_count();
     nt_gfx_end_pass();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     walk();
-    const uint32_t binds_second = nt_gfx_fake_bind_pipeline_count();
+    ui_walker_fixture_end_frame(&s_fx);
 
-    TEST_ASSERT_EQUAL_UINT32(binds_before + 1U, binds_first);
-    TEST_ASSERT_EQUAL_UINT32(binds_first + 1U, binds_second);
+    TEST_ASSERT_EQUAL_UINT32(binds_before + 2U, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
     const nt_gfx_fake_draw_t first = nt_gfx_fake_draw_trace_at(0);
     const nt_gfx_fake_draw_t second = nt_gfx_fake_draw_trace_at(1);

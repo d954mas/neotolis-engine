@@ -167,9 +167,10 @@ static void test_draw_records_a_text_draw(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
     nt_debug_overlay_draw(material, font, identity, 16.0F, NT_RGBA8(255, 255, 255, 255));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(program.id, nt_gfx_fake_draw_trace_at(0).program.id);
-    nt_gfx_end_pass();
 
     nt_debug_overlay_shutdown();
     nt_font_destroy(font);

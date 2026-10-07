@@ -258,7 +258,8 @@ height, in em) and `v_color`, and computes coverage with `SlugRender(coord,
 glyph, band_transform)` from `common/slug_coverage.glsl`.
 
 Pipeline cache keys include the program handle, so replacement selects a
-different entry. Destroying the old program frees its pipelines immediately;
+different entry. Destroying the old program (before the first pass or after
+`nt_gfx_end_frame`, by the frame rule) frees its pipelines immediately;
 renderers remove their dead cache records on the next insertion after a miss,
 or when resetting the cache. Lookup validates a matching pipeline but does not
 remove records. An unassigned program kept alive by its owner keeps its pipelines
@@ -457,9 +458,9 @@ descriptor carries no sampler state.
 An unsupported color or depth format, a target with no attachment, and an
 invalid, husk, multi-level or differently sized attachment texture are
 developer errors and assert, as are exhausted configured target capacity,
-creating a target inside an active pass, and destroying a live target there.
-Destroying an invalid or stale target is a no-op even inside a pass: the handle
-check runs first. A returned invalid target therefore means a lost context, a
+creating a target inside an active pass, and destroying a live target while the
+frame is being drawn (the frame rule). Destroying an invalid or stale target is a
+no-op even then: the handle check runs first. A returned invalid target therefore means a lost context, a
 failed backend allocation, or an incomplete framebuffer, such as `RGBA16F`
 without float rendering. `nt_gfx_make_pipeline`
 follows the same split: a
