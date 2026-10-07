@@ -46,9 +46,9 @@ A material carries at most `NT_MATERIAL_MAX_TEXTURES` (4) slots, including
 renderer-supplied declarations, so a material-driven program may sample at most
 4 of the 8 units a program can link.
 
-Sprite and text keep two legacy renderer-specific exceptions until #528. Sprite
+Sprite and text keep two legacy renderer-specific exceptions until #600. Sprite
 declares its atlas-page sampler in slot 0 but substitutes the page resource per
-command. Text declares no material textures and supplies its font samplers
+emit and run. Text declares no material textures and supplies its font samplers
 outside the material declaration. New specialized renderers follow the declared
 renderer-supplied semantic rule above.
 
@@ -127,7 +127,7 @@ No duplicated material data. Material is created once (either from code via desc
 
 Per-entity variation (e.g. per-character color, dissolve progress) goes through entity param components, not material mutation — each entity carries its own values, the material stays shared.
 
-Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame, so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
+Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. Renderers read params when they record a draw (the sprite renderer compares them with the values it last wrote to the program), so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
 
 ## Attr defaults
 
@@ -143,18 +143,15 @@ mesh renderers ignore them.
 A material stores the declared `nt_resource_t` for each texture slot and never a
 resolved handle. Renderers call `nt_resource_get` where they already transition
 material state: the mesh renderers at each material or supplied-texture change inside a draw call,
-the sprite renderer when a command opens. A documented renderer-supplied
+the sprite renderer at `set_material` and at each `draw_list` material change. A documented renderer-supplied
 semantic is not resolved: for `u_skin_matrices` the skinned path supplies the
 run's deformation texture and its default sampler instead of the declared
-resource and sampler, then applies the full declared set. A sprite
-command snapshots its textures at open and its params at flush, so a mid-frame
-`nt_material_set_param` also applies to queued commands. Slot 0 of a sprite
-material is the atlas page: the renderer substitutes the page into the open
-command before it stages any index (splitting the command when it already holds
-indices, which copies the snapshot), so the declared slot-0 resource is never
-resolved. A text material declares no textures, so the text renderer resolves no
+resource and sampler, then applies the full declared set. A sprite emit
+records the params current at the call. Slot 0 of a sprite material is the atlas
+page: the renderer substitutes the page of each emit, and of each `draw_list`
+run's first item, so the declared slot-0 resource is never resolved. A text material declares no textures, so the text renderer resolves no
 material textures; it binds the font's own textures. These sprite/text legacy
-exceptions are tracked by #528. There is no material step.
+exceptions end with the material bind group (#600). There is no material step.
 
 Between `nt_resource_init` and `nt_resource_shutdown`, the published view of a
 handle changes only inside `nt_resource_step`. `nt_resource_shutdown` unpublishes

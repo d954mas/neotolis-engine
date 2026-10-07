@@ -21,6 +21,8 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
@@ -49,6 +51,24 @@ void setUp(void) {
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool approx(float a, float b) { return fabsf(a - b) < 1e-3F; }
+
+/* Walks with the fake backend's draw trace armed, so the trace holds exactly this walk's draws in painter
+ * order. s_walk_draws is the walk's recorded draw count (merged draws count once). */
+static uint32_t s_draws_before_walk;
+static uint32_t s_walk_draws;
+static void walk_traced(const nt_ui_target_t *target) {
+    nt_gfx_fake_draw_trace_reset(true);
+    s_draws_before_walk = nt_gfx_draw_calls(&g_nt_gfx.counters);
+    nt_ui_walk(s_fx.ctx, target);
+    s_walk_draws = nt_gfx_draw_calls(&g_nt_gfx.counters) - s_draws_before_walk;
+}
+
+/* Trace draw `i` is a sprite draw of `quads` region quads that ends with emit `e`. */
+static bool trace_is_sprite_draw(uint32_t i, nt_sprite_test_emit_t e, uint32_t quads) {
+    const nt_gfx_fake_draw_t d = nt_gfx_fake_draw_trace_at(i);
+    return d.num_indices == quads * 6U && d.first_index + d.num_indices == e.first_index + e.index_count;
+}
+
 /* Channel k of a packed 0xAABBGGRR color as [0,1]; approx8 allows the RGBA8 quantization. */
 static float ch(uint32_t c, uint32_t k) { return (float)((c >> (8U * k)) & 0xFFU) / 255.0F; }
 static bool approx8(float a, float b) { return fabsf(a - b) <= (0.5F / 255.0F) + 1e-4F; }
@@ -497,7 +517,7 @@ static void test_inline_image_emits_sprite_and_text(void) {
     /* Text spans for "A " and " B" (image splits the run anyway -> two text runs). */
     TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "inline-image line still emits text draw_n spans");
     /* The image emitted a region quad (4 verts) via the standard sprite path. */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "inline image emits a 4-vert region quad via nt_ui_image");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_test_last_emit().vertex_count, "inline image emits a 4-vert region quad via nt_ui_image");
     /* The widget reports exactly one inline image emitted. */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "exactly one IMAGE atom emitted");
 }
@@ -507,7 +527,7 @@ static void test_inline_image_emits_sprite_and_text(void) {
 static void test_inline_image_defaults_material_from_ctx(void) {
     nt_text_renderer_test_reset_call_counters();
     frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU); /* image_material left unset */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "unset image_material -> image emits via the ctx->sprite_material default");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_test_last_emit().vertex_count, "unset image_material -> image emits via the ctx->sprite_material default");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one IMAGE atom emitted via the ctx default material");
 }
 
@@ -527,7 +547,7 @@ static nt_material_t make_rich_custom_material(float first_default) {
 static void assert_inline_image_carries(float first_default) {
     const float want[4] = {first_default, 0.25F, 0.5F, 1.0F};
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     for (uint32_t v = 0; v < 4U; v++) {
         float got[4] = {0};
         nt_sprite_renderer_test_last_emit_radial(v, got, 4);
@@ -560,7 +580,7 @@ static void test_inline_image_tint_packed(void) {
     /* 0xAABBGGRR: r=255 g=128 b=0 a=255 -> orange, alpha 1. */
     frame_text_image_text(mat, NT_RICH_VALIGN_MIDDLE, 0xFF0080FFU);
 
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "image quad");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_test_last_emit().vertex_count, "image quad");
     for (uint32_t v = 0; v < 4U; v++) {
         uint8_t col[4] = {0};
         nt_sprite_renderer_test_last_emit_color(v, col); /* 0xAABBGGRR byte order: r,g,b,a */
@@ -608,7 +628,7 @@ static void test_inline_image_fades_with_parent_opacity(void) {
     const nt_material_t mat = s_fx.sprite_material;
 
     frame_image_with_opacity(mat, 1.0F);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "image quad (opacity 1)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_test_last_emit().vertex_count, "image quad (opacity 1)");
     for (uint32_t v = 0; v < 4U; v++) {
         uint8_t col[4] = {0};
         nt_sprite_renderer_test_last_emit_color(v, col);
@@ -616,7 +636,7 @@ static void test_inline_image_fades_with_parent_opacity(void) {
     }
 
     frame_image_with_opacity(mat, 0.5F);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "image quad (opacity 0.5)");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_test_last_emit().vertex_count, "image quad (opacity 0.5)");
     for (uint32_t v = 0; v < 4U; v++) {
         uint8_t col[4] = {0};
         nt_sprite_renderer_test_last_emit_color(v, col);
@@ -652,26 +672,29 @@ static void frame_two_images(nt_material_t img_mat) {
     }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_sprite_renderer_test_reset_nonempty_flush_calls();
-    nt_ui_walk(s_fx.ctx, &target);
+    walk_traced(&target);
 }
 
-/* (6c) two same-band inline images COALESCE: set_material binds once in rich_emit_images and both quads
- * share one staging batch with no flush between them, so the band drains in ONE non-empty flush, not two. */
+/* (6c) two same-band inline images COALESCE: set_material binds once in rich_emit_images and the two
+ * adjacent quads share material and page, so the second draw merges into the first: ONE sprite draw. The
+ * text (band 0) lands before it. */
 static void test_two_inline_images_coalesce(void) {
     const nt_material_t mat = s_fx.sprite_material;
     frame_two_images(mat);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "both inline images emit in the immediate pass");
-    /* ONE non-empty sprite flush across BOTH images of the single band -> they coalesced (no per-image flush). */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_sprite_renderer_test_nonempty_flush_calls(), "two band images coalesce into ONE sprite batch (one non-empty flush, not two)");
     /* The LAST image emitted is a 4-vert region quad with the right tint (white, full opacity). */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_renderer_test_last_emit_vertex_count(), "second image emits a 4-vert region quad");
+    const nt_sprite_test_emit_t last = nt_sprite_test_last_emit();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, last.vertex_count, "second image emits a 4-vert region quad");
     for (uint32_t v = 0; v < 4U; v++) {
         uint8_t col[4] = {0};
         nt_sprite_renderer_test_last_emit_color(v, col);
         TEST_ASSERT_TRUE_MESSAGE(col[0] == 255U && col[1] == 255U && col[2] == 255U && col[3] == 255U, "second image tint == white, full opacity");
     }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_walk_draws, "text draw + ONE merged image draw, not two image draws");
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_FALSE_MESSAGE(trace_is_sprite_draw(0U, last, 2U), "first draw is the text band's");
+    TEST_ASSERT_TRUE_MESSAGE(trace_is_sprite_draw(1U, last, 2U), "second draw covers BOTH image quads");
 }
 
 /* Inline rich images self-emit in the CUSTOM block's sprite batch, NOT as Clay IMAGE commands: a
@@ -2087,7 +2110,7 @@ static void frame_text_image_object(void) {
     }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_ui_walk(s_fx.ctx, &target);
+    walk_traced(&target);
 }
 
 /* (L1) default layers by kind: with no <layer>, every TEXT atom reports layer 0, the IMAGE atom layer 1,
@@ -2117,11 +2140,11 @@ static void test_default_layers_by_kind(void) {
 }
 
 /* Within-band emit-order recorder: at object draw_fn time, capture (a) how many inline images have already
- * emitted (image_emit_count) and (b) the sprite renderer's STAGED vertex count. With the within-band order
- * text->image->object AND the flush-images-before-objects barrier, the object's draw_fn runs after the band's
- * image emitted AND was drained -> image_emit_count == 1 and staged sprite count == 0 (image landed under it). */
+ * emitted (image_emit_count) and (b) how many draws the walk has recorded. With the within-band order
+ * text->image->object, the band's text and image draws are already recorded when the object's draw_fn
+ * runs, so both land under whatever the object draws. */
 static uint32_t s_order_img_at_object_draw;
-static uint32_t s_order_sprite_staged_at_object_draw;
+static uint32_t s_order_draws_at_object_draw;
 static void order_recording_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
     (void)x;
@@ -2131,7 +2154,7 @@ static void order_recording_draw(void *user_data, float x, float y, float w, flo
     (void)color;
     (void)world_mat4;
     s_order_img_at_object_draw = nt_ui_rich_test_image_emit_count(s_fx.ctx);
-    s_order_sprite_staged_at_object_draw = nt_sprite_renderer_test_vertex_count();
+    s_order_draws_at_object_draw = nt_gfx_draw_calls(&g_nt_gfx.counters) - s_draws_before_walk;
 }
 
 /* (L2) <layer=5> override: a push_layer(5) around mixed text + image -> EVERY enclosed atom (any kind)
@@ -2146,8 +2169,8 @@ static void test_layer_override(void) {
     base.image_material = s_fx.sprite_material;
     const nt_atlas_region_ref_t ref = nt_atlas_ref(s_fx.atlas.handle, FX_WHITE_NAME_HASH);
 
-    s_order_img_at_object_draw = 0xFFFFFFFFU;           /* sentinel: stays unset if the object never draws */
-    s_order_sprite_staged_at_object_draw = 0xFFFFFFFFU; /* sentinel: must become 0 (images drained) if the object draws */
+    s_order_img_at_object_draw = 0xFFFFFFFFU;   /* sentinel: stays unset if the object never draws */
+    s_order_draws_at_object_draw = 0xFFFFFFFFU; /* sentinel: stays unset if the object never draws */
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("rich_lo_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
@@ -2163,7 +2186,8 @@ static void test_layer_override(void) {
     }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_ui_walk(s_fx.ctx, &target);
+    walk_traced(&target);
+    const nt_sprite_test_emit_t image = nt_sprite_test_last_emit();
 
     const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
     TEST_ASSERT_TRUE_MESSAGE(n >= 4U, "override block placed text + image + object atoms");
@@ -2174,9 +2198,52 @@ static void test_layer_override(void) {
      * object's draw_fn ran AFTER the band's image emitted (image-before-object). image_emit_count is 1 at
      * draw time (1 = the band's lone image already emitted; not the sentinel = the object did draw). */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_order_img_at_object_draw, "within band: image emits BEFORE object (object draw_fn sees image_emit_count == 1)");
-    /* And the band's image was FLUSHED before the object's opaque draw_fn, not left staged: the sprite
-     * staging is empty at draw time, so the image lands UNDER whatever the object draws (z barrier). */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_order_sprite_staged_at_object_draw, "band images drained BEFORE the object draw_fn (staged sprite vertex count == 0)");
+    /* Painter order inside the band: the text draw, then the image draw, both recorded before the object's
+     * draw_fn ran (it draws nothing itself, so they are the walk's only draws). */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_walk_draws, "band records a text draw and an image draw");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_order_draws_at_object_draw, "band text + image draws recorded BEFORE the object draw_fn");
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_FALSE_MESSAGE(trace_is_sprite_draw(0U, image, 1U), "within band: text paints first");
+    TEST_ASSERT_TRUE_MESSAGE(trace_is_sprite_draw(1U, image, 1U), "within band: image paints after text");
+}
+
+/* An object draw_fn that selects a foreign text material, as a game object drawing its own text may. */
+static void foreign_text_material_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
+    (void)user_data;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)color;
+    (void)world_mat4;
+    nt_text_renderer_set_material(s_fx.sprite_material);
+}
+
+/* (L2b) text in a band after an object that selected another text material draws with the block's. */
+static void test_later_band_text_reselects_block_text_material(void) {
+    nt_mem_scratch_reset();
+    s_fx.ctx->pending_rich = NULL;
+    s_fx.ctx->rich_session_open = false;
+
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("rich_tm_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
+        nt_ui_rich_begin(s_fx.ctx, &base);
+        nt_ui_rich_push_layer(s_fx.ctx, 0U);
+        nt_ui_rich_object(s_fx.ctx, stub_measure, foreign_text_material_draw, NULL);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_push_layer(s_fx.ctx, 1U);
+        nt_ui_rich_text_n(s_fx.ctx, "after", 5);
+        nt_ui_rich_pop(s_fx.ctx);
+        nt_ui_rich_end(s_fx.ctx);
+        nt_ui_rich_text(s_fx.ctx, CLAY_ID("rich_tm").id, NULL, &base, 800.0F, NT_RICH_ALIGN_LEFT, 0.0F, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(s_fx.text_material.id, nt_text_renderer_test_material_id(), "band 1 text is drawn with the block's text material, not the object's");
 }
 
 /* Build a multi-face block split across TWO explicit layers: faces R,B on layer 0 and faces I,BI on
@@ -2279,8 +2346,9 @@ static void test_font_rebinds_per_layer_for_shared_face(void) {
 }
 
 /* Build two inline images on DISTINCT explicit layers: a red image on layer 0 (lower band) and a green
- * image on layer 1 (higher band). Two populated sprite bands -> two per-band sprite drains; ascending emit
- * means the layer-1 (green) image is the LAST one emitted. */
+ * image on layer 1 (higher band). Ascending emit means the layer-1 (green) image is the LAST one emitted.
+ * s_two_layer_first_index is the first index the walk allocates (the red quad's). */
+static uint32_t s_two_layer_first_index;
 static void frame_two_layer_images(nt_material_t img_mat) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -2310,32 +2378,45 @@ static void frame_two_layer_images(nt_material_t img_mat) {
     }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_sprite_renderer_test_reset_nonempty_flush_calls();
+    s_two_layer_first_index = (g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].used + 3U) / 4U;
     nt_ui_walk(s_fx.ctx, &target);
 }
 
-/* (L5) per-band drain + ascending z (otherwise visual-only): a layer-0 red + layer-1 green image drain as
- * two non-empty sprite flushes (not one coalesced batch), and ascending band order makes layer-1 green emit LAST. */
+/* (L5) ascending z (otherwise visual-only): the layer-0 red quad's indices precede the layer-1 green quad's
+ * in the index stream, so red paints first. The two bands may merge into one draw (same material and page,
+ * no state change between them), so painter order is the index order, not a draw count. */
 static void test_layer_drain_orders_ascending(void) {
     const nt_material_t mat = s_fx.sprite_material;
     frame_two_layer_images(mat);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "two images on two layers both emit");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_sprite_renderer_test_nonempty_flush_calls(), "two populated bands -> one non-empty sprite drain per band (2)");
     /* Ascending: the HIGHER band (layer 1, green) emits LAST, so the last-emit probe holds green. */
+    const nt_sprite_test_emit_t green = nt_sprite_test_last_emit();
     uint8_t col[4] = {0};
     nt_sprite_renderer_test_last_emit_color(0U, col); /* 0xAABBGGRR -> r,g,b,a */
     TEST_ASSERT_TRUE_MESSAGE(col[0] == 0U && col[1] == 255U && col[2] == 0U, "higher band (layer 1, green) emits LAST -> ascending band order");
+
+    /* The walk's first index belongs to the red quad and comes before every green index. */
+    TEST_ASSERT_TRUE_MESSAGE(s_two_layer_first_index < green.first_index, "lower band's indices precede the higher band's");
+    uint32_t red_vertex = 0;
+    memcpy(&red_vertex, g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].staging + ((size_t)s_two_layer_first_index * sizeof(uint32_t)), sizeof(red_vertex));
+    TEST_ASSERT_TRUE_MESSAGE(red_vertex < green.first_vertex, "lower band's quad sits before the higher band's in vertex storage");
+    nt_sprite_vertex_t red_v;
+    memcpy(&red_v, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + ((size_t)red_vertex * green.stride), sizeof(red_v));
+    TEST_ASSERT_TRUE_MESSAGE(red_v.color[0] == 255U && red_v.color[1] == 0U && red_v.color[2] == 0U, "first painted quad is the lower band's red image");
 }
 
-/* (L6) default mixed block -> per-kind bands; only the IMAGE band carries sprites (text is stub-font no-op,
- * object self-draws), so exactly ONE non-empty sprite drain occurs. */
-static void test_default_mixed_block_band_flush_count(void) {
-    nt_sprite_renderer_test_reset_nonempty_flush_calls();
-    frame_text_image_object(); /* one IMAGE atom (band 1); text band 0 + object band 2 emit no sprites */
+/* (L6) default mixed block -> per-kind bands painted in ascending order: the TEXT band (0) draws before
+ * the IMAGE band (1); the stub object (band 2) draws nothing. */
+static void test_default_mixed_block_paints_bands_in_order(void) {
+    frame_text_image_object();
+    const nt_sprite_test_emit_t image = nt_sprite_test_last_emit();
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one inline image in the mixed block");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_sprite_renderer_test_nonempty_flush_calls(), "only the IMAGE band drains sprite content -> exactly one non-empty sprite flush");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_walk_draws, "text band draw + image band draw");
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_FALSE_MESSAGE(trace_is_sprite_draw(0U, image, 1U), "band 0 (text) paints first");
+    TEST_ASSERT_TRUE_MESSAGE(trace_is_sprite_draw(1U, image, 1U), "band 1 (image) paints after the text band");
 }
 
 /* (L7) AUTO + explicit layers MIXED in one block: a <layer=5> text run, then plain (AUTO) text + AUTO
@@ -2577,6 +2658,7 @@ int main(void) {
     RUN_TEST(test_markup_effect_capacity_keeps_prior_params_and_balances_close);
     RUN_TEST(test_emit_produces_text_spans);
     RUN_TEST(test_rich_only_frame_binds_text_material);
+    RUN_TEST(test_later_band_text_reselects_block_text_material);
     RUN_TEST(test_fixed_block_size_matches_solved);
     RUN_TEST(test_single_style_one_span_per_line);
     RUN_TEST(test_double_walk_is_deterministic);
@@ -2594,7 +2676,7 @@ int main(void) {
     RUN_TEST(test_font_group_per_layer);
     RUN_TEST(test_font_rebinds_per_layer_for_shared_face);
     RUN_TEST(test_layer_drain_orders_ascending);
-    RUN_TEST(test_default_mixed_block_band_flush_count);
+    RUN_TEST(test_default_mixed_block_paints_bands_in_order);
     RUN_TEST(test_mixed_auto_and_explicit_layers);
     RUN_TEST(test_over_cap_layers_hard_guard);
     RUN_TEST(test_inline_image_emits_sprite_and_text);

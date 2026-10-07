@@ -41,7 +41,13 @@ The command and payload must outlive every consuming walk. Frame-scratch data
 is invalidated by `nt_mem_scratch_reset`; the engine never frees user data.
 Repeated walks may invoke the callback again. A callback must not re-enter walk,
 change the layout tree, or reset scratch. It preserves active clipping and owns
-the GPU state it touches; the walker retains its existing flush/material barriers.
+the GPU state it touches. The walker flushes staged text before the callback, and
+every later sprite command selects its own material, so a callback may leave
+another sprite material selected. A callback that emits sprites calls
+`nt_sprite_renderer_set_material` first: the selection it finds is whatever an
+earlier command left. The walk's draw count (`nt_ui_get_last_walk_draw_calls`)
+counts recorded draws, so a walk whose first draw continues the caller's last
+draw in the same pass adds nothing for it.
 The supplied frame contains the composed world matrix, opacity, context and
 layout-space Clay command.
 
@@ -219,10 +225,9 @@ its own emit. Custom widgets on the base handle then batch with plain panels and
 icons instead of flushing at every boundary.
 
 A custom-attr base moves all base UI to the extended vertex stride
-([Sprite custom-attr block](../render/items-sorting-batching.md#sprite-custom-attr-block)).
-Its batches cap at the sprite renderer's `custom_max_vertices`. The largest base
-emit, a rounded BORDER, stages 56 vertices, so a custom-attr base needs
-`custom_max_vertices` ≥ 56.
+([Sprite custom-attr block](../render/items-sorting-batching.md#sprite-custom-attr-block)),
+so its geometry takes more vertex frame storage; size the host's budget from the
+measured peak.
 
 ## Interaction model
 

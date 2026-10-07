@@ -203,7 +203,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
             const float vis_corners[4][2] = {{vl, vt}, {vr, vt}, {vr, vb}, {vl, vb}};
             nt_ui_internal_emit_filled_quad_m(ctx->atlas, ctx->white_region, vis_corners, m, 0x641C42A8U);
             nt_ui_internal_emit_outline_m(ctx->atlas, ctx->white_region, vis_corners, 2.0F, m, 0xFFFFFFFFU);
-            nt_sprite_renderer_flush();
 
             if (can_label) {
                 char buf[80];
@@ -294,7 +293,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
                 overlay_draw_text(tmat, font, top_x + 4.0F, top_y - label_size - 2.0F, label_size, white, buf, (size_t)n);
             }
         }
-        nt_sprite_renderer_flush();
         nt_text_renderer_flush();
         if (scissor_w > 0 && scissor_h > 0) {
             nt_gfx_set_scissor_enabled(false);
@@ -343,7 +341,6 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         }
     }
 
-    nt_sprite_renderer_flush();
     if (can_label) {
         nt_text_renderer_flush();
     }

@@ -381,9 +381,9 @@ void nt_gfx_fake_reset(void) {
     s_fake_fail_next_render_target_create = false;
 }
 
-/* Deliberately outside nt_gfx_fake_reset: test_sprite_renderer's capacity-flush test resets the
- * other observations mid-scenario and still reads draws recorded before that. Scope is the explicit
- * nt_gfx_fake_draw_trace_reset alone (plus the disarm in backend_init). */
+/* Deliberately outside nt_gfx_fake_reset: a test may reset the other observations mid-scenario and
+ * still read draws recorded before that. Scope is the explicit nt_gfx_fake_draw_trace_reset alone
+ * (plus the disarm in backend_init). */
 static nt_gfx_fake_draw_t s_fake_draws[128];
 static uint32_t s_fake_draw_count;
 static bool s_fake_draw_enabled;

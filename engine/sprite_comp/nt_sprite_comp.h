@@ -94,6 +94,7 @@ typedef struct {
     const nt_atlas_uv_t *uvs;
     const uint16_t *indices;
     nt_resource_t page_resource;
+    float ipu; /* the atlas's inverse pixels per unit */
 } nt_sprite_resolved_region_t;
 
 /* Bulk SoA view — pointers stable for module lifetime; values shift on add/remove.

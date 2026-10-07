@@ -54,6 +54,12 @@ static void build_rect(nt_ui_context_t *ctx) {
     nt_ui_end(ctx);
 }
 
+/* A walk in the same pass continues the previous walk's draw (gfx merges it); a new pass starts its own. */
+static void next_pass(void) {
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 static void assert_timings(const nt_ui_context_t *ctx, int32_t end_ms, int32_t walk_ms) {
 #if !NT_UI_TIMING_ENABLED
     end_ms = 0;
@@ -92,6 +98,7 @@ static void test_repeated_frame_replaces_timing(void) {
 
     s_clock_step = 0.25;
     build_rect(s_fx.ctx);
+    next_pass();
     nt_ui_walk(s_fx.ctx, &s_target);
     assert_timings(s_fx.ctx, 250, 250);
 #if NT_UI_TIMING_ENABLED
@@ -181,6 +188,7 @@ static void test_context_timing_is_independent(void) {
 
     s_clock_step = 0.25;
     build_rect(s_other_ctx);
+    next_pass();
     nt_ui_walk(s_other_ctx, &s_target);
     assert_timings(s_other_ctx, 250, 250);
     assert_timings(s_fx.ctx, 125, 125);

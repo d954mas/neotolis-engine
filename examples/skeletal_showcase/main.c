@@ -79,6 +79,10 @@
 #ifdef NT_PLATFORM_WEB
 #include "platform/web/nt_platform_web.h"
 #endif
+
+/* Frame storage budget of the sprite geometry; the first scene peaks at about 3 KB / 1.6 KB. */
+#define SKELETAL_SHOWCASE_UI_VERTEX_BYTES (64U * 1024U)
+#define SKELETAL_SHOWCASE_UI_INDEX_BYTES (32U * 1024U)
 // #endregion
 
 // #region constants and state
@@ -2648,7 +2652,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_MESH);
         restore_mesh_scene();
         nt_shape_renderer_restore_gpu();
-        (void)nt_sprite_renderer_restore_gpu();
         (void)nt_text_renderer_restore_gpu();
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
@@ -2737,7 +2740,6 @@ static void frame(void) {
         nt_gfx_bind_uniform_block(0, &s_frame_uniforms, sizeof s_frame_uniforms);
         nt_ui_target_t target = nt_ui_scale_make_target(&s_ui_scale);
         nt_ui_walk(s_ui, &target);
-        nt_sprite_renderer_flush();
         nt_text_renderer_flush();
     }
     if (render_enabled) {
@@ -2770,7 +2772,8 @@ int main(int argc, char *argv[]) {
     gfx_desc.max_buffers = 128;
     gfx_desc.max_textures = 16;
     /* Worst frame: Order & Instancing, two passes of MAX skinned instances; scenes draw exclusively. */
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t);
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t)) + SKELETAL_SHOWCASE_UI_VERTEX_BYTES;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = SKELETAL_SHOWCASE_UI_INDEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 3U * 512U; /* two stage views and the UI view: 256 B or less each, plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
@@ -2793,8 +2796,6 @@ int main(int argc, char *argv[]) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
     nt_shape_renderer_init();
-    nt_sprite_renderer_desc_t sprite_desc = nt_sprite_renderer_desc_defaults();
-    nt_sprite_renderer_init(&sprite_desc);
     nt_text_renderer_init();
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();

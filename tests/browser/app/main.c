@@ -1018,8 +1018,7 @@ static void render_rich_composition(nt_ui_context_t *ctx) {
 static bool s_gpu_restore_pending;
 
 static bool gpu_restore_step(void) {
-    bool ok = nt_sprite_renderer_restore_gpu() == NT_OK;
-    ok = (nt_text_renderer_restore_gpu() == NT_OK) && ok;
+    bool ok = nt_text_renderer_restore_gpu() == NT_OK;
     nt_shape_renderer_restore_gpu();
     /* The probe's mesh and vertex input died with the context. */
     mesh_probe_destroy();
@@ -1224,7 +1223,8 @@ int main(int argc, char *argv[]) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.capture_capacity = 16384;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;  /* the mesh probe's instances */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U; /* the mesh probe's instances and the sprites */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = 128U * 1024U;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
@@ -1244,8 +1244,6 @@ int main(int argc, char *argv[]) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 5}); /* sprite, text, the mesh color probe's three */
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});             /* base + 4 rich faces */
 
-    nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
-    nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
     nt_shape_renderer_init();
     const bool probe_ok = mesh_probe_create();

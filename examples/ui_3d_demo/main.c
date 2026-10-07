@@ -67,6 +67,10 @@
 #ifdef NT_PLATFORM_WEB
 #include "platform/web/nt_platform_web.h"
 #endif
+
+/* Frame storage budget of the sprite geometry; the first scene peaks at about 3.8 KB / 2.5 KB. */
+#define UI_3D_DEMO_VERTEX_BYTES (64U * 1024U)
+#define UI_3D_DEMO_INDEX_BYTES (32U * 1024U)
 // #endregion
 
 // #region constants
@@ -794,9 +798,7 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_FONT);
         /* Materials keep their handles and draw again once their programs relink. */
         nt_shape_renderer_restore_gpu();
-        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        restore_result = nt_text_renderer_restore_gpu();
+        nt_result_t restore_result = nt_text_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         (void)restore_result;
         nt_program_ref_drop(&s_sprite_cutoff_program);
@@ -933,9 +935,8 @@ static void frame(void) {
          * fringes don't z-fight; the walker emits text with the renderer's current bias. Reset after. */
         nt_text_renderer_set_glyph_depth_bias(0.0001F);
         nt_ui_walk(s_ctx, &target);
-        /* Flush UI draws under VP_3D BEFORE switching uniforms; otherwise labels emitted
+        /* Flush UI text under VP_3D BEFORE switching uniforms; otherwise labels emitted
          * by ui_walk get rasterized with the next pass's ortho matrix and vanish. */
-        nt_sprite_renderer_flush();
         nt_text_renderer_flush();
         nt_text_renderer_set_glyph_depth_bias(0.0F);
 
@@ -970,14 +971,12 @@ static void frame(void) {
     if (ui_can_render && inspector_can_render && nt_ui_inspector_is_active(s_ctx)) {
         /* Sidebar tree is its own screen-space pass (ortho): the HUD above bound that view. */
         nt_ui_debug_inspector_walk(s_ctx, &target);
-        nt_sprite_renderer_flush();
         nt_text_renderer_flush();
 
         /* Highlight overlay emits the element's world geometry in 3D ctx → bind the perspective VP
          * so it lands on the panel; the depth-off inspector materials keep it on top. */
         nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
-        nt_sprite_renderer_flush();
         nt_text_renderer_flush();
     }
 
@@ -1038,6 +1037,8 @@ int main(int argc, char *argv[]) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 3U * 512U; /* 3D, HUD/inspector and highlight views: 256 B or less each, plus any offset alignment up to 256 */
     gfx_desc.depth = true;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = UI_3D_DEMO_VERTEX_BYTES;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = UI_3D_DEMO_INDEX_BYTES;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 
@@ -1056,8 +1057,6 @@ int main(int argc, char *argv[]) {
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
     nt_shape_renderer_init();
-    nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
-    nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
 
     nt_ui_module_init();

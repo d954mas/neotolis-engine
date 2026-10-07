@@ -68,7 +68,6 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
      * test_nt_sprite_renderer setUp). */
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
-    nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
     nt_text_renderer_init();
     nt_ui_module_init();
 

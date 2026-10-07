@@ -1255,8 +1255,8 @@ static uint8_t build_custom_block(const nt_ui_image_payload_t *p, const nt_ui_im
 /* GEOMETRY mode: a clean 4-corner bbox quad against the white pixel.
  *
  * INVARIANT (load-bearing): the vertex shader's gl_VertexID&3 corner derivation requires each
- * quad's base vertex index to be a multiple of 4. The align call enforces it, so the
- * quad may share a batch with emits of any vertex count; it emits EXACTLY 4 verts. */
+ * quad's base vertex index to be a multiple of 4. Every sprite emit starts there, so this one
+ * emits EXACTLY 4 verts in TL/TR/BR/BL order. */
 static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, uint32_t col, const float world_mat4[16], const float *custom, uint8_t custom_bytes) {
     const Clay_BoundingBox bb = c->boundingBox;
     if (bb.width <= 0.0F || bb.height <= 0.0F) {
@@ -1266,13 +1266,12 @@ static void emit_custom_geometry(const nt_ui_context_t *ctx, const Clay_RenderCo
      * 0..3 → local {-1,-1}/{+1,-1}/{+1,+1}/{-1,+1}. */
     const float positions[4][2] = {{bb.x, bb.y}, {bb.x + bb.width, bb.y}, {bb.x + bb.width, bb.y + bb.height}, {bb.x, bb.y + bb.height}};
     const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
-    nt_sprite_renderer_align_next_vertex_to_4();
     nt_sprite_renderer_emit_geometry(ctx->atlas, ctx->white_region, positions, 4, idx, 6, world_mat4, col, custom, custom_bytes);
 }
 // #endregion
 
 // #region helper_emit_text
-/* dispatch_command flushes sprite before and lazy-rebinds after. */
+/* Text stages until its flush; dispatch_command flushes it before the next sprite command. */
 static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, const float world_mat4[16]) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
@@ -1322,20 +1321,6 @@ typedef struct {
     scissor_rect_t rect;
 } clip_cache_entry_t;
 
-/* Sprite-pipeline bind state. dirty — a barrier closed the open cmd → next dispatch
- * rebinds. last_mat_id — skip redundant set_material across a same-material run; the
- * no-op holds only while a cmd is open, so a barrier resets it to 0. */
-typedef struct {
-    bool dirty;
-    uint32_t last_mat_id;
-} nt_ui_sprite_bind_t;
-
-/* Mark a barrier: cmd closed (flush) → force the next dispatch to rebind. */
-static inline void sprite_bind_barrier(nt_ui_sprite_bind_t *b) {
-    b->dirty = true;
-    b->last_mat_id = 0U;
-}
-
 /* DIRECT mode: viewport is GL physical, Y-flip inside the viewport rect.
  * SCALED mode: viewport is logical; scale+shift to physical, Y-flip against fb height. */
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
@@ -1363,7 +1348,7 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, nt_ui_sprite_bind_t *bind, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
+static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
     /* Fail-closed in OFF builds — assert vanishes; the stack[(*depth)++] below would corrupt memory. */
     if ((uint32_t)*depth >= NT_UI_WALKER_SCISSOR_DEPTH_CAP) {
@@ -1439,10 +1424,8 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
         ++(*clip_cache_len);
     }
 
-    /* Flush BEFORE scissor switch so staging keeps prior clip. */
-    nt_sprite_renderer_flush();
+    /* Flush BEFORE scissor switch so staged text keeps the prior clip. */
     nt_text_renderer_flush();
-    sprite_bind_barrier(bind);
 
     stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
@@ -1450,11 +1433,9 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     nt_gfx_set_scissor_enabled(true);
 }
 
-static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, nt_ui_sprite_bind_t *bind) {
+static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT(*depth > 0 && "scissor underflow");
-    nt_sprite_renderer_flush();
     nt_text_renderer_flush();
-    sprite_bind_barrier(bind);
     (*depth)--;
     if (*depth == 0) {
         nt_gfx_set_scissor_enabled(false);
@@ -1491,16 +1472,13 @@ typedef struct {
 } nt_ui_walk_counters_t;
 
 /* type=NONE = engine anchor (skip silently); type=GAME = invoke handler. */
-static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16], float opacity, nt_ui_sprite_bind_t *bind) {
+static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, const float world_mat4[16], float opacity) {
     const nt_ui_custom_data_t *cd = (const nt_ui_custom_data_t *)c->renderData.custom.customData;
     NT_ASSERT(cd != NULL && "CUSTOM command must have nt_ui_custom_data_t");
     if (cd->type == NT_UI_CUSTOM_TYPE_NONE) {
         return;
     }
-    nt_sprite_renderer_flush();
     nt_text_renderer_flush();
-    /* Handler binds its OWN material; reset the cache so the next dispatch rebinds. */
-    sprite_bind_barrier(bind);
 
     nt_ui_custom_frame_t frame;
     frame.ctx = ctx;
@@ -1583,17 +1561,12 @@ static bool command_matches_walk_mode(const nt_ui_context_t *ctx, nt_ui_walk_mod
 }
 #endif
 
-/* desired = ctx->sprite_material or a per-element override (radial reveal). Skip
- * set_material (does get_info+validation even on its no-op) across a same-material run;
- * a barrier (dirty) or material switch rebinds. The text flush is a DIFFERENT (TEXT)
- * pipeline — it never closes the sprite cmd, so can't invalidate the cache. */
-static inline void prep_sprite_dispatch_mat(nt_material_t desired, nt_ui_sprite_bind_t *bind) {
+/* desired = ctx->sprite_material or a per-element override (radial reveal). Staged text lands
+ * first: sprites record at the call, text at its flush. A CUSTOM handler may have selected
+ * another sprite material, so every sprite command selects its own. */
+static inline void prep_sprite_dispatch_mat(nt_material_t desired) {
     nt_text_renderer_flush();
-    if (desired.id != bind->last_mat_id || bind->dirty) {
-        nt_sprite_renderer_set_material(desired);
-        bind->last_mat_id = desired.id;
-    }
-    bind->dirty = false;
+    nt_sprite_renderer_set_material(desired);
 }
 
 static inline void mat4_mul_vec4_flat(const float m[16], const float v[4], float out[4]) {
@@ -1635,8 +1608,8 @@ static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierar
  * mapping, and the custom handler / sprite renderer composes view_proj × world_mat4 as needed.
  * The closed-form below assumes ws->m is affine (row3 = (0,0,0,1)) — guaranteed by compose_transform_level. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, nt_ui_sprite_bind_t *bind,
-                             nt_ui_walker_state_t *ws, nt_ui_walk_counters_t *counters, bool force_screen_space, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
+static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, nt_ui_walker_state_t *ws,
+                             nt_ui_walk_counters_t *counters, bool force_screen_space, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
 
@@ -1660,7 +1633,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
         counters->rect_command_count++;
-        prep_sprite_dispatch_mat(ctx->sprite_material, bind);
+        prep_sprite_dispatch_mat(ctx->sprite_material);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         Clay_Color fill = r->backgroundColor;
         fill.a *= ws->accum_opacity; /* the one pack rounds the folded alpha, as on every Clay command */
@@ -1670,7 +1643,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         counters->border_command_count++;
-        prep_sprite_dispatch_mat(ctx->sprite_material, bind);
+        prep_sprite_dispatch_mat(ctx->sprite_material);
         Clay_RenderCommand local = *c;
         local.renderData.border.color.a *= ws->accum_opacity;
         emit_border(ctx, &local, world_mat4);
@@ -1678,8 +1651,6 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     }
     case CLAY_RENDER_COMMAND_TYPE_TEXT: {
         counters->text_command_count++;
-        nt_sprite_renderer_flush();
-        sprite_bind_barrier(bind);
         Clay_RenderCommand local = *c;
         local.renderData.text.textColor.a *= ws->accum_opacity;
         /* Same userData rides every wrapped-line TEXT command, so apply the sticky deco per line and reset
@@ -1700,12 +1671,11 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         counters->image_command_count++; /* Clay IMAGE commands (nt_ui_image) only; inline rich images self-emit, not counted here */
-        /* Per-element material override (radial reveal): .id==0 = base material.
-         * Routed through prep so a shared override batches and the base<->override
-         * boundary flushes exactly once. */
+        /* Per-element material override (radial reveal): .id==0 = base material. Adjacent
+         * emits of one material merge in gfx. */
         const nt_ui_image_payload_t *ip = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
         const nt_material_t img_mat = (ip != NULL && ip->material.id != 0) ? ip->material : ctx->sprite_material;
-        prep_sprite_dispatch_mat(img_mat, bind);
+        prep_sprite_dispatch_mat(img_mat);
         Clay_RenderCommand local = *c;
         if (ws->accum_opacity < 1.0F) {
             Clay_Color *tint = &local.renderData.image.backgroundColor;
@@ -1740,7 +1710,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
         if (force_screen_space) {
-            scissor_push(&local, scissor_stack, depth, target, bind, clip_cache, clip_cache_len);
+            scissor_push(&local, scissor_stack, depth, target, clip_cache, clip_cache_len);
             if ((uint32_t)*depth > counters->max_scissor_depth) {
                 counters->max_scissor_depth = (uint32_t)*depth;
             }
@@ -1772,18 +1742,18 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         /* scissor_push reads Clay-Y-down and flips internally — convert back. */
         const float clay_top_y = vy + vh - mx_y;
         local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = clay_top_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
-        scissor_push(&local, scissor_stack, depth, target, bind, clip_cache, clip_cache_len);
+        scissor_push(&local, scissor_stack, depth, target, clip_cache, clip_cache_len);
         if ((uint32_t)*depth > counters->max_scissor_depth) {
             counters->max_scissor_depth = (uint32_t)*depth;
         }
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
-        scissor_pop(scissor_stack, depth, target, bind);
+        scissor_pop(scissor_stack, depth, target);
         return;
     case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
         /* Handler owns the transform math (LAYOUT bbox + world_mat4 + opacity passed through). */
-        emit_custom(ctx, c, world_mat4, ws->accum_opacity, bind);
+        emit_custom(ctx, c, world_mat4, ws->accum_opacity);
         return;
     }
 }
@@ -1803,7 +1773,6 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
 
     // #region entry-flush
     /* Walker owns GL scissor across the call; drain BEFORE early returns so leaked staging dies with the frame. */
-    nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     nt_gfx_set_scissor_enabled(false);
     // #endregion
@@ -1865,7 +1834,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     // #endregion
 
     // #region walker-state-init
-    /* After entry flush so walk_ms excludes draining the caller's pending geometry. */
+    /* After entry flush so walk_ms excludes the caller's staged text. */
 #if NT_UI_TIMING_ENABLED
     const double walk_t0 = nt_time_now();
 #endif
@@ -1881,7 +1850,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
 
     nt_ui_walk_counters_t counters = {0};
 
-    /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
+    /* AFTER entry flush so per-walk delta excludes the caller's staged text. */
     const uint32_t calls_at_entry = nt_gfx_draw_calls(&g_nt_gfx.counters);
     // #endregion
 
@@ -1912,12 +1881,6 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     }
 #endif
 
-    /* Sprite material up-front; text binds lazily inside emit_text. */
-    nt_sprite_renderer_set_material(ctx->sprite_material);
-
-    /* Seed the cache with the just-bound base material so the first base-material
-     * dispatch correctly no-ops (cmd already open); dirty=false matches that open cmd. */
-    nt_ui_sprite_bind_t bind = {.dirty = false, .last_mat_id = ctx->sprite_material.id};
     // #endregion
 
     // #region segment-scan + layer-dispatch
@@ -1947,7 +1910,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
         }
         if (!is_segmentable(c->commandType)) {
             if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END && depth > 0) {
-                dispatch_command(ctx, c, scissor_stack, &depth, target, &bind, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
+                dispatch_command(ctx, c, scissor_stack, &depth, target, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
                 ++i;
                 continue;
             }
@@ -1962,7 +1925,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
             memcpy(ws.m, b.m, sizeof ws.m);
             ws.accum_opacity = b.opacity;
             ws.hierarchy_depth = b.hierarchy_depth;
-            dispatch_command(ctx, c, scissor_stack, &depth, target, &bind, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
+            dispatch_command(ctx, c, scissor_stack, &depth, target, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
             ++i;
             continue;
         }
@@ -2010,7 +1973,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
                         memcpy(ws.m, b->m, sizeof ws.m);
                         ws.accum_opacity = b->opacity;
                         ws.hierarchy_depth = b->hierarchy_depth;
-                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &bind, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
+                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &ws, &counters, force_screen_space, clip_cache, &clip_cache_len);
                     }
                 }
             }
@@ -2020,7 +1983,6 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     // #endregion
 
     // #region exit-flush + metrics
-    nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
     nt_gfx_set_scissor_enabled(false);

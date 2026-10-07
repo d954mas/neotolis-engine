@@ -417,6 +417,17 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_skinned_mesh_renderer_native WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(test_skinned_mesh_renderer_native PROPERTIES LABELS "native")
 
+    add_executable(test_sprite_renderer_native unit/test_sprite_renderer_native.c unit/test_helpers/ui_atlas.c)
+    target_link_libraries(test_sprite_renderer_native PRIVATE
+        nt_sprite_renderer nt_atlas nt_sprite_comp nt_transform_comp nt_drawable_comp nt_material_comp
+        nt_material nt_render nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx nt_basisu_transcoder_stub
+        nt_window nt_input_stub nt_http_stub nt_fs_stub nt_log unity glad nt_meshwire_stub
+    )
+    target_compile_definitions(test_sprite_renderer_native PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_include_directories(test_sprite_renderer_native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_sprite_renderer_native)
+    set_tests_properties(test_sprite_renderer_native PROPERTIES LABELS "native")
+
     # --- Post-FX blur tests ---
     add_executable(test_nt_postfx_blur unit/test_nt_postfx_blur.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_nt_postfx_blur PRIVATE nt_postfx_blur nt_gfx_fake nt_basisu_transcoder_stub nt_log_stub unity nt_meshwire_stub)

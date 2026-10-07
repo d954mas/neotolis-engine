@@ -54,6 +54,9 @@ static void test_second_walk_identical(void) {
     /* Compare delta-to-delta, not raw counts, since both walks incur draws. */
     const uint32_t delta1 = nt_ui_get_last_walk_draw_calls(s_fx.ctx);
 
+    /* In the same pass the second walk's draw would merge into the first walk's. */
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_ui_walk(s_fx.ctx, &target);
 
     int vp2[4];
@@ -89,11 +92,11 @@ static void test_walk_without_atlas_silent_noop(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
     inject_frozen_cmds(1);
-    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+    const uint32_t calls_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
     /* No draws, stats zeroed. */
-    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_gfx_draw_calls(&g_nt_gfx.counters));
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_command_count(s_fx.ctx));
 }
 
@@ -147,14 +150,14 @@ static void test_walk_negative_viewport_size_asserts(void) {
 /* Zero viewport is legitimate (minimized tab); walker silent no-ops. */
 static void test_walk_zero_viewport_silent_noop(void) {
     inject_frozen_cmds(0);
-    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+    const uint32_t calls_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_ui_target_t zero_w = {.viewport = {0.0F, 0.0F, 0.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &zero_w);
     nt_ui_target_t zero_h = {.viewport = {0.0F, 0.0F, 800.0F, 0.0F}};
     nt_ui_walk(s_fx.ctx, &zero_h);
     nt_ui_target_t zero_both = {.viewport = {0.0F, 0.0F, 0.0F, 0.0F}};
     nt_ui_walk(s_fx.ctx, &zero_both);
-    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 /* Zero-viewport walk must overwrite stats (not leave stale prior frame). */

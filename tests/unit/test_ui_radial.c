@@ -19,6 +19,7 @@
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "resource/nt_resource.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
@@ -115,7 +116,7 @@ static void test_route_a_custom_binds_radial_material(void) {
 
     /* Extended-stride emit occurred: the a_radial block is baked into every
      * vertex (renderer-hook end-to-end proof). */
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     for (uint32_t v = 0; v < 4U; v++) {
         float out[4] = {0};
         nt_sprite_renderer_test_last_emit_radial(v, out, 4);
@@ -125,11 +126,9 @@ static void test_route_a_custom_binds_radial_material(void) {
     }
 }
 
-/* Route A is a HARD BARRIER: CUSTOM is not segmentable, so emit_custom flushes
- * before AND the radial emit's own boundary flushes — N radials via CUSTOM scale
- * the draw-call count linearly. This is the documented prototype-only limitation
- * that fails the batch-scale target; contrast test_route_b_*_batches below. */
-static void test_route_a_custom_does_not_batch(void) {
+/* N adjacent CUSTOM radials on one material and page record nothing between their emits, so
+ * each emit continues the previous draw: one draw for all N. */
+static void test_route_a_custom_shared_material_merges(void) {
     route_a_ctx_t rc = {.atlas = s_fx.atlas.handle, .region_index = s_fx.atlas.white_region_idx, .radial_mat = make_radial_material(), .calls = 0};
     nt_ui_set_custom_handler(s_fx.ctx, route_a_handler, &rc);
 
@@ -148,8 +147,7 @@ static void test_route_a_custom_does_not_batch(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_INT(n, rc.calls);
-    /* Each CUSTOM is its own draw — linear in N, NOT batched. */
-    TEST_ASSERT_EQUAL_UINT32((uint32_t)n, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
 /* ---- Route B: per-element material on the walker IMAGE path ---- */
@@ -188,9 +186,7 @@ static void make_image(int idx, float x, nt_resource_t atlas, uint32_t region_in
     c->userData = (void *)&k_layer0;
 }
 
-/* N IMAGE radials sharing ONE material flush+draw together: only the
- * base<->radial boundary flushes (set_material no-ops on same .id). The
- * draw-call count is CONSTANT in N, unlike Route A's per-radial flush. */
+/* N IMAGE radials sharing ONE material record one draw: the draw-call count is CONSTANT in N. */
 static void test_route_b_shared_material_batches(void) {
     const nt_material_t radial = make_radial_material();
     const uint32_t region = s_fx.atlas.white_region_idx;
@@ -202,6 +198,9 @@ static void test_route_b_shared_material_batches(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
     const uint32_t calls_2 = nt_ui_get_last_walk_draw_calls(s_fx.ctx);
+    /* In the same pass the next walk's first draw would merge into this one. */
+    nt_gfx_end_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
     /* Five radials sharing the SAME material. If batching holds, the draw-call
      * count does NOT grow with N. */
@@ -234,7 +233,7 @@ static void test_route_b_distinct_material_switches(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* base RECT flushes when the radial material binds → 2 draws. */
+    /* The radial material change splits the base RECT from the radial: 2 draws. */
     TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
@@ -272,11 +271,9 @@ static void test_walker_material_cache_batches_plain(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
-/* Cache-reset regression: a TEXT barrier between two same-base-material IMAGE runs
- * closes the sprite cmd. The cache MUST reset there so the second run rebinds — else
- * emit hits a closed cmd (no open cmd) or silently drops geometry. Two runs split by a
- * barrier = TWO draws, not one. Proves last_sprite_mat_id is reset on the text barrier. */
-static void test_walker_material_cache_resets_on_text_barrier(void) {
+/* A TEXT that records nothing (stub font) between two same-base-material IMAGEs leaves them
+ * compatible: the second image still emits and continues the first one's draw. */
+static void test_image_runs_around_empty_text_merge(void) {
     const uint32_t region = s_fx.atlas.white_region_idx;
     /* image(base) @0, TEXT @1, image(base) @2 — all layer 0, same z-segment order. */
     make_image(0, 0.0F, s_fx.atlas.handle, region, NT_MATERIAL_INVALID);
@@ -285,7 +282,7 @@ static void test_walker_material_cache_resets_on_text_barrier(void) {
     t->commandType = CLAY_RENDER_COMMAND_TYPE_TEXT;
     t->zIndex = 0;
     t->boundingBox = (Clay_BoundingBox){.x = 40, .y = 0, .width = 32, .height = 16};
-    t->renderData.text.fontId = 0; /* fixture stub font: emit silently skips, barrier still flushes */
+    t->renderData.text.fontId = 0; /* fixture stub font: emit silently skips */
     t->renderData.text.fontSize = 16;
     t->renderData.text.textColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
     t->renderData.text.stringContents.chars = "x";
@@ -298,8 +295,10 @@ static void test_walker_material_cache_resets_on_text_barrier(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* TEXT splits the two image runs → 2 sprite draws (cache correctly rebound run 2). */
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE_MESSAGE(pos[0] >= 80.0F, "the image after the text emitted last");
 }
 
 /* ===== nt_ui_radial widget math + ABI + emit payload ===== */
@@ -365,7 +364,7 @@ static void test_radial_emit_bakes_payload(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     /* A bbox quad: 4 vertices, each carrying the same 32 B custom block. */
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     const float expect_aspect = 64.0F / 32.0F;
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
@@ -410,7 +409,7 @@ static void test_image_custom_injects_aspect(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     const float expect_aspect = 96.0F / 32.0F;
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
@@ -470,7 +469,7 @@ static void test_image_custom_name_bound_reorder_safe(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     const float expect_aspect = 96.0F / 32.0F;
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
@@ -506,7 +505,7 @@ static void test_radial_fill_emit_payload(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     float out[8] = {0};
     nt_sprite_renderer_test_last_emit_radial(0, out, 8);
     TEST_ASSERT_TRUE(approx(out[0], start));
@@ -591,7 +590,7 @@ static void test_radial_image_region_bakes_payload(void) {
 
     /* White region = 4 verts; every vert carries the same 64 B block. aspect is now in
      * a_layout.x (out[12]); a_radial.w is freed (0). */
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     const float expect_aspect = 64.0F / 32.0F;
     for (uint32_t v = 0; v < 4U; v++) {
         float out[16] = {0};
@@ -626,7 +625,7 @@ static void test_radial_image_reveal_mode_plumbed(void) {
     TEST_ASSERT_TRUE_MESSAGE(approx(reveal_mode_param_x(style.material), (float)NT_UI_RADIAL_REVEAL_HIDE), "walk leaves material u_reveal_mode.x intact");
 
     /* a_tint (floats 4..7 of the custom block) baked per-vertex: rgb 0..1 + strength. */
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
         nt_sprite_renderer_test_last_emit_radial(v, out, 8);
@@ -666,7 +665,7 @@ static void test_radial_image_packed_region_bakes_uvrect(void) {
     radial_image_walk(&ref, &style, 64.0F, 64.0F);
 
     /* Packed quad = 4 verts; every vert carries the same a_uvrect = the region UV bounds. */
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     for (uint32_t v = 0; v < 4U; v++) {
         float out[16] = {0};
         nt_sprite_renderer_test_last_emit_radial(v, out, 16); /* full 64 B block */
@@ -699,7 +698,7 @@ static void test_radial_image_fill_emit(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     float out[4] = {0};
     nt_sprite_renderer_test_last_emit_radial(0, out, 4);
     TEST_ASSERT_TRUE(approx(out[0], start));
@@ -735,7 +734,7 @@ static void test_radial_image_opacity_preserves_tint_strength(void) {
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
     radial_image_walk_under_opacity(&ref, &style, 0.5F);
 
-    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     for (uint32_t v = 0; v < 4U; v++) {
         float out[8] = {0};
         nt_sprite_renderer_test_last_emit_radial(v, out, 8);
@@ -752,12 +751,12 @@ static void test_radial_image_opacity_preserves_tint_strength(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_route_a_custom_binds_radial_material);
-    RUN_TEST(test_route_a_custom_does_not_batch);
+    RUN_TEST(test_route_a_custom_shared_material_merges);
     RUN_TEST(test_route_b_shared_material_batches);
     RUN_TEST(test_route_b_distinct_material_switches);
     RUN_TEST(test_route_b_zero_material_uses_base);
     RUN_TEST(test_walker_material_cache_batches_plain);
-    RUN_TEST(test_walker_material_cache_resets_on_text_barrier);
+    RUN_TEST(test_image_runs_around_empty_text_merge);
     RUN_TEST(test_radial_fill_to_angle);
     RUN_TEST(test_radial_two_angle_swap);
     RUN_TEST(test_radial_style_abi);

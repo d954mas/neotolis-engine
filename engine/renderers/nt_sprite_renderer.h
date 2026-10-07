@@ -10,27 +10,6 @@
 
 _Static_assert(NT_POOL_SLOT_SHIFT == 16 && NT_POOL_SLOT_MASK == UINT16_MAX, "sprite batch key requires 16-bit material slots");
 
-/* Staging buffers for one flush. uint16 indices cap MAX_VERTICES at 65535: index
- * 0xFFFF is the primitive-restart value, which WebGL2 never draws as a vertex.
- * Default index ratio (9/4) sized for 8-vertex polygon worst case (18 idx /
- * 8 verts). Pure-rect content needs only 6/4 = 1.5×; polygon-heavy 16-v
- * needs 42/16 ≈ 2.6×. Override either to match the game's content profile. */
-#ifndef NT_SPRITE_RENDERER_MAX_VERTICES
-#define NT_SPRITE_RENDERER_MAX_VERTICES 16384
-#endif
-
-#ifndef NT_SPRITE_RENDERER_MAX_INDICES
-#define NT_SPRITE_RENDERER_MAX_INDICES (NT_SPRITE_RENDERER_MAX_VERTICES * 9 / 4)
-#endif
-
-_Static_assert(NT_SPRITE_RENDERER_MAX_VERTICES <= 65535, "MAX_VERTICES must fit uint16 indices below the restart value");
-
-#define NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP 64
-
-#ifndef NT_SPRITE_RENDERER_MAX_DRAW_CMDS
-#define NT_SPRITE_RENDERER_MAX_DRAW_CMDS 256
-#endif
-
 /* ---- Vertex format — 20 bytes ---- */
 
 typedef struct {
@@ -42,38 +21,16 @@ typedef struct {
 } nt_sprite_vertex_t;
 _Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes");
 
-/* Byte cap for a material's appended custom per-vertex attribute block (opt-in).
- * Headroom for four FLOAT4 blocks (a_radial + a_tint + a_uvrect + a_layout) = 64 B,
- * spent in full by the radial-image material. Only custom-attr materials pay this;
- * plain sprites keep the locked 20 B vertex. */
+/* Byte size of the custom attr blocks the UI stores per element (nt_ui), not a renderer cap:
+ * four FLOAT4 attrs (a_radial + a_tint + a_uvrect + a_layout), spent in full by the
+ * radial-image material. The renderer bakes whatever block the material's attr_map declares. */
 #ifndef NT_SPRITE_CUSTOM_STRIDE_MAX
 #define NT_SPRITE_CUSTOM_STRIDE_MAX 64
 #endif
 
-/* ---- Init descriptor ---- */
-
-typedef struct {
-    uint16_t max_pipelines;       /* default 16 */
-    uint32_t max_vertices;        /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_VERTICES */
-    uint32_t max_indices;         /* CPU staging cap; default NT_SPRITE_RENDERER_MAX_INDICES */
-    uint32_t custom_max_vertices; /* custom-attr staging cap; sizes the custom/interleave
-                                   * heap so plain-sprite games don't carry a big custom
-                                   * buffer. Every batch of a custom-attr material stages
-                                   * under it. Default 4096. */
-} nt_sprite_renderer_desc_t;
-
-static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
-    return (nt_sprite_renderer_desc_t){
-        .max_pipelines = 16,
-        .max_vertices = NT_SPRITE_RENDERER_MAX_VERTICES,
-        .max_indices = NT_SPRITE_RENDERER_MAX_INDICES,
-        .custom_max_vertices = 4096,
-    };
-}
-
 /* Only RESOLVED, non-tombstoned sprites have a page_resource. Material and the
  * currently published texture must stay live and unrebound until draw_list returns.
- * Store the returned token unchanged; separate draw_list calls form barriers. */
+ * Store the returned token unchanged: draw_list takes a run's page from its first item. */
 static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_resource_t page_resource) {
     uint32_t material_slot = nt_pool_slot_index(material.id);
     NT_ASSERT(material_slot != 0);
@@ -82,46 +39,53 @@ static inline uint32_t nt_sprite_renderer_batch_key(nt_material_t material, nt_r
     return (material_slot << NT_POOL_SLOT_SHIFT) | texture_slot;
 }
 
-/* ---- Lifecycle ---- */
+/* ---- Contracts ----
+ *
+ * Geometry goes to gfx frame storage: the host sets frame_capacity[NT_GFX_FRAME_VERTEX] and
+ * [NT_GFX_FRAME_INDEX] (asserted). Every emit and run records its draw at the call, so it
+ * needs an open pass, and call order is draw order; gfx drops equal binds and merges
+ * contiguous draws.
+ *
+ * Uniforms are program state: the renderer writes a material's params only when they differ
+ * from what it last wrote, so nothing else may write the uniforms of a program that sprite
+ * materials use.
+ *
+ * A material that samples the atlas declares its page sampler at slot 0, whose declared
+ * resource is never sampled: the renderer substitutes the page texture and the material may
+ * override the sampler. Every declared slot must resolve to a texture (register a placeholder
+ * for async loads). No textures = no page, e.g. nt_ui_radial's flat SDF. */
 
-nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
+/* Destroys the cached pipelines and vertex inputs. Required before nt_gfx_shutdown or a gfx
+ * re-init: new gfx pools reuse handle ids. */
 void nt_sprite_renderer_shutdown(void);
-/* Retains CPU storage and initialization; drops queued draws and GPU caches.
- * Failure returns NT_ERR_INIT_FAILED: retry before drawing/setting materials, or shut down.
- * Inactive modules are unchanged and return NT_OK. */
-nt_result_t nt_sprite_renderer_restore_gpu(void);
 
 /* Contracts:
- *   1. A material that samples the atlas declares its page sampler at slot 0, whose
- *      declared resource is never sampled: the renderer substitutes the page texture
- *      per command and the material may override the sampler. Every declared slot must
- *      resolve to a texture (register a placeholder for async loads; an override does not
- *      exempt it), asserted at flush. No textures = no page, e.g. nt_ui_radial's flat SDF.
- *   2. Caller pre-filters invisible, unresolved, and tombstoned sprites;
+ *   1. Caller pre-filters invisible, unresolved, and tombstoned sprites;
  *      renderer draws every entry.
+ *   2. Equal batch keys share material and page: a run draws with its first item's page.
  *   3. Frame UBOs (e.g. view_proj) are shader-specific — register and bind
  *      them before draw_list; renderer does not touch UBOs.
  *   4. Entities, required components, and material bindings stay live and
- *      unchanged through draw_list. */
+ *      unchanged through draw_list.
+ * Does not change the material selected by set_material. */
 /* items may be NULL only when count is 0; otherwise it is borrowed for the call. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
-/* Ends queued commands and clears staging; call set_material before emitting again.
- * Internal capacity flushes preserve the command's pipeline and bindings. */
-void nt_sprite_renderer_flush(void);
-
 /* ---- Non-ECS public emit surface ---- */
 
-/* Requires a valid material with an assigned program; rechecks program identity even for the same material.
- * May flush the open command. An unready program opens a command that flush skips.
- *
- * Numeric params remain mutable and are read at flush. */
+/* Selects the material the emits below draw with, for the current gfx frame. Requires a valid
+ * material with an assigned program; an unready program makes the emits draw nothing. Another
+ * set_material (the UI walker, a CUSTOM handler) replaces the selection, so a caller selects
+ * its own before emitting. Numeric params are compared when each emit is recorded. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
 /* Every emit below takes an optional custom block (custom, custom_bytes), baked into each of
  * its vertices like color. A custom-attr material (attr_map_count > 0) needs custom_bytes ==
  * attr_map_count*16 (asserted), or 0 to bake the material's attr defaults; with neither it
- * asserts. A plain material takes NULL, 0. */
+ * asserts. A plain material takes NULL, 0.
+ *
+ * Every emit starts at a multiple of 4 vertices, so a shader may derive a quad corner from
+ * gl_VertexID & 3. */
 
 /* Emit one atlas region at one mat4 transform.
  *
@@ -132,10 +96,7 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  *                   2D rotation/scale, m[12/13/14] carry translation.
  *   origin_x, _y  - pivot in normalized region-space (e.g. {0.5, 0.5}).
  *   color_packed  - 0xAABBGGRR, straight alpha (the shader premultiplies).
- *   flip_bits     - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y, 0 = none.
- *
- * Caller MUST have called set_material first so a cmd is open. Capacity
- * overflow is handled internally (auto flush + reopen, state preserved). */
+ *   flip_bits     - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y, 0 = none. */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits,
                                     const float *custom, uint8_t custom_bytes);
 
@@ -160,8 +121,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  *   flip_bits           - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y. The grid is CCW like
  *                         blob triangles; mirroring reverses that, as in emit_region.
  *
- * Emits 16 vertices + 54 indices (4x4 shared grid). Staging overflow handled
- * internally. Caller MUST have called set_material first. */
+ * Emits 16 vertices + 54 indices (4x4 shared grid). */
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float w, float h, float origin_x, float origin_y, const uint16_t src_lrtb[4],
                                     float slice9_scale, uint32_t color_packed, uint8_t flip_bits, const float *custom, uint8_t custom_bytes);
 
@@ -176,22 +136,13 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
  *                         Region must be READY and have vertex_count > 0;
  *                         tombstones no-op.
  *   positions           - vertex_count XY pairs in local space.
- *   indices             - index_count uint16s, local to this emit (rebased
- *                         to staging base internally). Must reference
- *                         indices < vertex_count.
+ *   indices             - index_count uint16s, local to this emit. Must
+ *                         reference indices < vertex_count.
  *   world_matrix        - 16-float column-major mat4 (cglm convention),
  *                         same subset read as emit_region.
- *   color_packed        - 0xAABBGGRR.
- *
- * Capacity overflow handled internally (snapshot + flush + reopen).
- * Caller MUST have called set_material first. */
+ *   color_packed        - 0xAABBGGRR. */
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
                                       const float *world_matrix, uint32_t color_packed, const float *custom, uint8_t custom_bytes);
-
-/* Pad staging with up to 3 unreferenced vertices so the next quad starts at a multiple of 4, for a
- * shader that derives the corner from gl_VertexID & 3. Without room that quad flushes and starts
- * at vertex 0. Caller MUST have called set_material first. */
-void nt_sprite_renderer_align_next_vertex_to_4(void);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
@@ -205,37 +156,20 @@ typedef struct {
     uint32_t offsets[16];
 } nt_sprite_layout_info_t;
 void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *out);
-/* Read back the custom per-vertex attr block of the v_idx-th vertex of the last
- * emit, from the byte-staging path. float_count floats written. */
-void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count);
-/* Same readback by batch vertex index: 0 .. last_emit_first_vertex + last_emit_vertex_count - 1. */
-void nt_sprite_renderer_test_batch_custom(uint32_t vertex, float *out, uint8_t float_count);
-uint32_t nt_sprite_renderer_test_last_emit_first_vertex(void);
+
+/* The last emit or draw_list item. vertices points at its first vertex in frame storage
+ * staging, valid until the next nt_gfx_begin_frame. */
+typedef struct {
+    const uint8_t *vertices;
+    uint32_t stride;
+    uint32_t first_vertex;
+    uint32_t vertex_count;
+    uint32_t first_index;
+    uint32_t index_count;
+} nt_sprite_test_emit_t;
+void nt_sprite_renderer_test_last_emit(nt_sprite_test_emit_t *out);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void);
-/* Draw commands staged but not yet flushed. */
-uint32_t nt_sprite_renderer_test_cmd_count(void);
-/* Per-renderer test counter (separate from nt_gfx_draw_calls). */
-uint32_t nt_sprite_renderer_test_draw_call_count(void);
-/* Current staging vertex_count (resets on flush). */
-uint32_t nt_sprite_renderer_test_vertex_count(void);
-/* Captured at end of emit_one — survives flush; lets tests assert per-emit
- * counts after draw_list completes. */
-uint32_t nt_sprite_renderer_test_last_emit_vertex_count(void);
-uint32_t nt_sprite_renderer_test_last_emit_index_count(void);
-/* Read back the position of the i-th vertex of the last emitted sprite.
- * Flush only resets vertex_count, not the staging array data, so positions
- * are still readable post-draw_list via the captured first_vertex offset. */
-void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]);
-/* Atlas texcoord of the i-th vertex of the last emit, in raw uint16 0..65535
- * units (the shader normalizes to [0,1] via USHORT2N). */
-void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2]);
-/* RGBA color of the i-th vertex of the last emit, as raw uint8 [R,G,B,A]. */
-void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]);
-bool nt_sprite_renderer_test_initialized(void);
-/* Flushes that replayed cmds (empty no-op flushes excluded). Lets rich z-layer tests pin per-band drains. */
-uint32_t nt_sprite_renderer_test_nonempty_flush_calls(void);
-void nt_sprite_renderer_test_reset_nonempty_flush_calls(void);
 #endif
 // #endregion
 

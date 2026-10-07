@@ -3,7 +3,6 @@
 #include "core/nt_builtins.h"
 #include <math.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 #ifdef __wasm_simd128__
@@ -25,211 +24,71 @@
 
 /* Base 20 B sprite vertex stride — custom attrs append after this offset. */
 #define NT_SPRITE_BASE_STRIDE 20
+/* Distinct material states; also bounds the layout cache, which holds fewer. */
+#ifndef NT_SPRITE_RENDERER_MAX_PIPELINES
+#define NT_SPRITE_RENDERER_MAX_PIPELINES 16
+#endif
 
 // #region module state
+/* A resolved material: what an emit or a draw_list run records. */
 typedef struct {
+    nt_material_t material;
+    const nt_material_info_t *info;
+    nt_program_t program; /* the program `pipeline` was built on: a replace keeps the material handle */
     nt_pipeline_t pipeline;
-    /* Captured independently because custom layouts may share a pipeline. */
     nt_vertex_input_t vertex_input;
-    nt_material_t material; /* params stay live to flush by contract, so a game may mutate
-                               them after emit; textures are snapshotted below */
-    /* Snapshot taken when the cmd opens; publication changes only inside nt_resource_step. */
-    uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
-    uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
-    nt_sampler_t tex_samplers[NT_MATERIAL_MAX_TEXTURES]; /* per-binding override, .id==0 keeps texture default */
-    uint8_t tex_count;
-    uint32_t first_index; /* offset into s_sprite.indices[] */
-    uint32_t index_count;
-    uint32_t first_vertex; /* vertex index into staging — for per-cmd vertex stats */
-} nt_sprite_draw_cmd_t;
+    uint32_t stride; /* 20 + attr_map_count * 16 */
+    uint64_t frame;  /* gfx frame of the selection */
+    /* Slot 0 is the atlas page, substituted per emit or run. */
+    nt_gfx_texture_binding_t textures[NT_MATERIAL_MAX_TEXTURES];
+} nt_sprite_material_t;
+
+/* One allocation of an emit or a draw_list item. */
+typedef struct {
+    uint8_t *vertices;
+    uint32_t *indices;
+    uint32_t base; /* absolute index of the first vertex */
+    uint32_t first_index;
+} nt_sprite_alloc_t;
 
 static struct {
-    bool initialized;
-    uint16_t max_pipelines;
-    nt_renderer_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
+    nt_renderer_pipeline_entry_t entries[NT_SPRITE_RENDERER_MAX_PIPELINES];
     uint16_t count;
 
-    /* Layout-hash cache over the shared VBO/IBO; custom layouts may share a
-     * pipeline. The pipeline hardcap is reused only as a capacity choice. */
+    /* Layout-hash cache over the frame buffers; custom layouts may share a pipeline. */
     struct {
         uint64_t key;
         nt_vertex_input_t vi;
-    } vi_entries[NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP];
+    } vi_entries[NT_SPRITE_RENDERER_MAX_PIPELINES];
     uint16_t vi_count;
 
-    nt_buffer_t vbo; /* dynamic, sized for the worst single flush (staging_size) */
-    nt_buffer_t ibo; /* dynamic, sized for max_indices * 2 (uint16 indices) */
-    /* One variable-stride CPU staging buffer: vertex i at staging + i*cur_stride,
-     * custom block at +20. Sized for the worst single flush:
-     * max(max_vertices*20, custom_max_vertices*(20+NT_SPRITE_CUSTOM_STRIDE_MAX)). */
-    uint8_t *staging;
-    uint16_t *indices;
-    uint32_t staging_size; /* byte capacity of staging (worst single flush) */
-    uint32_t max_vertices; /* runtime CPU staging caps (from desc) */
-    uint32_t max_indices;
-    uint32_t custom_max_vertices; /* custom flush caps here (custom verts are bigger) */
-    uint32_t vertex_count;
-    uint32_t index_count;
-    /* Byte stride of the current batch = 20 + cur_material_custom_bytes. Set in open_cmd,
-     * which flushes on a stride change, so the plain path stays a constant 20. */
-    uint32_t cur_stride;
-    /* Custom byte count the bound material's attr_map declares (attr_map_count *
-     * 16, one FLOAT4 per attr — matches build_sprite_layout). bake asserts an
-     * emit's block matches. 0 for a plain material. */
-    uint8_t cur_material_custom_bytes;
-    /* The bound material's attr defaults, baked by an emit without its own block;
-     * NULL when it declares none. Points into the material pool (slots never move). */
-    const uint8_t *cur_attr_defaults;
-
-    /* Recorded per-state draw commands. Last entry is the "currently open"
-     * cmd that emit_one writes into; closed by close_current_cmd() before a
-     * new state is pushed or before flush(). */
-    nt_sprite_draw_cmd_t cmds[NT_SPRITE_RENDERER_MAX_DRAW_CMDS];
-    uint32_t cmd_count;
-
-    /* Reset per draw_list call; SEPARATE from nt_gfx_draw_calls. */
-    uint32_t last_draw_list_calls;
-
-    /* Material of the most recently opened cmd; reset on flush. */
-    nt_material_t current_mat;
-    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is
-     * built, i.e. when something became drawable again. */
+    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is built. */
     bool warned_program_not_ready;
-    /* The open cmd's pipeline was built on this program. A flat replace keeps the
-     * material handle, so the fence below must compare programs too. */
-    nt_program_t current_program;
+
+    nt_sprite_material_t current; /* set_material; the immediate emits read it */
+
+    /* Params last written, per program: equal params record nothing, so adjacent emits merge. */
+    struct {
+        nt_program_t program;
+        nt_material_t material;
+        float params[NT_MATERIAL_MAX_PARAMS][4];
+    } recorded;
+
 #ifdef NT_TEST_ACCESS
-    /* Captured pre-flush so tests can read back the last emit. */
-    uint32_t last_emit_vertex_count;
-    uint32_t last_emit_index_count;
-    uint32_t last_emit_first_vertex;
-    /* Flushes that ACTUALLY replayed cmds (past the empty early-return). Empty no-op flushes don't count. */
-    uint32_t test_nonempty_flush_calls;
+    nt_sprite_test_emit_t last_emit;
 #endif
 } s_sprite;
 // #endregion
 
 // #region lifecycle
-static nt_result_t create_gpu_resources(void) {
-    s_sprite.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_VERTEX,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = s_sprite.staging_size,
-        .label = "sprite_vbo",
-    });
-    if (s_sprite.vbo.id == 0) {
-        return NT_ERR_INIT_FAILED;
-    }
-    s_sprite.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_INDEX,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = s_sprite.max_indices * (uint32_t)sizeof(uint16_t),
-        .index_type = NT_INDEX_UINT16,
-        .label = "sprite_ibo",
-    });
-    if (s_sprite.ibo.id == 0) {
-        nt_gfx_destroy_buffer(s_sprite.vbo);
-        s_sprite.vbo = (nt_buffer_t){0};
-        return NT_ERR_INIT_FAILED;
-    }
-    return NT_OK;
-}
-
-static void destroy_gpu_resources(void) {
+void nt_sprite_renderer_shutdown(void) {
     for (uint16_t i = 0; i < s_sprite.count; i++) {
         nt_gfx_destroy_pipeline(s_sprite.entries[i].pipeline);
     }
-    s_sprite.count = 0;
     for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
         nt_gfx_destroy_vertex_input(s_sprite.vi_entries[i].vi);
     }
-    s_sprite.vi_count = 0;
-    nt_gfx_destroy_buffer(s_sprite.vbo);
-    nt_gfx_destroy_buffer(s_sprite.ibo);
-    s_sprite.vbo = (nt_buffer_t){0};
-    s_sprite.ibo = (nt_buffer_t){0};
-
-    /* Queued commands reference the discarded GPU objects; never flush them. */
-    s_sprite.cmd_count = 0;
-    s_sprite.vertex_count = 0;
-    s_sprite.index_count = 0;
-    s_sprite.cur_stride = 0;
-    s_sprite.cur_material_custom_bytes = 0;
-    s_sprite.cur_attr_defaults = NULL;
-    s_sprite.current_mat = (nt_material_t){0};
-    s_sprite.current_program = NT_PROGRAM_INVALID;
-    s_sprite.last_draw_list_calls = 0;
-    s_sprite.warned_program_not_ready = false;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
-    NT_ASSERT(!s_sprite.initialized);
-    nt_sprite_renderer_desc_t d = (desc != NULL) ? *desc : nt_sprite_renderer_desc_defaults();
-    /* 0 cap means "use compile-time default" — lets callers that only set
-     * max_pipelines keep working without restating the staging caps. */
-    if (d.max_vertices == 0) {
-        d.max_vertices = NT_SPRITE_RENDERER_MAX_VERTICES;
-    }
-    if (d.max_indices == 0) {
-        d.max_indices = NT_SPRITE_RENDERER_MAX_INDICES;
-    }
-    if (d.custom_max_vertices == 0) {
-        d.custom_max_vertices = 4096;
-    }
-    NT_ASSERT(d.max_pipelines > 0 && d.max_pipelines <= NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP);
-    NT_ASSERT(d.max_vertices <= 65535 && "sprite max_vertices must fit uint16 indices below the restart value");
-    /* Custom flush indexes into indices[] too, so cmv must not exceed the base
-     * caps. */
-    NT_ASSERT(d.custom_max_vertices <= d.max_vertices && "sprite custom_max_vertices must not exceed max_vertices");
-    NT_ASSERT(d.custom_max_vertices >= 16U && "sprite custom_max_vertices must be >= 16 (largest fixed single emit: slice9 = 16 verts)");
-
     memset(&s_sprite, 0, sizeof(s_sprite));
-    s_sprite.max_pipelines = d.max_pipelines;
-    s_sprite.max_vertices = d.max_vertices;
-    s_sprite.max_indices = d.max_indices;
-    s_sprite.custom_max_vertices = d.custom_max_vertices;
-
-    /* Worst single flush: a pure-plain batch caps at max_vertices × 20 B; a
-     * custom-attr batch caps at custom_max_vertices × the extended stride. One
-     * buffer holds either — the larger of the two. */
-    const uint32_t plain_bytes = d.max_vertices * NT_SPRITE_BASE_STRIDE;
-    const uint32_t custom_bytes = d.custom_max_vertices * (NT_SPRITE_BASE_STRIDE + NT_SPRITE_CUSTOM_STRIDE_MAX);
-    s_sprite.staging_size = (plain_bytes > custom_bytes) ? plain_bytes : custom_bytes;
-
-    /* Heap-backed CPU staging (mirrors nt_mesh_renderer): one variable-stride
-     * byte buffer holds base + interleaved custom block by construction, so flush
-     * uploads it directly with no interleave pass. */
-    s_sprite.staging = (uint8_t *)calloc(1, s_sprite.staging_size);
-    s_sprite.indices = (uint16_t *)calloc(d.max_indices, sizeof(uint16_t));
-    if (s_sprite.staging == NULL || s_sprite.indices == NULL || create_gpu_resources() != NT_OK) {
-        free(s_sprite.staging);
-        free(s_sprite.indices);
-        memset(&s_sprite, 0, sizeof(s_sprite));
-        NT_LOG_ERROR("failed to initialize sprite renderer");
-        return NT_ERR_INIT_FAILED;
-    }
-
-    s_sprite.initialized = true;
-    return NT_OK;
-}
-
-void nt_sprite_renderer_shutdown(void) {
-    if (!s_sprite.initialized) {
-        return;
-    }
-    destroy_gpu_resources();
-    free(s_sprite.staging);
-    free(s_sprite.indices);
-    memset(&s_sprite, 0, sizeof(s_sprite));
-}
-
-nt_result_t nt_sprite_renderer_restore_gpu(void) {
-    if (!s_sprite.initialized) {
-        return NT_OK;
-    }
-    destroy_gpu_resources();
-    return create_gpu_resources();
 }
 // #endregion
 
@@ -280,7 +139,6 @@ static nt_vertex_layout_t build_sprite_layout(const nt_material_info_t *mat_info
         layout.attr_count++;
         offset += 16; /* FLOAT4 */
     }
-    NT_ASSERT(offset - NT_SPRITE_BASE_STRIDE <= NT_SPRITE_CUSTOM_STRIDE_MAX && "sprite custom attr block exceeds NT_SPRITE_CUSTOM_STRIDE_MAX");
     layout.stride = offset;
     return layout;
 }
@@ -302,56 +160,47 @@ static uint64_t nt_sprite_layout_key(const nt_material_info_t *mat_info) {
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* A recovered context may still have materials awaiting a new program. */
     if (!nt_gfx_program_ready(mat_info->program)) {
-        /* The one choke point every caller passes through, so the immediate and
-         * draw_list paths both get told. */
         nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
         return (nt_pipeline_t){0};
     }
     /* Vertex-inputs own layouts; the pipeline is program x state, keyed by its exact desc identity. */
-    nt_pipeline_desc_t desc;
-    memset(&desc, 0, sizeof(desc));
-    desc.program = mat_info->program;
-    desc.depth_test = mat_info->depth_test;
-    desc.depth_write = mat_info->depth_write;
-    desc.depth_func = NT_DEPTH_LESS;
-    desc.blend = mat_info->blend;
-    desc.cull_mode = (uint8_t)mat_info->cull_mode;
-    desc.label = (mat_info->label != NULL) ? mat_info->label : "sprite_pipeline";
+    const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mat_info, "sprite_pipeline");
     const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
-
     const nt_pipeline_t cached = nt_renderer_pipeline_cache_find(s_sprite.entries, s_sprite.count, &key);
     if (cached.id != 0) {
         return cached;
     }
-    return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, s_sprite.max_pipelines, &key, &desc, &s_sprite.warned_program_not_ready);
+    return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, NT_SPRITE_RENDERER_MAX_PIPELINES, &key, &desc, &s_sprite.warned_program_not_ready);
 }
 
-/* Entries are weak: a context loss frees vertex-input slots, so a hit
- * validates and a dead entry recreates in place (the mesh-row pattern) --
- * repeated losses must not grow the cache toward the hardcap. */
+/* Entries are weak: a context loss frees vertex-input slots, so a hit validates and a dead
+ * entry recreates in place over the current frame buffers. */
 static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *mat_info) {
+    const nt_buffer_t vbo = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX);
+    const nt_buffer_t ibo = nt_gfx_frame_buffer(NT_GFX_FRAME_INDEX);
+    if (vbo.id == 0 || ibo.id == 0) {
+        return NT_VERTEX_INPUT_INVALID; /* lost context: the frame buffers come back at restore */
+    }
     const uint64_t key = nt_sprite_layout_key(mat_info);
     uint16_t idx = s_sprite.vi_count;
     for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
-        if (s_sprite.vi_entries[i].key != key) {
-            continue;
+        const bool live = nt_gfx_vertex_input_valid(s_sprite.vi_entries[i].vi);
+        if (s_sprite.vi_entries[i].key == key) {
+            if (live) {
+                return s_sprite.vi_entries[i].vi;
+            }
+            idx = i;
+            break;
         }
-        if (nt_gfx_vertex_input_valid(s_sprite.vi_entries[i].vi)) {
-            return s_sprite.vi_entries[i].vi;
-        }
-        idx = i; /* dead entry: recreate in place */
-        break;
-    }
-    if (idx == s_sprite.vi_count) {
-        NT_ASSERT(s_sprite.vi_count < NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP");
-        if (s_sprite.vi_count >= NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP) {
-            return NT_VERTEX_INPUT_INVALID; /* OFF-mode guard, same as the mesh versions table */
+        if (!live && idx == s_sprite.vi_count) {
+            idx = i; /* a layout the loss freed; reused unless the key itself turns up */
         }
     }
+    NT_ASSERT(idx < NT_SPRITE_RENDERER_MAX_PIPELINES && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_PIPELINES");
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout = build_sprite_layout(mat_info),
-        .vertex_buffer = s_sprite.vbo,
-        .index_buffer = s_sprite.ibo,
+        .vertex_buffer = vbo,
+        .index_buffer = ibo,
         .label = "sprite_vi",
     });
     if (vi.id != 0) {
@@ -365,187 +214,177 @@ static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *m
 }
 // #endregion
 
-// #region cmd queue helpers
-/* Close the currently-open draw cmd by computing its index_count from the
- * accumulated staging position. Empty cmds (no indices written) are popped
- * so they never reach the GPU as zero-draw glDrawElements calls. */
-static void close_current_cmd(void) {
-    if (s_sprite.cmd_count == 0) {
+// #region material
+/* A failed pipeline or vertex input leaves the material not drawable (pipeline 0) until the
+ * next resolve retries. */
+static void resolve_material(nt_material_t mat, const nt_material_info_t *mi, nt_sprite_material_t *out) {
+    /* A zero budget would make every sprite silently vanish. */
+    NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].capacity > 0 &&
+              "sprite renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX] and [NT_GFX_FRAME_INDEX]");
+    out->material = mat;
+    out->info = mi;
+    out->program = mi->program;
+    out->stride = (uint32_t)NT_SPRITE_BASE_STRIDE + ((uint32_t)mi->attr_map_count * 16U);
+    out->pipeline = find_or_create_pipeline(mi);
+    out->vertex_input = (out->pipeline.id != 0) ? find_or_create_vertex_input(mi) : NT_VERTEX_INPUT_INVALID;
+    if (out->vertex_input.id == 0) {
+        out->pipeline = (nt_pipeline_t){0};
+    }
+    for (uint8_t t = 0; t < mi->tex_count; t++) {
+        out->textures[t] = (nt_gfx_texture_binding_t){
+            .name = {.value = mi->tex_name_hashes[t]},
+            /* Slot 0 is the atlas page by contract: its declared resource is never sampled. */
+            .texture = {.id = (t == 0) ? 0U : nt_resource_get(mi->tex_resources[t])},
+            .sampler = mi->tex_samplers[t],
+        };
+    }
+}
+
+/* Pipeline first: uniforms and the texture set land on its program. */
+static void record_state(nt_sprite_material_t *m, uint32_t page_tex) {
+    const nt_material_info_t *mi = m->info;
+    nt_gfx_bind_pipeline(m->pipeline);
+    const size_t param_bytes = (size_t)mi->param_count * sizeof(mi->params[0]);
+    if (s_sprite.recorded.program.id != m->program.id || s_sprite.recorded.material.id != m->material.id || memcmp(s_sprite.recorded.params, mi->params, param_bytes) != 0) {
+        nt_renderer_set_material_uniforms(mi);
+        s_sprite.recorded.program = m->program;
+        s_sprite.recorded.material = m->material;
+        memcpy(s_sprite.recorded.params, mi->params, param_bytes);
+    }
+    if (mi->tex_count > 0) {
+        m->textures[0].texture.id = page_tex;
+    }
+    /* Also with no declarations: gfx checks that the program samples nothing. */
+    nt_gfx_apply_texture_bindings(m->textures, mi->tex_count);
+    nt_gfx_bind_vertex_input(m->vertex_input);
+}
+
+void nt_sprite_renderer_set_material(nt_material_t mat) {
+    NT_ASSERT(mat.id != 0 && "nt_sprite_renderer_set_material: invalid material handle");
+    const nt_material_info_t *mi = nt_material_get_info(mat);
+    /* Assignment, not liveness: on the frame the context dies the program is
+     * already dead here, and trapping on that would crash a recoverable event. */
+    NT_ASSERT(mi != NULL && mi->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
+    nt_sprite_material_t *c = &s_sprite.current;
+    /* Params are compared when recorded, and resources are not stepped between draws of a frame.
+     * A failed resolve (pipeline 0) retries next frame; a destroyed program takes its pipeline
+     * with it, so that selection resolves again. */
+    const uint64_t frame = g_nt_gfx.counters.frame_sequence;
+    if (mat.id == c->material.id && mi->program.id == c->program.id && frame == c->frame && (c->pipeline.id == 0 || nt_gfx_pipeline_valid(c->pipeline))) {
         return;
     }
-    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
-    c->index_count = s_sprite.index_count - c->first_index;
-    if (c->index_count == 0) {
-        s_sprite.cmd_count--;
-    }
+    resolve_material(mat, mi, c);
+    c->frame = frame;
 }
+// #endregion
 
-/* Open a new cmd with state captured from a resolved material_info, anchored
- * at the current staging index_count. Caller must close the previous cmd via
- * close_current_cmd() before opening a new one. */
-static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_material_t mat) {
-    /* One staging batch has one vertex stride; draw_list opens cmds without set_material's flush. */
-    const uint32_t stride = (uint32_t)NT_SPRITE_BASE_STRIDE + ((uint32_t)mi->attr_map_count * 16U);
-    if (s_sprite.cmd_count >= NT_SPRITE_RENDERER_MAX_DRAW_CMDS || (s_sprite.vertex_count > 0 && stride != s_sprite.cur_stride)) {
-        nt_sprite_renderer_flush();
-    }
-    NT_ASSERT(s_sprite.cmd_count < NT_SPRITE_RENDERER_MAX_DRAW_CMDS && "sprite draw-cmd queue full; raise NT_SPRITE_RENDERER_MAX_DRAW_CMDS");
-    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count++];
-    memset(c, 0, sizeof(*c)); /* slots reuse across frames; clear stale fields */
-    c->pipeline = pip;
-    c->vertex_input = find_or_create_vertex_input(mi);
-    c->material = mat;
-    s_sprite.current_mat = mat;
-    s_sprite.current_program = mi->program;
-    /* Set here (not in set_material) so the ECS draw_list path, which calls
-     * open_cmd directly, is covered too. */
-    s_sprite.cur_material_custom_bytes = (uint8_t)(mi->attr_map_count * 16);
-    s_sprite.cur_attr_defaults = mi->has_attr_defaults ? (const uint8_t *)mi->attr_map_defaults : NULL;
-    /* The whole batch opened here uploads at this stride (set per-flush, not
-     * per-emit, so the plain fast path stays a constant 20). */
-    s_sprite.cur_stride = stride;
-    c->tex_count = mi->tex_count;
-    /* Slot 0 is the atlas page by contract: ensure_current_cmd_page_texture substitutes
-     * into it before any index is staged, so resolving the material's value is dead work. */
-    c->resolved_tex[0] = 0;
-    for (uint8_t i = 1; i < mi->tex_count; i++) {
-        c->resolved_tex[i] = nt_resource_get(mi->tex_resources[i]);
-    }
-    for (uint8_t i = 0; i < mi->tex_count; i++) {
-        c->tex_name_hashes[i] = mi->tex_name_hashes[i];
-        c->tex_samplers[i] = mi->tex_samplers[i];
-    }
-    c->first_index = s_sprite.index_count;
-    c->first_vertex = s_sprite.vertex_count;
+// #region allocation
+#ifdef NT_TEST_ACCESS
+static void capture_emit(const nt_sprite_alloc_t *a, uint32_t stride, uint32_t vertex_count, uint32_t index_count) {
+    s_sprite.last_emit = (nt_sprite_test_emit_t){
+        .vertices = a->vertices,
+        .stride = stride,
+        .first_vertex = a->base,
+        .vertex_count = vertex_count,
+        .first_index = a->first_index,
+        .index_count = index_count,
+    };
 }
+#endif
 
-/* Re-open a cmd with state copied from another cmd. Used by emit_one's
- * overflow recovery path: snapshot the current cmd's state before flush()
- * resets cmd_count, then re-open with first_index=0 in the fresh staging. */
-static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
-    if (s_sprite.cmd_count >= NT_SPRITE_RENDERER_MAX_DRAW_CMDS) {
-        nt_sprite_renderer_flush();
-    }
-    NT_ASSERT(s_sprite.cmd_count < NT_SPRITE_RENDERER_MAX_DRAW_CMDS);
-    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count++];
-    *c = *snap;
-    c->first_index = s_sprite.index_count;
-    c->index_count = 0;
-    c->first_vertex = s_sprite.vertex_count;
-}
-
-/* Atlas page is the texture source of truth — split cmd if a run crosses pages. */
-static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
-    NT_ASSERT(s_sprite.cmd_count > 0 && "sprite emit called with no open cmd");
-    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
-    /* Analytic-coverage shaders never sample the page: no substitution, no split, and
-     * an unresolved page must not hold the emit back. */
-    if (c->tex_count == 0) {
-        return true;
-    }
-    if (page_tex == 0) {
+/* Records the selected material and allocates one immediate emit; false draws nothing. Every
+ * emit starts at a multiple of 4 vertices for gl_VertexID & 3 corner shaders. */
+static bool emit_begin(uint32_t page_tex, uint32_t vertex_count, uint32_t index_count, nt_sprite_alloc_t *a) {
+    nt_sprite_material_t *m = &s_sprite.current;
+    NT_ASSERT(m->frame == g_nt_gfx.counters.frame_sequence && "sprite emit: call nt_sprite_renderer_set_material in this frame");
+    if (m->pipeline.id == 0 || (m->info->tex_count > 0 && page_tex == 0)) {
         return false;
     }
-
-    if (c->resolved_tex[0] == page_tex) {
-        return true;
-    }
-
-    const bool current_cmd_empty = s_sprite.index_count == c->first_index;
-    if (current_cmd_empty) {
-        c->resolved_tex[0] = page_tex;
-        return true;
-    }
-
-    nt_sprite_draw_cmd_t snapshot = *c;
-    snapshot.resolved_tex[0] = page_tex;
-    close_current_cmd();
-    open_cmd_from_snapshot(&snapshot);
+    record_state(m, page_tex);
+    uint32_t voff = 0;
+    uint32_t ioff = 0;
+    a->vertices = (uint8_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, vertex_count * m->stride, 4U * m->stride, &voff);
+    a->indices = (uint32_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_INDEX, index_count * 4U, 4U, &ioff);
+    a->base = voff / m->stride;
+    a->first_index = ioff / 4U;
+#ifdef NT_TEST_ACCESS
+    capture_emit(a, m->stride, vertex_count, index_count);
+#endif
     return true;
+}
+
+/* One draw_list run: contiguous vertices and indices, drawn once. */
+typedef struct {
+    uint32_t stride;
+    uint32_t next_vertex;
+    uint32_t first_index;
+    uint32_t index_count;
+    uint32_t vertex_count;
+} nt_sprite_run_t;
+
+/* The first item aligns the run to 4 vertices; the rest follow contiguously, since nothing
+ * else allocates or calls gfx inside a run. */
+static void run_alloc(nt_sprite_run_t *run, uint32_t vertex_count, uint32_t index_count, nt_sprite_alloc_t *a) {
+    uint32_t voff = 0;
+    uint32_t ioff = 0;
+    if (run->index_count == 0) {
+        a->vertices = (uint8_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, vertex_count * run->stride, 4U * run->stride, &voff);
+        a->indices = (uint32_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_INDEX, index_count * 4U, 4U, &ioff);
+        run->next_vertex = voff / run->stride;
+        run->first_index = ioff / 4U;
+    } else {
+        a->vertices = (uint8_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, vertex_count * run->stride, 1U, &voff);
+        a->indices = (uint32_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_INDEX, index_count * 4U, 1U, &ioff);
+        NT_ASSERT(voff == run->next_vertex * run->stride && ioff / 4U == run->first_index + run->index_count && "sprite run: allocation not contiguous");
+    }
+    a->base = run->next_vertex;
+    a->first_index = ioff / 4U;
+    run->next_vertex += vertex_count;
+    run->vertex_count += vertex_count;
+    run->index_count += index_count;
+#ifdef NT_TEST_ACCESS
+    capture_emit(a, run->stride, vertex_count, index_count);
+#endif
 }
 // #endregion
 
 // #region custom_attrs
 /* Whole FLOAT4 lanes: a constant-size copy inlines, a variable-size one is a libc call per vertex.
  * Out of line: inlining it at every emit kind costs ~3 KB of wasm and measured no faster. */
-static NT_NOINLINE void bake_custom_lanes(uint32_t base, uint32_t count, const uint8_t *src) {
-    const uint32_t lanes = s_sprite.cur_material_custom_bytes / 16U;
+static NT_NOINLINE void bake_custom_lanes(uint8_t *dst, uint32_t count, uint32_t stride, uint32_t lanes, const uint8_t *src) {
     for (uint32_t i = 0; i < count; i++) {
-        uint8_t *dst = s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
+        uint8_t *v = dst + ((size_t)i * stride) + NT_SPRITE_BASE_STRIDE;
         for (uint32_t l = 0; l < lanes; ++l) {
-            memcpy(dst + ((size_t)l * 16U), src + ((size_t)l * 16U), 16U);
+            memcpy(v + ((size_t)l * 16U), src + ((size_t)l * 16U), 16U);
         }
     }
 }
 
-/* Bake one emit's custom block — identical for every vertex, like color — into the
- * vertex range [base, base+count), at staging + i*cur_stride + 20 so flush uploads it
- * directly. No block: the material's attr defaults. Plain material: no-op. */
-static inline void bake_custom_attrs(uint32_t base, uint32_t count, const float *custom, uint8_t custom_bytes) {
-    /* A wrong size desyncs the upload stride from the pipeline's. */
-    NT_ASSERT((custom_bytes == 0U || custom_bytes == s_sprite.cur_material_custom_bytes) && "custom block size doesn't match the bound material's attr_map stride");
-    if (s_sprite.cur_material_custom_bytes == 0) {
+/* Bake one emit's custom block — identical for every vertex, like color — after the 20 B base
+ * of each vertex. No block: the material's attr defaults. Plain material: no-op. */
+static inline void bake_custom_attrs(const nt_sprite_material_t *m, uint8_t *dst, uint32_t count, const float *custom, uint8_t custom_bytes) {
+    const uint32_t bytes = m->stride - NT_SPRITE_BASE_STRIDE;
+    /* A wrong size desyncs the vertex stride from the pipeline's. */
+    NT_ASSERT((custom_bytes == 0U || custom_bytes == bytes) && "custom block size doesn't match the bound material's attr_map stride");
+    if (bytes == 0) {
         return;
     }
-    const uint8_t *src = (custom_bytes != 0U) ? (const uint8_t *)custom : s_sprite.cur_attr_defaults;
+    const uint8_t *src = (const uint8_t *)custom;
+    if (custom_bytes == 0U) {
+        src = m->info->has_attr_defaults ? (const uint8_t *)m->info->attr_map_defaults : NULL;
+    }
     NT_ASSERT(src != NULL && "custom-attr material: pass a custom block or give the material attr defaults");
-    NT_ASSERT(base + count <= s_sprite.custom_max_vertices && "custom-attr bake out of range at extended stride");
-    bake_custom_lanes(base, count, src);
+    bake_custom_lanes(dst, count, m->stride, bytes / 16U, src);
 }
 // #endregion
 
-// #region set_material
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_sprite_renderer_set_material(nt_material_t mat) {
-    NT_ASSERT(s_sprite.initialized);
-    NT_ASSERT(s_sprite.vbo.id != 0 && s_sprite.ibo.id != 0 && "retry failed GPU restore before submitting materials");
-    NT_ASSERT(mat.id != 0 && "nt_sprite_renderer_set_material: invalid material handle");
-
-    /* Validate BEFORE same-handle early return: stale handle (destroyed material,
-     * bumped generation) must assert even if the id still matches the cached one. */
-    const nt_material_info_t *mat_info = nt_material_get_info(mat);
-    /* Assignment, not liveness: on the frame the context dies the program is
-     * already dead here, and trapping on that would crash a recoverable event.
-     * make_pipeline polls the lost context and hands back an invalid pipeline. */
-    NT_ASSERT(mat_info != NULL && mat_info->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
-
-    /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
-    if (mat.id == s_sprite.current_mat.id && mat_info->program.id == s_sprite.current_program.id && s_sprite.cmd_count > 0) {
-        return;
-    }
-
-    if (s_sprite.cmd_count > 0) {
-        nt_sprite_renderer_flush();
-    }
-
-    /* An invalid pipeline still opens a cmd; flush drops it. find_or_create_pipeline
-     * has already said why. */
-    nt_pipeline_t pip = find_or_create_pipeline(mat_info);
-    open_cmd(pip, mat_info, mat);
-}
-// #endregion
-
-// #region emit_region_resolved
+// #region write_region
 /* always_inline keeps the ECS hot path's inlined shape. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static NT_ALWAYS_INLINE void emit_region_resolved(const nt_texture_region_t *r, const float (*positions)[2], const nt_atlas_uv_t *uvs, const uint16_t *idx, uint32_t page_tex, float ipu,
-                                                  const float *m, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits, const float *custom, uint8_t custom_bytes) {
+static NT_ALWAYS_INLINE void write_region(const nt_texture_region_t *r, const float (*positions)[2], const nt_atlas_uv_t *uvs, const uint16_t *idx, float ipu, const float *m, float origin_x,
+                                          float origin_y, uint32_t color_packed, uint8_t flip_bits, uint32_t stride, const nt_sprite_alloc_t *a) {
     NT_ASSERT(r != NULL && positions != NULL && uvs != NULL && idx != NULL);
     NT_ASSERT(m != NULL);
-    if (r->vertex_count == 0U) {
-        return; /* tombstone — silent no-op (matches old emit_one behaviour) */
-    }
-    if (!ensure_current_cmd_page_texture(page_tex)) {
-        return;
-    }
-
-    const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
-    if (s_sprite.vertex_count + r->vertex_count > vcap || s_sprite.index_count + r->index_count > s_sprite.max_indices) {
-        NT_ASSERT(s_sprite.cmd_count > 0 && "emit_region_resolved called with no open cmd");
-        nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
-        nt_sprite_renderer_flush();
-        open_cmd_from_snapshot(&snapshot);
-    }
 
     /* Source-space positions omit origin, so different pivots can share geometry. */
     float tx = m[12];
@@ -569,12 +408,6 @@ static NT_ALWAYS_INLINE void emit_region_resolved(const nt_texture_region_t *r, 
     ty -= (m[1] * dx) + (m[5] * dy);
     tz -= (m[2] * dx) + (m[6] * dy);
 
-    uint8_t cr = (uint8_t)(color_packed & 0xFFU);
-    uint8_t cg = (uint8_t)((color_packed >> 8) & 0xFFU);
-    uint8_t cb = (uint8_t)((color_packed >> 16) & 0xFFU);
-    uint8_t ca = (uint8_t)((color_packed >> 24) & 0xFFU);
-
-    uint32_t base = s_sprite.vertex_count;
 #ifdef __wasm_simd128__
     if (r->vertex_count == 4) {
         /* De-interleave positions[4][2] → pxs/pys lanes. */
@@ -607,21 +440,26 @@ static NT_ALWAYS_INLINE void emit_region_resolved(const nt_texture_region_t *r, 
         wasm_v128_store(ys_arr, ys);
         wasm_v128_store(zs_arr, zs);
         for (uint8_t i = 0; i < 4; i++) {
-            nt_sprite_vertex_t *v = (nt_sprite_vertex_t *)(s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride));
+            nt_sprite_vertex_t *v = (nt_sprite_vertex_t *)(a->vertices + ((size_t)i * stride));
             v->position[0] = xs_arr[i];
             v->position[1] = ys_arr[i];
             v->position[2] = zs_arr[i];
             v->texcoord[0] = uvs[i].atlas_u;
             v->texcoord[1] = uvs[i].atlas_v;
-            v->color[0] = cr;
-            v->color[1] = cg;
-            v->color[2] = cb;
-            v->color[3] = ca;
+            memcpy(v->color, &color_packed, sizeof(v->color));
         }
     } else
 #endif /* __wasm_simd128__ */
     {
-        for (uint8_t i = 0; i < r->vertex_count; i++) {
+        /* Locals: the byte stores below may alias the matrix, which would reload it per vertex. */
+        const float m0 = m[0];
+        const float m1 = m[1];
+        const float m2 = m[2];
+        const float m4 = m[4];
+        const float m5 = m[5];
+        const float m6 = m[6];
+        const uint8_t vertex_count = r->vertex_count;
+        for (uint8_t i = 0; i < vertex_count; i++) {
             float px = positions[i][0];
             if (fx) {
                 px = -px;
@@ -630,44 +468,28 @@ static NT_ALWAYS_INLINE void emit_region_resolved(const nt_texture_region_t *r, 
             if (fy) {
                 py = -py;
             }
-            nt_sprite_vertex_t *v = (nt_sprite_vertex_t *)(s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride));
-            v->position[0] = (m[0] * px) + (m[4] * py) + tx;
-            v->position[1] = (m[1] * px) + (m[5] * py) + ty;
-            v->position[2] = (m[2] * px) + (m[6] * py) + tz;
+            nt_sprite_vertex_t *v = (nt_sprite_vertex_t *)(a->vertices + ((size_t)i * stride));
+            v->position[0] = (m0 * px) + (m4 * py) + tx;
+            v->position[1] = (m1 * px) + (m5 * py) + ty;
+            v->position[2] = (m2 * px) + (m6 * py) + tz;
             v->texcoord[0] = uvs[i].atlas_u;
             v->texcoord[1] = uvs[i].atlas_v;
-            v->color[0] = cr;
-            v->color[1] = cg;
-            v->color[2] = cb;
-            v->color[3] = ca;
+            /* 0xAABBGGRR in little-endian memory is R, G, B, A. */
+            memcpy(v->color, &color_packed, sizeof(v->color));
         }
     }
-    bake_custom_attrs(base, r->vertex_count, custom, custom_bytes);
-    s_sprite.vertex_count += r->vertex_count;
 
-    /* Emit indices (rebase to staging base). Each flush chunk is capped to
-     * 65535 vertices, so uint16 indices stay below the restart value. */
-    uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
-    for (uint8_t i = 0; i < r->index_count; i++) {
-        uint32_t rebased = base + (uint32_t)idx[i];
-        NT_ASSERT(rebased < UINT16_MAX && "sprite uint16 index chunk overflow");
-        out_idx[i] = (uint16_t)rebased;
+    uint32_t *out_idx = a->indices;
+    const uint32_t base = a->base;
+    const uint8_t index_count = r->index_count;
+    for (uint8_t i = 0; i < index_count; i++) {
+        out_idx[i] = base + (uint32_t)idx[i];
     }
-    s_sprite.index_count += r->index_count;
-
-#ifdef NT_TEST_ACCESS
-    /* Capture per-emit counts + first-vertex offset so tests can read
-     * back emitted positions after draw_list completes (flush resets
-     * vertex_count but leaves the array data intact). */
-    s_sprite.last_emit_vertex_count = r->vertex_count;
-    s_sprite.last_emit_index_count = r->index_count;
-    s_sprite.last_emit_first_vertex = base;
-#endif
 }
 // #endregion
 
 // #region slice9_grid
-/* Local space matches emit_region's: Y-up, pivot-relative, mirrored by negating positions.
+/* Local space matches write_region's: Y-up, pivot-relative, mirrored by negating positions.
  * Row 0 is the local bottom and samples v_max: blob vertices are Y-up, atlas_v is PNG Y-down. */
 typedef struct {
     const nt_texture_region_t *region;
@@ -681,8 +503,6 @@ typedef struct {
     uint32_t color_packed;
     uint8_t flip_bits;
     const float *world_matrix;
-    const float *custom;
-    uint8_t custom_bytes;
 } slice9_grid_t;
 
 /* UV bbox of a region's vertices, as {u_min, u_max, v_min, v_max} in u16 space. */
@@ -744,8 +564,8 @@ static void slice9_build_splits(const slice9_grid_t *g, float lxs[4], float lys[
 }
 
 /* Writes the 16 grid vertices. The pivot rides in the translation and mirrors
- * with the geometry, exactly as emit_region_resolved does it. */
-static void write_slice9_vertices(const slice9_grid_t *g, const float lxs[4], const float lys[4], const uint16_t us[4], const uint16_t vs[4], uint32_t base) {
+ * with the geometry, exactly as write_region does it. */
+static void write_slice9_vertices(const slice9_grid_t *g, const float lxs[4], const float lys[4], const uint16_t us[4], const uint16_t vs[4], uint8_t *dst, uint32_t stride) {
     const float *m = g->world_matrix;
     const bool fx = (g->flip_bits & NT_SPRITE_FLAG_FLIP_X) != 0;
     const bool fy = (g->flip_bits & NT_SPRITE_FLAG_FLIP_Y) != 0;
@@ -755,25 +575,17 @@ static void write_slice9_vertices(const slice9_grid_t *g, const float lxs[4], co
     const float ty = m[13] - (m[1] * dx) - (m[5] * dy);
     const float tz = m[14] - (m[2] * dx) - (m[6] * dy);
 
-    const uint8_t cr = (uint8_t)(g->color_packed & 0xFFU);
-    const uint8_t cg = (uint8_t)((g->color_packed >> 8) & 0xFFU);
-    const uint8_t cb = (uint8_t)((g->color_packed >> 16) & 0xFFU);
-    const uint8_t ca = (uint8_t)((g->color_packed >> 24) & 0xFFU);
-
     for (uint8_t row = 0; row < 4; row++) {
         const float py = fy ? -lys[row] : lys[row];
         for (uint8_t col = 0; col < 4; col++) {
             const float px = fx ? -lxs[col] : lxs[col];
-            nt_sprite_vertex_t *v = (nt_sprite_vertex_t *)(s_sprite.staging + ((size_t)(base + (row * 4) + col) * s_sprite.cur_stride));
+            nt_sprite_vertex_t *v = (nt_sprite_vertex_t *)(dst + ((size_t)((row * 4) + col) * stride));
             v->position[0] = (m[0] * px) + (m[4] * py) + tx;
             v->position[1] = (m[1] * px) + (m[5] * py) + ty;
             v->position[2] = (m[2] * px) + (m[6] * py) + tz;
             v->texcoord[0] = us[col];
             v->texcoord[1] = vs[row];
-            v->color[0] = cr;
-            v->color[1] = cg;
-            v->color[2] = cb;
-            v->color[3] = ca;
+            memcpy(v->color, &g->color_packed, sizeof(v->color));
         }
     }
 }
@@ -786,35 +598,25 @@ static void slice9_assert_region(const slice9_grid_t *g) {
     NT_ASSERT(g->src_lrtb[0] + g->src_lrtb[1] < g->region->source_w && g->src_lrtb[2] + g->src_lrtb[3] < g->region->source_h && "slice9 src borders exceed source dimensions");
 }
 
-static void emit_slice9_grid(const slice9_grid_t *g) {
+/* 16 vertices and 54 indices into one allocation. */
+static void write_slice9(const slice9_grid_t *g, uint32_t stride, const nt_sprite_alloc_t *a) {
     slice9_assert_region(g);
-    const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
-    if (s_sprite.vertex_count + 16U > vcap || s_sprite.index_count + 54U > s_sprite.max_indices) {
-        NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9_grid called with no open cmd");
-        nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
-        nt_sprite_renderer_flush();
-        open_cmd_from_snapshot(&snapshot);
-    }
-    NT_ASSERT(16U <= vcap && 54U <= s_sprite.max_indices && "slice9: staging cap below one grid (raise max_vertices / max_indices)");
-
     float lxs[4];
     float lys[4];
     uint16_t us[4];
     uint16_t vs[4];
     slice9_build_splits(g, lxs, lys, us, vs);
-
-    const uint32_t base = s_sprite.vertex_count;
-    write_slice9_vertices(g, lxs, lys, us, vs, base);
+    write_slice9_vertices(g, lxs, lys, us, vs, a->vertices, stride);
 
     /* 54 indices: 9 cells x 2 triangles x 3 indices. */
-    uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
+    uint32_t *out_idx = a->indices;
     uint32_t ii = 0;
-    for (uint8_t row = 0; row < 3; row++) {
-        for (uint8_t col = 0; col < 3; col++) {
-            const uint16_t i_bl = (uint16_t)(base + (row * 4) + col);
-            const uint16_t i_br = (uint16_t)(i_bl + 1U);
-            const uint16_t i_tl = (uint16_t)(i_bl + 4U);
-            const uint16_t i_tr = (uint16_t)(i_tl + 1U);
+    for (uint32_t row = 0; row < 3; row++) {
+        for (uint32_t col = 0; col < 3; col++) {
+            const uint32_t i_bl = a->base + (row * 4U) + col;
+            const uint32_t i_br = i_bl + 1U;
+            const uint32_t i_tl = i_bl + 4U;
+            const uint32_t i_tr = i_tl + 1U;
             /* CCW in local Y-up, like the blob's triangles, so CULL_BACK draws it. */
             out_idx[ii++] = i_tl;
             out_idx[ii++] = i_bl;
@@ -824,76 +626,6 @@ static void emit_slice9_grid(const slice9_grid_t *g) {
             out_idx[ii++] = i_tr;
         }
     }
-
-    bake_custom_attrs(base, 16U, g->custom, g->custom_bytes);
-    s_sprite.vertex_count += 16U;
-    s_sprite.index_count += 54U;
-
-#ifdef NT_TEST_ACCESS
-    s_sprite.last_emit_vertex_count = 16U;
-    s_sprite.last_emit_index_count = 54U;
-    s_sprite.last_emit_first_vertex = base;
-#endif
-}
-// #endregion
-
-// #region emit_one
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
-    nt_entity_t e = {.id = item->entity};
-    uint16_t eidx = nt_entity_index(e);
-
-    /* Inlined vs three calls each doing the same liveness assert + array read. */
-    uint16_t s_idx = sv->sparse_indices[eidx];
-    uint16_t t_idx = tv->sparse_indices[eidx];
-    uint16_t d_idx = dv->sparse_indices[eidx];
-
-    /* NT_INVALID_COMP_INDEX would index SoA OOB -- catches stale items. */
-    NT_ASSERT(s_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
-    NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
-    NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
-
-    nt_resource_t atlas = sv->atlas[s_idx];
-    const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
-    uint8_t flags = sv->flags[s_idx];
-    NT_ASSERT((flags & NT_SPRITE_FLAG_RESOLVED) != 0 && "sprite render item: sprite is unresolved");
-    NT_ASSERT(resolved->region != NULL && "sprite render item: resolved region is NULL");
-    NT_ASSERT(resolved->region->vertex_count != 0 && "sprite render item: region is tombstoned");
-    const nt_texture_region_t *r = resolved->region;
-    NT_ASSERT(resolved->positions != NULL && resolved->uvs != NULL && resolved->indices != NULL);
-    uint32_t page_tex = nt_resource_get(resolved->page_resource);
-
-    const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
-    const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
-    const uint8_t flip_bits = flags & (NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
-    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
-
-    // #region emit_one_slice9_branch
-    /* A zero override is the documented way to turn a baked nine-patch back into a plain quad. */
-    const uint16_t *s9 = (flags & NT_SPRITE_FLAG_SLICE9_OV) ? sv->slice9_lrtb[s_idx] : r->slice9_lrtb;
-    if ((s9[0] | s9[1] | s9[2] | s9[3]) != 0) {
-        if (!ensure_current_cmd_page_texture(page_tex)) {
-            return;
-        }
-        NT_ASSERT(isfinite(sv->slice9_scale[s_idx]) && sv->slice9_scale[s_idx] > 0.0F && "emit_one: sv->slice9_scale[s_idx] must be finite > 0");
-        const slice9_grid_t grid = {
-            .region = r,
-            .uvs = resolved->uvs,
-            .src_lrtb = s9,
-            .band_per_px = sv->slice9_scale[s_idx] * ipu,
-            .w = (float)r->source_w * ipu,
-            .h = (float)r->source_h * ipu,
-            .origin_x = origin_x,
-            .origin_y = origin_y,
-            .color_packed = dv->colors_packed[d_idx],
-            .flip_bits = flip_bits,
-            .world_matrix = tv->world_matrices[t_idx],
-        };
-        emit_slice9_grid(&grid);
-        return;
-    }
-    // #endregion
-    emit_region_resolved(r, resolved->positions, resolved->uvs, resolved->indices, page_tex, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits, NULL, 0U);
 }
 // #endregion
 
@@ -901,33 +633,23 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits,
                                     const float *custom, uint8_t custom_bytes) {
-    NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(world_matrix != NULL);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_region: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_region: atlas must be READY");
-    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_region: call nt_sprite_renderer_set_material first");
 
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
     if (h.region->vertex_count == 0U) {
         return; /* tombstone or out-of-range */
     }
-    emit_region_resolved(h.region, h.positions, h.uvs, h.indices, nt_resource_get(h.page_resource), h.ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits, custom, custom_bytes);
-}
-// #endregion
-
-// #region align
-void nt_sprite_renderer_align_next_vertex_to_4(void) {
-    NT_ASSERT(s_sprite.initialized);
-    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_align_next_vertex_to_4: call nt_sprite_renderer_set_material first");
-    const uint32_t pad = (4U - (s_sprite.vertex_count & 3U)) & 3U;
-    const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
-    /* No room: a quad emit then flushes first and starts at vertex 0 anyway. The pad
-     * vertices are never indexed, so their stale staging bytes are never fetched. */
-    if (pad == 0U || s_sprite.vertex_count + pad > vcap) {
+    nt_sprite_alloc_t a;
+    if (!emit_begin(nt_resource_get(h.page_resource), h.region->vertex_count, h.region->index_count, &a)) {
         return;
     }
-    s_sprite.vertex_count += pad;
+    const nt_sprite_material_t *m = &s_sprite.current;
+    write_region(h.region, h.positions, h.uvs, h.indices, h.ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits, m->stride, &a);
+    bake_custom_attrs(m, a.vertices, h.region->vertex_count, custom, custom_bytes);
+    nt_gfx_draw_indexed(a.first_index, h.region->index_count, h.region->vertex_count);
 }
 // #endregion
 
@@ -935,34 +657,24 @@ void nt_sprite_renderer_align_next_vertex_to_4(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
                                       const float *world_matrix, uint32_t color_packed, const float *custom, uint8_t custom_bytes) {
-    NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(positions != NULL && indices != NULL && world_matrix != NULL);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_geometry: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_geometry: atlas must be READY");
-    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_geometry: call nt_sprite_renderer_set_material first");
     NT_ASSERT(vertex_count > 0U && index_count > 0U && "nt_sprite_renderer_emit_geometry: empty geometry");
     NT_ASSERT(index_count % 3U == 0U && "nt_sprite_renderer_emit_geometry: indices must form whole triangles");
-    NT_ASSERT(vertex_count <= s_sprite.max_vertices && "nt_sprite_renderer_emit_geometry: vertex_count exceeds staging capacity");
-    NT_ASSERT(index_count <= s_sprite.max_indices && "nt_sprite_renderer_emit_geometry: index_count exceeds staging capacity");
+    /* uint16 local indices address at most 65536 vertices; the byte sizes below must not wrap. */
+    NT_ASSERT(vertex_count <= 65536U && index_count <= UINT32_MAX / 4U && "nt_sprite_renderer_emit_geometry: geometry too large");
 
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
     if (h.region->vertex_count == 0U) {
         return; /* tombstone */
     }
-    const uint32_t page_tex = nt_resource_get(h.page_resource);
-    if (!ensure_current_cmd_page_texture(page_tex)) {
+    nt_sprite_alloc_t a;
+    if (!emit_begin(nt_resource_get(h.page_resource), vertex_count, index_count, &a)) {
         return;
     }
-
-    const uint32_t vcap = (s_sprite.cur_material_custom_bytes > 0) ? s_sprite.custom_max_vertices : s_sprite.max_vertices;
-    if (s_sprite.vertex_count + vertex_count > vcap || s_sprite.index_count + index_count > s_sprite.max_indices) {
-        nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
-        nt_sprite_renderer_flush();
-        open_cmd_from_snapshot(&snapshot);
-    }
-    /* A single emit larger than the (post-flush empty) cap can't fit — fail fast instead of overrunning staging. */
-    NT_ASSERT(vertex_count <= vcap && index_count <= s_sprite.max_indices && "emit_geometry: single emit exceeds staging cap (raise custom_max_vertices / max_indices)");
+    const nt_sprite_material_t *m = &s_sprite.current;
 
     /* Sample at the region's UV centroid -- the corner of vertex 0 would
      * land at the texel boundary and bleed into neighbours under linear
@@ -979,48 +691,25 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     const uint16_t shared_u = (uint16_t)(sum_u / h.region->vertex_count);
     const uint16_t shared_v = (uint16_t)(sum_v / h.region->vertex_count);
 
-    const uint8_t cr = (uint8_t)(color_packed & 0xFFU);
-    const uint8_t cg = (uint8_t)((color_packed >> 8) & 0xFFU);
-    const uint8_t cb = (uint8_t)((color_packed >> 16) & 0xFFU);
-    const uint8_t ca = (uint8_t)((color_packed >> 24) & 0xFFU);
-
-    const float *m = world_matrix;
-    const float tx = m[12];
-    const float ty = m[13];
-    const float tz = m[14];
-
-    const uint32_t base = s_sprite.vertex_count;
+    const float *wm = world_matrix;
     for (uint32_t i = 0; i < vertex_count; i++) {
         const float px = positions[i][0];
         const float py = positions[i][1];
-        nt_sprite_vertex_t *v = (nt_sprite_vertex_t *)(s_sprite.staging + ((size_t)(base + i) * s_sprite.cur_stride));
-        v->position[0] = (m[0] * px) + (m[4] * py) + tx;
-        v->position[1] = (m[1] * px) + (m[5] * py) + ty;
-        v->position[2] = (m[2] * px) + (m[6] * py) + tz;
+        nt_sprite_vertex_t *v = (nt_sprite_vertex_t *)(a.vertices + ((size_t)i * m->stride));
+        v->position[0] = (wm[0] * px) + (wm[4] * py) + wm[12];
+        v->position[1] = (wm[1] * px) + (wm[5] * py) + wm[13];
+        v->position[2] = (wm[2] * px) + (wm[6] * py) + wm[14];
         v->texcoord[0] = shared_u;
         v->texcoord[1] = shared_v;
-        v->color[0] = cr;
-        v->color[1] = cg;
-        v->color[2] = cb;
-        v->color[3] = ca;
+        memcpy(v->color, &color_packed, sizeof(v->color));
     }
-    bake_custom_attrs(base, vertex_count, custom, custom_bytes);
-    s_sprite.vertex_count += vertex_count;
+    bake_custom_attrs(m, a.vertices, vertex_count, custom, custom_bytes);
 
-    uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
     for (uint32_t i = 0; i < index_count; i++) {
-        const uint32_t rebased = base + (uint32_t)indices[i];
-        NT_ASSERT(rebased < UINT16_MAX && "sprite uint16 index chunk overflow");
         NT_ASSERT(indices[i] < vertex_count && "nt_sprite_renderer_emit_geometry: index out of range");
-        out_idx[i] = (uint16_t)rebased;
+        a.indices[i] = a.base + (uint32_t)indices[i];
     }
-    s_sprite.index_count += index_count;
-
-#ifdef NT_TEST_ACCESS
-    s_sprite.last_emit_vertex_count = vertex_count;
-    s_sprite.last_emit_index_count = index_count;
-    s_sprite.last_emit_first_vertex = base;
-#endif
+    nt_gfx_draw_indexed(a.first_index, index_count, vertex_count);
 }
 // #endregion
 
@@ -1029,10 +718,8 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float w, float h, float origin_x, float origin_y, const uint16_t src_lrtb[4],
                                     float slice9_scale, uint32_t color_packed, uint8_t flip_bits, const float *custom, uint8_t custom_bytes) {
-    NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(atlas.id != 0 && "emit_slice9: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "emit_slice9: atlas must be READY");
-    NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9: call nt_sprite_renderer_set_material first");
     NT_ASSERT(world_matrix != NULL && "emit_slice9: world_matrix must be non-NULL (pass NT_MATH_MAT4_IDENTITY for none)");
     NT_ASSERT(isfinite(w) && isfinite(h) && isfinite(origin_x) && isfinite(origin_y));
     NT_ASSERT(isfinite(slice9_scale) && slice9_scale > 0.0F && "emit_slice9: slice9_scale must be finite > 0");
@@ -1043,19 +730,16 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     if (rh.region->vertex_count == 0U) {
         return; /* tombstone */
     }
-
-    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
-
-    const uint32_t page_tex = nt_resource_get(rh.page_resource);
-    if (!ensure_current_cmd_page_texture(page_tex)) {
+    nt_sprite_alloc_t a;
+    if (!emit_begin(nt_resource_get(rh.page_resource), 16U, 54U, &a)) {
         return;
     }
-
+    const nt_sprite_material_t *m = &s_sprite.current;
     const slice9_grid_t grid = {
         .region = rh.region,
         .uvs = rh.uvs,
         .src_lrtb = (src_lrtb != NULL) ? src_lrtb : rh.region->slice9_lrtb,
-        .band_per_px = slice9_scale * ipu,
+        .band_per_px = slice9_scale * nt_atlas_get_inverse_pixels_per_unit(atlas),
         .w = w,
         .h = h,
         .origin_x = origin_x,
@@ -1063,33 +747,87 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         .color_packed = color_packed,
         .flip_bits = flip_bits,
         .world_matrix = world_matrix,
-        .custom = custom,
-        .custom_bytes = custom_bytes,
     };
-    emit_slice9_grid(&grid);
+    write_slice9(&grid, m->stride, &a);
+    bake_custom_attrs(m, a.vertices, 16U, custom, custom_bytes);
+    nt_gfx_draw_indexed(a.first_index, 54U, 16U);
 }
 // #endregion
 
 // #region draw_list
-/* Emit pass: stream verts into staging per batch_key; flush() does the upload. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void write_item(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv, const nt_sprite_material_t *m,
+                       nt_sprite_run_t *run) {
+    nt_entity_t e = {.id = item->entity};
+    uint16_t eidx = nt_entity_index(e);
+
+    /* Inlined vs three calls each doing the same liveness assert + array read. */
+    uint16_t s_idx = sv->sparse_indices[eidx];
+    uint16_t t_idx = tv->sparse_indices[eidx];
+    uint16_t d_idx = dv->sparse_indices[eidx];
+
+    /* NT_INVALID_COMP_INDEX would index SoA OOB -- catches stale items. */
+    NT_ASSERT(s_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
+    NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
+    NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
+
+    const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
+    uint8_t flags = sv->flags[s_idx];
+    NT_ASSERT((flags & NT_SPRITE_FLAG_RESOLVED) != 0 && "sprite render item: sprite is unresolved");
+    NT_ASSERT(resolved->region != NULL && "sprite render item: resolved region is NULL");
+    NT_ASSERT(resolved->region->vertex_count != 0 && "sprite render item: region is tombstoned");
+    const nt_texture_region_t *r = resolved->region;
+    NT_ASSERT(resolved->positions != NULL && resolved->uvs != NULL && resolved->indices != NULL);
+
+    const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
+    const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
+    const uint8_t flip_bits = flags & (NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
+    const float ipu = resolved->ipu;
+    nt_sprite_alloc_t a;
+
+    // #region write_item_slice9_branch
+    /* A zero override is the documented way to turn a baked nine-patch back into a plain quad. */
+    const uint16_t *s9 = (flags & NT_SPRITE_FLAG_SLICE9_OV) ? sv->slice9_lrtb[s_idx] : r->slice9_lrtb;
+    if ((s9[0] | s9[1] | s9[2] | s9[3]) != 0) {
+        NT_ASSERT(isfinite(sv->slice9_scale[s_idx]) && sv->slice9_scale[s_idx] > 0.0F && "write_item: sv->slice9_scale[s_idx] must be finite > 0");
+        const slice9_grid_t grid = {
+            .region = r,
+            .uvs = resolved->uvs,
+            .src_lrtb = s9,
+            .band_per_px = sv->slice9_scale[s_idx] * ipu,
+            .w = (float)r->source_w * ipu,
+            .h = (float)r->source_h * ipu,
+            .origin_x = origin_x,
+            .origin_y = origin_y,
+            .color_packed = dv->colors_packed[d_idx],
+            .flip_bits = flip_bits,
+            .world_matrix = tv->world_matrices[t_idx],
+        };
+        run_alloc(run, 16U, 54U, &a);
+        write_slice9(&grid, m->stride, &a);
+        bake_custom_attrs(m, a.vertices, 16U, NULL, 0U);
+        return;
+    }
+    // #endregion
+    run_alloc(run, r->vertex_count, r->index_count, &a);
+    write_region(r, resolved->positions, resolved->uvs, resolved->indices, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits, m->stride, &a);
+    bake_custom_attrs(m, a.vertices, r->vertex_count, NULL, 0U);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
-    NT_ASSERT(s_sprite.initialized);
     if (count == 0) {
         return;
     }
     NT_ASSERT(items != NULL);
-    NT_ASSERT(s_sprite.vbo.id != 0 && s_sprite.ibo.id != 0 && "retry failed GPU restore before drawing");
 
-    s_sprite.last_draw_list_calls = 0;
     nt_sprite_comp_view_t sv = nt_sprite_comp_view();
     nt_transform_comp_view_t tv = nt_transform_comp_view();
     nt_drawable_comp_view_t dv = nt_drawable_comp_view();
 
     /* Runs split per atlas page too, so consecutive runs often share a material;
      * nothing can replace its program inside this call, so the last resolve holds. */
-    uint32_t memo_mat = 0;
-    nt_pipeline_t memo_pip = {0};
+    nt_sprite_material_t m = {0};
     uint32_t run_start = 0;
     while (run_start < count) {
         uint32_t run_end = run_start + 1;
@@ -1097,112 +835,34 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
             run_end++;
         }
 
-        /* Resolve material + pipeline for this run via run-leader entity */
         nt_entity_t leader = {.id = items[run_start].entity};
         const nt_material_t *mat = nt_material_comp_handle(leader);
         const nt_material_info_t *mat_info = nt_material_get_info(*mat);
-        if (mat_info == NULL) { /* destroyed between item build and replay */
+        NT_ASSERT(mat_info != NULL && "sprite draw_list: material destroyed while its items are drawn");
+        if (mat->id != m.material.id) {
+            resolve_material(*mat, mat_info, &m);
+        }
+
+        /* Equal batch keys share the page: the run draws with its leader's. */
+        const uint16_t leader_sprite = sv.sparse_indices[nt_entity_index(leader)];
+        NT_ASSERT(leader_sprite != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
+        /* Checked here as well as per item: an unresolved leader has no page and would skip the run. */
+        NT_ASSERT((sv.flags[leader_sprite] & NT_SPRITE_FLAG_RESOLVED) != 0 && sv.resolved[leader_sprite].region != NULL && sv.resolved[leader_sprite].region->vertex_count != 0 &&
+                  "sprite render item: sprite is unresolved or tombstoned");
+        const uint32_t page_tex = nt_resource_get(sv.resolved[leader_sprite].page_resource);
+        if (m.pipeline.id == 0 || (mat_info->tex_count > 0 && page_tex == 0)) {
             run_start = run_end;
             continue;
         }
+        record_state(&m, page_tex);
 
-        /* Each batch_key boundary opens a fresh cmd. */
-        if (mat->id != memo_mat) {
-            memo_pip = find_or_create_pipeline(mat_info);
-            /* A failed resolve stays unmemoised so a later run retries. */
-            memo_mat = (memo_pip.id != 0) ? mat->id : 0;
-        }
-        const nt_pipeline_t pip = memo_pip;
-        if (pip.id == 0) { /* context died mid-frame; skip rather than draw through a stale bind */
-            run_start = run_end;
-            continue;
-        }
-        close_current_cmd();
-        open_cmd(pip, mat_info, *mat);
-
+        nt_sprite_run_t run = {.stride = m.stride};
         for (uint32_t i = run_start; i < run_end; i++) {
-            emit_one(&items[i], &sv, &tv, &dv);
+            write_item(&items[i], &sv, &tv, &dv, &m, &run);
         }
+        nt_gfx_draw_indexed(run.first_index, run.index_count, run.vertex_count);
         run_start = run_end;
     }
-    nt_sprite_renderer_flush();
-}
-// #endregion
-
-// #region flush
-/* Upload staging, replay cmds; rebind state only on delta. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_sprite_renderer_flush(void) {
-    close_current_cmd();
-    if (s_sprite.cmd_count == 0 || s_sprite.vertex_count == 0) {
-        s_sprite.vertex_count = 0;
-        s_sprite.index_count = 0;
-        s_sprite.cmd_count = 0;
-        return;
-    }
-#ifdef NT_TEST_ACCESS
-    s_sprite.test_nonempty_flush_calls++;
-#endif
-
-    /* orphan_buffer asks the driver to allocate fresh storage instead of
-     * mutating the bound VBO in place, so the GPU can keep consuming the
-     * previous frame's draws while we stage the next one.
-     *
-     * staging is already interleaved at i*cur_stride, so flush uploads it directly. */
-    NT_ASSERT((size_t)s_sprite.vertex_count * s_sprite.cur_stride <= s_sprite.staging_size && "sprite flush exceeds staging byte capacity");
-    nt_gfx_orphan_buffer(s_sprite.vbo, s_sprite.staging, s_sprite.vertex_count * s_sprite.cur_stride);
-    if (s_sprite.index_count > 0) {
-        nt_gfx_orphan_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint16_t));
-    }
-
-    nt_renderer_bound_t bound = {0};
-
-    for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
-        const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
-
-        /* Context loss or program destruction can invalidate a queued pipeline;
-         * the vertex input dies with the context or a buffer cascade. */
-        if (!nt_gfx_pipeline_valid(c->pipeline) || !nt_gfx_vertex_input_valid(c->vertex_input)) {
-            continue;
-        }
-
-        nt_renderer_bind_pipeline(&bound, c->pipeline);
-        /* Geometry is one bind, independent of pipeline changes: two custom
-         * layouts can share a pipeline and still switch vertex inputs here. */
-        nt_renderer_bind_vertex_input(&bound, c->vertex_input);
-
-        /* Sampler names come from the cmd, so a cmd whose material died still resolves
-         * its units; params are read from the live material when the material or the
-         * pipeline changed. */
-        const nt_material_info_t *mi = (c->material.id != bound.material) ? nt_material_get_info(c->material) : NULL;
-        nt_renderer_material_view_t view = {
-            .tex_count = c->tex_count,
-            .tex_name_hashes = c->tex_name_hashes,
-            .tex_samplers = c->tex_samplers,
-            .param_count = (mi != NULL) ? mi->param_count : 0,
-            .param_name_hashes = (mi != NULL) ? mi->param_name_hashes : NULL,
-            .params = (mi != NULL) ? mi->params : NULL,
-        };
-        memcpy(view.resolved_tex, c->resolved_tex, sizeof(view.resolved_tex));
-        nt_renderer_apply_material_uniforms(&bound, c->material.id, &view);
-        /* Per cmd, not per material: one material's page can change on a page split.
-         * Units come from the pipeline's program, so a dead material still binds right. */
-        nt_renderer_apply_texture_slots(&view);
-
-        /* Per-cmd vertex delta — avoids stats inflation across state splits. */
-        uint32_t cmd_vertex_end = (ci + 1U < s_sprite.cmd_count) ? s_sprite.cmds[ci + 1U].first_vertex : s_sprite.vertex_count;
-        uint32_t cmd_vertex_count = cmd_vertex_end - c->first_vertex;
-        nt_gfx_draw_indexed(c->first_index, c->index_count, cmd_vertex_count);
-        s_sprite.last_draw_list_calls++;
-    }
-
-    s_sprite.vertex_count = 0;
-    s_sprite.index_count = 0;
-    s_sprite.cmd_count = 0;
-    /* draw_list opens cmds per batch_key, not via current_mat. Reset
-     * the fence so a following same-handle set_material() re-opens. */
-    s_sprite.current_mat = (nt_material_t){0};
-    s_sprite.current_program = NT_PROGRAM_INVALID;
 }
 // #endregion
 
@@ -1222,58 +882,12 @@ void nt_sprite_renderer_test_layout(nt_material_t mat, nt_sprite_layout_info_t *
     }
 }
 
-void nt_sprite_renderer_test_batch_custom(uint32_t vertex, float *out, uint8_t float_count) {
+void nt_sprite_renderer_test_last_emit(nt_sprite_test_emit_t *out) {
     NT_ASSERT(out != NULL);
-    NT_ASSERT(vertex < s_sprite.last_emit_first_vertex + s_sprite.last_emit_vertex_count && "batch_custom: index out of range");
-    NT_ASSERT((uint32_t)float_count * sizeof(float) <= NT_SPRITE_CUSTOM_STRIDE_MAX && "batch_custom: float_count exceeds custom stride");
-    /* Custom block sits at +20 within each vertex's cur_stride slot in staging
-     * (flush leaves cur_stride + staging data intact for readback). */
-    const uint8_t *src = s_sprite.staging + ((size_t)vertex * s_sprite.cur_stride) + NT_SPRITE_BASE_STRIDE;
-    memcpy(out, src, (size_t)float_count * sizeof(float));
+    *out = s_sprite.last_emit;
 }
-
-void nt_sprite_renderer_test_last_emit_radial(uint32_t v_idx, float *out, uint8_t float_count) {
-    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_radial: index out of range");
-    nt_sprite_renderer_test_batch_custom(s_sprite.last_emit_first_vertex + v_idx, out, float_count);
-}
-
-uint32_t nt_sprite_renderer_test_last_emit_first_vertex(void) { return s_sprite.last_emit_first_vertex; }
 
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }
 uint32_t nt_sprite_renderer_test_vertex_input_cache_count(void) { return s_sprite.vi_count; }
-
-uint32_t nt_sprite_renderer_test_cmd_count(void) { return s_sprite.cmd_count; }
-uint32_t nt_sprite_renderer_test_draw_call_count(void) { return s_sprite.last_draw_list_calls; }
-uint32_t nt_sprite_renderer_test_vertex_count(void) { return s_sprite.vertex_count; }
-uint32_t nt_sprite_renderer_test_last_emit_vertex_count(void) { return s_sprite.last_emit_vertex_count; }
-uint32_t nt_sprite_renderer_test_last_emit_index_count(void) { return s_sprite.last_emit_index_count; }
-
-void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]) {
-    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_position: index out of range");
-    const nt_sprite_vertex_t *v = (const nt_sprite_vertex_t *)(s_sprite.staging + ((size_t)(s_sprite.last_emit_first_vertex + v_idx) * s_sprite.cur_stride));
-    out[0] = v->position[0];
-    out[1] = v->position[1];
-    out[2] = v->position[2];
-}
-
-void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2]) {
-    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_texcoord: index out of range");
-    const nt_sprite_vertex_t *v = (const nt_sprite_vertex_t *)(s_sprite.staging + ((size_t)(s_sprite.last_emit_first_vertex + v_idx) * s_sprite.cur_stride));
-    out[0] = v->texcoord[0];
-    out[1] = v->texcoord[1];
-}
-
-void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]) {
-    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_color: index out of range");
-    const nt_sprite_vertex_t *v = (const nt_sprite_vertex_t *)(s_sprite.staging + ((size_t)(s_sprite.last_emit_first_vertex + v_idx) * s_sprite.cur_stride));
-    out[0] = v->color[0];
-    out[1] = v->color[1];
-    out[2] = v->color[2];
-    out[3] = v->color[3];
-}
-
-bool nt_sprite_renderer_test_initialized(void) { return s_sprite.initialized; }
-uint32_t nt_sprite_renderer_test_nonempty_flush_calls(void) { return s_sprite.test_nonempty_flush_calls; }
-void nt_sprite_renderer_test_reset_nonempty_flush_calls(void) { s_sprite.test_nonempty_flush_calls = 0; }
 #endif
 // #endregion

@@ -68,6 +68,10 @@
 #endif
 
 #include "clay.h"
+
+/* Frame storage budget of the sprite geometry: the busiest tab peaks at about 67 KB / 37 KB. */
+#define UI_SHOWCASE_VERTEX_BYTES (256U * 1024U)
+#define UI_SHOWCASE_INDEX_BYTES (128U * 1024U)
 // #endregion
 
 // #region layers + reference resolution
@@ -2163,7 +2167,7 @@ static nt_ui_rich_object_measure_t rich_obj_bar_measure(void *user_data) {
 }
 static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
-    /* emit_custom dirtied the sprite bind cache before this rich emit -> rebind every call. */
+    /* The selection this callback finds is the band's image material: select its own. */
     nt_sprite_renderer_set_material(d->material);
     const float t = (d->clock != NULL) ? *d->clock : 0.0F;
     const float progress = 0.5F + (0.5F * sinf(t * 1.5F)); /* loops 0..1 */
@@ -3664,9 +3668,7 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        restore_result = nt_text_renderer_restore_gpu();
+        nt_result_t restore_result = nt_text_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
         (void)restore_result;
         nt_shape_renderer_restore_gpu();
@@ -3926,9 +3928,13 @@ int main(int argc, char *argv[]) {
     g_nt_window.height = 800;
     nt_window_init();
     nt_example_frames_init(argc, argv);
+    /* --frames skips input, so a measured run picks its tab here. */
+    s_active_tab = (int)nt_example_arg_u32(argc, argv, "--tab", 0);
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = UI_SHOWCASE_VERTEX_BYTES;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = UI_SHOWCASE_INDEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
@@ -3951,8 +3957,6 @@ int main(int argc, char *argv[]) {
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});
 
     nt_shape_renderer_init(); /* <obj=cube/> renders a real 3D cube into its inline box (embedded shaders). */
-    nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
-    nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
 
     nt_ui_module_init();
