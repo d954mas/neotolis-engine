@@ -350,8 +350,8 @@ sampler recreation publishes no
 logical set and issues no backend bind. Those failures are
 recoverable, so gfx reports them and skips the following draws of that set instead
 of returning a status the caller would have to branch on. Context loss means loss
-already synced by `nt_gfx_begin_frame`; material transitions do not poll the
-platform.
+already latched, by `nt_gfx_begin_frame` or by a failed backend call; material
+transitions do not poll the platform.
 
 The sampler class is part of the linked interface:
 
@@ -442,7 +442,9 @@ the lost event wipes. While the browser reports the context lost, begin_frame do
 not attempt recreation. A failed recreation is a context-creation failure: it
 logs one error, and on the web it leaves no context and no loss listener, so the
 engine stays lost and no later iteration recovers it. Backend failures caused by
-a loss are reported as `CONTEXT_LOST` without an error log.
+a loss are reported as `CONTEXT_LOST`; only the one that latches it logs an error.
+A sampler cache hit whose recreate meets the loss keeps its stable id and ends
+`CONTEXT_LOST`; a texture whose default sampler met it is not made.
 A loss frees every render-target slot, as it frees pipelines and vertex inputs;
 the attachment textures stay as husks. After restore the owner destroys the
 husks and makes new textures and targets. A restore that meets a new loss is

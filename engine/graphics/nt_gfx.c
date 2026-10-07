@@ -426,6 +426,11 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 
     /* Detect GPU compressed texture capabilities */
     g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
+    /* A probe on a lost context reports zero caps: latch it, and the restore probes again. */
+    if (nt_gfx_backend_query_context_lost()) {
+        g_nt_gfx.context_lost = true;
+        NT_LOG_ERROR("WebGL context lost");
+    }
 
     g_nt_gfx.initialized = true;
     nt_gfx_frame_create_buffers();
@@ -1280,7 +1285,8 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
         .label = NULL,
     };
     nt_sampler_t default_sampler = nt_gfx_make_sampler(&sampler_desc);
-    if (default_sampler.id == 0) {
+    /* A sampler recreate can latch a loss; a texture made on the dead context would be published live. */
+    if (default_sampler.id == 0 || g_nt_gfx.context_lost) {
         nt_gfx_backend_destroy_texture(backend);
         nt_pool_free(&s_gfx.texture_pool, id);
         return backend_failed(NULL);
@@ -2000,16 +2006,18 @@ static nt_gfx_result_t make_sampler(const nt_sampler_desc_t *desc, nt_sampler_t 
     for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
         if (s_gfx.sampler_cache[i].key == key) {
             /* Hit; lazy-recreate backend if context loss zeroed it. */
+            /* The id is stable either way: a failed recreate keeps the entry for bind-time recreate. */
+            out->id = i + 1;
             if (s_gfx.sampler_cache[i].backend == 0 && !g_nt_gfx.context_lost) {
                 s_gfx.sampler_cache[i].backend = nt_gfx_backend_create_sampler(&s_gfx.sampler_cache[i].desc);
                 if (s_gfx.sampler_cache[i].backend != 0) {
                     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, i + 1);
-                } else if (backend_failed(NULL) != NT_GFX_RESULT_CONTEXT_LOST) {
-                    /* The entry stays: bind-time recreate retries it. */
+                } else if (backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
+                    return NT_GFX_RESULT_CONTEXT_LOST;
+                } else {
                     NT_LOG_ERROR_ONCE("make_sampler: sampler recreation failed");
                 }
             }
-            out->id = i + 1;
             return NT_GFX_RESULT_CACHE;
         }
     }

@@ -796,6 +796,8 @@ their 0 dependencies, and the draws take the lost path too. Operations issued
 before the latch are issued and do nothing. The tables stay until the next
 begin_frame takes the lost event, so the recorded stream and capture stay
 consistent; a frame can see `context_restored` and a new latched loss together.
+`nt_gfx_init` latches the same way when its capability probe meets a loss, so
+nothing is made from the zero caps a lost context reports.
 Pass calls on a lost context are no-ops, not traps, except that `end_pass` closes a
 pass opened before the latch and `end_segment` closes its segment.
 

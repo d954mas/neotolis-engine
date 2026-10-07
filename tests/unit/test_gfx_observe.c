@@ -222,6 +222,17 @@ static void test_a_loss_latched_inside_a_pass_closes_the_pass(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
 }
 
+/* Init on a lost context probes zero caps and must not make frame buffers on them: it latches the loss. */
+static void test_init_on_a_lost_context_latches_the_loss(void) {
+    nt_gfx_shutdown();
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
+    nt_gfx_init(&desc);
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_gfx_fake_set_context_lost(false);
+}
+
 /* Only a loss the browser confirms latches: a failure on a live context keeps its reason and log. */
 static void test_a_failure_on_a_live_context_does_not_latch(void) {
     s_error_logs = 0;
@@ -261,9 +272,15 @@ static void test_a_sampler_recreate_and_a_readback_latch_a_loss(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+#if NT_GFX_CAPTURE_ENABLED
+    record_next_frame();
+#endif
     nt_gfx_fake_set_context_lost(true);
     TEST_ASSERT_EQUAL_UINT32(sampler.id, nt_gfx_make_sampler(&desc).id);
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+#if NT_GFX_CAPTURE_ENABLED
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CREATE, NT_GFX_OBJECT_SAMPLER));
+#endif
 
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_end_frame();
@@ -1086,6 +1103,7 @@ int main(void) {
     RUN_TEST(test_a_latched_loss_carries_a_whole_creation_chain);
     RUN_TEST(test_a_loss_latched_inside_a_pass_closes_the_pass);
     RUN_TEST(test_a_failure_on_a_live_context_does_not_latch);
+    RUN_TEST(test_init_on_a_lost_context_latches_the_loss);
     RUN_TEST(test_a_latched_loss_wipes_when_its_event_is_taken);
     RUN_TEST(test_a_sampler_recreate_and_a_readback_latch_a_loss);
     RUN_TEST(test_first_frame_counts_initial_resource_creation);

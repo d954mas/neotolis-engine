@@ -45,10 +45,11 @@ void nt_skeletal_gpu_init(const nt_skeletal_gpu_desc_t *desc) {
     NT_ASSERT(g_nt_gfx.initialized && "nt_skeletal_gpu_init: nt_gfx_init must run first");
 
     memset(&s_skeletal_gpu, 0, sizeof(s_skeletal_gpu));
+    /* A context lost during the caps probe reports 0; WebGL 2 guarantees at least the default width. */
     uint32_t max_size = nt_gfx_gpu_caps()->max_texture_size;
     uint32_t width = desc->width;
     if (width == 0) {
-        width = max_size < NT_SKELETAL_GPU_DEFAULT_WIDTH ? max_size : NT_SKELETAL_GPU_DEFAULT_WIDTH;
+        width = (max_size != 0 && max_size < NT_SKELETAL_GPU_DEFAULT_WIDTH) ? max_size : NT_SKELETAL_GPU_DEFAULT_WIDTH;
     }
     NT_ASSERT((g_nt_gfx.context_lost || (width <= max_size && desc->height <= max_size)) && "skeletal_gpu: palette texture exceeds max_texture_size");
     s_skeletal_gpu.width = (uint16_t)width;

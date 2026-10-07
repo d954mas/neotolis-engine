@@ -260,6 +260,8 @@ static void make_targets(uint16_t width, uint16_t height) {
     s_demo.scene = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.scene_color, .depth = s_demo.scene_depth, .label = "rtt_scene"});
     s_demo.temp = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.temp_color, .label = "rtt_blur_temp"});
     s_demo.blur = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.blur_color, .label = "rtt_blur_dest"});
+    /* Target 0 means the window, so a failed make would draw the scene there instead of trapping. */
+    NT_ASSERT((g_nt_gfx.context_lost || (s_demo.scene.id != 0 && s_demo.temp.id != 0 && s_demo.blur.id != 0)) && "rtt_showcase: render targets were not made");
     s_demo.rt_width = width;
     s_demo.rt_height = height;
 }
