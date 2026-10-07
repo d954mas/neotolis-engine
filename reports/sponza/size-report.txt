@@ -1,36 +1,36 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: 0910f8a
+# Commit: 57609e4
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 240 B
-Import               612 B
-Function             172 B
+Import               605 B
+Function             171 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                89 B
 Elem                  78 B
-Code              200893 B
-Data              212268 B
-Custom             10717 B
+Code              199637 B
+Data              212208 B
+Custom             10673 B
 ---------------- ----------
-TOTAL             425089 B
+TOTAL             423721 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
 31497 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
-29868 B   frame
+29612 B   frame
 27330 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17617 B   nt_gfx_activate_texture
  5759 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
- 5273 B   main
- 5011 B   nt_gfx_activate_mesh
- 4852 B   nt_gfx_frame_execute
+ 5149 B   main
+ 5013 B   nt_gfx_activate_mesh
+ 4816 B   nt_gfx_frame_execute
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
  3313 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
@@ -47,15 +47,15 @@ TOTAL             425089 B
  1420 B   nt_gfx_make_vertex_input
  1241 B   basist::bc7_mode_5_encoder::eval_weights(basist::color32 const*, unsigned char*, int, int, int, int, int, int)
  1218 B   basist::transcode_uastc_to_etc2_eac_a8(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
- 1129 B   nt_gfx_destroy_buffer
  1100 B   nt_hash32_str
  1024 B   nt_input_web_on_blur
   999 B   basist::determine_unique_pbits(unsigned int, unsigned int, float*, float*, basist::color_quad_u8&, basist::color_quad_u8&, unsigned int*)
   809 B   nt_input_web_on_pointer_move
   778 B   nt_gfx_gl_cache_ground_state
+  770 B   __cxx_global_array_dtor
 
-Total functions: 170
-Total code size: 200615 B
+Total functions: 169
+Total code size: 199362 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2204 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94198 B
-libnt_gfx.a                96670 B
-libnt_gfx_stub.a            6268 B
+libnt_gfx.a                94814 B
+libnt_gfx_stub.a            6172 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         3979978 B
+TOTAL (archives)         3978026 B
 
 ## Data Segments Summary
 
 Segments: 156
-Total data size: 211091 B
+Total data size: 211031 B

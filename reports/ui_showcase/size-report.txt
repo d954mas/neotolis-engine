@@ -1,39 +1,39 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: 0910f8a
+# Commit: 57609e4
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 562 B
-Import               612 B
+Import               605 B
 Function             368 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                95 B
 Elem                 144 B
-Code              384860 B
-Data               41869 B
-Custom             11647 B
+Code              383821 B
+Data               41913 B
+Custom             11642 B
 ---------------- ----------
-TOTAL             440178 B
+TOTAL             439171 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-68861 B   frame
+68872 B   frame
 17519 B   dispatch_command
 16312 B   nt_shape_renderer_init
-10399 B   main
+10264 B   main
  9467 B   input_field
  8830 B   Clay__ConfigureOpenElementPtr
  8251 B   nt_ui_rich_text_markup
  6059 B   Clay__SizeContainersAlongAxis
  5872 B   nt_ui_scroll_begin
  5643 B   Clay__InitializeEphemeralMemory
- 5085 B   nt_gfx_frame_execute
+ 5047 B   nt_gfx_frame_execute
  4903 B   render_rich
  4582 B   render_radial
  4292 B   slider_core
@@ -55,7 +55,7 @@ TOTAL             440178 B
  2504 B   nt_shape_renderer_flush
 
 Total functions: 366
-Total code size: 384220 B
+Total code size: 383181 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2204 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94198 B
-libnt_gfx.a                96670 B
-libnt_gfx_stub.a            6268 B
+libnt_gfx.a                94814 B
+libnt_gfx_stub.a            6172 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         3979978 B
+TOTAL (archives)         3978026 B
 
 ## Data Segments Summary
 
-Segments: 150
-Total data size: 40811 B
+Segments: 151
+Total data size: 40848 B
