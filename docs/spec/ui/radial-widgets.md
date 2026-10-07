@@ -25,7 +25,7 @@ A radial could be drawn two ways:
 
 Neotolis uses **Route B**. The reason is that the widget stays declarative: Route A
 hands the game a raw draw callback per widget, and every CUSTOM command is a walker
-barrier (staged text flushes around it, the callback selects its own material).
+barrier (it cuts layer batching, and the callback selects its own material).
 Route B keeps every radial on the walker's image emit path: the per-element
 material override (`nt_ui_image_payload_t.material`) carries the SDF fragment
 shader and extended vertex layout, the walker selects it for each command, and
