@@ -143,7 +143,6 @@ static struct {
     uint16_t rt_width;
     uint16_t rt_height;
     bool large_target;
-    bool render_resources_ready;
     float sample_zoom;
     float blur_radius;
 } s_demo;
@@ -180,16 +179,11 @@ static void destroy_quad_resources(void) {
     s_demo.white = (nt_texture_t){0};
 }
 
-static bool make_quad_resources(void) {
+/* Straight line: a loss met on the way latches in gfx, and the next restore makes everything again. */
+static void make_quad_resources(void) {
     s_demo.quad_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_quad_vs_src, .label = "rtt_quad_vs"});
     s_demo.quad_fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_quad_fs_src, .label = "rtt_quad_fs"});
-    if (s_demo.quad_vs.id == 0 || s_demo.quad_fs.id == 0) {
-        return false;
-    }
     s_demo.quad_program = nt_gfx_make_program(s_demo.quad_vs, s_demo.quad_fs);
-    if (!nt_gfx_program_ready(s_demo.quad_program)) {
-        return false;
-    }
 
     s_demo.quad_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = s_demo.quad_program,
@@ -214,22 +208,20 @@ static bool make_quad_resources(void) {
         .data = verts,
         .label = "rtt_quad_vbo",
     });
-    if (s_demo.quad_vbo.id != 0) {
-        s_demo.quad_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
-            .layout =
-                {
-                    .stride = sizeof(rtt_quad_vertex_t),
-                    .attr_count = 2,
-                    .attrs =
-                        {
-                            {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
-                            {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
-                        },
-                },
-            .vertex_buffer = s_demo.quad_vbo,
-            .label = "rtt_quad_vi",
-        });
-    }
+    s_demo.quad_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout =
+            {
+                .stride = sizeof(rtt_quad_vertex_t),
+                .attr_count = 2,
+                .attrs =
+                    {
+                        {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
+                        {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
+                    },
+            },
+        .vertex_buffer = s_demo.quad_vbo,
+        .label = "rtt_quad_vi",
+    });
     s_demo.white = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 1,
         .height = 1,
@@ -241,7 +233,6 @@ static bool make_quad_resources(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "rtt_white",
     });
-    return s_demo.quad_pipeline.id != 0 && s_demo.quad_vbo.id != 0 && s_demo.quad_vi.id != 0 && s_demo.white.id != 0;
 }
 
 /* Color is shown LINEAR; raw depth must be read NEAREST, which depth storage requires anyway. */
@@ -253,9 +244,7 @@ static nt_texture_t make_attachment(const char *label, uint16_t width, uint16_t 
 static void destroy_targets(void) {
     nt_texture_t *textures[] = {&s_demo.scene_color, &s_demo.scene_depth, &s_demo.temp_color, &s_demo.blur_color};
     for (size_t i = 0; i < sizeof(textures) / sizeof(textures[0]); i++) {
-        if (textures[i]->id != 0) {
-            nt_gfx_destroy_texture(*textures[i]);
-        }
+        nt_gfx_destroy_texture(*textures[i]);
         *textures[i] = (nt_texture_t){0};
     }
     s_demo.scene = NT_RENDER_TARGET_INVALID;
@@ -263,26 +252,17 @@ static void destroy_targets(void) {
     s_demo.blur = NT_RENDER_TARGET_INVALID;
 }
 
-static bool make_targets(uint16_t width, uint16_t height) {
+static void make_targets(uint16_t width, uint16_t height) {
     s_demo.scene_color = make_attachment("rtt_scene_color", width, height, NT_TEXTURE_FORMAT_RGBA8, NT_FILTER_LINEAR);
     s_demo.scene_depth = make_attachment("rtt_scene_depth", width, height, NT_TEXTURE_FORMAT_DEPTH24, NT_FILTER_NEAREST);
     s_demo.temp_color = make_attachment("rtt_blur_temp_color", width, height, NT_TEXTURE_FORMAT_RGBA8, NT_FILTER_LINEAR);
     s_demo.blur_color = make_attachment("rtt_blur_color", width, height, NT_TEXTURE_FORMAT_RGBA8, NT_FILTER_LINEAR);
-    if (s_demo.scene_color.id == 0 || s_demo.scene_depth.id == 0 || s_demo.temp_color.id == 0 || s_demo.blur_color.id == 0) {
-        destroy_targets();
-        return false;
-    }
     s_demo.scene = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.scene_color, .depth = s_demo.scene_depth, .label = "rtt_scene"});
     s_demo.temp = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.temp_color, .label = "rtt_blur_temp"});
     s_demo.blur = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_demo.blur_color, .label = "rtt_blur_dest"});
-    if (s_demo.scene.id == 0 || s_demo.temp.id == 0 || s_demo.blur.id == 0) {
-        destroy_targets();
-        return false;
-    }
-    return true;
+    s_demo.rt_width = width;
+    s_demo.rt_height = height;
 }
-
-static bool targets_valid(void) { return nt_gfx_render_target_valid(s_demo.scene) && nt_gfx_render_target_valid(s_demo.temp) && nt_gfx_render_target_valid(s_demo.blur); }
 
 static void try_bind_ui_resources(void) {
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
@@ -472,10 +452,6 @@ static void render_frame(void) {
     if (g_nt_gfx.context_lost) {
         return;
     }
-    /* A failed rebuild or a loss leaves the targets invalid until R or a restore remakes them. */
-    if (!s_demo.render_resources_ready || !targets_valid()) {
-        return;
-    }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = s_demo.scene,
@@ -505,12 +481,14 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         /* Materials keep their handles and draw again once their programs relink. */
         nt_shape_renderer_restore_gpu();
-        bool restored = nt_postfx_blur_restore_gpu() == NT_OK;
+        nt_postfx_blur_restore_gpu();
         destroy_quad_resources();
-        restored = make_quad_resources() && restored;
+        make_quad_resources();
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        restored = (nt_text_renderer_restore_gpu() == NT_OK) && restored;
+        if (nt_text_renderer_restore_gpu() != NT_OK) {
+            nt_log_error("rtt_showcase: text renderer restore failed");
+        }
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
@@ -519,16 +497,9 @@ static void frame(void) {
          * died, and nt_font_step rebuilds those itself. Clearing this would make
          * the gate call nt_font_add twice, which asserts on the duplicate. */
 
-        /* Loss freed the targets; their textures are husks that only we can destroy.
-         * Targets stay out of the ready flag: the frame gate checks them, and R rebuilds them. */
+        /* Loss freed the targets; their textures are husks that only we can destroy. */
         destroy_targets();
-        if (!make_targets(s_demo.rt_width, s_demo.rt_height)) {
-            nt_log_error("rtt_showcase: render targets were not rebuilt after context restore; press R to retry");
-        }
-        s_demo.render_resources_ready = restored;
-        if (!s_demo.render_resources_ready) {
-            nt_log_error("rtt_showcase: GPU resources are not ready after context restore");
-        }
+        make_targets(s_demo.rt_width, s_demo.rt_height);
     }
     nt_input_poll();
     nt_mem_scratch_reset();
@@ -539,18 +510,9 @@ static void frame(void) {
     }
 #endif
     if (nt_input_key_is_pressed(NT_KEY_R)) {
-        /* After a failed rebuild R retries the current size; only live targets toggle it. */
-        const bool large = targets_valid() ? !s_demo.large_target : s_demo.large_target;
-        const uint16_t width = large ? 768 : 512;
-        const uint16_t height = large ? 432 : 288;
+        s_demo.large_target = !s_demo.large_target;
         destroy_targets();
-        if (make_targets(width, height)) {
-            s_demo.large_target = large;
-            s_demo.rt_width = width;
-            s_demo.rt_height = height;
-        } else {
-            nt_log_error("rtt_showcase: render-target rebuild failed; press R to retry");
-        }
+        make_targets(s_demo.large_target ? 768 : 512, s_demo.large_target ? 432 : 288);
     }
     nt_resource_step();
     link_programs();
@@ -650,20 +612,9 @@ int main(void) {
     s_demo.sample_zoom = 1.0F;
     s_demo.blur_radius = 8.0F;
     nt_shape_renderer_init();
-    if (nt_postfx_blur_init() != NT_OK) {
-        return 1;
-    }
-    bool quad_ok = make_quad_resources();
-    NT_ASSERT(quad_ok && "rtt_showcase: failed to create quad resources");
-    if (!quad_ok) {
-        return 1;
-    }
-    if (!make_targets(512, 288)) {
-        return 1;
-    }
-    s_demo.rt_width = 512;
-    s_demo.rt_height = 288;
-    s_demo.render_resources_ready = true;
+    nt_postfx_blur_init();
+    make_quad_resources();
+    make_targets(512, 288);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();

@@ -1,7 +1,6 @@
 #include "postfx/nt_postfx_blur.h"
 
 #include "core/nt_assert.h"
-#include "log/nt_log.h"
 
 #include <math.h>
 #include <string.h>
@@ -68,10 +67,7 @@ static struct {
     nt_buffer_t triangle_vbo;
     nt_vertex_input_t vertex_input;
     nt_sampler_t sampler;
-    /* Logical life and GPU life are separate: a restore that fails leaves the
-     * module active so the next one retries, with the pass skipped meanwhile. */
     bool initialized;
-    bool gpu_ready;
 } s_blur;
 
 /* Fixed uniform names: hashed once at init, the blur path sets them every pass. */
@@ -151,18 +147,10 @@ static void pack_kernel_pairs(const float weights[NT_POSTFX_BLUR_MAX_KERNEL], ui
 
 static void destroy_gpu_resources(void) {
     nt_gfx_destroy_vertex_input(s_blur.vertex_input);
-    if (s_blur.triangle_vbo.id != 0) {
-        nt_gfx_destroy_buffer(s_blur.triangle_vbo);
-    }
-    if (s_blur.program.id != 0) {
-        nt_gfx_destroy_program(s_blur.program);
-    }
-    if (s_blur.fs.id != 0) {
-        nt_gfx_destroy_shader(s_blur.fs);
-    }
-    if (s_blur.vs.id != 0) {
-        nt_gfx_destroy_shader(s_blur.vs);
-    }
+    nt_gfx_destroy_buffer(s_blur.triangle_vbo);
+    nt_gfx_destroy_program(s_blur.program);
+    nt_gfx_destroy_shader(s_blur.fs);
+    nt_gfx_destroy_shader(s_blur.vs);
     s_blur.vertex_input = NT_VERTEX_INPUT_INVALID;
     s_blur.triangle_vbo = (nt_buffer_t){0};
     s_blur.pipeline = (nt_pipeline_t){0};
@@ -171,7 +159,8 @@ static void destroy_gpu_resources(void) {
     s_blur.vs = (nt_shader_t){0};
 }
 
-static bool make_gpu_resources(void) {
+/* Straight line: a loss met on the way latches in gfx, and every later create returns 0. */
+static void make_gpu_resources(void) {
     static const nt_postfx_blur_vertex_t verts[3] = {
         {{-1.0F, -1.0F}, {0.0F, 0.0F}},
         {{3.0F, -1.0F}, {2.0F, 0.0F}},
@@ -182,13 +171,7 @@ static bool make_gpu_resources(void) {
         &(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .wrap_u = NT_WRAP_CLAMP_TO_EDGE, .wrap_v = NT_WRAP_CLAMP_TO_EDGE, .label = "postfx_blur_sampler"});
     s_blur.vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_blur_vs_src, .label = "postfx_blur_vs"});
     s_blur.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_blur_fs_src, .label = "postfx_blur_fs"});
-    if (s_blur.vs.id == 0 || s_blur.fs.id == 0) {
-        return false;
-    }
     s_blur.program = nt_gfx_make_program(s_blur.vs, s_blur.fs);
-    if (!nt_gfx_program_ready(s_blur.program)) {
-        return false;
-    }
     s_blur.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .program = s_blur.program,
         .depth_test = false,
@@ -204,9 +187,6 @@ static bool make_gpu_resources(void) {
         .size = sizeof(verts),
         .label = "postfx_blur_triangle",
     });
-    if (s_blur.triangle_vbo.id == 0) {
-        return false;
-    }
     s_blur.vertex_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .layout =
             {
@@ -221,24 +201,14 @@ static bool make_gpu_resources(void) {
         .vertex_buffer = s_blur.triangle_vbo,
         .label = "postfx_blur_vi",
     });
-    return s_blur.pipeline.id != 0 && s_blur.vertex_input.id != 0 && s_blur.sampler.id != 0;
 }
 
-nt_result_t nt_postfx_blur_init(void) {
+void nt_postfx_blur_init(void) {
     NT_ASSERT(!s_blur.initialized && "nt_postfx_blur_init: already initialized");
-    if (s_blur.initialized) {
-        return NT_ERR_INIT_FAILED;
-    }
     memset(&s_blur, 0, sizeof(s_blur));
     hash_uniform_names();
-    if (!make_gpu_resources()) {
-        NT_LOG_ERROR("postfx_blur init failed");
-        destroy_gpu_resources();
-        return NT_ERR_INIT_FAILED;
-    }
+    make_gpu_resources();
     s_blur.initialized = true;
-    s_blur.gpu_ready = true;
-    return NT_OK;
 }
 
 void nt_postfx_blur_shutdown(void) {
@@ -246,21 +216,13 @@ void nt_postfx_blur_shutdown(void) {
     memset(&s_blur, 0, sizeof(s_blur));
 }
 
-nt_result_t nt_postfx_blur_restore_gpu(void) {
+void nt_postfx_blur_restore_gpu(void) {
     /* Games may include inactive modules in their recovery sequence. */
     if (!s_blur.initialized) {
-        return NT_OK;
+        return;
     }
-    s_blur.gpu_ready = false;
     destroy_gpu_resources();
-    if (!make_gpu_resources()) {
-        /* Stay initialized so the game can retry a failed rebuild. */
-        NT_LOG_ERROR("postfx_blur restore failed");
-        destroy_gpu_resources();
-        return NT_ERR_INIT_FAILED;
-    }
-    s_blur.gpu_ready = true;
-    return NT_OK;
+    make_gpu_resources();
 }
 
 typedef struct {
@@ -271,8 +233,7 @@ typedef struct {
 static bool validate_module_and_pass(const nt_postfx_blur_pass_t *pass) {
     NT_ASSERT(s_blur.initialized && "nt_postfx_blur_gaussian: module is not initialized");
     NT_ASSERT(pass != NULL && "nt_postfx_blur_gaussian: NULL pass");
-    /* A failed rebuild is recoverable; skip until the game retries restore_gpu. */
-    return s_blur.initialized && s_blur.gpu_ready && pass != NULL;
+    return s_blur.initialized && pass != NULL;
 }
 
 static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_targets_t *targets) {
@@ -376,6 +337,10 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
 }
 
 void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
+    /* A lost context leaves this module's and the caller's GPU objects unusable; nothing would draw. */
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
     float weights[NT_POSTFX_BLUR_MAX_KERNEL];
     uint32_t radius = 0;
     if (!validate_pass(pass, &radius, weights)) {
