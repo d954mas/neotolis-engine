@@ -84,7 +84,6 @@ static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 
 static nt_ui_context_t *s_ui_ctx;
-static nt_buffer_t s_frame_ubo;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
 static nt_resource_t s_atlas_tex_handle;
@@ -145,6 +144,12 @@ static struct {
     float blur_radius;
 } s_demo;
 
+/* The five frame quads in clip space (x0, y0, x1, y1), one immutable VBO made with the other quad resources. */
+enum { QUAD_LEFT_FRAME, QUAD_RIGHT_FRAME, QUAD_SCENE, QUAD_BLUR, QUAD_DEPTH, QUAD_COUNT };
+static const float s_quad_rects[QUAD_COUNT][4] = {
+    {-0.96F, -0.76F, -0.08F, 0.78F}, {0.08F, -0.76F, 0.96F, 0.78F}, {-0.92F, -0.62F, -0.12F, 0.70F}, {0.12F, -0.62F, 0.92F, 0.70F}, {-0.44F, -0.95F, 0.44F, -0.78F},
+};
+
 static void destroy_quad_resources(void) {
     nt_gfx_destroy_vertex_input(s_demo.quad_vi);
     if (s_demo.quad_vbo.id != 0) {
@@ -190,15 +195,22 @@ static bool make_quad_resources(void) {
         .cull_mode = 0,
         .label = "rtt_quad_pipeline",
     });
+    rtt_quad_vertex_t verts[QUAD_COUNT * 6];
+    for (uint32_t q = 0; q < QUAD_COUNT; q++) {
+        const float *r = s_quad_rects[q];
+        const rtt_quad_vertex_t quad[6] = {
+            {{r[0], r[1]}, {0.0F, 0.0F}}, {{r[2], r[1]}, {1.0F, 0.0F}}, {{r[2], r[3]}, {1.0F, 1.0F}}, {{r[0], r[1]}, {0.0F, 0.0F}}, {{r[2], r[3]}, {1.0F, 1.0F}}, {{r[0], r[3]}, {0.0F, 1.0F}},
+        };
+        memcpy(&verts[(size_t)q * 6U], quad, sizeof quad);
+    }
     s_demo.quad_vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 6U * (uint32_t)sizeof(rtt_quad_vertex_t),
+        .usage = NT_USAGE_IMMUTABLE,
+        .size = (uint32_t)sizeof verts,
+        .data = verts,
         .label = "rtt_quad_vbo",
     });
     if (s_demo.quad_vbo.id != 0) {
-        /* Layout lives on the owned vertex input; update_buffer keeps the GL
-         * name, so the per-frame vertex rewrite leaves the binding intact. */
         s_demo.quad_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
             .layout =
                 {
@@ -328,6 +340,36 @@ static bool ui_ready(void) {
     return s_atlas_bound && s_font_bound && sprite_info != NULL && nt_gfx_program_ready(sprite_info->program) && text_info != NULL && nt_gfx_program_ready(text_info->program);
 }
 
+/* Before the first pass: slider values apply to this frame's scene and blur. */
+static void declare_ui_overlay(void) {
+    if (!ui_ready()) {
+        return;
+    }
+    const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 960);
+    const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 540);
+
+    char zoom_text[32];
+    char blur_text[32];
+    (void)snprintf(zoom_text, sizeof zoom_text, "%.2fx", (double)s_demo.sample_zoom);
+    (void)snprintf(blur_text, sizeof blur_text, "%.1f px", (double)s_demo.blur_radius);
+
+    nt_ui_begin(s_ui_ctx, fb_w, fb_h, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
+    CLAY({.id = CLAY_ID("rtt_ui_root"),
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 18, .right = 18, .top = 14, .bottom = 0}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+        CLAY({.id = CLAY_ID("rtt_controls"),
+              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)},
+                         .padding = {.left = 18, .right = 18, .top = 12, .bottom = 12},
+                         .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                         .childGap = 28,
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = {9.0F, 13.0F, 20.0F, 224.0F}}) {
+            declare_slider_control("Sample zoom", zoom_text, nt_ui_id("rtt_sample_zoom"), &s_demo.sample_zoom, 1.0F, 2.5F, 0xFFFF8E38U);
+            declare_slider_control("Blur radius", blur_text, nt_ui_id("rtt_blur_radius"), &s_demo.blur_radius, 2.0F, 16.0F, 0xFF2EE4A6U);
+        }
+    }
+    nt_ui_end(s_ui_ctx);
+}
+
 static void draw_ui_overlay(void) {
     if (!ui_ready()) {
         return;
@@ -353,29 +395,7 @@ static void draw_ui_overlay(void) {
     uniforms.resolution[3] = (fb_h > 0.0F) ? (1.0F / fb_h) : 0.0F;
     uniforms.near_far[0] = -1.0F;
     uniforms.near_far[1] = 1.0F;
-    nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-    nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-
-    char zoom_text[32];
-    char blur_text[32];
-    (void)snprintf(zoom_text, sizeof zoom_text, "%.2fx", (double)s_demo.sample_zoom);
-    (void)snprintf(blur_text, sizeof blur_text, "%.1f px", (double)s_demo.blur_radius);
-
-    nt_ui_begin(s_ui_ctx, fb_w, fb_h, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS);
-    CLAY({.id = CLAY_ID("rtt_ui_root"),
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 18, .right = 18, .top = 14, .bottom = 0}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-        CLAY({.id = CLAY_ID("rtt_controls"),
-              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)},
-                         .padding = {.left = 18, .right = 18, .top = 12, .bottom = 12},
-                         .layoutDirection = CLAY_LEFT_TO_RIGHT,
-                         .childGap = 28,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
-              .backgroundColor = {9.0F, 13.0F, 20.0F, 224.0F}}) {
-            declare_slider_control("Sample zoom", zoom_text, nt_ui_id("rtt_sample_zoom"), &s_demo.sample_zoom, 1.0F, 2.5F, 0xFFFF8E38U);
-            declare_slider_control("Blur radius", blur_text, nt_ui_id("rtt_blur_radius"), &s_demo.blur_radius, 2.0F, 16.0F, 0xFF2EE4A6U);
-        }
-    }
-    nt_ui_end(s_ui_ctx);
+    nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, fb_w, fb_h}};
     nt_ui_walk(s_ui_ctx, &target);
@@ -421,11 +441,7 @@ static void draw_scene_contents(void) {
     nt_shape_renderer_flush();
 }
 
-static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x1, float y1, int mode, const float tint[4]) {
-    rtt_quad_vertex_t verts[6] = {
-        {{x0, y0}, {0.0F, 0.0F}}, {{x1, y0}, {1.0F, 0.0F}}, {{x1, y1}, {1.0F, 1.0F}}, {{x0, y0}, {0.0F, 0.0F}}, {{x1, y1}, {1.0F, 1.0F}}, {{x0, y1}, {0.0F, 1.0F}},
-    };
-    nt_gfx_update_buffer(s_demo.quad_vbo, 0, verts, sizeof(verts));
+static void draw_textured_quad(nt_texture_t texture, uint32_t quad, int mode, const float tint[4]) {
     nt_gfx_bind_pipeline(s_demo.quad_pipeline);
     nt_gfx_bind_vertex_input(s_demo.quad_vi);
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
@@ -433,19 +449,19 @@ static void draw_textured_quad(nt_texture_t texture, float x0, float y0, float x
     nt_gfx_set_uniform_int(nt_hash32_str("u_mode"), mode);
     nt_gfx_set_uniform_float(nt_hash32_str("u_zoom"), mode == 1 ? 1.0F : s_demo.sample_zoom);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), tint);
-    nt_gfx_draw(0, 6);
+    nt_gfx_draw(quad * 6U, 6);
 }
 
-static void draw_solid_quad(float x0, float y0, float x1, float y1, const float color[4]) { draw_textured_quad(s_demo.white, x0, y0, x1, y1, 0, color); }
+static void draw_solid_quad(uint32_t quad, const float color[4]) { draw_textured_quad(s_demo.white, quad, 0, color); }
 
 static void draw_default_frame(void) {
     float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     float frame[4] = {0.08F, 0.10F, 0.13F, 1.0F};
-    draw_solid_quad(-0.96F, -0.76F, -0.08F, 0.78F, frame);
-    draw_solid_quad(0.08F, -0.76F, 0.96F, 0.78F, frame);
-    draw_textured_quad(s_demo.scene_color, -0.92F, -0.62F, -0.12F, 0.70F, 0, white);
-    draw_textured_quad(s_demo.blur_color, 0.12F, -0.62F, 0.92F, 0.70F, 0, white);
-    draw_textured_quad(s_demo.scene_depth, -0.44F, -0.95F, 0.44F, -0.78F, 1, white);
+    draw_solid_quad(QUAD_LEFT_FRAME, frame);
+    draw_solid_quad(QUAD_RIGHT_FRAME, frame);
+    draw_textured_quad(s_demo.scene_color, QUAD_SCENE, 0, white);
+    draw_textured_quad(s_demo.blur_color, QUAD_BLUR, 0, white);
+    draw_textured_quad(s_demo.scene_depth, QUAD_DEPTH, 1, white);
 }
 
 static void render_frame(void) {
@@ -456,8 +472,6 @@ static void render_frame(void) {
     if (!s_demo.render_resources_ready || !targets_valid()) {
         return;
     }
-
-    nt_font_step();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){
         .target = s_demo.scene,
@@ -492,14 +506,6 @@ static void frame(void) {
         restored = make_quad_resources() && restored;
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "rtt_frame_uniforms",
-        });
-        restored = s_frame_ubo.id != 0 && restored;
         restored = (nt_sprite_renderer_restore_gpu() == NT_OK) && restored;
         restored = (nt_text_renderer_restore_gpu() == NT_OK) && restored;
         nt_program_ref_drop(&s_sprite_program);
@@ -547,6 +553,8 @@ static void frame(void) {
     link_programs();
     try_bind_ui_resources();
 
+    nt_font_step();
+    declare_ui_overlay();
     render_frame();
     nt_gfx_end_frame();
     nt_window_swap_buffers();
@@ -568,6 +576,7 @@ int main(void) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     gfx_desc.max_render_targets = 8;
     gfx_desc.max_textures = 32;
     gfx_desc.max_pipelines = 32;
@@ -592,13 +601,6 @@ int main(void) {
     const nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
     s_ui_ctx = nt_ui_create_context(s_ui_arena, sizeof s_ui_arena, &ui_desc);
     NT_ASSERT(s_ui_ctx != NULL && "rtt_showcase: failed to create UI context");
-
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "rtt_frame_uniforms",
-    });
 
     s_pack_id = nt_hash32_str("rtt_showcase");
     nt_resource_mount(s_pack_id, 100);
@@ -685,7 +687,6 @@ int main(void) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_postfx_blur_shutdown();
     nt_shape_renderer_shutdown();
     nt_gfx_shutdown();

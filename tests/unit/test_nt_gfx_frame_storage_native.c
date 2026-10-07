@@ -129,12 +129,6 @@ static void test_absolute_uint32_indices_over_two_strides_in_one_frame(void) {
     nt_gfx_begin_frame();
 }
 
-static uint32_t alloc_color_block(const float color[4]) {
-    uint32_t offset = 0;
-    memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, 4U * sizeof(float), g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, &offset), color, 4U * sizeof(float));
-    return offset;
-}
-
 static void assert_center(uint8_t red, uint8_t green) {
     uint8_t pixel[4] = {0};
     read_pixel((int)(g_nt_window.fb_width / 2U), (int)(g_nt_window.fb_height / 2U), pixel);
@@ -143,30 +137,28 @@ static void assert_center(uint8_t red, uint8_t green) {
 }
 
 /* The first pass executes (read_pixels) before the second block exists, so the
- * late block reaches the uniform buffer as a delta of a later execution. */
+ * late block reaches the uniform buffer as a delta of a later execution. Each pass
+ * draws with its own block. */
 static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(void) {
     static const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
     static const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
     nt_gfx_register_global_block("Color", 0);
     const nt_pipeline_t pipeline = make_pipeline(s_vertexid_vs_src, s_fs_block_src);
     const nt_vertex_input_t empty = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-    const nt_buffer_t ubo = nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM);
 
-    const uint32_t first = alloc_color_block(red);
     begin_black_pass();
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(empty);
-    nt_gfx_bind_uniform_buffer_range(ubo, 0, first, 4U * sizeof(float));
+    nt_gfx_bind_uniform_block(0, red, sizeof(red));
     nt_gfx_draw(0, 3);
     assert_center(255, 0);
     nt_gfx_end_pass();
 
     /* Produced while the frame is being drawn, as after UI layout. */
-    const uint32_t late = alloc_color_block(green);
     begin_black_pass();
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(empty);
-    nt_gfx_bind_uniform_buffer_range(ubo, 0, late, 4U * sizeof(float));
+    nt_gfx_bind_uniform_block(0, green, sizeof(green));
     nt_gfx_draw(0, 3);
     assert_center(0, 255);
     nt_gfx_end_pass();

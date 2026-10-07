@@ -107,7 +107,7 @@ static inline void nt_example_frames_end(bool ready) {
             s_example_frames.frame_peak[s] = c->frame_bytes[s];
         }
     }
-    if (index + 1 < NT_EXAMPLE_FRAMES_WARMUP + s_example_frames.frames) {
+    if ((uint64_t)index + 1U < (uint64_t)NT_EXAMPLE_FRAMES_WARMUP + s_example_frames.frames) { /* 64-bit: --frames near UINT32_MAX must not wrap */
         return;
     }
 

@@ -255,15 +255,9 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
     (void)byte_offset;
 }
 
-void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
-    (void)buf;
+void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     (void)slot;
-}
-
-void nt_gfx_bind_uniform_buffer_range(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
-    (void)buf;
-    (void)slot;
-    (void)offset;
+    (void)data;
     (void)size;
 }
 

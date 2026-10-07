@@ -524,7 +524,6 @@ static bool s_ids_ready;
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 
 static nt_ui_context_t *s_ctx;
-static nt_buffer_t s_frame_ubo;
 
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
@@ -3664,13 +3663,6 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
         /* Materials keep their handles and draw again once their programs relink. */
         nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
@@ -3803,19 +3795,11 @@ static void frame(void) {
 
     nt_font_step();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){
-        .clear_color = {g_current->bg.r / 255.0F, g_current->bg.g / 255.0F, g_current->bg.b / 255.0F, 1.0F},
-        .clear_depth = 1.0F,
-    });
-
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     const bool can_render = s_atlas_bound && s_font_bound && sprite_info && nt_gfx_program_ready(sprite_info->program) && text_info && nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-
         ensure_ids();
 
         const nt_material_info_t *base_info = nt_material_get_info(s_base_material);
@@ -3858,6 +3842,15 @@ static void frame(void) {
             s_rich_obj_demo.cube_view.fb_w = scale.fb_w;
             s_rich_obj_demo.cube_view.fb_h = scale.fb_h;
         }
+    }
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){
+        .clear_color = {g_current->bg.r / 255.0F, g_current->bg.g / 255.0F, g_current->bg.b / 255.0F, 1.0F},
+        .clear_depth = 1.0F,
+    });
+
+    if (can_render) {
+        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
@@ -3936,6 +3929,7 @@ int main(int argc, char *argv[]) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
 
@@ -3972,13 +3966,6 @@ int main(int argc, char *argv[]) {
     NT_ASSERT(s_ctx != NULL && "ui_showcase: failed to create UI context");
 
     g_nt_app.target_dt = 0.0F;
-
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
 
     s_pack_id = nt_hash32_str("ui_showcase");
     nt_resource_mount(s_pack_id, 100);
@@ -4166,7 +4153,6 @@ int main(int argc, char *argv[]) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

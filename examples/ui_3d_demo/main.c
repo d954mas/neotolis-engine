@@ -171,7 +171,6 @@ static void link_programs(void) {
 static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
-static nt_buffer_t s_frame_ubo;
 
 /* UI. */
 static nt_ui_context_t *s_ctx;
@@ -793,13 +792,6 @@ static void frame(void) {
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
         /* Materials keep their handles and draw again once their programs relink. */
         nt_shape_renderer_restore_gpu();
         nt_result_t restore_result = nt_sprite_renderer_restore_gpu();
@@ -902,17 +894,7 @@ static void frame(void) {
 #endif
 
     nt_font_step();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.06F, 0.07F, 0.10F, 1.0F}, .clear_depth = 1.0F});
 
-    /* 3D pass: shape_renderer drives its own VP. */
-    nt_shape_renderer_set_vp((const float *)vp_3d);
-    nt_shape_renderer_set_depth(true);
-    draw_room();
-    draw_boards();
-    draw_shape();
-    nt_shape_renderer_flush();
-
-    /* UI: needs perspective VP in frame_uniforms for sprite/text material shaders. */
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     const nt_material_info_t *text_3d_info = nt_material_get_info(s_text_material_3d); /* world labels: their own program */
@@ -920,9 +902,6 @@ static void frame(void) {
                                nt_gfx_program_ready(text_3d_info->program);
 
     if (ui_can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_3d, sizeof uniforms_3d);
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
-
         const nt_pointer_t mouse_phys = g_nt_input.pointers[0];
         nt_ui_begin(s_ctx, fb_w, fb_h, dt, &mouse_phys, 1);
         nt_ui_set_view_proj(s_ctx, (const float *)vp_3d);
@@ -934,6 +913,21 @@ static void frame(void) {
         }
         declare_panels();
         nt_ui_end(s_ctx);
+    }
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.06F, 0.07F, 0.10F, 1.0F}, .clear_depth = 1.0F});
+
+    /* 3D pass: shape_renderer drives its own VP. */
+    nt_shape_renderer_set_vp((const float *)vp_3d);
+    nt_shape_renderer_set_depth(true);
+    draw_room();
+    draw_boards();
+    draw_shape();
+    nt_shape_renderer_flush();
+
+    /* UI: needs perspective VP in frame_uniforms for sprite/text material shaders. */
+    if (ui_can_render) {
+        nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
 
         /* UI labels now write depth (world panels sort by depth) → bias glyph quads apart so their AA
          * fringes don't z-fight; the walker emits text with the renderer's current bias. Reset after. */
@@ -963,8 +957,7 @@ static void frame(void) {
 
     /* HUD: ortho VP. */
     if (text_info && nt_gfx_program_ready(text_info->program)) {
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_2d, sizeof uniforms_2d);
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        nt_gfx_bind_uniform_block(0, &uniforms_2d, sizeof uniforms_2d);
         draw_hud(fb_w, fb_h);
         nt_text_renderer_flush();
     }
@@ -975,17 +968,14 @@ static void frame(void) {
     const bool inspector_can_render = insp_sprite && nt_gfx_program_ready(insp_sprite->program) && insp_text && nt_gfx_program_ready(insp_text->program);
 
     if (ui_can_render && inspector_can_render && nt_ui_inspector_is_active(s_ctx)) {
-        /* Sidebar tree is its own screen-space pass (ortho). */
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_2d, sizeof uniforms_2d);
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        /* Sidebar tree is its own screen-space pass (ortho): the HUD above bound that view. */
         nt_ui_debug_inspector_walk(s_ctx, &target);
         nt_sprite_renderer_flush();
         nt_text_renderer_flush();
 
         /* Highlight overlay emits the element's world geometry in 3D ctx → bind the perspective VP
          * so it lands on the panel; the depth-off inspector materials keep it on top. */
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms_3d, sizeof uniforms_3d);
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
         nt_sprite_renderer_flush();
         nt_text_renderer_flush();
@@ -1046,6 +1036,7 @@ int main(int argc, char *argv[]) {
     nt_input_init();
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 3U * 512U; /* 3D, HUD/inspector and highlight views: 256 B or less each, plus any offset alignment up to 256 */
     gfx_desc.depth = true;
     nt_gfx_init(&gfx_desc);
     nt_gfx_register_global_block("Globals", 0);
@@ -1078,13 +1069,6 @@ int main(int argc, char *argv[]) {
     NT_ASSERT(s_ctx != NULL && "ui_3d_demo: failed to create UI context");
 
     g_nt_app.target_dt = 0.0F;
-
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
 
     s_pack_id = nt_hash32_str("ui_3d_demo");
     nt_resource_mount(s_pack_id, 100);
@@ -1204,7 +1188,6 @@ int main(int argc, char *argv[]) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();
