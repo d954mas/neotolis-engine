@@ -447,7 +447,7 @@ static void emit_line_decorations(const nt_text_style_t *style, const uint8_t *p
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- flat finite-value and feature preconditions.
 static void assert_style(const nt_text_style_t *style) {
     NT_ASSERT(style->font.id != 0 && "nt_text_renderer_draw_n: style has no font");
-    NT_ASSERT(isfinite(style->size) && isfinite(style->letter_tracking) && isfinite(style->line_leading) && "nt_text_renderer_draw_n: non-finite size or spacing");
+    NT_ASSERT(style->size > 0.0F && isfinite(style->size) && isfinite(style->letter_tracking) && isfinite(style->line_leading) && "nt_text_renderer_draw_n: size must be positive, spacing finite");
     NT_ASSERT(isfinite(style->weight_em) && isfinite(style->outline_w) && isfinite(style->shadow_dx) && isfinite(style->shadow_dy) && "nt_text_renderer_draw_n: non-finite decoration");
     NT_ASSERT(isfinite(style->oblique) && isfinite(style->glyph_depth_bias) && "nt_text_renderer_draw_n: non-finite oblique or depth bias");
 #if !NT_FONT_EMBOLDEN_ENABLED

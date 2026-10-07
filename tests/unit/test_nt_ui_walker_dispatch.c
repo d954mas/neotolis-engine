@@ -635,6 +635,39 @@ static void test_3d_debug_inspector_walk_draws_real_tree_text(void) {
 
     TEST_ASSERT_GREATER_THAN_UINT32(0U, ui_walker_fx_draw_count(text_program()));
 }
+
+/* Depth bias of the second glyph of the inspector's first tree text, drawn in a frame of its own. */
+static float inspector_second_glyph_bias(void) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("bias_tree_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(120.0F), CLAY_SIZING_FIXED(40.0F)}}}) {
+        nt_ui_label(s_fx.ctx, NULL, "TreeText", &(nt_ui_label_style_t){.font_id = 0, .font_size = 14, .color = NT_RGBA8(255, 255, 255, 255)});
+    }
+    nt_ui_end(s_fx.ctx);
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_ui_debug_inspector_walk(s_fx.ctx, &target);
+    const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
+    TEST_ASSERT_TRUE(ui_walker_fx_quads(d) >= 2U);
+    return ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 1, 0), UI_WALKER_FX_TEXT_DEPTH_BIAS);
+}
+
+/* The bias pairs with the context's text material: naming that same material as the inspector's keeps
+ * it, exactly like the fallback to it does. */
+static void test_inspector_with_the_context_text_material_keeps_its_bias(void) {
+    nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
+    nt_ui_set_text_material(s_fx.ctx, s_fx.text_material, 0.25F);
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    nt_ui_inspector_set_materials(s_fx.ctx, (nt_material_t){0}, (nt_material_t){0});
+    TEST_ASSERT_TRUE(inspector_second_glyph_bias() == 0.25F);
+    nt_ui_inspector_set_materials(s_fx.ctx, (nt_material_t){0}, s_fx.text_material);
+    TEST_ASSERT_TRUE(inspector_second_glyph_bias() == 0.25F);
+}
 #endif
 
 static void test_dispatch_3d_element_depth_bias_uses_hierarchy_depth(void) {
@@ -705,6 +738,7 @@ int main(void) {
     RUN_TEST(test_dispatch_3d_debug_layer_draws_in_screen_space_debug_walk);
     RUN_TEST(test_dispatch_3d_debug_text_uses_screen_space_orientation);
     RUN_TEST(test_3d_debug_inspector_walk_draws_real_tree_text);
+    RUN_TEST(test_inspector_with_the_context_text_material_keeps_its_bias);
 #endif
     RUN_TEST(test_dispatch_3d_element_depth_bias_uses_hierarchy_depth);
     RUN_TEST(test_dispatch_image_not_ready_silent);
