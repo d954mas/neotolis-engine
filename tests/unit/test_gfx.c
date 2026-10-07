@@ -2925,26 +2925,6 @@ void test_gfx_update_buffer_on_husk_asserts(void) {
     EXPECT_ASSERT(nt_gfx_update_buffer(vbo, 0, data, sizeof(data)));
 }
 
-void test_gfx_orphan_buffer_on_husk_asserts(void) {
-    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_VERTEX,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, vbo.id);
-
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-
-    const uint8_t data[64] = {0};
-    EXPECT_ASSERT(nt_gfx_orphan_buffer(vbo, data, sizeof(data)));
-}
-
 /* ---- Per-frame draw call counter ---- */
 
 /* The restore runs before the iteration builds anything, so what it rebuilds draws in the same iteration. */
@@ -3806,7 +3786,6 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_slots_freed_by_context_loss);
     RUN_TEST(test_gfx_update_texture_on_husk_asserts);
     RUN_TEST(test_gfx_update_buffer_on_husk_asserts);
-    RUN_TEST(test_gfx_orphan_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_bound_pipeline_holds_the_generation);
     RUN_TEST(test_gfx_restored_iteration_draws_what_it_rebuilds);
     RUN_TEST(test_gfx_failed_bind_drops_the_previous_pipeline);

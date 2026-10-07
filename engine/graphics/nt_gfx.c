@@ -56,8 +56,7 @@ typedef struct {
     uint8_t usage;      /* nt_buffer_usage_t */
     uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
     uint8_t _pad;
-    uint32_t size; /* initial capacity, retained across orphaning */
-    uint32_t storage_size;
+    uint32_t size; /* capacity */
 } nt_gfx_buffer_meta_t;
 
 /* ---- Vertex input metadata (destroy cascade + draw-invariant checks) ---- */
@@ -1128,7 +1127,6 @@ static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *ou
     s_gfx.buffer_metas[slot].usage = (uint8_t)desc->usage;
     s_gfx.buffer_metas[slot].index_type = desc->index_type;
     s_gfx.buffer_metas[slot].size = desc->size;
-    s_gfx.buffer_metas[slot].storage_size = desc->size;
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_BUFFER, id);
@@ -2469,29 +2467,6 @@ void nt_gfx_set_gpu_timing_enabled(bool enabled) {
 }
 
 bool nt_gfx_is_gpu_timing_supported(void) { return nt_gfx_backend_is_gpu_timing_supported(); }
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static nt_gfx_result_t orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
-    if (g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
-    if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
-        NT_LOG_ERROR("orphan_buffer: invalid handle");
-        return NT_GFX_RESULT_INVALID_HANDLE;
-    }
-    uint32_t slot = nt_pool_slot_index(buf.id);
-    NT_ASSERT(s_gfx.buffer_metas[slot].usage == NT_USAGE_DYNAMIC && "orphan_buffer: requires NT_USAGE_DYNAMIC");
-    NT_ASSERT(size <= s_gfx.buffer_metas[slot].size && "orphan_buffer: size exceeds buffer capacity");
-    NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "orphan_buffer: buffer has no live backend -- recreate it after context restore");
-    nt_gfx_backend_orphan_buffer(s_gfx.buffer_backends[slot], data, size);
-    s_gfx.buffer_metas[slot].storage_size = size;
-    return NT_GFX_RESULT_ACCEPTED;
-}
-
-void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_ORPHAN, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.flags = data != NULL);
-    NT_GFX_END(orphan_buffer(buf, data, size));
-}
 
 /* ---- Texture update ---- */
 

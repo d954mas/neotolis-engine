@@ -258,12 +258,6 @@ void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, ui
     (void)size;
 }
 
-void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
-    (void)buf;
-    (void)data;
-    (void)size;
-}
-
 void nt_gfx_begin_segment(const char *name) {
     NT_ASSERT(name != NULL);
     (void)name;

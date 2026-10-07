@@ -1731,28 +1731,6 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     }
 }
 
-void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
-        return;
-    }
-    GLuint buf = s_buffer_gl[backend_handle];
-    GLenum target = s_buffer_targets[backend_handle];
-    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
-    if (unhook_vao) {
-        ebo_upload_begin();
-    }
-    NT_GL(glBindBuffer, target, buf);
-    /* glBufferData with non-NULL data both orphans the existing storage and
-     * uploads in one call. The driver may allocate fresh memory for the new
-     * contents and reclaim the old block once the GPU finishes consuming it,
-     * avoiding the pipeline stall that glBufferSubData can introduce when
-     * rewriting a buffer that's still in flight. */
-    NT_GL_BUFFER_UPLOAD(data, size, glBufferData, target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
-    if (unhook_vao) {
-        ebo_upload_end();
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset) {
     NT_ASSERT(buffer_backend != 0 && buffer_backend <= s_init_desc.max_buffers && s_buffer_gl[buffer_backend] != 0 && "bind_instance_buffer: requires a live buffer");

@@ -1,4 +1,4 @@
-/* Real-GL coverage for VI switching, isolated EBO data operations, orphaning,
+/* Real-GL coverage for VI switching, isolated EBO data operations,
  * and binding preservation across rejected or failed operations. */
 
 #include "graphics/nt_gfx.h"
@@ -385,10 +385,9 @@ static void test_index_data_ops_do_not_rewire_bound_vertex_input(void) {
     nt_gfx_draw_indexed(0, 3, 3);
     TEST_ASSERT_UINT8_WITHIN(1, 255, center_red_in_pass());
 
-    /* All three data-op flavors on other index buffers while A's vertex input
-     * stays bound: update, orphan, and creation-with-data. */
+    /* Both data-op flavors on other index buffers while A's vertex input
+     * stays bound: update and creation-with-data. */
     nt_gfx_update_buffer(ibo_b, 0, s_degenerate_indices, sizeof(s_degenerate_indices));
-    nt_gfx_orphan_buffer(ibo_b, s_degenerate_indices, sizeof(s_degenerate_indices));
     nt_buffer_t ibo_c = nt_gfx_make_buffer(
         &(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = s_degenerate_indices, .size = sizeof(s_degenerate_indices), .index_type = NT_INDEX_UINT16});
     TEST_ASSERT_NOT_EQUAL_UINT32(0, ibo_c.id);
@@ -400,28 +399,6 @@ static void test_index_data_ops_do_not_rewire_bound_vertex_input(void) {
     nt_gfx_draw_indexed(0, 3, 3); /* still A's triangle indices, not B */
     TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
-}
-
-/* orphan_buffer keeps the GL buffer name, so the baked VAO attachment stays
- * live -- the per-flush orphaning pattern sprite/text rely on. */
-static void test_orphan_under_live_vertex_input_renders(void) {
-    nt_pipeline_t pip = make_red_pipeline();
-    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .data = s_empty, .size = sizeof(s_empty)});
-    nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
-
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_orphan_buffer(vbo, s_full, sizeof(s_full));
-    nt_gfx_draw(0, 3);
-    TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
-
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_orphan_buffer(vbo, s_empty, sizeof(s_empty));
-    nt_gfx_draw(0, 3);
-    TEST_ASSERT_UINT8_WITHIN(1, 0, end_frame_center_red());
 }
 
 /* A rejected pipeline bind clears the program selection but must not disturb
@@ -1498,7 +1475,6 @@ int main(void) {
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);
     RUN_TEST(test_second_frame_issues_no_static_attrib_pointers);
     RUN_TEST(test_index_data_ops_do_not_rewire_bound_vertex_input);
-    RUN_TEST(test_orphan_under_live_vertex_input_renders);
     RUN_TEST(test_empty_vertex_input_draws_fullscreen);
     RUN_TEST(test_rejected_pipeline_bind_preserves_vertex_input);
     RUN_TEST(test_creating_vertex_input_preserves_bound_one);

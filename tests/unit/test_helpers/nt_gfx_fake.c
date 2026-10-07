@@ -594,12 +594,6 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     s_fake_update_buffer_count++;
 }
 
-void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
-    (void)backend_handle;
-    (void)data;
-    (void)size;
-}
-
 void nt_gfx_backend_begin_segment(const char *name) { (void)name; }
 void nt_gfx_backend_end_segment(void) {}
 void nt_gfx_backend_drop_timer_segments(void) {}

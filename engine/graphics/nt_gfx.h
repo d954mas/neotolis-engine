@@ -523,7 +523,6 @@ typedef enum {
     NT_GFX_OP_UNIFORM_INT,
     NT_GFX_OP_UBO,
     NT_GFX_OP_BUFFER_UPLOAD,
-    NT_GFX_OP_BUFFER_ORPHAN,
     NT_GFX_OP_TEXTURE_UPLOAD,
     NT_GFX_OP_ATTRIBUTE,
     NT_GFX_OP_INSTANCE_BUFFER,
@@ -1032,7 +1031,6 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size);
  * a write before nt_gfx_end_frame lands before every draw of the frame, so every draw
  * reads the frame's last write; a write after it belongs to the next frame. */
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
-void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* ---- Frame storage ----
  *
@@ -1069,7 +1067,7 @@ static inline void *nt_gfx_frame_alloc(nt_gfx_frame_stream_t stream, uint32_t si
     return s->staging + offset;
 }
 
-/* Borrowed: never update, orphan or destroy it. Re-read every frame: a context restore
+/* Borrowed: never update or destroy it. Re-read every frame: a context restore
  * replaces it. The index buffer is NT_INDEX_UINT32. */
 static inline nt_buffer_t nt_gfx_frame_buffer(nt_gfx_frame_stream_t stream) { return g_nt_gfx_frame_storage[stream].buffer; }
 

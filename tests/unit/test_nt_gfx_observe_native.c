@@ -569,7 +569,7 @@ static void test_payloads_before_render_land_in_their_frame(void) {
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT64(16, g_nt_gfx.last_frame.buffer_upload_bytes);
 
-    nt_gfx_orphan_buffer(buffer, data, sizeof(data));
+    nt_gfx_update_buffer(buffer, 0, data, sizeof(data));
     nt_gfx_update_buffer(buffer, 8, data, 12);
     nt_gfx_counters_t live = g_nt_gfx.counters;
     TEST_ASSERT_EQUAL_UINT64(2, live.buffer_upload_calls);
