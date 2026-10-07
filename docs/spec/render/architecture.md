@@ -776,15 +776,16 @@ background tab) still wipe the backend tables. Taking the latch wipes every back
 handle and, unless a failed call latched the loss first, sets
 `g_nt_gfx.context_lost` and logs one error. While `context_lost` is
 set, begin_frame asks the browser (the only per-iteration JS query, and only in
-the lost state); once the context is back, the same begin_frame restores it and
+the lost state; failed calls and readbacks ask on their own path); once the context is back, the same begin_frame restores it and
 sets `g_nt_gfx.context_restored` until the next begin_frame. The game therefore
 sees the restore before its resource step and before it builds anything. The
 restore is one CONTEXT operation: it recreates the context, probes
 capabilities and ends ACCEPTED; it recreates no frontend resource. A recreate
 that fails leaves no context, logs one error and stays lost for good. A restore
 that the browser reports lost again when it finishes stays lost without an
-error log and is retried by a later begin_frame. Every restore starts by wiping
-the tables, so it never publishes stale ones whatever order the events took.
+error log and is retried by a later begin_frame. A browser restores only a
+loss whose event was handled, so begin_frame has taken the latch and wiped before
+it restores.
 
 A loss inside an iteration latches at the first backend call that fails on it:
 the call asks the browser, sets `g_nt_gfx.context_lost`, logs the one error and

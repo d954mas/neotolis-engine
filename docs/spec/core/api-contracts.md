@@ -433,10 +433,12 @@ Render targets have no resize. A size change destroys the attachment textures,
 which destroys their targets, and makes new textures and targets at the new
 size. The engine never recreates a target and never preserves pixels: consumers
 redraw offscreen contents after making a target.
-Context loss is synced at `nt_gfx_begin_frame`, at the start of the host
-iteration; pass calls on a lost context do nothing. Work issued
-after a loss inside an iteration is issued but does nothing, and the next
-begin_frame wipes. While the browser reports the context lost, begin_frame does
+Context loss latches at `nt_gfx_begin_frame`, at the start of the host
+iteration, or at the first backend call inside an iteration that fails on it;
+calls after the latch take their lost path, pass calls on a lost context do
+nothing, and `end_pass` still closes a pass opened before the latch. Work issued
+before the latch is issued but does nothing, and the next begin_frame that takes
+the lost event wipes. While the browser reports the context lost, begin_frame does
 not attempt recreation. A failed recreation is a context-creation failure: it
 logs one error, and on the web it leaves no context and no loss listener, so the
 engine stays lost and no later iteration recovers it. Backend failures caused by

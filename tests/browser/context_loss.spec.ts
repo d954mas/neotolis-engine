@@ -478,6 +478,17 @@ for (const nullCreates of [false, true]) {
     expect(errors, 'unexpected browser/gfx errors').toEqual([]);
   });
 
+  test('context loss: a shader create before the lost event latches the loss' + variant, async ({ page }) => {
+    test.setTimeout(60_000);
+    const errors = trackErrors(page);
+    if (nullCreates) await returnNullCreatesWhenLost(page);
+    await page.goto('/index.html');
+    await page.waitForFunction(() => window.__nt?.ready && window.__nt.programs_ready(), null, { timeout: 30_000 });
+    expect(await createInLossWindow(page, [2]), 'the shader create asks the browser and latches').toEqual([1, 0, 1]);
+    await restoreAndDraw(page, errors);
+    expect(errors, 'unexpected browser/gfx errors').toEqual([]);
+  });
+
   test('context loss: a texture created before the lost event leaves no error for the restored context' + variant, async ({ page }) => {
     test.setTimeout(60_000);
     const errors = trackErrors(page);

@@ -34,6 +34,7 @@ static void create_texture(void) {
         .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "skeletal_gpu_palettes",
     });
+    NT_ASSERT((s_skeletal_gpu.texture.id != 0 || g_nt_gfx.context_lost) && "skeletal_gpu: palette texture creation failed");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
@@ -49,6 +50,7 @@ void nt_skeletal_gpu_init(const nt_skeletal_gpu_desc_t *desc) {
     if (width == 0) {
         width = max_size < NT_SKELETAL_GPU_DEFAULT_WIDTH ? max_size : NT_SKELETAL_GPU_DEFAULT_WIDTH;
     }
+    NT_ASSERT((g_nt_gfx.context_lost || (width <= max_size && desc->height <= max_size)) && "skeletal_gpu: palette texture exceeds max_texture_size");
     s_skeletal_gpu.width = (uint16_t)width;
     s_skeletal_gpu.height = desc->height;
 

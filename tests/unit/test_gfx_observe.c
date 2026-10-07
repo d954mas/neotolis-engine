@@ -42,6 +42,25 @@ static void draw_setup(void) {
 
 static void draw_teardown(void) { nt_gfx_end_pass(); }
 
+#if NT_GFX_CAPTURE_ENABLED
+static void record_next_frame(void) {
+    nt_gfx_capture_request();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+}
+
+static uint32_t result_of(nt_gfx_capture_view_t capture, nt_gfx_operation_t operation, nt_gfx_object_kind_t kind) {
+    uint32_t result = UINT32_MAX;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *e = &capture.events[i];
+        if (e->kind == NT_GFX_EVENT_RESULT && e->operation == operation && e->object_kind == kind) {
+            result = (uint32_t)e->result;
+        }
+    }
+    return result;
+}
+#endif
+
 static void test_passes_sum_and_begin_frame_resets(void) {
     TEST_ASSERT_EQUAL_UINT64(2, g_nt_gfx.counters.frame_sequence);
     draw_setup();
@@ -115,7 +134,7 @@ static void test_loss_during_an_iteration_is_wiped_at_the_next_begin_frame(void)
 }
 
 /* The first create that meets a loss the browser has not reported yet latches it with one error log; later creates end CONTEXT_LOST quietly. */
-static void test_creates_on_a_loss_fail_quietly(void) {
+static void test_the_first_create_on_a_loss_latches_it_with_one_log(void) {
     const nt_buffer_desc_t buffer_desc = {.type = NT_BUFFER_VERTEX, .size = 8};
     const nt_texture_desc_t texture_desc = {.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8};
     const nt_render_target_desc_t rt_desc = {.color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 4, .height = 4, .format = NT_TEXTURE_FORMAT_RGBA8})};
@@ -179,13 +198,23 @@ static void test_a_latched_loss_carries_a_whole_creation_chain(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_error_logs);
 }
 
-/* A pass that opened before the loss latched still closes, so the frame ends normally. */
+/* A pass and a segment that opened before the loss latched still close, so the frame ends normally. */
 static void test_a_loss_latched_inside_a_pass_closes_the_pass(void) {
+#if NT_GFX_CAPTURE_ENABLED
+    record_next_frame();
+#endif
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_begin_segment("latched");
     nt_gfx_fake_set_context_lost(true);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_gfx_end_segment();
     nt_gfx_end_pass();
+#if NT_GFX_CAPTURE_ENABLED
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_ACCEPTED, result_of(capture, NT_GFX_OP_END_PASS, NT_GFX_OBJECT_NONE));
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_ACCEPTED, result_of(capture, NT_GFX_OP_SEGMENT_END, NT_GFX_OBJECT_NONE));
+#endif
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -193,8 +222,17 @@ static void test_a_loss_latched_inside_a_pass_closes_the_pass(void) {
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
 }
 
-/* The latch keeps the tables until the loss event arrives; a restore wipes them even if the event never was taken. */
-static void test_a_latched_loss_wipes_at_the_event_or_at_the_restore(void) {
+/* Only a loss the browser confirms latches: a failure on a live context keeps its reason and log. */
+static void test_a_failure_on_a_live_context_does_not_latch(void) {
+    s_error_logs = 0;
+    nt_gfx_fake_fail_buffer_creates(1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_error_logs);
+}
+
+/* The latch keeps the tables until begin_frame takes the lost event, also when the context is back by then. */
+static void test_a_latched_loss_wipes_when_its_event_is_taken(void) {
     for (uint32_t taken = 0; taken < 2; taken++) {
         const nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
         nt_gfx_fake_set_context_lost(true);
@@ -206,7 +244,7 @@ static void test_a_latched_loss_wipes_at_the_event_or_at_the_restore(void) {
             TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
             TEST_ASSERT_FALSE(nt_gfx_program_ready(program));
         }
-        nt_gfx_fake_set_context_lost(false); /* also drops an untaken event */
+        nt_gfx_fake_set_context_lost(false);
         nt_gfx_end_frame();
         nt_gfx_begin_frame();
         TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
@@ -377,11 +415,6 @@ static void test_segments_require_an_open_frame(void) {
 
 #if NT_GFX_CAPTURE_ENABLED
 /* The begin_frame that consumes a request starts recording the frame it opens. */
-static void record_next_frame(void) {
-    nt_gfx_capture_request();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-}
 
 static void test_resource_operations_keep_published_handles_after_destroy(void) {
     record_next_frame();
@@ -401,17 +434,6 @@ static void test_resource_operations_keep_published_handles_after_destroy(void) 
     }
     TEST_ASSERT_TRUE(created);
     TEST_ASSERT_TRUE(destroyed);
-}
-
-static uint32_t result_of(nt_gfx_capture_view_t capture, nt_gfx_operation_t operation, nt_gfx_object_kind_t kind) {
-    uint32_t result = UINT32_MAX;
-    for (uint32_t i = 0; i < capture.count; i++) {
-        const nt_gfx_event_t *e = &capture.events[i];
-        if (e->kind == NT_GFX_EVENT_RESULT && e->operation == operation && e->object_kind == kind) {
-            result = (uint32_t)e->result;
-        }
-    }
-    return result;
 }
 
 static void test_clear_copies_requests_and_skips_known_loss(void) {
@@ -1059,11 +1081,12 @@ int main(void) {
     RUN_TEST(test_instanced_products_are_widened_before_multiplication);
     RUN_TEST(test_loss_is_wiped_at_begin_frame_and_pass_calls_are_no_ops);
     RUN_TEST(test_loss_during_an_iteration_is_wiped_at_the_next_begin_frame);
-    RUN_TEST(test_creates_on_a_loss_fail_quietly);
+    RUN_TEST(test_the_first_create_on_a_loss_latches_it_with_one_log);
     RUN_TEST(test_loss_and_restore_between_iterations_restore_in_one_begin_frame);
     RUN_TEST(test_a_latched_loss_carries_a_whole_creation_chain);
     RUN_TEST(test_a_loss_latched_inside_a_pass_closes_the_pass);
-    RUN_TEST(test_a_latched_loss_wipes_at_the_event_or_at_the_restore);
+    RUN_TEST(test_a_failure_on_a_live_context_does_not_latch);
+    RUN_TEST(test_a_latched_loss_wipes_when_its_event_is_taken);
     RUN_TEST(test_a_sampler_recreate_and_a_readback_latch_a_loss);
     RUN_TEST(test_first_frame_counts_initial_resource_creation);
     RUN_TEST(test_work_after_end_frame_counts_in_the_open_frame);

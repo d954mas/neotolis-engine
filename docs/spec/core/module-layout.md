@@ -165,9 +165,9 @@ Blur arguments, readiness of the source and validity of the targets are precondi
 and assert when violated, as does a link failure in the helper's program.
 Initialization and restore create in a straight line and return nothing. A loss met
 on the way latches in gfx, and the next context restore calls
-`nt_postfx_blur_restore_gpu` again; a backend failure on a live context leaves 0
-handles that assert at the first pass. While the context is lost,
-`nt_postfx_blur_gaussian` returns at once.
+`nt_postfx_blur_restore_gpu` again; a backend failure on a live context asserts,
+during init or restore (a failed stage, buffer or sampler) or at the first pass.
+While the context is lost, `nt_postfx_blur_gaussian` returns at once.
 
 **Why link-time, not compile-time.** Selection happens at LINK time. This
 replaced the older `NT_MODULE_X` `#define` + provider-fn-ptr + weak-symbol

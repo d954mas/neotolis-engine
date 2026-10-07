@@ -169,6 +169,8 @@ static void make_gpu_resources(void) {
     /* Taps land on texel centres (highp UV math, see the FS), so NEAREST reads the same values as LINEAR and stays valid for RGBA32F without float filtering. */
     s_blur.sampler = nt_gfx_make_sampler(
         &(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .wrap_u = NT_WRAP_CLAMP_TO_EDGE, .wrap_v = NT_WRAP_CLAMP_TO_EDGE, .label = "postfx_blur_sampler"});
+    /* A sampler-less bind falls back to the source's default filter, and the taps need NEAREST. */
+    NT_ASSERT((s_blur.sampler.id != 0 || g_nt_gfx.context_lost) && "postfx_blur: sampler creation failed");
     s_blur.vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_blur_vs_src, .label = "postfx_blur_vs"});
     s_blur.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_blur_fs_src, .label = "postfx_blur_fs"});
     s_blur.program = nt_gfx_make_program(s_blur.vs, s_blur.fs);
@@ -233,7 +235,8 @@ typedef struct {
 static bool validate_module_and_pass(const nt_postfx_blur_pass_t *pass) {
     NT_ASSERT(s_blur.initialized && "nt_postfx_blur_gaussian: module is not initialized");
     NT_ASSERT(pass != NULL && "nt_postfx_blur_gaussian: NULL pass");
-    return s_blur.initialized && pass != NULL;
+    /* A lost context leaves this module's and the caller's GPU objects unusable; nothing would draw. */
+    return s_blur.initialized && pass != NULL && !g_nt_gfx.context_lost;
 }
 
 static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_targets_t *targets) {
@@ -337,10 +340,6 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
 }
 
 void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
-    /* A lost context leaves this module's and the caller's GPU objects unusable; nothing would draw. */
-    if (g_nt_gfx.context_lost) {
-        return;
-    }
     float weights[NT_POSTFX_BLUR_MAX_KERNEL];
     uint32_t radius = 0;
     if (!validate_pass(pass, &radius, weights)) {

@@ -335,6 +335,8 @@ Draw entry points that check handles before gfx (`nt_mesh_renderer` and
 `nt_skinned_mesh_renderer` `draw`/`draw_list`, `nt_postfx_blur_gaussian`) return at
 once while `g_nt_gfx.context_lost`, so a game may keep calling them through a loss,
 including after a restore that met a second loss and left handles 0.
+`nt_sprite_renderer_set_material` accepts a material whose relink met that loss;
+its emits draw nothing until the program is linked again.
 
 `nt_text_renderer_restore_gpu()` returns `nt_result_t`. It retains CPU
 allocations, configured capacities, and module initialization; only GPU

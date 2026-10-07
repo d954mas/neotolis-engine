@@ -486,7 +486,7 @@ static void frame(void) {
         make_quad_resources();
         nt_resource_invalidate(NT_ASSET_TEXTURE);
         nt_resource_invalidate(NT_ASSET_FONT);
-        if (nt_text_renderer_restore_gpu() != NT_OK) {
+        if (nt_text_renderer_restore_gpu() != NT_OK && !g_nt_gfx.context_lost) {
             nt_log_error("rtt_showcase: text renderer restore failed");
         }
         nt_program_ref_drop(&s_sprite_program);

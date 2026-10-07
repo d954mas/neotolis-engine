@@ -80,11 +80,11 @@ void nt_skinned_mesh_renderer_restore_gpu(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t offset, uint32_t count) {
-    /* A lost context can leave handles 0 (an asset or palette restored during a second loss); nothing would draw. */
+    NT_ASSERT(s_skinned.initialized);
+    /* A lost context can leave the deformation texture or a mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
         return;
     }
-    NT_ASSERT(s_skinned.initialized);
     NT_ASSERT(count > 0);
     NT_ASSERT(deformation.id != 0 && "skinned draw requires a deformation texture");
     const nt_material_info_t *mat_info = nt_material_get_info(material);
@@ -98,11 +98,11 @@ void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_te
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
-    /* A lost context can leave handles 0 (an asset or palette restored during a second loss); nothing would draw. */
+    NT_ASSERT(s_skinned.initialized);
+    /* A lost context can leave the deformation texture or a mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
         return;
     }
-    NT_ASSERT(s_skinned.initialized);
     NT_ASSERT(count == 0 || items != NULL);
     /* Transform and drawable by inline sparse reads; the skin binding goes through its asserting accessor. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();

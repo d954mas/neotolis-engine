@@ -60,11 +60,11 @@ void nt_mesh_renderer_restore_gpu(void) {
 /* ---- Draw ---- */
 
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t offset, uint32_t count) {
-    /* A lost context can leave handles 0 (an asset or palette restored during a second loss); nothing would draw. */
+    NT_ASSERT(s_mesh_renderer.initialized);
+    /* A lost context can leave a game-activated mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
         return;
     }
-    NT_ASSERT(s_mesh_renderer.initialized);
     NT_ASSERT(count > 0);
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
@@ -85,11 +85,11 @@ static uint32_t find_run_end(const nt_render_item_t *items, uint32_t run_start, 
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
-    /* A lost context can leave handles 0 (an asset or palette restored during a second loss); nothing would draw. */
+    NT_ASSERT(s_mesh_renderer.initialized);
+    /* A lost context can leave a game-activated mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
         return;
     }
-    NT_ASSERT(s_mesh_renderer.initialized);
     NT_ASSERT(count == 0 || items != NULL);
     /* Inline sparse reads, as the sprite emit does: no per-instance accessor call or liveness assert. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();

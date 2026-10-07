@@ -287,7 +287,9 @@ static void test_a_loss_during_restore_is_retried_by_the_next_one(void) {
     next_frame();
     TEST_ASSERT_NOT_NULL(nt_skeletal_gpu_reserve(1, &b));
     TEST_ASSERT_EQUAL_UINT32(0, b.texture.id);
+    const uint32_t uploads = nt_gfx_fake_update_texture_count();
     nt_skeletal_gpu_flush();
+    TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count());
     nt_gfx_fake_set_context_lost(false);
     next_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);

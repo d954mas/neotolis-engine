@@ -610,9 +610,6 @@ static void wipe_backend_handles(void) {
 
 /* The whole restore is one operation; its backend calls sit inside it. */
 static nt_gfx_result_t restore_context(void) {
-    /* A loss latched by a failed call wipes when its event is taken; wiping here as well keeps a
-     * restore from publishing stale tables whatever order the events took. */
-    wipe_backend_handles();
     /* A failed recreate leaves no context, so the query keeps reporting lost for good. */
     if (!nt_gfx_backend_recreate_all_resources()) {
         NT_LOG_ERROR("WebGL context restore failed");
@@ -858,6 +855,9 @@ static nt_gfx_result_t make_shader(const nt_shader_desc_t *desc, nt_shader_t *ou
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
 
+    if (g_nt_gfx.context_lost) {
+        return NT_GFX_RESULT_CONTEXT_LOST;
+    }
     uint32_t id = nt_pool_alloc(&s_gfx.shader_pool);
     if (id == 0) {
         NT_LOG_ERROR("shader pool full");
@@ -2004,9 +2004,9 @@ static nt_gfx_result_t make_sampler(const nt_sampler_desc_t *desc, nt_sampler_t 
                 s_gfx.sampler_cache[i].backend = nt_gfx_backend_create_sampler(&s_gfx.sampler_cache[i].desc);
                 if (s_gfx.sampler_cache[i].backend != 0) {
                     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_SAMPLER, i + 1);
-                } else {
+                } else if (backend_failed(NULL) != NT_GFX_RESULT_CONTEXT_LOST) {
                     /* The entry stays: bind-time recreate retries it. */
-                    (void)backend_failed("make_sampler: backend failed");
+                    NT_LOG_ERROR_ONCE("make_sampler: sampler recreation failed");
                 }
             }
             out->id = i + 1;
@@ -2014,6 +2014,9 @@ static nt_gfx_result_t make_sampler(const nt_sampler_desc_t *desc, nt_sampler_t 
         }
     }
 
+    if (g_nt_gfx.context_lost) {
+        return NT_GFX_RESULT_CONTEXT_LOST;
+    }
     NT_ASSERT(s_gfx.sampler_count < NT_GFX_MAX_SAMPLERS && "sampler cache full; raise NT_GFX_MAX_SAMPLERS");
     uint32_t backend = nt_gfx_backend_create_sampler(&normalized);
     if (backend == 0) {
@@ -2414,12 +2417,12 @@ static nt_gfx_result_t bind_uniform_block(nt_buffer_t buf, uint32_t slot, uint32
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && data != NULL && size > 0 && "bind_uniform_block: slot, data or size");
     const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
-    /* A disabled stream (zero capacity) reaches the allocator, which stops on the overflow. */
     const bool lost = g_nt_gfx.context_lost;
     const nt_buffer_t buf = lost ? (nt_buffer_t){0} : storage->buffer;
     uint32_t offset = 0;
     if (!lost) {
         NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_block: must be called inside a pass");
+        /* A disabled stream (zero capacity) reaches the allocator, which stops on the overflow. */
         memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, size, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, &offset), data, size);
     }
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
