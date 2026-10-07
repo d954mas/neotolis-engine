@@ -272,6 +272,47 @@ static void test_debug_emit_matches_walker_coord_space(void) {
     }
 }
 
+/* Fills before labels: with two labelled zones, every text draw follows the last sprite draw. */
+static void test_debug_labels_draw_after_all_fills(void) {
+    const nt_font_t font = ui_walker_fixture_make_real_font(&s_fx);
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    declare_btn("btnA", BTN_X, BTN_Y);
+    declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_debug_set_recording(s_fx.ctx, true);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    declare_btn("btnA", BTN_X, BTN_Y);
+    declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_debug_get_zone_count(s_fx.ctx));
+
+    nt_gfx_fake_draw_trace_reset(true);
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_debug_draw_hit_zones(s_fx.ctx, &target, NT_UI_DEBUG_HIT_ALL, font, 12.0F);
+
+    const uint32_t text_prog = nt_material_get_info(s_fx.text_material)->program.id;
+    const uint32_t sprite_prog = nt_material_get_info(s_fx.sprite_material)->program.id;
+    uint32_t last_sprite = 0;
+    uint32_t first_text = UINT32_MAX;
+    uint32_t sprites = 0;
+    for (uint32_t i = 0; i < nt_gfx_fake_draw_trace_count(); i++) {
+        const uint32_t prog = nt_gfx_fake_draw_trace_at(i).program.id;
+        if (prog == sprite_prog) {
+            last_sprite = i;
+            sprites++;
+        } else if (prog == text_prog && first_text == UINT32_MAX) {
+            first_text = i;
+        }
+    }
+    TEST_ASSERT_TRUE(sprites > 0U);
+    TEST_ASSERT_TRUE(first_text != UINT32_MAX);
+    TEST_ASSERT_TRUE_MESSAGE(first_text > last_sprite, "labels draw after every zone fill and outline");
+}
+
 /* Disabled-record helper drops a DISABLED zone without touching capture
  * state — the disabled path skips hit-test but must still surface in the overlay. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -362,6 +403,7 @@ int main(void) {
     RUN_TEST(test_debug_draw_off_mode_silent);
     RUN_TEST(test_debug_mode_filter);
     RUN_TEST(test_debug_emit_matches_walker_coord_space);
+    RUN_TEST(test_debug_labels_draw_after_all_fills);
     RUN_TEST(test_debug_disabled_helper_records_zone);
     RUN_TEST(test_debug_disabled_helper_off_no_capture);
     RUN_TEST(test_debug_cap_saturates_silently);

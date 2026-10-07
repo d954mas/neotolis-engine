@@ -39,6 +39,15 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
+static nt_program_t text_program(void) { return nt_material_get_info(s_fx.text_material)->program; }
+
+/* glyph_data[1] of quad `q`: 0 marks a solid decoration quad, a glyph quad has bands. */
+static uint32_t quad_band_count(nt_gfx_fake_draw_t d, uint32_t q) {
+    uint32_t bands = 0;
+    memcpy(&bands, ui_walker_fx_text_vertex(d, q, 0) + 24U, sizeof bands);
+    return bands;
+}
+
 /* Helper: walks the frozen_cmds array and returns the first TEXT cmd, or NULL. */
 static const Clay_RenderCommand *find_first_text_cmd(const nt_ui_context_t *ctx) {
     for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
@@ -273,13 +282,11 @@ static void test_label_sized_overrides_font_size(void) {
     TEST_ASSERT_EQUAL_INT32(255, (int32_t)c->renderData.text.textColor.r);
 }
 
-/* a label whose style carries decoration sets the sticky renderer decoration state per draw
- * (bold->synth weight, outline width, underline) through the walker, then resets after (no leak). Pinned
- * via the renderer observe hooks (the stub font emits no glyphs, but draw_n observes the state at entry). */
+/* Decoration reaches the renderer through the walker: bold grows the glyph variant, the outline and
+ * the shadow each add a glyph pass, and the underline adds one quad. */
 #if NT_FONT_EMBOLDEN_ENABLED
-static void test_label_decoration_wires_and_resets_setters(void) {
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
-    nt_text_renderer_test_reset_call_counters();
+static void test_label_decoration_reaches_the_renderer(void) {
+    nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
 
     static const nt_ui_label_style_t s = {
         .font_id = 0,
@@ -294,21 +301,27 @@ static void test_label_decoration_wires_and_resets_setters(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    Clay_SetCullingEnabled(false); /* stub measure returns {0,0}; keep the TEXT cmd so it reaches emit */
+    Clay_SetCullingEnabled(false);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Deco", &s); }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_gfx_fake_draw_trace_reset(true);
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_weight() > 0.0F, "bold label feeds a synthetic weight to the renderer during emit");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_outline_width() > 0.0F, "label outline width reaches the renderer");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_saw_underline(), "label underline reaches the renderer");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_weight() == 0.0F, "decoration reset after the label draw (no leak onto later text)");
+    TEST_ASSERT_EQUAL_UINT32(1U, ui_walker_fx_draw_count(text_program()));
+    const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE((3U * 4U) + 1U, ui_walker_fx_quads(d), "shadow, outline and fill passes of 4 glyphs plus one underline quad");
+    const float fill_x1 = ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 8, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1);
+    TEST_ASSERT_TRUE_MESSAGE(fill_x1 > 400.0F, "bold label fills with an emboldened glyph variant");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, quad_band_count(d, 12), "the last quad is the solid underline");
+    const float bl_y = ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 12, 0), 4);
+    const float tl_y = ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 12, 3), 4);
+    TEST_ASSERT_TRUE_MESSAGE(tl_y > bl_y, "the underline has the font's thickness");
 }
 #endif
 
 /* Parent opacity must fold into outline/shadow alpha (not just the fill): the walker pre-multiplies
- * only textColor.a, so nt_ui_label_deco_apply folds accum_opacity into the decoration colors — else a
+ * only textColor.a, so nt_ui_label_deco_style folds accum_opacity into the decoration colors — else a
  * faded panel keeps opaque outline/shadow. */
 static void test_label_deco_folds_parent_opacity(void) {
     nt_ui_label_deco_t d = {0};
@@ -321,26 +334,26 @@ static void test_label_deco_folds_parent_opacity(void) {
     d.shadow_color = 0x80332211U; /* alpha > 0 -> shadow active */
 
     /* Opacity multiplies the existing alpha (0x80 * 0.5 = 0x40); RGB bytes stay in place. */
-    nt_ui_label_deco_apply(&d, 0.5F); /* half-faded parent */
+    nt_text_style_t half = {0};
+    nt_ui_label_deco_style(&d, 0.5F, &half); /* half-faded parent */
 #if NT_FONT_EMBOLDEN_ENABLED
-    TEST_ASSERT_EQUAL_HEX32(0x40665544U, nt_text_renderer_test_outline_color());
+    TEST_ASSERT_EQUAL_HEX32(0x40665544U, half.outline_color);
 #endif
-    TEST_ASSERT_EQUAL_HEX32(0x40332211U, nt_text_renderer_test_shadow_color());
+    TEST_ASSERT_EQUAL_HEX32(0x40332211U, half.shadow_color);
 
-    nt_ui_label_deco_apply(&d, 1.0F); /* opaque parent leaves alpha untouched */
+    nt_text_style_t opaque = {0};
+    nt_ui_label_deco_style(&d, 1.0F, &opaque); /* opaque parent leaves alpha untouched */
 #if NT_FONT_EMBOLDEN_ENABLED
-    TEST_ASSERT_EQUAL_HEX32(0x80665544U, nt_text_renderer_test_outline_color());
+    TEST_ASSERT_EQUAL_HEX32(0x80665544U, opaque.outline_color);
 #endif
-    TEST_ASSERT_EQUAL_HEX32(0x80332211U, nt_text_renderer_test_shadow_color());
-    nt_text_renderer_reset_decoration();
+    TEST_ASSERT_EQUAL_HEX32(0x80332211U, opaque.shadow_color);
 }
 
 /* A decorated label that breaks into multiple lines (embedded '\n') must decorate EVERY emitted line.
  * Decoration rides the label's private element_data, which Clay carries identically on every wrapped-line
- * TEXT command (userData is uniform per element), so all lines match -> deco applied == text-command count. */
+ * TEXT command (userData is uniform per element), so every line draws its own underline quad. */
 static void test_label_decoration_applies_to_wrapped_lines(void) {
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
-    nt_ui_test_reset_deco_applied_count();
+    nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
 
     static const nt_ui_label_style_t s = {
         .font_id = 0,
@@ -364,9 +377,16 @@ static void test_label_decoration_applies_to_wrapped_lines(void) {
     TEST_ASSERT_TRUE_MESSAGE(text_cmds >= 2, "embedded newline must emit >=2 TEXT commands (multi-line repro)");
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_gfx_fake_draw_trace_reset(true);
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)text_cmds, nt_ui_test_deco_applied_count(), "decoration must apply to EVERY line (uniform element_data), not just the first");
-    nt_text_renderer_reset_decoration();
+    uint32_t underlines = 0;
+    for (uint32_t i = 0; i < ui_walker_fx_draw_count(text_program()); i++) {
+        const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), i);
+        for (uint32_t q = 0; q < ui_walker_fx_quads(d); q++) {
+            underlines += (quad_band_count(d, q) == 0U) ? 1U : 0U;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)text_cmds, underlines, "decoration must apply to EVERY line (uniform element_data), not just the first");
 }
 
 /* Headline property of the special-data design: a decorated label built WITH game data keeps the caller's
@@ -396,21 +416,22 @@ static void test_label_decoration_preserves_element_data(void) {
 }
 
 /* NEGATIVE: a plain (undecorated) label passes the caller's element_data through unchanged (special_kind
- * NONE), so the walker applies no decoration and the sticky renderer state stays clean. */
+ * NONE), so the walker draws it with a plain style. */
 static void test_label_plain_no_decoration(void) {
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
-    nt_text_renderer_test_reset_call_counters();
-    nt_ui_test_reset_deco_applied_count();
+    nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     Clay_SetCullingEnabled(false);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Plain", &s_style_body); }
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_gfx_fake_draw_trace_reset(true);
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_test_deco_applied_count(), "plain label triggers no decoration apply in the walker");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_max_weight() == 0.0F, "plain label feeds no synthetic weight");
-    TEST_ASSERT_FALSE_MESSAGE(nt_text_renderer_test_saw_underline(), "plain label feeds no underline");
+    const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(5U, ui_walker_fx_quads(d), "plain label: one fill quad per glyph, no underline");
+    for (uint32_t q = 0; q < 5U; q++) {
+        TEST_ASSERT_TRUE_MESSAGE(ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, q, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1) == 400.0F, "plain label uses the unweighted glyph");
+    }
 }
 
 int main(void) {
@@ -430,7 +451,7 @@ int main(void) {
     RUN_TEST(test_label_scratch_copies_text);
     RUN_TEST(test_label_sized_overrides_font_size);
 #if NT_FONT_EMBOLDEN_ENABLED
-    RUN_TEST(test_label_decoration_wires_and_resets_setters);
+    RUN_TEST(test_label_decoration_reaches_the_renderer);
 #endif
     RUN_TEST(test_label_decoration_applies_to_wrapped_lines);
     RUN_TEST(test_label_decoration_preserves_element_data);

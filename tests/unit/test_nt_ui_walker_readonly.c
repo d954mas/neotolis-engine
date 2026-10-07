@@ -123,7 +123,7 @@ static void test_walk_without_end_asserts(void) {
     TEST_ASSERT_NOT_NULL(fresh);
     nt_ui_set_atlas_white_region(fresh, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
     nt_ui_set_sprite_material(fresh, s_fx.sprite_material);
-    nt_ui_set_text_material(fresh, s_fx.text_material);
+    nt_ui_set_text_material(fresh, s_fx.text_material, 0.0F);
     nt_ui_set_custom_handler(fresh, NULL, NULL);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};

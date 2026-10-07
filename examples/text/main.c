@@ -91,8 +91,6 @@ static uint32_t s_prev_fb_h;
 
 static double s_prof_draw_sum;
 static double s_prof_draw_max;
-static double s_prof_flush_sum;
-static double s_prof_flush_max;
 static double s_prof_font_step_sum;
 static double s_prof_font_step_max;
 static uint32_t s_prof_frames;
@@ -165,7 +163,7 @@ static void draw_text_scene(void) {
         uint32_t white = NT_RGBA8(255, 255, 255, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-5.0F, 3.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_EN, (const float *)model, 2.0F, white, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 2.0F, .color = white}, (const float *)model, TEXT_EN);
     }
 
     /* Medium Russian text at Y=1.0, light blue */
@@ -173,7 +171,7 @@ static void draw_text_scene(void) {
         uint32_t blue = NT_RGBA8(153, 204, 255, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-5.0F, 1.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_RU, (const float *)model, 1.5F, blue, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 1.5F, .color = blue}, (const float *)model, TEXT_RU);
     }
 
     /* Chinese text at Y=-1.0, light green */
@@ -181,7 +179,7 @@ static void draw_text_scene(void) {
         uint32_t green = NT_RGBA8(153, 255, 153, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-3.0F, -1.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_CN, (const float *)model, 1.5F, green, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 1.5F, .color = green}, (const float *)model, TEXT_CN);
     }
 
     /* Korean text at Y=-3.0, light yellow */
@@ -189,7 +187,7 @@ static void draw_text_scene(void) {
         uint32_t yellow = NT_RGBA8(255, 255, 153, 255);
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-4.0F, -3.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_KR, (const float *)model, 1.5F, yellow, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 1.5F, .color = yellow}, (const float *)model, TEXT_KR);
     }
 
     /* Small size reference at bottom */
@@ -198,19 +196,19 @@ static void draw_text_scene(void) {
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-8.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_EN, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 0.5F, .color = gray}, (const float *)model, TEXT_EN);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-2.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_RU, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 0.5F, .color = gray}, (const float *)model, TEXT_RU);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){4.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_CN, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 0.5F, .color = gray}, (const float *)model, TEXT_CN);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){8.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_KR, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
+        nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = 0.5F, .color = gray}, (const float *)model, TEXT_KR);
     }
 }
 
@@ -225,9 +223,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_FONT);
 
         /* Materials keep their handles and draw again once their programs relink. */
-        const nt_result_t restore_result = nt_text_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
@@ -335,13 +330,11 @@ static void frame(void) {
 
 #if NT_LOG_MIN_LEVEL == 0
     double t_draw = 0.0;
-    double t_flush = 0.0;
 #endif
     if (can_render) {
         nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         nt_text_renderer_set_material(s_text_material);
-        nt_text_renderer_set_font(s_font);
 
 #if NT_LOG_MIN_LEVEL == 0
         t_draw = nt_time_now();
@@ -349,12 +342,6 @@ static void frame(void) {
         draw_text_scene();
 #if NT_LOG_MIN_LEVEL == 0
         t_draw = (nt_time_now() - t_draw) * 1000.0;
-
-        t_flush = nt_time_now();
-#endif
-        nt_text_renderer_flush();
-#if NT_LOG_MIN_LEVEL == 0
-        t_flush = (nt_time_now() - t_flush) * 1000.0;
 #endif
     }
 
@@ -377,13 +364,9 @@ static void frame(void) {
 #if NT_LOG_MIN_LEVEL == 0
     // #region Profiling — accumulate
     s_prof_draw_sum += t_draw;
-    s_prof_flush_sum += t_flush;
     s_prof_font_step_sum += t_font_step;
     if (t_draw > s_prof_draw_max) {
         s_prof_draw_max = t_draw;
-    }
-    if (t_flush > s_prof_flush_max) {
-        s_prof_flush_max = t_flush;
     }
     if (t_font_step > s_prof_font_step_max) {
         s_prof_font_step_max = t_font_step;
@@ -397,8 +380,6 @@ static void frame(void) {
         s_prof_reported = false;
         s_prof_draw_sum = 0.0;
         s_prof_draw_max = 0.0;
-        s_prof_flush_sum = 0.0;
-        s_prof_flush_max = 0.0;
         s_prof_font_step_sum = 0.0;
         s_prof_font_step_max = 0.0;
         s_prof_frames = 0;
@@ -418,7 +399,6 @@ static void frame(void) {
             nt_log_info("=== text profiling [%s] (%u frames, %.1fs) ===", label, s_prof_frames, now - s_prof_reset_time);
             nt_log_info("  font_step  avg=%.3f ms  max=%.3f ms", s_prof_font_step_sum * inv, s_prof_font_step_max);
             nt_log_info("  draw       avg=%.3f ms  max=%.3f ms", s_prof_draw_sum * inv, s_prof_draw_max);
-            nt_log_info("  flush      avg=%.3f ms  max=%.3f ms", s_prof_flush_sum * inv, s_prof_flush_max);
             nt_log_info("  cache      %u/%u glyphs  curve %u/%u texels (%.0f%%)", fs.glyphs_cached, fs.max_glyphs, fs.curve_texels_used, fs.curve_texels_total,
                         fs.curve_texels_total > 0 ? 100.0 * fs.curve_texels_used / fs.curve_texels_total : 0.0);
             s_prof_reported = true;
@@ -450,6 +430,8 @@ int main(int argc, char *argv[]) {
 
     /* 4. GFX init */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 32U * 1024U; /* the scene peaks at 12.5 KB: 60 glyphs */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = 4U * 1024U;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
 
@@ -474,7 +456,6 @@ int main(int argc, char *argv[]) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 8});
 
     /* 9. Text renderer init */
-    nt_text_renderer_init();
 
     /* 11. Mount packs and start base pack loading */
     s_base_pack_id = nt_hash32_str("text_base");

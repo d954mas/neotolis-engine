@@ -325,9 +325,9 @@ list resolves the current publication again. The
 gfx front-end maps names to the bound program's canonical units,
 ignores inactive declarations, validates complete active coverage, and calls the
 backend only after the whole set resolves, recording only the units whose
-texture or sampler changed in the pass. The text renderer draws once per flush
-and other renderers draw in between, so it also submits its complete set
-unconditionally.
+texture or sampler changed in the pass. The text renderer records its font's
+complete set with every draw; gfx drops it when unchanged, so consecutive draws
+of one font and material merge.
 
 The material-driven mesh, skinned mesh, sprite, and text renderer caches build the
 `nt_pipeline_desc_t` from the material's render state and key on its
@@ -366,7 +366,8 @@ Cache entries are weak: a hit validates the handle, and an entry whose
 vertex input died (context loss) is recreated in place over the new frame
 buffers, so repeated losses cannot grow the cache and no restore call is needed. A miss creates the vertex input and caches it only on
 success; recoverable creation failures leave the cache unchanged so the next
-lookup retries.
+lookup retries. The text renderer has one fixed layout and keeps a single vertex
+input under the same rules; `nt_text_renderer_shutdown` destroys it.
 
 ### Color
 
@@ -419,11 +420,9 @@ executes, before the draws that read it, so a frame that executes once (in
 read. A buffer write or destroy that executes the stream earlier (see
 Draw-phase command stream) makes the next execution append to frame buffers
 that earlier draws of the frame read: the waiting case above.
-The sprite renderer writes its geometry to frame storage. Immediate-mode batches
-that flush between game passes (text, shape) still choose a per-flush policy by
-measurement; the shape instance rings predate this rule. A text flush updates its
-own buffer, which executes the stream first, so a UI frame with text uploads frame
-storage more than once.
+The sprite and text renderers write their geometry to frame storage. The shape
+renderer, an immediate-mode batch that flushes between game passes, still chooses
+a per-flush policy by measurement; its instance rings predate this rule.
 
 A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
 waits did not raise GPU work per frame, and the phone's governor granted the
@@ -488,6 +487,8 @@ Storage never grows: an overflow logs the stream, the needed and the free bytes
 and stops the program, with assertions OFF too, because the capacity is the
 game's budget. `nt_gfx_counters_t.frame_bytes` reports each stream's use of the
 frame, final after `end_frame`, to size the capacities from a real scene.
+Text uses VERTEX and INDEX: 208 bytes of vertices and 24 bytes of indices per
+glyph quad, decoration quads included.
 
 Each upload is one `NT_GFX_OP_BUFFER_UPLOAD` operation on its frame buffer,
 recorded and counted where the execution runs (see Frame observation). Every
@@ -569,9 +570,9 @@ nt_gfx_end_frame(); /* uploads frame storage, then executes the passes */
 
 A shadow list drawn in several cascades packs once per cascade; to pack once,
 the game writes the instances itself and draws them through the core in each
-cascade. The sprite renderer records into frame storage at each emit, inside a
-pass. Text and shape flush inside passes under their own policy and do not read
-frame storage.
+cascade. The sprite and text renderers record into frame storage at each emit
+or draw, inside a pass. Shape flushes inside passes under its own policy and does
+not read frame storage.
 
 ### Render targets
 
@@ -1113,7 +1114,7 @@ minimal. The mesh renderers share one resolve-and-record body in
 
 **Batched dynamic** — high-throughput renderers (`nt_sprite_renderer`; future particles). Many small items per frame (1k–60k): geometry is written straight into frame storage, `draw_list` records one draw per run of equal batch keys, and immediate emits rely on the front-end's bind dedup and draw merge instead of a command queue. Multi-page atlas resolution and the SIMD quad path stay. Measured on bunnymark at 60k against the former queue and staging: draws 16 to 2, GL calls 136 to 24, buffer uploads 32 to 4 per frame; whole-frame CPU in Chrome (ANGLE D3D11) 9.5 to 8.5 ms. The cost moved into one upload of the whole frame's geometry (6.3 MB with `uint32_t` indices): on native desktop GL the frame is 15% slower at 60k and faster below about 5k sprites, because the frame storage no longer stays in the CPU cache the way the former 400 KB staging did.
 
-**Specialized** — domain-specific layout (`nt_text_renderer` glyph atlas + line layout; future debug-line/IM-GUI). Sit between the two — more state than primitives, less throughput pressure than batched dynamic.
+**Specialized** — domain-specific layout (`nt_text_renderer` glyph atlas + line layout; future debug-line/IM-GUI). Sit between the two — more state than primitives, less throughput pressure than batched dynamic. `nt_text_renderer` records like the sprite renderer: each draw call writes its glyph quads into frame storage and records one indexed draw, which gfx merges with the previous draw of the same font and material. The per-call `nt_text_style_t` carries everything that shapes the vertices, so the renderer keeps no font or decoration state.
 
 When adding a new renderer, classify first:
 

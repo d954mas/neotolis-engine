@@ -10,7 +10,7 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
-#include "renderers/nt_text_renderer.h"
+#include "material/nt_material.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -289,7 +289,7 @@ static void test_button_begin_label_end_inline(void) {
 
 static void test_button_label_walks_in_3d_ctx(void) {
     s_fx.ctx->use_raycast_input = true;
-    nt_text_renderer_test_reset_call_counters();
+    nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
 
     static const float identity_vp[16] = {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
@@ -304,10 +304,11 @@ static void test_button_label_walks_in_3d_ctx(void) {
     }
     nt_ui_end(s_fx.ctx);
 
+    nt_gfx_fake_draw_trace_reset(true);
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, nt_text_renderer_test_draw_n_calls());
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, ui_walker_fx_draw_count(nt_material_get_info(s_fx.text_material)->program));
 }
 
 /* ---- Test: slice9_scale propagates from style to the IMAGE payload. ---- */

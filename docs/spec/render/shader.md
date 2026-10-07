@@ -46,10 +46,10 @@ stage links a second program and assigns it with `nt_material_set_program` --
 a supported flat replace, and the only runtime shader replacement there is.
 Pipeline cache keys include the program handle. Destroying the old program frees
 its pipelines; renderers remove dead records during insertion after a cache miss
-or on reset. Sprite and text staged work retains its original pipeline and is
-discarded if that pipeline is destroyed. Mesh draws require the program to
-stay live until the recorded draws execute. Numeric material params
-remain mutable and are read at draw or flush; snapshot timing is specified in
+or on reset. Sprite and text draws record with the pipeline resolved at
+`set_material`; mesh draws with the pipeline resolved at their call. Every
+program must stay live until the recorded draws execute. Numeric material params
+remain mutable and are read at the draw; snapshot timing is specified in
 [API contracts](../core/api-contracts.md#program-handles).
 
 Uniform block bindings are program state, not material state: a program is

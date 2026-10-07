@@ -12,6 +12,7 @@
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
 #include "input/nt_input.h"
+#include "renderers/nt_text_renderer.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
@@ -354,6 +355,7 @@ struct nt_ui_context {
     uint32_t white_region;
     nt_material_t sprite_material;
     nt_material_t text_material;
+    float text_glyph_depth_bias; /* every text draw of the walk; pairs with a depth-writing text material */
     nt_ui_custom_handler_t custom_fn;
     void *custom_user;
 
@@ -502,9 +504,12 @@ struct nt_ui_label_deco {
     uint32_t shadow_color;
 };
 
-/* Push the decoration to the sticky renderer setters (real->synth bold cascade + outline/shadow/underline/
- * strike). The caller resets via nt_text_renderer_reset_decoration after emit_text. */
-void nt_ui_label_deco_apply(const nt_ui_label_deco_t *d, float opacity);
+/* Fills the decoration of a text style: real->synth bold cascade, outline/shadow faded by opacity,
+ * underline/strike. */
+void nt_ui_label_deco_style(const nt_ui_label_deco_t *d, float opacity, nt_text_style_t *style);
+
+/* The glyph depth bias pairs with the context's text material; any other text material draws without it. */
+static inline float nt_ui_internal_text_bias(const nt_ui_context_t *ctx, nt_material_t text_material) { return (text_material.id == ctx->text_material.id) ? ctx->text_glyph_depth_bias : 0.0F; }
 
 /* Flat row borrowing id_string from Clay (valid through next nt_ui_begin). */
 typedef struct nt_ui_inspector_tree_row {

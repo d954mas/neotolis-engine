@@ -68,9 +68,10 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
-/* Frame storage budget of the sprite geometry; the first scene peaks at about 3.8 KB / 2.5 KB. */
-#define UI_3D_DEMO_VERTEX_BYTES (64U * 1024U)
-#define UI_3D_DEMO_INDEX_BYTES (32U * 1024U)
+/* Frame storage budget of the sprite and text geometry; the first scene peaks at about 75 KB / 11 KB, and with
+ * the inspector open at about 210 KB / 38 KB. */
+#define UI_3D_DEMO_VERTEX_BYTES (512U * 1024U)
+#define UI_3D_DEMO_INDEX_BYTES (128U * 1024U)
 // #endregion
 
 // #region constants
@@ -689,7 +690,7 @@ static void draw_hud_block(const char *text, float x, float y, float size, uint3
     mat4 model;
     glm_mat4_identity(model);
     glm_translate(model, (vec3){x, y, 0.0F});
-    nt_text_renderer_draw(text, (const float *)model, size, color, 0.0F, 0.0F);
+    nt_text_renderer_draw(&(nt_text_style_t){.font = s_font, .size = size, .color = color}, (const float *)model, text);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -698,7 +699,6 @@ static void draw_hud(float fb_w, float fb_h) {
         return;
     }
     nt_text_renderer_set_material(s_text_material);
-    nt_text_renderer_set_font(s_font);
 
     const uint32_t white = NT_RGBA8(242, 242, 250, 255);
     const uint32_t accent = NT_RGBA8(255, 217, 77, 255);
@@ -762,8 +762,6 @@ static void draw_hud(float fb_w, float fb_h) {
         const uint32_t stats_color = NT_RGBA8(204, 230, 204, 255);
         nt_debug_overlay_draw(s_text_material, s_font, (const float *)stats_model, HUD_SIZE - 2.0F, stats_color);
     }
-
-    nt_text_renderer_flush();
 }
 // #endregion
 
@@ -798,9 +796,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_FONT);
         /* Materials keep their handles and draw again once their programs relink. */
         nt_shape_renderer_restore_gpu();
-        nt_result_t restore_result = nt_text_renderer_restore_gpu();
-        NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
-        (void)restore_result;
         nt_program_ref_drop(&s_sprite_cutoff_program);
         nt_program_ref_drop(&s_sprite_program);
         nt_program_ref_drop(&s_text_program);
@@ -931,28 +926,18 @@ static void frame(void) {
     if (ui_can_render) {
         nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
 
-        /* UI labels now write depth (world panels sort by depth) → bias glyph quads apart so their AA
-         * fringes don't z-fight; the walker emits text with the renderer's current bias. Reset after. */
-        nt_text_renderer_set_glyph_depth_bias(0.0001F);
         nt_ui_walk(s_ctx, &target);
-        /* Flush UI text under VP_3D BEFORE switching uniforms; otherwise labels emitted
-         * by ui_walk get rasterized with the next pass's ortho matrix and vanish. */
-        nt_text_renderer_flush();
-        nt_text_renderer_set_glyph_depth_bias(0.0F);
 
         /* World-space depth-writing text. The per-glyph clip-space bias keeps overlapping glyph
-         * quads from z-fighting at their AA fringes (set before the draw, reset after). */
+         * quads from z-fighting at their AA fringes. */
         if (s_font_bound) {
             const uint32_t yellow = NT_RGBA8(255, 255, 51, 255);
             nt_text_renderer_set_material(s_text_material_3d);
-            nt_text_renderer_set_font(s_font);
-            nt_text_renderer_set_glyph_depth_bias(0.0001F);
             mat4 text_model;
             glm_mat4_identity(text_model);
             glm_translate(text_model, (vec3){-7.0F, 4.0F, 0.0F});
-            nt_text_renderer_draw("HELLO 3D WORLD", (const float *)text_model, 0.8F, yellow, 0.0F, 0.0F);
-            nt_text_renderer_set_glyph_depth_bias(0.0F);
-            nt_text_renderer_flush();
+            const nt_text_style_t style = {.font = s_font, .size = 0.8F, .color = yellow, .glyph_depth_bias = 0.0001F};
+            nt_text_renderer_draw(&style, (const float *)text_model, "HELLO 3D WORLD");
         }
     }
 
@@ -960,7 +945,6 @@ static void frame(void) {
     if (text_info && nt_gfx_program_ready(text_info->program)) {
         nt_gfx_bind_uniform_block(0, &uniforms_2d, sizeof uniforms_2d);
         draw_hud(fb_w, fb_h);
-        nt_text_renderer_flush();
     }
 
     /* The inspector sprite uses a separate program that may become ready after the UI's. */
@@ -971,13 +955,11 @@ static void frame(void) {
     if (ui_can_render && inspector_can_render && nt_ui_inspector_is_active(s_ctx)) {
         /* Sidebar tree is its own screen-space pass (ortho): the HUD above bound that view. */
         nt_ui_debug_inspector_walk(s_ctx, &target);
-        nt_text_renderer_flush();
 
         /* Highlight overlay emits the element's world geometry in 3D ctx → bind the perspective VP
          * so it lands on the panel; the depth-off inspector materials keep it on top. */
         nt_gfx_bind_uniform_block(0, &uniforms_3d, sizeof uniforms_3d);
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
-        nt_text_renderer_flush();
     }
 
     nt_gfx_end_pass();
@@ -1057,7 +1039,6 @@ int main(int argc, char *argv[]) {
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
     nt_shape_renderer_init();
-    nt_text_renderer_init();
 
     nt_ui_module_init();
     nt_ui_create_desc_t ui_desc = nt_ui_create_desc_defaults();
@@ -1124,7 +1105,8 @@ int main(int argc, char *argv[]) {
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);
     /* UI labels use the depth-writing text material so they sort with the panels (overlapping world
      * panels). The HUD/stats keep s_text_material (depth_write=false) — they're a flat screen overlay. */
-    nt_ui_set_text_material(s_ctx, s_text_material_3d);
+    /* UI labels write depth (world panels sort by depth): bias glyph quads apart so their AA fringes don't z-fight. */
+    nt_ui_set_text_material(s_ctx, s_text_material_3d, 0.0001F);
     /* Inspector overlay materials: same shaders, depth_test=false so the debug sidebar stays on top
      * without testing the 3D scene depth (passive overlay, no depth-buffer side effects). */
     s_inspector_sprite_material = nt_material_create(&(nt_material_create_desc_t){
