@@ -1,5 +1,5 @@
 # Size Report: text (wasm-analysis-paired)
-# Commit: ea3d3ee
+# Commit: 7ef509e
 
 ## WASM Section Sizes
 
@@ -102,7 +102,7 @@ libnt_pool.a                1376 B
 libnt_postfx_blur.a         7720 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a   1310094 B
+libnt_shape_renderer.a   1229462 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
@@ -122,7 +122,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         3041612 B
+TOTAL (archives)         2960980 B
 
 ## Data Segments Summary
 

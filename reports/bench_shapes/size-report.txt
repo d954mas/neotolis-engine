@@ -1,41 +1,44 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: ea3d3ee
+# Commit: 7ef509e
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 195 B
+Type                 210 B
 Import               507 B
-Function             109 B
+Function             104 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                71 B
 Elem                  24 B
-Code               83869 B
-Data               13537 B
-Custom              4338 B
+Code               78647 B
+Data               12681 B
+Custom              4271 B
 ---------------- ----------
-TOTAL             102671 B
+TOTAL              96536 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-19880 B   main
-14195 B   frame
- 5046 B   nt_gfx_frame_execute
+19740 B   main
+ 7741 B   frame
+ 5043 B   nt_gfx_frame_execute
  3002 B   fmt_fp
  2834 B   rebuild_shapes
- 2832 B   nt_shape_renderer_flush
- 2613 B   printf_core
+ 2611 B   printf_core
  2192 B   nt_gfx_make_program
+ 1931 B   wire_template_path
  1845 B   __rem_pio2f
- 1793 B   wire_template_path
+ 1686 B   nt_shape_renderer_flush
+ 1600 B   nt_shape_renderer_cube_wire
+ 1495 B   place_corners
  1480 B   nt_gfx_make_vertex_input
  1119 B   nt_input_web_on_blur
- 1100 B   nt_hash32_str
+ 1099 B   nt_hash32_str
+ 1077 B   draw_instances
   944 B   nt_shape_renderer_polyline
   850 B   nt_gfx_make_pipeline
   844 B   nt_gfx_gl_cache_ground_state
@@ -43,19 +46,16 @@ TOTAL             102671 B
   802 B   nt_input_web_on_pointer_down
   708 B   nt_gfx_make_buffer
   690 B   pop_arg_long_double
-  551 B   nt_shape_renderer_shutdown
   540 B   claim_more_memory
   519 B   __memcpy
-  504 B   emmalloc_memalign
+  501 B   emmalloc_memalign
+  486 B   nt_gfx_buffer_update
   431 B   nt_app_web_frame
   409 B   attempt_allocate
-  409 B   nt_log_write
   407 B   nt_gfx_destroy_buffer
-  393 B   nt_gfx_frame_create_buffers
-  385 B   sinf
 
-Total functions: 108
-Total code size: 83684 B
+Total functions: 103
+Total code size: 78469 B
 
 ## Built Engine Archives
 
@@ -102,7 +102,7 @@ libnt_pool.a                1376 B
 libnt_postfx_blur.a         7720 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a   1310094 B
+libnt_shape_renderer.a   1229462 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         3041612 B
+TOTAL (archives)         2960980 B
 
 ## Data Segments Summary
 
-Segments: 42
-Total data size: 13240 B
+Segments: 49
+Total data size: 12336 B

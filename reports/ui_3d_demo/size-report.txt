@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: ea3d3ee
+# Commit: 7ef509e
 
 ## WASM Section Sizes
 
@@ -7,29 +7,29 @@ Section                Size
 ---------------- ----------
 Type                 311 B
 Import               584 B
-Function             198 B
+Function             188 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                  54 B
-Code              239941 B
-Data               20532 B
-Custom              6638 B
+Code              238359 B
+Data               19609 B
+Custom              6428 B
 ---------------- ----------
-TOTAL             268368 B
+TOTAL             265643 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-62817 B   frame
+63663 B   frame
 17026 B   dispatch_command
-16268 B   nt_shape_renderer_init
- 9644 B   main
- 8796 B   Clay__ConfigureOpenElementPtr
+15445 B   create_gpu
+10031 B   main
+ 8787 B   Clay__ConfigureOpenElementPtr
  6038 B   Clay__SizeContainersAlongAxis
- 5643 B   Clay__InitializeEphemeralMemory
+ 5616 B   Clay__InitializeEphemeralMemory
  5288 B   nt_ui_button_begin
  5047 B   nt_gfx_frame_execute
  4146 B   upload_glyph
@@ -41,21 +41,21 @@ TOTAL             268368 B
  3007 B   fmt_fp
  2605 B   nt_http_request
  2428 B   printf_core
- 2415 B   nt_shape_renderer_flush
- 2368 B   atlas_on_resolve
+ 2367 B   atlas_on_resolve
  2346 B   nt_gfx_apply_texture_bindings
  2203 B   nt_gfx_make_program
- 2018 B   nt_text_renderer_draw_n
- 1896 B   Clay__InitializePersistentMemory
+ 2020 B   nt_text_renderer_draw_n
+ 1931 B   wire_template_path
+ 1887 B   Clay__InitializePersistentMemory
  1851 B   __rem_pio2f
- 1793 B   wire_template_path
  1747 B   nt_hash64
+ 1687 B   nt_shape_renderer_flush
  1678 B   nt_font_lookup_glyph_offset
  1486 B   nt_gfx_make_vertex_input
- 1467 B   emit_glyph_pass
+ 1465 B   emit_glyph_pass
 
-Total functions: 196
-Total code size: 239600 B
+Total functions: 186
+Total code size: 238038 B
 
 ## Built Engine Archives
 
@@ -102,7 +102,7 @@ libnt_pool.a                1376 B
 libnt_postfx_blur.a         7720 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a   1310094 B
+libnt_shape_renderer.a   1229462 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         3041612 B
+TOTAL (archives)         2960980 B
 
 ## Data Segments Summary
 
-Segments: 42
-Total data size: 20235 B
+Segments: 49
+Total data size: 19263 B

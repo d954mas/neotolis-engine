@@ -1,5 +1,5 @@
 # Size Report: skeletal_showcase (wasm-analysis-paired)
-# Commit: ea3d3ee
+# Commit: 7ef509e
 
 ## WASM Section Sizes
 
@@ -7,55 +7,55 @@ Section                Size
 ---------------- ----------
 Type                 434 B
 Import               584 B
-Function             335 B
+Function             329 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
-Elem                 157 B
-Code              344076 B
-Data               27094 B
-Custom             10028 B
+Elem                 156 B
+Code              341862 B
+Data               26174 B
+Custom              9939 B
 ---------------- ----------
-TOTAL             382818 B
+TOTAL             379588 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-53556 B   frame
-20812 B   main
-20428 B   dispatch_command
-16268 B   nt_shape_renderer_init
- 9026 B   mixing_declare_controls
+53394 B   frame
+21254 B   main
+20433 B   dispatch_command
+15460 B   create_gpu
+ 9019 B   mixing_declare_controls
  8830 B   Clay__ConfigureOpenElementPtr
- 6433 B   nt_ui_combo_begin
+ 6430 B   nt_ui_combo_begin
  6059 B   Clay__SizeContainersAlongAxis
- 5874 B   nt_ui_scroll_begin
- 5790 B   slider_core
+ 5873 B   nt_ui_scroll_begin
+ 5786 B   slider_core
  5643 B   Clay__InitializeEphemeralMemory
- 5267 B   mixing_update
- 5225 B   declare_properties
+ 5246 B   mixing_update
+ 5224 B   declare_properties
  5047 B   nt_gfx_frame_execute
- 4639 B   skinned_draw
- 4383 B   skinned_declare_controls
+ 4647 B   skinned_draw
+ 4372 B   skinned_declare_controls
  4005 B   Clay__MeasureTextCached
- 3528 B   nt_sprite_renderer_set_material
- 3417 B   nt_skinned_mesh_renderer_draw_list
+ 3530 B   nt_sprite_renderer_set_material
+ 3425 B   nt_skinned_mesh_renderer_draw_list
  3365 B   Clay__CloseElement
  3362 B   upload_glyph
  3144 B   nt_ui_label
- 3127 B   nt_gfx_make_texture
+ 3126 B   nt_gfx_make_texture
  3011 B   fmt_fp
  2667 B   nt_http_request_ex
  2591 B   nt_gfx_activate_mesh
- 2582 B   scrollbar_emit_axis
- 2466 B   nt_shape_renderer_flush
- 2449 B   nt_ui_checkbox
+ 2581 B   scrollbar_emit_axis
+ 2448 B   nt_ui_checkbox
  2429 B   printf_core
+ 2394 B   skinned_prepare
 
-Total functions: 333
-Total code size: 343522 B
+Total functions: 327
+Total code size: 341320 B
 
 ## Built Engine Archives
 
@@ -102,7 +102,7 @@ libnt_pool.a                1376 B
 libnt_postfx_blur.a         7720 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a   1310094 B
+libnt_shape_renderer.a   1229462 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         3041612 B
+TOTAL (archives)         2960980 B
 
 ## Data Segments Summary
 
-Segments: 78
-Total data size: 26542 B
+Segments: 85
+Total data size: 25574 B
