@@ -233,8 +233,8 @@ int main(int argc, char *argv[]) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (uint32_t)sizeof(nt_mesh_instance_t); /* one mesh instance */
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U;                                /* the 256 B view block plus any offset alignment up to 256 */
+    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
-    nt_gfx_register_global_block("Globals", 0);
 
     nt_http_init();
 #ifndef NT_PLATFORM_WEB

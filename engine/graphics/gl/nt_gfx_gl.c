@@ -1301,10 +1301,8 @@ static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
         return 0;
     }
 
-    const nt_global_block_t *blocks;
-    uint32_t block_count;
-    nt_gfx_get_global_blocks(&blocks, &block_count);
-    for (uint32_t bi = 0; bi < block_count; bi++) {
+    const nt_global_block_t *blocks = s_init_desc.global_blocks;
+    for (uint32_t bi = 0; bi < NT_GFX_MAX_GLOBAL_BLOCKS && blocks[bi].name != NULL; bi++) {
         GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, blocks[bi].name);
         if (block_index != GL_INVALID_INDEX) {
             NT_GL(glUniformBlockBinding, program, block_index, (GLuint)blocks[bi].binding_slot);
@@ -1763,20 +1761,6 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
     NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, s_buffer_gl[backend_handle], (GLintptr)offset, (GLsizeiptr)size);
-}
-
-void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
-    if (program_backend == 0 || program_backend > s_init_desc.max_programs) {
-        return;
-    }
-    GLuint program = s_programs[program_backend].program;
-    if (program == 0) {
-        return;
-    }
-    GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, block_name);
-    if (block_index != GL_INVALID_INDEX) {
-        NT_GL(glUniformBlockBinding, program, block_index, slot);
-    }
 }
 
 /* ---- Texture management ---- */

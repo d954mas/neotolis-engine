@@ -46,12 +46,6 @@ static void test_stub_returns_empty_queries_without_fabricating_pixels(void) {
     TEST_ASSERT_FALSE(nt_gfx_poll_segment_time_ns("frame", &time_ns));
     TEST_ASSERT_EQUAL_UINT64(0, time_ns);
     TEST_ASSERT_FALSE(nt_gfx_is_gpu_timing_supported());
-    const nt_global_block_t *blocks = NULL;
-    uint32_t count = 1;
-    nt_gfx_register_global_block("Frame", 0);
-    nt_gfx_get_global_blocks(&blocks, &count);
-    TEST_ASSERT_NULL(blocks);
-    TEST_ASSERT_EQUAL_UINT32(0, count);
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gpu_caps()->max_texture_size);
 }
 
@@ -67,10 +61,6 @@ static void test_stub_queries_require_outputs(void) {
     uint16_t size = 0;
     NT_TEST_EXPECT_ASSERT(nt_gfx_texture_size((nt_texture_t){0}, NULL, &size));
     NT_TEST_EXPECT_ASSERT(nt_gfx_texture_size((nt_texture_t){0}, &size, NULL));
-    uint32_t count = 0;
-    const nt_global_block_t *blocks = NULL;
-    NT_TEST_EXPECT_ASSERT(nt_gfx_get_global_blocks(NULL, &count));
-    NT_TEST_EXPECT_ASSERT(nt_gfx_get_global_blocks(&blocks, NULL));
 }
 #endif
 

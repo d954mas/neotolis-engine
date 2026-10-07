@@ -44,6 +44,7 @@ void setUp(void) {
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 1024U * 1024U;
     desc.frame_capacity[NT_GFX_FRAME_INDEX] = 64U * 1024U;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
+    desc.global_blocks[0] = (nt_global_block_t){"Color", 0};
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -142,7 +143,6 @@ static void assert_center(uint8_t red, uint8_t green) {
 static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(void) {
     static const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
     static const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
-    nt_gfx_register_global_block("Color", 0);
     const nt_pipeline_t pipeline = make_pipeline(s_vertexid_vs_src, s_fs_block_src);
     const nt_vertex_input_t empty = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
 

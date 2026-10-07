@@ -14,17 +14,6 @@ _Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_
     __builtin_trap();
 }
 
-void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
-    (void)name;
-    (void)binding_slot;
-}
-
-void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count) {
-    NT_ASSERT(blocks != NULL && count != NULL);
-    *blocks = NULL;
-    *count = 0;
-}
-
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
     (void)desc;
     g_nt_gfx = (nt_gfx_t){0};

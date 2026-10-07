@@ -508,25 +508,6 @@ void test_gfx_context_loss_keeps_handle_drops_ready(void) {
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
 }
 
-/* ---- Global blocks: registration order does not matter ---- */
-
-/* The registry is the single truth for name -> slot, so it must reach programs
- * that already exist. Engine renderers link in their init, which would
- * otherwise close the window before a game gets to register anything. */
-void test_gfx_register_global_block_after_program_is_allowed(void) {
-    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
-
-    nt_gfx_register_global_block("Globals", 0);
-
-    const nt_global_block_t *blocks = NULL;
-    uint32_t count = 0;
-    nt_gfx_get_global_blocks(&blocks, &count);
-    TEST_ASSERT_EQUAL_UINT32(1, count);
-    TEST_ASSERT_EQUAL_STRING("Globals", blocks[0].name);
-    /* The stub verifies registration only; block bindings require real GL. */
-}
-
 /* ---- Program: pipelines borrow it, they never link ---- */
 
 void test_gfx_two_pipelines_share_one_program(void) {
@@ -2496,45 +2477,6 @@ void test_update_buffer_rejects_immutable(void) {
     nt_gfx_destroy_buffer(buf);
 }
 
-/* ---- Global block registration ---- */
-
-void test_register_global_block(void) {
-    nt_gfx_register_global_block("Globals", 0);
-    nt_gfx_register_global_block("Lighting", 1);
-
-    const nt_global_block_t *blocks;
-    uint32_t count;
-    nt_gfx_get_global_blocks(&blocks, &count);
-    TEST_ASSERT_EQUAL_UINT32(2, count);
-    TEST_ASSERT_EQUAL_STRING("Globals", blocks[0].name);
-    TEST_ASSERT_EQUAL_UINT32(0, blocks[0].binding_slot);
-    TEST_ASSERT_TRUE(blocks[0].active);
-    TEST_ASSERT_EQUAL_STRING("Lighting", blocks[1].name);
-    TEST_ASSERT_EQUAL_UINT32(1, blocks[1].binding_slot);
-    TEST_ASSERT_TRUE(blocks[1].active);
-}
-
-void test_register_global_block_max(void) {
-    for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS; i++) {
-        nt_gfx_register_global_block("Block", i);
-    }
-    const nt_global_block_t *blocks;
-    uint32_t count;
-    nt_gfx_get_global_blocks(&blocks, &count);
-    TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_GLOBAL_BLOCKS, count);
-}
-
-void test_register_global_block_cleared_on_shutdown(void) {
-    nt_gfx_register_global_block("Globals", 0);
-    nt_gfx_shutdown();
-    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
-    nt_gfx_begin_frame();
-    const nt_global_block_t *blocks;
-    uint32_t count;
-    nt_gfx_get_global_blocks(&blocks, &count);
-    TEST_ASSERT_EQUAL_UINT32(0, count);
-}
-
 /* ---- RGBA16F texture creation ---- */
 
 void test_gfx_make_texture_rgba16f(void) {
@@ -3354,7 +3296,15 @@ void test_indexed_draw_merge_boundaries(void) {
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_GPU_TIMING_ENABLED ? 10U : 9U, merged_draws_after_end_frame());
 }
 
-void test_register_global_block_asserts_unsupported_slot(void) { EXPECT_ASSERT(nt_gfx_register_global_block("Frame", NT_GFX_MAX_UNIFORM_BUFFER_SLOTS)); }
+void test_global_block_at_an_unsupported_slot_asserts_at_init(void) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    const nt_gfx_desc_t desc = NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8,
+                                                .max_render_targets = 16, .global_blocks = {{"Frame", NT_GFX_MAX_UNIFORM_BUFFER_SLOTS}});
+    EXPECT_ASSERT(nt_gfx_init(&desc));
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
+    nt_gfx_begin_frame();
+}
 
 void test_indexed_draw_merge_spans_texture_updates_but_not_passes(void) {
     nt_texture_t texture = make_binding_test_texture(1);
@@ -3573,7 +3523,6 @@ int main(void) {
     RUN_TEST(test_gfx_make_program_rejects_a_stage_left_unready_by_a_loss);
     RUN_TEST(test_gfx_program_link_context_loss_releases_every_slot);
     RUN_TEST(test_gfx_context_loss_keeps_handle_drops_ready);
-    RUN_TEST(test_gfx_register_global_block_after_program_is_allowed);
     RUN_TEST(test_gfx_pipeline_asserts_null_desc);
     RUN_TEST(test_gfx_pipeline_context_lost_returns_invalid);
     RUN_TEST(test_gfx_pipeline_pool_full_asserts);
@@ -3666,7 +3615,7 @@ int main(void) {
     RUN_TEST(test_indexed_draw_merge_keeps_the_count_in_glsizei);
     RUN_TEST(test_contiguous_plain_draws_merge);
     RUN_TEST(test_indexed_draws_assert_whole_triangles);
-    RUN_TEST(test_register_global_block_asserts_unsupported_slot);
+    RUN_TEST(test_global_block_at_an_unsupported_slot_asserts_at_init);
     RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
     RUN_TEST(test_gpu_timing_toggle_mid_frame_executes_the_stream_only_with_gpu_timing);
     RUN_TEST(test_buffer_write_executes_earlier_draws_and_recording_continues);
@@ -3675,9 +3624,6 @@ int main(void) {
     RUN_TEST(test_update_buffer_rejects_out_of_range);
     RUN_TEST(test_update_buffer_rejects_immutable);
     /* Global block registration tests */
-    RUN_TEST(test_register_global_block);
-    RUN_TEST(test_register_global_block_max);
-    RUN_TEST(test_register_global_block_cleared_on_shutdown);
     RUN_TEST(test_bind_uniform_block_copies_and_binds_its_range);
     RUN_TEST(test_bind_uniform_block_follows_probed_alignment);
     /* New pixel format tests */

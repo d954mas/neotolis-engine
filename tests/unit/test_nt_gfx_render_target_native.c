@@ -44,6 +44,7 @@ void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_textures = 3;
     desc.max_render_targets = 2;
+    desc.global_blocks[0] = (nt_global_block_t){"Globals", 3};
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -750,8 +751,8 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     nt_gfx_destroy_shader(vertex_shader);
 }
 
-/* Real GL must record the registered block binding when the program links. */
-static void test_global_block_registered_before_link_binds_in_the_program(void) {
+/* Real GL must record the declared block binding when the program links. */
+static void test_global_block_from_the_desc_binds_in_the_program(void) {
     static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
                                        "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
     static const char *fragment_source = "#ifdef GL_ES\n"
@@ -759,8 +760,6 @@ static void test_global_block_registered_before_link_binds_in_the_program(void) 
                                          "#endif\n"
                                          "out vec4 frag_color;\n"
                                          "void main() { frag_color = vec4(1.0); }\n";
-
-    nt_gfx_register_global_block("Globals", 3);
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
@@ -935,46 +934,6 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
 
     destroy_test_target(&target);
     nt_gfx_destroy_pipeline(pip_b);
-    nt_gfx_destroy_program(prog);
-    nt_gfx_destroy_shader(fs);
-    nt_gfx_destroy_shader(vs);
-}
-
-/* Late block registration must reach programs linked before the game registered the binding. */
-static void test_global_block_registered_after_link_binds_in_that_program(void) {
-    static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
-                                       "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
-    static const char *fragment_source = "#ifdef GL_ES\n"
-                                         "precision mediump float;\n"
-                                         "#endif\n"
-                                         "out vec4 frag_color;\n"
-                                         "void main() { frag_color = vec4(1.0); }\n";
-
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
-
-    /* Registration must update this already-linked program. */
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
-    nt_gfx_register_global_block("Globals", 5);
-
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_frame_execute();
-
-    GLint current_program = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
-    TEST_ASSERT_NOT_EQUAL_INT(0, current_program);
-    GLuint block_index = glGetUniformBlockIndex((GLuint)current_program, "Globals");
-    TEST_ASSERT_NOT_EQUAL_UINT32(GL_INVALID_INDEX, block_index);
-    GLint binding = -1;
-    glGetActiveUniformBlockiv((GLuint)current_program, block_index, GL_UNIFORM_BLOCK_BINDING, &binding);
-    TEST_ASSERT_EQUAL_INT(5, binding);
-
-    nt_gfx_end_pass();
-
-    nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
@@ -1741,8 +1700,7 @@ int main(void) {
     RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);
     RUN_TEST(test_rgba32f_linear_filtering_and_generated_mips);
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
-    RUN_TEST(test_global_block_registered_before_link_binds_in_the_program);
-    RUN_TEST(test_global_block_registered_after_link_binds_in_that_program);
+    RUN_TEST(test_global_block_from_the_desc_binds_in_the_program);
     RUN_TEST(test_uniform_values_are_shared_by_pipelines_on_one_program);
     RUN_TEST(test_each_pipeline_binds_its_own_program);
     RUN_TEST(test_destroying_one_pipeline_leaves_the_shared_program_alive);

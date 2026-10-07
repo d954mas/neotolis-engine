@@ -759,12 +759,6 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, 
     s_fake_ubo_bind_count++;
 }
 
-void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
-    (void)program_backend;
-    (void)block_name;
-    (void)slot;
-}
-
 void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {
     s_fake_last_uniform_program = program_backend;
     (void)name_hash;

@@ -83,8 +83,8 @@ Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, `nt_gfx_read_pixels`, the GPU timing toggle and
 polling. Recorded commands keep their mutual order. A temporary rule keeps
 today's order for the operations that need it: `nt_gfx_update_buffer`,
-`nt_gfx_orphan_buffer`, every destroy of a live handle, `nt_gfx_read_pixels`,
-`nt_gfx_register_global_block` and, with GPU timing compiled ON,
+`nt_gfx_orphan_buffer`, every destroy of a live handle, `nt_gfx_read_pixels`
+and, with GPU timing compiled ON,
 `nt_gfx_set_gpu_timing_enabled` first execute the commands recorded so far, so
 they see every earlier draw. Other immediate operations may run before
 draw-phase calls recorded earlier in the same frame. A texture write is not
@@ -123,8 +123,8 @@ and publishes the whole set and ends `ACCEPTED`, but records a unit bind only
 when that unit's texture or sampler changed in the pass. A uniform block is
 frame data at a fresh offset of the uniform frame stream, so its bind always
 records and ends `ACCEPTED`; GL keeps the slot binding across passes and frames.
-Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind or
-a global block registration at that slot or above asserts.
+Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind at
+that slot or above asserts, and so does `nt_gfx_init` for a global block declared there.
 
 The compare runs after the pass check; an equal value was validated when it was
 recorded and every path that could invalidate it clears the mirror. An invalid

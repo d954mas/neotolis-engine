@@ -223,7 +223,6 @@ bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
 
 /* size 0 binds the whole buffer; otherwise [offset, offset + size), validated by the frontend. */
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size);
-void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot);
 
 /* Uniform locations and values are program state, so the write names its
  * program; it must be the one currently bound. */

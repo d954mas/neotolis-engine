@@ -109,11 +109,6 @@ typedef struct {
 
 nt_gfx_t g_nt_gfx;
 
-/* ---- Global UBO block registry ---- */
-
-static nt_global_block_t s_global_blocks[NT_GFX_MAX_GLOBAL_BLOCKS];
-static uint32_t s_global_block_count;
-
 /* ---- File-scope internal state ---- */
 
 /* Sampler cache entry — packed key, original desc, and current backend handle.
@@ -181,36 +176,6 @@ static const nt_gfx_texture_meta_t *render_target_attachment_meta(uint32_t rt_sl
 static const nt_gfx_texture_meta_t *render_target_size_meta(uint32_t rt_slot) {
     const bool has_color = s_gfx.render_target_metas[rt_slot].attachments[NT_GFX_RT_COLOR].id != 0;
     return render_target_attachment_meta(rt_slot, has_color ? NT_GFX_RT_COLOR : NT_GFX_RT_DEPTH);
-}
-
-/* ---- Global UBO block registration ---- */
-
-void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
-    NT_ASSERT(name != NULL);
-    NT_ASSERT(binding_slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "register_global_block: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
-    nt_gfx_frame_execute();
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UNIFORM_BLOCK, NT_GFX_OBJECT_NONE, 0, event->data.binding.name = nt_hash32_str(name).value; event->data.binding.slot = binding_slot);
-    NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
-    /* Borrowed until nt_gfx_shutdown; use a string literal or equally long-lived immutable storage. */
-    s_global_blocks[s_global_block_count].name = name;
-    s_global_blocks[s_global_block_count].binding_slot = binding_slot;
-    s_global_blocks[s_global_block_count].active = true;
-    s_global_block_count++;
-
-    /* Late registration must also bind blocks in programs already linked. */
-    for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
-        if (s_gfx.program_backends[i] != 0) {
-            nt_gfx_backend_set_uniform_block(s_gfx.program_backends[i], name, binding_slot);
-        }
-    }
-    NT_GFX_END(NT_GFX_RESULT_ACCEPTED);
-}
-
-void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count) {
-    NT_ASSERT(blocks != NULL);
-    NT_ASSERT(count != NULL);
-    *blocks = s_global_blocks;
-    *count = s_global_block_count;
 }
 
 /* ---- Lifecycle ---- */
@@ -371,6 +336,9 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_vertex_inputs > 0 && "nt_gfx_desc_t.max_vertex_inputs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_render_targets > 0 && "nt_gfx_desc_t.max_render_targets is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS && desc->global_blocks[i].name != NULL; i++) {
+        NT_ASSERT(desc->global_blocks[i].binding_slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "nt_gfx_desc_t.global_blocks: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
+    }
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
     s_gfx.scissor_rect[2] = -1;
@@ -515,9 +483,6 @@ void nt_gfx_shutdown(void) {
 #if NT_GFX_CAPTURE_ENABLED
     memset(&g_nt_gfx_capture, 0, sizeof(g_nt_gfx_capture));
 #endif
-    /* Clear global block registry */
-    memset(s_global_blocks, 0, sizeof(s_global_blocks));
-    s_global_block_count = 0;
 }
 
 const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }

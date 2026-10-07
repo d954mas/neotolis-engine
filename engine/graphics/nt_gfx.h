@@ -88,7 +88,7 @@ typedef struct {
     nt_sampler_t sampler;
 } nt_gfx_texture_binding_t;
 
-/* ---- Global UBO block registry (compile-time limit) ---- */
+/* ---- Global uniform blocks (compile-time limit) ---- */
 
 #define NT_GFX_MAX_GLOBAL_BLOCKS 8
 
@@ -98,10 +98,10 @@ typedef struct {
  * iterates sampler_count, not capacity, so capacity is free for the hot path. */
 #define NT_GFX_MAX_SAMPLERS 128
 
+/* A uniform block every program binds to binding_slot at link, when it declares one with this name. */
 typedef struct {
-    const char *name; /* borrowed unchanged until nt_gfx_shutdown */
+    const char *name; /* borrowed unchanged until nt_gfx_shutdown; NULL ends the list */
     uint32_t binding_slot;
-    bool active;
 } nt_global_block_t;
 
 /* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
@@ -346,11 +346,12 @@ typedef struct {
     /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: 0 (disabled);
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
-    bool depth;               /* request depth buffer (default: true) */
-    bool stencil;             /* request stencil buffer (default: false) */
-    bool antialias;           /* MSAA (default: false) */
-    bool alpha;               /* transparent canvas/window (default: false) */
-    bool premultiplied_alpha; /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
+    nt_global_block_t global_blocks[NT_GFX_MAX_GLOBAL_BLOCKS]; /* default: none; slots below NT_GFX_MAX_UNIFORM_BUFFER_SLOTS */
+    bool depth;                                                /* request depth buffer (default: true) */
+    bool stencil;                                              /* request stencil buffer (default: false) */
+    bool antialias;                                            /* MSAA (default: false) */
+    bool alpha;                                                /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha;                                  /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {
@@ -520,7 +521,6 @@ typedef enum {
     NT_GFX_OP_UNIFORM_VEC4,
     NT_GFX_OP_UNIFORM_FLOAT,
     NT_GFX_OP_UNIFORM_INT,
-    NT_GFX_OP_UNIFORM_BLOCK,
     NT_GFX_OP_UBO,
     NT_GFX_OP_BUFFER_UPLOAD,
     NT_GFX_OP_BUFFER_ORPHAN,
@@ -829,13 +829,6 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .premultiplied_alpha = true,
     };
 }
-
-/* ---- Global UBO block registration ---- */
-
-/* Registers the block binding for existing and future programs.
- * name is required and borrowed unchanged until nt_gfx_shutdown; gfx never frees it. */
-void nt_gfx_register_global_block(const char *name, uint32_t binding_slot);
-void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count);
 
 /* ---- Lifecycle ---- */
 
