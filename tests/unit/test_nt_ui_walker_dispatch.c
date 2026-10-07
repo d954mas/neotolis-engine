@@ -5,10 +5,10 @@
 
 #include "clay.h"
 #include "graphics/nt_gfx.h"
+#include "material/nt_material.h"
 #include <math.h>
 
 #include "renderers/nt_sprite_renderer.h"
-#include "renderers/nt_text_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -481,39 +481,60 @@ static void test_dispatch_image_origin_override_shifts_anchor(void) {
     TEST_ASSERT_EQUAL_INT(484, (int)v3[1]);
 }
 
-/* Stub font has units_per_em=0, so draw_n captures the model matrix without
- * emitting glyphs. m[5] = +1 (local Y-flip composes with world_aff's Y-flip);
- * m[13] = vy+vh - baseline_y_layout puts baseline at the right GL coord. */
-static void test_dispatch_text_model_matrix_preserves_y_up(void) {
-    nt_text_renderer_test_reset_call_counters();
+static nt_program_t text_program(void) { return nt_material_get_info(s_fx.text_material)->program; }
 
+/* The model the walker hands the text renderer, recovered from the first glyph quad of the only text
+ * draw: with the pen at the origin a corner's renderer-local position is its em texcoord * size / 1000. */
+static void first_glyph_model(float size, float m[16]) {
+    TEST_ASSERT_EQUAL_UINT32(1U, ui_walker_fx_draw_count(text_program()));
+    const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
+    const uint8_t *bl = ui_walker_fx_text_vertex(d, 0, 0);
+    const uint8_t *br = ui_walker_fx_text_vertex(d, 0, 1);
+    const uint8_t *tl = ui_walker_fx_text_vertex(d, 0, 3);
+    const float scale = size / 1000.0F;
+    const float x0 = ui_walker_fx_vertex_float(bl, 12) * scale;
+    const float y0 = ui_walker_fx_vertex_float(bl, 16) * scale;
+    const float dx = (ui_walker_fx_vertex_float(br, 12) * scale) - x0;
+    const float dy = (ui_walker_fx_vertex_float(tl, 16) * scale) - y0;
+    memset(m, 0, 16 * sizeof m[0]);
+    m[0] = (ui_walker_fx_vertex_float(br, 0) - ui_walker_fx_vertex_float(bl, 0)) / dx;
+    m[1] = (ui_walker_fx_vertex_float(br, 4) - ui_walker_fx_vertex_float(bl, 4)) / dx;
+    m[4] = (ui_walker_fx_vertex_float(tl, 0) - ui_walker_fx_vertex_float(bl, 0)) / dy;
+    m[5] = (ui_walker_fx_vertex_float(tl, 4) - ui_walker_fx_vertex_float(bl, 4)) / dy;
+    m[12] = ui_walker_fx_vertex_float(bl, 0) - (m[0] * x0) - (m[4] * y0);
+    m[13] = ui_walker_fx_vertex_float(bl, 4) - (m[1] * x0) - (m[5] * y0);
+}
+
+/* m[5] = +1 (local Y-flip composes with world_aff's Y-flip); m[13] = vy+vh - baseline_y_layout puts
+ * the baseline at the right GL coord. */
+static void test_dispatch_text_model_matrix_preserves_y_up(void) {
+    nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_TEXT;
     c->boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 60.0F, .width = 100.0F, .height = 20.0F};
     static const char *kText = "AB";
     c->renderData.text.stringContents = (Clay_StringSlice){.length = 2, .chars = kText, .baseChars = kText};
     c->renderData.text.textColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
-    c->renderData.text.fontId = 0; /* bound stub: units_per_em=0 → silent skip after capture */
-    c->renderData.text.fontSize = 14;
+    c->renderData.text.fontId = 0;
+    c->renderData.text.fontSize = 10;
     inject_frozen_cmds(1);
 
+    nt_gfx_fake_draw_trace_reset(true);
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_draw_n_calls());
     float m[16];
-    memcpy(m, nt_text_renderer_test_last_model(), sizeof m);
+    first_glyph_model(10.0F, m);
     /* Linear part: m[0]=1, m[5]=+1 (Y-up preserved); scaled-int compare since
      * Unity's float asserts are excluded. */
     TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(m[0] * 1000.0F));
     TEST_ASSERT_EQUAL_INT(0, (int)lrintf(m[1] * 1000.0F));
     TEST_ASSERT_EQUAL_INT(0, (int)lrintf(m[4] * 1000.0F));
     TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(m[5] * 1000.0F));
-    /* Translate part: ox = bbox.x = 50; baseline_y (layout) = bbox.y +
-     * (bbox.h - text_h)/2 - descent*scale = 60 + 10 + 0 = 70 (stub font has
-     * scale=0). GL baseline = vy+vh - 70 = 530. */
+    /* Translate part: ox = bbox.x = 50; baseline_y (layout) = bbox.y + (bbox.h - text_h)/2 +
+     * ascent*scale = 60 + 5 + 8 = 73. GL baseline = vy+vh - 73 = 527. */
     TEST_ASSERT_EQUAL_INT(50, (int)lrintf(m[12]));
-    TEST_ASSERT_EQUAL_INT(530, (int)lrintf(m[13]));
+    TEST_ASSERT_EQUAL_INT(527, (int)lrintf(m[13]));
 }
 
 #if NT_UI_DEBUG_TOOLS
@@ -555,6 +576,7 @@ static void test_dispatch_3d_debug_layer_draws_in_screen_space_debug_walk(void) 
 
 static void test_dispatch_3d_debug_text_uses_screen_space_orientation(void) {
     s_fx.ctx->use_raycast_input = true;
+    nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_TEXT;
@@ -564,25 +586,26 @@ static void test_dispatch_3d_debug_text_uses_screen_space_orientation(void) {
     c->renderData.text.stringContents = (Clay_StringSlice){.length = 2, .chars = kText, .baseChars = kText};
     c->renderData.text.textColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
     c->renderData.text.fontId = 0;
-    c->renderData.text.fontSize = 14;
+    c->renderData.text.fontSize = 10;
     c->renderData.text.letterSpacing = 0;
     c->renderData.text.lineHeight = 0;
     inject_frozen_cmds(1);
 
+    nt_gfx_fake_draw_trace_reset(true);
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_debug_inspector_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_draw_n_calls());
     float m[16];
-    memcpy(m, nt_text_renderer_test_last_model(), sizeof m);
+    first_glyph_model(10.0F, m);
     TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(m[0] * 1000.0F));
     TEST_ASSERT_EQUAL_INT(1000, (int)lrintf(m[5] * 1000.0F));
     TEST_ASSERT_EQUAL_INT(50, (int)lrintf(m[12]));
-    TEST_ASSERT_EQUAL_INT(530, (int)lrintf(m[13]));
+    TEST_ASSERT_EQUAL_INT(527, (int)lrintf(m[13]));
 }
 
 static void test_3d_debug_inspector_walk_draws_real_tree_text(void) {
     s_fx.ctx->use_raycast_input = true;
+    nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
     nt_ui_inspector_set_active(s_fx.ctx, true);
     const float identity_vp[16] = {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
@@ -607,10 +630,10 @@ static void test_3d_debug_inspector_walk_draws_real_tree_text(void) {
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
-    const uint32_t calls_before = nt_text_renderer_test_draw_n_calls();
+    nt_gfx_fake_draw_trace_reset(true);
     nt_ui_debug_inspector_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_GREATER_THAN_UINT32(calls_before, nt_text_renderer_test_draw_n_calls());
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, ui_walker_fx_draw_count(text_program()));
 }
 #endif
 

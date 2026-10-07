@@ -1,6 +1,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_test_font_blob.h"
 
 /* Empty TU when NT_TEST_ACCESS undefined (helper compiled into non-UI binaries). */
 #ifdef NT_TEST_ACCESS
@@ -21,7 +22,6 @@
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
-#include "nt_font_format.h"
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
@@ -142,51 +142,9 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     nt_hash_shutdown();
 }
 
-#define REAL_FONT_FIRST_CP 32U
-#define REAL_FONT_LAST_CP 126U
-
-static void build_real_font_blob(ui_walker_fixture_t *fx) {
-    const uint32_t glyph_count = REAL_FONT_LAST_CP - REAL_FONT_FIRST_CP + 1U;
-    const uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
-    const uint32_t contour_offset = header_size + (glyph_count * (uint32_t)sizeof(NtFontGlyphEntry));
-    /* contour_count 1, point_count 3, all on-curve: clockwise (a TrueType outer) triangle spanning the
-     * bbox, so an emboldened variant grows past it. First point (0,-200), int16 deltas (0,1000) (400,-1000). */
-    const uint8_t esc = NT_FONT_DELTA_SENTINEL;
-    const uint8_t contour[] = {1, 0, 3, 0, 0x07, 0x00, 0x00, 0x00, 0x38, 0xFF, 0, esc, 0xE8, 0x03, esc, 0x90, 0x01, esc, 0x18, 0xFC};
-    fx->real_font_blob_size = contour_offset + (uint32_t)sizeof contour;
-    fx->real_font_blob = (uint8_t *)calloc(fx->real_font_blob_size, 1);
-    TEST_ASSERT_NOT_NULL(fx->real_font_blob);
-
-    NtFontAssetHeader hdr;
-    memset(&hdr, 0, sizeof hdr);
-    hdr.magic = NT_FONT_MAGIC;
-    hdr.version = NT_FONT_VERSION;
-    hdr.glyph_count = (uint16_t)glyph_count;
-    hdr.units_per_em = 1000;
-    hdr.ascent = 800;
-    hdr.descent = -200;
-    memcpy(fx->real_font_blob, &hdr, sizeof hdr);
-
-    for (uint32_t i = 0; i < glyph_count; i++) {
-        NtFontGlyphEntry entry;
-        memset(&entry, 0, sizeof entry);
-        entry.codepoint = REAL_FONT_FIRST_CP + i;
-        entry.data_offset = contour_offset;
-        entry.advance = 500;
-        if (entry.codepoint != ' ') {
-            entry.bbox_y0 = -200;
-            entry.bbox_x1 = 400;
-            entry.bbox_y1 = 800;
-            entry.curve_count = 3;
-        }
-        memcpy(fx->real_font_blob + header_size + ((size_t)i * sizeof entry), &entry, sizeof entry);
-    }
-    memcpy(fx->real_font_blob + contour_offset, contour, sizeof contour);
-}
-
 nt_font_t ui_walker_fixture_make_real_font(ui_walker_fixture_t *fx) {
     if (fx->real_font_blob == NULL) {
-        build_real_font_blob(fx);
+        fx->real_font_blob = nt_test_font_blob(32U, 126U, &fx->real_font_blob_size);
     }
     const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
     nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(fx->real_font_blob, fx->real_font_blob_size)));

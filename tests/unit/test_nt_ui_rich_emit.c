@@ -70,14 +70,10 @@ static void make_real_fonts(nt_font_t *fonts, int count) {
 }
 
 /* Walks with the fake backend's draw trace armed, so the trace holds exactly this walk's draws in painter
- * order. s_walk_draws is the walk's recorded draw count (merged draws count once). */
-static uint32_t s_draws_before_walk;
-static uint32_t s_walk_draws;
+ * order (merged draws count once). */
 static void walk_traced(const nt_ui_target_t *target) {
     nt_gfx_fake_draw_trace_reset(true);
-    s_draws_before_walk = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_ui_walk(s_fx.ctx, target);
-    s_walk_draws = nt_gfx_draw_calls(&g_nt_gfx.counters) - s_draws_before_walk;
 }
 
 /* Trace draw `i` is a sprite draw of `quads` region quads that ends with emit `e`. */
@@ -126,15 +122,14 @@ static void frame_two_run_text(float container_w, nt_rich_align_t align) {
 /* (1) emit produces walker text commands (> 0) AND the draw_n span count matches the
  * solved TEXT line-fragments. Two runs on one wide line -> two spans. */
 static void test_emit_produces_text_spans(void) {
-    nt_text_renderer_test_reset_call_counters();
+    s_body_font = ui_walker_fixture_make_real_font(&s_fx);
+    nt_gfx_fake_draw_trace_reset(true);
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT);
 
-    const uint32_t spans = nt_text_renderer_test_draw_n_calls();
-    TEST_ASSERT_TRUE_MESSAGE(spans > 0U, "rich-text emits at least one draw_n span");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, spans, "two style runs on one line -> two draw_n spans");
-
-    /* The widget-side span counter agrees with the renderer's draw_n call count. */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(spans, nt_ui_rich_test_emit_span_count(s_fx.ctx), "widget span count == draw_n calls");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_emit_span_count(s_fx.ctx), "two style runs on one line -> two draw_n spans");
+    /* The spans reach the renderer: one quad per visible glyph of "Hello world" (the space has none). */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, ui_walker_fx_draw_count(text_program()), "both spans merge into one text draw");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(10U, ui_walker_fx_quads(ui_walker_fx_draw_at(text_program(), 0)), "every glyph of both spans is drawn");
 
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_atom_count(s_fx.ctx) >= 2U, "solver placed >=2 TEXT atoms");
 }
@@ -168,7 +163,6 @@ static void test_single_style_one_span_per_line(void) {
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
 
-    nt_text_renderer_test_reset_call_counters();
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("rich_root2"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
@@ -181,7 +175,7 @@ static void test_single_style_one_span_per_line(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_text_renderer_test_draw_n_calls(), "one style, one line -> one draw_n span");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_emit_span_count(s_fx.ctx), "one style, one line -> one draw_n span");
 }
 
 /* (4) double-walk determinism: re-walking the same frame yields identical span counts and
@@ -201,15 +195,13 @@ static void test_double_walk_is_deterministic(void) {
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
 
-    nt_text_renderer_test_reset_call_counters();
     nt_ui_walk(s_fx.ctx, &target);
-    const uint32_t spans_1 = nt_text_renderer_test_draw_n_calls();
+    const uint32_t spans_1 = nt_ui_rich_test_emit_span_count(s_fx.ctx);
     const uint32_t atoms_1 = nt_ui_rich_test_atom_count(s_fx.ctx);
     const uint32_t runs_1 = nt_ui_rich_test_run_count(s_fx.ctx);
 
-    nt_text_renderer_test_reset_call_counters();
     nt_ui_walk(s_fx.ctx, &target); /* re-walk the SAME frozen frame */
-    const uint32_t spans_2 = nt_text_renderer_test_draw_n_calls();
+    const uint32_t spans_2 = nt_ui_rich_test_emit_span_count(s_fx.ctx);
     const uint32_t atoms_2 = nt_ui_rich_test_atom_count(s_fx.ctx);
     const uint32_t runs_2 = nt_ui_rich_test_run_count(s_fx.ctx);
 
@@ -496,11 +488,10 @@ static void frame_text_image_text(nt_material_t img_mat, nt_rich_valign_t valign
  * text rides draw_n -- both present. */
 static void test_inline_image_emits_sprite_and_text(void) {
     const nt_material_t mat = s_fx.sprite_material;
-    nt_text_renderer_test_reset_call_counters();
     frame_text_image_text(mat, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU);
 
     /* Text spans for "A " and " B" (image splits the run anyway -> two text runs). */
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "inline-image line still emits text draw_n spans");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_emit_span_count(s_fx.ctx) > 0U, "inline-image line still emits text draw_n spans");
     /* The image emitted a region quad (4 verts) via the standard sprite path. */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_test_last_emit().vertex_count, "inline image emits a 4-vert region quad via nt_ui_image");
     /* The widget reports exactly one inline image emitted. */
@@ -510,7 +501,6 @@ static void test_inline_image_emits_sprite_and_text(void) {
 /* (5b) MATERIAL DEFAULT: a block that leaves image_material UNSET (id==0) inherits ctx->sprite_material
  * (nt_ui_set_sprite_material) -- the image still emits its region quad via the ctx default, no per-block set. */
 static void test_inline_image_defaults_material_from_ctx(void) {
-    nt_text_renderer_test_reset_call_counters();
     frame_text_image_text((nt_material_t){0}, NT_RICH_VALIGN_MIDDLE, 0xFFFFFFFFU); /* image_material left unset */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, nt_sprite_test_last_emit().vertex_count, "unset image_material -> image emits via the ctx->sprite_material default");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one IMAGE atom emitted via the ctx default material");
@@ -676,8 +666,7 @@ static void test_two_inline_images_coalesce(void) {
         nt_sprite_renderer_test_last_emit_color(v, col);
         TEST_ASSERT_TRUE_MESSAGE(col[0] == 255U && col[1] == 255U && col[2] == 255U && col[3] == 255U, "second image tint == white, full opacity");
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_walk_draws, "text draw + ONE merged image draw, not two image draws");
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_gfx_fake_draw_trace_count(), "text draw + ONE merged image draw, not two image draws");
     TEST_ASSERT_FALSE_MESSAGE(trace_is_sprite_draw(0U, last, 2U), "first draw is the text band's");
     TEST_ASSERT_TRUE_MESSAGE(trace_is_sprite_draw(1U, last, 2U), "second draw covers BOTH image quads");
 }
@@ -1878,9 +1867,8 @@ static void test_two_rich_text_blocks_one_frame_no_trap(void) {
     nt_ui_end(s_fx.ctx);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    nt_text_renderer_test_reset_call_counters();
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "both rich-text blocks emit (no nest-guard trap)");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_emit_span_count(s_fx.ctx) > 0U, "both rich-text blocks emit (no nest-guard trap)");
 }
 
 /* ===== Public markup entry e2e (nt_ui_rich_text_markup) ===== */
@@ -1919,11 +1907,10 @@ static void test_markup_e2e_emit_and_link(void) {
     const uint32_t link_id = nt_hash32("here", 4).value;
 
     /* Warm-up frame so the prev-frame bbox the link hit-test needs is populated. */
-    nt_text_renderer_test_reset_call_counters();
     nt_pointer_t idle = make_ptr(0.0F, 0.0F, false, false, false);
     (void)frame_markup(&idle);
 
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "markup entry emits draw_n spans");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_emit_span_count(s_fx.ctx) > 0U, "markup entry emits draw_n spans");
     TEST_ASSERT_TRUE_MESSAGE(approx(nt_ui_rich_test_total_w(s_fx.ctx), MK_CONTAINER_W), "markup FIXED width == container_w");
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_link_rect_count(s_fx.ctx) >= 1U, "markup <link> produced a link rect");
 
@@ -2052,7 +2039,6 @@ static void test_custom_fx_runs_via_markup(void) {
     /* "A " has no effect; "<fx=myfx>BB</fx>" runs the custom fn per glyph; the stock wave too. */
     static const char *const markup_fx = "A <fx=myfx>BB</fx> <fx=wavename>CC</fx>";
     nt_pointer_t mouse = {0};
-    nt_text_renderer_test_reset_call_counters();
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("cfx_mk_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_rich_text_markup(s_fx.ctx, CLAY_ID("cfx_mk").id, NULL, &ts, &base, markup_fx, strlen(markup_fx), 400.0F, NT_RICH_ALIGN_LEFT, 0.5F, NULL);
@@ -2065,7 +2051,7 @@ static void test_custom_fx_runs_via_markup(void) {
      * custom counter -- proving custom resolved to the GAME fn, not the stock id (custom != stock). */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_custom_fx_calls, "markup <fx=myfx> ran the custom fn once per glyph (custom before stock)");
     TEST_ASSERT_EQUAL_PTR_MESSAGE(&s_markup_param, s_custom_fx_seen_user, "markup-registered user_data reaches the custom fn at emit");
-    TEST_ASSERT_TRUE_MESSAGE(nt_text_renderer_test_draw_n_calls() > 0U, "markup with custom + stock effects still emits text spans");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_emit_span_count(s_fx.ctx) > 0U, "markup with custom + stock effects still emits text spans");
 }
 
 /* ===== Z-order layers ===== */
@@ -2139,7 +2125,7 @@ static void order_recording_draw(void *user_data, float x, float y, float w, flo
     (void)color;
     (void)world_mat4;
     s_order_img_at_object_draw = nt_ui_rich_test_image_emit_count(s_fx.ctx);
-    s_order_draws_at_object_draw = nt_gfx_draw_calls(&g_nt_gfx.counters) - s_draws_before_walk;
+    s_order_draws_at_object_draw = nt_gfx_fake_draw_trace_count();
 }
 
 /* (L2) <layer=5> override: a push_layer(5) around mixed text + image -> EVERY enclosed atom (any kind)
@@ -2185,9 +2171,8 @@ static void test_layer_override(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_order_img_at_object_draw, "within band: image emits BEFORE object (object draw_fn sees image_emit_count == 1)");
     /* Painter order inside the band: the text draw, then the image draw, both recorded before the object's
      * draw_fn ran (it draws nothing itself, so they are the walk's only draws). */
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_walk_draws, "band records a text draw and an image draw");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_gfx_fake_draw_trace_count(), "band records a text draw and an image draw");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_order_draws_at_object_draw, "band text + image draws recorded BEFORE the object draw_fn");
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_FALSE_MESSAGE(trace_is_sprite_draw(0U, image, 1U), "within band: text paints first");
     TEST_ASSERT_TRUE_MESSAGE(trace_is_sprite_draw(1U, image, 1U), "within band: image paints after text");
 }
@@ -2383,8 +2368,7 @@ static void test_default_mixed_block_paints_bands_in_order(void) {
     const nt_sprite_test_emit_t image = nt_sprite_test_last_emit();
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one inline image in the mixed block");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, s_walk_draws, "text band draw + image band draw");
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_gfx_fake_draw_trace_count(), "text band draw + image band draw");
     TEST_ASSERT_FALSE_MESSAGE(trace_is_sprite_draw(0U, image, 1U), "band 0 (text) paints first");
     TEST_ASSERT_TRUE_MESSAGE(trace_is_sprite_draw(1U, image, 1U), "band 1 (image) paints after the text band");
 }
@@ -2479,7 +2463,6 @@ static void test_late_effect_preserves_plain_text_runs(void) {
     s_custom_fx_calls = 0U;
     s_custom_fx_seen_user = NULL;
     s_obj_draw_calls = 0U;
-    nt_text_renderer_test_reset_call_counters();
 
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -2500,7 +2483,7 @@ static void test_late_effect_preserves_plain_text_runs(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, s_custom_fx_calls, "only the object carries the newly interned effect");
     TEST_ASSERT_EQUAL_PTR(&param, s_custom_fx_seen_user);
     TEST_ASSERT_EQUAL_UINT32(1U, s_obj_draw_calls);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_text_renderer_test_draw_n_calls(), "plain runs before and after the effect both render");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_emit_span_count(s_fx.ctx), "plain runs before and after the effect both render");
 }
 
 static nt_ui_rich_fx_params_t s_seen_tuned_params[NT_UI_RICH_MAX_CUSTOM_FX + 1U];

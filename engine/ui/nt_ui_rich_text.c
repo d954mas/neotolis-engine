@@ -2094,15 +2094,15 @@ static void rich_emit_images(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t 
     }
 }
 
-/* The style of one TEXT run: its font and decoration, and the context's glyph depth bias. A non-finite
+/* The style of one TEXT run: its font and decoration, and the block's glyph depth bias. A non-finite
  * outline width or shadow offset turns that decoration off: the base style bypasses the push_* clamps. */
-static nt_text_style_t rich_run_style(const nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *e) {
+static nt_text_style_t rich_run_style(const nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, const nt_ui_rich_solved_atom_t *e, float glyph_depth_bias) {
     const nt_ui_rich_style_t *stl = &st->styles[st->runs[e->run_idx].style_idx];
     nt_text_style_t style = {
         .font = e->font,
         .weight_em = (e->flags & NT_UI_RICH_RUN_SYNTH_BOLD) != 0U ? NT_TEXT_SYNTH_BOLD_WEIGHT : 0.0F,
         .oblique = (e->flags & NT_UI_RICH_RUN_SYNTH_ITALIC) != 0U ? NT_UI_RICH_SYNTH_ITALIC_SHEAR : 0.0F,
-        .glyph_depth_bias = nt_ui_internal_text_bias(frame->ctx, (st->text_material.id != 0U) ? st->text_material : frame->ctx->text_material),
+        .glyph_depth_bias = glyph_depth_bias,
         .underline = (e->flags & NT_UI_RICH_RUN_UNDERLINE) != 0U,
         .strikethrough = (e->flags & NT_UI_RICH_RUN_STRIKE) != 0U,
     };
@@ -2120,7 +2120,7 @@ static nt_text_style_t rich_run_style(const nt_ui_rich_state_t *st, const nt_ui_
 
 /* Group same-band TEXT by font.id so the draws of one font are adjacent and merge: every font change
  * records a texture set and splits the draw. No distinct-font cap -> a >4-family block never drops a face. */
-static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer) {
+static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_frame_t *frame, float box_x, float box_y, uint8_t layer, float glyph_depth_bias) {
     for (uint32_t i = 0; i < st->solved_count; i++) {
         const nt_ui_rich_solved_atom_t *s = &st->solved[i];
         if (s->kind != NT_RICH_ATOM_TEXT || s->text_len == 0U || s->layer != layer) {
@@ -2142,7 +2142,7 @@ static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_fram
             if (e->kind != NT_RICH_ATOM_TEXT || e->text_len == 0U || e->layer != layer || e->font.id != s->font.id) {
                 continue; /* other kinds/layers/fonts -> their own pass */
             }
-            nt_text_style_t style = rich_run_style(st, frame, e);
+            nt_text_style_t style = rich_run_style(st, frame, e, glyph_depth_bias);
             if (e->effect_id == 0U) {
                 rich_emit_text_plain(st, frame, e, box_x, box_y, &style);
             } else {
@@ -2206,6 +2206,7 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
      * stored: the game may swap the ctx materials between two walks of one declared frame. */
     const nt_ui_context_t *ctx = frame->ctx;
     const nt_material_t text_mat = st->text_material.id != 0U ? st->text_material : ctx->text_material;
+    const float text_bias = nt_ui_internal_text_bias(ctx, text_mat);
     const nt_material_t image_mat = st->image_material.id != 0U ? st->image_material : ctx->sprite_material;
 
     /* id==0 -> neither style nor ctx gave a sprite material, so skip images. */
@@ -2220,7 +2221,7 @@ static void rich_emit_custom(const nt_ui_custom_frame_t *frame, void *data) {
         /* Within ONE band, kinds stack text < image < object. An earlier band's object draw_fn may have
          * selected another text material; an object draw_fn that draws text selects its own. */
         nt_text_renderer_set_material(text_mat);
-        rich_emit_text_layer(st, frame, box_x, box_y, L);
+        rich_emit_text_layer(st, frame, box_x, box_y, L, text_bias);
         if (emit_images) {
             rich_emit_images(st, frame, box_x, box_y, L, image_mat);
         }

@@ -70,10 +70,6 @@ void nt_text_renderer_draw(const nt_text_style_t *style, const float model[16], 
 
 // #region test_access
 #ifdef NT_TEST_ACCESS
-/* Observed at every draw_n entry since the last reset_call_counters, also with a glyph-less font. */
-void nt_text_renderer_test_reset_call_counters(void);
-const float *nt_text_renderer_test_last_model(void);
-uint32_t nt_text_renderer_test_draw_n_calls(void);
 /* Occupied cache entries, including dead pipelines not yet removed by insertion/reset. */
 uint16_t nt_text_renderer_test_pipeline_cache_count(void);
 #endif

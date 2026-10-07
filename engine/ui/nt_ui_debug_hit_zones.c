@@ -165,9 +165,6 @@ static bool zone_passes_mode(const nt_ui_debug_zone_t *z, nt_ui_debug_hit_mode_t
 // #region label rendering
 /* `text_model` already places the baseline; caller picks screen (2D) or z->m-mapped (3D) space. */
 static void draw_zone_label(const nt_ui_debug_zone_t *z, const float text_model[16], nt_material_t text_mat, float bias, nt_font_t font, float size) {
-    if (size <= 0.0F) {
-        return;
-    }
     char buf[64];
     const char *state_str = "idle";
     if (z->state_flags & NT_UI_DEBUG_FLAG_DISABLED) {
@@ -288,6 +285,7 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
         return;
     }
     /* Labels after every fill: a later zone's fill must not cover an earlier zone's label. */
+    const float tbias = nt_ui_internal_text_bias(ctx, tmat);
     for (uint32_t i = 0; i < ctx->debug_zone_count; ++i) {
         const nt_ui_debug_zone_t *z = &ctx->debug_zones[i];
         if (!zone_passes_mode(z, mode)) {
@@ -295,7 +293,7 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
         }
         float text_model[16];
         zone_label_model(z, is_3d, vy, vh, label_size, text_model);
-        draw_zone_label(z, text_model, tmat, nt_ui_internal_text_bias(ctx, tmat), font, label_size);
+        draw_zone_label(z, text_model, tmat, tbias, font, label_size);
     }
 }
 // #endregion

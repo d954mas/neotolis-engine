@@ -61,12 +61,6 @@ static struct {
 
     nt_hash32_t curve_name; /* hashed at the first resolve */
 
-#ifdef NT_TEST_ACCESS
-    /* Observed at every draw_n entry, even when the font has no glyph data (units_per_em == 0), so
-     * walker tests pin the model the UI built without a real font fixture. */
-    float test_last_model[16];
-    uint32_t test_draw_n_calls;
-#endif
 } s_text;
 // #endregion
 
@@ -270,34 +264,15 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
  * path as glyphs — correct under any model matrix (world / 3D), no scissor/viewport hijack. */
 static void emit_decoration_quad(const float model[16], float x0, float y0, float x1, float y1, uint32_t color, float glyph_bias) {
     nt_text_vertex_t *v = alloc_quad();
-
-    float band0;
-    pack_uint_as_float(&band0, 0U); /* band_count=0 = decoration sentinel */
-    v[0].glyph_data[0] = 0.0F;
-    v[0].glyph_data[1] = band0;
-    /* bounds/texcoord unused: the shader returns before reading them for the sentinel. */
-    v[0].glyph_bounds[0] = 0.0F;
-    v[0].glyph_bounds[1] = 0.0F;
-    v[0].glyph_bounds[2] = 0.0F;
-    v[0].glyph_bounds[3] = 0.0F;
-    v[0].color = color;
-    v[0].depth_bias = glyph_bias;
+    /* All-zero glyph data is band_count 0, the sentinel; the shader reads no bounds or texcoord for it. */
+    v[0] = (nt_text_vertex_t){.color = color, .depth_bias = glyph_bias};
     v[1] = v[0];
     v[2] = v[0];
     v[3] = v[0];
-
     transform_point(v[0].position, model, x0, y0); /* BL */
     transform_point(v[1].position, model, x1, y0); /* BR */
     transform_point(v[2].position, model, x1, y1); /* TR */
     transform_point(v[3].position, model, x0, y1); /* TL */
-    v[0].texcoord[0] = 0.0F;
-    v[0].texcoord[1] = 0.0F;
-    v[1].texcoord[0] = 0.0F;
-    v[1].texcoord[1] = 0.0F;
-    v[2].texcoord[0] = 0.0F;
-    v[2].texcoord[1] = 0.0F;
-    v[3].texcoord[0] = 0.0F;
-    v[3].texcoord[1] = 0.0F;
 }
 // #endregion
 
@@ -399,7 +374,7 @@ static void emit_glyph_pass(const nt_text_style_t *style, const uint8_t *p, cons
 
 /* One underline/strike sentinel quad per LINE (continuous per same-style segment; within one
  * draw_n the whole run is one style, so the segment boundary is the newline). Y and thickness come from
- * the scaled v5 metrics. Exact vertical sign is a visual-QA concern. */
+ * the font metrics scaled to the run. */
 static void emit_line_deco_quads(const nt_text_style_t *style, const float model[16], float scale, float x1, float pen_y, nt_font_metrics_t metrics, float *glyph_bias) {
     if (style->underline) {
         float top = pen_y + ((float)metrics.underline_position * scale); /* underline_position = top edge, below baseline */
@@ -483,10 +458,6 @@ static void assert_style(const nt_text_style_t *style) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_text_renderer_draw_n(const nt_text_style_t *style, const float model[16], const char *utf8, size_t len) {
     NT_ASSERT(style != NULL && "nt_text_renderer_draw_n: style is required");
-#ifdef NT_TEST_ACCESS
-    memcpy(s_text.test_last_model, model, sizeof s_text.test_last_model);
-    s_text.test_draw_n_calls++;
-#endif
     NT_ASSERT(s_text.current.frame == g_nt_gfx.counters.frame_sequence && "nt_text_renderer_draw_n: call nt_text_renderer_set_material in this frame");
     assert_style(style);
     if (len == 0U || utf8 == NULL || s_text.current.pipeline.id == 0) {
@@ -533,11 +504,10 @@ void nt_text_renderer_draw_n(const nt_text_style_t *style, const float model[16]
     const int16_t fill_key = nt_font_quantize_weight(style->weight_em * upm);
     /* The shadow silhouette follows the outline width, not its alpha, so a fading outline cannot swap it. */
     const int16_t outline_key = (int16_t)(style->outline_w > 0.0F ? nt_font_quantize_weight((style->weight_em + style->outline_w) * upm) : fill_key);
-    const int16_t shadow_key = outline_key;
     const bool outline_active = (style->outline_w > 0.0F && (style->outline_color >> 24) != 0U);
 #else
     const int16_t fill_key = 0;
-    const int16_t shadow_key = 0;
+    const int16_t outline_key = 0;
 #endif
     const bool shadow_active = (style->shadow_color >> 24) != 0U;
 
@@ -547,7 +517,7 @@ void nt_text_renderer_draw_n(const nt_text_style_t *style, const float model[16]
      * keeps it: triangles of a draw blend in index order. */
     s_text.run.quads = 0;
     if (shadow_active) {
-        emit_glyph_pass(style, p, end, m, scale, line_advance, slot, shadow_key, style->shadow_color, style->shadow_dx * size, style->shadow_dy * size, &glyph_bias);
+        emit_glyph_pass(style, p, end, m, scale, line_advance, slot, outline_key, style->shadow_color, style->shadow_dx * size, style->shadow_dy * size, &glyph_bias);
     }
 #if NT_FONT_EMBOLDEN_ENABLED
     if (outline_active) {
@@ -568,9 +538,6 @@ void nt_text_renderer_draw(const nt_text_style_t *style, const float model[16], 
 
 // #region Test accessors
 #ifdef NT_TEST_ACCESS
-void nt_text_renderer_test_reset_call_counters(void) { s_text.test_draw_n_calls = 0; }
-const float *nt_text_renderer_test_last_model(void) { return s_text.test_last_model; }
-uint32_t nt_text_renderer_test_draw_n_calls(void) { return s_text.test_draw_n_calls; }
 uint16_t nt_text_renderer_test_pipeline_cache_count(void) { return s_text.pipeline_count; }
 #endif
 // #endregion

@@ -12,11 +12,11 @@
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "metrics/nt_metrics.h"
-#include "nt_font_format.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "debug_overlay/nt_debug_overlay.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_test_font_blob.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -42,7 +42,7 @@ static void push_frame(float frame_ms, float cpu_ms, float gpu_ms, uint32_t draw
 }
 #endif
 
-/* ---- Test 1: init + shutdown round-trip ---- */
+/* ---- init + shutdown round-trip ---- */
 
 static void test_stats_init_shutdown(void) {
     nt_debug_overlay_init();
@@ -52,7 +52,7 @@ static void test_stats_init_shutdown(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 2: format_lines schema (reads nt_metrics) ---- */
+/* ---- format_lines schema (reads nt_metrics) ---- */
 
 static void test_stats_format_lines_schema(void) {
     nt_debug_overlay_init();
@@ -70,7 +70,7 @@ static void test_stats_format_lines_schema(void) {
 }
 
 #if NT_METRICS_ENABLED
-/* ---- Test 3: format reflects the last-frame cpu/gpu/draws from nt_metrics ----
+/* ---- format reflects the last-frame cpu/gpu/draws from nt_metrics ----
    The format tests below need real nt_metrics bodies; the OFF mirror (NT_METRICS_ENABLED=0) has no-op
    stubs (fps 0 / gpu sentinel / no counters), so they are gated out there — the init/shutdown, schema
    (labels present), and draw-bind tests stay live in both configs. */
@@ -89,7 +89,7 @@ static void test_stats_format_reflects_last_frame(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 4: fps line reflects the nt_metrics rolling avg ---- */
+/* ---- fps line reflects the nt_metrics rolling avg ---- */
 
 static void test_stats_format_reflects_fps(void) {
     nt_debug_overlay_init();
@@ -105,7 +105,7 @@ static void test_stats_format_reflects_fps(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 5: user counters in the HUD, exact int + decimals for floats ---- */
+/* ---- user counters in the HUD, exact int + decimals for floats ---- */
 
 static void test_stats_user_counters(void) {
     nt_debug_overlay_init();
@@ -128,7 +128,7 @@ static void test_stats_user_counters(void) {
     nt_debug_overlay_shutdown();
 }
 
-/* ---- Test 6: int user counter exact past 2^53 in the HUD ---- */
+/* ---- int user counter exact past 2^53 in the HUD ---- */
 
 static void test_stats_user_counter_uint64_exact(void) {
     nt_debug_overlay_init();
@@ -145,23 +145,7 @@ static void test_stats_user_counter_uint64_exact(void) {
 }
 #endif /* NT_METRICS_ENABLED */
 
-/* ---- Test 7: draw records the HUD through the text renderer ---- */
-
-/* A font with one triangle glyph 'F' (the HUD starts with "FPS:"). */
-static uint8_t *build_f_font_blob(uint32_t *out_size) {
-    const uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
-    /* contour_count 1, point_count 3, all on-curve, first point (0,0), deltas (50,0) (-50,50). */
-    static const uint8_t contour[14] = {1, 0, 3, 0, 0x07, 0x00, 0, 0, 0, 0, 50, 0, (uint8_t)(int8_t)-50, 50};
-    *out_size = header_size + (uint32_t)sizeof(NtFontGlyphEntry) + (uint32_t)sizeof contour;
-    uint8_t *blob = (uint8_t *)calloc(*out_size, 1);
-    TEST_ASSERT_NOT_NULL(blob);
-    const NtFontAssetHeader hdr = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 800, .descent = -200};
-    memcpy(blob, &hdr, sizeof hdr);
-    const NtFontGlyphEntry entry = {.codepoint = 'F', .data_offset = header_size + (uint32_t)sizeof(NtFontGlyphEntry), .advance = 500, .bbox_x1 = 50, .bbox_y1 = 50, .curve_count = 3};
-    memcpy(blob + header_size, &entry, sizeof entry);
-    memcpy(blob + entry.data_offset, contour, sizeof contour);
-    return blob;
-}
+/* ---- draw records the HUD through the text renderer ---- */
 
 static void test_draw_records_a_text_draw(void) {
     nt_hash_init(&(nt_hash_desc_t){0});
@@ -173,7 +157,7 @@ static void test_draw_records_a_text_draw(void) {
     const nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_curve_texture"}, 1);
     const nt_material_t material = nt_material_create(&(nt_material_create_desc_t){.program = program, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     uint32_t blob_size = 0;
-    uint8_t *blob = build_f_font_blob(&blob_size);
+    uint8_t *blob = nt_test_font_blob('F', 'F', &blob_size); /* the HUD starts with "FPS:" */
     const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
     nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
     nt_resource_step();

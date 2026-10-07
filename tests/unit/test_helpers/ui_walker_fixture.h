@@ -54,8 +54,7 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx);
  * nt_layout_index 0 (zeroed) resolves to the baked root: identity transform, band 0. */
 void ui_walker_fixture_inject_cmds(ui_walker_fixture_t *fx, Clay_RenderCommand *cmds, int32_t count, int32_t capacity);
 
-/* A new font that really draws: one triangle glyph (bbox 0..400 x -200..800, advance 500) for each of ASCII
- * 33..126, an advance-only space; units_per_em 1000, ascent 800, descent -200. */
+/* A new font that really draws: nt_test_font_blob over ASCII 32..126. */
 nt_font_t ui_walker_fixture_make_real_font(ui_walker_fixture_t *fx);
 
 /* Fake-backend draw trace probes (arm it with nt_gfx_fake_draw_trace_reset). */

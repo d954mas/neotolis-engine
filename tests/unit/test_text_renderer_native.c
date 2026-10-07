@@ -10,10 +10,10 @@
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
-#include "nt_font_format.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_test_font_blob.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -46,42 +46,6 @@ static uint8_t *s_blob;
 static nt_font_t s_font;
 static nt_material_t s_material;
 
-/* 'A' and 'B': one triangle each, advance 500, bbox 0..400 x -200..800 in a 1000-unit em. */
-static uint8_t *build_font_blob(uint32_t *out_size) {
-    static const uint8_t contour[14] = {1, 0, 3, 0, 0x07, 0x00, 0, 0, 0, 0, 50, 0, (uint8_t)(int8_t)-50, 50};
-    const uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
-    const uint32_t glyphs_size = 2U * (uint32_t)sizeof(NtFontGlyphEntry);
-    const uint32_t total_size = header_size + glyphs_size + (2U * (uint32_t)sizeof contour);
-    uint8_t *blob = (uint8_t *)calloc(total_size, 1);
-    TEST_ASSERT_NOT_NULL(blob);
-
-    NtFontAssetHeader hdr;
-    memset(&hdr, 0, sizeof hdr);
-    hdr.magic = NT_FONT_MAGIC;
-    hdr.version = NT_FONT_VERSION;
-    hdr.glyph_count = 2;
-    hdr.units_per_em = 1000;
-    hdr.ascent = 800;
-    hdr.descent = -200;
-    memcpy(blob, &hdr, sizeof hdr);
-
-    for (uint32_t g = 0; g < 2U; g++) {
-        NtFontGlyphEntry entry;
-        memset(&entry, 0, sizeof entry);
-        entry.codepoint = 'A' + g;
-        entry.data_offset = header_size + glyphs_size + (g * (uint32_t)sizeof contour);
-        entry.advance = 500;
-        entry.bbox_y0 = -200;
-        entry.bbox_x1 = 400;
-        entry.bbox_y1 = 800;
-        entry.curve_count = 3;
-        memcpy(blob + header_size + ((size_t)g * sizeof entry), &entry, sizeof entry);
-        memcpy(blob + entry.data_offset, contour, sizeof contour);
-    }
-    *out_size = total_size;
-    return blob;
-}
-
 void setUp(void) {
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 2, .max_pipelines = 2, .max_buffers = 8, .max_textures = 4, .max_meshes = 2, .max_vertex_inputs = 4, .max_render_targets = 2));
@@ -91,7 +55,7 @@ void setUp(void) {
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
 
     uint32_t size = 0;
-    s_blob = build_font_blob(&size);
+    s_blob = nt_test_font_blob('A', 'B', &size);
     s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = MAX_GLYPHS});
     nt_font_add(s_font, nt_font_test_resource(nt_font_test_register_data(s_blob, size)));
     nt_resource_step();

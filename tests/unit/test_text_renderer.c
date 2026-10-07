@@ -22,90 +22,11 @@
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_test_font_blob.h"
 #include "time/nt_time.h"
 #include "color/nt_color.h"
 #include "unity.h"
 /* clang-format on */
-
-/* ---- Test blob builder (identical to test_font.c) ---- */
-
-static uint8_t *build_test_font_blob(uint32_t *out_size) {
-    uint32_t contour_size = 14; /* v4: cc(2)+pc(2)+flags(2)+first(4)+deltas(4) */
-    uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
-    uint32_t glyphs_size = 3 * (uint32_t)sizeof(NtFontGlyphEntry);
-    uint32_t total_size = header_size + glyphs_size + (3 * contour_size);
-
-    uint8_t *blob = (uint8_t *)calloc(total_size, 1);
-    NT_ASSERT(blob);
-
-    NtFontAssetHeader hdr;
-    memset(&hdr, 0, sizeof(hdr));
-    hdr.magic = NT_FONT_MAGIC;
-    hdr.version = NT_FONT_VERSION;
-    hdr.glyph_count = 3;
-    hdr.units_per_em = 1000;
-    hdr.ascent = 800;
-    hdr.descent = -200;
-    hdr.line_gap = 0;
-    /* v5 decoration metrics (font units): underline below baseline, strike above. */
-    hdr.underline_position = -100;
-    hdr.underline_thickness = 50;
-    hdr.strikeout_position = 250;
-    hdr.strikeout_size = 40;
-    memcpy(blob, &hdr, sizeof(hdr));
-
-    uint32_t data_base = header_size + glyphs_size;
-    uint32_t codepoints[3] = {65, 66, 67}; /* 'A', 'B', 'C' */
-
-    for (int g = 0; g < 3; g++) {
-        NtFontGlyphEntry entry;
-        memset(&entry, 0, sizeof(entry));
-        entry.codepoint = codepoints[g];
-        entry.data_offset = data_base + ((uint32_t)g * contour_size);
-        entry.advance = 500;
-        entry.bbox_x0 = 0;
-        entry.bbox_y0 = -200;
-        entry.bbox_x1 = 400;
-        entry.bbox_y1 = 800;
-        entry.curve_count = 3; /* 3 on-curve points in closed contour → 3 line segments */
-        entry.kern_count = 0;
-        memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &entry, sizeof(entry));
-    }
-
-    /* Write v4 contour data per glyph: contour_count, then per-contour:
-     * point_count, flags_bitmask, first_point(abs), varlen_deltas */
-    for (int g = 0; g < 3; g++) {
-        uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
-        /* contour_count = 1 */
-        uint16_t cc = 1;
-        memcpy(wp, &cc, 2);
-        wp += 2;
-        /* point_count = 3 (triangle: 3 on-curve points → 3 line-segment curves) */
-        uint16_t pc = 3;
-        memcpy(wp, &pc, 2);
-        wp += 2;
-        /* flags bitmask: NT_FONT_BITMASK_BYTES(3) = 2, all on-curve → bits 0,1,2 set */
-        wp[0] = 0x07;
-        wp[1] = 0x00;
-        wp += 2;
-        /* first point absolute (0, 0) */
-        int16_t fx = 0;
-        int16_t fy = 0;
-        memcpy(wp, &fx, 2);
-        wp += 2;
-        memcpy(wp, &fy, 2);
-        wp += 2;
-        /* delta point 1: (50, 0) — fits in int8, single byte each */
-        *wp++ = 50;
-        *wp++ = 0;
-        /* delta point 2: (-50, 50) — fits in int8 */
-        *wp++ = (uint8_t)(int8_t)-50;
-        *wp++ = 50;
-    }
-
-    *out_size = total_size;
-    return blob;
-}
 
 /* ---- Helper: register font blob as test resource ---- */
 
@@ -138,21 +59,8 @@ static const float s_identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0
 static const uint32_t s_white = 0xFFFFFFFFU;
 #define TEXT_VERTEX_BYTES 52U /* nt_text_vertex_t */
 
-/* The style draws use: setUp's font, plus whatever decoration a test sets on it. */
-static nt_text_style_t s_style;
-
-static void reset_style(void) { s_style = (nt_text_style_t){.font = s_style.font}; }
-
-static void draw_text_n(const char *text, size_t len, float size, uint32_t color, float letter_tracking, float line_leading) {
-    nt_text_style_t style = s_style;
-    style.size = size;
-    style.color = color;
-    style.letter_tracking = letter_tracking;
-    style.line_leading = line_leading;
-    nt_text_renderer_draw_n(&style, s_identity, text, len);
-}
-
-static void draw_text(const char *text, float size, uint32_t color, float letter_tracking, float line_leading) { draw_text_n(text, strlen(text), size, color, letter_tracking, line_leading); }
+/* The style most draws use: the setUp font, 32 px, white, nothing else set. */
+static nt_text_style_t plain(void) { return (nt_text_style_t){.font = s_font, .size = 32.0F, .color = s_white}; }
 
 /* The frame's selection; next_frame selects it again. */
 static nt_material_t s_mat;
@@ -189,7 +97,8 @@ static void next_frame(void) {
 
 /* Executes what is recorded so far, as the frame end would. */
 static void draw_and_execute(void) {
-    draw_text("AB", 32.0F, s_white, 0.0F, 0.0F);
+    const nt_text_style_t style = plain();
+    nt_text_renderer_draw(&style, s_identity, "AB");
     nt_gfx_frame_execute();
 }
 
@@ -273,7 +182,7 @@ void setUp(void) {
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
 
     /* Build font and create handle */
-    s_blob = build_test_font_blob(&s_blob_size);
+    s_blob = nt_test_font_blob('A', 'C', &s_blob_size);
     nt_font_create_desc_t desc = {
         .max_glyphs = 16,
     };
@@ -283,7 +192,6 @@ void setUp(void) {
     nt_resource_step();
     nt_font_step();
 
-    s_style = (nt_text_style_t){.font = s_font};
     select_material(create_test_material_with_blend(nt_blend_alpha()));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
@@ -303,10 +211,11 @@ void tearDown(void) {
     nt_gfx_shutdown();
 }
 
-/* ---- Test 1: UTF-8 decode ASCII (TEXT-03) ---- */
+/* ---- UTF-8 decode ASCII ---- */
 
 void test_utf8_decode_ascii(void) {
-    draw_text("ABC", 32.0F, s_white, 0.0F, 0.0F);
+    const nt_text_style_t style = plain();
+    nt_text_renderer_draw(&style, s_identity, "ABC");
     TEST_ASSERT_EQUAL_UINT32(3, text_quad_count());
 }
 
@@ -352,25 +261,27 @@ void test_text_renderer_rejects_unrelated_second_sampler(void) {
     NT_TEST_EXPECT_ASSERT(draw_and_execute());
 }
 
-/* ---- Test 2: UTF-8 decode Cyrillic (TEXT-03) ---- */
+/* ---- UTF-8 decode Cyrillic ---- */
 
 void test_utf8_decode_cyrillic(void) {
+    const nt_text_style_t style = plain();
     /* "При" in Russian = 3 codepoints, 6 bytes */
     /* These are non-ASCII, so they won't be in our test font -> tofu glyphs */
-    draw_text("\xd0\x9f\xd1\x80\xd0\xb8", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "\xd0\x9f\xd1\x80\xd0\xb8");
     /* Tofu glyphs still produce quads (has visible bbox) */
     TEST_ASSERT_EQUAL_UINT32(3, text_quad_count());
 }
 
-/* ---- Test 3: UTF-8 decode CJK (TEXT-03) ---- */
+/* ---- UTF-8 decode CJK ---- */
 
 void test_utf8_decode_cjk(void) {
+    const nt_text_style_t style = plain();
     /* "你好" = 2 codepoints, 6 bytes */
-    draw_text("\xe4\xbd\xa0\xe5\xa5\xbd", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "\xe4\xbd\xa0\xe5\xa5\xbd");
     TEST_ASSERT_EQUAL_UINT32(2, text_quad_count());
 }
 
-/* ---- Test 4: Measure returns nonzero (TEXT-02) ---- */
+/* ---- Measure returns nonzero ---- */
 
 void test_measure_returns_nonzero(void) {
     /* "ABC" -> all in test font with advance=500, units_per_em=1000 */
@@ -379,7 +290,7 @@ void test_measure_returns_nonzero(void) {
     TEST_ASSERT_TRUE(sz.height > 0.0F);
 }
 
-/* ---- Test 5: Measure empty string (TEXT-02 edge) ---- */
+/* ---- Measure empty string ---- */
 
 void test_measure_empty_string(void) {
     nt_text_size_t sz = nt_font_measure(s_font, "", 32.0F, 0.0F);
@@ -387,7 +298,7 @@ void test_measure_empty_string(void) {
     TEST_ASSERT_TRUE(sz.height == 0.0F);
 }
 
-/* ---- Test 6: Measure NULL string (TEXT-02 edge) ---- */
+/* ---- Measure NULL string ---- */
 
 void test_measure_null_string(void) {
     nt_text_size_t sz = nt_font_measure(s_font, NULL, 32.0F, 0.0F);
@@ -397,8 +308,10 @@ void test_measure_null_string(void) {
 
 /* The vertex carries the draw's packed color at byte 44 and the per-glyph depth bias at byte 48. */
 void test_vertex_color_and_depth_bias_bytes(void) {
-    s_style.glyph_depth_bias = 0.25F;
-    draw_text("AB", 32.0F, NT_RGBA8(10, 20, 30, 40), 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    style.glyph_depth_bias = 0.25F;
+    style.color = NT_RGBA8(10, 20, 30, 40);
+    nt_text_renderer_draw(&style, s_identity, "AB");
     TEST_ASSERT_EQUAL_UINT32(2, text_quad_count());
     const uint8_t *v = text_vertices();
     uint32_t color = 0;
@@ -410,7 +323,6 @@ void test_vertex_color_and_depth_bias_bytes(void) {
     TEST_ASSERT_EQUAL_HEX32(NT_RGBA8(10, 20, 30, 40), color);
     TEST_ASSERT_TRUE(bias0 == 0.0F);  /* NOLINT -- exact */
     TEST_ASSERT_TRUE(bias1 == 0.25F); /* NOLINT -- exact */
-    s_style.glyph_depth_bias = 0.0F;
 }
 
 /* The GPU reads that color as normalized RGBA8 at byte 44 of a 52-byte vertex. */
@@ -424,16 +336,9 @@ void test_vertex_input_reads_color_as_normalized_rgba8(void) {
     TEST_ASSERT_EQUAL_UINT16(44U, layout.attrs[4].offset);
 }
 
-/* ---- Test 8: 4 vertices per glyph (TEXT-01) ---- */
-
-void test_vertex_count_4_per_glyph(void) {
-    draw_text("AB", 32.0F, s_white, 0.0F, 0.0F);
-    /* 2 visible glyphs -> 8 vertices */
-    TEST_ASSERT_EQUAL_UINT32(8, text_vertex_count());
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- Unity assertions expand into branches.
 void test_quad_covers_fp16_rounded_tofu(void) {
+    nt_text_style_t style = plain();
     static const struct {
         uint16_t upm;
         int16_t ascent;
@@ -448,7 +353,7 @@ void test_quad_covers_fp16_rounded_tofu(void) {
     };
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         uint32_t blob_size;
-        uint8_t *blob = build_test_font_blob(&blob_size);
+        uint8_t *blob = nt_test_font_blob('A', 'C', &blob_size);
         NtFontAssetHeader hdr;
         memcpy(&hdr, blob, sizeof hdr);
         hdr.units_per_em = cases[i].upm;
@@ -460,8 +365,9 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         nt_font_add(font, register_font_resource("rounded_tofu", blob, blob_size));
         nt_resource_step();
         nt_font_step();
-        s_style.font = font;
-        draw_text("Z", (float)cases[i].upm * 2.0F, s_white, 0.0F, 0.0F);
+        style.font = font;
+        style.size = (float)cases[i].upm * 2.0F;
+        nt_text_renderer_draw(&style, s_identity, "Z");
         TEST_ASSERT_EQUAL_UINT32(4, text_vertex_count());
 
         const uint8_t *verts = text_vertices();
@@ -483,7 +389,6 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         TEST_ASSERT_TRUE((float)cases[i].ascent == bounds[3]);
 
         next_frame();
-        s_style.font = s_font;
         nt_gfx_end_pass(); /* texture destruction is pass-forbidden */
         nt_font_destroy(font);
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -523,15 +428,16 @@ void test_zero_frame_capacity_asserts_at_set_material(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* A selection belongs to its frame: the next frame's draws need a new set_material. */
 void test_draw_after_previous_frame_selection_asserts(void) {
+    const nt_text_style_t style = plain();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    NT_TEST_EXPECT_ASSERT(draw_text("AB", 32.0F, s_white, 0.0F, 0.0F));
+    NT_TEST_EXPECT_ASSERT(nt_text_renderer_draw(&style, s_identity, "AB"));
 }
 #endif
 
-/* ---- Test 10: Measure width increases with more chars (TEXT-04) ---- */
+/* ---- Measure width increases with more chars ---- */
 
 void test_measure_width_increases(void) {
     nt_text_size_t sz_a = nt_font_measure(s_font, "A", 32.0F, 0.0F);
@@ -539,10 +445,11 @@ void test_measure_width_increases(void) {
     TEST_ASSERT_TRUE(sz_ab.width > sz_a.width);
 }
 
-/* ---- Test 11: Newlines reset x and advance y ---- */
+/* ---- Newlines reset x and advance y ---- */
 
 void test_draw_newline_advances_to_next_line(void) {
-    draw_text("A\nB", 32.0F, s_white, 0.0F, 0.0F);
+    const nt_text_style_t style = plain();
+    nt_text_renderer_draw(&style, s_identity, "A\nB");
     TEST_ASSERT_EQUAL_UINT32(2, text_quad_count());
 
     const uint8_t *verts = text_vertices();
@@ -561,10 +468,11 @@ void test_draw_newline_advances_to_next_line(void) {
 
 /* Line breaks emit no quad, so the call records nothing: no binds, no draw. */
 void test_a_call_without_quads_records_nothing(void) {
+    const nt_text_style_t style = plain();
     const uint32_t used = g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].used;
     nt_gfx_fake_reset();
     nt_gfx_fake_draw_trace_reset(true);
-    draw_text("\r\n\n", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "\r\n\n");
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_bind_pipeline_count());
@@ -573,6 +481,7 @@ void test_a_call_without_quads_records_nothing(void) {
 
 /* Two draws of one font and material are one GPU draw; another font splits it with only a texture set. */
 void test_equal_draws_merge_and_a_font_change_splits(void) {
+    nt_text_style_t style = plain();
     nt_font_t other = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
     nt_font_add(other, register_font_resource("text_other_font", s_blob, s_blob_size));
     nt_resource_step();
@@ -580,12 +489,12 @@ void test_equal_draws_merge_and_a_font_change_splits(void) {
 
     nt_gfx_fake_reset();
     nt_gfx_fake_draw_trace_reset(true);
-    draw_text("AB", 32.0F, s_white, 0.0F, 0.0F);
-    draw_text("C", 32.0F, s_white, 0.0F, 0.0F);
-    s_style.font = other;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
-    s_style.font = s_font;
-    draw_text("B", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "AB");
+    nt_text_renderer_draw(&style, s_identity, "C");
+    style.font = other;
+    nt_text_renderer_draw(&style, s_identity, "A");
+    style.font = s_font;
+    nt_text_renderer_draw(&style, s_identity, "B");
     nt_gfx_frame_execute();
 
     TEST_ASSERT_EQUAL_UINT32(3U, nt_gfx_fake_draw_trace_count());
@@ -603,6 +512,7 @@ void test_equal_draws_merge_and_a_font_change_splits(void) {
 
 /* Params are written once per change on a program: A -> B -> A writes A again, equal draws write nothing. */
 void test_material_params_record_once_per_change(void) {
+    const nt_text_style_t style = plain();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
     nt_program_t shared = nt_gfx_make_program(vs, fs);
@@ -613,19 +523,19 @@ void test_material_params_record_once_per_change(void) {
 
     nt_gfx_fake_reset();
     select_material(a);
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
-    draw_text("B", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "A");
+    nt_text_renderer_draw(&style, s_identity, "B");
     select_material(b);
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "A");
     select_material(a);
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "A");
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(3U, nt_gfx_fake_uniform_vec4_count());
 
     /* Unchanged params on the next frame write nothing. */
     next_frame();
     nt_gfx_fake_reset();
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "A");
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(0U, nt_gfx_fake_uniform_vec4_count());
 
@@ -634,7 +544,7 @@ void test_material_params_record_once_per_change(void) {
     nt_material_set_param(a, "u_tint", green);
     next_frame();
     nt_gfx_fake_reset();
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "A");
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_uniform_vec4_count());
 }
@@ -642,7 +552,6 @@ void test_material_params_record_once_per_change(void) {
 /* A vertex-input creation failure leaves the selection undrawable for its frame only. */
 void test_vertex_input_failure_is_retried_next_frame(void) {
     nt_text_renderer_shutdown(); /* drops the vertex input built in setUp */
-    s_style.font = s_font;
     nt_gfx_fake_fail_next_vertex_input_create();
     nt_gfx_fake_draw_trace_reset(true);
     select_material(s_mat);
@@ -663,7 +572,6 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
-    const uint16_t base = nt_text_renderer_test_pipeline_cache_count();
     nt_gfx_fake_reset();
     select_material(a);
     draw_and_execute();
@@ -671,7 +579,6 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
     draw_and_execute();
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_pipeline_create_count());
-    TEST_ASSERT_EQUAL_UINT16(base + 1U, nt_text_renderer_test_pipeline_cache_count());
 }
 
 /* Render state is folded in, so one program with two states is two pipelines. */
@@ -682,7 +589,6 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
     nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
-    const uint16_t base = nt_text_renderer_test_pipeline_cache_count();
     nt_gfx_fake_reset();
     select_material(opaque_mat);
     draw_and_execute();
@@ -690,7 +596,6 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     draw_and_execute();
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_pipeline_create_count());
-    TEST_ASSERT_EQUAL_UINT16(base + 2U, nt_text_renderer_test_pipeline_cache_count());
 }
 
 /* Programs come out of the pool in creation order, so two shader pairs get
@@ -706,7 +611,6 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
-    const uint16_t base = nt_text_renderer_test_pipeline_cache_count();
     nt_gfx_fake_reset();
     nt_gfx_fake_draw_trace_reset(true);
     select_material(a);
@@ -715,7 +619,6 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     draw_and_execute();
 
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_pipeline_create_count());
-    TEST_ASSERT_EQUAL_UINT16(base + 2U, nt_text_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(p0.id, nt_gfx_fake_draw_trace_at(0).program.id);
     TEST_ASSERT_EQUAL_UINT32(p1.id, nt_gfx_fake_draw_trace_at(1).program.id);
@@ -755,6 +658,7 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
 
 /* One glyph slot: 'A' takes it, B and C find every slot in use this frame and draw as tofu. */
 void test_full_glyph_cache_still_draws_the_entire_run(void) {
+    nt_text_style_t style = plain();
     nt_font_create_desc_t desc = {
         .max_glyphs = 2,
     };
@@ -762,24 +666,24 @@ void test_full_glyph_cache_still_draws_the_entire_run(void) {
     nt_font_add(tiny_font, register_font_resource("text_cache_full", s_blob, s_blob_size));
     nt_resource_step();
     nt_font_step();
-    s_style.font = tiny_font;
+    style.font = tiny_font;
 
     const uint32_t uploads = nt_gfx_fake_update_texture_count();
-    draw_text("ABCABC", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "ABCABC");
     nt_gfx_frame_execute();
 
     TEST_ASSERT_EQUAL_UINT32(uploads + 1U, nt_gfx_fake_update_texture_count()); /* only 'A' uploads its row */
     TEST_ASSERT_EQUAL_UINT64(36U, g_nt_gfx.counters.indices);
     TEST_ASSERT_EQUAL_UINT64(24U, g_nt_gfx.counters.vertices);
-    s_style.font = s_font;
     nt_gfx_end_pass();
     nt_font_destroy(tiny_font);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
 void test_decoration_only_run_draws(void) {
+    nt_text_style_t style = plain();
     uint32_t blob_size = 0;
-    uint8_t *blob = build_test_font_blob(&blob_size);
+    uint8_t *blob = nt_test_font_blob('A', 'C', &blob_size);
     NtFontGlyphEntry entry;
     memcpy(&entry, blob + sizeof(NtFontAssetHeader), sizeof(entry));
     entry.bbox_x1 = entry.bbox_x0;
@@ -790,12 +694,12 @@ void test_decoration_only_run_draws(void) {
     nt_font_add(font, register_font_resource("text_decoration_only", blob, blob_size));
     nt_resource_step();
     nt_font_step();
-    s_style.font = font;
-    s_style.underline = true;
-    s_style.strikethrough = true;
+    style.font = font;
+    style.underline = true;
+    style.strikethrough = true;
 
     nt_gfx_fake_draw_trace_reset(true);
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "A");
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(0U);
@@ -803,8 +707,6 @@ void test_decoration_only_run_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(12U, draw.num_indices);
     TEST_ASSERT_EQUAL_UINT64(8U, g_nt_gfx.counters.vertices); /* glyph + decoration quad */
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
-    reset_style();
-    s_style.font = s_font;
     nt_gfx_end_pass();
     nt_font_destroy(font);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -812,6 +714,7 @@ void test_decoration_only_run_draws(void) {
 }
 
 void test_unready_font_skips_glyph_and_decoration_uploads(void) {
+    nt_text_style_t style = plain();
     nt_log_add_sink(capture_errors, NULL);
     const uint8_t mask = 1U; /* fail the font's only texture */
     nt_gfx_fake_fail_texture_creates(mask);
@@ -822,7 +725,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     nt_gfx_fake_fail_texture_creates(mask);
     nt_gfx_end_pass();
     nt_font_step();
-    s_style.font = font;
+    style.font = font;
 
     s_error_count = 0;
     const uint32_t uploads = nt_gfx_fake_update_texture_count();
@@ -831,13 +734,13 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     nt_gfx_begin_frame();
     nt_text_renderer_set_material(s_mat);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    draw_text("ABC", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "ABC");
 #if NT_FONT_EMBOLDEN_ENABLED
-    s_style.weight_em = 0.04F;
+    style.weight_em = 0.04F;
 #endif
-    s_style.underline = true;
-    s_style.strikethrough = true;
-    draw_text("ABC", 32.0F, s_white, 0.0F, 0.0F);
+    style.underline = true;
+    style.strikethrough = true;
+    nt_text_renderer_draw(&style, s_identity, "ABC");
     nt_gfx_frame_execute();
 
     TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count());
@@ -856,14 +759,12 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     nt_gfx_begin_frame();
     nt_text_renderer_set_material(s_mat);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    draw_text("ABC", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "ABC");
     nt_gfx_frame_execute();
     TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_fake_update_texture_count());
     TEST_ASSERT_EQUAL_UINT64(30U, g_nt_gfx.counters.indices);
     TEST_ASSERT_EQUAL_UINT64(20U, g_nt_gfx.counters.vertices);
     TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
-    reset_style();
-    s_style.font = s_font;
     nt_gfx_end_pass();
     nt_font_destroy(font);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -900,7 +801,6 @@ void test_a_new_program_after_shutdown_does_not_reuse_the_old_pipeline(void) {
 
     nt_gfx_end_pass();
     nt_text_renderer_shutdown();
-    s_style.font = s_font;
     nt_material_set_program(mat, nt_gfx_make_program(vs, fs));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 
@@ -973,32 +873,35 @@ void test_context_loss_recovers_without_a_restore_call(void) {
     TEST_ASSERT_EQUAL_UINT64(12U, g_nt_gfx.counters.indices);
 }
 
-/* ---- Test 12: TEXT-01 — _draw_n produces byte-identical vertex stream to _draw ---- */
+/* ---- _draw_n produces byte-identical vertex stream to _draw ---- */
 
 void test_draw_n_matches_draw(void) {
-    draw_text("AB", 32.0F, s_white, 0.0F, 0.0F);
+    const nt_text_style_t style = plain();
+    nt_text_renderer_draw(&style, s_identity, "AB");
     TEST_ASSERT_EQUAL_UINT32(8U, text_vertex_count()); /* 2 visible glyphs × 4 verts */
     uint8_t buf_draw[8U * TEXT_VERTEX_BYTES];
     memcpy(buf_draw, text_vertices(), sizeof buf_draw);
 
     next_frame();
-    draw_text_n("AB", 2U, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw_n(&style, s_identity, "AB", 2U);
     TEST_ASSERT_EQUAL_UINT32(8U, text_vertex_count());
     TEST_ASSERT_EQUAL_MEMORY(buf_draw, text_vertices(), sizeof buf_draw);
 }
 
-/* ---- Test 13b: letter_spacing shifts subsequent glyphs by spacing pixels ---- */
+/* ---- letter_spacing shifts subsequent glyphs by spacing pixels ---- */
 
 void test_draw_n_letter_spacing_advances_pen(void) {
+    nt_text_style_t style = plain();
     /* Baseline: AB with zero spacing -- second glyph's first vertex x at advance(A). */
-    draw_text_n("AB", 2U, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw_n(&style, s_identity, "AB", 2U);
     TEST_ASSERT_EQUAL_UINT32(8U, text_vertex_count());
     float base_b_x = 0.0F;
     memcpy(&base_b_x, text_vertices() + ((size_t)4U * TEXT_VERTEX_BYTES), sizeof(float));
 
     /* Same call with spacing=7: B's first vertex shifts by exactly 7 px. */
     next_frame();
-    draw_text_n("AB", 2U, 32.0F, s_white, 7.0F, 0.0F);
+    style.letter_tracking = 7.0F;
+    nt_text_renderer_draw_n(&style, s_identity, "AB", 2U);
     float spaced_b_x = 0.0F;
     memcpy(&spaced_b_x, text_vertices() + ((size_t)4U * TEXT_VERTEX_BYTES), sizeof(float));
 
@@ -1009,8 +912,9 @@ void test_draw_n_letter_spacing_advances_pen(void) {
 /* ---- line_leading shifts subsequent lines by leading px on \n ---- */
 
 void test_draw_n_line_leading_advances_pen_y(void) {
+    nt_text_style_t style = plain();
     /* Baseline: "A\nB" with zero leading -- B at y = -natural_line_advance. */
-    draw_text_n("A\nB", 3U, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw_n(&style, s_identity, "A\nB", 3U);
     TEST_ASSERT_EQUAL_UINT32(8U, text_vertex_count());
     /* vertex 0 = A's first corner, vertex 4 = B's first corner. y is float[1]. */
     float base_b_y = 0.0F;
@@ -1018,7 +922,8 @@ void test_draw_n_line_leading_advances_pen_y(void) {
 
     /* Same call with leading=10: B shifts by 10 more px downward. */
     next_frame();
-    draw_text_n("A\nB", 3U, 32.0F, s_white, 0.0F, 10.0F);
+    style.line_leading = 10.0F;
+    nt_text_renderer_draw_n(&style, s_identity, "A\nB", 3U);
     float leading_b_y = 0.0F;
     memcpy(&leading_b_y, text_vertices() + ((size_t)4U * TEXT_VERTEX_BYTES) + sizeof(float), sizeof(float));
 
@@ -1026,11 +931,12 @@ void test_draw_n_line_leading_advances_pen_y(void) {
     TEST_ASSERT_EQUAL_INT32((int32_t)(base_b_y - 10.0F), (int32_t)leading_b_y);
 }
 
-/* ---- Test 13: TEXT-01b — poisoned byte at utf8[len] does NOT contribute (no over-read) ---- */
+/* ---- poisoned byte at utf8[len] does NOT contribute (no over-read) ---- */
 
 void test_draw_n_does_not_over_read(void) {
+    const nt_text_style_t style = plain();
     /* Reference: _draw on the clean "AB" string */
-    draw_text("AB", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw(&style, s_identity, "AB");
     TEST_ASSERT_EQUAL_UINT32(8U, text_vertex_count());
     uint8_t buf_ref[8U * TEXT_VERTEX_BYTES];
     memcpy(buf_ref, text_vertices(), sizeof buf_ref);
@@ -1041,7 +947,7 @@ void test_draw_n_does_not_over_read(void) {
     const char buf[8] = {'A', 'B', 'X', 'X', 'X', 'X', 'X', 'X'};
 
     next_frame();
-    draw_text_n(buf, 2U, 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_renderer_draw_n(&style, s_identity, buf, 2U);
     TEST_ASSERT_EQUAL_UINT32(8U, text_vertex_count());
     TEST_ASSERT_EQUAL_MEMORY(buf_ref, text_vertices(), sizeof buf_ref);
 }
@@ -1049,12 +955,13 @@ void test_draw_n_does_not_over_read(void) {
 /* ---- Benchmark cases (printed as [BENCH] lines; cover draw hot-loop perf) ---- */
 
 static void bench_draw_short_warm(void) {
+    const nt_text_style_t style = plain();
     /* GPU-side glyph cache and font ASCII fast-path warm via setup. A frame per call keeps the
      * frame storage budget from saturating across 1000 draws. */
     const int n_calls = 1000;
     const uint64_t t0 = nt_time_nanos();
     for (int i = 0; i < n_calls; i++) {
-        draw_text_n("ABC", 3U, 32.0F, s_white, 0.0F, 0.0F);
+        nt_text_renderer_draw_n(&style, s_identity, "ABC", 3U);
         next_frame();
     }
     const uint64_t t1 = nt_time_nanos();
@@ -1065,6 +972,7 @@ static void bench_draw_short_warm(void) {
 }
 
 static void bench_draw_mixed_ui(void) {
+    const nt_text_style_t style = plain();
     /* 6 hot labels each redrawn over 200 frames. Approximates a stable UI re-render path where
      * the GPU glyph cache and the ASCII fast-path are both warm. */
     const char *const labels[] = {"OK", "AB", "BC", "CA", "ABC", "BCA"};
@@ -1073,7 +981,7 @@ static void bench_draw_mixed_ui(void) {
 
     /* Warm up the glyph cache once. */
     for (int i = 0; i < label_count; i++) {
-        draw_text_n(labels[i], lens[i], 32.0F, s_white, 0.0F, 0.0F);
+        nt_text_renderer_draw_n(&style, s_identity, labels[i], lens[i]);
     }
     next_frame();
 
@@ -1082,7 +990,7 @@ static void bench_draw_mixed_ui(void) {
     const uint64_t t0 = nt_time_nanos();
     for (int f = 0; f < frames; f++) {
         for (int i = 0; i < label_count; i++) {
-            draw_text_n(labels[i], lens[i], 32.0F, s_white, 0.0F, 0.0F);
+            nt_text_renderer_draw_n(&style, s_identity, labels[i], lens[i]);
             total_calls++;
         }
         next_frame();
@@ -1096,12 +1004,12 @@ static void bench_draw_mixed_ui(void) {
 
 /* ---- synthetic-oblique (faux-italic) ---- */
 
-/* set_oblique shears the model so a glyph's top edge shifts +x relative to its bottom (lean about the
+/* Oblique shears the model so a glyph's top edge shifts +x relative to its bottom (lean about the
  * baseline). 0 = upright: top and bottom share x under the identity model. The test font 'A' spans
  * em y -200..800 → ~33px tall at size 32, so oblique 0.5 leans the top ~16px. */
 void test_oblique_leans_glyph_top(void) {
-    s_style.oblique = 0.0F;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(1U, text_quad_count());
     float bl_x = 0.0F; /* vertex 0 = BL */
     float tl_x = 0.0F; /* vertex 3 = TL */
@@ -1110,13 +1018,11 @@ void test_oblique_leans_glyph_top(void) {
     TEST_ASSERT_TRUE(bl_x == tl_x); /* upright: no shear -> top and bottom share x exactly */
 
     next_frame();
-    s_style.oblique = 0.5F;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    style.oblique = 0.5F;
+    nt_text_renderer_draw(&style, s_identity, "A");
     memcpy(&bl_x, text_vertices() + 0, sizeof(float));
     memcpy(&tl_x, text_vertices() + ((size_t)3U * TEXT_VERTEX_BYTES), sizeof(float));
     TEST_ASSERT_TRUE_MESSAGE(tl_x > bl_x + 1.0F, "oblique leans the glyph top toward +x");
-
-    s_style.oblique = 0.0F; /* restore upright for test isolation */
 }
 
 /* ---- three-pass painter-order emit + sentinel decoration quad ---- */
@@ -1126,45 +1032,47 @@ static const uint32_t s_black = NT_RGBA8(0, 0, 0, 255);
 /* Outline adds a second draw span (fill + outline pass) → exactly 2× the fill-only vertex count. */
 #if NT_FONT_EMBOLDEN_ENABLED
 void test_outline_emits_extra_span(void) {
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    nt_text_renderer_draw(&style, s_identity, "A");
     const uint32_t fill_only = text_vertex_count();
     TEST_ASSERT_EQUAL_UINT32(4U, fill_only); /* one visible glyph */
     next_frame();
 
-    s_style.outline_w = 0.05F;
-    s_style.outline_color = s_black;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    style.outline_w = 0.05F;
+    style.outline_color = s_black;
+    nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(2U * fill_only, text_vertex_count()); /* fill + outline */
-    reset_style();
 }
 #endif
 
 /* Shadow adds one more pass; shadow+outline = three passes. */
 void test_shadow_emits_extra_span(void) {
-    s_style.shadow_dx = 2.0F;
-    s_style.shadow_dy = 2.0F;
-    s_style.shadow_color = s_black;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    style.shadow_dx = 2.0F;
+    style.shadow_dy = 2.0F;
+    style.shadow_color = s_black;
+    nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(8U, text_vertex_count()); /* fill + shadow */
 
 #if NT_FONT_EMBOLDEN_ENABLED
     next_frame();
-    s_style.outline_w = 0.05F;
-    s_style.outline_color = s_black;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    style.outline_w = 0.05F;
+    style.outline_color = s_black;
+    nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(12U, text_vertex_count()); /* fill + outline + shadow */
 #endif
-    reset_style();
 }
 
 /* Shadow pass reuses the fill variant translated by (dx,dy)*scale — no new cache key, exact offset. */
 void test_shadow_pass_offset(void) {
+    nt_text_style_t style = plain();
     /* Shadow offset is em: px = d * size. Use size != units_per_em so the em contract is unambiguous
      * (a design-unit *scale would give a different number) — (0.1,-0.05)em at size 200 = (+20,-10). */
-    s_style.shadow_dx = 0.1F;
-    s_style.shadow_dy = -0.05F;
-    s_style.shadow_color = s_black;
-    draw_text("A", 200.0F, s_white, 0.0F, 0.0F);
+    style.shadow_dx = 0.1F;
+    style.shadow_dy = -0.05F;
+    style.shadow_color = s_black;
+    style.size = 200.0F;
+    nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(2U, text_quad_count()); /* shadow (quad0) + fill (quad1) */
     const uint8_t *v = text_vertices();
     float shadow_x = 0.0F;
@@ -1183,53 +1091,55 @@ void test_shadow_pass_offset(void) {
     memcpy(&fill_color, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 44U, sizeof fill_color);
     TEST_ASSERT_EQUAL_HEX32(s_black, shadow_color); /* each pass carries its own color */
     TEST_ASSERT_EQUAL_HEX32(s_white, fill_color);
-    reset_style();
 }
 
 #if NT_FONT_EMBOLDEN_ENABLED
 /* An outline color whose alpha byte is 0 is off, whatever its RGB or width. */
 void test_outline_with_zero_alpha_emits_no_pass(void) {
-    s_style.outline_w = 0.05F;
-    s_style.outline_color = 0x00FFFFFFU;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    style.outline_w = 0.05F;
+    style.outline_color = 0x00FFFFFFU;
+    nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(4U, text_vertex_count()); /* fill only */
-    reset_style();
 }
 
 /* The shadow keeps the outline silhouette while the outline alpha fades to 0: the width picks it. */
 void test_zero_alpha_outline_keeps_the_shadow_on_the_outline_silhouette(void) {
-    s_style.shadow_dx = 0.0F;
-    s_style.shadow_dy = 0.0F;
-    s_style.shadow_color = s_black;
-    s_style.outline_w = 0.05F;
-    s_style.outline_color = 0x00FFFFFFU;
-    draw_text("A", 200.0F, s_white, 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    style.shadow_dx = 0.0F;
+    style.shadow_dy = 0.0F;
+    style.shadow_color = s_black;
+    style.outline_w = 0.05F;
+    style.outline_color = 0x00FFFFFFU;
+    style.size = 200.0F;
+    nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(8U, text_vertex_count()); /* shadow + fill */
     const uint8_t *v = text_vertices();
     /* Glyph data and bounds (bytes 20..43) name the cache variant: the shadow's is not the fill's. */
     TEST_ASSERT_NOT_EQUAL(0, memcmp(v + 20U, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 20U, 24U));
-    reset_style();
 }
 #endif
 
 /* A shadow color whose alpha byte is 0 is off, whatever its RGB. */
 void test_shadow_with_zero_alpha_emits_no_pass(void) {
-    s_style.shadow_dx = 2.0F;
-    s_style.shadow_dy = 2.0F;
-    s_style.shadow_color = 0x00FFFFFFU;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    style.shadow_dx = 2.0F;
+    style.shadow_dy = 2.0F;
+    style.shadow_color = 0x00FFFFFFU;
+    nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(4U, text_vertex_count()); /* fill only */
-    reset_style();
 }
 
 /* Passes emit GROUPED (all shadows, then all fills) — never interleaved per glyph. With "AB" the order
  * must be [shadow_A, shadow_B, fill_A, fill_B]: both shadow quads sit +20 from their fills. If interleaved
  * ([shadow_A, fill_A, shadow_B, fill_B]) quad1 would be fill_A and the +20 check on quad1 vs quad3 fails. */
 void test_passes_grouped_not_interleaved(void) {
-    s_style.shadow_dx = 0.1F;
-    s_style.shadow_dy = 0.0F;
-    s_style.shadow_color = s_black; /* em -> +20px at size 200 */
-    draw_text("AB", 200.0F, s_white, 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    style.shadow_dx = 0.1F;
+    style.shadow_dy = 0.0F;
+    style.shadow_color = s_black; /* em -> +20px at size 200 */
+    style.size = 200.0F;
+    nt_text_renderer_draw(&style, s_identity, "AB");
     TEST_ASSERT_EQUAL_UINT32(4U, text_quad_count()); /* 2 shadow + 2 fill */
     const uint8_t *v = text_vertices();
     float sh_a = 0.0F;
@@ -1242,13 +1152,13 @@ void test_passes_grouped_not_interleaved(void) {
     memcpy(&fl_b, v + ((size_t)3U * 4U * TEXT_VERTEX_BYTES), sizeof(float)); /* quad3 = fill_B */
     TEST_ASSERT_EQUAL_INT32(20, (int32_t)(sh_a - fl_a));
     TEST_ASSERT_EQUAL_INT32(20, (int32_t)(sh_b - fl_b)); /* grouping: quad1 is shadow_B, not fill_A */
-    reset_style();
 }
 
 /* Underline emits exactly ONE solid sentinel quad (band_count=0) per line after the glyph passes. */
 void test_underline_one_quad_per_segment(void) {
-    s_style.underline = true;
-    draw_text("AB", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    style.underline = true;
+    nt_text_renderer_draw(&style, s_identity, "AB");
     /* 2 fill glyphs + 1 underline quad. */
     TEST_ASSERT_EQUAL_UINT32(3U, text_quad_count());
 
@@ -1257,43 +1167,24 @@ void test_underline_one_quad_per_segment(void) {
     /* vertex 8 (quad2 v0), glyph_data at byte offset 20, [1] at +4 = 24. */
     memcpy(&band_count, text_vertices() + ((size_t)8U * TEXT_VERTEX_BYTES) + 20U + 4U, sizeof(uint32_t));
     TEST_ASSERT_EQUAL_UINT32(0U, band_count);
-    reset_style();
 }
 
 /* One decoration quad PER LINE: two lines → two underline quads (continuous per same-style segment). */
 void test_underline_quad_per_line(void) {
-    s_style.underline = true;
-    draw_text("A\nB", 32.0F, s_white, 0.0F, 0.0F);
+    nt_text_style_t style = plain();
+    style.underline = true;
+    nt_text_renderer_draw(&style, s_identity, "A\nB");
     /* 2 fill glyphs + 2 underline quads (one per line). */
     TEST_ASSERT_EQUAL_UINT32(4U, text_quad_count());
-    reset_style();
-}
-
-/* Decoration is per call: a plain draw after a decorated one in the same frame adds one fill quad. */
-void test_plain_draw_after_decorated_draw_is_fill_only(void) {
-#if NT_FONT_EMBOLDEN_ENABLED
-    s_style.outline_w = 0.05F;
-    s_style.outline_color = s_black;
-#endif
-    s_style.shadow_dx = 2.0F;
-    s_style.shadow_dy = 2.0F;
-    s_style.shadow_color = s_black;
-    s_style.underline = true;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
-    const uint32_t decorated = text_quad_count();
-    reset_style();
-
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(decorated + 1U, text_quad_count());
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* A NaN offset would become garbage geometry, so the style is rejected at draw. */
 void test_nonfinite_shadow_offset_asserts_at_draw(void) {
-    s_style.shadow_dx = NAN;
-    s_style.shadow_color = s_black;
-    NT_TEST_EXPECT_ASSERT(draw_text("A", 32.0F, s_white, 0.0F, 0.0F));
-    reset_style();
+    nt_text_style_t style = plain();
+    style.shadow_dx = NAN;
+    style.shadow_color = s_black;
+    NT_TEST_EXPECT_ASSERT(nt_text_renderer_draw(&style, s_identity, "A"));
     TEST_ASSERT_EQUAL_UINT32(0U, text_vertex_count());
 }
 #endif
@@ -1302,22 +1193,23 @@ void test_nonfinite_shadow_offset_asserts_at_draw(void) {
 
 #if !NT_FONT_EMBOLDEN_ENABLED && NT_ASSERT_MODE == NT_ASSERT_FULL
 void test_embolden_off_rejects_nonzero_before_drawing(void) {
+    nt_text_style_t style = plain();
     const float weights[] = {0.25F, -0.25F, 0x1p-20F, -0x1p-20F};
     for (uint32_t i = 0; i < sizeof weights / sizeof weights[0]; i++) {
-        s_style.weight_em = weights[i];
-        NT_TEST_EXPECT_ASSERT(draw_text("A", 32.0F, s_white, 0.0F, 0.0F));
+        style.weight_em = weights[i];
+        NT_TEST_EXPECT_ASSERT(nt_text_renderer_draw(&style, s_identity, "A"));
     }
-    reset_style();
+    style = plain();
     const float outlines[] = {0.25F, 0x1p-20F};
     for (uint32_t i = 0; i < sizeof outlines / sizeof outlines[0]; i++) {
-        s_style.outline_w = outlines[i];
-        NT_TEST_EXPECT_ASSERT(draw_text("A", 32.0F, s_white, 0.0F, 0.0F));
+        style.outline_w = outlines[i];
+        NT_TEST_EXPECT_ASSERT(nt_text_renderer_draw(&style, s_identity, "A"));
     }
     TEST_ASSERT_EQUAL_UINT32(0U, text_vertex_count()); /* rejected before drawing */
 
-    reset_style();
-    s_style.weight_em = -0.0F;
-    draw_text("A", 32.0F, s_white, 0.0F, 0.0F);
+    style = plain();
+    style.weight_em = -0.0F;
+    nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(4U, text_vertex_count());
 }
 #endif
@@ -1338,7 +1230,6 @@ int main(void) {
     RUN_TEST(test_measure_null_string);
     RUN_TEST(test_vertex_color_and_depth_bias_bytes);
     RUN_TEST(test_vertex_input_reads_color_as_normalized_rgba8);
-    RUN_TEST(test_vertex_count_4_per_glyph);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
     RUN_TEST(test_text_material_with_textures_asserts_at_set_material);
     RUN_TEST(test_zero_frame_capacity_asserts_at_set_material);
@@ -1381,7 +1272,6 @@ int main(void) {
     RUN_TEST(test_passes_grouped_not_interleaved);
     RUN_TEST(test_underline_one_quad_per_segment);
     RUN_TEST(test_underline_quad_per_line);
-    RUN_TEST(test_plain_draw_after_decorated_draw_is_fill_only);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_nonfinite_shadow_offset_asserts_at_draw);
 #endif

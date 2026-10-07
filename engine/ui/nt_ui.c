@@ -43,7 +43,6 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
 
 #ifdef NT_TEST_ACCESS
-static uint32_t s_test_deco_applied_count; /* walker deco-apply count; reset per test to verify wrapped-line coverage */
 #endif
 static bool s_nt_ui_module_initialized = false;
 
@@ -1653,11 +1652,6 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         /* Same userData rides every wrapped-line TEXT command, so every line carries the decoration. */
         const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)c->userData;
         const nt_ui_label_deco_t *deco = (ed != NULL && ed->special_kind == NT_UI_SPECIAL_TEXT_DECO) ? ed->special.text_deco : NULL;
-#ifdef NT_TEST_ACCESS
-        if (deco != NULL) {
-            s_test_deco_applied_count++; /* per decorated TEXT command (wrapped lines count each) */
-        }
-#endif
         emit_text(ctx, &local, text_scale, world_mat4, deco, ws->accum_opacity);
         return;
     }
@@ -1867,8 +1861,9 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
             ctx->sprite_material = ctx->inspector_sprite_material;
         }
         if (ctx->inspector_text_material.id != 0) {
+            /* The bias belongs to the game's text material. */
+            ctx->text_glyph_depth_bias = (ctx->inspector_text_material.id == ctx->text_material.id) ? saved_text_bias : 0.0F;
             ctx->text_material = ctx->inspector_text_material;
-            ctx->text_glyph_depth_bias = 0.0F; /* the bias belongs to the game's text material */
         }
     }
 #endif
@@ -3174,9 +3169,6 @@ uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     return ctx->test_last_walk_unlayered_count;
 }
-
-uint32_t nt_ui_test_deco_applied_count(void) { return s_test_deco_applied_count; }
-void nt_ui_test_reset_deco_applied_count(void) { s_test_deco_applied_count = 0; }
 
 /* These expose Clay's RAW device-space pointer — NOT the layout-converted one the hit-test uses.
    Under a scaled viewport device != layout, so a hit-decision reader must convert via the viewport
