@@ -3,14 +3,11 @@
 
 #include "core/nt_types.h"
 
-/* ---- Compile-time limits (overridable) ---- */
+/* ---- Compile-time limits (overridable) ----
+ * CPU staging between flushes; a full queue flushes. Frame storage holds every flush of the frame. */
 
 #ifndef NT_SHAPE_RENDERER_MAX_VERTICES
 #define NT_SHAPE_RENDERER_MAX_VERTICES 16384
-#endif
-
-#ifndef NT_SHAPE_RENDERER_MAX_INDICES
-#define NT_SHAPE_RENDERER_MAX_INDICES 32768
 #endif
 
 #ifndef NT_SHAPE_RENDERER_MAX_INSTANCES
@@ -24,23 +21,6 @@
 #ifndef NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS
 #define NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS 1024
 #endif
-
-/* ---- Index type (auto-selected by MAX_VERTICES) ---- */
-
-#if NT_SHAPE_RENDERER_MAX_VERTICES > 65535
-typedef uint32_t nt_shape_index_t;
-#define NT_SHAPE_INDEX_TYPE NT_INDEX_UINT32
-#else
-typedef uint16_t nt_shape_index_t;
-#define NT_SHAPE_INDEX_TYPE NT_INDEX_UINT16
-#endif
-
-/* ---- Vertex format ---- */
-
-typedef struct {
-    float pos[3];   /* world-space position */
-    uint32_t color; /* RGBA8 0xAABBGGRR, read normalized */
-} nt_shape_renderer_vertex_t;
 
 /* ---- Lifecycle ---- */
 
@@ -108,7 +88,6 @@ enum {
 
 uint32_t nt_shape_renderer_test_instance_count(int type);
 uint32_t nt_shape_renderer_test_vertex_count(void);
-uint32_t nt_shape_renderer_test_index_count(void);
 uint32_t nt_shape_renderer_test_stroke_count(void);
 const float *nt_shape_renderer_test_vp(void);
 const float *nt_shape_renderer_test_eye(void);

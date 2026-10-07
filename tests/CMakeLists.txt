@@ -401,10 +401,10 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_nt_gfx_basis_native TIMEOUT 300)
     set_tests_properties(test_nt_gfx_basis_native PROPERTIES LABELS "native")
 
-    add_executable(test_shape_renderer_ring_native unit/test_shape_renderer_ring_native.c)
-    target_link_libraries(test_shape_renderer_ring_native PRIVATE nt_shape_renderer nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
-    nt_setup_test_target(test_shape_renderer_ring_native)
-    set_tests_properties(test_shape_renderer_ring_native PROPERTIES LABELS "native")
+    add_executable(test_shape_renderer_native unit/test_shape_renderer_native.c)
+    target_link_libraries(test_shape_renderer_native PRIVATE nt_shape_renderer nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
+    nt_setup_test_target(test_shape_renderer_native)
+    set_tests_properties(test_shape_renderer_native PROPERTIES LABELS "native")
 
     add_executable(test_skinned_mesh_renderer_native unit/test_skinned_mesh_renderer_native.c)
     target_link_libraries(test_skinned_mesh_renderer_native PRIVATE

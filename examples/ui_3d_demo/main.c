@@ -68,7 +68,8 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
-/* Frame storage budget of the sprite and text geometry; the first scene peaks at about 75 KB / 11 KB, and with
+/* Frame storage budget of the sprite, text and shape geometry (the room, grid and shown shape take under 8 KB);
+ * the first scene peaks at about 75 KB / 11 KB, and with
  * the inspector open at about 210 KB / 38 KB. */
 #define UI_3D_DEMO_VERTEX_BYTES (512U * 1024U)
 #define UI_3D_DEMO_INDEX_BYTES (128U * 1024U)

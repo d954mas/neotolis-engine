@@ -39,7 +39,7 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
-/* Frame storage budget of the sprite and text geometry. */
+/* Frame storage budget of the sprite, text and shape geometry (the shapes take under 1 KB). */
 #define RTT_SHOWCASE_VERTEX_BYTES (64U * 1024U)
 #define RTT_SHOWCASE_INDEX_BYTES (32U * 1024U)
 

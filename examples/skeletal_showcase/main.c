@@ -83,6 +83,8 @@
 /* Frame storage budget of the UI sprite and text geometry; the first scene peaks at about 80 KB / 10 KB with the skinned instances. */
 #define SKELETAL_SHOWCASE_UI_VERTEX_BYTES (128U * 1024U)
 #define SKELETAL_SHOWCASE_UI_INDEX_BYTES (32U * 1024U)
+/* Debug shapes of both stage views: ground grid, bones, joint spheres and axes. */
+#define SKELETAL_SHOWCASE_SHAPE_VERTEX_BYTES (64U * 1024U)
 // #endregion
 
 // #region constants and state
@@ -2765,7 +2767,8 @@ int main(int argc, char *argv[]) {
     gfx_desc.max_buffers = 128;
     gfx_desc.max_textures = 16;
     /* Worst frame: Order & Instancing, two passes of MAX skinned instances; scenes draw exclusively. */
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t)) + SKELETAL_SHOWCASE_UI_VERTEX_BYTES;
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] =
+        (2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t)) + SKELETAL_SHOWCASE_UI_VERTEX_BYTES + SKELETAL_SHOWCASE_SHAPE_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = SKELETAL_SHOWCASE_UI_INDEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 3U * 512U; /* two stage views and the UI view: 256 B or less each, plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);

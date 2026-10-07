@@ -412,7 +412,7 @@ nt_gfx_fake_draw_t nt_gfx_fake_draw_trace_at(uint32_t index) {
     return s_fake_draws[index];
 }
 
-static void fake_record_draw(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
+static void fake_record_draw(uint32_t first_index, uint32_t num_indices, uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count, uint8_t index_type) {
     if (!s_fake_draw_enabled) {
         return;
     }
@@ -426,6 +426,8 @@ static void fake_record_draw(uint32_t first_index, uint32_t num_indices, uint32_
         .program = nt_gfx_pipeline_program(pipeline),
         .first_index = first_index,
         .num_indices = num_indices,
+        .first_vertex = first_vertex,
+        .num_vertices = num_vertices,
         .instance_count = instance_count,
         .index_type = index_type,
     };
@@ -802,13 +804,11 @@ void nt_gfx_backend_set_uniform_int(uint32_t program_backend, uint32_t name_hash
     (void)val;
 }
 
-void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
-    fake_record_draw(0, 0, instance_count, NT_INDEX_NONE);
-    (void)first_vertex;
-    (void)num_vertices;
-}
+void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) { fake_record_draw(0, 0, first_vertex, num_vertices, instance_count, NT_INDEX_NONE); }
 
-void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) { fake_record_draw(first_index, num_indices, instance_count, index_type); }
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
+    fake_record_draw(first_index, num_indices, 0, 0, instance_count, index_type);
+}
 
 bool nt_gfx_backend_recreate_all_resources(void) {
     /* The front-end drops every stage and program handle on loss without a

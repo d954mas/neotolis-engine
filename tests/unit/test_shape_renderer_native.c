@@ -1,5 +1,5 @@
-/* Real-GL proof that ring-allocated instance uploads land where the draws
- * read: multi-flush frames write disjoint ranges yet render pixel-correct.
+/* Real-GL proof that shapes drawn from frame storage and the shared templates land where the
+ * draws read: several flushes of one frame render pixel-correct.
  * Fixed-size offscreen target — the window framebuffer scales with host DPI. */
 
 #include "color/nt_color.h"
@@ -23,6 +23,7 @@ static nt_render_target_t s_target;
 
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U;
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -31,7 +32,7 @@ void setUp(void) {
     s_target = nt_gfx_make_render_target(&(nt_render_target_desc_t){
         .color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = RT_W, .height = RT_H, .format = NT_TEXTURE_FORMAT_RGBA8}),
         .depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = RT_W, .height = RT_H, .format = NT_TEXTURE_FORMAT_DEPTH24}),
-        .label = "shape_ring_rt",
+        .label = "shape_rt",
     });
     TEST_ASSERT_TRUE(nt_gfx_render_target_valid(s_target));
 
@@ -56,56 +57,31 @@ static void assert_pixel(const uint8_t *frame, int x, int y_top, uint8_t r, uint
     TEST_ASSERT_UINT8_WITHIN(1, b, p[2]);
 }
 
-static void test_multi_flush_ring_offsets_render_correctly(void) {
+/* Every flush of the frame appends to frame storage; each draw reads its own range of it and of the
+ * shared template buffers, including the capsule's hemisphere offset in the shared fill program. */
+static void test_several_flushes_of_one_frame_render_in_place(void) {
     const uint32_t red = NT_RGBA8(255, 0, 0, 255);
     const uint32_t green = NT_RGBA8(0, 255, 0, 255);
     const uint32_t blue = NT_RGBA8(0, 0, 255, 255);
+    const uint32_t yellow = NT_RGBA8(255, 255, 0, 255);
+    const uint32_t magenta = NT_RGBA8(255, 0, 255, 255);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
 
-    /* Flush 1: two instance types -> two ring writes within one flush.
-     * Red rect covers the left half; green cube sits center-right (the circle
+    /* Flush 1: red rect over the left half; green cube center-right (the circle
      * template lies in XZ — edge-on under the identity VP — so cube it is). */
     nt_shape_renderer_rect((float[3]){-0.5F, 0.0F, 0.0F}, (float[2]){1.0F, 2.0F}, NULL, red);
     nt_shape_renderer_cube((float[3]){0.5F, 0.0F, 0.0F}, (float[3]){0.5F, 0.5F, 0.5F}, NULL, green);
     nt_shape_renderer_flush();
 
-    /* Flush 2: rect again — its upload starts at a nonzero ring offset.
-     * Blue rect in the top-right quadrant (clip x [0.2,0.8], y [0.4,0.8]). */
+    /* Flush 2: blue rect in the top-right quadrant (clip x [0.2,0.8], y [0.4,0.8]). */
     nt_shape_renderer_rect((float[3]){0.5F, 0.6F, 0.0F}, (float[2]){0.6F, 0.4F}, NULL, blue);
     nt_shape_renderer_flush();
 
-    uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
-
-    assert_pixel(frame, 16, 32, 255, 0, 0); /* left half: red rect (flush 1, write 1) */
-    assert_pixel(frame, 48, 32, 0, 255, 0); /* cube center: green (flush 1, write 2 at nonzero offset) */
-    assert_pixel(frame, 48, 13, 0, 0, 255); /* top-right quadrant: blue rect (flush 2 at nonzero offset) */
-    assert_pixel(frame, 56, 56, 0, 0, 0);   /* bottom-right corner untouched: background */
-}
-
-/* Wrap: many flushes exceed instance-buffer capacity; after the cursor wraps
- * to 0 the newest shape must still render (no stale data drawn). */
-static void test_ring_wrap_still_renders(void) {
-    const uint32_t red = NT_RGBA8(255, 0, 0, 255);
-    const uint32_t green = NT_RGBA8(0, 255, 0, 255);
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
-
-    /* Flush count derived from the actual capacity: >= 2 wraps at any
-     * configured size (per-flush count clamped so small caps still cycle). */
-    uint32_t cap = NT_SHAPE_RENDERER_MAX_INSTANCES;
-    uint32_t per = cap < 256U ? cap : 256U;
-    uint32_t flushes = ((cap / per) * 2U) + 1U;
-    for (uint32_t i = 0; i < flushes; i++) {
-        for (uint32_t j = 0; j < per; j++) {
-            nt_shape_renderer_rect((float[3]){-0.5F, 0.0F, 0.0F}, (float[2]){1.0F, 2.0F}, NULL, red);
-        }
-        nt_shape_renderer_flush();
-    }
-    nt_shape_renderer_rect((float[3]){0.5F, 0.0F, 0.0F}, (float[2]){1.0F, 2.0F}, NULL, green);
+    /* Flush 3: a batch triangle low on the right and a vertical capsule at the right edge
+     * (radius 0.1, half body 0.2: clip y [-0.3, 0.3]). */
+    nt_shape_renderer_triangle((float[3]){0.2F, -0.9F, 0}, (float[3]){0.5F, -0.9F, 0}, (float[3]){0.35F, -0.5F, 0}, yellow);
+    nt_shape_renderer_capsule((float[3]){0.85F, 0.0F, 0.0F}, 0.1F, 0.6F, NULL, magenta);
     nt_shape_renderer_flush();
 
     uint8_t frame[RT_W * RT_H * 4U] = {0};
@@ -113,8 +89,14 @@ static void test_ring_wrap_still_renders(void) {
     nt_gfx_end_pass();
     TEST_ASSERT_TRUE(read_ok);
 
-    assert_pixel(frame, 16, 32, 255, 0, 0); /* left half still red */
-    assert_pixel(frame, 48, 32, 0, 255, 0); /* post-wrap green rect renders */
+    assert_pixel(frame, 16, 32, 255, 0, 0);   /* left half: red rect */
+    assert_pixel(frame, 48, 32, 0, 255, 0);   /* cube center: green */
+    assert_pixel(frame, 48, 13, 0, 0, 255);   /* top-right quadrant: blue rect (second flush) */
+    assert_pixel(frame, 43, 56, 255, 255, 0); /* triangle centroid: batch from frame storage */
+    assert_pixel(frame, 59, 32, 255, 0, 255); /* capsule body */
+    assert_pixel(frame, 59, 24, 255, 0, 255); /* capsule top hemisphere, moved up by the half body */
+    assert_pixel(frame, 59, 20, 0, 0, 0);     /* above the capsule: background */
+    assert_pixel(frame, 60, 60, 0, 0, 0);     /* bottom-right corner: background */
 }
 
 static void test_wire_circle_has_closed_outer_joins(void) {
@@ -310,8 +292,7 @@ int main(void) {
     RUN_TEST(test_pixel_line_clips_at_near_plane);
     RUN_TEST(test_wire_circle_has_closed_outer_joins);
     RUN_TEST(test_overlay_strokes_draw_over_fills_until_flush);
-    RUN_TEST(test_multi_flush_ring_offsets_render_correctly);
-    RUN_TEST(test_ring_wrap_still_renders);
+    RUN_TEST(test_several_flushes_of_one_frame_render_in_place);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

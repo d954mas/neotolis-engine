@@ -379,6 +379,7 @@ int main(void) {
     nt_window_init();
     nt_input_init();
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 64U * 1024U; /* the shape overlay */
     nt_gfx_init(&gfx_desc);
     nt_shape_renderer_init();
 

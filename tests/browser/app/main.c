@@ -1222,7 +1222,7 @@ int main(int argc, char *argv[]) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.capture_capacity = 16384;
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U; /* the mesh probe's instances, the sprites and the text */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U; /* the mesh probe's instances, the sprites, the text and the shape probe */
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = 128U * 1024U;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);

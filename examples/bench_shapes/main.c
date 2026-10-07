@@ -31,6 +31,9 @@
 /* Shape storage */
 #define MAX_SHAPES_PER_TYPE 32768
 #define MAX_SHAPES (MAX_SHAPES_PER_TYPE * 8)
+/* Frame storage per shape of each type at its costliest variant: a line 28 B, a rect wire 4 strokes of 52 B, a
+ * triangle wire 3 strokes, a cube wire 12 lines, and a circle, sphere, cylinder or capsule one 44 B instance. */
+#define BENCH_VERTEX_BYTES_PER_SHAPE_SET (28U + (4U * 52U) + (3U * 52U) + (12U * 28U) + (4U * 44U))
 
 /* Shape types */
 enum { BENCH_LINE, BENCH_RECT, BENCH_TRI, BENCH_CIRCLE, BENCH_CUBE, BENCH_SPHERE, BENCH_CYL, BENCH_CAP };
@@ -640,6 +643,9 @@ int main(int argc, char **argv) {
     nt_example_frames_init(argc, argv);
     nt_input_init();
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    /* Every flush of the frame stays in frame storage until end_frame; the room and floor text add a little. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (MAX_SHAPES_PER_TYPE * BENCH_VERTEX_BYTES_PER_SHAPE_SET) + (256U * 1024U);
+    gfx_desc.stream_capacity = 512U * 1024U; /* all auto-flushes of a full frame record before end_frame: 218 KB at the cap */
     nt_gfx_init(&gfx_desc);
     nt_shape_renderer_init();
 

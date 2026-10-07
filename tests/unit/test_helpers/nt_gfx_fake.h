@@ -19,8 +19,10 @@ nt_program_t nt_gfx_fake_make_program_typed(const char *const *names, const uint
 typedef struct {
     nt_pipeline_t pipeline;
     nt_program_t program;
-    uint32_t first_index; /* indexed draws only */
-    uint32_t num_indices; /* 0 on a non-indexed draw */
+    uint32_t first_index;  /* indexed draws only */
+    uint32_t num_indices;  /* 0 on a non-indexed draw */
+    uint32_t first_vertex; /* non-indexed draws only */
+    uint32_t num_vertices; /* non-indexed draws only */
     uint32_t instance_count;
     uint8_t index_type; /* NT_INDEX_NONE on a non-indexed draw */
 } nt_gfx_fake_draw_t;
