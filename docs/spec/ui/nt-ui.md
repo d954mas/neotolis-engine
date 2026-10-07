@@ -43,7 +43,11 @@ Repeated walks may invoke the callback again. A callback must not re-enter walk,
 change the layout tree, or reset scratch. It preserves active clipping and owns
 the GPU state it touches. The walker flushes staged text before the callback, and
 every later sprite command selects its own material, so a callback may leave
-another sprite material selected.
+another sprite material selected. A callback that emits sprites calls
+`nt_sprite_renderer_set_material` first: the selection it finds is whatever an
+earlier command left. The walk's draw count (`nt_ui_get_last_walk_draw_calls`)
+counts recorded draws, so a walk whose first draw continues the caller's last
+draw in the same pass adds nothing for it.
 The supplied frame contains the composed world matrix, opacity, context and
 layout-space Clay command.
 

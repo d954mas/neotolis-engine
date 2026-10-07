@@ -59,7 +59,7 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeli
     if (*count >= cap) {
         NT_LOG_ERROR("pipeline cache exhausted building '%s' -- raise that renderer's cap", (desc->label != NULL) ? desc->label : "(unlabeled)");
     }
-    NT_ASSERT(*count < cap && "pipeline cache exhausted -- raise this renderer's cap (desc.max_pipelines or NT_*_RENDERER_MAX_PIPELINES)");
+    NT_ASSERT(*count < cap && "pipeline cache exhausted -- raise this renderer's cap (its desc max_pipelines or NT_*_RENDERER_MAX_PIPELINES)");
     nt_pipeline_t pip = nt_gfx_make_pipeline(desc);
     if (pip.id == 0) {
         return pip;

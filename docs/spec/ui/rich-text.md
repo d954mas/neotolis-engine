@@ -244,7 +244,9 @@ nt_ui_rich_pop(ctx);
 - **Custom objects** (`<obj>`): a Flutter-style WidgetSpan — the solver reserves
   a box via `measure_fn` (text wraps around it); the widget calls the game's
   `draw_fn(user_data, x, y, w, h, color, world_mat4)` at the solved box. The engine
-  never draws the object (renderer-agnostic). `x,y,w,h` are LAYOUT (logical,
+  never draws the object (renderer-agnostic); a `draw_fn` that emits sprites selects
+  its own material first, since the selection it finds is whatever the band's images or an earlier
+  command left. `x,y,w,h` are LAYOUT (logical,
   Clay Y-down) px; `world_mat4` is the frame's column-major LAYOUT→world matrix — the
   **same** matrix every other engine emit uses, with the screen Y-flip baked in for the
   default 2D ctx — so the game multiplies its positions by it (or composes it on the

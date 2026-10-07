@@ -8,6 +8,7 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "graphics/nt_gfx.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "sprite_comp/nt_sprite_comp.h"
 #include "test_helpers/nt_assert_trap.h"
@@ -334,12 +335,10 @@ static void test_image_black_tint_faded_out_draws_no_opaque_white(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root"), .userData = NT_UI_CLAY_DATA_XFORM(0U, &t, 0.0F)}) { nt_ui_image(s_fx.ctx, NULL, &ref, &st, &decl); }
     nt_ui_end(s_fx.ctx);
+    const uint32_t vertex_used = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used;
     nt_ui_walk(s_fx.ctx, &target);
-    for (uint32_t i = 0; i < nt_sprite_test_last_emit().vertex_count; ++i) {
-        uint8_t color[4];
-        nt_sprite_renderer_test_last_emit_color(i, color);
-        TEST_ASSERT_EQUAL_UINT8(0U, color[3]);
-    }
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_image_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(vertex_used, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used, "an invisible image emits no vertices");
 }
 
 /* ---- Test 12: the slice9 grid lands exactly on the bbox, and the origin moves it ---- */

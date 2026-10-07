@@ -25,7 +25,9 @@
 /* Base 20 B sprite vertex stride — custom attrs append after this offset. */
 #define NT_SPRITE_BASE_STRIDE 20
 /* Distinct material states; also bounds the layout cache, which holds fewer. */
+#ifndef NT_SPRITE_RENDERER_MAX_PIPELINES
 #define NT_SPRITE_RENDERER_MAX_PIPELINES 16
+#endif
 
 // #region module state
 /* A resolved material: what an emit or a draw_list run records. */
@@ -182,14 +184,17 @@ static nt_vertex_input_t find_or_create_vertex_input(const nt_material_info_t *m
     const uint64_t key = nt_sprite_layout_key(mat_info);
     uint16_t idx = s_sprite.vi_count;
     for (uint16_t i = 0; i < s_sprite.vi_count; i++) {
-        if (s_sprite.vi_entries[i].key != key) {
-            continue;
+        const bool live = nt_gfx_vertex_input_valid(s_sprite.vi_entries[i].vi);
+        if (s_sprite.vi_entries[i].key == key) {
+            if (live) {
+                return s_sprite.vi_entries[i].vi;
+            }
+            idx = i;
+            break;
         }
-        if (nt_gfx_vertex_input_valid(s_sprite.vi_entries[i].vi)) {
-            return s_sprite.vi_entries[i].vi;
+        if (!live && idx == s_sprite.vi_count) {
+            idx = i; /* a layout the loss freed; reused unless the key itself turns up */
         }
-        idx = i;
-        break;
     }
     NT_ASSERT(idx < NT_SPRITE_RENDERER_MAX_PIPELINES && "sprite vertex-input cache full; raise NT_SPRITE_RENDERER_MAX_PIPELINES");
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
@@ -248,8 +253,9 @@ static void record_state(nt_sprite_material_t *m, uint32_t page_tex) {
     }
     if (mi->tex_count > 0) {
         m->textures[0].texture.id = page_tex;
-        nt_gfx_apply_texture_bindings(m->textures, mi->tex_count);
     }
+    /* Also with no declarations: gfx checks that the program samples nothing. */
+    nt_gfx_apply_texture_bindings(m->textures, mi->tex_count);
     nt_gfx_bind_vertex_input(m->vertex_input);
 }
 
@@ -260,9 +266,11 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
      * already dead here, and trapping on that would crash a recoverable event. */
     NT_ASSERT(mi != NULL && mi->program.id != 0 && "nt_sprite_renderer_set_material: material has no program");
     nt_sprite_material_t *c = &s_sprite.current;
-    /* Params are compared when recorded, and texture publication changes only between frames. */
+    /* Params are compared when recorded, and resources are not stepped between draws of a frame.
+     * A failed resolve (pipeline 0) retries next frame; a destroyed program takes its pipeline
+     * with it, so that selection resolves again. */
     const uint64_t frame = g_nt_gfx.counters.frame_sequence;
-    if (mat.id == c->material.id && mi->program.id == c->program.id && frame == c->frame) {
+    if (mat.id == c->material.id && mi->program.id == c->program.id && frame == c->frame && (c->pipeline.id == 0 || nt_gfx_pipeline_valid(c->pipeline))) {
         return;
     }
     resolve_material(mat, mi, c);
@@ -443,7 +451,15 @@ static NT_ALWAYS_INLINE void write_region(const nt_texture_region_t *r, const fl
     } else
 #endif /* __wasm_simd128__ */
     {
-        for (uint8_t i = 0; i < r->vertex_count; i++) {
+        /* Locals: the byte stores below may alias the matrix, which would reload it per vertex. */
+        const float m0 = m[0];
+        const float m1 = m[1];
+        const float m2 = m[2];
+        const float m4 = m[4];
+        const float m5 = m[5];
+        const float m6 = m[6];
+        const uint8_t vertex_count = r->vertex_count;
+        for (uint8_t i = 0; i < vertex_count; i++) {
             float px = positions[i][0];
             if (fx) {
                 px = -px;
@@ -453,9 +469,9 @@ static NT_ALWAYS_INLINE void write_region(const nt_texture_region_t *r, const fl
                 py = -py;
             }
             nt_sprite_vertex_t *v = (nt_sprite_vertex_t *)(a->vertices + ((size_t)i * stride));
-            v->position[0] = (m[0] * px) + (m[4] * py) + tx;
-            v->position[1] = (m[1] * px) + (m[5] * py) + ty;
-            v->position[2] = (m[2] * px) + (m[6] * py) + tz;
+            v->position[0] = (m0 * px) + (m4 * py) + tx;
+            v->position[1] = (m1 * px) + (m5 * py) + ty;
+            v->position[2] = (m2 * px) + (m6 * py) + tz;
             v->texcoord[0] = uvs[i].atlas_u;
             v->texcoord[1] = uvs[i].atlas_v;
             /* 0xAABBGGRR in little-endian memory is R, G, B, A. */
@@ -464,8 +480,10 @@ static NT_ALWAYS_INLINE void write_region(const nt_texture_region_t *r, const fl
     }
 
     uint32_t *out_idx = a->indices;
-    for (uint8_t i = 0; i < r->index_count; i++) {
-        out_idx[i] = a->base + (uint32_t)idx[i];
+    const uint32_t base = a->base;
+    const uint8_t index_count = r->index_count;
+    for (uint8_t i = 0; i < index_count; i++) {
+        out_idx[i] = base + (uint32_t)idx[i];
     }
 }
 // #endregion
@@ -644,6 +662,8 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_geometry: atlas must be READY");
     NT_ASSERT(vertex_count > 0U && index_count > 0U && "nt_sprite_renderer_emit_geometry: empty geometry");
     NT_ASSERT(index_count % 3U == 0U && "nt_sprite_renderer_emit_geometry: indices must form whole triangles");
+    /* uint16 local indices address at most 65536 vertices; the byte sizes below must not wrap. */
+    NT_ASSERT(vertex_count <= 65536U && index_count <= UINT32_MAX / 4U && "nt_sprite_renderer_emit_geometry: geometry too large");
 
     nt_atlas_region_handles_t h;
     nt_atlas_get_region_handles(atlas, region_index, &h);
@@ -751,7 +771,6 @@ static void write_item(const nt_render_item_t *item, const nt_sprite_comp_view_t
     NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
     NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
 
-    nt_resource_t atlas = sv->atlas[s_idx];
     const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
     uint8_t flags = sv->flags[s_idx];
     NT_ASSERT((flags & NT_SPRITE_FLAG_RESOLVED) != 0 && "sprite render item: sprite is unresolved");
@@ -763,7 +782,7 @@ static void write_item(const nt_render_item_t *item, const nt_sprite_comp_view_t
     const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
     const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
     const uint8_t flip_bits = flags & (NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
-    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
+    const float ipu = resolved->ipu;
     nt_sprite_alloc_t a;
 
     // #region write_item_slice9_branch

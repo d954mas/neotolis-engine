@@ -401,7 +401,7 @@ static uint32_t build_slice9_atlas(uint8_t *atlas_blob, uint32_t cap) {
 
     uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
 
-    NtAtlasRegion regions[1];
+    NtAtlasRegion regions[2];
     memset(regions, 0, sizeof(regions));
     regions[0].name_hash = 0xC00ULL;
     regions[0].source_w = 64;
@@ -415,11 +415,15 @@ static uint32_t build_slice9_atlas(uint8_t *atlas_blob, uint32_t cap) {
     regions[0].page_index = 0;
     regions[0].transform = 0;
     regions[0].flags = NT_ATLAS_REGION_FLAG_QUAD_012023;
+    /* Tombstone: a name with no geometry. */
+    regions[1].name_hash = 0xC01ULL;
+    regions[1].source_w = 64;
+    regions[1].source_h = 64;
 
     uint64_t page_ids[1] = {FIXTURE_PAGE0_RID};
     atlas_blob_spec_t spec = {
         .regions = regions,
-        .region_count = 1,
+        .region_count = 2,
         .vertices = verts,
         .total_vertex_count = 4,
         .indices = indices,
@@ -579,18 +583,22 @@ static void test_slice9_flip_y(void) {
 
 /* Test: tombstone region emits nothing */
 static void test_slice9_tombstone_noop(void) {
-    s_atlas_res = register_test_atlas(0xC5ULL);
-    nt_material_t mat = create_test_material();
-    nt_sprite_renderer_set_material(mat);
-
-    /* No tombstone region in our fixture: check that a normal slice9 adds exactly its 16 vertices. */
-    const uint32_t used_before = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used;
-
     nt_resource_t atlas = register_slice9_atlas(0xC6ULL);
+    nt_sprite_renderer_set_material(create_test_material());
+    TEST_ASSERT_EQUAL_UINT8(0, nt_atlas_get_region(atlas, 1)->vertex_count);
+
+    const uint32_t vertex_used = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used;
+    const uint32_t index_used = g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].used;
+    const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     const uint16_t b2[4] = {2, 2, 2, 2};
+    nt_sprite_renderer_emit_slice9(atlas, 1, NT_MATH_MAT4_IDENTITY, 50.0F, 50.0F, 0.0F, 0.0F, b2, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
+    TEST_ASSERT_EQUAL_UINT32(vertex_used, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
+    TEST_ASSERT_EQUAL_UINT32(index_used, g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].used);
+    TEST_ASSERT_EQUAL_UINT32(draws_before, nt_gfx_draw_calls(&g_nt_gfx.counters));
+
+    /* Control: the live region of the same atlas draws. */
     nt_sprite_renderer_emit_slice9(atlas, 0, NT_MATH_MAT4_IDENTITY, 50.0F, 50.0F, 0.0F, 0.0F, b2, 1.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
-    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_test_last_emit().vertex_count);
-    TEST_ASSERT_EQUAL_UINT32(used_before + (16U * (uint32_t)sizeof(nt_sprite_vertex_t)), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
+    TEST_ASSERT_EQUAL_UINT32(draws_before + 1U, nt_gfx_draw_calls(&g_nt_gfx.counters));
 }
 
 /* Pins m[12]/m[13] translation handling — every grid vertex shifted (+50, +30). */

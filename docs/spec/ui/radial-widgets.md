@@ -23,14 +23,14 @@ A radial could be drawn two ways:
   the existing UI walker image path; the walker emits a textured/white-region
   quad through the sprite renderer and binds the widget's material.
 
-Neotolis uses **Route B**. The reason is batching: Route A drops out of the
-walker's image emit and cannot share draw state, so every CUSTOM widget is its
-own draw. Route B keeps every radial on the sprite renderer's emit path, so many
-radials that share one material batch into a single draw. The per-element
+Neotolis uses **Route B**. The reason is that the widget stays declarative: Route A
+hands the game a raw draw callback per widget, and every CUSTOM command is a walker
+barrier (staged text flushes around it, the callback selects its own material).
+Route B keeps every radial on the walker's image emit path: the per-element
 material override (`nt_ui_image_payload_t.material`) carries the SDF fragment
-shader and extended vertex layout; the walker only re-binds it when the `.id`
-differs from the currently bound material, so a screen full of identical-material
-radials still collapses to one `set_material` and one draw.
+shader and extended vertex layout, the walker selects it for each command, and
+gfx merges adjacent emits of one material, so a screen full of identical-material
+radials draws once.
 
 ## Name-bound injection vocabulary
 

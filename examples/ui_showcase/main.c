@@ -2168,7 +2168,7 @@ static nt_ui_rich_object_measure_t rich_obj_bar_measure(void *user_data) {
 }
 static void rich_obj_bar_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     const rich_obj_demo_t *d = (const rich_obj_demo_t *)user_data;
-    /* emit_custom dirtied the sprite bind cache before this rich emit -> rebind every call. */
+    /* The selection this callback finds is the band's image material: select its own. */
     nt_sprite_renderer_set_material(d->material);
     const float t = (d->clock != NULL) ? *d->clock : 0.0F;
     const float progress = 0.5F + (0.5F * sinf(t * 1.5F)); /* loops 0..1 */

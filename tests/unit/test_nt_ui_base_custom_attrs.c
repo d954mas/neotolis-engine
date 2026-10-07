@@ -48,11 +48,14 @@ void setUp(void) { ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WAL
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static void assert_batch_range_carries_defaults(uint32_t first, uint32_t end) {
-    TEST_ASSERT_GREATER_THAN_UINT32(first, end);
-    for (uint32_t v = first; v < end; ++v) {
+/* Padding vertices sit between emits, so check the vertices the base indices reference. */
+static void assert_base_indices_carry_defaults(uint32_t index_end, uint32_t vertex_end) {
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, index_end);
+    const uint32_t *indices = (const uint32_t *)g_nt_gfx_frame_storage[NT_GFX_FRAME_INDEX].staging;
+    for (uint32_t i = 0; i < index_end; ++i) {
+        TEST_ASSERT_LESS_THAN_UINT32(vertex_end, indices[i]);
         float got[4] = {0};
-        nt_sprite_renderer_test_batch_custom(v, got, 4);
+        nt_sprite_renderer_test_batch_custom(indices[i], got, 4);
         TEST_ASSERT_EQUAL_MEMORY_MESSAGE(k_defaults, got, sizeof k_defaults, "base emit bakes the material defaults");
     }
 }
@@ -110,7 +113,7 @@ static void test_defaults_ride_every_base_emit_in_one_batch(void) {
      * rect (4) + border + plain image (4) + slice9 (16). */
     const uint32_t first_widget_vertex = nt_sprite_test_last_emit().first_vertex;
     TEST_ASSERT_GREATER_THAN_UINT32(4U + 4U + 16U, first_widget_vertex);
-    assert_batch_range_carries_defaults(0U, first_widget_vertex);
+    assert_base_indices_carry_defaults(nt_sprite_test_last_emit().first_index, first_widget_vertex);
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_test_last_emit().vertex_count);
     for (uint32_t v = 0; v < 4U; ++v) {
         float got[4] = {0};

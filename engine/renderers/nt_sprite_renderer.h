@@ -21,10 +21,9 @@ typedef struct {
 } nt_sprite_vertex_t;
 _Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes");
 
-/* Byte cap for a material's appended custom per-vertex attribute block (opt-in).
- * Headroom for four FLOAT4 blocks (a_radial + a_tint + a_uvrect + a_layout) = 64 B,
- * spent in full by the radial-image material. Only custom-attr materials pay this;
- * plain sprites keep the locked 20 B vertex. */
+/* Byte size of the custom attr blocks the UI stores per element (nt_ui), not a renderer cap:
+ * four FLOAT4 attrs (a_radial + a_tint + a_uvrect + a_layout), spent in full by the
+ * radial-image material. The renderer bakes whatever block the material's attr_map declares. */
 #ifndef NT_SPRITE_CUSTOM_STRIDE_MAX
 #define NT_SPRITE_CUSTOM_STRIDE_MAX 64
 #endif

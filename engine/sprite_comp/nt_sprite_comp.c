@@ -57,6 +57,7 @@ static void sprite_cache_region(uint16_t idx, nt_resource_t atlas, uint32_t regi
         .uvs = nt_atlas_get_region_uvs(atlas, region_index),
         .indices = nt_atlas_get_region_indices(atlas, region_index),
         .page_resource = page_resource,
+        .ipu = nt_atlas_get_inverse_pixels_per_unit(atlas),
     };
 }
 

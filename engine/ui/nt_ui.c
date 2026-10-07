@@ -1671,9 +1671,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         counters->image_command_count++; /* Clay IMAGE commands (nt_ui_image) only; inline rich images self-emit, not counted here */
-        /* Per-element material override (radial reveal): .id==0 = base material.
-         * Routed through prep so a shared override batches and the base<->override
-         * boundary flushes exactly once. */
+        /* Per-element material override (radial reveal): .id==0 = base material. Adjacent
+         * emits of one material merge in gfx. */
         const nt_ui_image_payload_t *ip = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
         const nt_material_t img_mat = (ip != NULL && ip->material.id != 0) ? ip->material : ctx->sprite_material;
         prep_sprite_dispatch_mat(img_mat);
@@ -1835,7 +1834,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
     // #endregion
 
     // #region walker-state-init
-    /* After entry flush so walk_ms excludes draining the caller's pending geometry. */
+    /* After entry flush so walk_ms excludes the caller's staged text. */
 #if NT_UI_TIMING_ENABLED
     const double walk_t0 = nt_time_now();
 #endif
@@ -1851,7 +1850,7 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
 
     nt_ui_walk_counters_t counters = {0};
 
-    /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
+    /* AFTER entry flush so per-walk delta excludes the caller's staged text. */
     const uint32_t calls_at_entry = nt_gfx_draw_calls(&g_nt_gfx.counters);
     // #endregion
 

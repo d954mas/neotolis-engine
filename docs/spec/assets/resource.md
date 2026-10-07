@@ -323,7 +323,8 @@ module initialized but unable to draw; the game must retry
 `nt_postfx_blur_restore_gpu` until it succeeds. `nt_mesh_renderer`,
 `nt_skinned_mesh_renderer`,
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
-restore drops queued commands and pipeline caches, then the game relinks. The
+the game relinks them; the text renderer's restore drops queued commands and
+its pipeline cache. The
 mesh renderers own no buffer: their restore only drops the pipeline and
 vertex-input caches and returns void. The sprite renderer has no restore entry
 point: it owns no buffer, and its pipeline and vertex-input caches validate on
@@ -341,9 +342,7 @@ returns `NT_ERR_INIT_FAILED` after releasing partial GPU resources. The module
 stays initialized, so the game can call restore again or shut it down. There
 is no automatic retry, with one narrow exception: the text renderer's vertex
 input bakes over buffers it owns, so a recoverable backend failure there is
-retried lazily in flush and does not fail the restore. After a sprite
-failure, the game must not submit draws or sprite materials until a restore
-succeeds; violating that precondition asserts. The text renderer instead
+retried lazily in flush and does not fail the restore. The text renderer
 discards staged glyphs while its buffers are missing. Examples may explicitly
 choose fail-fast handling, while a game that needs retries owns that policy.
 
