@@ -115,6 +115,25 @@ static void test_wire_circle_has_closed_outer_joins(void) {
     assert_pixel(frame, 32, 32, 0, 0, 0);
 }
 
+/* The sphere wire sits after the circle in the shared wire buffer: its draw starts at a nonzero
+ * index offset. Its XY ring faces the identity camera. */
+static void test_wire_template_at_an_index_offset_renders(void) {
+    nt_shape_renderer_set_line_width(0.2F);
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F});
+    nt_shape_renderer_sphere_wire((float[3]){0, 0, 0}, 0.5F, NULL, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_flush();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_end_pass();
+    TEST_ASSERT_TRUE(read_ok);
+    /* Diagonals: only the XY ring passes there; the edge-on XZ and YZ rings are bands along the axes. */
+    assert_pixel(frame, 43, 20, 255, 255, 255); /* the XY ring at 45 degrees */
+    assert_pixel(frame, 20, 43, 255, 255, 255); /* and at 225 degrees */
+    assert_pixel(frame, 38, 26, 0, 0, 0);       /* inside the ring, off the axis bands */
+}
+
 /* Within one flush the line stays above a later fill; the next flush draws over both. */
 static void test_overlay_strokes_draw_over_fills_until_flush(void) {
     nt_shape_renderer_set_line_width(0.3F);
@@ -293,6 +312,7 @@ int main(void) {
     RUN_TEST(test_wire_circle_has_closed_outer_joins);
     RUN_TEST(test_overlay_strokes_draw_over_fills_until_flush);
     RUN_TEST(test_several_flushes_of_one_frame_render_in_place);
+    RUN_TEST(test_wire_template_at_an_index_offset_renders);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

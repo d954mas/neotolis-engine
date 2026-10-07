@@ -512,9 +512,12 @@ void test_shape_loss_during_restore_is_retried_by_the_next_one(void) {
     TEST_ASSERT_EQUAL_MEMORY(vp, nt_shape_renderer_test_vp(), sizeof(vp));
     TEST_ASSERT_FALSE(nt_shape_renderer_test_depth_enabled());
     nt_gfx_fake_draw_trace_reset(true);
+    /* The triangle batch reads the frame vertex buffer the restore made. */
+    nt_shape_renderer_triangle((const float[3]){0, 0, 0}, (const float[3]){1, 0, 0}, (const float[3]){0, 1, 0}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_line((const float[3]){0, 0, 0}, (const float[3]){1, 0, 0}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_draw_trace_at(0).num_vertices);
     bool found = false;
     for (uint32_t i = 0; i < nt_gfx_fake_uniform_vec4_count(); i++) {
         if (nt_gfx_fake_uniform_vec4_hash_at(i) == nt_hash32_str("u_pixel_scale").value) {

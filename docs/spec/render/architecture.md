@@ -1070,8 +1070,8 @@ and two closed meridians that include the straight sides. A capsule with
 and collapsed straight segments. Rotated variants transform the complete path
 before constructing its thickness.
 
-A branching wire graph is distinct from a path: cube edges and `mesh_wire`
-remain independent segments, and cylinder strut/ring intersections do not gain
+A branching wire graph is distinct from a path: cube edges remain independent
+segments, and cylinder strut/ring intersections do not gain
 an arbitrary two-edge join. No global graph stitching, hidden-edge extraction,
 mesh silhouette or duplicate-edge removal is implied by these APIs.
 

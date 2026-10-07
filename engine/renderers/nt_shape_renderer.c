@@ -209,6 +209,7 @@ typedef struct {
 /* Circle 1 ring, sphere 3, cylinder 2 rings + 4 struts, capsule 2 rings + 2 meridians. */
 #define NT_WIRE_TEMPLATE_SEGMENTS ((6 * NT_SHAPE_SEGMENTS) + 4 + NT_WIRE_MAX_SEGMENTS)
 /* WebGL 2 always restarts primitives at index 65535. */
+_Static_assert(NT_SHAPE_RENDERER_MAX_VERTICES >= 3, "the triangle batch holds at least one triangle");
 _Static_assert(NT_FILL_TEMPLATE_VERTICES < 65535 && NT_WIRE_TEMPLATE_SEGMENTS * 7 < 65535, "template indices must stay below the restart index");
 
 typedef struct {
@@ -851,24 +852,16 @@ static void create_gpu(void) {
         .layout = k_line_template_layout, .instance_layout = k_stroke_instance_layout, .vertex_buffer = s_shape.gpu.line_vbo, .index_buffer = s_shape.gpu.line_ibo, .label = "shape_stroke_vi"});
 }
 
+/* A buffer takes its vertex inputs and a program its pipelines along; only the batch vertex
+ * input sits on a borrowed buffer. */
 static void destroy_gpu(void) {
-    nt_gfx_destroy_vertex_input(s_shape.gpu.stroke_vi);
-    nt_gfx_destroy_vertex_input(s_shape.gpu.line_vi);
-    nt_gfx_destroy_vertex_input(s_shape.gpu.wire_vi);
     nt_gfx_destroy_vertex_input(s_shape.gpu.batch_vi);
-    nt_gfx_destroy_vertex_input(s_shape.gpu.fill_vi);
     nt_gfx_destroy_buffer(s_shape.gpu.line_ibo);
     nt_gfx_destroy_buffer(s_shape.gpu.line_vbo);
     nt_gfx_destroy_buffer(s_shape.gpu.wire_ibo);
     nt_gfx_destroy_buffer(s_shape.gpu.wire_vbo);
     nt_gfx_destroy_buffer(s_shape.gpu.fill_ibo);
     nt_gfx_destroy_buffer(s_shape.gpu.fill_vbo);
-    for (int depth = 0; depth < 2; depth++) {
-        nt_gfx_destroy_pipeline(s_shape.gpu.fill_pip[depth]);
-        nt_gfx_destroy_pipeline(s_shape.gpu.batch_pip[depth]);
-        nt_gfx_destroy_pipeline(s_shape.gpu.wire_pip[depth]);
-        nt_gfx_destroy_pipeline(s_shape.gpu.line_pip[depth]);
-    }
     nt_gfx_destroy_program(s_shape.gpu.line_prog);
     nt_gfx_destroy_program(s_shape.gpu.wire_prog);
     nt_gfx_destroy_program(s_shape.gpu.batch_prog);
