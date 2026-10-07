@@ -80,11 +80,10 @@ first uploads the frame storage allocated since the previous one (see Frame
 storage). Nothing is recorded outside a frame.
 
 Every other operation is immediate: creates, destroys, buffer and texture
-updates, activation, queries, `nt_gfx_read_pixels`, the GPU timing toggle and
+updates, activation, queries, the GPU timing toggle and
 polling. Recorded commands keep their mutual order. A temporary rule keeps
 today's order for the operations that need it: `nt_gfx_update_buffer`,
-`nt_gfx_orphan_buffer`, every destroy of a live handle, `nt_gfx_read_pixels`
-and, with GPU timing compiled ON,
+`nt_gfx_orphan_buffer`, every destroy of a live handle and, with GPU timing compiled ON,
 `nt_gfx_set_gpu_timing_enabled` first execute the commands recorded so far, so
 they see every earlier draw. Other immediate operations may run before
 draw-phase calls recorded earlier in the same frame. A texture write is not
@@ -653,7 +652,7 @@ size change is new textures and new targets.
 
 A depth-only target (a shadow map) has no color attachment. It is
 framebuffer-complete, the pass color clear is a no-op, and
-`nt_gfx_read_pixels` inside such a pass asserts.
+`nt_gfx_read_pixels` with it as the source asserts.
 
 Attachments are ordinary textures: `NT_SAMPLER_DEFAULT` selects the sampler of
 their own descriptor, and a binding may override it, for example with a

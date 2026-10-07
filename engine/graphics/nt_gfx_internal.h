@@ -219,7 +219,8 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
 /* Framebuffer readback. Writes w*h rgba8 pixels into out_rgba8 in raw GL
  * bottom-left order; the single Y-flip to top-left is done in the shared
  * nt_gfx.c layer. Returns false on read failure so the caller never encodes garbage. */
-bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
+/* render_target_backend 0 reads the window. */
+bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8);
 
 /* size 0 binds the whole buffer; otherwise [offset, offset + size), validated by the frontend. */
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size);

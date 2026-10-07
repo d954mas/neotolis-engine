@@ -2,6 +2,7 @@
  * uniform blocks allocated after the first pass, and delta uploads mid-frame. */
 
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_frame.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -89,7 +90,14 @@ static uint32_t alloc_indices(uint32_t first_vertex) {
     return offset / 4U;
 }
 
-static void read_pixel(int x, int y, uint8_t out[4]) { TEST_ASSERT_TRUE(nt_gfx_read_pixels(x, y, 1, 1, out, 4)); }
+static void read_pixel(int x, int y, uint8_t out[4]) { TEST_ASSERT_TRUE(nt_gfx_read_pixels((nt_render_target_t){0}, x, y, 1, 1, out, 4)); }
+
+/* Inside an open pass: replays the recorded calls and reads one pixel of the bound window
+ * framebuffer, which the next pass would clear. */
+static void read_pixel_in_pass(int x, int y, uint8_t out[4]) {
+    nt_gfx_frame_execute();
+    glReadPixels(x, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, out);
+}
 
 static void assert_red_left_green_right(void) {
     uint8_t left[4] = {0};
@@ -123,9 +131,9 @@ static void test_absolute_uint32_indices_over_two_strides_in_one_frame(void) {
     nt_gfx_bind_pipeline(green);
     nt_gfx_bind_vertex_input(wide);
     nt_gfx_draw_indexed(right_first, 3, 3);
-    assert_red_left_green_right();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    assert_red_left_green_right();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_begin_frame();
 }
@@ -137,7 +145,7 @@ static void assert_center(uint8_t red, uint8_t green) {
     TEST_ASSERT_EQUAL_UINT8(green, pixel[1]);
 }
 
-/* The first pass executes (read_pixels) before the second block exists, so the
+/* The first pass executes (read in the pass) before the second block exists, so the
  * late block reaches the uniform buffer as a delta of a later execution. Each pass
  * draws with its own block. */
 static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(void) {
@@ -151,7 +159,8 @@ static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(voi
     nt_gfx_bind_vertex_input(empty);
     nt_gfx_bind_uniform_block(0, red, sizeof(red));
     nt_gfx_draw(0, 3);
-    assert_center(255, 0);
+    uint8_t first[4] = {0};
+    read_pixel_in_pass((int)(g_nt_window.fb_width / 2U), (int)(g_nt_window.fb_height / 2U), first);
     nt_gfx_end_pass();
 
     /* Produced while the frame is being drawn, as after UI layout. */
@@ -160,9 +169,11 @@ static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(voi
     nt_gfx_bind_vertex_input(empty);
     nt_gfx_bind_uniform_block(0, green, sizeof(green));
     nt_gfx_draw(0, 3);
-    assert_center(0, 255);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT8(255, first[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, first[1]);
+    assert_center(0, 255);
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_begin_frame();
 }
@@ -185,9 +196,9 @@ static void test_a_mid_frame_execution_and_a_delta_upload_draw_both_halves(void)
     const uint32_t right_first = alloc_indices(alloc_triangle(12, 3, s_right));
     nt_gfx_bind_pipeline(green);
     nt_gfx_draw_indexed(right_first, 3, 3);
-    assert_red_left_green_right();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    assert_red_left_green_right();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_begin_frame();
 }
@@ -223,11 +234,11 @@ static void test_an_index_upload_leaves_a_bound_input_with_its_own_index_buffer(
     nt_gfx_bind_pipeline(red);
     nt_gfx_bind_vertex_input(own);
     nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     uint8_t left[4] = {0};
     read_pixel((int)(g_nt_window.fb_width * 3U / 16U), (int)(g_nt_window.fb_height / 2U), left);
     TEST_ASSERT_EQUAL_UINT8(255, left[0]);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_begin_frame();
 }

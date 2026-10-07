@@ -500,7 +500,8 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) {
 
 /* Synthetic readback: r = GL row, g = column, bottom-left order like glReadPixels,
  * so the shared-layer Y-flip is observable (out row 0 must carry GL row h-1). */
-bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
+bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8) {
+    (void)render_target_backend;
     (void)x;
     (void)y;
     uint8_t *p = (uint8_t *)out_rgba8;

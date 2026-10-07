@@ -35,7 +35,7 @@ static void test_stub_has_no_graphics_resources(void) {
 static void test_stub_returns_empty_queries_without_fabricating_pixels(void) {
     uint8_t pixels[4] = {1, 2, 3, 4};
     const uint8_t expected[4] = {1, 2, 3, 4};
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels(0, 0, 1, 1, pixels, sizeof(pixels)));
+    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixels, sizeof(pixels)));
     TEST_ASSERT_EQUAL_MEMORY(expected, pixels, sizeof(pixels));
     uint16_t width = 10;
     uint16_t height = 20;

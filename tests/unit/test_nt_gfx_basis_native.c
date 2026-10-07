@@ -168,8 +168,9 @@ static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w
     const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = tex, .sampler = sampler};
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, vp_w, vp_h, s_readback, (uint32_t)sizeof(s_readback)));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const bool read = nt_gfx_read_pixels(rt, 0, 0, vp_w, vp_h, s_readback, (uint32_t)sizeof(s_readback));
 
     nt_gfx_destroy_texture(color);
     nt_gfx_destroy_vertex_input(vi);
@@ -177,6 +178,8 @@ static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w
     nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(read);
 }
 
 /* read_pixels hands back top-left rows; GL row 0 is the source's row 0. */

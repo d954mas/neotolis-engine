@@ -286,10 +286,13 @@ static void test_a_sampler_recreate_and_a_readback_latch_a_loss(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    nt_gfx_end_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     uint8_t pixel[4];
     nt_gfx_fake_set_context_lost(true);
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel)));
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_gfx_begin_frame();
 }
 
 /* Loading after init lands in the first frame, so its creations are counted like any frame's. */

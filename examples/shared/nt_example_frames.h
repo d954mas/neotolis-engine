@@ -113,7 +113,7 @@ static inline void nt_example_frames_end(bool ready) {
 
     uint32_t size = g_nt_window.fb_width * g_nt_window.fb_height * 4U;
     uint8_t *pixels = (uint8_t *)malloc(size);
-    bool read = pixels != NULL && nt_gfx_read_pixels(0, 0, (int)g_nt_window.fb_width, (int)g_nt_window.fb_height, pixels, size);
+    bool read = pixels != NULL && nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, (int)g_nt_window.fb_width, (int)g_nt_window.fb_height, pixels, size);
     uint32_t checksum = read ? nt_hash32(pixels, size).value : 0;
     free(pixels);
 

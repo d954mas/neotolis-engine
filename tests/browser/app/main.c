@@ -334,16 +334,16 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_probe"), .texture = texture, .sampler = NT_SAMPLER_DEFAULT};
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_draw(0, 3);
-    uint8_t pixel[4] = {0};
-    bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    uint8_t pixel[4] = {0};
+    bool read = nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(texture);
-    nt_gfx_end_frame();
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
 /* context_loss.spec.ts calls steps 1-3 right after a synchronous loseContext(): the browser already
@@ -460,16 +460,16 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_basis_uv"), uv);
     nt_gfx_draw(0, 3);
-    uint8_t pixel[4] = {0};
-    bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    uint8_t pixel[4] = {0};
+    bool read = nt_gfx_read_pixels(target, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(color);
-    nt_gfx_end_frame();
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
 EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
@@ -513,10 +513,12 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_apply_texture_bindings(NULL, 0);
     nt_gfx_set_uniform_vec4(uniform, z);
     nt_gfx_draw(0, 3);
-    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, original, sizeof(pixels)) == 0) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, original, sizeof(pixels)) == 0) {
         result |= 1U;
     }
-    nt_gfx_end_pass();
+    nt_gfx_begin_frame();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F, .load_color = true});
     nt_gfx_bind_pipeline(pipeline);
@@ -524,20 +526,37 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_apply_texture_bindings(NULL, 0);
     nt_gfx_set_uniform_vec4(uniform, z);
     nt_gfx_draw(0, 3);
-    const uint8_t green[8] = {0, 255, 0, 255, 0, 255, 0, 255};
-    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
-        result |= 2U;
-    }
     nt_gfx_set_scissor(1, 0, 1, 1);
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const uint8_t green[8] = {0, 255, 0, 255, 0, 255, 0, 255};
+    if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
+        result |= 2U;
+    }
+    nt_gfx_begin_frame();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .load_depth = true});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     const uint8_t red[8] = {255, 0, 0, 255, 255, 0, 0, 255};
-    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0) {
+    if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0) {
         result |= 4U;
     }
+    nt_gfx_begin_frame();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
+    nt_gfx_set_scissor(0, 0, 1, 1);
+    nt_gfx_set_scissor_enabled(true);
+    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {0, 0, 1, 1}});
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const uint8_t blue_red[8] = {0, 0, 255, 255, 255, 0, 0, 255};
+    if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, blue_red, sizeof(pixels)) == 0) {
+        result |= 64U;
+    }
+    nt_gfx_begin_frame();
+
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
     nt_gfx_bind_pipeline(overwrite);
     nt_gfx_bind_vertex_input(input);
@@ -545,11 +564,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_set_uniform_vec4(uniform, z);
     nt_gfx_set_scissor(0, 0, 1, 1);
     nt_gfx_set_scissor_enabled(true);
-    nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {0, 0, 1, 1}});
-    const uint8_t blue_red[8] = {0, 0, 255, 255, 255, 0, 0, 255};
-    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, blue_red, sizeof(pixels)) == 0) {
-        result |= 64U;
-    }
     nt_gfx_clear(&(nt_clear_desc_t){.depth = true, .clear_depth = 0.2F});
     nt_gfx_clear(&(nt_clear_desc_t){0});
     nt_gfx_set_scissor_enabled(false);
@@ -561,30 +575,35 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     z[0] = 0.0F;
     nt_gfx_set_uniform_vec4(uniform, z);
     nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     const uint8_t red_green[8] = {255, 0, 0, 255, 0, 255, 0, 255};
-    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red_green, sizeof(pixels)) == 0) {
+    if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red_green, sizeof(pixels)) == 0) {
         result |= 128U;
     }
-    nt_gfx_end_pass();
-    nt_pass_desc_t discard = {.target = target, .load_color = true, .load_depth = true, .discard_depth = true};
-    nt_gfx_begin_pass(&discard);
+    nt_gfx_begin_frame();
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true, .discard_depth = true});
     nt_gfx_bind_pipeline(overwrite);
     nt_gfx_bind_vertex_input(input);
     nt_gfx_apply_texture_bindings(NULL, 0);
     nt_gfx_set_uniform_vec4(uniform, z);
     nt_gfx_draw(0, 3);
-    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
         result |= 16U;
     }
-    discard.discard_depth = false;
-    nt_gfx_end_pass();
+    nt_gfx_begin_frame();
+
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
-    if (nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
-        result |= 32U;
-    }
     nt_gfx_end_pass();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.load_color = true, .load_depth = true, .discard_depth = true});
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
+        result |= 32U;
+    }
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_pipeline(overwrite);
@@ -595,7 +614,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_destroy_render_target(prepass);
     nt_gfx_destroy_texture(color);
     nt_gfx_destroy_texture(depth);
-    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
     return result;
@@ -669,9 +687,10 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
         }
     }
     nt_gfx_draw(0, 3);
-    uint8_t pixel[4] = {0};
-    bool read = nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    uint8_t pixel[4] = {0};
+    bool read = nt_gfx_read_pixels(target, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_vertex_input(vi);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_program(program);
@@ -681,7 +700,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     nt_gfx_destroy_texture(texture);
     nt_gfx_destroy_texture(spare);
     nt_gfx_destroy_buffer(buffer);
-    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_end_frame();
     const nt_gfx_counters_t counters = g_nt_gfx.last_frame;

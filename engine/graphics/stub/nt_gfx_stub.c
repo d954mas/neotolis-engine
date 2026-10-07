@@ -229,7 +229,8 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
 // Signature follows the public readback API.
 // NOLINTNEXTLINE(readability-non-const-parameter)
-bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+    (void)src;
     (void)x;
     (void)y;
     (void)w;

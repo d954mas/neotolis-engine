@@ -129,7 +129,7 @@ static cJSON *capture_produce(void *vctx) {
     if (rgba == NULL) {
         return NULL;
     }
-    if (!nt_gfx_read_pixels((int)c->x, (int)c->y, (int)c->w, (int)c->h, rgba, rgba_len)) {
+    if (!nt_gfx_read_pixels((nt_render_target_t){0}, (int)c->x, (int)c->y, (int)c->w, (int)c->h, rgba, rgba_len)) {
         free(rgba);
         return NULL;
     }

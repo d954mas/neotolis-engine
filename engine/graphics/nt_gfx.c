@@ -659,7 +659,8 @@ void nt_gfx_end_frame(void) {
 
 /* Cap-checked rgba8 readback + single Y-flip to top-left. L1 contract,
  * so bad size returns false (bot-param validation is the L2 concern). */
-static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static nt_gfx_result_t read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
     if (w <= 0 || h <= 0) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
@@ -667,12 +668,20 @@ static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uin
     if (out == NULL) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
-    NT_ASSERT((s_gfx.active_render_target == 0 || s_gfx.render_target_metas[nt_pool_slot_index(s_gfx.active_render_target)].attachments[NT_GFX_RT_COLOR].id != 0) &&
-              "read_pixels: the active render target has no color attachment");
     /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
-       early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed. */
+       early-returns on this. The capture producer treats false as failure -> NULL -> capture_failed.
+       It also frees every render target, so it comes before the source checks. */
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
+    }
+    uint32_t rt_slot = 0;
+    if (src.id != 0) {
+        NT_ASSERT(nt_pool_valid(&s_gfx.render_target_pool, src.id) && "read_pixels: invalid render target");
+        rt_slot = nt_pool_slot_index(src.id);
+        /* WebGL reads RGBA/UNSIGNED_BYTE only from a normalized fixed-point color buffer. */
+        NT_ASSERT(s_gfx.render_target_metas[rt_slot].attachments[NT_GFX_RT_COLOR].id != 0 && render_target_attachment_meta(rt_slot, NT_GFX_RT_COLOR)->format == NT_TEXTURE_FORMAT_RGBA8 &&
+                  "read_pixels: the source needs an RGBA8 color attachment");
+        NT_ASSERT(x >= 0 && y >= 0 && x + w <= render_target_size_meta(rt_slot)->width && y + h <= render_target_size_meta(rt_slot)->height && "read_pixels: rect outside the render target");
     }
     /* Compute in uint64_t so w*h*4 cannot overflow before the cap check. */
     uint64_t need = (uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U;
@@ -680,7 +689,7 @@ static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uin
         return NT_GFX_RESULT_CAPACITY;
     }
     /* WebGL reports a loss once through glGetError and the drain before the read eats it: ask the browser too. */
-    if (!nt_gfx_backend_read_pixels(x, y, w, h, out) || nt_gfx_backend_query_context_lost()) {
+    if (!nt_gfx_backend_read_pixels(rt_slot, x, y, w, h, out) || nt_gfx_backend_query_context_lost()) {
         return backend_failed(NULL); /* GL read error -> capture_failed, not an encode of uninitialized memory. */
     }
 
@@ -700,11 +709,12 @@ static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uin
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
-    nt_gfx_frame_execute();
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_READ_PIXELS, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = (uint32_t)x; event->data.state.integers[1] = (uint32_t)y;
-                         event->data.state.integers[2] = (uint32_t)w; event->data.state.integers[3] = (uint32_t)h);
-    const nt_gfx_result_t result = read_pixels(x, y, w, h, out, out_cap);
+bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+    /* Only an ended frame has executed every draw; the window holds it until the swap. */
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "read_pixels: read between nt_gfx_end_frame and nt_gfx_begin_frame");
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_READ_PIXELS, src.id != 0 ? NT_GFX_OBJECT_RENDER_TARGET : NT_GFX_OBJECT_NONE, src.id, event->data.state.integers[0] = (uint32_t)x;
+                         event->data.state.integers[1] = (uint32_t)y; event->data.state.integers[2] = (uint32_t)w; event->data.state.integers[3] = (uint32_t)h);
+    const nt_gfx_result_t result = read_pixels(src, x, y, w, h, out, out_cap);
     NT_GFX_END(result);
     return result == NT_GFX_RESULT_ACCEPTED;
 }

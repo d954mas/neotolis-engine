@@ -1003,10 +1003,13 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 
-/* Reads an (x,y,w,h) sub-rect of the bound default framebuffer into caller-owned `out`:
- * rgba8 (row pitch w*4), TOP-LEFT origin (GL's bottom-left read is y-flipped once here),
- * straight alpha. Returns false on w<=0 || h<=0 or w*h*4 > out_cap (no write past the cap). */
-bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap);
+/* Reads an (x,y,w,h) sub-rect of `src` (0 = the window) into caller-owned `out`, only between
+ * nt_gfx_end_frame and the next nt_gfx_begin_frame (the window: before the swap). (x, y) is the
+ * rect's bottom-left corner, as in GL; `out` is rgba8 (row pitch w*4), TOP-LEFT origin (y-flipped
+ * once here), straight alpha. A render target needs an RGBA8 color attachment the rect fits in;
+ * after a pass that discarded its color the content is undefined. Returns false on w<=0 || h<=0,
+ * w*h*4 > out_cap (no write past the cap) or a lost context. */
+bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap);
 
 /* ---- Instance buffer ---- */
 

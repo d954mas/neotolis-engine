@@ -392,11 +392,11 @@ static void test_complete_capture_matches_gl_counters(void) {
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_set_uniform_vec4(nt_hash32_str("tint"), tint);
     nt_gfx_draw(0, 3);
-    uint8_t pixel[4] = {0};
-    (void)nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_end_pass();
-    nt_gfx_destroy_buffer(buffer);
     nt_gfx_end_frame();
+    uint8_t pixel[4] = {0};
+    (void)nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel));
+    nt_gfx_destroy_buffer(buffer);
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     uint32_t recorded[NT_GFX_GL_COUNT] = {0};
@@ -541,10 +541,10 @@ static void test_readback_is_recorded_as_issued_call(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    uint8_t pixel[4] = {0};
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    uint8_t pixel[4] = {0};
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     uint32_t reads = 0;

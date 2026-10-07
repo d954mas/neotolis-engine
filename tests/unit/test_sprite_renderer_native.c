@@ -106,13 +106,13 @@ void tearDown(void) {
 
 static void begin_black_pass(void) { nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F}); }
 
-/* Reads the frame and closes it before any assertion, so a failure never leaves a pass open. */
+/* Ends the frame, reads the window and opens the next frame before any assertion, so a failure never leaves a pass open. */
 static void capture_and_end_frame(void) {
     const uint32_t w = g_nt_window.fb_width;
     const uint32_t h = g_nt_window.fb_height;
-    const bool read = nt_gfx_read_pixels(0, 0, (int)w, (int)h, s_pixels, sizeof(s_pixels));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    const bool read = nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, (int)w, (int)h, s_pixels, sizeof(s_pixels));
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE_MESSAGE(read, "framebuffer larger than the capture buffer");
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());

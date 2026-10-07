@@ -379,14 +379,34 @@ static void test_pass_sequencing_and_capacity_misuse_assert(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_init(&invalid_desc));
 }
 
+/* Draws execute at end_frame, so a read inside the frame would see none of them. */
+static void test_read_pixels_asserts_inside_a_frame(void) {
+    nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
+    uint8_t pixel[4];
+
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: read between nt_gfx_end_frame and nt_gfx_begin_frame"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: read between nt_gfx_end_frame and nt_gfx_begin_frame"));
+    nt_gfx_end_pass();
+
+    nt_gfx_end_frame();
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    nt_gfx_begin_frame();
+}
+
 /* A depth-only target has no color to read. */
-static void test_read_pixels_asserts_inside_depth_only_pass(void) {
+static void test_read_pixels_asserts_on_depth_only_source(void) {
     nt_render_target_t rt = make_target(NO_TEXTURE, make_depth());
     uint8_t pixel[4];
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
-    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: the source needs an RGBA8 color attachment"));
+    nt_gfx_begin_frame();
 }
 // #endregion
 
@@ -670,7 +690,8 @@ int main(void) {
     RUN_TEST(test_zero_pass_target_routes_to_default_framebuffer_after_render_target);
     RUN_TEST(test_begin_pass_asserts_for_invalid_or_stale_target);
     RUN_TEST(test_pass_sequencing_and_capacity_misuse_assert);
-    RUN_TEST(test_read_pixels_asserts_inside_depth_only_pass);
+    RUN_TEST(test_read_pixels_asserts_inside_a_frame);
+    RUN_TEST(test_read_pixels_asserts_on_depth_only_source);
     RUN_TEST(test_active_attachments_cannot_be_sampled);
     RUN_TEST(test_attachments_bind_with_their_default_sampler);
     RUN_TEST(test_depth_texture_rejects_linear_sampler_override);

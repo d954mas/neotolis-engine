@@ -1019,14 +1019,29 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { gl_set_viewport(x
 /* Raw GL readback, bottom-left origin. Y-flip to top-left is done once in
  * the shared layer (nt_gfx_read_pixels). rgba8 rows are 4*w bytes -> already
  * 4-aligned; set GL_PACK_ALIGNMENT=4 explicitly so it never depends on state. */
-bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
+bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8) {
+    GLuint fbo = 0;
+    if (render_target_backend != 0) {
+        NT_ASSERT(render_target_backend <= s_init_desc.max_render_targets && s_render_target_gl[render_target_backend] != 0 && "read_pixels: requires a live render target");
+        fbo = s_render_target_gl[render_target_backend];
+    }
+    /* Between frames the window is bound; a target is bound for this read only. */
+    if (s_bound_framebuffer != fbo) {
+        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
+        s_bound_framebuffer = fbo;
+    }
     NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
     /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
     nt_gfx_gl_drain_errors();
     NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, out_rgba8);
     /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
        partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
-    return NT_GL_RET0(glGetError) == GL_NO_ERROR;
+    const bool ok = NT_GL_RET0(glGetError) == GL_NO_ERROR;
+    if (fbo != 0) {
+        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
+        s_bound_framebuffer = 0;
+    }
+    return ok;
 }
 
 /* ---- Pipeline bind ---- */
