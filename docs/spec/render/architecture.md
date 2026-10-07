@@ -404,10 +404,10 @@ but not free: Mali drivers under ANGLE track the whole buffer, not the written
 range, so the write waits for those draws or copies around them. Measured on
 the reference phone:
 
-- appending per-draw data between draws of one frame (the former mesh and
-  skinned instance rings, the shape instance rings) costs 2-15x frame time when
-  the frame is not GPU-bound;
-- a partial rewrite from offset 0 (the shape batch) stalls the same way;
+- appending per-draw data between draws of one frame (the former mesh,
+  skinned and shape instance rings) costs 2-15x frame time when the frame is
+  not GPU-bound;
+- a partial rewrite from offset 0 (the former shape batch) stalls the same way;
 - a full-size rewrite does not stall: Chrome gives the buffer new storage;
 - rewriting a buffer one frame after its last read does not stall;
 - orphaning (`nt_gfx_orphan_buffer`) removes the wait but allocates storage on
@@ -420,9 +420,8 @@ executes, before the draws that read it, so a frame that executes once (in
 read. A buffer write or destroy that executes the stream earlier (see
 Draw-phase command stream) makes the next execution append to frame buffers
 that earlier draws of the frame read: the waiting case above.
-The sprite and text renderers write their geometry to frame storage. The shape
-renderer, an immediate-mode batch that flushes between game passes, still chooses
-a per-flush policy by measurement; its instance rings predate this rule.
+The sprite, text and shape renderers write their geometry to frame storage, so a
+frame drawn by engine renderers alone uploads it once, in `nt_gfx_end_frame`.
 
 A wait is a timing cost, not lost GPU throughput. In a GPU-bound frame the
 waits did not raise GPU work per frame, and the phone's governor granted the
@@ -571,8 +570,8 @@ nt_gfx_end_frame(); /* uploads frame storage, then executes the passes */
 A shadow list drawn in several cascades packs once per cascade; to pack once,
 the game writes the instances itself and draws them through the core in each
 cascade. The sprite and text renderers record into frame storage at each emit
-or draw, inside a pass. Shape flushes inside passes under its own policy and does
-not read frame storage.
+or draw, inside a pass; the shape renderer copies each kind into frame storage at
+`flush`.
 
 ### Render targets
 
@@ -1046,7 +1045,8 @@ hardware line-width support.
 
 Width, width mode, viewport dimension, VP and depth changes flush all pending
 geometry. Identical values do not flush.
-Settings survive GPU restore, including a failed restore followed by retry.
+Settings survive GPU restore, including a restore that met a new loss; queued
+shapes are dropped.
 The game must flush before changing render passes or directly changing the gfx
 viewport; the renderer does not intercept gfx state changes.
 
@@ -1070,8 +1070,8 @@ and two closed meridians that include the straight sides. A capsule with
 and collapsed straight segments. Rotated variants transform the complete path
 before constructing its thickness.
 
-A branching wire graph is distinct from a path: cube edges and `mesh_wire`
-remain independent segments, and cylinder strut/ring intersections do not gain
+A branching wire graph is distinct from a path: cube edges remain independent
+segments, and cylinder strut/ring intersections do not gain
 an arbitrary two-edge join. No global graph stitching, hidden-edge extraction,
 mesh silhouette or duplicate-edge removal is implied by these APIs.
 
@@ -1081,11 +1081,22 @@ translucent strokes.
 
 ### Storage and draw order
 
-No heap allocation or trigonometry occurs when submitting strokes. Circle,
-sphere, cylinder and capsule wires use immutable templates built at
-initialization and cost one instance per shape.
+No heap allocation or trigonometry occurs when submitting strokes. Filled
+shapes and circle, sphere, cylinder and capsule wires use immutable templates
+built at initialization, one index buffer range per type in two shared buffers
+(fills, wires), and cost one instance per shape; one program draws every filled
+type, the capsule's hemisphere tag riding in the template's fourth component.
 
-Every flush draws filled instanced shapes by type, then triangles and meshes,
+Each kind is staged on the CPU between flushes. `flush` copies every non-empty
+kind into frame storage (`NT_GFX_FRAME_VERTEX`) and draws it from there:
+instanced kinds bind the frame vertex buffer as their instance buffer at the
+copy's offset, and triangles are a non-indexed list read from it. Frame storage
+holds every flush of the frame until `nt_gfx_end_frame`, and so does the command
+stream, so a host sizes `frame_capacity[NT_GFX_FRAME_VERTEX]` and
+`stream_capacity` for its busiest frame; `nt_shape_renderer_init` asserts a
+nonzero vertex budget.
+
+Every flush draws filled instanced shapes by type, then triangles,
 then wire templates by type, connected segments and independent lines. Within
 one flush this kind order replaces submission order: outlines stay on top of
 fills, and interleaved submissions batch into at most one draw per kind. Flushes
@@ -1095,10 +1106,11 @@ overlay mode, calls `flush` between them.
 
 `NT_SHAPE_RENDERER_MAX_LINES` bounds independent lines (default 8192) and
 `NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS` connected segments (default 1024).
-Each wire template type holds `ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)`
-shapes (default 512). A full queue flushes all pending geometry. A skipped flush
-after failed initialization empties every queue, preventing overflow during
-context recovery.
+`NT_SHAPE_RENDERER_MAX_INSTANCES` bounds each filled type (default 2048) and
+`NT_SHAPE_RENDERER_MAX_VERTICES` the triangle vertices (default 16384). Each wire
+template type holds `ceil(NT_SHAPE_RENDERER_MAX_INSTANCES / 4)` shapes (default
+512). These bound the CPU staging, not a frame: a full queue flushes all pending
+geometry.
 
 ## Renderer complexity classes
 

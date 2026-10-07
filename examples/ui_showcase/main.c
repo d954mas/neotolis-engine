@@ -69,7 +69,7 @@
 
 #include "clay.h"
 
-/* Frame storage budget of the sprite and text geometry: the busiest tab peaks at about 410 KB / 64 KB, and with
+/* Frame storage budget of the sprite, text and shape geometry (one cube): the busiest tab peaks at about 410 KB / 64 KB, and with
  * the inspector open at about 760 KB / 225 KB. */
 #define UI_SHOWCASE_VERTEX_BYTES (2048U * 1024U)
 #define UI_SHOWCASE_INDEX_BYTES (512U * 1024U)
@@ -2281,7 +2281,7 @@ static void rich_obj_cube_draw(void *user_data, float x, float y, float w, float
     nt_shape_renderer_set_vp((const float *)cube_vp);
     /* color = the draw_fn-resolved RGBA (<color> + folded opacity + fx tint) -> cube tints/fades with text.
      * size 1.5 (not 1.0) so the cube fills more of its reserved box -- a unit cube projects to only ~36%. */
-    nt_shape_renderer_cube_rot((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.5F, 1.5F, 1.5F}, rot, color);
+    nt_shape_renderer_cube((vec3){0.0F, 0.0F, 0.0F}, (vec3){1.5F, 1.5F, 1.5F}, rot, color);
     nt_shape_renderer_flush(); /* binds its own pipeline+u_vp and draws NOW */
 }
 

@@ -31,6 +31,9 @@
 /* Shape storage */
 #define MAX_SHAPES_PER_TYPE 32768
 #define MAX_SHAPES (MAX_SHAPES_PER_TYPE * 8)
+/* Frame storage per shape of each type at its costliest variant: a line 28 B, a rect wire 4 strokes of 52 B, a
+ * triangle wire 3 strokes, a cube wire 12 lines, and a circle, sphere, cylinder or capsule one 44 B instance. */
+#define BENCH_VERTEX_BYTES_PER_SHAPE_SET (28U + (4U * 52U) + (3U * 52U) + (12U * 28U) + (4U * 44U))
 
 /* Shape types */
 enum { BENCH_LINE, BENCH_RECT, BENCH_TRI, BENCH_CIRCLE, BENCH_CUBE, BENCH_SPHERE, BENCH_CYL, BENCH_CAP };
@@ -224,16 +227,16 @@ static void dispatch_shape(const bench_shape_t *s) {
     case BENCH_RECT:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_rect(s->a, s->size, s->col);
+            nt_shape_renderer_rect(s->a, s->size, NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_rect_wire(s->a, s->size, s->col);
+            nt_shape_renderer_rect_wire(s->a, s->size, NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_rect_rot(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_rect(s->a, s->size, s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_rect_wire_rot(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_rect_wire(s->a, s->size, s->rot, s->col);
             break;
         default:
             break;
@@ -260,16 +263,16 @@ static void dispatch_shape(const bench_shape_t *s) {
     case BENCH_CIRCLE:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_circle(s->a, s->size[0], s->col);
+            nt_shape_renderer_circle(s->a, s->size[0], NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_circle_wire(s->a, s->size[0], s->col);
+            nt_shape_renderer_circle_wire(s->a, s->size[0], NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_circle_rot(s->a, s->size[0], s->rot, s->col);
+            nt_shape_renderer_circle(s->a, s->size[0], s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_circle_wire_rot(s->a, s->size[0], s->rot, s->col);
+            nt_shape_renderer_circle_wire(s->a, s->size[0], s->rot, s->col);
             break;
         default:
             break;
@@ -278,16 +281,16 @@ static void dispatch_shape(const bench_shape_t *s) {
     case BENCH_CUBE:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_cube(s->a, s->size, s->col);
+            nt_shape_renderer_cube(s->a, s->size, NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_cube_wire(s->a, s->size, s->col);
+            nt_shape_renderer_cube_wire(s->a, s->size, NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_cube_rot(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_cube(s->a, s->size, s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_cube_wire_rot(s->a, s->size, s->rot, s->col);
+            nt_shape_renderer_cube_wire(s->a, s->size, s->rot, s->col);
             break;
         default:
             break;
@@ -295,24 +298,24 @@ static void dispatch_shape(const bench_shape_t *s) {
         break;
     case BENCH_SPHERE:
         if (s->variant == 0) {
-            nt_shape_renderer_sphere(s->a, s->size[0], s->col);
+            nt_shape_renderer_sphere(s->a, s->size[0], NULL, s->col);
         } else {
-            nt_shape_renderer_sphere_wire(s->a, s->size[0], s->col);
+            nt_shape_renderer_sphere_wire(s->a, s->size[0], NULL, s->col);
         }
         break;
     case BENCH_CYL:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_cylinder(s->a, s->size[0], s->size[1], s->col);
+            nt_shape_renderer_cylinder(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], s->col);
+            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_cylinder_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_cylinder(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_cylinder_wire_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         default:
             break;
@@ -321,16 +324,16 @@ static void dispatch_shape(const bench_shape_t *s) {
     case BENCH_CAP:
         switch (s->variant) {
         case 0:
-            nt_shape_renderer_capsule(s->a, s->size[0], s->size[1], s->col);
+            nt_shape_renderer_capsule(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 1:
-            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], s->col);
+            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], NULL, s->col);
             break;
         case 2:
-            nt_shape_renderer_capsule_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_capsule(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         case 3:
-            nt_shape_renderer_capsule_wire_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], s->rot, s->col);
             break;
         default:
             break;
@@ -433,7 +436,7 @@ static void draw_room(void) {
     float floor_pos[3] = {0, 0, 0};
     float floor_sz[2] = {ROOM_W, ROOM_D};
     float floor_rot[4] = {0.7071068F, 0, 0, 0.7071068F};
-    nt_shape_renderer_rect_rot(floor_pos, floor_sz, floor_rot, floor_col);
+    nt_shape_renderer_rect(floor_pos, floor_sz, floor_rot, floor_col);
 
     uint32_t grid_col = NT_RGBA8(64, 64, 77, 255);
     int grid_nx = (int)(ROOM_W / GRID_STEP) + 1;
@@ -453,30 +456,30 @@ static void draw_room(void) {
 
     uint32_t ceil_col = NT_RGBA8(31, 31, 51, 255);
     float ceil_pos[3] = {0, ROOM_H, 0};
-    nt_shape_renderer_rect_rot(ceil_pos, floor_sz, floor_rot, ceil_col);
+    nt_shape_renderer_rect(ceil_pos, floor_sz, floor_rot, ceil_col);
 
     uint32_t wall_col = NT_RGBA8(46, 41, 36, 255);
     {
         float pos[3] = {0, ROOM_H * 0.5F, -hd};
         float sz[2] = {ROOM_W, ROOM_H};
-        nt_shape_renderer_rect(pos, sz, wall_col);
+        nt_shape_renderer_rect(pos, sz, NULL, wall_col);
     }
     {
         float pos[3] = {0, ROOM_H * 0.5F, hd};
         float sz[2] = {ROOM_W, ROOM_H};
-        nt_shape_renderer_rect(pos, sz, wall_col);
+        nt_shape_renderer_rect(pos, sz, NULL, wall_col);
     }
     {
         float pos[3] = {-hw, ROOM_H * 0.5F, 0};
         float sz[2] = {ROOM_D, ROOM_H};
         float rot[4] = {0, 0.7071068F, 0, 0.7071068F};
-        nt_shape_renderer_rect_rot(pos, sz, rot, wall_col);
+        nt_shape_renderer_rect(pos, sz, rot, wall_col);
     }
     {
         float pos[3] = {hw, ROOM_H * 0.5F, 0};
         float sz[2] = {ROOM_D, ROOM_H};
         float rot[4] = {0, 0.7071068F, 0, 0.7071068F};
-        nt_shape_renderer_rect_rot(pos, sz, rot, wall_col);
+        nt_shape_renderer_rect(pos, sz, rot, wall_col);
     }
 }
 
@@ -519,11 +522,11 @@ static void frame(void) {
         const nt_gfx_counters_t stats = g_nt_gfx.last_frame; /* previous frame; this one has not drawn yet */
         const uint32_t inst_dc = stats.accepted[NT_GFX_OP_DRAW_INSTANCED] + stats.accepted[NT_GFX_OP_DRAW_INDEXED_INSTANCED];
         uint32_t batch_dc = nt_gfx_draw_calls(&stats) - inst_dc;
-        uint64_t tris = stats.indices / 3;
+        uint64_t indexed_tris = stats.indices / 3; /* the triangle batch is non-indexed: counted in verts */
         printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f\n"
-               "        dc=%u (batch=%u inst=%u)  obj=%" PRIu64 "  verts=%" PRIu64 "  tris=%" PRIu64 "  idx=%" PRIu64 "\n",
+               "        dc=%u (batch=%u inst=%u)  obj=%" PRIu64 "  verts=%" PRIu64 "  indexed_tris=%" PRIu64 "  idx=%" PRIu64 "\n",
                s_shape_count, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)render_avg, (double)s_render_max, (double)(1.0F / avg), nt_gfx_draw_calls(&stats), batch_dc, inst_dc,
-               stats.instances, stats.vertices, tris, stats.indices);
+               stats.instances, stats.vertices, indexed_tris, stats.indices);
         s_dt_max = 0.0F;
         s_dt_sum = 0.0F;
         s_dt_count = 0;
@@ -640,6 +643,9 @@ int main(int argc, char **argv) {
     nt_example_frames_init(argc, argv);
     nt_input_init();
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    /* Every flush of the frame stays in frame storage until end_frame; the room and floor text add a little. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (MAX_SHAPES_PER_TYPE * BENCH_VERTEX_BYTES_PER_SHAPE_SET) + (256U * 1024U);
+    gfx_desc.stream_capacity = 512U * 1024U; /* all auto-flushes of a full frame record before end_frame: 218 KB at the cap */
     nt_gfx_init(&gfx_desc);
     nt_shape_renderer_init();
 
