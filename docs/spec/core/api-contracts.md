@@ -178,17 +178,17 @@ data, so a draw reads only blocks bound in its own frame. WebGL rejects a draw
 whose bound range is smaller than the block's data size; gfx does not know block
 sizes, so `size` covers the whole block. A slot at or above the limit, NULL
 `data` or a zero `size` asserts; an exhausted stream stops as a frame storage
-overflow. On a lost context, including a new loss that left the frame buffer
-unmade during a restore, the call allocates nothing and ends `CONTEXT_LOST`.
+overflow. On a lost context the call allocates nothing and ends `CONTEXT_LOST`.
 
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
-`nt_gfx_begin_frame` has synced, or a link the browser reports lost. The second
+already latched (by `nt_gfx_begin_frame` or an earlier failed call, which also
+covers a stage the loss left 0), or a link the browser reports lost, which latches it. The second
 is a stage handle that is still live but whose GPU object that loss discarded —
 permanently unready (END result `UNREADY`), so the owner recreates the stage and
 links again. Both are
-recoverable and neither asserts. A stale stage handle remains a developer error
-and traps.
+recoverable and neither asserts. On a live context a 0 or stale stage handle
+remains a developer error and traps.
 
 `nt_material_set_program` is the only setter for the borrowed handle, including assignment
 from or to `NT_PROGRAM_INVALID`. Assigning the same handle is a no-op, so a

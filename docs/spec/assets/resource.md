@@ -318,9 +318,9 @@ Restore entry points leave never-initialized or explicitly shut-down modules
 untouched, so a game may call all of them without activating unused renderers.
 
 `nt_shape_renderer` and `nt_postfx_blur` own their programs and relink embedded
-sources inside their restore entry points. A failed blur restore leaves the
-module initialized but unable to draw; the game must retry
-`nt_postfx_blur_restore_gpu` until it succeeds. `nt_mesh_renderer`,
+sources inside their restore entry points. A loss during a restore latches in
+gfx, and the next context restore calls the entry points again; owners keep no
+retry state. `nt_mesh_renderer`,
 `nt_skinned_mesh_renderer`,
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
 the game relinks them; the text renderer's restore drops queued commands and
@@ -331,13 +331,16 @@ point: it owns no buffer, and its pipeline and vertex-input caches validate on
 lookup and recreate what the loss freed.
 Frame storage needs no game restore: the `nt_gfx_begin_frame` that restores the
 context makes new frame buffers, and that frame's allocations reach them.
+Draw entry points that check handles before gfx (`nt_mesh_renderer` and
+`nt_skinned_mesh_renderer` `draw`/`draw_list`, `nt_postfx_blur_gaussian`) return at
+once while `g_nt_gfx.context_lost`, so a game may keep calling them through a loss,
+including after a restore that met a second loss and left handles 0.
 
 `nt_text_renderer_restore_gpu()` returns `nt_result_t`. It retains CPU
 allocations, configured capacities, and module initialization; only GPU
 buffers, cached pipelines/vertex inputs, and queued draw state are reset.
 Every restore entry point is an inactive no-op. The `nt_result_t`-returning
-text and blur functions return `NT_OK` in that case;
-`nt_shape_renderer_restore_gpu` and the mesh renderers return void. Failed GPU creation
+text function returns `NT_OK` in that case; the others return void. Its failed GPU creation
 returns `NT_ERR_INIT_FAILED` after releasing partial GPU resources. The module
 stays initialized, so the game can call restore again or shut it down. There
 is no automatic retry, with one narrow exception: the text renderer's vertex

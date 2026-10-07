@@ -221,7 +221,8 @@ backend gone — because per-frame code keeps operating on them through the
 loss window and the restore recipe has their owners destroy the old handles
 explicitly. Applying a texture set containing a husk reports once and issues no
 texture or sampler bind, and the draws of that set are skipped; binding a husk
-buffer, or writing into any husk, asserts.
+buffer, or writing into any husk, asserts. Destroying handle 0 is a silent no-op
+for every primary type, so an owner whose create met a loss destroys without a check.
 
 **Program / pipeline split.** A program is the linked (vertex, fragment) pair
 and owns everything that follows from linking: uniform locations, uniform
@@ -768,11 +769,12 @@ after it.
 Context loss is synced at begin_frame. The web context registers a canvas
 `webglcontextlost` handler that calls `preventDefault` (the browser restores only
 a handled loss, so shells must not) and sets one latch. Browser lost and restored
-events are separate tasks and never arrive inside a frame callback, so the state
-begin_frame syncs holds for the whole iteration. begin_frame always takes the
+events are separate tasks and never arrive inside a frame callback, so a restore
+never lands inside an iteration; a loss can (below). begin_frame always takes the
 latch, so a loss and restore that both happen between two callbacks (a
-background tab) still wipe the backend tables. A new loss wipes every backend
-handle, sets `g_nt_gfx.context_lost` and logs one error. While `context_lost` is
+background tab) still wipe the backend tables. Taking the latch wipes every backend
+handle and, unless a failed call latched the loss first, sets
+`g_nt_gfx.context_lost` and logs one error. While `context_lost` is
 set, begin_frame asks the browser (the only per-iteration JS query, and only in
 the lost state); once the context is back, the same begin_frame restores it and
 sets `g_nt_gfx.context_restored` until the next begin_frame. The game therefore
@@ -781,14 +783,26 @@ restore is one CONTEXT operation: it recreates the context, probes
 capabilities and ends ACCEPTED; it recreates no frontend resource. A recreate
 that fails leaves no context, logs one error and stays lost for good. A restore
 that the browser reports lost again when it finishes stays lost without an
-error log and is retried by a later begin_frame. A loss inside an
-iteration changes no state: operations issued after it are issued but do
-nothing, creates end `CONTEXT_LOST` without an error log, and the next
-begin_frame wipes. Pass calls on a lost context are no-ops, not traps.
+error log and is retried by a later begin_frame. Every restore starts by wiping
+the tables, so it never publishes stale ones whatever order the events took.
 
-A backend call that reports a failure (a create, a readback, a lazy sampler recreate at bind) asks the browser: a loss ends the
-operation with `CONTEXT_LOST` and logs nothing; a live context keeps its own
-failure reason and error log. The backend asks only where the answer prevents a crash or a
+A loss inside an iteration latches at the first backend call that fails on it:
+the call asks the browser, sets `g_nt_gfx.context_lost`, logs the one error and
+ends `CONTEXT_LOST`, and every later call takes its lost path. An owner therefore
+creates in a straight line: once a shader create met the loss, the program,
+pipeline and vertex input built on it end `CONTEXT_LOST` instead of asserting on
+their 0 dependencies, and the draws take the lost path too. Operations issued
+before the latch are issued and do nothing. The tables stay until the next
+begin_frame takes the lost event, so the recorded stream and capture stay
+consistent; a frame can see `context_restored` and a new latched loss together.
+Pass calls on a lost context are no-ops, not traps, except that `end_pass` closes a
+pass opened before the latch and `end_segment` closes its segment.
+
+A backend call that reports a failure (a create, a readback, a lazy sampler recreate at bind or on a
+cache hit) asks the browser: a loss latches as above and ends the operation with
+`CONTEXT_LOST`; a live context keeps its own failure reason and error log. A
+readback asks after every read as well: WebGL reports a loss once through
+`glGetError`, and the drain before the read consumes it. The backend asks only where the answer prevents a crash or a
 misleading log: before shader and program creation, because Emscripten throws on
 the null object some browsers return on a lost context; error logs for link,
 uniform reflection and framebuffer completeness, which a loss suppresses;
