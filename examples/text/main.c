@@ -34,6 +34,7 @@
 #include "time/nt_time.h"
 #include "window/nt_window.h"
 
+#include "../shared/nt_example_frames.h"
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
 #include "text_assets.h"
@@ -74,7 +75,6 @@ static bool s_grabbed;
 static nt_font_t s_font;
 static nt_material_t s_text_material;
 static nt_program_ref_t s_text_program;
-static nt_buffer_t s_frame_ubo;
 
 static nt_hash32_t s_base_pack_id;
 static nt_hash32_t s_cjk_pack_id;
@@ -219,17 +219,11 @@ static void draw_text_scene(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
+    nt_example_frames_begin();
     nt_gfx_begin_frame();
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_FONT);
 
-        nt_gfx_destroy_buffer(s_frame_ubo);
-        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = NT_BUFFER_UNIFORM,
-            .usage = NT_USAGE_DYNAMIC,
-            .size = sizeof(nt_frame_uniforms_t),
-            .label = "frame_uniforms",
-        });
         /* Materials keep their handles and draw again once their programs relink. */
         const nt_result_t restore_result = nt_text_renderer_restore_gpu();
         NT_ASSERT(restore_result == NT_OK && "GPU restore failed");
@@ -237,7 +231,9 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
-    nt_input_poll();
+    if (!nt_example_frames_on()) {
+        nt_input_poll();
+    }
     float dt = g_nt_app.dt;
 
 #ifndef NT_PLATFORM_WEB
@@ -342,8 +338,7 @@ static void frame(void) {
     double t_flush = 0.0;
 #endif
     if (can_render) {
-        nt_gfx_update_buffer(s_frame_ubo, 0, &uniforms, sizeof(uniforms));
-        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
+        nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         nt_text_renderer_set_material(s_text_material);
         nt_text_renderer_set_font(s_font);
@@ -371,6 +366,11 @@ static void frame(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+#ifdef ASSET_FONT_TEXT_FONT_CJK
+    nt_example_frames_end(can_render && s_cjk_loading && nt_resource_pack_state(s_cjk_pack_id) == NT_PACK_STATE_READY);
+#else
+    nt_example_frames_end(can_render && s_cjk_loading); /* the fallback font build ships no CJK pack */
+#endif
 
     nt_window_swap_buffers();
 
@@ -428,7 +428,7 @@ static void frame(void) {
 #endif
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
     /* 1. Engine init */
     nt_engine_config_t config = {0};
     config.app_name = "text_demo";
@@ -446,9 +446,11 @@ int main(void) {
 
     /* 3. Input init */
     nt_input_init();
+    nt_example_frames_init(argc, argv);
 
     /* 4. GFX init */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO block (slot 0 for Globals: view_proj etc.) */
@@ -473,14 +475,6 @@ int main(void) {
 
     /* 9. Text renderer init */
     nt_text_renderer_init();
-
-    /* 10. Create frame uniforms UBO */
-    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = sizeof(nt_frame_uniforms_t),
-        .label = "frame_uniforms",
-    });
 
     /* 11. Mount packs and start base pack loading */
     s_base_pack_id = nt_hash32_str("text_base");
@@ -542,7 +536,6 @@ int main(void) {
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();
-    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

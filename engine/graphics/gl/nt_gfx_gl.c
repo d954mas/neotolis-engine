@@ -1657,21 +1657,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     if (buf == 0) {
         return 0; /* storing name 0 would alias the free-slot sentinel */
     }
-    GLenum target;
-    switch (desc->type) {
-    case NT_BUFFER_VERTEX:
-        target = GL_ARRAY_BUFFER;
-        break;
-    case NT_BUFFER_INDEX:
-        target = GL_ELEMENT_ARRAY_BUFFER;
-        break;
-    case NT_BUFFER_UNIFORM:
-        target = GL_UNIFORM_BUFFER;
-        break;
-    default:
-        target = GL_ARRAY_BUFFER;
-        break;
-    }
+    const GLenum target = desc->type == NT_BUFFER_INDEX ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     GLenum usage = map_buffer_usage(desc->usage);
     bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
     if (unhook_vao) {
@@ -1776,12 +1762,7 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
 
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
-    GLuint buf = s_buffer_gl[backend_handle];
-    if (size != 0) {
-        NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, buf, (GLintptr)offset, (GLsizeiptr)size);
-    } else {
-        NT_GL(glBindBufferBase, GL_UNIFORM_BUFFER, slot, buf);
-    }
+    NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, s_buffer_gl[backend_handle], (GLintptr)offset, (GLsizeiptr)size);
 }
 
 void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {

@@ -2450,42 +2450,6 @@ void test_activate_mesh_rejects_meshopt_decoded_size_overflow(void) {
 
 /* ---- Uniform buffer tests ---- */
 
-void test_make_uniform_buffer(void) {
-    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
-    nt_gfx_destroy_buffer(buf);
-}
-
-void test_bind_uniform_buffer(void) {
-    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_uniform_buffer(buf, 0); /* must not crash */
-    nt_gfx_end_pass();
-    nt_gfx_destroy_buffer(buf);
-}
-
-void test_update_uniform_buffer(void) {
-    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
-    uint8_t data[256];
-    memset(data, 0xAB, sizeof(data));
-    nt_gfx_update_buffer(buf, 0, data, 256);
-    nt_gfx_destroy_buffer(buf);
-}
-
 void test_update_buffer_at_offset(void) {
     nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
@@ -2527,26 +2491,6 @@ void test_update_buffer_rejects_immutable(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
     EXPECT_ASSERT(nt_gfx_update_buffer(buf, 0, initial, 64));
     nt_gfx_destroy_buffer(buf);
-}
-
-void test_destroy_uniform_buffer(void) {
-    nt_buffer_t buf1 = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    uint32_t slot1 = buf1.id & 0xFFFF;
-    nt_gfx_destroy_buffer(buf1);
-
-    nt_buffer_t buf2 = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    uint32_t slot2 = buf2.id & 0xFFFF;
-    TEST_ASSERT_EQUAL_UINT32(slot1, slot2);         /* reused slot */
-    TEST_ASSERT_NOT_EQUAL_UINT32(buf1.id, buf2.id); /* different generation */
-    nt_gfx_destroy_buffer(buf2);
 }
 
 /* ---- Global block registration ---- */
@@ -2848,29 +2792,6 @@ void test_gfx_pipeline_slots_freed_by_context_loss(void) {
     }
 }
 
-/* Buffers have no auto-restore path, so a husk means the owner skipped the
- * recreate contract -- the one case a bind cannot absorb. */
-void test_gfx_bind_uniform_buffer_on_husk_asserts(void) {
-    nt_buffer_t ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_UNIFORM,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = 256,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, ubo.id);
-
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame(); /* latches the loss, zeroes every backend record */
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame(); /* restore succeeds; the buffer stays a husk */
-    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(ubo, 0));
-    nt_gfx_end_pass();
-}
-
 /* Render-target attachments are rejected earlier, so an update reaching a husk
  * is always a primary texture the owner never recreated. */
 void test_gfx_update_texture_on_husk_asserts(void) {
@@ -3133,75 +3054,67 @@ void test_gfx_bound_pipeline_holds_the_generation(void) {
     nt_gfx_end_pass();
 }
 
-static nt_buffer_t make_test_ubo(uint32_t size) { return nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_UNIFORM, .usage = NT_USAGE_DYNAMIC, .size = size}); }
+static const uint8_t s_block_a[48] = {1, 2, 3};
+static const uint8_t s_block_b[48] = {4, 5, 6};
 
-void test_bind_uniform_buffer_range_reaches_backend(void) {
-    nt_buffer_t ubo = make_test_ubo(1024);
+/* Each block is copied into the uniform frame stream at the next aligned offset and binds that range. */
+void test_bind_uniform_block_copies_and_binds_its_range(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_uniform_buffer(ubo, 1);
-    nt_gfx_bind_uniform_buffer_range(ubo, 7, 768, 256); /* final legal range */
+    nt_gfx_bind_uniform_block(1, s_block_a, sizeof(s_block_a));
+    nt_gfx_bind_uniform_block(7, s_block_b, sizeof(s_block_b));
     nt_gfx_end_pass();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
-    nt_gfx_fake_ubo_bind_t whole = nt_gfx_fake_ubo_bind_at(0);
-    nt_gfx_fake_ubo_bind_t range = nt_gfx_fake_ubo_bind_at(1);
-    TEST_ASSERT_EQUAL_UINT32(1, whole.slot);
-    TEST_ASSERT_EQUAL_UINT32(0, whole.size);
-    TEST_ASSERT_EQUAL_UINT32(whole.buffer_backend, range.buffer_backend);
-    TEST_ASSERT_EQUAL_UINT32(7, range.slot);
-    TEST_ASSERT_EQUAL_UINT32(768, range.offset);
-    TEST_ASSERT_EQUAL_UINT32(256, range.size);
-}
-
-void test_bind_uniform_buffer_range_asserts(void) {
-    nt_buffer_t ubo = make_test_ubo(1024);
-    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 1024});
+    nt_gfx_fake_ubo_bind_t a = nt_gfx_fake_ubo_bind_at(0);
+    nt_gfx_fake_ubo_bind_t b = nt_gfx_fake_ubo_bind_at(1);
+    TEST_ASSERT_EQUAL_UINT32(1, a.slot);
+    TEST_ASSERT_EQUAL_UINT32(0, a.offset);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(s_block_a), a.size);
+    TEST_ASSERT_EQUAL_UINT32(a.buffer_backend, b.buffer_backend);
+    TEST_ASSERT_EQUAL_UINT32(7, b.slot);
+    TEST_ASSERT_EQUAL_UINT32(256, b.offset);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(s_block_b), b.size);
+    const uint8_t *staging = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging;
+    TEST_ASSERT_EQUAL_MEMORY(s_block_a, staging + a.offset, sizeof(s_block_a));
+    TEST_ASSERT_EQUAL_MEMORY(s_block_b, staging + b.offset, sizeof(s_block_b));
+    const uint32_t used = g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used;
+    EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, s_block_a, sizeof(s_block_a))); /* outside a pass */
+    TEST_ASSERT_EQUAL_UINT32(used, g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256));          /* off the 256 B alignment */
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 0));             /* empty */
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 512));         /* past the end */
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0xFFFFFF00U, 512)); /* offset + size wraps */
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 2048));          /* larger than the buffer */
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(vbo, 0, 0, 256));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, NULL, sizeof(s_block_a)));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_block(0, s_block_a, 0));
     nt_gfx_end_pass();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
 }
 
-void test_bind_uniform_buffer_range_follows_orphaned_storage(void) {
-    nt_buffer_t ubo = make_test_ubo(1024);
-    nt_gfx_orphan_buffer(ubo, NULL, 256);
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256));
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 512));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_ubo_bind_count());
-    nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 256);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
-
-    nt_gfx_orphan_buffer(ubo, NULL, 0);
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 0, 16));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
-
-    nt_gfx_orphan_buffer(ubo, NULL, 1024);
-    nt_gfx_bind_uniform_buffer_range(ubo, 0, 768, 256);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
-    nt_gfx_end_pass();
-    EXPECT_ASSERT(nt_gfx_orphan_buffer(ubo, NULL, 1280));
-}
-
-/* The alignment is a device cap, re-read on every probe. */
-void test_bind_uniform_buffer_range_follows_probed_alignment(void) {
-    nt_gfx_shutdown();
-    nt_gfx_fake_set_uniform_buffer_offset_alignment(16);
-    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
+/* The alignment is a device cap, re-read at init and at context restore; it need not be a power of two. */
+void test_bind_uniform_block_follows_probed_alignment(void) {
+    const uint32_t alignments[] = {16, 48, 512};
+    for (uint32_t i = 0; i < sizeof(alignments) / sizeof(alignments[0]); i++) {
+        nt_gfx_end_frame();
+        nt_gfx_shutdown();
+        nt_gfx_fake_reset();
+        nt_gfx_fake_set_uniform_buffer_offset_alignment(alignments[i]);
+        nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
+        nt_gfx_begin_frame();
+        TEST_ASSERT_EQUAL_UINT32(alignments[i], g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
+        nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+        nt_gfx_bind_uniform_block(0, s_block_a, 20);
+        nt_gfx_bind_uniform_block(0, s_block_b, 20);
+        nt_gfx_end_pass();
+        TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_ubo_bind_count());
+        TEST_ASSERT_EQUAL_UINT32(alignments[i] < 20U ? 2U * alignments[i] : alignments[i], nt_gfx_fake_ubo_bind_at(1).offset);
+    }
+    nt_gfx_fake_set_uniform_buffer_offset_alignment(64);
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(16, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
-
-    nt_buffer_t ubo = make_test_ubo(1024);
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    TEST_ASSERT_EQUAL_UINT32(64, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_uniform_buffer_range(ubo, 0, 16, 256);
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 8, 256));
+    nt_gfx_bind_uniform_block(0, s_block_a, 20);
+    nt_gfx_bind_uniform_block(0, s_block_b, 20);
     nt_gfx_end_pass();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_ubo_bind_count());
+    TEST_ASSERT_EQUAL_UINT32(64U + 20U, g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].used);
 }
 
 // #region deferred draw-phase stream
@@ -3247,7 +3160,6 @@ void test_stream_executes_draws_in_call_order_at_end_frame(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one stream check per recorded call
 void test_stream_records_every_draw_phase_call(void) {
-    nt_buffer_t ubo = make_test_ubo(256);
     const float m[16] = {0};
     const float v[4] = {0};
     EXPECT_RECORDED(begin_stream_test_pass());
@@ -3255,7 +3167,7 @@ void test_stream_records_every_draw_phase_call(void) {
     EXPECT_RECORDED(nt_gfx_set_scissor(0, 0, 4, 4));
     EXPECT_RECORDED(nt_gfx_set_scissor_enabled(true));
     EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
-    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 0));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(0, v, sizeof(v)));
     EXPECT_RECORDED(nt_gfx_set_uniform_mat4(nt_hash32_str("u_mvp"), m));
     EXPECT_RECORDED(nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), v));
     EXPECT_RECORDED(nt_gfx_set_uniform_float(nt_hash32_str("u_time"), 1.0F));
@@ -3280,32 +3192,43 @@ void test_stream_records_every_draw_phase_call(void) {
 
 /* An equal bind ends CACHE: nothing recorded, not counted as accepted. */
 void test_equal_binds_record_nothing(void) {
-    nt_buffer_t ubo = make_test_ubo(512);
     nt_pipeline_t pipeline = begin_stream_test_pass();
     EXPECT_NOT_RECORDED(nt_gfx_bind_pipeline(pipeline));
     EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
     EXPECT_NOT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
     EXPECT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
     EXPECT_NOT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
-    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 3, 256, 128));
-    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 3, 256, 128));
-    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 3, 0, 128)); /* another range */
-    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 3));               /* whole buffer */
-    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 3));
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_PIPELINE]);
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_VIEWPORT]);
-    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
     nt_gfx_end_pass();
 }
 
-/* Pipeline, vertex input and viewport are pass state; the scissor rectangle
- * and uniform-buffer slots carry over passes. */
+/* A block is frame data: every bind records, also the same data again or the same range as the
+ * previous frame, and the frame's own bytes upload to that range. */
+void test_every_uniform_block_binds_and_uploads_its_bytes(void) {
+    begin_stream_test_pass();
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, sizeof(s_block_a)));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_a, sizeof(s_block_a)));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    begin_stream_test_pass();
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(3, s_block_b, sizeof(s_block_b))); /* offset 0 again */
+    nt_gfx_draw(0, 3);
+    nt_gfx_end_pass();
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_UBO]);
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_update_buffer_offset());
+    TEST_ASSERT_EQUAL_UINT32(sizeof(s_block_b), nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_MEMORY(s_block_b, nt_gfx_fake_last_update_buffer_data(), sizeof(s_block_b));
+    nt_gfx_begin_frame();
+}
+
+/* Pipeline, vertex input and viewport are pass state; the scissor rectangle carries over passes. */
 void test_bind_mirrors_follow_their_contract_scope(void) {
-    nt_buffer_t ubo = make_test_ubo(256);
     nt_pipeline_t pipeline = begin_stream_test_pass();
     nt_gfx_set_viewport(0, 0, 4, 4);
     nt_gfx_set_scissor(1, 2, 3, 4);
-    nt_gfx_bind_uniform_buffer(ubo, 0);
     const nt_vertex_input_t vi = {nt_gfx_test_bound_vertex_input()};
     nt_gfx_end_pass();
 
@@ -3314,7 +3237,6 @@ void test_bind_mirrors_follow_their_contract_scope(void) {
     EXPECT_RECORDED(nt_gfx_bind_vertex_input(vi));
     EXPECT_RECORDED(nt_gfx_set_viewport(0, 0, 4, 4));
     EXPECT_NOT_RECORDED(nt_gfx_set_scissor(1, 2, 3, 4));
-    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer(ubo, 0));
     nt_gfx_end_pass();
     /* The mirror does not bypass the pass check. */
     EXPECT_ASSERT(nt_gfx_bind_pipeline(pipeline));
@@ -3336,19 +3258,20 @@ void test_context_loss_clears_carried_over_bind_mirrors(void) {
     nt_gfx_end_pass();
 }
 
-/* A buffer re-created in the same pool slot has a new id and binds again; the slot clear
- * itself is pinned by the capture snapshot test. */
-void test_destroyed_uniform_buffer_leaves_its_slots(void) {
-    nt_buffer_t ubo = make_test_ubo(256);
+/* A restore replaces the uniform frame buffer; blocks bind to the new one up to the slot limit. */
+void test_restored_uniform_blocks_bind_again(void) {
     begin_stream_test_pass();
-    nt_gfx_bind_uniform_buffer(ubo, 0);
-    nt_gfx_bind_uniform_buffer(ubo, NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1);
-    nt_gfx_destroy_buffer(ubo);
-    nt_buffer_t again = make_test_ubo(256);
-    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(ubo.id), nt_pool_slot_index(again.id));
-    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(again, 0));
-    EXPECT_RECORDED(nt_gfx_bind_uniform_buffer(again, NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1));
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer(again, NT_GFX_MAX_UNIFORM_BUFFER_SLOTS));
+    nt_gfx_bind_uniform_block(0, s_block_a, sizeof(s_block_a));
+    nt_gfx_bind_uniform_block(NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1, s_block_a, sizeof(s_block_a));
+    nt_gfx_end_pass();
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(0, s_block_a, sizeof(s_block_a)));
+    EXPECT_RECORDED(nt_gfx_bind_uniform_block(NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1, s_block_a, sizeof(s_block_a)));
+    EXPECT_ASSERT(nt_gfx_bind_uniform_block(NT_GFX_MAX_UNIFORM_BUFFER_SLOTS, s_block_a, sizeof(s_block_a)));
     nt_gfx_end_pass();
 }
 
@@ -3404,7 +3327,6 @@ void test_contiguous_indexed_draws_merge(void) {
 /* Any recorded command, a gap in the range or an execution of the stream ends the merge. */
 void test_indexed_draw_merge_boundaries(void) {
     nt_buffer_t spare = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
-    nt_buffer_t ubo = make_test_ubo(256);
     nt_gfx_fake_draw_trace_reset(true);
     begin_stream_test_pass();
     nt_gfx_draw_indexed(0, 3, 3);
@@ -3419,7 +3341,7 @@ void test_indexed_draw_merge_boundaries(void) {
     nt_gfx_draw_indexed(24, 3, 3); /* merges into 21 */
     nt_gfx_set_viewport(0, 0, 4, 4);
     nt_gfx_draw_indexed(27, 3, 3);
-    nt_gfx_bind_uniform_buffer(ubo, 0);
+    nt_gfx_bind_uniform_block(0, s_block_a, sizeof(s_block_a));
     nt_gfx_draw_indexed(30, 3, 3);
     /* A segment is a command only with GPU timing compiled in; without it the draws join. */
     nt_gfx_begin_segment("merge-boundary");
@@ -3427,19 +3349,6 @@ void test_indexed_draw_merge_boundaries(void) {
     nt_gfx_end_segment();
     /* 0 | 3 | 9 | 12i | 15i | 18 | 21+24 | 27 | 30 [| 33] */
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_GPU_TIMING_ENABLED ? 10U : 9U, merged_draws_after_end_frame());
-}
-
-/* An orphan keeps the binding; a range that no longer fits the shrunk storage re-validates. */
-void test_orphaned_uniform_buffer_revalidates_its_range(void) {
-    nt_buffer_t ubo = make_test_ubo(512);
-    const uint8_t data[256] = {0};
-    begin_stream_test_pass();
-    nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128);
-    nt_gfx_orphan_buffer(ubo, data, 512);
-    EXPECT_NOT_RECORDED(nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128));
-    nt_gfx_orphan_buffer(ubo, data, 256);
-    EXPECT_ASSERT(nt_gfx_bind_uniform_buffer_range(ubo, 0, 256, 128));
-    nt_gfx_end_pass();
 }
 
 void test_register_global_block_asserts_unsupported_slot(void) { EXPECT_ASSERT(nt_gfx_register_global_block("Frame", NT_GFX_MAX_UNIFORM_BUFFER_SLOTS)); }
@@ -3739,13 +3648,13 @@ int main(void) {
     RUN_TEST(test_activate_mesh_rejects_meshopt_undersized_wire);
     RUN_TEST(test_activate_mesh_rejects_meshopt_decoded_size_overflow);
     /* Uniform buffer tests */
-    RUN_TEST(test_make_uniform_buffer);
     RUN_TEST(test_stream_executes_draws_in_call_order_at_end_frame);
     RUN_TEST(test_stream_records_every_draw_phase_call);
     RUN_TEST(test_equal_binds_record_nothing);
     RUN_TEST(test_bind_mirrors_follow_their_contract_scope);
     RUN_TEST(test_context_loss_clears_carried_over_bind_mirrors);
-    RUN_TEST(test_destroyed_uniform_buffer_leaves_its_slots);
+    RUN_TEST(test_restored_uniform_blocks_bind_again);
+    RUN_TEST(test_every_uniform_block_binds_and_uploads_its_bytes);
     RUN_TEST(test_texture_set_records_only_changed_units);
     RUN_TEST(test_contiguous_indexed_draws_merge);
     RUN_TEST(test_indexed_draw_merge_boundaries);
@@ -3754,26 +3663,20 @@ int main(void) {
     RUN_TEST(test_indexed_draw_merge_keeps_the_count_in_glsizei);
     RUN_TEST(test_contiguous_plain_draws_merge);
     RUN_TEST(test_indexed_draws_assert_whole_triangles);
-    RUN_TEST(test_orphaned_uniform_buffer_revalidates_its_range);
     RUN_TEST(test_register_global_block_asserts_unsupported_slot);
     RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
     RUN_TEST(test_gpu_timing_toggle_mid_frame_executes_the_stream_only_with_gpu_timing);
     RUN_TEST(test_buffer_write_executes_earlier_draws_and_recording_continues);
     RUN_TEST(test_stream_overflow_asserts);
-    RUN_TEST(test_bind_uniform_buffer);
-    RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_update_buffer_at_offset);
     RUN_TEST(test_update_buffer_rejects_out_of_range);
     RUN_TEST(test_update_buffer_rejects_immutable);
-    RUN_TEST(test_destroy_uniform_buffer);
     /* Global block registration tests */
     RUN_TEST(test_register_global_block);
     RUN_TEST(test_register_global_block_max);
     RUN_TEST(test_register_global_block_cleared_on_shutdown);
-    RUN_TEST(test_bind_uniform_buffer_range_reaches_backend);
-    RUN_TEST(test_bind_uniform_buffer_range_asserts);
-    RUN_TEST(test_bind_uniform_buffer_range_follows_orphaned_storage);
-    RUN_TEST(test_bind_uniform_buffer_range_follows_probed_alignment);
+    RUN_TEST(test_bind_uniform_block_copies_and_binds_its_range);
+    RUN_TEST(test_bind_uniform_block_follows_probed_alignment);
     /* New pixel format tests */
     RUN_TEST(test_gfx_make_texture_rgba16f);
     RUN_TEST(test_gfx_rgba32f_filters_require_capability);
@@ -3793,7 +3696,6 @@ int main(void) {
     RUN_TEST(test_gfx_update_texture_full);
     RUN_TEST(test_gfx_update_texture_invalid_handle);
     RUN_TEST(test_gfx_pipeline_slots_freed_by_context_loss);
-    RUN_TEST(test_gfx_bind_uniform_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_update_texture_on_husk_asserts);
     RUN_TEST(test_gfx_update_buffer_on_husk_asserts);
     RUN_TEST(test_gfx_orphan_buffer_on_husk_asserts);

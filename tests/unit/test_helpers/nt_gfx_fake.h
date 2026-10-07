@@ -77,7 +77,7 @@ typedef struct {
 nt_gfx_fake_update_texture_rect_t nt_gfx_fake_update_texture_rect_at(uint32_t index);
 
 typedef struct {
-    uint32_t buffer_backend, slot, offset, size; /* size 0: whole-buffer bind */
+    uint32_t buffer_backend, slot, offset, size;
 } nt_gfx_fake_ubo_bind_t;
 
 uint32_t nt_gfx_fake_ubo_bind_count(void);

@@ -58,8 +58,8 @@ last-writer-wins across them. The engine keeps one global name -> slot registry
 instead, and `nt_gfx_register_global_block` applies it to existing and future
 programs that declare the block. The registry borrows each name without copying;
 the string must remain valid and unchanged until `nt_gfx_shutdown`. Registrations
-survive context loss. The buffer varies per draw via `nt_gfx_bind_uniform_buffer`,
-or a range of one buffer via `nt_gfx_bind_uniform_buffer_range`.
+survive context loss. The data varies per draw: `nt_gfx_bind_uniform_block` copies a
+block into the uniform frame stream and binds it to a slot.
 
 The GL backend caches at most 16 active standalone non-sampler uniform locations
 per program. Each active array element consumes one entry; uniforms in blocks do
