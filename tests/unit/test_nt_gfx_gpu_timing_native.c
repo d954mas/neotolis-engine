@@ -30,7 +30,6 @@ bool nt_gfx_gl_ctx_query_lost(void) { return s_fixture_lost; }
 bool nt_gfx_gl_ctx_enable_timer_query(void) { return s_fixture_supported; }
 bool nt_gfx_gl_ctx_enable_debug_groups(void) { return true; }
 bool nt_gfx_gl_ctx_enable_debug_callback(void) { return false; }
-bool nt_gfx_gl_ctx_enable_parallel_compile(void) { return false; }
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) { return (nt_gfx_gpu_caps_t){0}; }
 
 static void GLAD_API_PTR capture_gen(GLsizei count, GLuint *queries) {

@@ -517,7 +517,7 @@ static void finish_program_links(void) {
         if (s_gfx.program_pending[i] == 0) {
             continue;
         }
-        nt_gfx_result_t result = nt_gfx_backend_finish_program(s_gfx.program_pending[i]);
+        nt_gfx_result_t result = nt_gfx_backend_finish_program(s_gfx.program_pending[i], g_nt_gfx.gpu_caps.has_parallel_shader_compile);
         if (result == NT_GFX_RESULT_UNREADY) {
             continue;
         }

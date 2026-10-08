@@ -1454,10 +1454,10 @@ static void GLAD_API_PTR skip_second_uniform_query(GLuint program, GLuint index,
 /* Finishes a link the driver may still run in parallel. */
 static nt_gfx_result_t finish_backend_program(uint32_t program) {
     const struct timespec start = nt_test_link_wait_start();
-    nt_gfx_result_t result = nt_gfx_backend_finish_program(program);
+    nt_gfx_result_t result = nt_gfx_backend_finish_program(program, g_nt_gfx.gpu_caps.has_parallel_shader_compile);
     while (result == NT_GFX_RESULT_UNREADY) {
         nt_test_link_wait_check(&start);
-        result = nt_gfx_backend_finish_program(program);
+        result = nt_gfx_backend_finish_program(program, g_nt_gfx.gpu_caps.has_parallel_shader_compile);
     }
     return result;
 }

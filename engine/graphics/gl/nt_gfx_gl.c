@@ -130,7 +130,6 @@ typedef struct {
 /* Service VAO for index-buffer data ops: the ELEMENT_ARRAY_BUFFER bind is VAO
  * state, and core profile rejects it with VAO 0 bound (INVALID_OPERATION). */
 static GLuint s_ebo_upload_vao;
-static bool s_parallel_compile; /* per context: link completion can be polled */
 
 static nt_gfx_gl_program_t *s_programs;           /* programs, linked or linking, indexed by slot */
 static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by slot */
@@ -609,7 +608,6 @@ static void nt_gfx_gl_init_context_features(void) {
     nt_gfx_backend_drop_timer_segments();
 #endif
     nt_gfx_gl_ctx_enable_debug_callback();
-    s_parallel_compile = nt_gfx_gl_ctx_enable_parallel_compile();
     /* Fresh context (init or restore): the previous upload VAO died with it. */
     NT_GL_GEN(glGenVertexArrays, 1, &s_ebo_upload_vao);
     /* 0 with a live context would silently break every index-buffer upload on
@@ -1498,12 +1496,12 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
-nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle) {
+nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_programs && s_programs[backend_handle].program != 0);
     nt_gfx_gl_program_t *rec = &s_programs[backend_handle];
     /* Any other program query before completion blocks until the driver finishes the link. */
     GLint done = GL_TRUE;
-    if (s_parallel_compile) {
+    if (poll) {
         NT_GL(glGetProgramiv, rec->program, GL_COMPLETION_STATUS_KHR, &done);
     }
     if (!done) {

@@ -465,7 +465,8 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     return slot;
 }
 
-nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle) {
+nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll) {
+    (void)poll;
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && "finish_program: handle out of range");
     if (s_fake_lose_context_on_program_link) {
         /* GL reports the link complete and failed on a lost context, before the loss event. */

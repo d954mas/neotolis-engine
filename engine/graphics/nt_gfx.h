@@ -792,6 +792,7 @@ typedef struct {
     bool has_etc2;                            /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
     bool has_float_render_target;             /* RGBA16F as a colour attachment (EXT_color_buffer_float / core GL 3.0+) */
     bool has_float_texture_linear;            /* RGBA32F filtering (OES_texture_float_linear / core GL 3.0+) */
+    bool has_parallel_shader_compile;         /* link completion polled without blocking (KHR_parallel_shader_compile / KHR|ARB) */
     uint32_t max_texture_size;                /* GL_MAX_TEXTURE_SIZE, queried at init */
     uint32_t uniform_buffer_offset_alignment; /* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT: uniform blocks start at a multiple; size frame_capacity by it */
 } nt_gfx_gpu_caps_t;

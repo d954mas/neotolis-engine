@@ -86,6 +86,8 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.has_etc2 = get_extension("WEBGL_compressed_texture_etc");
     caps.has_float_render_target = get_extension("EXT_color_buffer_float");
     caps.has_float_texture_linear = get_extension("OES_texture_float_linear");
+    /* Without getExtension the COMPLETION_STATUS query is INVALID_ENUM and reads as never complete. */
+    caps.has_parallel_shader_compile = get_extension("KHR_parallel_shader_compile");
     GLint max_texture_size = 0;
     NT_GL(glGetIntegerv, GL_MAX_TEXTURE_SIZE, &max_texture_size);
     caps.max_texture_size = (uint32_t)max_texture_size;
@@ -94,9 +96,6 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.uniform_buffer_offset_alignment = (uint32_t)ubo_align;
     return caps;
 }
-
-/* Without getExtension the COMPLETION_STATUS query is INVALID_ENUM and reads as never complete. */
-bool nt_gfx_gl_ctx_enable_parallel_compile(void) { return get_extension("KHR_parallel_shader_compile"); }
 
 #if NT_GFX_GPU_TIMING_ENABLED
 /* Enable EXT_disjoint_timer_query_webgl2; getExtension activates its constants for this context. */

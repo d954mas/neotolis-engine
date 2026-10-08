@@ -21,10 +21,6 @@ bool nt_gfx_gl_ctx_query_lost(void);
  * the test backend also implements it, so the declaration lives at the
  * shared internal layer, not the GL-only header. */
 
-/* Enables KHR_parallel_shader_compile (web) or checks KHR/ARB_parallel_shader_compile
- * (native). True when GL_COMPLETION_STATUS can be queried without blocking. */
-bool nt_gfx_gl_ctx_enable_parallel_compile(void);
-
 #if NT_GFX_GPU_TIMING_ENABLED
 /* Enable EXT_disjoint_timer_query_webgl2 (web) or check ARB_timer_query
  * support (native). Returns true if GL_TIME_ELAPSED queries are usable. */
