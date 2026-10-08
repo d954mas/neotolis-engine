@@ -100,8 +100,7 @@ deliberate design. The NT_ASSERT crash-early policy is intentional: invariant
 violations crash immediately rather than degrade silently. The only supported
 assert modes are FULL and TRAP; a failed assertion never continues in either mode.
 Assert expressions must be side-effect-free. Hard guards remain required at
-untrusted/runtime-input boundaries and for documented recoverable API outcomes;
-do not request fallback paths or tests for the removed OFF mode.
+untrusted/runtime-input boundaries and for documented recoverable API outcomes.
 Source of truth: AGENTS.md and docs/spec/ — read
 docs/spec/index.md first, then only the chapters relevant to this diff.
 

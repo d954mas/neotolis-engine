@@ -48,7 +48,7 @@ generation, batching, per-frame resource resolve, dense SoA/ECS iteration.
 (b) `assert()` (plain C assert) used for error handling — it vanishes under `NDEBUG`;
 (c) a **side effect lives inside `NT_ASSERT(...)`** — assertion expressions must only check invariants, never mutate state.
 **Cite:** AGENTS.md §"Asserts and errors".
-**Scope:** all runtime code. FULL and TRAP are the only supported modes; a failed assertion never continues. Bounds assertions are valid for programmer invariants. Untrusted/runtime input (parsers, network, pack data) and documented recoverable outcomes need a hard guard. Do not require recovery after a failed assertion or tests for the removed OFF mode.
+**Scope:** all runtime code. FULL and TRAP are the only supported modes; a failed assertion never continues. Bounds assertions are valid for programmer invariants. Untrusted/runtime input (parsers, network, pack data) and documented recoverable outcomes need a hard guard.
 ✅ `NT_ASSERT(slot < cap); arr[slot] = v;` (check and use separate) · error return `NULL` for "resource not found" (documented API contract).
 ❌ `NT_ASSERT(arr[i++] == expected);` (mutates state while checking an invariant) · `if (bad_data) return NT_ERR;` where bad_data means a builder bug (should assert).
 
