@@ -16,6 +16,7 @@
 #include "resource/nt_resource.h"
 #include "debug_overlay/nt_debug_overlay.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "test_helpers/nt_test_font_blob.h"
 #include "unity.h"
 /* clang-format on */
@@ -155,6 +156,7 @@ static void test_draw_records_a_text_draw(void) {
     nt_debug_overlay_init();
 
     const nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_curve_texture"}, 1);
+    nt_test_gfx_link_wait(program);
     const nt_material_t material = nt_material_create(&(nt_material_create_desc_t){.program = program, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     uint32_t blob_size = 0;
     uint8_t *blob = nt_test_font_blob('F', 'F', &blob_size); /* the HUD starts with "FPS:" */

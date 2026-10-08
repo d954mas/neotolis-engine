@@ -57,6 +57,8 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     return caps;
 }
 
+bool nt_gfx_gl_ctx_enable_parallel_compile(void) { return GLAD_GL_KHR_parallel_shader_compile != 0 || GLAD_GL_ARB_parallel_shader_compile != 0; }
+
 #if NT_GFX_GPU_TIMING_ENABLED
 bool nt_gfx_gl_ctx_enable_timer_query(void) {
     /* GL_TIME_ELAPSED + glBeginQuery were promoted to core in GL 3.3, so on

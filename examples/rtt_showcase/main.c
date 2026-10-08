@@ -472,7 +472,10 @@ static void render_frame(void) {
     });
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.015F, 0.018F, 0.025F, 1.0F}, .clear_depth = 1.0F});
-    draw_default_frame();
+    /* The quad program links over the next frames, at startup and after a restore. */
+    if (nt_gfx_program_ready(s_demo.quad_program)) {
+        draw_default_frame();
+    }
     draw_ui_overlay();
     nt_gfx_end_pass();
 }

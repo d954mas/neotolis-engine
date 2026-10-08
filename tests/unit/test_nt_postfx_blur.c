@@ -42,6 +42,9 @@ void setUp(void) {
     nt_gfx_fake_reset();
     nt_gfx_fake_set_samplers((const char *const[]){"u_source"}, 1);
     nt_postfx_blur_init();
+    /* The fake finishes the blur program's link at the next begin_frame. */
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
     nt_gfx_fake_draw_trace_reset(true);
 }
 

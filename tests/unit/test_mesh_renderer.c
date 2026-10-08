@@ -34,15 +34,6 @@
 
 /* ---- Virtual pack counter (unique per test) ---- */
 
-static uint32_t s_program_warnings;
-
-static void capture_program_warning(nt_log_level_t level, const char *domain, const char *message, void *user) {
-    (void)user;
-    if (level == NT_LOG_LEVEL_WARN && strcmp(domain, "mesh_renderer") == 0 && strstr(message, "program is not ready") != NULL) {
-        s_program_warnings++;
-    }
-}
-
 /* ---- Helper: build a minimal mesh blob and activate it via nt_gfx ---- */
 
 static nt_mesh_t create_test_mesh(void) {
@@ -302,10 +293,8 @@ static void draw_list(const nt_render_item_t *items, uint32_t count) {
 /* ---- Unity setUp / tearDown ---- */
 
 void setUp(void) {
-    s_program_warnings = 0;
     memset(s_test_tex_res, 0, sizeof(s_test_tex_res));
     s_test_tex_pack_created = false;
-    nt_log_add_sink(capture_program_warning, NULL);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 64, .max_pipelines = 64, .max_buffers = 256, .max_textures = 32, .max_meshes = 32, .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS,
                                   .max_render_targets = 16));
@@ -328,7 +317,6 @@ void setUp(void) {
 }
 
 void tearDown(void) {
-    nt_log_remove_sink(capture_program_warning, NULL);
     nt_test_frame_teardown();
     nt_mesh_renderer_shutdown();
     nt_material_shutdown();
@@ -362,7 +350,7 @@ void test_draw_list_empty(void) {
 
 void test_draw_list_null_items_asserts_when_nonempty(void) { NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(NULL, 1)); }
 
-void test_unready_program_warns_once_and_rearms_after_pipeline_creation(void) {
+void test_unready_program_skips_until_a_ready_program_is_assigned(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material_with_attr(NT_PROGRAM_INVALID, "position", 0, nt_blend_opaque());
     nt_entity_t entity = create_test_entity(mesh, mat);
@@ -371,13 +359,11 @@ void test_unready_program_warns_once_and_rearms_after_pipeline_creation(void) {
     draw_list(&item, 1);
     draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_program_warnings);
 
     nt_program_t program = create_test_program();
     nt_material_set_program(mat, program);
     draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_program_warnings);
 
     nt_test_frame_close();
     nt_gfx_destroy_program(program);
@@ -385,7 +371,6 @@ void test_unready_program_warns_once_and_rearms_after_pipeline_creation(void) {
     draw_list(&item, 1);
     draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 2U : 0U, s_program_warnings);
 }
 
 void test_batch_key_packs_material_and_mesh_slots(void) {
@@ -1756,6 +1741,7 @@ void test_lists_read_bindings_at_the_call(void) {
 void test_list_after_a_program_change_reapplies_the_texture_set(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material_textured(create_test_tex_program(), nt_blend_opaque(), NT_SAMPLER_DEFAULT);
+    nt_program_t p2 = create_test_tex_program();
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t items[1];
     fill_items(items, &e, &mat, &mesh, 1);
@@ -1765,7 +1751,6 @@ void test_list_after_a_program_change_reapplies_the_texture_set(void) {
     nt_gfx_fake_reset();
     mark_draws();
     nt_mesh_renderer_draw_list(items, 1);
-    nt_program_t p2 = create_test_tex_program();
     nt_material_set_program(mat, p2);
     nt_mesh_renderer_draw_list(items, 1);
     nt_test_frame_next();
@@ -1840,7 +1825,7 @@ int main(void) {
     RUN_TEST(test_init_shutdown);
     RUN_TEST(test_draw_list_empty);
     RUN_TEST(test_draw_list_null_items_asserts_when_nonempty);
-    RUN_TEST(test_unready_program_warns_once_and_rearms_after_pipeline_creation);
+    RUN_TEST(test_unready_program_skips_until_a_ready_program_is_assigned);
     RUN_TEST(test_batch_key_packs_material_and_mesh_slots);
     RUN_TEST(test_batch_key_ignores_generation_bits);
     RUN_TEST(test_batch_key_distinguishes_old_hash_collision);

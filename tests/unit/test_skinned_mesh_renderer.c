@@ -183,15 +183,6 @@ static nt_material_t make_material_with_skin_streams(nt_program_t program, uint8
     return nt_material_create(&desc);
 }
 
-static uint32_t s_program_warnings;
-
-static void capture_program_warning(nt_log_level_t level, const char *domain, const char *message, void *user) {
-    (void)user;
-    if (level == NT_LOG_LEVEL_WARN && strcmp(domain, "skinned_mesh_renderer") == 0 && strstr(message, "program is not ready") != NULL) {
-        s_program_warnings++;
-    }
-}
-
 static nt_entity_t make_entity(nt_mesh_t mesh, nt_material_t material, nt_deformation_binding_t binding) {
     nt_entity_t entity = nt_entity_create();
     TEST_ASSERT_TRUE(nt_transform_comp_add(entity));
@@ -259,8 +250,6 @@ static void mesh_draw_list(const nt_render_item_t *items, uint32_t count) {
 
 void setUp(void) {
     s_surface_pack_created = false;
-    s_program_warnings = 0;
-    nt_log_add_sink(capture_program_warning, NULL);
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 8, .max_pipelines = 16, /* skinned 8 + static 2 + headroom */
                                   .max_buffers = 32, .max_textures = 16, .max_meshes = 8,
@@ -284,7 +273,6 @@ void setUp(void) {
 }
 
 void tearDown(void) {
-    nt_log_remove_sink(capture_program_warning, NULL);
     nt_test_frame_teardown();
     nt_skinned_mesh_renderer_shutdown();
     nt_material_shutdown();
@@ -686,7 +674,7 @@ void test_static_mesh_renderer_ignores_unmapped_skin_streams(void) {
     nt_test_frame_open();
 }
 
-void test_unready_program_warns_once_and_rearms_after_success(void) {
+void test_unready_program_skips_until_a_ready_program_is_assigned(void) {
     nt_mesh_t mesh = make_mesh();
     nt_texture_t texture = make_deformation_texture();
     nt_material_t material = make_material(NT_PROGRAM_INVALID);
@@ -695,7 +683,7 @@ void test_unready_program_warns_once_and_rearms_after_success(void) {
 
     skinned_draw_list(&item, 1);
     skinned_draw_list(&item, 1);
-    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_program_warnings);
+    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
 
     nt_program_t program = nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1);
     nt_material_set_program(material, program);
@@ -707,7 +695,7 @@ void test_unready_program_warns_once_and_rearms_after_success(void) {
     nt_test_frame_open();
     skinned_draw_list(&item, 1);
     skinned_draw_list(&item, 1);
-    TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 2U : 0U, s_program_warnings);
+    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
 }
 
 void test_failed_pipeline_and_vertex_input_creation_are_retryable(void) {
@@ -903,7 +891,7 @@ int main(void) {
     RUN_TEST(test_skinned_mesh_stream_cannot_overlap_the_color_location);
     RUN_TEST(test_static_mesh_stream_cannot_overlap_the_color_location);
     RUN_TEST(test_static_mesh_renderer_ignores_unmapped_skin_streams);
-    RUN_TEST(test_unready_program_warns_once_and_rearms_after_success);
+    RUN_TEST(test_unready_program_skips_until_a_ready_program_is_assigned);
     RUN_TEST(test_failed_pipeline_and_vertex_input_creation_are_retryable);
     RUN_TEST(test_restore_drops_caches_and_the_next_draw_rebuilds_them);
     RUN_TEST(test_core_draw_supplies_the_deformation_texture_across_passes);

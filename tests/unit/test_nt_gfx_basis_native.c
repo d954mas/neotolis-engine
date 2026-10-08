@@ -11,6 +11,7 @@
 #include "nt_builder.h"
 #include "nt_texture_format.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -156,7 +157,7 @@ static void render_sampled(nt_texture_t tex, nt_sampler_t sampler, uint16_t rt_w
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_fullscreen_vs});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_sample_fs});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
+    nt_test_gfx_link_wait(prog);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
 

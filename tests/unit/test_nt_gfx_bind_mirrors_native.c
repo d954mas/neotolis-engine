@@ -16,6 +16,7 @@
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "test_helpers/nt_gfx_test_gl_read.h"
 
 static const char *s_vs_src = "precision mediump float;\n"
@@ -81,7 +82,9 @@ static nt_vertex_input_t make_vi(nt_buffer_t vbo, nt_buffer_t ibo) { return nt_g
 static nt_pipeline_t make_red_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
-    return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
+    return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
 }
 
 /* Between frames: reads the window center through the public readback. */
@@ -110,8 +113,10 @@ static uint8_t center_red_in_pass(void) {
 static nt_pipeline_t make_pipeline_ex(const char *vs_src, const char *fs_src, bool depth_test, bool depth_write, bool blend) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
     return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .program = nt_gfx_make_program(vs, fs),
+        .program = program,
         .depth_test = depth_test,
         .depth_write = depth_write,
         .blend = blend ? nt_blend_alpha() : nt_blend_opaque(),
@@ -462,7 +467,9 @@ static const char *s_vertexid_vs_src = "precision mediump float;\n"
 static void test_empty_vertex_input_draws_fullscreen(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vertexid_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
 
     begin_black_pass();
@@ -936,6 +943,7 @@ static void test_uniform_write_targets_bound_pipelines_program(void) {
     /* Program and pipeline slots must differ to expose wrong-slot routing. */
     nt_program_t spare =
         nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src}), nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src}));
+    nt_test_gfx_link_wait(spare);
     TEST_ASSERT_TRUE(nt_gfx_program_ready(spare));
     nt_pipeline_t pip_b = make_pipeline_ex(vs_src, fs_src, false, true, false);
 
@@ -1150,6 +1158,7 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
     nt_program_t prog_p = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(prog_p);
     nt_pipeline_t pip_p = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_p});
     nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
 
@@ -1176,6 +1185,7 @@ static void test_destroy_current_program_then_relink_reissues_use_program(void) 
     TEST_ASSERT_EQUAL_INT(0, current_program);
 
     nt_program_t prog_q = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(prog_q);
     nt_pipeline_t pip_q = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog_q});
     TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip_q));
 
@@ -1311,10 +1321,10 @@ static void test_block_members_skip_the_uniform_cache(void) {
                      "layout(std140) uniform Big { vec4 big_data[1024]; };\n"
                      "uniform vec4 u_offset;\n"
                      "void main() { gl_Position = big_data[gl_VertexID] + u_offset; }\n";
-    const uint32_t lookups = g_nt_gfx.counters.gl[NT_GFX_GL_glGetUniformLocation];
     nt_pipeline_t pip = make_pipeline_ex(vs, s_fs_src, false, false, false);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glGetUniformLocation] - lookups);
+    /* Reflection runs in the begin_frame that finished the link, the frame these counters cover. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glGetUniformLocation]);
 }
 
 static void test_vec4_repeat_skips_physical_upload(void) {
@@ -1361,6 +1371,8 @@ static void test_vec4_cache_follows_program_lifetime(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
     nt_program_t p = nt_gfx_make_program(vs, fs);
     nt_program_t q = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(p);
+    nt_test_gfx_link_wait(q);
     nt_pipeline_t pipelines[3] = {
         nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = p}),
         nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = q}),
@@ -1388,6 +1400,7 @@ static void test_vec4_cache_follows_program_lifetime(void) {
     nt_gfx_begin_frame();
     nt_gfx_destroy_program(p);
     p = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(p);
     pipelines[0] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = p});
     begin_black_pass();
     nt_gfx_bind_pipeline(pipelines[0]);

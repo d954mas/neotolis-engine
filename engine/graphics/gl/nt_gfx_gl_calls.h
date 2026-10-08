@@ -155,7 +155,7 @@ static inline void nt_gl_put_callback(nt_gl_callback_t callback) { nt_gl_put_uns
 #define NT_GL_UNIFORM_VALUES_(float_count, location, ...)                                                                                                                                              \
     (NT_GL_RECORDING_() ? nt_gl_put_uniform((location), (float_count), NT_GL_CAT(NT_GL_LAST_, NT_GL_NARGS(location, __VA_ARGS__))(location, __VA_ARGS__)) : (void)0)
 #define NT_GL_CLOSE_() nt_gl_close()
-#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLint: nt_gl_close_int, GLuint: nt_gl_close_uint)(result)
+#define NT_GL_CLOSE_RESULT_(result) _Generic((result), GLboolean: nt_gl_close_uint, GLint: nt_gl_close_int, GLuint: nt_gl_close_uint)(result)
 #else
 #define NT_GL_OPEN_(call) NT_GL_COUNT_(call)
 #define NT_GL_ARGS_(...) ((void)0)

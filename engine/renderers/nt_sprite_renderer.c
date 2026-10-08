@@ -62,9 +62,6 @@ static struct {
     } vi_entries[NT_SPRITE_RENDERER_MAX_PIPELINES];
     uint16_t vi_count;
 
-    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is built. */
-    bool warned_program_not_ready;
-
     nt_sprite_material_t current; /* set_material; the immediate emits read it */
 
     /* Params last written, per program: equal params record nothing, so adjacent emits merge. */
@@ -160,7 +157,6 @@ static uint64_t nt_sprite_layout_key(const nt_material_info_t *mat_info) {
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* A recovered context may still have materials awaiting a new program. */
     if (!nt_gfx_program_ready(mat_info->program)) {
-        nt_renderer_warn_program_not_ready(&s_sprite.warned_program_not_ready, mat_info);
         return (nt_pipeline_t){0};
     }
     /* Vertex-inputs own layouts; the pipeline is program x state, keyed by its exact desc identity. */
@@ -170,7 +166,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     if (cached.id != 0) {
         return cached;
     }
-    return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, NT_SPRITE_RENDERER_MAX_PIPELINES, &key, &desc, &s_sprite.warned_program_not_ready);
+    return nt_renderer_pipeline_cache_insert(s_sprite.entries, &s_sprite.count, NT_SPRITE_RENDERER_MAX_PIPELINES, &key, &desc);
 }
 
 /* Entries are weak: a context loss frees vertex-input slots, so a hit validates and a dead

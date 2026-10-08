@@ -15,21 +15,15 @@ typedef struct {
     nt_program_t program; /* filled by update(), cleared by drop() */
 } nt_program_ref_t;
 
-/* ref is required, with both stage resources assigned. Returns true only when a program is linked.
- * Reclaims an unready owned program before retrying; linking waits for both stages to be ready.
- *
- * May be called each frame, before the first pass (it may destroy an unready program); the
- * caller assigns ref->program to materials when true. */
+/* ref is required, with both stage resources assigned. Returns true when a link starts; the
+ * caller assigns ref->program to materials then, and renderers skip it until it is ready.
+ * Linking waits for both stages to be ready. Call each frame; after a context loss, drop()
+ * first so the next update links again. */
 static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
     NT_ASSERT(ref != NULL && "nt_program_ref_update: ref is required");
     NT_ASSERT(ref->vs.id != 0 && ref->fs.id != 0 && "nt_program_ref: request both stage resources before update()");
     if (ref->program.id != 0) {
-        if (nt_gfx_program_ready(ref->program)) {
-            return false;
-        }
-        /* Lost readiness is terminal; reclaim before linking a replacement. */
-        nt_gfx_destroy_program(ref->program);
-        ref->program = NT_PROGRAM_INVALID;
+        return false;
     }
     uint32_t vs = nt_resource_get(ref->vs);
     uint32_t fs = nt_resource_get(ref->fs);

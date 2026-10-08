@@ -296,7 +296,8 @@ static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radiu
     validate_no_aliasing(pass, &targets);
     validate_kernel_parameters(pass);
     build_validated_kernel(pass, out_radius, out_weights);
-    return true;
+    /* After the checks, so a misused pass asserts while the program still links. */
+    return nt_gfx_program_ready(s_blur.program);
 }
 
 static void upload_kernel(uint32_t radius, const float packed[20]) {

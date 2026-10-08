@@ -598,6 +598,7 @@ typedef enum {
     X(glGenerateMipmap)                                                                                                                                                                                \
     X(glGetActiveUniform)                                                                                                                                                                              \
     X(glGetActiveUniformsiv)                                                                                                                                                                           \
+    X(glGetAttachedShaders)                                                                                                                                                                            \
     X(glGetError)                                                                                                                                                                                      \
     X(glGetIntegerv)                                                                                                                                                                                   \
     X(glGetProgramInfoLog)                                                                                                                                                                             \
@@ -609,6 +610,7 @@ typedef enum {
     X(glGetUniformBlockIndex)                                                                                                                                                                          \
     X(glGetUniformLocation)                                                                                                                                                                            \
     X(glInvalidateFramebuffer)                                                                                                                                                                         \
+    X(glIsShader)                                                                                                                                                                                      \
     X(glLinkProgram)                                                                                                                                                                                   \
     X(glPixelStorei)                                                                                                                                                                                   \
     X(glPolygonOffset)                                                                                                                                                                                 \
@@ -863,11 +865,13 @@ void nt_gfx_clear(const nt_clear_desc_t *desc);
 /* ---- Resource creation ---- */
 
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
-/* Links valid stages. Link errors, >16 non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS samplers assert.
- * Returns invalid while the context is lost, and for a live stage
+/* Starts linking valid stages; nt_gfx_begin_frame finishes the link, so the program is ready no
+ * earlier than the next frame. Link errors, >16 non-sampler uniforms and >NT_GFX_MAX_TEXTURE_SLOTS
+ * samplers assert there. Returns invalid while the context is lost, and for a live stage
  * whose GPU object a loss discarded -- recreate the stages and relink. Only a stale stage handle asserts. */
 nt_program_t nt_gfx_make_program(nt_shader_t vs, nt_shader_t fs);
-/* Creation preserves the currently bound pipeline. */
+/* Accepts a linking program; binding the pipeline asserts until the program is ready.
+ * Creation preserves the currently bound pipeline. */
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 /* Caller owns the result; destroy it with nt_gfx_destroy_vertex_input. The VI
  * borrows its buffers; creation borrows desc/label and preserves the bound VI.
@@ -937,8 +941,8 @@ bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
  * slot -- they are baked objects with no re-fill path). Renderer caches
  * check this on lookup and self-heal. */
 bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
-/* Reports a live program backend, required by nt_gfx_make_pipeline.
- * Readiness lost to context loss never returns for that handle. */
+/* True once nt_gfx_begin_frame finished the link on the current context; constant within a frame.
+ * Required to bind a pipeline on the program. Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
 /* The program the pipeline borrows; INVALID for an invalid or stale pipeline. */
 nt_program_t nt_gfx_pipeline_program(nt_pipeline_t pip);

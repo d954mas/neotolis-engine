@@ -24,6 +24,9 @@ void setUp(void) {
     nt_gfx_begin_frame();
     nt_gfx_fake_reset();
     nt_shape_renderer_init();
+    /* The fake finishes the renderer's program links at the next begin_frame. */
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
     /* Enter frame/pass so flush->draw_indexed doesn't assert */
     nt_test_frame_begin_pass();
 }
@@ -512,6 +515,8 @@ void test_shape_loss_during_restore_is_retried_by_the_next_one(void) {
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     nt_shape_renderer_restore_gpu();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     TEST_ASSERT_EQUAL_MEMORY(vp, nt_shape_renderer_test_vp(), sizeof(vp));
     TEST_ASSERT_FALSE(nt_shape_renderer_test_depth_enabled());
@@ -666,10 +671,39 @@ static void test_wire_instances_overflow_without_losing_shapes(void) {
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
 }
 
+/* Until every program links, a flush drops its queues: an overflow flush neither asserts nor leaves
+ * stale shapes for the first frame that draws. */
+static void test_unlinked_programs_drop_queued_shapes(void) {
+    nt_test_frame_close();
+    nt_shape_renderer_shutdown();
+    nt_gfx_fake_hold_program_links(true);
+    nt_gfx_begin_frame();
+    nt_shape_renderer_init();
+    nt_test_frame_begin_pass();
+    nt_gfx_fake_draw_trace_reset(true);
+    for (uint32_t i = 0; i < NT_SHAPE_RENDERER_MAX_INSTANCES + 1; i++) {
+        nt_shape_renderer_capsule_wire((float[3]){1, 2, 3}, 0.5F, 3, NULL, NT_RGBA8(255, 255, 255, 255));
+    }
+    nt_shape_renderer_triangle((const float[3]){0, 0, 0}, (const float[3]){1, 0, 0}, (const float[3]){0, 1, 0}, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_flush();
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
+
+    nt_gfx_fake_hold_program_links(false);
+    nt_test_frame_next();
+    nt_shape_renderer_capsule_wire((float[3]){1, 2, 3}, 0.5F, 3, NULL, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_flush();
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_at(0).instance_count);
+    nt_gfx_fake_draw_trace_reset(false);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_polyline_overflow_preserves_all_segments);
     RUN_TEST(test_wire_instances_overflow_without_losing_shapes);
+    RUN_TEST(test_unlinked_programs_drop_queued_shapes);
     RUN_TEST(test_polyline_skips_repeated_points_and_closes_once);
     RUN_TEST(test_polyline_asserts_non_finite_points);
     RUN_TEST(test_width_mode_and_viewport_changes_flush_wires);

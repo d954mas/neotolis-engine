@@ -12,6 +12,7 @@
 /* clang-format off */
 /* NT_TEST_ACCESS / NT_TEST_ACCESS provided via CMake */
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "atlas/nt_atlas.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
@@ -325,6 +326,7 @@ static void test_emit_region_direct_call(void) {
     s_atlas_res = register_test_atlas(0xA1ULL);
     nt_material_t mat = create_test_material();
 
+    nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
 
     /* Identity scale 32 / translate (10, 20) screen mat4, row-major.
@@ -346,6 +348,7 @@ static void test_emit_region_direct_call(void) {
 static void test_emit_region_polygon_hull_vertex_count_preserved(void) {
     s_atlas_res = register_test_atlas(0xA3ULL);
     nt_material_t mat = create_test_material();
+    nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
 
     const float m[16] = {
@@ -369,6 +372,7 @@ static void test_set_material_same_merges_change_splits(void) {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
     };
 
+    nt_test_frame_finish_links();
     const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_sprite_renderer_set_material(mat_a);
     nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, 0U, NULL, 0U);
@@ -463,6 +467,7 @@ static nt_resource_t register_slice9_atlas(uint64_t rid) {
 static void test_slice9_basic(void) {
     nt_resource_t atlas = register_slice9_atlas(0xC1ULL);
     nt_material_t mat = create_test_material();
+    nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
 
     const uint16_t b4[4] = {4, 4, 4, 4};
@@ -478,6 +483,7 @@ static void test_slice9_basic(void) {
 static void test_slice9_positions(void) {
     nt_resource_t atlas = register_slice9_atlas(0xC2ULL);
     nt_material_t mat = create_test_material();
+    nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
 
     /* Target: (0,0,100,80), borders: (4,4,4,4) */
@@ -523,6 +529,7 @@ static void test_slice9_positions(void) {
 static void test_slice9_flip_x(void) {
     nt_resource_t atlas = register_slice9_atlas(0xC3ULL);
     nt_material_t mat = create_test_material();
+    nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
 
     /* Asymmetric borders: L=4, R=8. */
@@ -556,6 +563,7 @@ static void test_slice9_flip_x(void) {
 static void test_slice9_flip_y(void) {
     nt_resource_t atlas = register_slice9_atlas(0xC4ULL);
     nt_material_t mat = create_test_material();
+    nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
 
     /* Asymmetric: T=4, B=8. */
@@ -585,7 +593,9 @@ static void test_slice9_flip_y(void) {
 /* Test: tombstone region emits nothing */
 static void test_slice9_tombstone_noop(void) {
     nt_resource_t atlas = register_slice9_atlas(0xC6ULL);
-    nt_sprite_renderer_set_material(create_test_material());
+    const nt_material_t mat = create_test_material();
+    nt_test_frame_finish_links();
+    nt_sprite_renderer_set_material(mat);
     TEST_ASSERT_EQUAL_UINT8(0, nt_atlas_get_region(atlas, 1)->vertex_count);
 
     const uint32_t vertex_used = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used;
@@ -607,6 +617,7 @@ static void test_slice9_tombstone_noop(void) {
 static void test_slice9_mat4_translation(void) {
     nt_resource_t atlas = register_slice9_atlas(0xC7ULL);
     nt_material_t mat = create_test_material();
+    nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
 
     float m[16];
@@ -633,6 +644,7 @@ static void test_slice9_mat4_translation(void) {
 static void test_slice9_mat4_rotation_90(void) {
     nt_resource_t atlas = register_slice9_atlas(0xC8ULL);
     nt_material_t mat = create_test_material();
+    nt_test_frame_finish_links();
     nt_sprite_renderer_set_material(mat);
 
     /* col 0 = [0, 1, 0, 0], col 1 = [-1, 0, 0, 0]:

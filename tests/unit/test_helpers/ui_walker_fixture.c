@@ -1,6 +1,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "test_helpers/nt_test_font_blob.h"
 
 /* Empty TU when NT_TEST_ACCESS undefined (helper compiled into non-UI binaries). */
@@ -67,11 +68,6 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     nt_font_init(&(nt_font_desc_t){.max_fonts = 16}); /* rich multi-face tests create up to 6 distinct fonts */
     nt_material_init(&(nt_material_desc_t){.max_materials = 32});
 
-    /* Open a frame/pass so sprite/text renderers can draw_indexed without
-     * tripping the stub gfx backend's "no active pass" guard (mirrors the
-     * test_nt_sprite_renderer setUp). */
-    nt_gfx_begin_pass(&FIXTURE_PASS);
-
     nt_ui_module_init();
 
     /* nt_debug_overlay is NOT init'd here -- nt_ui_walk does not depend on it.
@@ -83,6 +79,15 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     fx->sprite_material = make_material(true);
     fx->text_material = make_material(false);
     fx->text_material_b = make_material(false);
+    /* Program links finish at a begin_frame, so wait for them before any pass. */
+    nt_test_gfx_link_wait(nt_material_get_info(fx->sprite_material)->program);
+    nt_test_gfx_link_wait(nt_material_get_info(fx->text_material)->program);
+    nt_test_gfx_link_wait(nt_material_get_info(fx->text_material_b)->program);
+
+    /* Open a pass so sprite/text renderers can draw_indexed without
+     * tripping the stub gfx backend's "no active pass" guard (mirrors the
+     * test_nt_sprite_renderer setUp). */
+    nt_gfx_begin_pass(&FIXTURE_PASS);
 
     /* Stub font: valid pool slot, no resource attached. nt_font_valid() is
      * true so walker's contract assert passes, but units_per_em stays 0 so

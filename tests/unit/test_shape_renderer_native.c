@@ -8,8 +8,10 @@
 #include "unity.h"
 #include "window/nt_window.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -20,6 +22,25 @@ enum { RT_W = 64, RT_H = 64 };
 static const float k_identity_vp[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 
 static nt_render_target_t s_target;
+
+/* The renderer's programs finish linking at begin_frames, several with parallel compile, and a flush
+ * draws nothing until all of them are ready: a probe shape that draws marks them linked. */
+static void wait_shape_links(void) {
+    const time_t start = time(NULL);
+    for (;;) {
+        nt_gfx_begin_pass(&(nt_pass_desc_t){.target = s_target, .clear_depth = 1.0F});
+        nt_shape_renderer_triangle((const float[3]){0, 0, 0}, (const float[3]){1, 0, 0}, (const float[3]){0, 1, 0}, NT_RGBA8(255, 255, 255, 255));
+        nt_shape_renderer_flush();
+        const bool drawn = nt_gfx_draw_calls(&g_nt_gfx.counters) != 0;
+        nt_gfx_end_pass();
+        nt_gfx_end_frame();
+        nt_gfx_begin_frame();
+        if (drawn) {
+            return;
+        }
+        TEST_ASSERT_TRUE_MESSAGE(time(NULL) - start < 10, "shape renderer programs did not link");
+    }
+}
 
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
@@ -39,6 +60,7 @@ void setUp(void) {
     nt_shape_renderer_init();
     nt_shape_renderer_set_vp(k_identity_vp);
     nt_shape_renderer_set_depth(false);
+    wait_shape_links();
 }
 
 void tearDown(void) {

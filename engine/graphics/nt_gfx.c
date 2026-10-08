@@ -122,8 +122,9 @@ static struct {
     nt_pool_t texture_pool;
     nt_pool_t render_target_pool;
 
-    uint32_t *shader_backends; /* backend handles parallel to pool slots */
-    uint32_t *program_backends;
+    uint32_t *shader_backends;   /* backend handles parallel to pool slots */
+    uint32_t *program_backends;  /* 0 while the link is pending */
+    uint32_t *program_pending;   /* backend handle while the link runs */
     uint32_t *pipeline_programs; /* full program handle each pipeline borrows */
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
@@ -190,6 +191,9 @@ static nt_gfx_result_t backend_failed(const char *what) {
     return NT_GFX_RESULT_BACKEND_FAILURE;
 }
 
+/* The backend slot a program holds, linked or still linking. */
+static uint32_t program_slot_backend(uint32_t slot) { return s_gfx.program_backends[slot] != 0 ? s_gfx.program_backends[slot] : s_gfx.program_pending[slot]; }
+
 // #region frame observation
 #if NT_GFX_CAPTURE_ENABLED
 nt_gfx_capture_state_t g_nt_gfx_capture;
@@ -226,7 +230,7 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
             case NT_GFX_OBJECT_PROGRAM:
-                event->data.resource.backend = s_gfx.program_backends[slot];
+                event->data.resource.backend = program_slot_backend(slot);
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
             case NT_GFX_OBJECT_PIPELINE:
@@ -352,6 +356,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 
     s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
     s_gfx.program_backends = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
+    s_gfx.program_pending = (uint32_t *)calloc(desc->max_programs + 1, sizeof(uint32_t));
     s_gfx.pipeline_programs = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
@@ -368,8 +373,8 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     nt_pool_init(&s_gfx.mesh_pool, desc->max_meshes);
     s_gfx.mesh_table = (nt_gfx_mesh_info_t *)calloc((size_t)desc->max_meshes + 1, sizeof(nt_gfx_mesh_info_t));
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
-    NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.pipeline_programs && s_gfx.buffer_backends && s_gfx.texture_backends && s_gfx.buffer_metas && s_gfx.vertex_input_metas &&
-              s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && "gfx init: out of memory");
+    NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.program_pending && s_gfx.pipeline_programs && s_gfx.buffer_backends && s_gfx.texture_backends && s_gfx.buffer_metas &&
+              s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && "gfx init: out of memory");
 
     if (!nt_gfx_backend_init(desc)) {
         NT_LOG_ERROR("backend init failed");
@@ -425,7 +430,7 @@ void nt_gfx_shutdown(void) {
         }
     }
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
-        nt_gfx_backend_destroy_program(s_gfx.program_backends[i]);
+        nt_gfx_backend_destroy_program(program_slot_backend(i));
     }
     for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
         nt_gfx_backend_destroy_shader(s_gfx.shader_backends[i]);
@@ -450,6 +455,7 @@ void nt_gfx_shutdown(void) {
 
     free(s_gfx.shader_backends);
     free(s_gfx.program_backends);
+    free(s_gfx.program_pending);
     free(s_gfx.pipeline_programs);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
@@ -505,6 +511,26 @@ static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
 
 /* ---- Frame / Pass ---- */
 
+/* A link finishes no earlier than the frame after make_program, so readiness is constant within a frame. */
+static void finish_program_links(void) {
+    for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
+        if (s_gfx.program_pending[i] == 0) {
+            continue;
+        }
+        nt_gfx_result_t result = nt_gfx_backend_finish_program(s_gfx.program_pending[i]);
+        if (result == NT_GFX_RESULT_UNREADY) {
+            continue;
+        }
+        if (result != NT_GFX_RESULT_ACCEPTED && backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
+            return; /* the next begin_frame wipes every pending link */
+        }
+        NT_ASSERT(result == NT_GFX_RESULT_ACCEPTED && "program link failed");
+        s_gfx.program_backends[i] = s_gfx.program_pending[i];
+        s_gfx.program_pending[i] = 0;
+        NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, s_gfx.program_pool.slots[i].id);
+    }
+}
+
 /* Every backend name died with the context. */
 static void wipe_backend_handles(void) {
     for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
@@ -512,6 +538,7 @@ static void wipe_backend_handles(void) {
     }
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
         s_gfx.program_backends[i] = 0;
+        s_gfx.program_pending[i] = 0;
     }
     /* Pipelines, vertex inputs and render targets are baked objects with no re-fill path:
      * loss frees their slots outright, so handles held across a loss go
@@ -618,6 +645,9 @@ void nt_gfx_begin_frame(void) {
     /* After the CONTEXT operation: the remake is ordinary buffer work of the frame. */
     if (g_nt_gfx.context_restored) {
         nt_gfx_frame_create_buffers();
+    }
+    if (!g_nt_gfx.context_lost) {
+        finish_program_links();
     }
 #if NT_GFX_GPU_TIMING_ENABLED
     if (!g_nt_gfx.context_lost) {
@@ -853,9 +883,10 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
         nt_pool_free(&s_gfx.program_pool, id);
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(backend != 0 && "program link failed");
+    NT_ASSERT(backend != 0 && "program creation failed");
 
-    s_gfx.program_backends[nt_pool_slot_index(id)] = backend;
+    /* Reading link status now would block until the driver finishes; begin_frame finishes it. */
+    s_gfx.program_pending[nt_pool_slot_index(id)] = backend;
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_PROGRAM, id);
@@ -941,18 +972,19 @@ static nt_gfx_result_t make_pipeline(const nt_pipeline_desc_t *desc, nt_pipeline
      * the caller retries on a later frame. */
     NT_ASSERT(desc != NULL);
     /* Context loss zeroes the program backend, so without this every renderer
-     * would trap on the readiness assert below. */
+     * would trap on the program assert below. */
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(nt_gfx_program_ready(desc->program) && "make_pipeline: program is not linked");
+    NT_ASSERT(nt_pool_valid(&s_gfx.program_pool, desc->program.id) && program_slot_backend(nt_pool_slot_index(desc->program.id)) != 0 &&
+              "make_pipeline: invalid program, or one a context loss discarded");
     NT_ASSERT(blend_state_valid(&desc->blend));
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
     NT_ASSERT(id != 0 && "pipeline pool full -- raise nt_gfx_desc_t.max_pipelines");
 
     uint32_t slot = nt_pool_slot_index(id);
-    uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(desc->program.id)];
+    uint32_t program_backend = program_slot_backend(nt_pool_slot_index(desc->program.id));
     uint32_t backend = nt_gfx_backend_create_pipeline(desc, program_backend, slot);
     if (backend == 0) {
         NT_LOG_ERROR("backend pipeline creation failed");
@@ -1353,8 +1385,9 @@ static nt_gfx_result_t destroy_program(nt_program_t prog) {
         nt_gfx_destroy_pipeline((nt_pipeline_t){s_gfx.pipeline_pool.slots[i].id});
     }
     uint32_t slot = nt_pool_slot_index(prog.id);
-    nt_gfx_backend_destroy_program(s_gfx.program_backends[slot]);
+    nt_gfx_backend_destroy_program(program_slot_backend(slot));
     s_gfx.program_backends[slot] = 0;
+    s_gfx.program_pending[slot] = 0;
     nt_pool_free(&s_gfx.program_pool, prog.id);
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -1544,7 +1577,9 @@ static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
     /* The set is program state: another pipeline on the same program keeps it,
      * and a program without samplers needs none. */
     if (s_gfx.bound_pipeline == 0 || s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)] != program) {
-        const bool samples = nt_gfx_backend_program_sampler_mask(s_gfx.program_backends[nt_pool_slot_index(program)]) != 0;
+        const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(program)];
+        NT_ASSERT(program_backend != 0 && "bind_pipeline: program is not ready -- gate draws on nt_gfx_program_ready");
+        const bool samples = nt_gfx_backend_program_sampler_mask(program_backend) != 0;
         s_gfx.texture_set_state = samples ? NT_GFX_TEXTURE_SET_NONE : NT_GFX_TEXTURE_SET_APPLIED;
     }
     /* Loss frees pipeline slots, so a live slot always has a backend. */

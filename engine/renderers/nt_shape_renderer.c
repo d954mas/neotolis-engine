@@ -933,6 +933,11 @@ static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, const v
 
 void nt_shape_renderer_flush(void) {
     NT_ASSERT(s_shape.initialized && "nt_shape_renderer_flush: module is not initialized");
+    /* Each program finishes linking on its own frame; until all do, queued shapes are dropped. */
+    if (!nt_gfx_program_ready(s_shape.gpu.fill_prog) || !nt_gfx_program_ready(s_shape.gpu.batch_prog) || !nt_gfx_program_ready(s_shape.gpu.wire_prog) || !nt_gfx_program_ready(s_shape.gpu.line_prog)) {
+        drop_queues();
+        return;
+    }
     const int d = s_shape.depth_enabled ? 1 : 0;
     for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
         const uint32_t count = s_shape.fill_counts[type];

@@ -34,9 +34,6 @@ static struct {
     /* Weak: a context loss frees it, and the next resolve recreates it over the current frame buffers. */
     nt_vertex_input_t vertex_input;
 
-    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is built. */
-    bool warned_program_not_ready;
-
     /* set_material; draws read it */
     struct {
         nt_material_t material;
@@ -66,10 +63,9 @@ static struct {
 
 // #region Pipeline cache
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *info) {
-    /* One query covers every state: no program yet, a program that died with the
-     * context, and a program its owner destroyed. */
+    /* One query covers every state: no program yet, a program still linking, one that
+     * died with the context, and one its owner destroyed. */
     if (!nt_gfx_program_ready(info->program)) {
-        nt_renderer_warn_program_not_ready(&s_text.warned_program_not_ready, info);
         return (nt_pipeline_t){0};
     }
     const nt_pipeline_desc_t desc = {
@@ -86,7 +82,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *info) {
     if (cached.id != 0) {
         return cached;
     }
-    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc, &s_text.warned_program_not_ready);
+    return nt_renderer_pipeline_cache_insert(s_text.pipelines, &s_text.pipeline_count, NT_TEXT_RENDERER_MAX_PIPELINES, &key, &desc);
 }
 
 static nt_vertex_input_t find_or_create_vertex_input(void) {

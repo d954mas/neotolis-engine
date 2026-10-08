@@ -126,8 +126,10 @@ static uint8_t s_fake_fail_texture_creates;
 static uint32_t s_fake_texture_destroy_count;
 static uint32_t s_fake_last_destroyed_texture;
 static uint8_t s_fake_fail_buffer_creates;
-static bool s_fake_fail_next_program_create;
+static bool s_fake_fail_next_program_link;
+static bool s_fake_hold_program_links;
 static bool s_fake_lose_context_on_program_create;
+static bool s_fake_lose_context_on_program_link;
 static bool s_fake_fail_next_pipeline_create;
 static bool s_fake_fail_next_sampler_create;
 static bool s_fake_fail_next_backend_restore_lost;
@@ -216,8 +218,10 @@ void nt_gfx_fake_fail_buffer_creates(uint8_t mask) {
     NT_ASSERT(mask <= 3);
     s_fake_fail_buffer_creates = mask;
 }
-void nt_gfx_fake_fail_next_program_create(void) { s_fake_fail_next_program_create = true; }
+void nt_gfx_fake_fail_next_program_link(void) { s_fake_fail_next_program_link = true; }
+void nt_gfx_fake_hold_program_links(bool hold) { s_fake_hold_program_links = hold; }
 void nt_gfx_fake_lose_context_on_program_create(void) { s_fake_lose_context_on_program_create = true; }
+void nt_gfx_fake_lose_context_on_program_link(void) { s_fake_lose_context_on_program_link = true; }
 void nt_gfx_fake_fail_next_pipeline_create(void) { s_fake_fail_next_pipeline_create = true; }
 void nt_gfx_fake_fail_next_sampler_create(void) { s_fake_fail_next_sampler_create = true; }
 void nt_gfx_fake_fail_next_backend_restore_lost(void) { s_fake_fail_next_backend_restore_lost = true; }
@@ -291,8 +295,10 @@ void nt_gfx_fake_reset(void) {
     s_fake_texture_destroy_count = 0;
     s_fake_last_destroyed_texture = 0;
     s_fake_fail_buffer_creates = 0;
-    s_fake_fail_next_program_create = false;
+    s_fake_fail_next_program_link = false;
+    s_fake_hold_program_links = false;
     s_fake_lose_context_on_program_create = false;
+    s_fake_lose_context_on_program_link = false;
     s_fake_fail_next_pipeline_create = false;
     s_fake_fail_next_sampler_create = false;
     s_fake_fail_next_backend_restore_lost = false;
@@ -451,16 +457,31 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
     if (s_fake_context_lost) {
         return 0; /* GL creates no name on a lost context */
     }
-    if (s_fake_fail_next_program_create) {
-        s_fake_fail_next_program_create = false;
-        return 0;
-    }
     (void)vs_backend;
     (void)fs_backend;
     const uint32_t slot = fake_alloc_slot(s_fake_program_table, s_fake_max_programs);
     NT_ASSERT(slot != 0 && "fake program table full");
     s_fake_program_table[slot] = s_fake_program_template;
     return slot;
+}
+
+nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle) {
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_fake_max_programs && "finish_program: handle out of range");
+    if (s_fake_lose_context_on_program_link) {
+        /* GL reports the link complete and failed on a lost context, before the loss event. */
+        s_fake_lose_context_on_program_link = false;
+        s_fake_context_lost = true;
+        s_fake_loss_pending = true;
+        return NT_GFX_RESULT_BACKEND_FAILURE;
+    }
+    if (s_fake_hold_program_links) {
+        return NT_GFX_RESULT_UNREADY;
+    }
+    if (s_fake_fail_next_program_link) {
+        s_fake_fail_next_program_link = false;
+        return NT_GFX_RESULT_BACKEND_FAILURE;
+    }
+    return NT_GFX_RESULT_ACCEPTED;
 }
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) {

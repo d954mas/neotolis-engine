@@ -6,9 +6,11 @@
 #include "log/nt_log.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "unity.h"
 
 static uint32_t s_error_logs;
+static nt_program_t s_draw_program; /* linked by setUp's begin_frame */
 
 static void count_error_logs(nt_log_level_t level, const char *domain, const char *msg, void *user) {
     (void)domain;
@@ -23,6 +25,7 @@ void setUp(void) {
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
     nt_gfx_init(&desc);
+    s_draw_program = nt_gfx_fake_make_program(NULL, 0);
     nt_gfx_begin_frame();
 }
 
@@ -32,8 +35,7 @@ void tearDown(void) {
 }
 
 static void draw_setup(void) {
-    nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_draw_program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
@@ -98,6 +100,7 @@ static void test_instanced_products_are_widened_before_multiplication(void) {
 /* begin_frame wipes a new loss; pass calls on the lost context are no-ops, not traps. */
 static void test_loss_is_wiped_at_begin_frame_and_pass_calls_are_no_ops(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
+    nt_test_gfx_link_wait(program);
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -122,6 +125,7 @@ static void test_loss_is_wiped_at_begin_frame_and_pass_calls_are_no_ops(void) {
 /* A loss no failing call meets changes no state: its work is issued and does nothing, and the next begin_frame wipes. */
 static void test_loss_during_an_iteration_is_wiped_at_the_next_begin_frame(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
+    nt_test_gfx_link_wait(program);
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_end_pass();
@@ -158,6 +162,7 @@ static void test_the_first_create_on_a_loss_latches_it_with_one_log(void) {
 /* A loss and restore between two iterations (a background tab) wipe and restore in one begin_frame. */
 static void test_loss_and_restore_between_iterations_restore_in_one_begin_frame(void) {
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
+    nt_test_gfx_link_wait(program);
     nt_gfx_fake_lose_and_restore_context();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -246,6 +251,7 @@ static void test_a_failure_on_a_live_context_does_not_latch(void) {
 static void test_a_latched_loss_wipes_when_its_event_is_taken(void) {
     for (uint32_t taken = 0; taken < 2; taken++) {
         const nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
+        nt_test_gfx_link_wait(program);
         nt_gfx_fake_set_context_lost(true);
         TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}).id);
         TEST_ASSERT_TRUE(nt_gfx_program_ready(program));
@@ -1073,6 +1079,7 @@ static void test_exact_capacity_and_one_record_short(void) {
         desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 4096; /* as in setUp: the recorded frame uploads */
         desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
         nt_gfx_init(&desc);
+        s_draw_program = nt_gfx_fake_make_program(NULL, 0);
         nt_gfx_begin_frame();
         record_next_frame();
         nt_gfx_end_frame();

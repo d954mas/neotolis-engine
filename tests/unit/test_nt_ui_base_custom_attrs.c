@@ -65,6 +65,7 @@ static void assert_base_indices_carry_defaults(uint32_t index_end, uint32_t vert
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_defaults_ride_every_base_emit_in_one_batch(void) {
     const nt_material_t mat = make_one_attr_material();
+    ui_walker_fixture_next_frame(&s_fx);
     nt_ui_set_sprite_material(s_fx.ctx, mat);
 
     nt_atlas_region_ref_t plain_ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
@@ -177,6 +178,7 @@ static void declare_mixed_frame(nt_material_t mat, bool with_radial) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_geometry_widget_shares_base_batch_aligned(void) {
     const nt_material_t mat = make_radial_layout_material();
+    ui_walker_fixture_next_frame(&s_fx);
     nt_ui_set_sprite_material(s_fx.ctx, mat);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
 

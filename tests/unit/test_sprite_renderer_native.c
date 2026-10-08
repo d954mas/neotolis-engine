@@ -16,6 +16,7 @@
 #include "resource/nt_resource.h"
 #include "sprite_comp/nt_sprite_comp.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "test_helpers/ui_atlas.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "unity.h"
@@ -60,6 +61,7 @@ static nt_program_t make_program(const char *vs_src) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
     nt_program_t program = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, program.id);
+    nt_test_gfx_link_wait(program);
     return program;
 }
 

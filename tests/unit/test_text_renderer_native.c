@@ -13,6 +13,7 @@
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "test_helpers/nt_test_font_blob.h"
 #include "unity.h"
 #include "window/nt_window.h"
@@ -63,7 +64,9 @@ void setUp(void) {
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
-    s_material = nt_material_create(&(nt_material_create_desc_t){.program = nt_gfx_make_program(vs, fs), .cull_mode = NT_CULL_NONE, .label = "native_text_row"});
+    const nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
+    s_material = nt_material_create(&(nt_material_create_desc_t){.program = program, .cull_mode = NT_CULL_NONE, .label = "native_text_row"});
 }
 
 void tearDown(void) {
