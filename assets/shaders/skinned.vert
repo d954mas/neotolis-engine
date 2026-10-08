@@ -7,7 +7,7 @@ layout(location = 1) in vec2 a_uv;
 #include "common/globals.glsl"
 
 out vec2 v_uv;
-out vec4 v_color;
+out mediump vec4 v_color;
 
 void main() {
     mat4 world = mat4(

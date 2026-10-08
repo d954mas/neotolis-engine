@@ -21,9 +21,9 @@ layout(location = 6) in vec4 a_uvrect;
 layout(location = 7) in vec4 a_layout;
 
 out vec2 v_texcoord;
-out vec4 v_color;
+out mediump vec4 v_color;
 out vec4 v_radial;
-out vec4 v_tint;
+out mediump vec4 v_tint;
 out vec4 v_uvrect;
 out vec4 v_layout;
 out vec2 v_local;

@@ -22,7 +22,7 @@ layout(location = 5) in float a_depth_bias;
 out vec2 v_texcoord;
 flat out uvec2 v_glyph;
 flat out vec4 v_band_transform; // bbox x0, y0, band_count / width, band_count / height
-out vec4 v_color;
+out mediump vec4 v_color;
 
 void main() {
     uvec2 glyph = floatBitsToUint(a_glyph_data);
