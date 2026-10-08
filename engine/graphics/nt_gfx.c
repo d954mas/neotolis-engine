@@ -335,8 +335,12 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_vertex_inputs > 0 && "nt_gfx_desc_t.max_vertex_inputs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_render_targets > 0 && "nt_gfx_desc_t.max_render_targets is 0 -- use nt_gfx_desc_defaults() or set explicitly");
-    for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS && desc->global_blocks[i].name != NULL; i++) {
-        NT_ASSERT(desc->global_blocks[i].binding_slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && "nt_gfx_desc_t.global_blocks: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
+    for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS; i++) {
+        NT_ASSERT((desc->global_blocks[i].name == NULL || desc->global_blocks[i].binding_slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS) &&
+                  "nt_gfx_desc_t.global_blocks: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
+        /* Link stops at the first NULL name: a later entry would never bind. */
+        NT_ASSERT((desc->global_blocks[i].name != NULL || i + 1 == NT_GFX_MAX_GLOBAL_BLOCKS || desc->global_blocks[i + 1].name == NULL) &&
+                  "nt_gfx_desc_t.global_blocks: an entry follows the NULL name that ends the list");
     }
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
@@ -679,7 +683,9 @@ static nt_gfx_result_t read_pixels(nt_render_target_t src, int x, int y, int w, 
         /* WebGL reads RGBA/UNSIGNED_BYTE only from a normalized fixed-point color buffer. */
         NT_ASSERT(s_gfx.render_target_metas[rt_slot].attachments[NT_GFX_RT_COLOR].id != 0 && render_target_attachment_meta(rt_slot, NT_GFX_RT_COLOR)->format == NT_TEXTURE_FORMAT_RGBA8 &&
                   "read_pixels: the source needs an RGBA8 color attachment");
-        NT_ASSERT(x >= 0 && y >= 0 && x + w <= render_target_size_meta(rt_slot)->width && y + h <= render_target_size_meta(rt_slot)->height && "read_pixels: rect outside the render target");
+        /* w and h are positive here; 64-bit sums cannot overflow. */
+        NT_ASSERT(x >= 0 && y >= 0 && (int64_t)x + w <= render_target_size_meta(rt_slot)->width && (int64_t)y + h <= render_target_size_meta(rt_slot)->height &&
+                  "read_pixels: rect outside the render target");
     }
     /* Compute in uint64_t so w*h*4 cannot overflow before the cap check. */
     uint64_t need = (uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4U;
@@ -720,18 +726,13 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     NT_ASSERT((s_gfx.render_state == NT_GFX_STATE_IDLE || s_gfx.render_state == NT_GFX_STATE_DRAWN) && "begin_pass: needs an open frame with no open pass");
+    NT_ASSERT(desc != NULL);
+    NT_ASSERT((desc->target.id != 0 || !desc->discard_color) && "begin_pass: discarding the window color loses the presented frame");
     /* A lost frame records nothing but keeps the pass order, so its sequencing and the frame rule still assert. */
     if (g_nt_gfx.context_lost) {
         s_gfx.render_state = NT_GFX_STATE_PASS;
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-
-    NT_ASSERT(desc != NULL);
-    if (desc == NULL) {
-        NT_LOG_ERROR("begin_pass: NULL desc");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
-    NT_ASSERT((desc->target.id != 0 || !desc->discard_color) && "begin_pass: discarding the window color loses the presented frame");
 
     uint32_t render_target_backend = 0;
     uint16_t width = 0;
@@ -1302,11 +1303,6 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
     }
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
-    }
-    NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
-    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("make_render_target called inside a pass");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
     bool has_attachment = desc->color.id != 0 || desc->depth.id != 0;
     NT_ASSERT(has_attachment && "make_render_target: needs a color or depth attachment");
@@ -2390,7 +2386,7 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
 /* ---- Buffer update ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansion, not real branching
-nt_gfx_result_t nt_gfx_buffer_update(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
+static nt_gfx_result_t buffer_update(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2410,7 +2406,7 @@ nt_gfx_result_t nt_gfx_buffer_update(nt_buffer_t buf, uint32_t offset, const voi
 
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, buf.id, event->data.resource.size = size; event->data.resource.related[0] = offset; event->data.resource.flags = data != NULL);
-    NT_GFX_END(nt_gfx_buffer_update(buf, offset, data, size));
+    NT_GFX_END(buffer_update(buf, offset, data, size));
 }
 
 static nt_gfx_result_t begin_segment(const char *name) {
@@ -2930,13 +2926,9 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
+    /* Pool exhaustion is a configuration error, as for textures. */
     uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);
-    if (mesh_id == 0) {
-        NT_LOG_ERROR("activate_mesh: mesh pool full");
-        destroy_unpublished_buffer(ibo);
-        destroy_unpublished_buffer(vbo);
-        return 0;
-    }
+    NT_ASSERT(mesh_id != 0 && "activate_mesh: mesh pool full -- raise nt_gfx_desc_t.max_meshes");
 
     uint32_t slot = nt_pool_slot_index(mesh_id);
     memset(&s_gfx.mesh_table[slot], 0, sizeof(nt_gfx_mesh_info_t));

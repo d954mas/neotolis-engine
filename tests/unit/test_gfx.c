@@ -2055,18 +2055,36 @@ void test_frame_rule_ignores_stale_destroys_and_allows_the_frame_before_its_firs
     nt_gfx_begin_frame();
 }
 
-/* A frame that starts lost records nothing but keeps the pass order and the rule. */
+/* A frame that starts lost records only its END_PASS (a backend no-op) but keeps the pass order and the rule. */
 void test_frame_rule_holds_in_a_lost_frame(void) {
     frame_rule_objects_t o = make_frame_rule_objects();
     nt_gfx_end_frame();
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
     EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F}));
     EXPECT_ASSERT(nt_gfx_end_frame());
     nt_gfx_end_pass();
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx_stream.used);
     EXPECT_FRAME_RULE(nt_gfx_destroy_program(o.prog));
+    nt_gfx_end_frame();
+}
+
+/* The desc checks precede the lost-context return: a lost frame still rejects a bad pass desc. */
+void test_begin_pass_on_a_lost_context_still_checks_its_desc(void) {
+    nt_gfx_end_frame();
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    EXPECT_ASSERT(nt_gfx_begin_pass(NULL));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "desc != NULL"));
+    EXPECT_ASSERT(nt_gfx_begin_pass(&(nt_pass_desc_t){.discard_color = true}));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "begin_pass: discarding the window color"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_end_pass();
     nt_gfx_end_frame();
 }
 
@@ -2083,18 +2101,46 @@ void test_failed_mesh_activation_in_a_drawn_frame_frees_its_buffer(void) {
     TEST_ASSERT_EQUAL_UINT32(accepted + 1U, g_nt_gfx.counters.accepted[NT_GFX_OP_DESTROY]);
 }
 
-/* Lifetime work before the first pass does not execute what the frame recorded so far. */
+/* Lifetime work before the first pass executes nothing the frame recorded so far: frame storage stays
+ * unsent in every config, and the stream keeps its segment where GPU timing records one. */
 void test_destroys_before_the_first_pass_leave_the_stream_pending(void) {
     frame_rule_objects_t o = make_frame_rule_objects();
+    uint32_t offset = 0;
+    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 16, 4, &offset), 7, 16);
     nt_gfx_begin_segment("frame");
     const uint32_t used = g_nt_gfx_stream.used;
 #if NT_GFX_GPU_TIMING_ENABLED
     TEST_ASSERT_NOT_EQUAL_UINT32(0, used);
 #endif
+    const uint32_t updates = nt_gfx_fake_update_buffer_count();
     nt_gfx_destroy_program(o.prog);
     nt_gfx_deactivate_mesh(o.mesh);
     TEST_ASSERT_EQUAL_UINT32(used, g_nt_gfx_stream.used);
+    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_VERTEX]);
     nt_gfx_end_segment();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(updates + 1U, nt_gfx_fake_update_buffer_count());
+    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_update_buffer_size());
+    nt_gfx_begin_frame();
+}
+
+/* Pool exhaustion is a configuration error, not a recoverable activation failure. */
+void test_activate_mesh_asserts_when_the_mesh_pool_is_full(void) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 1, .max_vertex_inputs = 8, .max_render_targets = 16));
+    nt_gfx_begin_frame();
+    uint8_t blob[MESH_BLOB_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_valid_mesh_blob(blob);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    EXPECT_ASSERT(nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "activate_mesh: mesh pool full"));
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
+    nt_gfx_begin_frame();
 }
 // #endregion
 
@@ -3430,7 +3476,34 @@ void test_global_block_at_an_unsupported_slot_asserts_at_init(void) {
     const nt_gfx_desc_t desc = NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8,
                                                 .max_render_targets = 16, .global_blocks = {{"Frame", NT_GFX_MAX_UNIFORM_BUFFER_SLOTS}});
     EXPECT_ASSERT(nt_gfx_init(&desc));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "nt_gfx_desc_t.global_blocks: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS"));
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
+    nt_gfx_begin_frame();
+}
+
+void test_global_block_after_the_null_name_asserts_at_init(void) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    const nt_gfx_desc_t desc = NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8,
+                                                .max_render_targets = 16, .global_blocks = {{"Frame", 0}, {NULL, 0}, {"View", 1}});
+    EXPECT_ASSERT(nt_gfx_init(&desc));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "nt_gfx_desc_t.global_blocks: an entry follows the NULL name that ends the list"));
+    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
+    nt_gfx_begin_frame();
+}
+
+/* A list that fills every entry has no NULL terminator and is valid. */
+void test_full_global_block_list_inits(void) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc =
+        NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16);
+    static const char *const names[NT_GFX_MAX_GLOBAL_BLOCKS] = {"B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"};
+    for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS; i++) {
+        desc.global_blocks[i] = (nt_global_block_t){names[i], NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1U - i};
+    }
+    nt_gfx_init(&desc);
+    TEST_ASSERT_TRUE(g_nt_gfx.initialized);
     nt_gfx_begin_frame();
 }
 
@@ -3720,8 +3793,10 @@ int main(void) {
     RUN_TEST(test_frame_rule_rejects_every_live_destroy_while_drawn);
     RUN_TEST(test_frame_rule_ignores_stale_destroys_and_allows_the_frame_before_its_first_pass);
     RUN_TEST(test_frame_rule_holds_in_a_lost_frame);
+    RUN_TEST(test_begin_pass_on_a_lost_context_still_checks_its_desc);
     RUN_TEST(test_failed_mesh_activation_in_a_drawn_frame_frees_its_buffer);
     RUN_TEST(test_destroys_before_the_first_pass_leave_the_stream_pending);
+    RUN_TEST(test_activate_mesh_asserts_when_the_mesh_pool_is_full);
     RUN_TEST(test_activate_mesh_bad_magic);
     RUN_TEST(test_activate_shader_valid_blob);
     RUN_TEST(test_activate_shader_bad_magic);
@@ -3755,6 +3830,8 @@ int main(void) {
     RUN_TEST(test_contiguous_plain_draws_merge);
     RUN_TEST(test_indexed_draws_assert_whole_triangles);
     RUN_TEST(test_global_block_at_an_unsupported_slot_asserts_at_init);
+    RUN_TEST(test_global_block_after_the_null_name_asserts_at_init);
+    RUN_TEST(test_full_global_block_list_inits);
     RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
     RUN_TEST(test_gpu_timing_toggle_mid_frame_leaves_the_stream_pending);
     RUN_TEST(test_buffer_write_leaves_earlier_draws_pending);

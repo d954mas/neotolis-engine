@@ -44,7 +44,7 @@ game_render           ← nt_ui_walk reads scratch pointers; any number of
                         destroyed (the frame rule)
 nt_gfx_end_frame      ← after the last pass, also when nothing renders; uploads
                         frame storage and executes the recorded draw-phase calls
-                        (nt_gfx_read_pixels reads the window here, before the swap)
+nt_gfx_read_pixels    ← optional: reads the finished frame, before the swap
 nt_window_swap_buffers
 ```
 

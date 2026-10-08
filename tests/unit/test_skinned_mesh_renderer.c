@@ -236,17 +236,25 @@ static void begin_storage_frame(void) {
     nt_gfx_begin_frame();
 }
 
+static bool s_frame_ended; /* close_frame ran and no open_frame followed: tearDown must not close again */
+
 static void open_frame(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    s_frame_ended = false;
+}
+
+static void end_frame(void) {
+    nt_gfx_end_frame();
+    s_frame_ended = true;
 }
 
 static void close_frame(void) {
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
+    end_frame();
 }
 
-/* The fake observes a frame once nt_gfx_end_frame has executed it; the reopened pass keeps tearDown valid. */
+/* The fake observes a frame once nt_gfx_end_frame has executed it. */
 static void next_frame(void) {
     close_frame();
     open_frame();
@@ -296,12 +304,15 @@ void setUp(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_fake_draw_trace_reset(true);
     s_draw_mark = 0;
+    s_frame_ended = false;
 }
 
 void tearDown(void) {
     nt_log_remove_sink(capture_program_warning, NULL);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
+    if (!s_frame_ended) {
+        nt_gfx_end_pass();
+        nt_gfx_end_frame();
+    }
     nt_skinned_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_skin_comp_shutdown();
@@ -801,7 +812,7 @@ void test_core_draw_supplies_the_deformation_texture_across_passes(void) {
         nt_gfx_end_pass();
     }
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count()); /* recording writes no buffer */
-    nt_gfx_end_frame();
+    end_frame();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_update_buffer_count()); /* one upload for both passes */
     TEST_ASSERT_EQUAL_UINT32(offset, nt_gfx_fake_last_instance_offset());

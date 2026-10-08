@@ -855,8 +855,8 @@ void nt_gfx_begin_frame(void);
  * end_pass and before nt_window_swap_buffers. Requires an open frame with no open pass.
  * Executes the frame's recorded draw-phase calls in call order. */
 void nt_gfx_end_frame(void);
-/* Passes do not nest and run only between begin_frame and end_frame; on a lost context
- * both calls are no-ops, but begin_pass still asserts that order. */
+/* Passes do not nest and run only between begin_frame and end_frame. On a lost context they
+ * record nothing but still open and close the pass, so the order and the frame rule assert. */
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_end_pass(void);
 /* Requires an open pass and a non-NULL desc, borrowed only for this call.
@@ -888,7 +888,10 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
  * errors assert. */
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
-/* ---- Resource destruction ---- */
+/* ---- Resource destruction ----
+ *
+ * Frame rule: destroying a live object asserts from the first nt_gfx_begin_pass until
+ * nt_gfx_end_frame, also through nt_gfx_deactivate_*. */
 
 /* Already linked programs remain usable after their stages are destroyed. */
 void nt_gfx_destroy_shader(nt_shader_t shd);
@@ -903,9 +906,8 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 /* Invalid and stale handles are no-ops because buffer destruction also
  * destroys dependent vertex inputs (see nt_gfx_destroy_buffer). */
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi);
-/* Destroys VIs that borrow this vertex/index buffer. Destroying a captured
- * instance buffer instead makes every draw assert until it is re-pointed;
- * GL retains the old storage until that re-point or the VI's destruction. */
+/* Destroys VIs that borrow this vertex/index buffer. A captured instance buffer is not
+ * cascade-destroyed; GL retains its storage until the next re-point or the VI's destruction. */
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 /* Destroys render targets that borrow this texture. */
 void nt_gfx_destroy_texture(nt_texture_t tex);
@@ -1088,7 +1090,8 @@ bool nt_gfx_is_gpu_timing_supported(void);
 
 /* ---- Texture update (uncompressed, non-mipmapped, non-depth textures only, level 0) ---- */
 
-/* Not ordered against this frame's draws: write a sampled region at most once per frame, before its first draw. */
+/* Allowed at any time: a write before nt_gfx_end_frame lands before every draw of the frame, so
+ * every draw reads the frame's last write; a write after it belongs to the next frame. */
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */

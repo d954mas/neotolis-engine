@@ -454,12 +454,15 @@ static nt_gfx_desc_t test_gfx_desc(void) {
     return NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 16, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16, .max_vertex_inputs = 16, .max_render_targets = 16);
 }
 
+static bool s_frame_ended; /* close_frame ran and no open_frame followed: tearDown must not close again */
+
 static void setup_with_gfx_desc(const nt_gfx_desc_t *gfx_desc) {
     s_pack_blob_count = 0;
     memset((void *)s_pack_blobs, 0, sizeof(s_pack_blobs));
     s_atlas_res = NT_RESOURCE_INVALID;
     s_vpack_counter = 0;
     s_radial_shared_program = NT_PROGRAM_INVALID;
+    s_frame_ended = false;
 
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(gfx_desc);
@@ -495,11 +498,13 @@ void setUp(void) {
 static void close_frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    s_frame_ended = true;
 }
 
 static void open_frame(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    s_frame_ended = false;
 }
 
 /* Closes the pass and the frame and opens the next ones; the fake observes a frame once
@@ -521,8 +526,10 @@ static uint32_t draw_list_draws(const nt_render_item_t *items, uint32_t count) {
 }
 
 void tearDown(void) {
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
+    if (!s_frame_ended) {
+        nt_gfx_end_pass();
+        nt_gfx_end_frame();
+    }
     nt_sprite_renderer_shutdown();
 
     nt_material_shutdown();
@@ -2170,7 +2177,8 @@ void test_sprite_renderer_new_layout_after_context_restore_reuses_a_dead_vertex_
 void test_sprite_renderer_reselect_after_program_destroyed_in_frame_draws_nothing(void) {
     s_atlas_res = register_test_atlas(0xDDULL);
     const nt_material_t mat = create_test_material();
-    close_frame();
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_sprite_renderer_set_material(mat);
     nt_gfx_destroy_program(nt_material_get_info(mat)->program);

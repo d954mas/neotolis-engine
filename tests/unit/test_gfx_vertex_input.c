@@ -267,6 +267,7 @@ void test_bind_vi_reaches_backend(void) {
 void test_bind_invalid_vi_clears_mirror(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
+    nt_vertex_input_t live = make_vi(vbo, (nt_buffer_t){0});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_end_pass();
@@ -274,11 +275,13 @@ void test_bind_invalid_vi_clears_mirror(void) {
     nt_gfx_begin_frame();
     nt_gfx_destroy_vertex_input(vi);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_vertex_input(live);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
     nt_gfx_bind_vertex_input(vi); /* stale: clears the mirror instead of trapping */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_vertex_input_count());
 }
 
 void test_bind_pipeline_preserves_bound_vi(void) {
@@ -555,10 +558,9 @@ void test_vi_make_during_context_loss_returns_invalid(void) {
     nt_gfx_fake_set_context_lost(false);
 }
 
-/* Destroying a pointed instance buffer unpoints dependents: the next
- * instanced draw without a re-point traps instead of silently reading the
- * dead buffer through the VAO's dangling attachment. */
-void test_destroying_instance_buffer_unpoints_dependents(void) {
+/* Destroying a pointed instance buffer between frames does not cascade to the vertex
+ * input: it stays valid and draws again once the next pass points it at a live buffer. */
+void test_destroying_instance_buffer_keeps_dependents_valid(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
     nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
@@ -576,11 +578,17 @@ void test_destroying_instance_buffer_unpoints_dependents(void) {
     nt_gfx_begin_frame();
     nt_gfx_destroy_buffer(stream);
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi)); /* instance buffers do not cascade-destroy */
+    nt_buffer_t next = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
-    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
+    nt_gfx_bind_instance_buffer(next, 16);
+    nt_gfx_draw_instanced(0, 3, 2);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_instance_offset());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_bound_vertex_input(), nt_gfx_fake_last_instance_vertex_input());
 }
 
 /* Pool slots survive context loss: a stale instance-buffer handle must trap,
@@ -674,7 +682,7 @@ int main(void) {
     RUN_TEST(test_bind_instance_buffer_rejects_unaligned_offset);
     RUN_TEST(test_draw_without_vertex_input_asserts);
     RUN_TEST(test_vi_make_during_context_loss_returns_invalid);
-    RUN_TEST(test_destroying_instance_buffer_unpoints_dependents);
+    RUN_TEST(test_destroying_instance_buffer_keeps_dependents_valid);
     RUN_TEST(test_bind_instance_buffer_asserts_on_stale_buffer);
     RUN_TEST(test_vi_slots_freed_by_context_loss);
     return UNITY_END();

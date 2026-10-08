@@ -472,7 +472,8 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     nt_gfx_destroy_texture(color);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
-EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
+/* In capture mode every probe frame is captured, so capture covers every pass of the probe. */
+static void probe_begin_frame(int capture) {
 #if NT_GFX_CAPTURE_ENABLED
     if (capture != 0) {
         nt_gfx_capture_request();
@@ -481,6 +482,10 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     (void)capture;
 #endif
     nt_gfx_begin_frame();
+}
+
+EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
+    probe_begin_frame(capture);
     const uint8_t original[8] = {17, 43, 89, 255, 211, 127, 31, 255};
     nt_texture_t color = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .data = original});
     nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 1, .format = NT_TEXTURE_FORMAT_DEPTH24});
@@ -518,7 +523,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, original, sizeof(pixels)) == 0) {
         result |= 1U;
     }
-    nt_gfx_begin_frame();
+    probe_begin_frame(capture);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F, .load_color = true});
     nt_gfx_bind_pipeline(pipeline);
@@ -534,7 +539,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
         result |= 2U;
     }
-    nt_gfx_begin_frame();
+    probe_begin_frame(capture);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {1.0F, 0.0F, 0.0F, 1.0F}, .load_depth = true});
     nt_gfx_end_pass();
@@ -543,7 +548,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red, sizeof(pixels)) == 0) {
         result |= 4U;
     }
-    nt_gfx_begin_frame();
+    probe_begin_frame(capture);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
     nt_gfx_set_scissor(0, 0, 1, 1);
@@ -555,7 +560,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, blue_red, sizeof(pixels)) == 0) {
         result |= 64U;
     }
-    nt_gfx_begin_frame();
+    probe_begin_frame(capture);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
     nt_gfx_bind_pipeline(overwrite);
@@ -581,7 +586,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, red_green, sizeof(pixels)) == 0) {
         result |= 128U;
     }
-    nt_gfx_begin_frame();
+    probe_begin_frame(capture);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true, .discard_depth = true});
     nt_gfx_bind_pipeline(overwrite);
@@ -594,7 +599,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     if (nt_gfx_read_pixels(target, 0, 0, 2, 1, pixels, sizeof(pixels)) && memcmp(pixels, green, sizeof(pixels)) == 0) {
         result |= 16U;
     }
-    nt_gfx_begin_frame();
+    probe_begin_frame(capture);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .load_color = true, .load_depth = true});
     nt_gfx_end_pass();

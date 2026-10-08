@@ -204,8 +204,8 @@ compares the program as well as the handle; draws already recorded keep their
 pipeline. Sprite `draw_list` resolves each run's material itself. The text
 renderer writes material params only when `{program, material, params}` differ
 from its last write, so nothing else may write the uniforms of a program that
-text materials use. A program is not destroyed between `set_material` and the
-frame's draws through it: the draw would bind a dead pipeline and assert.
+text materials use. A program is destroyed only outside a drawn frame (the frame rule), so a
+pipeline resolved at `set_material` stays live for the frame's draws.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
@@ -457,9 +457,9 @@ descriptor carries no sampler state.
 
 An unsupported color or depth format, a target with no attachment, and an
 invalid, husk, multi-level or differently sized attachment texture are
-developer errors and assert, as are exhausted configured target capacity,
-creating a target inside an active pass, and destroying a live target while the
-frame is being drawn (the frame rule). Destroying an invalid or stale target is a
+developer errors and assert, as are exhausted configured target capacity and
+destroying a live target while the frame is being drawn (the frame rule).
+Creating a target is allowed anywhere, inside a pass too: execution is deferred. Destroying an invalid or stale target is a
 no-op even then: the handle check runs first. A returned invalid target therefore means a lost context, a
 failed backend allocation, or an incomplete framebuffer, such as `RGBA16F`
 without float rendering. `nt_gfx_make_pipeline`

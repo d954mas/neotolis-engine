@@ -14,15 +14,28 @@
 /* Helper: float approximately equal (avoids UNITY_EXCLUDE_FLOAT issue) */
 static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
 
-/* The fake observes a frame once nt_gfx_end_frame has executed it; the reopened pass keeps tearDown valid. */
-static void next_frame_in_pass(void) {
+static bool s_frame_ended; /* close_frame ran and no open_frame followed: tearDown must not close again */
+
+static void close_frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    s_frame_ended = true;
+}
+
+static void open_frame(void) {
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    s_frame_ended = false;
+}
+
+/* The fake observes a frame once nt_gfx_end_frame has executed it. */
+static void next_frame_in_pass(void) {
+    close_frame();
+    open_frame();
 }
 
 void setUp(void) {
+    s_frame_ended = false;
     nt_gfx_desc_t desc =
         NT_GFX_TEST_DESC(.max_shaders = 32, .max_programs = 32, .max_pipelines = 32, .max_buffers = 128, .max_textures = 32, .max_meshes = 32, .max_vertex_inputs = 32, .max_render_targets = 16);
     /* A test is one frame, and every flush of it adds to frame storage. */
@@ -36,8 +49,10 @@ void setUp(void) {
 }
 
 void tearDown(void) {
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
+    if (!s_frame_ended) {
+        nt_gfx_end_pass();
+        nt_gfx_end_frame();
+    }
     nt_shape_renderer_shutdown();
     nt_gfx_shutdown();
 }
@@ -46,14 +61,12 @@ void tearDown(void) {
 
 void test_shape_init_shutdown(void) {
     TEST_ASSERT_TRUE(nt_shape_renderer_test_initialized());
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
+    close_frame();
     nt_shape_renderer_shutdown();
     TEST_ASSERT_FALSE(nt_shape_renderer_test_initialized());
     /* Re-init for tearDown */
     nt_shape_renderer_init();
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    open_frame();
 }
 
 /* ---- 2. Flush empty is no-op ---- */
@@ -550,8 +563,7 @@ void test_shape_loss_during_restore_is_retried_by_the_next_one(void) {
  * unconditionally must not have this one silently initialize itself and take
  * program and pipeline slots the game sized for its own materials. */
 void test_shape_restore_on_inactive_renderer_does_nothing(void) {
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
+    close_frame();
     nt_shape_renderer_shutdown();
     const uint32_t programs = nt_gfx_fake_program_create_count();
     const uint32_t pipelines = nt_gfx_fake_pipeline_create_count();
@@ -562,8 +574,7 @@ void test_shape_restore_on_inactive_renderer_does_nothing(void) {
     TEST_ASSERT_EQUAL_UINT32(programs, nt_gfx_fake_program_create_count());
     TEST_ASSERT_EQUAL_UINT32(pipelines, nt_gfx_fake_pipeline_create_count());
     nt_shape_renderer_init();
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    open_frame();
 }
 
 static void test_polyline_skips_repeated_points_and_closes_once(void) {

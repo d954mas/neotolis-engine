@@ -86,9 +86,12 @@ static uint32_t text_vertex_count(void) { return g_nt_gfx_frame_storage[NT_GFX_F
 static uint32_t text_quad_count(void) { return text_vertex_count() / 4U; }
 static const uint8_t *text_vertices(void) { return g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging; }
 
+static bool s_frame_ended; /* close_frame ran and no open_frame followed: tearDown must not close again */
+
 static void close_frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    s_frame_ended = true;
 }
 
 /* Opens the next frame with the same selection: frame storage starts empty. */
@@ -96,6 +99,7 @@ static void open_frame(void) {
     nt_gfx_begin_frame();
     nt_text_renderer_set_material(s_mat);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    s_frame_ended = false;
 }
 
 /* The fake observes a frame once nt_gfx_end_frame has executed it. */
@@ -181,6 +185,7 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
+    s_frame_ended = false;
     nt_gfx_fake_reset();
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
@@ -207,8 +212,10 @@ void setUp(void) {
 
 void tearDown(void) {
     nt_log_remove_sink(capture_errors, NULL);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
+    if (!s_frame_ended) {
+        nt_gfx_end_pass();
+        nt_gfx_end_frame();
+    }
     nt_text_renderer_shutdown();
     nt_font_destroy(s_font);
     free(s_blob);

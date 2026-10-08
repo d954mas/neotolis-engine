@@ -75,9 +75,8 @@ index type of the bound vertex input), and GPU timing
 segment begin and end. Descriptors and uniform values are copied
 into the stream. A binding equal to the current one and an indexed draw that
 continues the previous one record nothing new (see Binding dedup and draw
-merge). `nt_gfx_end_frame` executes the stream in call order; every execution
-first uploads the frame storage allocated since the previous one (see Frame
-storage). Nothing is recorded outside a frame.
+merge). `nt_gfx_end_frame` first uploads the frame storage (see Frame storage), then
+executes the stream in call order. Nothing is recorded outside a frame.
 
 Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, the GPU timing toggle and polling.
@@ -108,7 +107,7 @@ context records nothing but still opens the pass. The check is one compare per
 destroy; draws pay nothing.
 
 `nt_gfx_desc_t.stream_capacity` is the byte budget of the draw-phase commands of
-one frame, allocated once at init; `nt_gfx_desc_defaults()` sets 32 KiB (twice
+one frame, allocated once at init; `nt_gfx_desc_defaults()` sets 32 KiB (over three times
 the largest measured frame, Sponza at 8.9 KB; a mesh run records 60-100 bytes),
 and init asserts at least 4 bytes. The stream never grows: an overflow logs the
 needed and free bytes and stops the program, with assertions OFF too, because
@@ -215,10 +214,9 @@ keeps renderer-cached vertex inputs from outliving mesh buffers; mesh caches
 revalidate handles with `nt_gfx_vertex_input_valid` on lookup. Because the
 cascade makes stale handles routine, `nt_gfx_destroy_vertex_input` tolerates
 stale and INVALID handles as no-ops. The dynamically captured instance
-buffer is *not* cascade-destroyed, but destroying the one the pass pointed clears
-that instance binding: the next draw of that vertex input asserts until
-`nt_gfx_bind_instance_buffer` re-points it, and the GL attachment's storage
-lingers until that re-point or the vertex input's death.
+buffer is *not* cascade-destroyed: it can be destroyed only outside a drawn frame
+(the frame rule), and every pass re-points its instance buffers anyway; the GL
+attachment's storage lingers until that re-point or the vertex input's death.
 Buffer *contents* may change at any time (queue semantics, see Draw-phase
 command stream) — an update keeps the GL name, so baked attachments survive it;
 what a write costs depends on when it happens (see Dynamic data lifetime) — and
@@ -464,7 +462,7 @@ point between `nt_gfx_begin_frame` and `nt_gfx_end_frame`, in a pass or after UI
 layout, and never ends a draw merge. `end_frame` sends everything allocated in
 the frame; bytes allocated after it would never reach the GPU, so the next
 `begin_frame` asserts on them.
-`nt_gfx_end_frame` sends each stream.s bytes with one buffer update, then
+`nt_gfx_end_frame` sends each stream's bytes with one buffer update, then
 replays: fill an allocation before `nt_gfx_end_frame`. Offsets and pointers stay
 valid until the next `nt_gfx_begin_frame`, which empties the storage. Alignment padding is
 zeroed once at init and keeps old payload bytes afterwards; consumers read only
@@ -526,7 +524,7 @@ call, in the current pass. Each has two entry points:
   texture), allocates and packs each run's instances from the transform,
   drawable (and skin) components, and records it as the core does.
 
-The core.s instances are filled before `nt_gfx_end_frame` (see Frame
+The core's instances are filled before `nt_gfx_end_frame` (see Frame
 storage). One allocation may be drawn any number of times in any passes of the
 frame, so shadow cascades draw one packing. Each core call resolves pipeline,
 vertex input and material state: draw a batch per call, not one object.
@@ -640,8 +638,7 @@ Pass color and depth clears are pass-owned operations. In particular,
 state; pipeline write masks affect draws, not the next pass initialization. Bound
 pipeline, vertex input, the instance binding and the logical complete texture
 set are pass-scoped: `begin_pass` discards them. The texture set is additionally tied to the bound
-program and is discarded when that program changes or when the bound pipeline is
-destroyed. Pipeline and vertex-input binds, texture-set application,
+program and is discarded when that program changes. Pipeline and vertex-input binds, texture-set application,
 instance-buffer re-pointing, uniform writes and draws outside a pass assert.
 Destroying a live object from the first pass until `nt_gfx_end_frame` asserts
 (the frame rule, see Draw-phase command stream).

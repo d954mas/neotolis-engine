@@ -202,20 +202,27 @@ static void test_compatible_sprites_merge(void) {
 }
 
 /* One material walked in two passes of one frame: a pass resets the bound state, so the second
- * pass binds the pipeline again and draws with it. */
+ * pass binds the pipeline again and draws with it. The one-pass frame first pins that the first
+ * walk of a frame binds exactly once, so the two-pass count leaves exactly one bind to the second. */
 static void test_one_material_two_passes_rebinds(void) {
     make_rect(0, 0);
     inject_frozen_cmds(1);
 
+    const uint32_t one_pass_before = nt_gfx_fake_bind_pipeline_count();
+    walk();
+    ui_walker_fixture_end_frame(&s_fx);
+    TEST_ASSERT_EQUAL_UINT32(one_pass_before + 1U, nt_gfx_fake_bind_pipeline_count());
+
+    ui_walker_fixture_next_frame(&s_fx);
     nt_gfx_fake_draw_trace_reset(true);
-    const uint32_t binds_before = nt_gfx_fake_bind_pipeline_count();
+    const uint32_t two_pass_before = nt_gfx_fake_bind_pipeline_count();
     walk();
     nt_gfx_end_pass();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     walk();
     ui_walker_fixture_end_frame(&s_fx);
 
-    TEST_ASSERT_EQUAL_UINT32(binds_before + 2U, nt_gfx_fake_bind_pipeline_count());
+    TEST_ASSERT_EQUAL_UINT32(two_pass_before + 2U, nt_gfx_fake_bind_pipeline_count());
     TEST_ASSERT_EQUAL_UINT32(2U, nt_gfx_fake_draw_trace_count());
     const nt_gfx_fake_draw_t first = nt_gfx_fake_draw_trace_at(0);
     const nt_gfx_fake_draw_t second = nt_gfx_fake_draw_trace_at(1);

@@ -7,6 +7,7 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -216,12 +217,13 @@ static void test_stale_destroy_leaves_the_target_that_reused_its_slot(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_destroy_count());
 }
 
-static void test_make_and_destroy_reject_active_pass(void) {
+/* Creation only records a new object, so it is allowed in a pass; a destroy follows the frame rule. */
+static void test_make_in_a_pass_is_allowed_and_destroy_follows_the_frame_rule(void) {
     nt_texture_t color = make_color();
     nt_render_target_t rt = make_target(color, NO_TEXTURE);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
-    NT_TEST_EXPECT_ASSERT(make_target(color, NO_TEXTURE));
+    TEST_ASSERT_TRUE(nt_gfx_render_target_valid(make_target(color, NO_TEXTURE)));
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_render_target(rt));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
     /* The frame rule runs before the cascade, so the target survives. */
@@ -234,7 +236,7 @@ static void test_make_and_destroy_reject_active_pass(void) {
 
     TEST_ASSERT_TRUE(nt_gfx_render_target_valid(rt));
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(color));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_create_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_render_target_create_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_destroy_count());
 }
 
@@ -417,6 +419,76 @@ static void test_read_pixels_asserts_on_depth_only_source(void) {
     nt_gfx_end_frame();
     NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: the source needs an RGBA8 color attachment"));
+    nt_gfx_begin_frame();
+}
+
+/* WebGL reads RGBA/UNSIGNED_BYTE only from a normalized color buffer: a half-float target is rejected. */
+static void test_read_pixels_asserts_on_half_float_source(void) {
+    nt_render_target_t rt = make_target(make_attachment(NT_TEXTURE_FORMAT_RGBA16F, 64, 32), NO_TEXTURE);
+    uint8_t pixel[4];
+
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: the source needs an RGBA8 color attachment"));
+    nt_gfx_begin_frame();
+}
+
+static void test_read_pixels_asserts_on_a_rect_outside_the_target(void) {
+    nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
+    uint8_t pixels[4 * 4];
+
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, -1, 0, 1, 1, pixels, sizeof(pixels)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: rect outside the render target"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, -1, 1, 1, pixels, sizeof(pixels)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: rect outside the render target"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 63, 0, 2, 1, pixels, sizeof(pixels)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: rect outside the render target"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 31, 1, 2, pixels, sizeof(pixels)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: rect outside the render target"));
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, INT_MAX, 0, 1, 1, pixels, sizeof(pixels)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: rect outside the render target"));
+    nt_gfx_begin_frame();
+}
+
+static void test_read_pixels_asserts_on_a_destroyed_source(void) {
+    nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
+    uint8_t pixel[4];
+
+    nt_gfx_destroy_render_target(rt);
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: invalid render target"));
+    nt_gfx_begin_frame();
+}
+
+/* After end_pass the frame's draws are still unexecuted, so DRAWN is inside the frame too. */
+static void test_read_pixels_asserts_after_end_pass_before_end_frame(void) {
+    nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
+    uint8_t pixel[4];
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: read between nt_gfx_end_frame and nt_gfx_begin_frame"));
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+}
+
+/* A rect touching the far corner is inside: the bounds are exclusive of width and height only. */
+static void test_read_pixels_reads_an_rgba8_target_between_frames(void) {
+    nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
+    uint8_t pixels[2 * 2 * 4];
+    memset(pixels, 0, sizeof(pixels));
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(rt, 62, 30, 2, 2, pixels, sizeof(pixels)));
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x40, pixels[(i * 4U) + 2U]);
+        TEST_ASSERT_EQUAL_HEX8(0xFF, pixels[(i * 4U) + 3U]);
+    }
     nt_gfx_begin_frame();
 }
 // #endregion
@@ -694,7 +766,7 @@ int main(void) {
     RUN_TEST(test_destroying_a_texture_destroys_only_its_targets);
     RUN_TEST(test_destroy_render_target_tolerates_invalid_and_stale_handles);
     RUN_TEST(test_stale_destroy_leaves_the_target_that_reused_its_slot);
-    RUN_TEST(test_make_and_destroy_reject_active_pass);
+    RUN_TEST(test_make_in_a_pass_is_allowed_and_destroy_follows_the_frame_rule);
     RUN_TEST(test_recreate_at_new_size_without_spare_slots);
     RUN_TEST(test_context_loss_frees_targets_and_leaves_texture_husks);
     RUN_TEST(test_make_over_husk_while_lost_returns_invalid);
@@ -706,6 +778,11 @@ int main(void) {
     RUN_TEST(test_pass_sequencing_and_capacity_misuse_assert);
     RUN_TEST(test_read_pixels_asserts_inside_a_frame);
     RUN_TEST(test_read_pixels_asserts_on_depth_only_source);
+    RUN_TEST(test_read_pixels_asserts_on_half_float_source);
+    RUN_TEST(test_read_pixels_asserts_on_a_rect_outside_the_target);
+    RUN_TEST(test_read_pixels_asserts_on_a_destroyed_source);
+    RUN_TEST(test_read_pixels_asserts_after_end_pass_before_end_frame);
+    RUN_TEST(test_read_pixels_reads_an_rgba8_target_between_frames);
     RUN_TEST(test_active_attachments_cannot_be_sampled);
     RUN_TEST(test_attachments_bind_with_their_default_sampler);
     RUN_TEST(test_depth_texture_rejects_linear_sampler_override);
