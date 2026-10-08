@@ -310,7 +310,7 @@ typedef enum {
  * copy for per-draw re-pointing, and max_vertex_inputs slots exist. */
 #define NT_GFX_MAX_INSTANCE_ATTRS 8
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
-/* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS; the front-end mirrors each slot's binding. */
+/* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS, so every slot works on every device. */
 #define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS 24
 
 typedef struct {
