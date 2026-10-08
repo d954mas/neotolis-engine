@@ -15,18 +15,15 @@ nt_window_t g_nt_window = {.max_dpr = 2.0F, .resizable = true};
 static nt_window_pre_swap_hook_fn s_pre_swap_hooks[NT_WINDOW_MAX_PRE_SWAP_HOOKS];
 static int s_pre_swap_hook_count;
 
-bool nt_window_add_pre_swap_hook(nt_window_pre_swap_hook_fn fn) {
-    if (fn == NULL) {
-        return false;
-    }
+void nt_window_add_pre_swap_hook(nt_window_pre_swap_hook_fn fn) {
+    NT_ASSERT(fn != NULL);
     for (int i = 0; i < s_pre_swap_hook_count; i++) {
         if (s_pre_swap_hooks[i] == fn) {
-            return true; /* idempotent: already registered counts as installed. */
+            return; /* Already registered. */
         }
     }
     NT_ASSERT(s_pre_swap_hook_count < NT_WINDOW_MAX_PRE_SWAP_HOOKS);
     s_pre_swap_hooks[s_pre_swap_hook_count++] = fn;
-    return true;
 }
 
 void nt_window_run_pre_swap_hooks(void) {

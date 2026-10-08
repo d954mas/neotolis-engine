@@ -89,10 +89,10 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
     const nt_ui_vlist_style_t st = (style != NULL) ? *style : nt_ui_vlist_style_defaults();
     NT_ASSERT(isfinite(item_extent) && item_extent > 0.0F && "nt_ui_vlist_begin: item_extent must be finite and > 0");
     NT_ASSERT(st.overscan >= 0 && "nt_ui_vlist_begin: style.overscan must be >= 0");
-    NT_ASSERT(isfinite(st.gap) && st.gap >= 0.0F && "nt_ui_vlist_begin: style.gap must be finite and >= 0");
+    NT_ASSERT(isfinite(st.gap) && st.gap >= 0.0F && st.gap <= (float)UINT16_MAX && "nt_ui_vlist_begin: style.gap must be finite and in [0, UINT16_MAX]");
     /* gap is the inter-row spacing: applied as the scroll container's childGap (renders between rows) AND
      * folded into the per-row stride so the window + spacers reserve it. Clay childGap is integer px, so
-     * round ONCE and use that same value everywhere (stride, spacers, childGap) — no float/int drift. */
+     * truncate ONCE and use that same value everywhere (stride, spacers, childGap) — no float/int drift. */
     const uint16_t gap_px = (uint16_t)st.gap;
     const float gap = (float)gap_px;
     const float safe_extent = item_extent + gap;

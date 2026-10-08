@@ -429,6 +429,10 @@ default, X). The general `nt_ui_child_id(parent_id, "label")` helper derives a p
 parent scope + a string label (fmix-folded, never 0), so game code derives child ids without
 inventing numeric salts.
 
+`style.gap` must be finite and in `[0, UINT16_MAX]`; invalid values assert
+before the scroll opens. Its fractional part is discarded once, and the same
+integer pixel gap is used for Clay child spacing, row stride and spacers.
+
 ## Text input
 
 `nt_ui_input_text` is a single-line field over a game-owned

@@ -19,9 +19,9 @@ static uint32_t s_vpack_counter;
 
 /* ---- Unity setUp / tearDown ---- */
 
-static nt_result_t init_material_defaults(void) {
+static void init_material_defaults(void) {
     nt_material_desc_t d = nt_material_desc_defaults();
-    return nt_material_init(&d);
+    nt_material_init(&d);
 }
 
 void setUp(void) {
@@ -152,15 +152,18 @@ void test_blend_multiply_multiplies_rgb_and_preserves_destination_alpha(void) {
 /* ---- Test 1: init/shutdown lifecycle ---- */
 
 void test_init_shutdown(void) {
-    /* tearDown calls shutdown, so re-init to test return values */
+    /* Re-init restores a usable material pool. */
     nt_material_shutdown();
-    nt_result_t r = init_material_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, r);
+    init_material_defaults();
+    nt_material_create_desc_t d = make_test_desc();
+    nt_material_t mat = nt_material_create(&d);
+    TEST_ASSERT_TRUE(nt_material_valid(mat));
 
     /* Shutdown and re-init should succeed */
     nt_material_shutdown();
-    nt_result_t r2 = init_material_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, r2);
+    init_material_defaults();
+    mat = nt_material_create(&d);
+    TEST_ASSERT_TRUE(nt_material_valid(mat));
 }
 
 /* ---- Test 2: create returns valid handle ---- */

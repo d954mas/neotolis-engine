@@ -125,7 +125,8 @@ typedef struct {
 
 /* ---- Lifecycle ---- */
 
-nt_result_t nt_material_init(const nt_material_desc_t *desc);
+/* NULL desc, zero capacity, double init and allocation failure assert. */
+void nt_material_init(const nt_material_desc_t *desc);
 void nt_material_shutdown(void);
 
 /* ---- Create / Destroy / Query ---- */

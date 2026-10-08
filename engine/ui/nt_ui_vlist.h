@@ -28,7 +28,7 @@ typedef struct {
 typedef struct {
     nt_ui_scroll_style_t scroll; /* the owned scroll's tunables (one clip) */
     int32_t overscan;            /* extra rows rendered each side of the viewport (hides recycle pop) */
-    float gap;                   /* inter-row spacing (px, >= 0, rounded to int); rendered as the scroll container's childGap */
+    float gap;                   /* inter-row spacing (px, finite 0..UINT16_MAX, truncated to int); scroll container's childGap */
     /* Id recycle modulus: per-row id keys on (index % id_ring), so distinct ids per list are bounded
      * by id_ring, NOT the row count — a 10k list never saturates Clay's PERSISTENT element hashmap
      * (one permanent slot per distinct id ever declared). MUST exceed the max simultaneously-visible

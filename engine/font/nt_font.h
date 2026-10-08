@@ -105,8 +105,9 @@ void nt_font_measure_invalidate_cache(void);
 void nt_font_measure_invalidate(nt_font_t font);
 
 /* Call after nt_resource_init(), before its first successful file or virtual mount.
- * Registers FONT once per resource lifecycle; nt_font_shutdown() does not reset that registration. */
-nt_result_t nt_font_init(const nt_font_desc_t *desc);
+ * Registers FONT once per resource lifecycle; nt_font_shutdown() does not reset that registration.
+ * NULL desc, zero capacity, double init and allocation failure assert. */
+void nt_font_init(const nt_font_desc_t *desc);
 void nt_font_shutdown(void);
 /* Call once per frame after gfx begin_frame, outside a pass and before any text: recovery replaces the
  * GPU texture, and a provider change clears the glyph cache that this frame's draws will sample. */

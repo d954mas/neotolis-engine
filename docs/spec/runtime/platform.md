@@ -67,6 +67,13 @@ Platform does **not** handle:
 - material logic
 - resource manifests
 
+## Pre-swap hooks
+
+`nt_window_add_pre_swap_hook(fn)` registers a process-lifetime callback and returns
+`void`. Each swap invokes it before presenting, while the rendered back buffer
+is valid. Re-registering the same callback is a no-op, including at capacity.
+`NULL` and registering a new callback beyond the fixed table capacity assert.
+
 ## WASM bridge allocation
 
 EM_JS code allocating into the WASM heap uses `wasmExports['malloc']`.

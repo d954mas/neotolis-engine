@@ -456,6 +456,12 @@ Additional types (material, audio) will be added as needed.
 
 ### NT_ASSET_FONT binary format
 
+`nt_font_init(desc)` initializes the font pool and registers the FONT type,
+returning `void`. Call it after `nt_resource_init`, before the first successful
+file or virtual mount. The descriptor must be non-NULL with positive `max_fonts`;
+invalid arguments, double initialization and allocation failure assert.
+`nt_font_shutdown` does not reset type registration in the resource lifecycle.
+
 Builder produces font assets from TTF/OTF sources. Binary layout:
 
 ```

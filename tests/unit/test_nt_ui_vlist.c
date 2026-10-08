@@ -282,10 +282,9 @@ static void test_vlist_spacer_content_size_x(void) {
 /* ---- (f-gap) gap>0 renders as childGap AND reserves scroll space: content == count*item_extent +
  * (count-1)*gap, row 0 at the container top (no phantom leading gap), rows advance by item_extent+gap. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — inflated by the TEST_ASSERT macro expansion
-static void test_vlist_gap_renders(void) {
+static void check_vlist_gap_renders(float gap) {
     const uint32_t count = 100U;
     const float item_extent = 40.0F;
-    const float gap = 10.0F;
     for (int frame = 0; frame < 2; ++frame) { /* frame 1 establishes dims; frame 2 reads them back */
         nt_pointer_t p = {0};
         nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
@@ -321,6 +320,9 @@ static void test_vlist_gap_renders(void) {
     TEST_ASSERT_TRUE(row1.found);
     TEST_ASSERT_TRUE(fabsf((row1.y - row0.y) - (item_extent + gap)) < 0.5F);
 }
+
+static void test_vlist_gap_renders(void) { check_vlist_gap_renders(10.0F); }
+static void test_vlist_max_gap_renders(void) { check_vlist_gap_renders((float)UINT16_MAX); }
 
 /* ---- (g) one-clip-only: exactly one scroll container, never one per row ---- */
 static void test_vlist_one_clip(void) {
@@ -451,6 +453,7 @@ static void vlist_begin_with_gap_expect_assert(uint32_t root_id, float item_exte
 
 static void test_vlist_begin_negative_gap_asserts(void) { vlist_begin_with_gap_expect_assert(nt_ui_id("badgap_neg"), 10.0F, -20.0F); }
 static void test_vlist_begin_nan_gap_asserts(void) { vlist_begin_with_gap_expect_assert(nt_ui_id("badgap_nan"), 10.0F, NAN); }
+static void test_vlist_begin_oversized_gap_asserts(void) { vlist_begin_with_gap_expect_assert(nt_ui_id("badgap_large"), 10.0F, 65536.0F); }
 
 /* Negative overscan is a developer error: begin asserts. */
 static void test_vlist_begin_negative_overscan_asserts(void) {
@@ -479,12 +482,14 @@ int main(void) {
     RUN_TEST(test_vlist_spacer_content_size);
     RUN_TEST(test_vlist_spacer_content_size_x);
     RUN_TEST(test_vlist_gap_renders);
+    RUN_TEST(test_vlist_max_gap_renders);
     RUN_TEST(test_vlist_one_clip);
     RUN_TEST(test_vlist_window_exceeds_ring_asserts);
     RUN_TEST(test_vlist_nested_scroll_reversals_no_crash);
     RUN_TEST(test_vlist_saturation_asserts);
     RUN_TEST(test_vlist_begin_negative_gap_asserts);
     RUN_TEST(test_vlist_begin_nan_gap_asserts);
+    RUN_TEST(test_vlist_begin_oversized_gap_asserts);
     RUN_TEST(test_vlist_begin_negative_overscan_asserts);
     return UNITY_END();
 }

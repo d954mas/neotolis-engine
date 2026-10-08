@@ -310,8 +310,10 @@ void test_font_init_shutdown(void) {
     nt_font_shutdown();
     nt_resource_shutdown();
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_result_t r = nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
-    TEST_ASSERT_EQUAL(NT_OK, r);
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 2});
+    TEST_ASSERT_TRUE(nt_font_valid(font));
+    nt_font_destroy(font);
     /* tearDown will call shutdown */
 }
 

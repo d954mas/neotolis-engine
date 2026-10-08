@@ -16,7 +16,6 @@ void nt_devapi_capture_arm(void); /* mark the host capture-capable (called by in
    devapi lib links only the header-only nt_window_interface. Idempotent. */
 static inline void nt_devapi_capture_install_seam(void) {
     /* Register the seam before advertising capture support; a full hook table asserts. */
-    if (nt_window_add_pre_swap_hook(nt_devapi_capture_on_pre_swap)) {
-        nt_devapi_capture_arm();
-    }
+    nt_window_add_pre_swap_hook(nt_devapi_capture_on_pre_swap);
+    nt_devapi_capture_arm();
 }

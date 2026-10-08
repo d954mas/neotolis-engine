@@ -1406,7 +1406,7 @@ static void create_font_textures(nt_font_slot_t *slot) {
 static void destroy_font_textures(nt_font_slot_t *slot) { nt_gfx_destroy_texture(slot->curve_texture); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_result_t nt_font_init(const nt_font_desc_t *desc) {
+void nt_font_init(const nt_font_desc_t *desc) {
     NT_ASSERT(!s_font.initialized);
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_fonts > 0);
@@ -1425,7 +1425,6 @@ nt_result_t nt_font_init(const nt_font_desc_t *desc) {
 
     s_font.last_resolve_epoch = 0;
     s_font.initialized = true;
-    return NT_OK;
 }
 
 void nt_font_shutdown(void) {

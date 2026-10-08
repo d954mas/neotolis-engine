@@ -19,7 +19,7 @@ static struct {
 /* ---- Lifecycle ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_result_t nt_material_init(const nt_material_desc_t *desc) {
+void nt_material_init(const nt_material_desc_t *desc) {
     NT_ASSERT(!s_mat.initialized);      /* double init */
     NT_ASSERT(desc);                    /* NULL descriptor */
     NT_ASSERT(desc->max_materials > 0); /* must specify capacity */
@@ -30,7 +30,6 @@ nt_result_t nt_material_init(const nt_material_desc_t *desc) {
     NT_ASSERT(s_mat.slots); /* alloc fail at init = fatal */
 
     s_mat.initialized = true;
-    return NT_OK;
 }
 
 void nt_material_shutdown(void) {
