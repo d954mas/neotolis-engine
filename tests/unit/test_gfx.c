@@ -3588,19 +3588,17 @@ void test_stream_records_copies_of_descriptors_and_uniform_values(void) {
     nt_gfx_begin_frame();
 }
 
-/* The toggle is not a stream boundary: recorded draws stay pending until end_frame. */
-void test_gpu_timing_toggle_mid_frame_leaves_the_stream_pending(void) {
-    nt_gfx_fake_draw_trace_reset(true);
+/* Segments recorded in a frame execute at end_frame, so the toggle waits for the frame to end. */
+void test_gpu_timing_toggles_only_between_frames(void) {
+    EXPECT_ASSERT(nt_gfx_set_gpu_timing_enabled(false));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "toggle between"));
     begin_stream_test_pass();
-    nt_gfx_draw_indexed(0, 3, 3);
-    const uint32_t pending = g_nt_gfx_stream.used;
-    nt_gfx_set_gpu_timing_enabled(true);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, g_nt_gfx_stream.used);
-    TEST_ASSERT_EQUAL_UINT32(pending, g_nt_gfx_stream.used);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
+    EXPECT_ASSERT(nt_gfx_set_gpu_timing_enabled(false));
     nt_gfx_end_pass();
+    EXPECT_ASSERT(nt_gfx_set_gpu_timing_enabled(false));
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_draw_trace_count());
+    nt_gfx_set_gpu_timing_enabled(false);
+    nt_gfx_set_gpu_timing_enabled(true);
     nt_gfx_begin_frame();
 }
 
@@ -3797,7 +3795,7 @@ int main(void) {
     RUN_TEST(test_global_block_at_an_unsupported_slot_asserts_at_init);
     RUN_TEST(test_full_global_block_list_inits);
     RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
-    RUN_TEST(test_gpu_timing_toggle_mid_frame_leaves_the_stream_pending);
+    RUN_TEST(test_gpu_timing_toggles_only_between_frames);
     RUN_TEST(test_buffer_write_leaves_earlier_draws_pending);
     RUN_TEST(test_stream_overflow_asserts);
     RUN_TEST(test_update_buffer_at_offset);

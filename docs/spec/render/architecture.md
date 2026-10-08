@@ -107,6 +107,10 @@ context records nothing but still opens the pass, and every draw-phase call
 checks the pass before it returns `NT_GFX_RESULT_CONTEXT_LOST`. The check is one compare per
 destroy; draws pay nothing.
 
+`nt_gfx_set_gpu_timing_enabled` runs only between frames: disabling closes an
+active timer segment at the call, while the segments a frame records execute in
+its `nt_gfx_end_frame`, so a toggle inside a frame could split them.
+
 `nt_gfx_desc_t.stream_capacity` is the byte budget of the draw-phase commands of
 one frame, allocated once at init; `nt_gfx_desc_defaults()` sets 32 KiB (over three times
 the largest measured frame, Sponza at 8.9 KB; a mesh run records 60-100 bytes),
@@ -940,8 +944,7 @@ request arguments, and one RESULT, carrying the outcome `result`; a creator's
 RESULT carries the new handle (zero on failure), while its backend slot and
 names are in the DEFINITION record. BEGIN and RESULT are recorded at the call.
 The BACKEND and backend SKIP records of recorded commands appear when the
-stream executes, at `nt_gfx_end_frame` or before the BEGIN of an operation that
-executes it first, outside any BEGIN/RESULT pair. Immediate backend work inside a
+stream executes in `nt_gfx_end_frame`, outside any BEGIN/RESULT pair. Immediate backend work inside a
 draw-phase call, such as a lazy sampler recreation, stays inside its pair.
 Operations issued inside another operation
 (default samplers, cascaded destroys) nest between its BEGIN and
@@ -1018,10 +1021,8 @@ pipeline definition carries the program handle in `related[0]`. Backend
 vertex-input backend slot in `detail`; initial state uses the current raw
 program name. Vertex-input creation copies each static/instance attribute with
 its divisor, layout, and known buffer. The initial SCISSOR record holds the
-carried-over rectangle and the initial UBO records hold each bound slot's
-buffer, offset and size, from the front-end slot records. The rectangle is
-`UNKNOWN` before the first set and after a context loss; an unbound slot has no
-record. A bind inside the capture that
+carried-over rectangle; it is `UNKNOWN` before the first set and after a
+context loss. Uniform-block bindings are not recorded: each block lives one frame. A bind inside the capture that
 ends `CACHE` matches this state or one set earlier in the frame. Inherited
 layouts unavailable in existing CPU state are explicitly unknown. Capture
 never adds a GL-state mirror of its own or queries GL to reconstruct state.

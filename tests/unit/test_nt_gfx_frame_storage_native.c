@@ -14,8 +14,6 @@
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
-#include "test_helpers/nt_gfx_test_gl_read.h"
-
 static const char *s_vs_src = "precision mediump float;\n"
                               "layout(location = 0) in vec2 a_position;\n"
                               "void main() { gl_Position = vec4(a_position, 0.0, 1.0); }\n";
@@ -134,42 +132,35 @@ static void test_absolute_uint32_indices_over_two_strides_in_one_frame(void) {
     nt_gfx_begin_frame();
 }
 
-static void assert_center(uint8_t red, uint8_t green) {
-    uint8_t pixel[4] = {0};
-    read_pixel((int)(g_nt_window.fb_width / 2U), (int)(g_nt_window.fb_height / 2U), pixel);
-    TEST_ASSERT_EQUAL_UINT8(red, pixel[0]);
-    TEST_ASSERT_EQUAL_UINT8(green, pixel[1]);
-}
-
-/* The first pass executes (read in the pass) before the second block exists, so the
- * late block reaches the uniform buffer as a delta of a later execution. Each pass
- * draws with its own block. */
+/* A block allocated after the first pass reaches its later draw, and each pass draws with
+ * its own block: both reach the GPU in the one upload of end_frame. */
 static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(void) {
     static const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
     static const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
     const nt_pipeline_t pipeline = make_pipeline(s_vertexid_vs_src, s_fs_block_src);
     const nt_vertex_input_t empty = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
 
+    const int half = (int)(g_nt_window.fb_width / 2U);
+    const int height = (int)g_nt_window.fb_height;
     begin_black_pass();
+    nt_gfx_set_viewport(0, 0, half, height);
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(empty);
     nt_gfx_bind_uniform_block(0, red, sizeof(red));
     nt_gfx_draw(0, 3);
-    uint8_t first[4] = {0};
-    nt_test_gl_read_in_pass((int)(g_nt_window.fb_width / 2U), (int)(g_nt_window.fb_height / 2U), 1, 1, first);
     nt_gfx_end_pass();
 
     /* Produced while the frame is being drawn, as after UI layout. */
-    begin_black_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.load_color = true, .clear_depth = 1.0F});
+    nt_gfx_set_viewport(half, 0, half, height);
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(empty);
     nt_gfx_bind_uniform_block(0, green, sizeof(green));
     nt_gfx_draw(0, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT8(255, first[0]);
-    TEST_ASSERT_EQUAL_UINT8(0, first[1]);
-    assert_center(0, 255);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_BUFFER_UPLOAD]);
+    assert_red_left_green_right();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_begin_frame();
 }

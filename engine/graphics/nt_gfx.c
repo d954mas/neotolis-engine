@@ -2213,15 +2213,6 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
 
 /* ---- Uniform blocks ---- */
 
-static nt_gfx_result_t bind_uniform_block(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
-    if (g_nt_gfx.context_lost) {
-        return NT_GFX_RESULT_CONTEXT_LOST;
-    }
-    /* Every block takes a fresh offset, so a bind is never equal to the slot's last one within a frame: no dedup. */
-    nt_gfx_frame_bind_uniform_buffer(s_gfx.buffer_backends[nt_pool_slot_index(buf.id)], slot, offset, size);
-    return NT_GFX_RESULT_ACCEPTED;
-}
-
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && data != NULL && size > 0 && "bind_uniform_block: slot, data or size");
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_block: must be called inside a pass");
@@ -2233,7 +2224,11 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
         memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, size, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, &offset), data, size);
     }
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_UBO, NT_GFX_OBJECT_BUFFER, buf.id, event->data.binding.slot = slot; event->data.binding.offset = offset; event->data.binding.size = size);
-    NT_GFX_END(bind_uniform_block(buf, slot, offset, size));
+    /* Every block takes a fresh offset, so a bind is never equal to the slot's last one within a frame: no dedup. */
+    if (!lost) {
+        nt_gfx_frame_bind_uniform_buffer(s_gfx.buffer_backends[nt_pool_slot_index(buf.id)], slot, offset, size);
+    }
+    NT_GFX_END(lost ? NT_GFX_RESULT_CONTEXT_LOST : NT_GFX_RESULT_ACCEPTED);
 }
 
 /* ---- Buffer update ---- */
@@ -2310,6 +2305,8 @@ bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
 }
 
 void nt_gfx_set_gpu_timing_enabled(bool enabled) {
+    /* The backend closes an active segment now, so a toggle may not split the recorded segments of a frame. */
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_ENDED && "set_gpu_timing_enabled: toggle between nt_gfx_end_frame and nt_gfx_begin_frame");
     NT_GFX_BEGIN_REQUEST(NT_GFX_OP_GPU_TIMING, NT_GFX_OBJECT_NONE, 0, event->data.state.integers[0] = enabled);
     nt_gfx_backend_set_gpu_timing_enabled(enabled);
     NT_GFX_END(NT_GFX_RESULT_ACCEPTED);

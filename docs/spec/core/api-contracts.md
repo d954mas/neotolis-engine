@@ -495,8 +495,8 @@ variant.
 Draw-state calls require an open pass. `nt_gfx_set_scissor`, `nt_gfx_set_scissor_enabled`,
 `nt_gfx_set_viewport` and
 `nt_gfx_bind_uniform_block` assert
-without an open pass; on a lost context they return before the check, as other
-binds do. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
+without an open pass, also on a lost context: every draw-phase call checks the
+pass before it returns `NT_GFX_RESULT_CONTEXT_LOST`. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
 target and clears the bound pipeline, vertex input, instance binding and texture
 set. The scissor rectangle and uniform-block bindings
 carry over, so a pass sets the scissor rectangle before it enables scissor. A

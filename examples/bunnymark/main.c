@@ -261,6 +261,9 @@ static void spawn_n_defold(uint32_t n) {
 
 /* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
+static bool s_gpu_timing_on = true;
+static bool s_gpu_timing_toggle; /* the T key; applied between frames */
+
 static float bunnymark_poll_gpu_ms(void) {
     uint64_t gpu_ns = 0;
     bool ready = false;
@@ -345,10 +348,7 @@ static void frame(void) {
     /* T toggles GPU timer queries. Shows current support state in the log. */
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
     if (nt_input_key_is_pressed(NT_KEY_T)) {
-        static bool s_gpu_timing_on = true;
-        s_gpu_timing_on = !s_gpu_timing_on;
-        nt_gfx_set_gpu_timing_enabled(s_gpu_timing_on);
-        nt_log_info("Bunnymark: GPU timing %s (supported=%d)", s_gpu_timing_on ? "ON" : "OFF", (int)nt_gfx_is_gpu_timing_supported());
+        s_gpu_timing_toggle = true;
     }
 #endif
     if (!consumed) {
@@ -501,6 +501,14 @@ static void frame(void) {
 
     nt_gfx_end_frame();
     nt_example_frames_end(s_initial_spawned);
+#if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
+    if (s_gpu_timing_toggle) {
+        s_gpu_timing_toggle = false;
+        s_gpu_timing_on = !s_gpu_timing_on;
+        nt_gfx_set_gpu_timing_enabled(s_gpu_timing_on);
+        nt_log_info("Bunnymark: GPU timing %s (supported=%d)", s_gpu_timing_on ? "ON" : "OFF", (int)nt_gfx_is_gpu_timing_supported());
+    }
+#endif
 
 #if NT_METRICS_ENABLED
     float cpu_ms = (float)((nt_time_now() - cpu_begin) * 1000.0);

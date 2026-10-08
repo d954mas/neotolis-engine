@@ -1084,7 +1084,8 @@ void nt_gfx_end_segment(void);
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 
 /* Requires compiled support; the runtime choice starts enabled and survives context loss.
- * Disable cancels active/pending samples. Supported reports capability. */
+ * Disable cancels active/pending samples. Only between nt_gfx_end_frame and the next
+ * nt_gfx_begin_frame: recorded segments execute at end_frame. Supported reports capability. */
 void nt_gfx_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_is_gpu_timing_supported(void);
 
