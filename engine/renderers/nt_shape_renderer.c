@@ -30,11 +30,11 @@ static void mat3_mulv(const float m[3][3], const float v[3], float out[3]) { glm
 
 /* ---- Embedded shader source ---- */
 
-static const char *s_shape_vs_src = "precision mediump float;\n"
+static const char *s_shape_vs_src = "precision highp float;\n"
                                     "layout(location = 0) in vec3 a_position;\n"
                                     "layout(location = 2) in vec4 a_color;\n"
                                     "uniform mat4 u_vp;\n"
-                                    "out vec4 v_color;\n"
+                                    "out mediump vec4 v_color;\n"
                                     "void main() {\n"
                                     "    v_color = a_color;\n"
                                     "    gl_Position = u_vp * vec4(a_position, 1.0);\n"
@@ -221,14 +221,14 @@ typedef struct {
 
 /* xyz is the unit template; w tags a capsule hemisphere (+1 top, -1 bottom) and is 0 for every other shape.
  * A capsule scales by its radius on all axes and moves each hemisphere by half its body. */
-static const char *s_fill_vs_src = "precision mediump float;\n"
+static const char *s_fill_vs_src = "precision highp float;\n"
                                    "layout(location = 0) in vec4 a_pos_tag;\n"
                                    "layout(location = 1) in vec3 i_center;\n"
                                    "layout(location = 2) in vec3 i_scale;\n"
                                    "layout(location = 3) in vec4 i_rot;\n"
                                    "layout(location = 4) in vec4 i_color;\n"
                                    "uniform mat4 u_vp;\n"
-                                   "out vec4 v_color;\n"
+                                   "out mediump vec4 v_color;\n"
                                    "void main() {\n"
                                    "    vec3 p = a_pos_tag.xyz * mix(i_scale, i_scale.xxx, abs(a_pos_tag.w));\n"
                                    "    p.y += a_pos_tag.w * i_scale.y;\n"

@@ -5,7 +5,8 @@
 // Uses CalcRootCode and CalcCoverage verbatim; the solvers use a cancellation-free root form (below).
 
 // RGBA16F; row = glyph band_row: band_count header texels (y_start, y_count, x_start, x_count), then curves.
-uniform sampler2D u_curve_texture;
+// mediump, not the lowp sampler default: band offsets and counts are read back as integers.
+uniform mediump sampler2D u_curve_texture;
 
 // Linear fallback for truly degenerate (a.y == 0) curves; near-tangential
 // cases are handled by the Citardauq stable form in the solvers below.

@@ -3,7 +3,7 @@ precision mediump float;
 uniform sampler2D u_texture;
 uniform vec4 u_alpha_cutoff; // .x = alpha discard threshold (set per material; 0 disables)
 
-in vec2 v_texcoord;
+in highp vec2 v_texcoord;
 in vec4 v_color;
 
 out vec4 frag_color;

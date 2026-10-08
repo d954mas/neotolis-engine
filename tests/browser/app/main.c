@@ -134,7 +134,7 @@ static uint32_t s_mesh_handle;
 static nt_hash32_t s_mesh_color_name;
 static uint32_t s_mesh_index_count, s_mesh_vertex_count;
 
-static const char *s_mesh_vs_src = "precision mediump float;\n"
+static const char *s_mesh_vs_src = "precision highp float;\n"
                                    "layout(location = 0) in vec3 a_position;\n"
                                    "layout(location = 4) in vec2 i_offset;\n"
                                    "void main() { gl_Position = vec4(a_position.xy * 0.1 + i_offset, 0.0, 1.0); }\n";

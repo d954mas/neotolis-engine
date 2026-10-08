@@ -12,7 +12,7 @@ typedef struct {
 
 _Static_assert(sizeof(nt_postfx_blur_vertex_t) == 16, "blur vertex size");
 
-static const char *s_blur_vs_src = "precision mediump float;\n"
+static const char *s_blur_vs_src = "precision highp float;\n"
                                    "layout(location = 0) in vec2 a_position;\n"
                                    "layout(location = 3) in vec2 a_uv;\n"
                                    "out highp vec2 v_uv;\n"
