@@ -103,7 +103,8 @@ module shutdown, unmount or restore that destroys GPU objects, because a recorde
 command may still name it. Before the first pass and after `nt_gfx_end_frame`
 destroys are allowed; a destroy of a stale or invalid handle keeps its own
 contract. A lost frame follows the same order: `nt_gfx_begin_pass` on a lost
-context records nothing but still opens the pass. The check is one compare per
+context records nothing but still opens the pass, and every draw-phase call
+checks the pass before it returns `NT_GFX_RESULT_CONTEXT_LOST`. The check is one compare per
 destroy; draws pay nothing.
 
 `nt_gfx_desc_t.stream_capacity` is the byte budget of the draw-phase commands of
@@ -142,7 +143,8 @@ Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 
 that slot or above asserts, and so does `nt_gfx_init` for a global block declared there.
 
 The compare runs after the pass check; an equal value was validated when it was
-recorded and every path that could invalidate it clears the mirror. An invalid
+recorded, `begin_pass` discards the pass-scoped mirrors, and the frame rule keeps
+every recorded object alive until `nt_gfx_end_frame`. An invalid
 pipeline or vertex-input handle clears its mirror (the unbind); other invalid
 binds leave their mirrors unchanged. Uniform values are not deduplicated by
 the front-end. The GL backend keeps caches for
@@ -986,8 +988,10 @@ no fresh definition; pipelines, vertex inputs and render targets that the first
 detection frees get no DESTROY record. Samplers are re-defined when lazily recreated. Definitions
 remain meaningful after resource destruction or slot reuse.
 
-The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, bound
-frontend handles) opens the snapshot. The other frontend INITIAL records and the
+The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, arg 0 =
+context lost) opens the snapshot; pass-scoped bindings are not recorded, because the
+first `begin_pass` discards them. The scissor records (the state that carries over
+frames) and the
 frontend resource definitions follow, then the backend `INITIAL/STATE` record
 (`NT_GFX_INITIAL_BACKEND`, cached GL names and framebuffer size) and the backend's
 own definitions. While the context is known lost, the backend records hold the

@@ -165,7 +165,7 @@ A link failure is a developer error and asserts, alongside an invalid stage
 handle, and an exhausted program pool.
 
 `nt_gfx_desc_t.global_blocks` declares the global name -> binding slot list at
-`nt_gfx_init` (up to `NT_GFX_MAX_GLOBAL_BLOCKS`, a NULL name ends it); every
+`nt_gfx_init` (up to `NT_GFX_MAX_GLOBAL_BLOCKS`; an entry with a NULL name is unused); every
 program that declares a listed block gets its slot at link. There is no
 per-program override and no later registration. Names are borrowed without
 copying: each string must remain valid and unchanged until `nt_gfx_shutdown`.

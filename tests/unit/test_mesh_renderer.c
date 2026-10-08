@@ -1,6 +1,7 @@
 #define NT_LOG_DOMAIN "mesh_renderer_test"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
 #include <string.h>
@@ -285,33 +286,9 @@ static uint32_t drawn_instances(void) {
     return total;
 }
 
-static bool s_frame_ended; /* close_frame ran and no open_frame followed: tearDown must not close again */
-
-static void open_frame(void) {
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    s_frame_ended = false;
-}
-
-static void end_frame(void) {
-    nt_gfx_end_frame();
-    s_frame_ended = true;
-}
-
-static void close_frame(void) {
-    nt_gfx_end_pass();
-    end_frame();
-}
-
-/* The fake observes a frame once nt_gfx_end_frame has executed it. */
-static void next_frame(void) {
-    close_frame();
-    open_frame();
-}
-
 /* Records a single list in a fresh frame's pass; the frame stays open. */
 static void record_list(const nt_render_item_t *items, uint32_t count) {
-    next_frame();
+    nt_test_frame_next();
     mark_draws();
     nt_mesh_renderer_draw_list(items, count);
 }
@@ -319,7 +296,7 @@ static void record_list(const nt_render_item_t *items, uint32_t count) {
 /* One gfx frame drawing a single list in one pass, executed before it returns. */
 static void draw_list(const nt_render_item_t *items, uint32_t count) {
     record_list(items, count);
-    next_frame();
+    nt_test_frame_next();
 }
 
 /* ---- Unity setUp / tearDown ---- */
@@ -346,17 +323,13 @@ void setUp(void) {
 
     nt_gfx_fake_draw_trace_reset(true);
     s_draw_mark = 0;
-    s_frame_ended = false;
     /* Enter frame/pass so draw calls don't assert */
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_test_frame_begin_pass();
 }
 
 void tearDown(void) {
     nt_log_remove_sink(capture_program_warning, NULL);
-    if (!s_frame_ended) {
-        nt_gfx_end_pass();
-        nt_gfx_end_frame();
-    }
+    nt_test_frame_teardown();
     nt_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_drawable_comp_shutdown();
@@ -406,9 +379,9 @@ void test_unready_program_warns_once_and_rearms_after_pipeline_creation(void) {
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 1U : 0U, s_program_warnings);
 
-    close_frame();
+    nt_test_frame_close();
     nt_gfx_destroy_program(program);
-    open_frame();
+    nt_test_frame_open();
     draw_list(&item, 1);
     draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
@@ -549,9 +522,9 @@ void test_draw_list_skips_a_run_whose_program_was_destroyed(void) {
     nt_material_t mat = create_test_material();
     nt_entity_t e = create_test_entity(mesh, mat);
 
-    close_frame();
+    nt_test_frame_close();
     nt_gfx_destroy_program(nt_material_get_info(mat)->program);
-    open_frame();
+    nt_test_frame_open();
 
     nt_render_item_t items[1];
     items[0].sort_key = 0;
@@ -574,9 +547,9 @@ void test_reset_drops_cached_pipelines(void) {
     draw_list(items, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
 
-    close_frame();
+    nt_test_frame_close();
     nt_mesh_renderer_restore_gpu();
-    open_frame();
+    nt_test_frame_open();
     TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
 
     nt_material_set_program(mat, NT_PROGRAM_INVALID);
@@ -1232,7 +1205,7 @@ void test_runs_of_one_list_pack_each_entity_world_and_color(void) {
     nt_transform_comp_update();
 
     record_list(items, 4);
-    close_frame(); /* frame storage keeps the frame's bytes until the next begin_frame */
+    nt_test_frame_close(); /* frame storage keeps the frame's bytes until the next begin_frame */
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(4U * sizeof(nt_mesh_instance_t), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
     TEST_ASSERT_EQUAL_UINT32(2U * sizeof(nt_mesh_instance_t), nt_gfx_fake_last_instance_offset());
@@ -1241,7 +1214,7 @@ void test_runs_of_one_list_pack_each_entity_world_and_color(void) {
         TEST_ASSERT_EQUAL_HEX32(0x10203000U + i, instance->color);
         TEST_ASSERT_TRUE(instance->world_rows[0][3] == (float)(i + 1)); /* NOLINT -- exact small integer */
     }
-    open_frame();
+    nt_test_frame_open();
 }
 
 /* Every render item needs a drawable: its color is instance data. */
@@ -1445,9 +1418,9 @@ void test_bufferless_vertex_input_shared_and_slot_reuse_destroys_nothing(void) {
         TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
         TEST_ASSERT_EQUAL_UINT32(2 + cycle, nt_gfx_fake_vertex_input_create_count());
         const uint32_t old_id = mesh.id;
-        close_frame();
+        nt_test_frame_close();
         nt_gfx_deactivate_mesh(mesh.id);
-        open_frame();
+        nt_test_frame_open();
         mesh = create_test_mesh_nonindexed(); /* reuses the freed pool slot */
         TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(old_id), nt_pool_slot_index(mesh.id));
         TEST_ASSERT_NOT_EQUAL(old_id, mesh.id);
@@ -1475,9 +1448,9 @@ void test_empty_layout_with_index_buffer_is_per_mesh(void) {
     nt_gfx_fake_reset();
     draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
-    close_frame();
+    nt_test_frame_close();
     nt_gfx_deactivate_mesh(mesh_a.id);
-    open_frame();
+    nt_test_frame_open();
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
 }
 
@@ -1493,9 +1466,9 @@ void test_bufferless_vertex_input_recreated_after_restore(void) {
     nt_gfx_fake_reset();
     draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
-    close_frame();
+    nt_test_frame_close();
     nt_mesh_renderer_restore_gpu();
-    open_frame();
+    nt_test_frame_open();
     TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_vertex_input_count());
     draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
@@ -1515,10 +1488,10 @@ void test_vertex_input_survives_mesh_slot_reuse(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
 
     /* Deactivation destroys the mesh buffers; the cascade kills the vi. */
-    close_frame();
+    nt_test_frame_close();
     nt_gfx_deactivate_mesh(mesh_a.id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_vertex_input_count());
-    open_frame();
+    nt_test_frame_open();
 
     nt_mesh_t mesh_b = create_test_mesh(); /* reuses the freed pool slot */
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(mesh_a.id), nt_pool_slot_index(mesh_b.id));
@@ -1533,11 +1506,11 @@ void test_vertex_input_survives_mesh_slot_reuse(void) {
 
 /* Exceeding max_mesh_layouts asserts (crash-early over silent eviction). */
 void test_vertex_input_versions_overflow_asserts(void) {
-    close_frame();
+    nt_test_frame_close();
     nt_mesh_renderer_shutdown();
     nt_mesh_renderer_desc_t small = {.max_pipelines = 8, .max_mesh_layouts = 2};
     TEST_ASSERT_EQUAL_INT(0, (int)nt_mesh_renderer_init(&small));
-    open_frame();
+    nt_test_frame_open();
 
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t shared = create_test_program();
@@ -1575,9 +1548,9 @@ void test_restore_gpu(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
 
     /* Restore GPU context */
-    close_frame();
+    nt_test_frame_close();
     nt_mesh_renderer_restore_gpu();
-    open_frame();
+    nt_test_frame_open();
     TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
 
     /* Subsequent draw should still work (rebuilds cache lazily) */
@@ -1591,14 +1564,14 @@ void test_restore_gpu(void) {
 /* The restore contract is "every ACTIVE renderer": a game restores all
  * renderers unconditionally, including ones it never initialized. */
 void test_restore_on_inactive_renderer_does_nothing(void) {
-    close_frame();
+    nt_test_frame_close();
     nt_mesh_renderer_shutdown();
     TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
 
     nt_mesh_renderer_restore_gpu();
 
     TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
-    open_frame();
+    nt_test_frame_open();
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1648,12 +1621,12 @@ void test_core_draw_reuses_one_allocation_across_passes(void) {
         nt_gfx_end_pass();
     }
     TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count()); /* recording writes no buffer */
-    end_frame();
+    nt_test_frame_end();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(4, drawn_instances());
     TEST_ASSERT_EQUAL_UINT32(offset, nt_gfx_fake_last_instance_offset());
     TEST_ASSERT_EQUAL_UINT32(updates + 1, nt_gfx_fake_update_buffer_count()); /* one upload for both passes */
-    open_frame();
+    nt_test_frame_open();
 }
 
 void test_core_draw_asserts_on_zero_count(void) {
@@ -1687,7 +1660,7 @@ void test_core_draw_applies_the_material_every_call(void) {
     const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
     nt_material_set_param(mat, "u_tint", tint2);
     nt_mesh_renderer_draw(mesh, mat, offset, 1);
-    next_frame();
+    nt_test_frame_next();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_TEXTURE_SET]);
@@ -1725,7 +1698,7 @@ void test_draw_list_of_a_new_mesh_after_a_draw_executes_nothing(void) {
     nt_mesh_renderer_draw_list(b, 1);
     TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-    next_frame();
+    nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(updates + 1, nt_gfx_fake_update_buffer_count());
 }
@@ -1770,7 +1743,7 @@ void test_lists_read_bindings_at_the_call(void) {
     *nt_material_comp_handle(e) = relocated;
     item.batch_key = nt_mesh_renderer_batch_key(relocated, mesh);
     nt_mesh_renderer_draw_list(&item, 1);
-    next_frame();
+    nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(plain)->program.id, nt_gfx_fake_draw_trace_at(s_draw_mark).program.id);
     TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(relocated)->program.id, nt_gfx_fake_draw_trace_at(s_draw_mark + 1).program.id);
@@ -1795,7 +1768,7 @@ void test_list_after_a_program_change_reapplies_the_texture_set(void) {
     nt_program_t p2 = create_test_tex_program();
     nt_material_set_program(mat, p2);
     nt_mesh_renderer_draw_list(items, 1);
-    next_frame();
+    nt_test_frame_next();
 
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(p2.id, nt_gfx_fake_draw_trace_at(s_draw_mark + 1).program.id);
@@ -1820,7 +1793,7 @@ void test_list_drawn_twice_in_one_pass_reads_current_params(void) {
     const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
     nt_material_set_param(mat, "u_tint", tint2);
     nt_mesh_renderer_draw_list(items, 1);
-    next_frame();
+    nt_test_frame_next();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
     float last[4];
@@ -1844,7 +1817,7 @@ void test_skipped_run_allocates_nothing(void) {
 
     record_list(items, 3);
     TEST_ASSERT_EQUAL_UINT32(2U * sizeof(nt_mesh_instance_t), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
-    next_frame();
+    nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
 }
 

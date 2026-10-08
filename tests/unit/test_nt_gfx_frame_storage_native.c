@@ -14,6 +14,8 @@
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
+#include "test_helpers/nt_gfx_test_gl_read.h"
+
 static const char *s_vs_src = "precision mediump float;\n"
                               "layout(location = 0) in vec2 a_position;\n"
                               "void main() { gl_Position = vec4(a_position, 0.0, 1.0); }\n";
@@ -93,13 +95,6 @@ static uint32_t alloc_indices(uint32_t first_vertex) {
 
 static void read_pixel(int x, int y, uint8_t out[4]) { TEST_ASSERT_TRUE(nt_gfx_read_pixels((nt_render_target_t){0}, x, y, 1, 1, out, 4)); }
 
-/* Inside an open pass: replays the recorded calls and reads one pixel of the bound window
- * framebuffer, which the next pass would clear. */
-static void read_pixel_in_pass(int x, int y, uint8_t out[4]) {
-    nt_gfx_frame_execute();
-    glReadPixels(x, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, out);
-}
-
 static void assert_red_left_green_right(void) {
     uint8_t left[4] = {0};
     uint8_t right[4] = {0};
@@ -161,7 +156,7 @@ static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(voi
     nt_gfx_bind_uniform_block(0, red, sizeof(red));
     nt_gfx_draw(0, 3);
     uint8_t first[4] = {0};
-    read_pixel_in_pass((int)(g_nt_window.fb_width / 2U), (int)(g_nt_window.fb_height / 2U), first);
+    nt_test_gl_read_in_pass((int)(g_nt_window.fb_width / 2U), (int)(g_nt_window.fb_height / 2U), 1, 1, first);
     nt_gfx_end_pass();
 
     /* Produced while the frame is being drawn, as after UI layout. */

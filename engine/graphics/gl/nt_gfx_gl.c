@@ -1020,15 +1020,10 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { gl_set_viewport(x
  * the shared layer (nt_gfx_read_pixels). rgba8 rows are 4*w bytes -> already
  * 4-aligned; set GL_PACK_ALIGNMENT=4 explicitly so it never depends on state. */
 bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8) {
-    GLuint fbo = 0;
-    if (render_target_backend != 0) {
-        NT_ASSERT(render_target_backend <= s_init_desc.max_render_targets && s_render_target_gl[render_target_backend] != 0 && "read_pixels: requires a live render target");
-        fbo = s_render_target_gl[render_target_backend];
-    }
     /* Between frames the window is bound; a target is bound for this read only. */
-    if (s_bound_framebuffer != fbo) {
+    const GLuint fbo = render_target_backend != 0 ? s_render_target_gl[render_target_backend] : 0;
+    if (fbo != 0) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
-        s_bound_framebuffer = fbo;
     }
     NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
     /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
@@ -1039,7 +1034,6 @@ bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, in
     const bool ok = NT_GL_RET0(glGetError) == GL_NO_ERROR;
     if (fbo != 0) {
         NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
-        s_bound_framebuffer = 0;
     }
     return ok;
 }
@@ -1317,7 +1311,10 @@ static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
     }
 
     const nt_global_block_t *blocks = s_init_desc.global_blocks;
-    for (uint32_t bi = 0; bi < NT_GFX_MAX_GLOBAL_BLOCKS && blocks[bi].name != NULL; bi++) {
+    for (uint32_t bi = 0; bi < NT_GFX_MAX_GLOBAL_BLOCKS; bi++) {
+        if (blocks[bi].name == NULL) {
+            continue;
+        }
         GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, blocks[bi].name);
         if (block_index != GL_INVALID_INDEX) {
             NT_GL(glUniformBlockBinding, program, block_index, (GLuint)blocks[bi].binding_slot);

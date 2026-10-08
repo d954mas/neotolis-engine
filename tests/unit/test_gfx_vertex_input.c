@@ -302,20 +302,6 @@ void test_bind_pipeline_preserves_bound_vi(void) {
     TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_instance_offset());
 }
 
-/* Recorded binds name the vertex input until end_frame: destroying it while bound breaks the frame rule. */
-void test_destroy_while_bound_asserts_the_frame_rule(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input(vi);
-    uint32_t bound = nt_gfx_test_bound_vertex_input();
-    EXPECT_ASSERT(nt_gfx_destroy_vertex_input(vi));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "frame rule"));
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
-    TEST_ASSERT_EQUAL_UINT32(bound, nt_gfx_test_bound_vertex_input());
-    nt_gfx_end_pass();
-}
-
 /* Bound state is pass-scoped: the next pass starts with nothing bound. */
 void test_begin_pass_clears_bound_vi(void) {
     nt_buffer_t vbo = make_vbo();
@@ -461,24 +447,6 @@ void test_instance_pointing_survives_a_plain_vertex_input_in_between(void) {
     nt_gfx_bind_vertex_input(a);
     nt_gfx_draw_instanced(0, 3, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.counters));
-    nt_gfx_end_pass();
-}
-
-/* A pointed instance buffer is named by recorded commands until end_frame: destroying it in the pass breaks the frame rule. */
-void test_instance_buffer_destroy_in_pass_asserts_the_frame_rule(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_pipeline_t pip = make_test_pipeline();
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(stream, 0);
-    EXPECT_ASSERT(nt_gfx_destroy_buffer(stream));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "frame rule"));
-    nt_gfx_draw_instanced(0, 3, 2); /* the rejected destroy left the instance pointing intact */
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_pass();
 }
 
@@ -667,7 +635,6 @@ int main(void) {
     RUN_TEST(test_bind_vi_reaches_backend);
     RUN_TEST(test_bind_invalid_vi_clears_mirror);
     RUN_TEST(test_bind_pipeline_preserves_bound_vi);
-    RUN_TEST(test_destroy_while_bound_asserts_the_frame_rule);
     RUN_TEST(test_begin_pass_clears_bound_vi);
     RUN_TEST(test_bind_instance_buffer_uses_bound_vi);
     RUN_TEST(test_bind_instance_buffer_asserts_without_instance_layout);
@@ -675,7 +642,6 @@ int main(void) {
     RUN_TEST(test_instanced_draw_asserts_before_instance_pointing);
     RUN_TEST(test_instance_pointing_is_pass_scoped);
     RUN_TEST(test_instance_pointing_survives_a_plain_vertex_input_in_between);
-    RUN_TEST(test_instance_buffer_destroy_in_pass_asserts_the_frame_rule);
     RUN_TEST(test_equal_instance_binding_is_dropped);
     RUN_TEST(test_attributeless_vi_draws);
     RUN_TEST(test_pipeline_and_vertex_input_bind_orthogonally);

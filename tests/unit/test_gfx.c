@@ -848,12 +848,10 @@ void test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost(voi
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    /* The loss branch itself drops the set; apply must not be what clears it. */
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
-
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_apply_texture_bindings(NULL, 0);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
-    nt_gfx_end_frame();
+    end_texture_binding_test_pass();
     TEST_ASSERT_EQUAL_UINT32(texture_binds, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(sampler_binds, nt_gfx_fake_bind_sampler_count());
 }
@@ -928,7 +926,7 @@ void test_gfx_failed_sampler_restore_rejects_whole_set_and_retries(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_sampler(1));
 }
 
-void test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy(void) {
+void test_gfx_texture_set_clears_on_pass_begin_and_failed_bind(void) {
     nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_texture_t texture = make_binding_test_texture(1);
@@ -944,23 +942,6 @@ void test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy(v
     apply_texture_set(&binding, 1);
     nt_gfx_bind_pipeline((nt_pipeline_t){UINT32_MAX});
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
-
-    nt_gfx_bind_pipeline(pipeline);
-    apply_texture_set(&binding, 1);
-    end_texture_binding_test_pass();
-    nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
-    nt_gfx_destroy_program(program);
-    TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_NONE, nt_gfx_test_texture_set_state());
-}
-
-/* Recorded commands may still sample the texture until end_frame; lifetime changes wait for the frame. */
-void test_gfx_destroy_texture_inside_pass_asserts(void) {
-    nt_texture_t texture = make_binding_test_texture(1);
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "frame rule"));
-    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_gfx_texture_format(texture)); /* still alive */
     end_texture_binding_test_pass();
 }
 
@@ -1073,22 +1054,6 @@ void test_gfx_destroy_program_destroys_its_pipelines(void) {
     nt_gfx_bind_pipeline(a);
     EXPECT_ASSERT(nt_gfx_draw(0, 0));
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
-    nt_gfx_end_pass();
-}
-
-/* The program of a bound pipeline cannot die mid-frame: recorded binds still name it. */
-void test_gfx_destroying_the_bound_program_in_a_pass_asserts_the_frame_rule(void) {
-    nt_shader_t vs = make_test_vs();
-    nt_shader_t fs = make_test_fs();
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    EXPECT_ASSERT(nt_gfx_destroy_program(prog));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "frame rule"));
-    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
-    TEST_ASSERT_TRUE(nt_gfx_pipeline_valid(pip));
     nt_gfx_end_pass();
 }
 
@@ -2070,6 +2035,18 @@ void test_frame_rule_holds_in_a_lost_frame(void) {
     nt_gfx_end_pass();
     TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx_stream.used);
     EXPECT_FRAME_RULE(nt_gfx_destroy_program(o.prog));
+    nt_gfx_end_frame();
+}
+
+/* The pass check precedes the lost-context return: a lost frame still rejects a bind outside a pass. */
+void test_bind_outside_a_pass_asserts_on_a_lost_frame(void) {
+    frame_rule_objects_t o = make_frame_rule_objects();
+    nt_gfx_end_frame();
+    nt_gfx_fake_set_context_lost(true);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    EXPECT_ASSERT(nt_gfx_bind_pipeline(o.pip));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "bind_pipeline: must be called inside a pass"));
     nt_gfx_end_frame();
 }
 
@@ -3481,17 +3458,6 @@ void test_global_block_at_an_unsupported_slot_asserts_at_init(void) {
     nt_gfx_begin_frame();
 }
 
-void test_global_block_after_the_null_name_asserts_at_init(void) {
-    nt_gfx_end_frame();
-    nt_gfx_shutdown();
-    const nt_gfx_desc_t desc = NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8,
-                                                .max_render_targets = 16, .global_blocks = {{"Frame", 0}, {NULL, 0}, {"View", 1}});
-    EXPECT_ASSERT(nt_gfx_init(&desc));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "nt_gfx_desc_t.global_blocks: an entry follows the NULL name that ends the list"));
-    nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));
-    nt_gfx_begin_frame();
-}
-
 /* A list that fills every entry has no NULL terminator and is valid. */
 void test_full_global_block_list_inits(void) {
     nt_gfx_end_frame();
@@ -3710,14 +3676,12 @@ int main(void) {
     RUN_TEST(test_gfx_apply_texture_bindings_publishes_nothing_while_context_is_lost);
     RUN_TEST(test_gfx_apply_texture_bindings_rejects_texture_husk_without_backend_binds);
     RUN_TEST(test_gfx_failed_sampler_restore_rejects_whole_set_and_retries);
-    RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_failed_bind_and_program_destroy);
-    RUN_TEST(test_gfx_destroy_texture_inside_pass_asserts);
+    RUN_TEST(test_gfx_texture_set_clears_on_pass_begin_and_failed_bind);
     RUN_TEST(test_gfx_destroy_program_accepts_invalid);
     RUN_TEST(test_gfx_destroy_program_asserts_on_a_stale_handle);
     RUN_TEST(test_gfx_context_restore_yields_a_new_program_handle);
     RUN_TEST(test_gfx_frame_boundary_syncs_loss_before_creates);
     RUN_TEST(test_gfx_destroy_program_destroys_its_pipelines);
-    RUN_TEST(test_gfx_destroying_the_bound_program_in_a_pass_asserts_the_frame_rule);
     RUN_TEST(test_gfx_make_program_does_not_dedup);
     RUN_TEST(test_gfx_program_valid_and_ready);
     RUN_TEST(test_gfx_destroy_program_invalidates);
@@ -3793,6 +3757,7 @@ int main(void) {
     RUN_TEST(test_frame_rule_rejects_every_live_destroy_while_drawn);
     RUN_TEST(test_frame_rule_ignores_stale_destroys_and_allows_the_frame_before_its_first_pass);
     RUN_TEST(test_frame_rule_holds_in_a_lost_frame);
+    RUN_TEST(test_bind_outside_a_pass_asserts_on_a_lost_frame);
     RUN_TEST(test_begin_pass_on_a_lost_context_still_checks_its_desc);
     RUN_TEST(test_failed_mesh_activation_in_a_drawn_frame_frees_its_buffer);
     RUN_TEST(test_destroys_before_the_first_pass_leave_the_stream_pending);
@@ -3830,7 +3795,6 @@ int main(void) {
     RUN_TEST(test_contiguous_plain_draws_merge);
     RUN_TEST(test_indexed_draws_assert_whole_triangles);
     RUN_TEST(test_global_block_at_an_unsupported_slot_asserts_at_init);
-    RUN_TEST(test_global_block_after_the_null_name_asserts_at_init);
     RUN_TEST(test_full_global_block_list_inits);
     RUN_TEST(test_stream_records_copies_of_descriptors_and_uniform_values);
     RUN_TEST(test_gpu_timing_toggle_mid_frame_leaves_the_stream_pending);

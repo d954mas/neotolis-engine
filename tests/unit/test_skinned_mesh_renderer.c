@@ -1,5 +1,6 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 
 #include <string.h>
 
@@ -236,33 +237,9 @@ static void begin_storage_frame(void) {
     nt_gfx_begin_frame();
 }
 
-static bool s_frame_ended; /* close_frame ran and no open_frame followed: tearDown must not close again */
-
-static void open_frame(void) {
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    s_frame_ended = false;
-}
-
-static void end_frame(void) {
-    nt_gfx_end_frame();
-    s_frame_ended = true;
-}
-
-static void close_frame(void) {
-    nt_gfx_end_pass();
-    end_frame();
-}
-
-/* The fake observes a frame once nt_gfx_end_frame has executed it. */
-static void next_frame(void) {
-    close_frame();
-    open_frame();
-}
-
 /* Records a single list in a fresh frame's pass; the frame stays open. */
 static void record_skinned_list(const nt_render_item_t *items, uint32_t count) {
-    next_frame();
+    nt_test_frame_next();
     s_draw_mark = nt_gfx_fake_draw_trace_count();
     nt_skinned_mesh_renderer_draw_list(items, count);
 }
@@ -270,14 +247,14 @@ static void record_skinned_list(const nt_render_item_t *items, uint32_t count) {
 /* One gfx frame drawing a single list in one pass, executed before it returns. */
 static void skinned_draw_list(const nt_render_item_t *items, uint32_t count) {
     record_skinned_list(items, count);
-    next_frame();
+    nt_test_frame_next();
 }
 
 static void mesh_draw_list(const nt_render_item_t *items, uint32_t count) {
-    next_frame();
+    nt_test_frame_next();
     s_draw_mark = nt_gfx_fake_draw_trace_count();
     nt_mesh_renderer_draw_list(items, count);
-    next_frame();
+    nt_test_frame_next();
 }
 
 void setUp(void) {
@@ -301,18 +278,14 @@ void setUp(void) {
     nt_skinned_mesh_renderer_desc_t desc = nt_skinned_mesh_renderer_desc_defaults();
     desc.max_pipelines = 8;
     TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&desc));
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_test_frame_begin_pass();
     nt_gfx_fake_draw_trace_reset(true);
     s_draw_mark = 0;
-    s_frame_ended = false;
 }
 
 void tearDown(void) {
     nt_log_remove_sink(capture_program_warning, NULL);
-    if (!s_frame_ended) {
-        nt_gfx_end_pass();
-        nt_gfx_end_frame();
-    }
+    nt_test_frame_teardown();
     nt_skinned_mesh_renderer_shutdown();
     nt_material_shutdown();
     nt_skin_comp_shutdown();
@@ -495,7 +468,7 @@ void test_runs_of_one_list_pack_each_entity_fields(void) {
     nt_transform_comp_update();
 
     record_skinned_list(items, 4);
-    close_frame(); /* frame storage keeps the frame's bytes until the next begin_frame */
+    nt_test_frame_close(); /* frame storage keeps the frame's bytes until the next begin_frame */
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(4U * sizeof(nt_skinned_mesh_instance_t), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
     TEST_ASSERT_EQUAL_UINT32(2U * sizeof(nt_skinned_mesh_instance_t), nt_gfx_fake_last_instance_offset());
@@ -505,7 +478,7 @@ void test_runs_of_one_list_pack_each_entity_fields(void) {
         TEST_ASSERT_EQUAL_UINT16(20U + i, instance->skin_origins[0]);
         TEST_ASSERT_TRUE(instance->world_rows[0][3] == (float)(i + 1)); /* NOLINT -- exact small integer */
     }
-    open_frame();
+    nt_test_frame_open();
 }
 
 /* Every render item needs a drawable: its color is instance data. */
@@ -708,9 +681,9 @@ void test_static_mesh_renderer_ignores_unmapped_skin_streams(void) {
     mesh_draw_list(&item, 1);
 
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
-    close_frame();
+    nt_test_frame_close();
     nt_mesh_renderer_shutdown();
-    open_frame();
+    nt_test_frame_open();
 }
 
 void test_unready_program_warns_once_and_rearms_after_success(void) {
@@ -729,9 +702,9 @@ void test_unready_program_warns_once_and_rearms_after_success(void) {
     skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 
-    close_frame();
+    nt_test_frame_close();
     nt_gfx_destroy_program(program);
-    open_frame();
+    nt_test_frame_open();
     skinned_draw_list(&item, 1);
     skinned_draw_list(&item, 1);
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= 1 ? 2U : 0U, s_program_warnings);
@@ -770,9 +743,9 @@ void test_restore_drops_caches_and_the_next_draw_rebuilds_them(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
 
-    close_frame();
+    nt_test_frame_close();
     nt_skinned_mesh_renderer_restore_gpu();
-    open_frame();
+    nt_test_frame_open();
     TEST_ASSERT_TRUE(nt_skinned_mesh_renderer_test_initialized());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_pipeline_cache_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_skinned_mesh_renderer_test_vertex_input_count());
@@ -782,12 +755,12 @@ void test_restore_drops_caches_and_the_next_draw_rebuilds_them(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_skinned_mesh_renderer_test_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 
-    close_frame();
+    nt_test_frame_close();
     nt_skinned_mesh_renderer_shutdown();
     nt_skinned_mesh_renderer_restore_gpu();
     TEST_ASSERT_FALSE(nt_skinned_mesh_renderer_test_initialized());
     TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 2, .max_mesh_layouts = 2}));
-    open_frame();
+    nt_test_frame_open();
 }
 
 /* The core draws caller-packed instances with no entity component and supplies the given
@@ -812,12 +785,12 @@ void test_core_draw_supplies_the_deformation_texture_across_passes(void) {
         nt_gfx_end_pass();
     }
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_update_buffer_count()); /* recording writes no buffer */
-    end_frame();
+    nt_test_frame_end();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_update_buffer_count()); /* one upload for both passes */
     TEST_ASSERT_EQUAL_UINT32(offset, nt_gfx_fake_last_instance_offset());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture), nt_gfx_fake_bound_texture_at(0));
-    open_frame();
+    nt_test_frame_open();
 }
 
 void test_core_draw_asserts_on_a_zero_deformation_texture(void) {
@@ -857,7 +830,7 @@ void test_lists_read_the_deformation_texture_at_the_call(void) {
     record_skinned_list(&item, 1);
     nt_skin_comp_handle(entity)->texture = texture_b;
     nt_skinned_mesh_renderer_draw_list(&item, 1);
-    next_frame();
+    nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_a), nt_gfx_fake_bound_texture_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_b), nt_gfx_fake_bound_texture_at(1));
@@ -895,7 +868,7 @@ void test_deformation_change_reapplies_textures_not_uniforms(void) {
 void test_empty_list_reserves_nothing(void) {
     record_skinned_list(NULL, 0);
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
-    next_frame();
+    nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
 }
 

@@ -80,12 +80,6 @@ typedef struct {
     uint32_t sampler;
 } nt_gfx_unit_binding_t;
 
-typedef struct {
-    uint32_t buffer; /* full handle, 0 = unbound */
-    uint32_t offset;
-    uint32_t size; /* 0 = whole buffer */
-} nt_gfx_ubo_binding_t;
-
 /* ---- Texture metadata (format + dimensions for update_texture validation) ---- */
 
 typedef struct {
@@ -158,9 +152,8 @@ static struct {
      * contract keeps its state. */
     nt_gfx_instance_binding_t bound_instance;
     nt_gfx_unit_binding_t bound_units[NT_GFX_MAX_TEXTURE_SLOTS];
-    nt_gfx_ubo_binding_t bound_ubos[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* GL keeps it across passes and frames; capture snapshot only */
-    int scissor_rect[4];                                              /* GL bottom-left x,y,w,h; carries over passes; w = -1: unknown */
-    int viewport_rect[4];                                             /* GL bottom-left x,y,w,h; w = -1: unknown */
+    int scissor_rect[4];  /* GL bottom-left x,y,w,h; carries over passes; w = -1: unknown */
+    int viewport_rect[4]; /* GL bottom-left x,y,w,h; w = -1: unknown */
 } s_gfx;
 
 _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
@@ -283,22 +276,14 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record macros expand at owning sites
 static void capture_initial_state(void) {
-    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event->detail = NT_GFX_INITIAL_FRONTEND; event->data.state.integers[0] = s_gfx.bound_pipeline;
-                  event->data.state.integers[1] = s_gfx.bound_vertex_input; event->data.state.integers[2] = s_gfx.active_render_target; event->data.state.integers[3] = s_gfx.bound_index_type;
-                  event->data.state.integers[4] = s_gfx.texture_set_state; event->data.state.integers[5] = g_nt_gfx.context_lost;);
+    /* Pass-scoped mirrors are discarded by the first begin_pass, so only frame-crossing state is recorded. */
+    NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event->detail = NT_GFX_INITIAL_FRONTEND; event->data.state.integers[0] = g_nt_gfx.context_lost;);
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR_ENABLE, event->data.state.integers[0] = s_gfx.scissor_enabled);
     /* The carried-over binding mirrors explain an equal bind that ends CACHE in the capture. */
     if (s_gfx.scissor_rect[2] < 0) {
         NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, event->result = NT_GFX_RESULT_UNKNOWN);
     } else {
         NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, for (uint32_t i = 0; i < 4; i++) { event->data.state.integers[i] = (uint32_t)s_gfx.scissor_rect[i]; });
-    }
-    for (uint32_t slot = 0; slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; slot++) {
-        const nt_gfx_ubo_binding_t *ubo = &s_gfx.bound_ubos[slot];
-        if (ubo->buffer != 0) {
-            NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_UBO, event->object_kind = NT_GFX_OBJECT_BUFFER; event->object = ubo->buffer; event->data.binding.slot = slot;
-                          event->data.binding.offset = ubo->offset; event->data.binding.size = ubo->size);
-        }
     }
     const nt_pool_t *pools[] = {&s_gfx.shader_pool, &s_gfx.program_pool, &s_gfx.pipeline_pool, &s_gfx.vertex_input_pool, &s_gfx.buffer_pool, &s_gfx.texture_pool, &s_gfx.render_target_pool};
     const nt_gfx_object_kind_t kinds[] = {NT_GFX_OBJECT_SHADER, NT_GFX_OBJECT_PROGRAM, NT_GFX_OBJECT_PIPELINE,     NT_GFX_OBJECT_VERTEX_INPUT,
@@ -338,9 +323,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS; i++) {
         NT_ASSERT((desc->global_blocks[i].name == NULL || desc->global_blocks[i].binding_slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS) &&
                   "nt_gfx_desc_t.global_blocks: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
-        /* Link stops at the first NULL name: a later entry would never bind. */
-        NT_ASSERT((desc->global_blocks[i].name != NULL || i + 1 == NT_GFX_MAX_GLOBAL_BLOCKS || desc->global_blocks[i + 1].name == NULL) &&
-                  "nt_gfx_desc_t.global_blocks: an entry follows the NULL name that ends the list");
     }
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
@@ -562,13 +544,7 @@ static void wipe_backend_handles(void) {
     /* Mesh table: keep entries active. nt_resource_invalidate() will
      * call deactivate_mesh() which returns slots to mesh pool.
      * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
-    s_gfx.bound_pipeline = 0;
-    s_gfx.active_render_target = 0;
-    discard_texture_set();
-    s_gfx.bound_vertex_input = 0;
-    s_gfx.bound_index_type = NT_INDEX_NONE;
-    /* A new context starts with no uniform-buffer bindings and an unknown scissor box. */
-    memset(s_gfx.bound_ubos, 0, sizeof(s_gfx.bound_ubos));
+    /* A new context starts with an unknown scissor box; pass-scoped mirrors reset at begin_pass. */
     s_gfx.scissor_rect[2] = -1;
     /* Sampler cache: zero only the backend ids so material-stored sampler.id slot references
      * stay valid; the backend is lazily recreated on the next nt_gfx_make_sampler hit or bind_texture. */
@@ -728,6 +704,14 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     NT_ASSERT((s_gfx.render_state == NT_GFX_STATE_IDLE || s_gfx.render_state == NT_GFX_STATE_DRAWN) && "begin_pass: needs an open frame with no open pass");
     NT_ASSERT(desc != NULL);
     NT_ASSERT((desc->target.id != 0 || !desc->discard_color) && "begin_pass: discarding the window color loses the presented frame");
+    /* Bound state is pass-scoped: the pass clear touches draw state. */
+    s_gfx.bound_pipeline = 0;
+    discard_texture_set();
+    s_gfx.bound_vertex_input = 0;
+    s_gfx.bound_index_type = NT_INDEX_NONE;
+    s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
+    memset(s_gfx.bound_units, 0, sizeof(s_gfx.bound_units));
+    s_gfx.viewport_rect[2] = -1; /* the backend sets the whole target at execution */
     /* A lost frame records nothing but keeps the pass order, so its sequencing and the frame rule still assert. */
     if (g_nt_gfx.context_lost) {
         s_gfx.render_state = NT_GFX_STATE_PASS;
@@ -752,14 +736,6 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
 
     s_gfx.render_state = NT_GFX_STATE_PASS;
     s_gfx.active_render_target = desc->target.id;
-    /* Bound state is pass-scoped: the pass clear touches draw state. */
-    s_gfx.bound_pipeline = 0;
-    discard_texture_set();
-    s_gfx.bound_vertex_input = 0;
-    s_gfx.bound_index_type = NT_INDEX_NONE;
-    s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
-    memset(s_gfx.bound_units, 0, sizeof(s_gfx.bound_units));
-    s_gfx.viewport_rect[2] = -1; /* the backend sets the whole target at execution */
     /* Scissor is pass-scoped: every pass starts with it off. */
     if (s_gfx.scissor_enabled) {
         s_gfx.scissor_enabled = false;
@@ -786,11 +762,6 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
 static nt_gfx_result_t end_pass(void) {
     /* Closes a pass also on a lost context; an END without a recorded BEGIN is a backend no-op. */
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("end_pass called outside PASS state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
-
     s_gfx.render_state = NT_GFX_STATE_DRAWN;
     s_gfx.active_render_target = 0;
     nt_gfx_frame_end_pass();
@@ -803,11 +774,11 @@ void nt_gfx_end_pass(void) {
 }
 
 static nt_gfx_result_t clear(const nt_clear_desc_t *desc) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "clear requires an open pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(desc != NULL);
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "clear requires an open pass");
     if (desc->color || desc->depth) {
         nt_gfx_frame_clear(desc);
     }
@@ -1434,10 +1405,6 @@ static nt_gfx_result_t destroy_pipeline(nt_pipeline_t pip) {
         return NT_GFX_RESULT_INVALID_HANDLE;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
-    if (s_gfx.bound_pipeline == pip.id) {
-        s_gfx.bound_pipeline = 0;
-        discard_texture_set();
-    }
     nt_gfx_backend_destroy_pipeline(slot);
     s_gfx.pipeline_programs[slot] = 0;
     nt_pool_free(&s_gfx.pipeline_pool, pip.id);
@@ -1457,10 +1424,6 @@ static nt_gfx_result_t destroy_vertex_input(nt_vertex_input_t vi) {
         return NT_GFX_RESULT_INVALID_HANDLE;
     }
     uint32_t slot = nt_pool_slot_index(vi.id);
-    if (s_gfx.bound_vertex_input == vi.id) {
-        s_gfx.bound_vertex_input = 0;
-        s_gfx.bound_index_type = NT_INDEX_NONE;
-    }
     nt_gfx_backend_destroy_vertex_input(slot);
     memset(&s_gfx.vertex_input_metas[slot], 0, sizeof(nt_gfx_vertex_input_meta_t));
     nt_pool_free(&s_gfx.vertex_input_pool, vi.id);
@@ -1488,10 +1451,6 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
         if (s_gfx.vertex_input_metas[i].vbo_id == buf.id || s_gfx.vertex_input_metas[i].ibo_id == buf.id) {
             nt_gfx_destroy_vertex_input((nt_vertex_input_t){s_gfx.vertex_input_pool.slots[i].id});
         }
-    }
-    /* The storage stays attached to the VAO, but no draw may reuse it without a re-point. */
-    if (s_gfx.bound_instance.buffer == buf.id) {
-        s_gfx.bound_instance = (nt_gfx_instance_binding_t){0};
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
     nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
@@ -1598,10 +1557,10 @@ nt_texture_format_t nt_gfx_texture_format(nt_texture_t tex) {
 /* ---- Draw state ---- */
 
 static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_pipeline: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_pipeline: must be called inside a pass");
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("bind_pipeline called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
@@ -1638,10 +1597,10 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
 }
 
 static nt_gfx_result_t bind_vertex_input(nt_vertex_input_t vi) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_vertex_input: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_vertex_input: must be called inside a pass");
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("bind_vertex_input called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
@@ -1753,10 +1712,10 @@ static bool texture_is_active_attachment(nt_texture_t texture) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- contract asserts expand into nested handler branches
 static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
     discard_texture_set();
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "apply_texture_bindings: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "apply_texture_bindings: must be called inside a pass");
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "apply_texture_bindings: no pipeline bound");
     NT_ASSERT((bindings != NULL || count == 0) && "apply_texture_bindings: NULL bindings with nonzero count");
     if (s_gfx.render_state != NT_GFX_STATE_PASS || s_gfx.bound_pipeline == 0 || (bindings == NULL && count != 0)) {
@@ -2005,10 +1964,10 @@ static nt_gfx_result_t set_scissor(int x, int y, int w, int h) {
     /* Negative width/height is undefined in GL — assert early per AGENTS.md "fail early". */
     NT_ASSERT(w >= 0);
     NT_ASSERT(h >= 0);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_scissor: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_scissor: must be called inside a pass");
     if (s_gfx.scissor_rect[0] == x && s_gfx.scissor_rect[1] == y && s_gfx.scissor_rect[2] == w && s_gfx.scissor_rect[3] == h) {
         return NT_GFX_RESULT_CACHE;
     }
@@ -2027,10 +1986,10 @@ void nt_gfx_set_scissor(int x, int y, int w, int h) {
 }
 
 static nt_gfx_result_t set_scissor_enabled(bool enabled) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_scissor_enabled: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_scissor_enabled: must be called inside a pass");
     /* The mirror owns this state end to end, so the dedup lives here and the backend stays raw. */
     if (s_gfx.scissor_enabled == enabled) {
         return NT_GFX_RESULT_CACHE;
@@ -2048,10 +2007,10 @@ void nt_gfx_set_scissor_enabled(bool enabled) {
 static nt_gfx_result_t set_viewport(int x, int y, int w, int h) {
     NT_ASSERT(w >= 0);
     NT_ASSERT(h >= 0);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_viewport: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_viewport: must be called inside a pass");
     if (s_gfx.viewport_rect[0] == x && s_gfx.viewport_rect[1] == y && s_gfx.viewport_rect[2] == w && s_gfx.viewport_rect[3] == h) {
         return NT_GFX_RESULT_CACHE;
     }
@@ -2073,12 +2032,12 @@ void nt_gfx_set_viewport(int x, int y, int w, int h) {
 
 /* Uniforms belong to the bound pipeline's borrowed program. */
 static uint32_t uniform_target_program(void) {
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform: must be called inside a pass");
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "set_uniform: no pipeline bound");
     return s_gfx.program_backends[nt_pool_slot_index(s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)])];
 }
 
 static nt_gfx_result_t set_uniform_mat4(nt_hash32_t name, const float *matrix) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2095,6 +2054,7 @@ void nt_gfx_set_uniform_mat4(nt_hash32_t name, const float *matrix) {
 }
 
 static nt_gfx_result_t set_uniform_vec4(nt_hash32_t name, const float *vec) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2111,6 +2071,7 @@ void nt_gfx_set_uniform_vec4(nt_hash32_t name, const float *vec) {
 }
 
 static nt_gfx_result_t set_uniform_float(nt_hash32_t name, float val) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2125,6 +2086,7 @@ void nt_gfx_set_uniform_float(nt_hash32_t name, float val) {
 }
 
 static nt_gfx_result_t set_uniform_int(nt_hash32_t name, int val) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "set_uniform: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
@@ -2167,11 +2129,11 @@ static void assert_whole_triangles(uint32_t count) { NT_ASSERT(count % 3U == 0U 
 
 static nt_gfx_result_t draw(uint32_t first_vertex, uint32_t num_vertices) {
     assert_whole_triangles(num_vertices);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
 
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("draw called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
@@ -2200,11 +2162,11 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
 
 static nt_gfx_result_t draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
     assert_whole_triangles(num_vertices);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
 
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("draw_instanced called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
@@ -2234,11 +2196,11 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
 
 static nt_gfx_result_t draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices) {
     assert_whole_triangles(num_indices);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
 
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("draw_indexed called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
@@ -2269,11 +2231,11 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
 
 static nt_gfx_result_t draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count) {
     assert_whole_triangles(num_indices);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
 
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("draw_indexed_instanced called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
@@ -2307,10 +2269,10 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — NT_ASSERT expansion, not real branching
 static nt_gfx_result_t bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_instance_buffer: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_instance_buffer: must be called inside a pass");
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         NT_LOG_ERROR("bind_instance_buffer called outside PASS state");
         return NT_GFX_RESULT_INVALID_ARGUMENT;
@@ -2358,24 +2320,21 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
 /* ---- Uniform blocks ---- */
 
 static nt_gfx_result_t bind_uniform_block(nt_buffer_t buf, uint32_t slot, uint32_t offset, uint32_t size) {
-    if (buf.id == 0) {
+    if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    /* Every block takes a fresh offset, so a bind is never equal to the slot's last one within a frame:
-     * no dedup. The slot record only feeds the capture snapshot. */
-    s_gfx.bound_ubos[slot] = (nt_gfx_ubo_binding_t){buf.id, offset, size};
+    /* Every block takes a fresh offset, so a bind is never equal to the slot's last one within a frame: no dedup. */
     nt_gfx_frame_bind_uniform_buffer(s_gfx.buffer_backends[nt_pool_slot_index(buf.id)], slot, offset, size);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
     NT_ASSERT(slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS && data != NULL && size > 0 && "bind_uniform_block: slot, data or size");
-    const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM];
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_block: must be called inside a pass");
     const bool lost = g_nt_gfx.context_lost;
-    const nt_buffer_t buf = lost ? (nt_buffer_t){0} : storage->buffer;
+    const nt_buffer_t buf = lost ? (nt_buffer_t){0} : g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].buffer;
     uint32_t offset = 0;
     if (!lost) {
-        NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_uniform_block: must be called inside a pass");
         /* A disabled stream (zero capacity) reaches the allocator, which stops on the overflow. */
         memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_UNIFORM, size, g_nt_gfx.gpu_caps.uniform_buffer_offset_alignment, &offset), data, size);
     }
@@ -2926,7 +2885,6 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    /* Pool exhaustion is a configuration error, as for textures. */
     uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);
     NT_ASSERT(mesh_id != 0 && "activate_mesh: mesh pool full -- raise nt_gfx_desc_t.max_meshes");
 

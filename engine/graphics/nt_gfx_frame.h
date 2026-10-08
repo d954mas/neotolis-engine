@@ -55,7 +55,7 @@ void nt_gfx_frame_shutdown(void);
 void nt_gfx_frame_create_buffers(void);
 /* Empties the storage; asserts that the closing frame uploaded every allocation. */
 void nt_gfx_frame_begin(void);
-/* nt_gfx_end_frame: uploads the frame storage allocated since the previous upload, then
+/* nt_gfx_end_frame: uploads the frame storage, then
  * replays the recorded commands in call order and empties the stream. Native GL tests
  * also call it to inspect GL inside a pass. */
 void nt_gfx_frame_execute(void);

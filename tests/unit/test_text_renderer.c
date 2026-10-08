@@ -1,5 +1,6 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <math.h>
 #include <setjmp.h>
@@ -86,25 +87,15 @@ static uint32_t text_vertex_count(void) { return g_nt_gfx_frame_storage[NT_GFX_F
 static uint32_t text_quad_count(void) { return text_vertex_count() / 4U; }
 static const uint8_t *text_vertices(void) { return g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging; }
 
-static bool s_frame_ended; /* close_frame ran and no open_frame followed: tearDown must not close again */
-
-static void close_frame(void) {
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    s_frame_ended = true;
-}
-
 /* Opens the next frame with the same selection: frame storage starts empty. */
 static void open_frame(void) {
     nt_gfx_begin_frame();
     nt_text_renderer_set_material(s_mat);
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    s_frame_ended = false;
+    nt_test_frame_begin_pass();
 }
 
-/* The fake observes a frame once nt_gfx_end_frame has executed it. */
 static void next_frame(void) {
-    close_frame();
+    nt_test_frame_close();
     open_frame();
 }
 
@@ -185,7 +176,6 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
 
 void setUp(void) {
     nt_assert_handler = test_assert_handler;
-    s_frame_ended = false;
     nt_gfx_fake_reset();
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 16, .max_programs = 8, .max_pipelines = 8, .max_buffers = 16, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
@@ -207,15 +197,12 @@ void setUp(void) {
     nt_font_step();
 
     select_material(create_test_material_with_blend(nt_blend_alpha()));
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_test_frame_begin_pass();
 }
 
 void tearDown(void) {
     nt_log_remove_sink(capture_errors, NULL);
-    if (!s_frame_ended) {
-        nt_gfx_end_pass();
-        nt_gfx_end_frame();
-    }
+    nt_test_frame_teardown();
     nt_text_renderer_shutdown();
     nt_font_destroy(s_font);
     free(s_blob);
@@ -404,7 +391,7 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         TEST_ASSERT_TRUE((float)cases[i].descent == bounds[1]);
         TEST_ASSERT_TRUE((float)cases[i].ascent == bounds[3]);
 
-        close_frame();
+        nt_test_frame_close();
         nt_font_destroy(font);
         open_frame();
         free(blob);
@@ -520,7 +507,7 @@ void test_equal_draws_merge_and_a_font_change_splits(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_bind_vertex_input_count());
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
 
-    close_frame();
+    nt_test_frame_close();
     nt_font_destroy(other);
     open_frame();
 }
@@ -555,7 +542,7 @@ void test_material_params_record_once_per_change(void) {
 
     /* A param changed between frames reaches the next frame's draw. */
     const float green[4] = {0, 1, 0, 1};
-    close_frame();
+    nt_test_frame_close();
     nt_material_set_param(a, "u_tint", green);
     open_frame();
     nt_gfx_fake_reset();
@@ -566,7 +553,7 @@ void test_material_params_record_once_per_change(void) {
 
 /* A vertex-input creation failure leaves the selection undrawable for its frame only. */
 void test_vertex_input_failure_is_retried_next_frame(void) {
-    close_frame();
+    nt_test_frame_close();
     nt_text_renderer_shutdown(); /* drops the vertex input built in setUp */
     nt_gfx_fake_fail_next_vertex_input_create();
     nt_gfx_fake_draw_trace_reset(true);
@@ -651,7 +638,7 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     draw_and_execute();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_pipeline_create_count());
 
-    close_frame();
+    nt_test_frame_close();
     nt_gfx_destroy_program(dead);
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
@@ -685,7 +672,7 @@ void test_full_glyph_cache_still_draws_the_entire_run(void) {
 
     const uint32_t uploads = nt_gfx_fake_update_texture_count();
     nt_text_renderer_draw(&style, s_identity, "ABCABC");
-    close_frame();
+    nt_test_frame_close();
 
     TEST_ASSERT_EQUAL_UINT32(uploads + 1U, nt_gfx_fake_update_texture_count()); /* only 'A' uploads its row */
     TEST_ASSERT_EQUAL_UINT64(36U, g_nt_gfx.counters.indices);
@@ -714,7 +701,7 @@ void test_decoration_only_run_draws(void) {
 
     nt_gfx_fake_draw_trace_reset(true);
     nt_text_renderer_draw(&style, s_identity, "A");
-    close_frame();
+    nt_test_frame_close();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_draw_trace_count());
     nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(0U);
     TEST_ASSERT_EQUAL_UINT32(nt_material_get_info(s_mat)->program.id, draw.program.id);
@@ -755,7 +742,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     style.strikethrough = true;
     nt_text_renderer_draw(&style, s_identity, "ABC");
     TEST_ASSERT_EQUAL_UINT32(0U, text_quad_count());
-    close_frame();
+    nt_test_frame_close();
 
     TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count());
     TEST_ASSERT_EQUAL_UINT32(binds, nt_gfx_fake_bound_texture_count());
@@ -769,7 +756,7 @@ void test_unready_font_skips_glyph_and_decoration_uploads(void) {
     TEST_ASSERT_FALSE(glyph->is_tofu);
     open_frame();
     nt_text_renderer_draw(&style, s_identity, "ABC");
-    close_frame();
+    nt_test_frame_close();
     TEST_ASSERT_GREATER_THAN_UINT32(uploads, nt_gfx_fake_update_texture_count());
     TEST_ASSERT_EQUAL_UINT64(30U, g_nt_gfx.counters.indices);
     TEST_ASSERT_EQUAL_UINT64(20U, g_nt_gfx.counters.vertices);
@@ -807,7 +794,7 @@ void test_a_new_program_after_shutdown_does_not_reuse_the_old_pipeline(void) {
     draw_and_execute();
     TEST_ASSERT_EQUAL_UINT32(1U, nt_gfx_fake_pipeline_create_count());
 
-    close_frame();
+    nt_test_frame_close();
     nt_text_renderer_shutdown();
     nt_material_set_program(mat, nt_gfx_make_program(vs, fs));
     open_frame();
@@ -822,7 +809,7 @@ void test_a_new_program_after_shutdown_does_not_reuse_the_old_pipeline(void) {
  * looks like, so the selection draws nothing rather than trapping. */
 void test_a_destroyed_program_draws_nothing(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_opaque());
-    close_frame();
+    nt_test_frame_close();
     /* The material keeps the handle: recovery destroys programs, not materials. */
     nt_gfx_destroy_program(nt_material_get_info(material)->program);
     open_frame();

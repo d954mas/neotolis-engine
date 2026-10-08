@@ -14,6 +14,8 @@
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
+#include "test_helpers/nt_gfx_test_gl_read.h"
+
 static PFNGLINVALIDATEFRAMEBUFFERPROC s_invalidate;
 static uint32_t s_invalidate_count;
 static GLenum s_invalidated[3];
@@ -46,12 +48,6 @@ static void read_after_frame(nt_render_target_t src, int width, int height, uint
     nt_gfx_end_frame();
     TEST_ASSERT_TRUE(nt_gfx_read_pixels(src, 0, 0, width, height, out, out_cap));
     nt_gfx_begin_frame();
-}
-
-/* State that lives only inside an open pass: run the recorded stream and read the bound framebuffer, bottom row first. */
-static void read_bound_framebuffer(int width, int height, uint8_t *out) {
-    nt_gfx_frame_execute();
-    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, out);
 }
 
 void setUp(void) {
@@ -1334,7 +1330,7 @@ static void test_two_draws_on_one_program_bind_at_their_queried_units(void) {
     nt_gfx_apply_texture_bindings(bindings, 2);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
-    read_bound_framebuffer(1, 1, first);
+    nt_test_gl_read_in_pass(0, 0, 1, 1, first);
 
     /* Second draw puts red on u_b's unit only: u_a must keep reading red (red has no green). */
     bindings[1].texture = tex_red;
@@ -1605,7 +1601,7 @@ static void test_explicit_clear_preserves_unselected_pixels_and_draw_state(void)
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
     uint8_t pixels[48] = {0};
-    read_bound_framebuffer(4, 3, pixels);
+    nt_test_gl_read_in_pass(0, 0, 4, 3, pixels);
     uint8_t expected[48] = {0, 0, 255, 255, 255, 0, 0,   255, 255, 0, 0,   255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255,
                             0, 0, 255, 255, 0,   0, 255, 255, 0,   0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255};
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, pixels, sizeof(pixels));
@@ -1618,7 +1614,7 @@ static void test_explicit_clear_preserves_unselected_pixels_and_draw_state(void)
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
     uint8_t unchanged[48] = {0};
-    read_bound_framebuffer(4, 3, unchanged);
+    nt_test_gl_read_in_pass(0, 0, 4, 3, unchanged);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(pixels, unchanged, sizeof(pixels));
     uint32_t clears = g_nt_gfx.counters.gl[NT_GFX_GL_glClear];
     nt_gfx_clear(&(nt_clear_desc_t){.clear_color = {1, 1, 1, 1}, .clear_depth = 1});
@@ -1629,7 +1625,7 @@ static void test_explicit_clear_preserves_unselected_pixels_and_draw_state(void)
     nt_gfx_draw(0, 3);
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    read_bound_framebuffer(4, 3, pixels);
+    nt_test_gl_read_in_pass(0, 0, 4, 3, pixels);
     const uint8_t green[8] = {0, 255, 0, 255, 0, 255, 0, 255};
     memcpy(&expected[4], green, sizeof(green));
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, pixels, sizeof(pixels));
@@ -1638,13 +1634,13 @@ static void test_explicit_clear_preserves_unselected_pixels_and_draw_state(void)
         TEST_ASSERT_UINT32_WITHIN(1, i == 1 || i == 2 ? 750 : 250, (uint32_t)((depths[i] * 1000.0F) + 0.5F));
     }
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {1, 0, 0, 1}});
-    read_bound_framebuffer(4, 3, pixels);
+    nt_test_gl_read_in_pass(0, 0, 4, 3, pixels);
     const uint8_t red[8] = {255, 0, 0, 255, 255, 0, 0, 255};
     memcpy(&expected[4], red, sizeof(red));
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, pixels, sizeof(pixels));
     nt_gfx_set_scissor_enabled(false);
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {1, 0, 0, 1}});
-    read_bound_framebuffer(4, 3, pixels);
+    nt_test_gl_read_in_pass(0, 0, 4, 3, pixels);
     assert_rgba(pixels, 12, 255, 0, 0, 255);
     nt_gfx_clear(&(nt_clear_desc_t){.depth = true, .clear_depth = 0.9F});
     nt_gfx_frame_execute();

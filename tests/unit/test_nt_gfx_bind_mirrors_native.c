@@ -16,6 +16,8 @@
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
+#include "test_helpers/nt_gfx_test_gl_read.h"
+
 static const char *s_vs_src = "precision mediump float;\n"
                               "layout(location = 0) in vec2 a_position;\n"
                               "void main() { gl_Position = vec4(a_position, 0.0, 1.0); }\n";
@@ -98,12 +100,10 @@ static uint8_t end_frame_center_red(void) {
     return red;
 }
 
-/* Mid-pass: replays the recorded calls and reads the window center straight from GL,
- * keeping the pass and its bound state open for the calls that follow. */
+/* Mid-pass red channel at the window center; the pass stays open for the calls that follow. */
 static uint8_t center_red_in_pass(void) {
-    nt_gfx_frame_execute();
     uint8_t px[4] = {0, 0, 0, 0};
-    glReadPixels(8, 8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    nt_test_gl_read_in_pass(8, 8, 1, 1, px);
     return px[0];
 }
 

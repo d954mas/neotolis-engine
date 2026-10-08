@@ -100,7 +100,7 @@ typedef struct {
 
 /* A uniform block every program binds to binding_slot at link, when it declares one with this name. */
 typedef struct {
-    const char *name; /* borrowed unchanged until nt_gfx_shutdown; NULL ends the list */
+    const char *name; /* borrowed unchanged until nt_gfx_shutdown; NULL = unused entry */
     uint32_t binding_slot;
 } nt_global_block_t;
 
@@ -823,7 +823,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_meshes = 128,
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
-        .stream_capacity = 32U * 1024U, /* whole-frame peaks: sponza 8.9 KB, ui_showcase 2.3 KB */
+        .stream_capacity = 32U * 1024U,
         .depth = true,
         .premultiplied_alpha = true,
     };
