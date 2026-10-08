@@ -94,8 +94,8 @@ frame, before the first draw that samples it.
 `nt_gfx_desc_t.stream_capacity` is the byte budget of draw-phase commands
 recorded between executions, allocated once at init; `nt_gfx_desc_defaults()`
 sets 256 KiB, and init asserts at least 4 bytes. The stream never grows: an
-overflow logs the needed and free bytes and stops the program, with assertions
-OFF too, because the capacity is the game's budget. `nt_gfx_counters_t.stream_bytes` reports the frame's peak
+overflow logs the needed and free bytes and stops the program because the capacity
+is the game's budget. `nt_gfx_counters_t.stream_bytes` reports the frame's peak
 recorded bytes between executions, to size the capacity from a real scene.
 
 GL `begin_pass`

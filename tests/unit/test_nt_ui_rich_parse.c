@@ -575,7 +575,7 @@ static void test_parse_obj_null_tagset_graceful(void) {
     TEST_ASSERT_FALSE_MESSAGE(found_object, "<obj> with NULL tagset produced NO object run (skipped)");
 }
 
-/* An atlas alias requires a tagset; use a valid base to isolate that assertion. */
+/* A valid base isolates missing-tagset handling from unrelated configuration errors. */
 static void parse_img_null_tagset(const char *m) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -586,7 +586,7 @@ static void parse_img_null_tagset(const char *m) {
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
 }
-/* An atlas alias requires a tagset; use a valid base to isolate that assertion. */
+/* An atlas alias with a NULL tagset logs and skips the image without asserting. */
 static void test_parse_img_alias_null_tagset_graceful(void) {
     parse_img_null_tagset("a<img=a:b/>b"); /* no trap */
     const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);

@@ -15,8 +15,7 @@ void nt_devapi_capture_arm(void); /* mark the host capture-capable (called by in
    nt_window_add_pre_swap_hook reference lands in the host's TU (which links the real nt_window); the
    devapi lib links only the header-only nt_window_interface. Idempotent. */
 static inline void nt_devapi_capture_install_seam(void) {
-    /* Arm only if the hook actually registered: a full hook table (assert compiled out) would otherwise
-       leave the host capture-capable with no seam, so captures would defer forever, not capture_unavailable. */
+    /* Register the seam before advertising capture support; a full hook table asserts. */
     if (nt_window_add_pre_swap_hook(nt_devapi_capture_on_pre_swap)) {
         nt_devapi_capture_arm();
     }
