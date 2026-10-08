@@ -386,10 +386,10 @@ specified in the UI chapters linked above.
 - **Shared display:** CI ctest stays serial because real-GL tests share xvfb.
   Local parallel runs use the desktop display; GL tests have `RESOURCE_LOCK
   gl_display` in `cmake/test_target.cmake`.
-- **Assert define collision:** `nt_core` exports the configured `NT_ASSERT_MODE`.
-  For tests requiring another mode, use a wrapper TU with `#undef`/`#define`,
-  rather than a conflicting target `-D` that trips `-Wmacro-redefined`.
-  Only FULL (2) and TRAP (1) are supported.
+- **Assertion tests:** suites using `NT_TEST_EXPECT_ASSERT` require FULL (2),
+  selected by `native-debug-test` and `native-release-test`. TRAP (1) bypasses
+  the test handler. Configure the linked engine and tests together; a target-local
+  override conflicts with the `NT_ASSERT_MODE` exported by `nt_core`.
 - **Release test warnings:** production `--push` does not compile test TUs under
   NDEBUG; `native-release-test` in CI may expose their unused variables.
 - **Windows spawn exhaustion:** random Emscripten subprocess failures with

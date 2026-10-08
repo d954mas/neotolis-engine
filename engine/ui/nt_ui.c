@@ -2240,16 +2240,10 @@ static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, i
         float cy;
         float cw;
         float ch;
-        /* Fail-closed on invariant violation rather than letting input through. */
-        if (!nt_ui_clay_priv_bbox_for_id(ctx->clay, cur_id, &cx, &cy, &cw, &ch)) {
-            NT_ASSERT(false && "hit_clip_chain: clip ancestor missing from Clay hashmap");
-            return false;
-        }
+        const bool found = nt_ui_clay_priv_bbox_for_id(ctx->clay, cur_id, &cx, &cy, &cw, &ch);
+        NT_ASSERT(found && "hit_clip_chain: clip ancestor missing from Clay hashmap");
         const int32_t cur_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, cur_id);
-        if (cur_slot < 0 || cur_slot >= N) {
-            NT_ASSERT(false && "hit_clip_chain: clip ancestor slot OOB");
-            return false;
-        }
+        NT_ASSERT(cur_slot >= 0 && cur_slot < N && "hit_clip_chain: clip ancestor slot OOB");
         const nt_ui_baked_xform_t cb = ctx->hit_baked[cur_slot];
         float clx;
         float cly;

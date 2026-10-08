@@ -42,8 +42,13 @@ and `valign` is one of `baseline|middle|top|bottom` (default `middle`); these
 mirror the builder `nt_ui_rich_image(ref, valign, oy, scale)` args, so a tagged
 markup `<img>` and the builder call produce a byte-identical run. A malformed
 attr (bad float, unknown key, unknown valign) is **logged once (`nt_log_warn_unique`) and skipped** —
-markup is untrusted localization DATA, so a bad value degrades gracefully (the rest renders) and never
-asserts; the code-first builder, being trusted game code, still asserts. Only the **NAMED** resolves go through the
+markup is untrusted localization DATA, so malformed attributes warn and leave the rest rendering;
+the code-first builder, being trusted game code, asserts on invalid arguments. This recovery does not
+cover block capacity or unavailable features: the game must keep runs, styles, atoms, link rects
+and distinct layers within the configured limits, for both markup and code-first calls;
+exceeding these limits asserts. The code-first text-byte limit also asserts; markup truncates
+excess literal bytes at a complete UTF-8 boundary. Excess parser nesting warns and skips tags;
+effect-slot overflow uses the identity behavior described below. Only the **NAMED** resolves go through the
 **tagset**: `<color=name>`, `<font=name>`, `<fx=name>` (optionally tuned:
 `<fx=name amp=8 speed=3>` — `key=value` float pairs after the name, tunable effects
 only), an `<img=alias:region/>` atlas alias, and the self-closing

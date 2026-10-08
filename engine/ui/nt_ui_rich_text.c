@@ -470,13 +470,7 @@ void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
         return;
     }
     nt_ui_rich_state_t *st = rich_state(ctx);
-    NT_ASSERT(st->text_len + len <= st->max_text_bytes && "rich text buffer overflow");
-    /* Overflow guard: on wasm32 size_t is 32-bit, so
-     * `text_len + len` can wrap past the cap and bypass the assert. Subtraction-form bound: reject
-     * any len past the cap, and any len that would not fit the remaining room, before the memcpy. */
-    if (len > (size_t)st->max_text_bytes || st->text_len > st->max_text_bytes - (uint32_t)len) {
-        return;
-    }
+    NT_ASSERT(len <= (size_t)st->max_text_bytes && st->text_len <= st->max_text_bytes - (uint32_t)len && "rich text buffer overflow");
 
     const uint32_t off = st->text_len;
     memcpy(st->text + off, utf8, len);

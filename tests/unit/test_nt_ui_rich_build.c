@@ -415,6 +415,18 @@ static void test_runtime_text_cap_respected(void) {
     TEST_ASSERT_EQUAL_UINT32(9U, nt_ui_rich_test_run_text_len(s_fx.ctx, 0));
 }
 
+static void test_text_length_wrap_asserts_before_copy(void) {
+    nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
+    base.font_id[0] = s_fx.stub_font;
+    nt_ui_rich_begin(s_fx.ctx, &base);
+    nt_ui_rich_text_n(s_fx.ctx, "x", 1U);
+    NT_TEST_EXPECT_ASSERT(nt_ui_rich_text_n(s_fx.ctx, "y", SIZE_MAX));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_rich_test_run_text_len(s_fx.ctx, 0U));
+    nt_ui_rich_text_n(s_fx.ctx, "y", 1U);
+    nt_ui_rich_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_rich_test_run_text_len(s_fx.ctx, 0U));
+}
+
 /* desc rich_max_* == 0 falls back to the compile-time #define caps; a block near the default still builds.
  * Pins the "0 -> compile-time default" cap-resolution rule. */
 static void test_default_caps_when_desc_zero(void) {
@@ -501,6 +513,7 @@ int main(void) {
     RUN_TEST(test_markup_img_alias);
     RUN_TEST(test_runtime_run_cap_respected);
     RUN_TEST(test_runtime_text_cap_respected);
+    RUN_TEST(test_text_length_wrap_asserts_before_copy);
     RUN_TEST(test_default_caps_when_desc_zero);
     return UNITY_END();
 }

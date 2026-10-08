@@ -336,7 +336,6 @@ static void test_vlist_one_clip(void) {
 }
 
 /* A too-small id ring must assert before visible rows alias a recycled slot. */
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
 static void test_vlist_window_exceeds_ring_asserts(void) {
     nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
     st.id_ring = 8U; /* tiny ring; the 200px viewport over 10px rows wants ~29 rows >> ring-1 */
@@ -361,11 +360,8 @@ static void test_vlist_window_exceeds_ring_asserts(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
     NT_TEST_EXPECT_ASSERT((void)nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 1000U, 10.0F, NT_UI_AXIS_Y, &st, &decl));
 }
-#endif
 
-/* ---- (i) nested vlists swept back and forth ---- Without recycling, a 10k-row sweep's distinct
- * per-row ids saturate Clay's persistent element hashmap -> stale layoutElement -> build_tree degrade.
- * id_ring bounds the ids (degrade stays 0); id_ring==0 reproduces the saturation backstop. */
+/* Recycling bounds distinct IDs during nested 10k-row scroll sweeps. */
 #define VL_OUTER_ID 0x0C0FFEE1U
 #define VL_Y_ID 0x0C0FFEE2U
 #define VL_X_ID 0x0C0FFEE3U
@@ -417,10 +413,8 @@ static void vlist_nested_sweep_frame(float pos_y, uint32_t id_ring) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* Sweep vlist_y top<->bottom several times over 10k rows. Returns the build_tree degrade count. */
-static uint32_t vlist_nested_sweep(uint32_t id_ring) {
-    nt_ui_internal_test_reset_stale_floating_parent_count();
-
+/* Sweep vlist_y top<->bottom several times over 10k rows. */
+static void vlist_nested_sweep(uint32_t id_ring) {
     const float content = (float)VL_BIG_COUNT * VL_BIG_ROW_H; /* 340000 */
     const float maxpos = -(content - VL_VIEW);                /* most-negative offset (fully scrolled) */
 
@@ -435,23 +429,13 @@ static uint32_t vlist_nested_sweep(uint32_t id_ring) {
             vlist_nested_sweep_frame(maxpos * frac, id_ring);
         }
     }
-    return nt_ui_internal_test_stale_floating_parent_count();
 }
 
-/* PROOF the recycle fix works: with default id_ring the distinct ids stay bounded, so the same
- * 10k sweep that used to saturate now never does -> degrade count == 0, and no build_tree trap. */
-static void test_vlist_nested_scroll_reversals_no_crash(void) {
-    const uint32_t degrades = vlist_nested_sweep(nt_ui_vlist_style_defaults().id_ring);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, degrades, "ring recycling must keep Clay's hashmap bounded (no saturation/degrade)");
-}
+static void test_vlist_nested_scroll_reversals_no_crash(void) { vlist_nested_sweep(nt_ui_vlist_style_defaults().id_ring); }
 
 /* Disabling recycling saturates Clay's hashmap and must assert on a stale floating parent. */
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
-static void test_vlist_saturation_asserts(void) { NT_TEST_EXPECT_ASSERT((void)vlist_nested_sweep(0U)); }
-#endif
+static void test_vlist_saturation_asserts(void) { NT_TEST_EXPECT_ASSERT(vlist_nested_sweep(0U)); }
 
-/* ---- Death tests (NT_ASSERT_FULL only): begin signals a developer error on a bad gap ---- */
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* Invalid gap asserts before the owned scroll opens, so the frame stays balanced. */
 static void vlist_begin_with_gap_expect_assert(uint32_t root_id, float item_extent, float gap) {
     nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
@@ -480,7 +464,6 @@ static void test_vlist_begin_negative_overscan_asserts(void) {
     }
     nt_ui_end(s_fx.ctx);
 }
-#endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 int main(void) {
     UNITY_BEGIN();
@@ -497,17 +480,11 @@ int main(void) {
     RUN_TEST(test_vlist_spacer_content_size_x);
     RUN_TEST(test_vlist_gap_renders);
     RUN_TEST(test_vlist_one_clip);
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vlist_window_exceeds_ring_asserts);
-#endif
     RUN_TEST(test_vlist_nested_scroll_reversals_no_crash);
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vlist_saturation_asserts);
-#endif
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vlist_begin_negative_gap_asserts);
     RUN_TEST(test_vlist_begin_nan_gap_asserts);
     RUN_TEST(test_vlist_begin_negative_overscan_asserts);
-#endif
     return UNITY_END();
 }

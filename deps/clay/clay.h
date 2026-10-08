@@ -2162,8 +2162,7 @@ void Clay__ConfigureOpenElementPtr(const Clay_ElementDeclaration *declaration) {
                 clipElementId = 0;
             }
             // NT patch 4: zIndex is relative to the enclosing floating element. Saturating the int16 field
-            // merges two stacking bands, so it is reported (nt_ui asserts on it); an NT_ASSERT_OFF build
-            // returns from the handler and paints the merged band.
+            // merges two stacking bands, so it is reported (nt_ui asserts on it).
             int32_t enclosingZ = context->openFloatingZStack.length > 0 ? Clay__int32_tArray_GetValue(&context->openFloatingZStack, context->openFloatingZStack.length - 1) : 0;
             int32_t rawZ = enclosingZ + (int32_t)floatingConfig.zIndex;
             int32_t effectiveZ = CLAY__MAX(INT16_MIN, CLAY__MIN(INT16_MAX, rawZ));
