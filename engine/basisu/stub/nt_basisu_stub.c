@@ -4,8 +4,7 @@
 
 /* Loud-fail stub: a BASIS texture reaching a stub build is a build-composition
    bug (basis content packed, transcoder not linked) — assert, don't mask with a
-   placeholder. Under NT_ASSERT_MODE=OFF the failure returns route into
-   nt_gfx's activate error path (log + FAILED asset). */
+   placeholder. */
 #define NT_BASISU_STUB_TRAP() NT_ASSERT(0 && "BASIS texture but nt_basisu_transcoder_stub linked -- link nt_basisu_transcoder")
 
 void nt_basisu_transcoder_global_init(void) { NT_BASISU_STUB_TRAP(); }

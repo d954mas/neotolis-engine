@@ -237,8 +237,7 @@ caller is code with an affordance to disable and "not available" is a
 legitimate composition the game ships with.
 
 **Loud-fail stub** — every entry point asserts (`NT_ASSERT(0 && ...)`) and
-returns its failure value, so under `NT_ASSERT_MODE=OFF` the caller's existing
-error path still runs (log + failed asset), never a silent no-op. Use this when
+never returns in either supported mode. Use this when
 hitting the stub is a build-composition BUG, not a state anyone can branch on:
 the caller is a data-driven loop with no affordance to gray out, and the data
 that reaches the stub should never have been shipped with it.

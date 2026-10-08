@@ -52,7 +52,7 @@ _Static_assert(sizeof(s_default_element_data) == 256 * sizeof(nt_ui_element_data
 // #endregion
 
 // #region clay_error_handler
-/* All Clay errors are fatal; assert compiles out in NT_ASSERT_OFF builds. */
+/* All Clay errors are fatal. */
 static void nt_ui_clay_error_cb(Clay_ErrorData err) {
 #if NT_LOG_MIN_LEVEL < 3
     /* errorText is .length + .chars, NOT NUL-terminated. */

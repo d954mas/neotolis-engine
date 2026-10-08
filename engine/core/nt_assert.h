@@ -10,21 +10,19 @@ extern "C" {
 /* Asserts are contracts, not error handling.
    A failed assert means the program is broken — continuing would mask bugs.
    Release presets select TRAP (immediate crash, no strings, minimal overhead).
-   OFF is a supported build mode without runtime guarantees. Violating an
-   asserted precondition there requires no fallback path.
-   Assert expressions must be side-effect-free because OFF does not evaluate them.
+   A failed assert never continues in either mode; do not add recovery after it.
+   Assert expressions must be side-effect-free.
    Never use asserts for conditions that can legitimately occur at runtime
    (missing files, user input, etc) — those are error handling. */
 
 /* Assert mode constants (for readability in headers, not needed in CMake). */
-#define NT_ASSERT_OFF 0
 #define NT_ASSERT_TRAP 1
 #define NT_ASSERT_FULL 2
 
 #ifndef NT_ASSERT_MODE
-#error "NT_ASSERT_MODE must be defined by the nt_core target (0..2)"
-#elif NT_ASSERT_MODE < NT_ASSERT_OFF || NT_ASSERT_MODE > NT_ASSERT_FULL
-#error "NT_ASSERT_MODE must be in 0..2"
+#error "NT_ASSERT_MODE must be defined by the nt_core target (1..2)"
+#elif NT_ASSERT_MODE != NT_ASSERT_TRAP && NT_ASSERT_MODE != NT_ASSERT_FULL
+#error "NT_ASSERT_MODE must be 1 (TRAP) or 2 (FULL)"
 #endif
 
 /* Handler type: receives stringified expression, file, and line.
@@ -34,7 +32,6 @@ typedef void (*nt_assert_handler_t)(const char *expr, const char *file, int line
 extern nt_assert_handler_t nt_assert_handler;
 
 /* NT_ASSERT_MODE levels:
-   0 (OFF)  — ((void)0), no runtime guarantees, minimal binary.
    1 (TRAP) — __builtin_trap() on failure, no strings.
    2 (FULL) — hookable handler with expr/file/line strings (tests). */
 
@@ -56,10 +53,6 @@ extern nt_assert_handler_t nt_assert_handler;
         if (!(cond))                                                                                                                                                                                   \
             __builtin_trap();                                                                                                                                                                          \
     } while (0)
-
-#else /* NT_ASSERT_OFF */
-
-#define NT_ASSERT(cond) ((void)0)
 
 #endif
 

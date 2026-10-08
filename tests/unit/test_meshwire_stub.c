@@ -1,7 +1,6 @@
 /* Loud-fail contract of nt_meshwire_stub: every entry point must fire
  * NT_ASSERT on first contact (a wire-encoded mesh in a stub build is a
- * build-composition bug). The OFF-mode failure-return contract lives in
- * test_meshwire_stub_off.c. */
+ * build-composition bug). */
 #include "meshwire/nt_meshwire.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"

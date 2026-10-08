@@ -1,7 +1,6 @@
 /* Loud-fail contract of nt_basisu_transcoder_stub: every entry point must fire
  * NT_ASSERT on first contact (a BASIS texture in a stub build is a
- * build-composition bug). The OFF-mode failure-return contract lives in
- * test_basisu_stub_off.c. */
+ * build-composition bug). */
 #include "basisu/nt_basisu_transcoder.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"

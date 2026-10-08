@@ -4,8 +4,7 @@
 
 /* Loud-fail stub: a wire-encoded mesh reaching a stub build is a
    build-composition bug (packed meshes present, decoder not linked) — assert,
-   don't mask with garbage vertex data. Under NT_ASSERT_MODE=OFF the false
-   returns route into nt_gfx's activate error path (log + FAILED asset). */
+   don't mask with garbage vertex data. */
 #define NT_MESHWIRE_STUB_TRAP() NT_ASSERT(0 && "wire-encoded mesh but nt_meshwire_stub linked -- link nt_meshwire")
 
 bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_size, const uint8_t *src, uint32_t src_size, uint32_t vertex_count) {

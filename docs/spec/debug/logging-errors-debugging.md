@@ -1,6 +1,6 @@
 # Logging, Errors, Debugging
 
-Log levels, the NT_ASSERT contract policy (OFF/TRAP/FULL), fatal-vs-recoverable
+Log levels, the NT_ASSERT contract policy (TRAP/FULL), fatal-vs-recoverable
 error policy, and the metrics-fed debug overlay. The bulk documents the dev-only
 devapi: transport model, time/render control (`nt_app`), input and UI
 automation, observability commands (log/perf/entity/resource), the entity-write
@@ -96,14 +96,13 @@ groups retain their dependency errors.
 
 Asserts are contracts, not error handling. A failed assert means the program is broken beyond recovery — continuing would mask bugs.
 
-- **NT_ASSERT** — single macro, three compile-time modes via `NT_ASSERT_MODE`:
-  - `0 (OFF)` — `((void)0)`, zero overhead. Supported via CMake override (`-DNT_ASSERT_MODE=0`), without runtime guarantees. Assert expressions are not evaluated; an asserted precondition violation requires no detection or recovery.
+- **NT_ASSERT** — single macro, two compile-time modes via `NT_ASSERT_MODE`:
   - `1 (TRAP)` — `__builtin_trap()`, no strings, minimal binary impact. The CMake default and the production Release presets select this mode.
   - `2 (FULL)` — hookable handler with `expr/file/line` strings. Debug and release-test presets select this mode. Tests use the handler to catch and verify assert failures via `setjmp`/`longjmp`.
 - `nt_core` exports the selected mode to consumers. `nt_assert.h` requires it explicitly; `NDEBUG` and `NT_DEBUG` do not select or alter it.
 - Production Release presets select TRAP (1): contract violations crash immediately instead of continuing with corrupted state. No string bloat, no handler overhead — just a single branch + trap instruction per assert.
-- Assert expressions are side-effect-free because OFF does not evaluate them. No fallback path is required solely to keep an OFF build running after an invariant breach.
-- Hard guards are required at untrusted/runtime-input boundaries and wherever a public API promises recoverable rejection; those guards implement the API contract, not support for OFF.
+- Assert expressions are side-effect-free. A failed assert never continues in either mode; do not duplicate its condition with recovery or a log/return path. OFF (0) is rejected by CMake and the header.
+- Hard guards are required at untrusted/runtime-input boundaries and wherever a public API promises recoverable rejection; those guards implement the API contract independently of diagnostic configuration.
 - Never use asserts for conditions that can legitimately occur at runtime (missing files, user input, network errors) — those are error handling (see below).
 
 ## Error policy

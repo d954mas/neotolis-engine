@@ -127,10 +127,10 @@ option(NT_DEVAPI_GROUP_ENTITY_WRITE "Build the devapi entity.set component-write
 # Default OFF (opt-in); the first DEFERRED data-returning group — links nt_gfx (readback) + nt_fpng (PNG encode).
 option(NT_DEVAPI_GROUP_CAPTURE "Build the devapi capture.frame/capture.region group (PNG framebuffer capture)." OFF)
 
-set(NT_ASSERT_MODE "1" CACHE STRING "Assert mode: 0=off (no runtime guarantees), 1=trap, 2=full.")
-set_property(CACHE NT_ASSERT_MODE PROPERTY STRINGS 0 1 2)
-if(NOT NT_ASSERT_MODE MATCHES "^[0-2]$")
-    message(FATAL_ERROR "NT_ASSERT_MODE must be 0 (OFF), 1 (TRAP), or 2 (FULL).")
+set(NT_ASSERT_MODE "1" CACHE STRING "Assert mode: 1=trap, 2=full.")
+set_property(CACHE NT_ASSERT_MODE PROPERTY STRINGS 1 2)
+if(NOT NT_ASSERT_MODE MATCHES "^[1-2]$")
+    message(FATAL_ERROR "NT_ASSERT_MODE must be 1 (TRAP) or 2 (FULL).")
 endif()
 
 option(NT_SKELETAL_CHECKS "Enable expensive skeletal numerical checks (finite TRS values, unit quaternions)." OFF)

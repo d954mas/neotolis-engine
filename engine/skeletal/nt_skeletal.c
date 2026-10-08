@@ -207,11 +207,9 @@ void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, nt_skeletal
 // #endregion
 
 // #region composition
-#if NT_ASSERT_MODE != NT_ASSERT_OFF
 static bool nt_skeletal_poses_disjoint(const nt_skeletal_trs_t *a, const nt_skeletal_trs_t *b, uint16_t joint_count) {
     return (uintptr_t)(a + joint_count) <= (uintptr_t)b || (uintptr_t)(b + joint_count) <= (uintptr_t)a;
 }
-#endif
 
 #if NT_SKELETAL_CHECKS
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
