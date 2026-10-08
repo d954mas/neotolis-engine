@@ -32,8 +32,9 @@ complete and leaves unfinished ones pending; without the extension it finishes
 every pending link there, which may block. Finishing reads the link status,
 binds the global blocks, reflects uniforms and samplers and writes the sampler
 units. A program is therefore ready no earlier than the frame after
-`nt_gfx_make_program`, and readiness changes only in `nt_gfx_begin_frame`, by
-a destroy or by a loss, so it is constant within a frame. Until then
+`nt_gfx_make_program`. Readiness turns true only in `nt_gfx_begin_frame` and
+turns false only by a destroy or by the loss processing in `nt_gfx_begin_frame`,
+so a program never becomes ready inside a frame. Until then
 `nt_gfx_program_ready` is false: `nt_gfx_make_pipeline` accepts the program,
 binding a pipeline on it asserts, and renderers and games skip draws that
 need it.
@@ -81,7 +82,7 @@ block into the uniform frame stream and binds it to a slot.
 The GL backend caches at most 16 active standalone non-sampler uniform locations
 per program. Each active array element consumes one entry; uniforms in blocks do
 not consume entries, and samplers do not either — they live in a separate table
-capped by `NT_GFX_MAX_TEXTURE_SLOTS`. Exceeding either capacity asserts at link
+capped by `NT_GFX_MAX_TEXTURE_SLOTS`. Exceeding either capacity asserts when the link finishes
 time instead of silently omitting values. Reflection reads the complete reported names into
 a fixed link-time buffer (`NT_GFX_GL_MAX_UNIFORM_NAME`, 256 bytes; a longer name asserts at
 link); neither linking nor setting a uniform allocates.
@@ -105,9 +106,9 @@ and updates allocate nothing.
 Sampler uniforms are program state, not material state: their texture units are
 fixed at link and nobody writes them afterwards. Reflection classifies every
 active uniform by type — `sampler2D`, `sampler2DShadow`, and `usampler2D` are
-supported. `isampler2D` asserts at link because the engine exposes no signed
+supported. `isampler2D` asserts when the link finishes because the engine exposes no signed
 integer texture format; the other WebGL2 sampler types (cube, 3D, array, and
-their integer forms) assert at link. The production gfx stub neither compiles
+their integer forms) assert when the link finishes. The production gfx stub neither compiles
 nor inspects shader sources and creates no programs; see
 [stub semantics](../core/module-layout.md#stub-semantics-and-capability-queries). Each
 sampler element, array elements included, takes one unit, numbered 0..n-1 in

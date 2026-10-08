@@ -335,8 +335,8 @@ static bool probe_programs_ready(void) {
     return true;
 }
 
-/* The game programs and the probe programs linked -- false through the whole window
- * between the loss and the relink. */
+/* The game programs and the probe programs linked -- false from the loss until a begin_frame
+ * finishes every relink. */
 EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) {
     return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program) && nt_gfx_program_ready(s_mesh_program) && probe_programs_ready()) ? 1 : 0;
 }

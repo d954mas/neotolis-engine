@@ -511,7 +511,7 @@ static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
 
 /* ---- Frame / Pass ---- */
 
-/* A link finishes no earlier than the frame after make_program, so readiness is constant within a frame. */
+/* A link finishes no earlier than the frame after make_program, so a program never becomes ready inside a frame. */
 static void finish_program_links(void) {
     for (uint32_t i = 1; i <= s_gfx.program_pool.capacity; i++) {
         if (s_gfx.program_pending[i] == 0) {
@@ -522,7 +522,7 @@ static void finish_program_links(void) {
             continue;
         }
         if (result != NT_GFX_RESULT_ACCEPTED && backend_failed(NULL) == NT_GFX_RESULT_CONTEXT_LOST) {
-            return; /* the next begin_frame wipes every pending link */
+            return; /* the begin_frame that takes the loss wipes every pending link */
         }
         NT_ASSERT(result == NT_GFX_RESULT_ACCEPTED && "program link failed");
         s_gfx.program_backends[i] = s_gfx.program_pending[i];

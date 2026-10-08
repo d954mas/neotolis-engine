@@ -170,7 +170,7 @@ Initialization and restore create in a straight line and return nothing. A loss 
 on the way latches in gfx, and the next context restore calls
 `nt_postfx_blur_restore_gpu` again; a backend failure on a live context asserts,
 during init or restore (a failed stage, buffer or sampler) or at the first pass.
-While the context is lost, `nt_postfx_blur_gaussian` returns at once.
+While the context is lost, `nt_postfx_blur_gaussian` returns false at once.
 
 **Why link-time, not compile-time.** Selection happens at LINK time. This
 replaced the older `NT_MODULE_X` `#define` + provider-fn-ptr + weak-symbol

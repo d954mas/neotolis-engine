@@ -588,7 +588,7 @@ A shadow list drawn in several cascades packs once per cascade; to pack once,
 the game writes the instances itself and draws them through the core in each
 cascade. The sprite and text renderers record into frame storage at each emit
 or draw, inside a pass; the shape renderer copies each kind into frame storage at
-`flush`. Lifetime work (resource unmounts, `nt_program_ref_update`,
+`flush`. Lifetime work (resource unmounts, `nt_program_ref_drop`,
 renderer restores, any destroy) runs before the first pass or after
 `nt_gfx_end_frame` (the frame rule); `nt_gfx_read_pixels` runs after
 `nt_gfx_end_frame`, before the swap.

@@ -941,7 +941,7 @@ bool nt_gfx_pipeline_valid(nt_pipeline_t pip);
  * slot -- they are baked objects with no re-fill path). Renderer caches
  * check this on lookup and self-heal. */
 bool nt_gfx_vertex_input_valid(nt_vertex_input_t vi);
-/* True once nt_gfx_begin_frame finished the link on the current context; constant within a frame.
+/* True once nt_gfx_begin_frame finished the link on the current context; never turns true inside a frame.
  * Required to bind a pipeline on the program. Readiness lost to context loss never returns for that handle. */
 bool nt_gfx_program_ready(nt_program_t prog);
 /* The program the pipeline borrows; INVALID for an invalid or stale pipeline. */

@@ -154,7 +154,7 @@ Handle validity and readiness are separate. `nt_gfx_program_valid` reports
 whether the handle still refers to a live slot; `nt_gfx_program_ready` reports
 whether the link finished on the current context. `nt_gfx_make_program` only
 starts the link, and `nt_gfx_begin_frame` finishes it, so a new program is
-ready no earlier than the next frame and readiness never changes inside a
+ready no earlier than the next frame and never becomes ready inside a
 frame (see [shader](../render/shader.md#runtime-objects-shadercode-program)).
 Processing context loss clears readiness while handles stay valid, and because
 no API relinks, that program never becomes ready again: a valid program that is
@@ -366,7 +366,7 @@ The sampler class is part of the linked interface:
 | `sampler2DShadow` | Depth | Comparison enabled |
 | `usampler2D` | Unsigned integer | Comparison disabled |
 
-`isampler2D` and sampler dimensions other than 2D are rejected at link because
+`isampler2D` and sampler dimensions other than 2D are rejected when the link finishes because
 the public texture formats cannot satisfy them.
 
 ### Texture activation

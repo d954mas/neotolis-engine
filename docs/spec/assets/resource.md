@@ -337,7 +337,7 @@ Draw entry points that check handles before gfx (`nt_mesh_renderer` and
 once while `g_nt_gfx.context_lost`, so a game may keep calling them through a loss,
 including after a restore that met a second loss and left handles 0.
 `nt_sprite_renderer_set_material` accepts a material whose relink met that loss;
-its emits draw nothing until the program is linked again.
+its emits draw nothing until its new program is ready.
 
 Every restore entry point is an inactive no-op and returns void. GPU creation
 inside it runs in a straight line: a loss latches in gfx and the next context

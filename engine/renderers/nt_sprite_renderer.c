@@ -155,7 +155,7 @@ static uint64_t nt_sprite_layout_key(const nt_material_info_t *mat_info) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
-    /* A recovered context may still have materials awaiting a new program. */
+    /* No program yet, one still linking, one that died with the context, or one its owner destroyed. */
     if (!nt_gfx_program_ready(mat_info->program)) {
         return (nt_pipeline_t){0};
     }

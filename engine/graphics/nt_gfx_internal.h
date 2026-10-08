@@ -162,7 +162,7 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
 /* UNREADY while the link runs; ACCEPTED once linked, with uniform locations cached and one texture
  * unit per active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS);
- * BACKEND_FAILURE on a failed link or a loss. */
+ * BACKEND_FAILURE on a failed link, a failed reflection or a loss. */
 nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 

@@ -1226,7 +1226,7 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 
     NT_GL(glCompileShader, shader);
     /* Per MDN best practice: do NOT check GL_COMPILE_STATUS here.
-     * Checking forces synchronous compilation.  Errors surface at link time. */
+     * Checking forces synchronous compilation.  Errors surface when nt_gfx_begin_frame finishes the link. */
     return (uint32_t)shader;
 }
 
@@ -1294,7 +1294,7 @@ static void nt_gfx_gl_log_link_failure(GLuint program) {
     GLuint stages[2] = {0, 0};
     NT_GL(glGetAttachedShaders, program, 2, &count, stages);
     for (GLsizei i = 0; i < count; i++) {
-        /* Emscripten no longer maps a deleted stage, and reading its log would throw. */
+        /* Emscripten drops a deleted stage's name mapping, and reading its log would throw. */
         if (!NT_GL_RET(glIsShader, stages[i])) {
             continue;
         }
