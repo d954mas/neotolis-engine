@@ -2059,9 +2059,6 @@ static bool texture_set_ready(void) {
 
 /* Enabled-but-unpointed instance attribs are invalid GL that fails silently. */
 static void assert_instance_attribs_pointed(void) {
-    if (s_gfx.bound_vertex_input == 0) {
-        return; /* the missing bind itself already trapped */
-    }
     NT_ASSERT((s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)].instance_attr_count == 0 || s_gfx.bound_instance.vertex_input == s_gfx.bound_vertex_input) &&
               "draw: bound vertex input has instance attribs that bind_instance_buffer has not pointed in this pass");
 }

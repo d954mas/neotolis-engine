@@ -10,6 +10,11 @@ Related: [Shader System](shader.md), [Render Components](render-components.md), 
 
 ## MaterialAsset purpose
 
+`nt_material_init(desc)` initializes the material pool and returns `void`.
+The descriptor must be non-NULL with positive `max_materials`. Invalid arguments,
+double initialization and allocation failure assert; there is no recoverable
+initialization result.
+
 Material = shader + render state + values.
 
 ## Numeric params policy

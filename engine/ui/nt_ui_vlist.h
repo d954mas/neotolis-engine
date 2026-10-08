@@ -28,11 +28,11 @@ typedef struct {
 typedef struct {
     nt_ui_scroll_style_t scroll; /* the owned scroll's tunables (one clip) */
     int32_t overscan;            /* extra rows rendered each side of the viewport (hides recycle pop) */
-    float gap;                   /* inter-row spacing (px, >= 0, rounded to int); rendered as the scroll container's childGap */
+    float gap;                   /* inter-row spacing (px, finite 0..UINT16_MAX, truncated to int); scroll container's childGap */
     /* Id recycle modulus: per-row id keys on (index % id_ring), so distinct ids per list are bounded
      * by id_ring, NOT the row count — a 10k list never saturates Clay's PERSISTENT element hashmap
      * (one permanent slot per distinct id ever declared). MUST exceed the max simultaneously-visible
-     * window (begin hard-clamps the window to id_ring-1 so visible rows never alias). Default 256 ~ 256
+     * window (begin asserts otherwise, before visible rows can alias). Default 256 ~ 256
      * hashmap slots/list, far beyond any real viewport. 0/1 disables recycling (absolute ids; can
      * saturate). */
     uint32_t id_ring;
@@ -50,7 +50,7 @@ nt_ui_vlist_style_t nt_ui_vlist_style_defaults(void);
  *     frame) — never hang them off the recycled id.
  *   - Transient UI state (hover / press anim / focus / capture) follows the screen SLOT, not the row
  *     content — standard immediate-mode virtualization.
- * id_ring MUST exceed the max visible window (begin clamps to be safe). */
+ * id_ring MUST exceed the max visible window; begin asserts on overflow. */
 
 /* Collision-safe per-item id: maps index onto a bounded ring slot (index % ring, ring>1) then fmixes
  * base_id + slot into one widely-spread id so per-slot retained state never aliases a neighbor's Clay

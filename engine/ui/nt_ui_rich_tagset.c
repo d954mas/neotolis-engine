@@ -129,9 +129,6 @@ void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *
 // #region lookup
 bool nt_ui_rich_tagset_lookup_font(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_font_t out_family[4]) {
     NT_ASSERT(ts != NULL && out_family != NULL);
-    if (ts == NULL || out_family == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
-        return false;
-    }
     for (uint32_t i = 0; i < ts->font_count; i++) {
         if (ts->fonts[i].name_hash == name_hash) {
             memcpy(out_family, ts->fonts[i].family, sizeof ts->fonts[i].family);
@@ -143,9 +140,6 @@ bool nt_ui_rich_tagset_lookup_font(const nt_ui_rich_tagset_t *ts, uint64_t name_
 
 bool nt_ui_rich_tagset_lookup_atlas(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_resource_t *out_atlas) {
     NT_ASSERT(ts != NULL && out_atlas != NULL);
-    if (ts == NULL || out_atlas == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
-        return false;
-    }
     for (uint32_t i = 0; i < ts->atlas_count; i++) {
         if (ts->atlases[i].name_hash == name_hash) {
             *out_atlas = ts->atlases[i].atlas;
@@ -157,9 +151,6 @@ bool nt_ui_rich_tagset_lookup_atlas(const nt_ui_rich_tagset_t *ts, uint64_t name
 
 bool nt_ui_rich_tagset_lookup_color(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint32_t *out_color_abgr) {
     NT_ASSERT(ts != NULL && out_color_abgr != NULL);
-    if (ts == NULL || out_color_abgr == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
-        return false;
-    }
     for (uint32_t i = 0; i < ts->color_count; i++) {
         if (ts->colors[i].name_hash == name_hash) {
             *out_color_abgr = ts->colors[i].color_abgr;
@@ -171,9 +162,6 @@ bool nt_ui_rich_tagset_lookup_color(const nt_ui_rich_tagset_t *ts, uint64_t name
 
 bool nt_ui_rich_tagset_lookup_effect_fn(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, bool *out_tunable, nt_ui_rich_fx_fn *out_fn, void **out_user) {
     NT_ASSERT(ts != NULL && out_tunable != NULL && out_fn != NULL && out_user != NULL);
-    if (ts == NULL || out_tunable == NULL || out_fn == NULL || out_user == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
-        return false;
-    }
     for (uint32_t i = 0; i < ts->effect_count; i++) {
         if (ts->effects[i].name_hash == name_hash) {
             *out_tunable = ts->effects[i].tunable;
@@ -187,9 +175,6 @@ bool nt_ui_rich_tagset_lookup_effect_fn(const nt_ui_rich_tagset_t *ts, uint64_t 
 
 bool nt_ui_rich_tagset_lookup_object(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_ui_rich_tagset_object_t *out_object) {
     NT_ASSERT(ts != NULL && out_object != NULL);
-    if (ts == NULL || out_object == NULL) { /* HARD: public lookup stays NULL-safe with NT_ASSERT OFF */
-        return false;
-    }
     for (uint32_t i = 0; i < ts->object_count; i++) {
         if (ts->objects[i].name_hash == name_hash) {
             *out_object = ts->objects[i];

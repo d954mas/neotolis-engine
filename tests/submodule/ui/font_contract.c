@@ -10,9 +10,7 @@
 int main(int argc, char **argv) {
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    if (nt_font_init(&(nt_font_desc_t){.max_fonts = 1}) != NT_OK) {
-        return 1;
-    }
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
     nt_gfx_init(&(nt_gfx_desc_t){0});
     puts("font-contract-ready");
     (void)fflush(stdout);

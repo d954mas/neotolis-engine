@@ -242,9 +242,6 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
     }
     /* Crash instead of hiding VAO churn behind version eviction. */
     NT_ASSERT(reusable != NULL && "mesh vertex-input versions exhausted -- raise renderer max_mesh_layouts");
-    if (reusable == NULL) {
-        return NT_VERTEX_INPUT_INVALID;
-    }
 
     nt_vertex_input_t vi;
     if (layout.attr_count == 0 && mesh_info->ibo.id == 0) {

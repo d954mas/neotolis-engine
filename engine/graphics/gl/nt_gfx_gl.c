@@ -915,9 +915,6 @@ static void invalidate_attachments(GLbitfield mask) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend, uint16_t width, uint16_t height) {
     NT_ASSERT(desc != NULL);
-    if (desc == NULL) {
-        return;
-    }
     GLsizei viewport_w = (GLsizei)g_nt_window.fb_width;
     GLsizei viewport_h = (GLsizei)g_nt_window.fb_height;
     GLuint fbo = 0;
@@ -1353,7 +1350,6 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
         return true;
     case GL_INT_SAMPLER_2D:
         NT_ASSERT(false && "program sampler requires a signed integer texture format");
-        return false;
     case GL_SAMPLER_3D:
     case GL_SAMPLER_CUBE:
     case GL_SAMPLER_CUBE_SHADOW:
@@ -1394,7 +1390,6 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
     case GL_UNSIGNED_INT_SAMPLER_BUFFER:
 #endif
         NT_ASSERT(false && "program declares an unsupported sampler type");
-        return false;
     default:
         return false;
     }

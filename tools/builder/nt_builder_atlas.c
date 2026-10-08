@@ -1460,8 +1460,7 @@ static void atlas_write_oriented_trim(const uint8_t *src, size_t src_stride, uin
             int32_t ty = 0;
             /* Texel variant: the corner variant maps 0..w and is off by one on every mirror. */
             transform_point_texel((int32_t)x, (int32_t)y, t, (int32_t)tw, (int32_t)th, &tx, &ty);
-            /* Hard bound — this indexes a WRITE into scratch, and NT_ASSERT_MODE=OFF
-             * compiles the assert away. Mirrors the guard on the compare path. */
+            /* Bounds the scratch write; mirrors the check on the compare path. */
             NT_BUILD_ASSERT(tx >= 0 && ty >= 0 && (uint32_t)tx < ow && (uint32_t)ty < oh && "canonical hash: texel outside the scratch buffer");
             if (tx < 0 || ty < 0 || (uint32_t)tx >= ow || (uint32_t)ty >= oh) {
                 continue;
@@ -2647,14 +2646,13 @@ static void alias_retriangulate(const Point2D *ring, uint32_t n, uint16_t *out, 
     uint32_t produced = 0;
     const bool ok = nt_polygon_triangulate_validated(ring, n, out, &produced, NULL);
     NT_BUILD_ASSERT(ok && produced == expected_index_count && "alias geometry: derived ring failed to retriangulate");
-    /* Hard fallback — on the failure path the callee may not have written `out` at
-     * all, and NT_ASSERT_MODE=OFF would let malloc garbage reach the blob. */
+    /* The failure path may leave out unwritten. */
     if (!ok || produced != expected_index_count) {
         memset(out, 0, (size_t)expected_index_count * sizeof(uint16_t));
     }
 }
 
-/* Hard gates must stay loud with asserts off — a bare abort() shows an embedder nothing.
+/* Invariant failures must identify the atlas before terminating.
  * The handler is the embedder's observation channel; it may not return (test traps). */
 static _Noreturn void atlas_invariant_abort_at(const AtlasPipeline *p, const char *what, const char *file, int line) {
     NT_LOG_ERROR("atlas '%s': internal invariant broken (%s)", p->state->name, what);
@@ -2679,7 +2677,7 @@ static void pipeline_reprove_alias_geometry(AtlasPipeline *p, uint32_t i, uint32
     free(binary);
     const bool ok = proof.valid && nt_selected_geometry_proof_equal(&proof, root_proof);
     NT_BUILD_ASSERT(ok && "alias geometry proof mismatch");
-    /* Hard gate — an asserts-off build must not store an invalid proof, which every
+    /* Hard gate — never store an invalid proof, which every
      * downstream check would then wave through as well. */
     if (!ok) {
         atlas_invariant_abort(p, "alias geometry proof mismatch");
@@ -3447,7 +3445,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         NT_BUILD_ASSERT(p->vertex_counts[i] <= UINT8_MAX && "pipeline_serialize: region vertex_count exceeds uint8_t");
         NT_BUILD_ASSERT(p->geometry_proofs[i].valid && "pipeline_serialize: selected geometry proof missing");
-        /* Hard gate — asserts-off must not serialize geometry the proof system never accepted. */
+        /* Hard gate — never serialize geometry the proof system never accepted. */
         if (!p->geometry_proofs[i].valid) {
             atlas_invariant_abort(p, "selected geometry proof missing");
         }
@@ -3509,7 +3507,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         /* An alias borrows exactly its root's placement; UV correctness for aliases
          * rests on this routing, which no downstream proof re-checks. */
         NT_BUILD_ASSERT((p->dedup_map[i] < 0 ? pl->sprite_index == i : pl->sprite_index == (uint32_t)p->dedup_map[i]) && "pipeline_serialize: placement does not belong to this sprite's root");
-        /* Hard gate — asserts-off must not bake an alias's UVs from a foreign placement. */
+        /* Hard gate — never bake an alias's UVs from a foreign placement. */
         if (!(p->dedup_map[i] < 0 ? pl->sprite_index == i : pl->sprite_index == (uint32_t)p->dedup_map[i])) {
             atlas_invariant_abort(p, "placement does not belong to this sprite's root");
         }
@@ -3517,7 +3515,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
          * packer placements whose product stays inside this sprite's own mask. */
         uint8_t rt = d4_compose(pl->transform, p->alias_rel[i]);
         NT_BUILD_ASSERT((atlas_sprite_effective_mask(p, i) & (uint8_t)(1U << rt)) && "pipeline_serialize: region transform outside the sprite's own mask");
-        /* Hard gate — asserts-off must not ship an orientation the sprite's mask forbids. */
+        /* Hard gate — never ship an orientation the sprite's mask forbids. */
         if (!(atlas_sprite_effective_mask(p, i) & (uint8_t)(1U << rt))) {
             atlas_invariant_abort(p, "region transform outside the sprite's own mask");
         }
@@ -3604,7 +3602,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
                                           p->geometry_proofs[i].selected_area2, reconstructed_indices, idx_count, p->geometry_opts[i].max_added_area_percent, p->geometry_opts[i].max_vertices);
         free(binary);
         NT_BUILD_ASSERT(serialized_proof.valid && nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i]) && "serialized geometry proof mismatch");
-        /* Hard gate — asserts-off must not ship a blob whose emitted bytes disprove
+        /* Hard gate — never ship a blob whose emitted bytes disprove
          * the selected geometry; mirrors the reprove gate on the alias path. */
         if (!serialized_proof.valid || !nt_selected_geometry_proof_equal(&serialized_proof, &p->geometry_proofs[i])) {
             atlas_invariant_abort(p, "serialized geometry proof mismatch");

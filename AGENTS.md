@@ -30,8 +30,8 @@ Neotolis Engine is a minimalist **C17** game engine for **Web/WASM (WebGL 2)**. 
 
 - Prefer `NT_ASSERT` for invariants and unexpected runtime states; use `NT_BUILD_ASSERT` for builder programmer invariants, unexpected states, OOM, missing/unreadable files and single-asset decode failures.
 - Error returns are valid for documented recoverable API outcomes, never to silently swallow bugs or broken data.
-- Release presets select TRAP. OFF is a supported build mode with assertions disabled, without runtime guarantees; no fallback is required solely for OFF.
-- Assert expressions must be side-effect-free because OFF does not evaluate them. Hard guards belong at untrusted/runtime-input boundaries and where the API promises recoverable rejection.
+- The only assert modes are FULL (debug/tests) and TRAP (release). A failed assert never continues; do not add recovery or a duplicate log/return after it.
+- Assert expressions must be side-effect-free. Hard guards belong at untrusted/runtime-input boundaries and where the API promises recoverable rejection.
 - ATLAS builder content failures use `nt_builder_get_errors`; keep the exact exception list in [builder error policy](docs/spec/builder/builder.md#asserts-vs-graceful-content-errors).
 - Locked: an asset activator checks only structure — magic, version, exact size, counts, indices, grid shape. It never checks values (finite floats, unit quaternions, radii): the builder asserts them, the pack CRC32 keeps them, kernels re-assert under their check flag. Do not add a value check to an activator.
 

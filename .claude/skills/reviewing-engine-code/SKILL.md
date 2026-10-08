@@ -97,9 +97,11 @@ Explicit over implicit; the runtime stays simple; no heap allocation in hot path
 (frame loop, fixed update, render item generation, batching, per-frame resource
 resolve, dense SoA iteration); compile-time limits and preallocated storages are
 deliberate design. The NT_ASSERT crash-early policy is intentional: invariant
-violations crash immediately rather than degrade silently — but note NT_ASSERT
-compiles to ((void)0) in the OFF shipping config, so bounds checks and side effects
-must never live inside it. Source of truth: AGENTS.md and docs/spec/ — read
+violations crash immediately rather than degrade silently. The only supported
+assert modes are FULL and TRAP; a failed assertion never continues in either mode.
+Assert expressions must be side-effect-free. Hard guards remain required at
+untrusted/runtime-input boundaries and for documented recoverable API outcomes.
+Source of truth: AGENTS.md and docs/spec/ — read
 docs/spec/index.md first, then only the chapters relevant to this diff.
 
 Compare against merge-base <merge-base>. Scope: only code introduced or modified by
@@ -191,8 +193,9 @@ report are at most 3 lines each.
 - Style, naming, comment volume, missing docstrings, or documentation quantity.
 - "Add a NULL check / return an error code" on paths where NT_ASSERT crash-early is
   the documented policy. The exception is real: assert-only guards on untrusted or
-  runtime input, or side effects inside NT_ASSERT, ARE findings (NT_ASSERT vanishes
-  in the OFF shipping config).
+  runtime input where recoverable rejection is required, or side effects inside
+  NT_ASSERT, ARE findings. Bounds assertions on programmer invariants are valid in
+  both FULL and TRAP; recovery after a failed assertion is unreachable.
 - Compile-time limits (`#define` caps) and preallocated storages questioned as
   "inflexible" or "should be dynamic" — they are the design. Flag a genuine overflow
   or off-by-one against a cap instead.

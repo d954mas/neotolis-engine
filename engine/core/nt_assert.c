@@ -2,7 +2,7 @@
 
 #include <stddef.h>
 
-/* Default handler exists only in FULL mode so TRAP/OFF builds don't drag in <stdio.h>
+/* Default handler exists only in FULL mode so TRAP builds don't drag in <stdio.h>
  * (release contract: "TRAP immediate crash, no strings"). Tests can still install their
  * own handler at any mode via nt_assert_handler. */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL

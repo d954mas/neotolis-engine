@@ -102,7 +102,7 @@ class Checks:
             missing = dict(DEFINES)
             del missing[define]
             self.compile(f"missing-{define}", source, missing, rf"error:[^\n]*{define}[^\n]*defined")
-        for mode in range(3):
+        for mode in (1, 2):
             for checks in (0, 1):
                 source = ('#include "skeletal/nt_skeletal.h"\n'
                           f'_Static_assert(NT_ASSERT_MODE == {mode}, "explicit assert mode");\n'
@@ -111,6 +111,9 @@ class Checks:
                     defines = dict(DEFINES, NT_ASSERT_MODE=mode, NT_SKELETAL_CHECKS=checks)
                     defines[build_define] = 1
                     self.compile(f"asserts-{mode}-skeletal-{checks}-{build_define}", source, defines)
+        for mode in (0, -1, 3):
+            self.compile(f"invalid-asserts-{mode}", '#include "core/nt_assert.h"\n',
+                         {"NT_ASSERT_MODE": mode}, r"error:[^\n]*NT_ASSERT_MODE must be")
         for floor in (-1, 4):
             self.compile(f"invalid-floor-{floor}", '#include "log/nt_log.h"\n',
                          {"NT_LOG_MIN_LEVEL": floor}, r"error:[^\n]*NT_LOG_MIN_LEVEL must be in 0\.\.3")
@@ -139,7 +142,7 @@ class Checks:
                   "-DNT_DEVAPI_ENABLED=OFF", "-DNT_UI_DEBUG_TOOLS=OFF",
                   "-DNT_DEVAPI_GROUP_UI=ON", "-DNT_DEVAPI_GROUP_OBS=ON", "-DNT_DEVAPI_GROUP_ENTITY_WRITE=ON"]
         policies = {
-            "off": {"NT_ASSERT_MODE": "0", "NT_UI_CHECKS": "ON", "NT_SKELETAL_CHECKS": "ON",
+            "quiet": {"NT_ASSERT_MODE": "1", "NT_UI_CHECKS": "ON", "NT_SKELETAL_CHECKS": "ON",
                     "NT_RESOURCE_TIMING_ENABLED": "OFF", "NT_LOG_MIN_LEVEL": "3", "NT_UI_TIMING_ENABLED": "OFF", "NT_GFX_GPU_TIMING_ENABLED": "OFF",
                     "NT_GFX_CAPTURE_ENABLED": "OFF",
                     "NT_INTROSPECT_ENABLED": "ON", "NT_INTROSPECT_WRITE_ENABLED": "OFF",
@@ -169,7 +172,7 @@ class Checks:
                                    r"undefined|unresolved|LNK2019|LNK1120")
             if "nt_log_write" not in missing:
                 raise RuntimeError("missing implementation did not report nt_log_write")
-            if name == "off":
+            if name == "quiet":
                 archive = (build / "log_archive.path").read_text(encoding="utf-8").strip()
                 symbols = self.command("none-archive-symbols", [self.args.nm, "--defined-only", archive])
                 undefined = self.command("none-archive-undefined", [self.args.nm, "--undefined-only", archive])
@@ -206,7 +209,7 @@ class Checks:
         for value in ("-1", "4", "WARN", "1x"):
             self.command(f"configure-floor-{value}", common + ["-S", str(source), "-B", str(work / f"invalid-floor-{value}"),
                          f"-DNT_LOG_MIN_LEVEL={value}"], r"NT_LOG_MIN_LEVEL must be 0")
-        for index, value in enumerate(("", "-1", "3", "FULL", "1x")):
+        for index, value in enumerate(("", "0", "-1", "3", "FULL", "1x")):
             self.command(f"configure-asserts-{index}", common + ["-S", str(source), "-B", str(work / f"invalid-asserts-{index}"),
                          f"-DNT_ASSERT_MODE={value}"], r"NT_ASSERT_MODE must be")
         if work.parent != self.output.resolve():

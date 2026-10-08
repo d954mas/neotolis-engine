@@ -79,8 +79,8 @@ is no longer a valid configuration.
 |---|---|---|
 | `NT_STATIC_CRT` | ON | Static release CRT on Windows; OFF inherits the embedding application's CRT. |
 | `NT_BUILD_TESTS` | ON | `native-release` OFF; `native-release-test` ON. |
-| `NT_ASSERT_MODE` | 1 (TRAP) | Debug and release-test presets select FULL (2); production Release presets select TRAP (1). OFF (0) is a supported build mode without runtime guarantees. |
-| `NT_SKELETAL_CHECKS` | OFF | Expensive skeletal numerical checks (finite TRS values, unit quaternions). Cheap pointer, index, count and capacity assertions remain independent of this flag, including inside joint/palette loops. Debug/release-test presets select ON; production Release selects OFF. Explicit ON enables checks in any build type. `NT_ASSERT_MODE=0` removes the assertions without rewriting this flag. |
+| `NT_ASSERT_MODE` | 1 (TRAP) | Debug and release-test presets select FULL (2); production Release presets select TRAP (1). OFF (0) is rejected. |
+| `NT_SKELETAL_CHECKS` | OFF | Expensive skeletal numerical checks (finite TRS values, unit quaternions). Cheap pointer, index, count and capacity assertions remain independent of this flag, including inside joint/palette loops. Debug/release-test presets select ON; production Release selects OFF. Explicit ON enables checks in any build type. |
 | `NT_LOG_MIN_LEVEL` | 0 (INFO) | Debug/release-test 0; production Release 1 (WARN). Also 2 ERROR, 3 NONE. |
 | `NT_RESOURCE_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_UI_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
@@ -386,10 +386,10 @@ specified in the UI chapters linked above.
 - **Shared display:** CI ctest stays serial because real-GL tests share xvfb.
   Local parallel runs use the desktop display; GL tests have `RESOURCE_LOCK
   gl_display` in `cmake/test_target.cmake`.
-- **Assert define collision:** `nt_core` exports the configured `NT_ASSERT_MODE`.
-  For tests requiring another mode, use a wrapper TU with `#undef`/`#define`,
-  following `tests/unit/test_helpers/nt_atlas_assert_off_tu.c`, not a conflicting
-  target `-D` that trips `-Wmacro-redefined`.
+- **Assertion tests:** suites using `NT_TEST_EXPECT_ASSERT` require FULL (2),
+  selected by `native-debug-test` and `native-release-test`. TRAP (1) bypasses
+  the test handler. Configure the linked engine and tests together; a target-local
+  override conflicts with the `NT_ASSERT_MODE` exported by `nt_core`.
 - **Release test warnings:** production `--push` does not compile test TUs under
   NDEBUG; `native-release-test` in CI may expose their unused variables.
 - **Windows spawn exhaustion:** random Emscripten subprocess failures with

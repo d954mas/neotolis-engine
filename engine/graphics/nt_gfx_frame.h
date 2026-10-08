@@ -58,7 +58,7 @@ void nt_gfx_frame_begin(void);
 /* Run by nt_gfx_end_frame: uploads the frame storage, then replays the recorded commands
  * in call order and empties the stream. */
 void nt_gfx_frame_execute(void);
-/* Cold path: logs needed/free bytes and stops; it never returns, also with asserts OFF. */
+/* Cold path: logs needed/free bytes and stops; it never returns. */
 _Noreturn void nt_gfx_frame_overflow(uint32_t needed_words);
 
 #define NT_GFX_CMD_WORDS(bytes) (((uint32_t)(bytes) + 3U) / 4U)

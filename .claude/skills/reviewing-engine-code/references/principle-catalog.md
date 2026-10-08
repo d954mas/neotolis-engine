@@ -46,11 +46,11 @@ generation, batching, per-frame resource resolve, dense SoA/ECS iteration.
 **Rule:** three distinct violations, all P0:
 (a) an **error code silently swallows** an invariant breach or broken data that indicates a bug (instead of `NT_ASSERT`);
 (b) `assert()` (plain C assert) used for error handling — it vanishes under `NDEBUG`;
-(c) a **bounds check or side effect lives inside `NT_ASSERT(...)`** — `NT_ASSERT` compiles to `((void)0)` in the OFF shipping config, so the check/side-effect disappears in production.
+(c) a **side effect lives inside `NT_ASSERT(...)`** — assertion expressions must only check invariants, never mutate state.
 **Cite:** AGENTS.md §"Asserts and errors".
-**Scope:** all runtime code. Untrusted/runtime input (parsers, network, pack data) needs a HARD guard, not assert-only.
+**Scope:** all runtime code. FULL and TRAP are the only supported modes; a failed assertion never continues. Bounds assertions are valid for programmer invariants. Untrusted/runtime input (parsers, network, pack data) and documented recoverable outcomes need a hard guard.
 ✅ `NT_ASSERT(slot < cap); arr[slot] = v;` (check and use separate) · error return `NULL` for "resource not found" (documented API contract).
-❌ `NT_ASSERT(arr[i++] == expected);` (mutation vanishes in OFF) · `if (bad_data) return NT_ERR;` where bad_data means a builder bug (should assert).
+❌ `NT_ASSERT(arr[i++] == expected);` (mutates state while checking an invariant) · `if (bad_data) return NT_ERR;` where bad_data means a builder bug (should assert).
 
 ## 3. Explicit over implicit — P1/P2
 

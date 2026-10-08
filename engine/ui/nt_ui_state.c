@@ -36,7 +36,6 @@ void *nt_ui_state(nt_ui_context_t *ctx, uint32_t id, uint32_t size, uint32_t tag
     }
     /* No eviction: the game clears on screen close or raises state_slots / state_probe_max. */
     NT_ASSERT(0 && "nt_ui_state: pool overflow — clear on screen close or raise state_slots/state_probe_max");
-    return NULL;
 }
 
 void *nt_ui_state_find(nt_ui_context_t *ctx, uint32_t id) {

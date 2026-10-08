@@ -11,8 +11,7 @@
 #include "ui/nt_ui_state.h"
 
 // #region window_math
-/* HARD guards (not asserts — those vanish in OFF): a bad count/extent must never over-read the
- * spacer/state index. double avoids float blow-up on huge counts. pos_on_axis is Clay's childOffset
+/* double avoids float blow-up on huge counts. pos_on_axis is Clay's childOffset
  * (negative going down/right), so scrolled distance = -pos. */
 static nt_ui_vlist_range_t vlist_window(float pos_on_axis, float viewport, float item_extent, uint32_t count, int overscan) {
     nt_ui_vlist_range_t r = {1U, 0U}; /* empty sentinel: first > last */
@@ -90,15 +89,13 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
     const nt_ui_vlist_style_t st = (style != NULL) ? *style : nt_ui_vlist_style_defaults();
     NT_ASSERT(isfinite(item_extent) && item_extent > 0.0F && "nt_ui_vlist_begin: item_extent must be finite and > 0");
     NT_ASSERT(st.overscan >= 0 && "nt_ui_vlist_begin: style.overscan must be >= 0");
-    NT_ASSERT(isfinite(st.gap) && st.gap >= 0.0F && "nt_ui_vlist_begin: style.gap must be finite and >= 0");
+    NT_ASSERT(isfinite(st.gap) && st.gap >= 0.0F && st.gap <= (float)UINT16_MAX && "nt_ui_vlist_begin: style.gap must be finite and in [0, UINT16_MAX]");
     /* gap is the inter-row spacing: applied as the scroll container's childGap (renders between rows) AND
      * folded into the per-row stride so the window + spacers reserve it. Clay childGap is integer px, so
-     * round ONCE and use that same value everywhere (stride, spacers, childGap) — no float/int drift.
-     * HARD guards (NT_ASSERT vanishes in OFF): a bad item_extent/gap must never feed a negative/NaN FIXED
-     * spacer or a negative childGap. safe_extent/gap_px are the real guards. */
-    const uint16_t gap_px = (isfinite(st.gap) && st.gap > 0.0F) ? (uint16_t)st.gap : 0U;
+     * truncate ONCE and use that same value everywhere (stride, spacers, childGap) — no float/int drift. */
+    const uint16_t gap_px = (uint16_t)st.gap;
     const float gap = (float)gap_px;
-    const float safe_extent = (isfinite(item_extent) && item_extent > 0.0F) ? (item_extent + gap) : 0.0F;
+    const float safe_extent = item_extent + gap;
 
     /* Exactly ONE scroll (one Clay clip) per vlist — never one clip per row (each Clay clip is a
      * persistent pool slot). Axis selects the scroll axis + the inner layoutDirection (an X-axis list
@@ -120,16 +117,9 @@ nt_ui_vlist_range_t nt_ui_vlist_begin(nt_ui_context_t *ctx, const nt_ui_element_
 
     nt_ui_vlist_range_t r = vlist_window(pos, viewport, safe_extent, count, st.overscan);
 
-    /* A window >= id_ring maps two SIMULTANEOUSLY-visible rows to one ring slot -> same Clay id ->
-     * DUPLICATE_ID, i.e. id_ring too small (dev misconfig). Assert on the UNCLAMPED count so debug
-     * points at the cause, not at the silently-shrunk window the clamp below leaves. */
+    /* Visible rows must not alias the same recycled Clay id. */
     const uint64_t want = (r.first <= r.last) ? ((uint64_t)r.last - r.first + 1U) : 0U;
     NT_ASSERT((st.id_ring <= 1U || want < (uint64_t)st.id_ring) && "vlist_begin: visible window (viewport/item_extent + 2*overscan) must stay below style.id_ring — raise id_ring");
-    /* Best-effort containment after the invariant; supported modes trap above.
-     * Only shrinks `last`; the trailing spacer keeps content == count*extent. */
-    if (st.id_ring > 1U && want > (uint64_t)(st.id_ring - 1U)) {
-        r.last = r.first + (st.id_ring - 2U); /* window size = ring-1 (<= ring-1, > 0 since ring>1) */
-    }
 
     const bool empty = (r.first > r.last);
 

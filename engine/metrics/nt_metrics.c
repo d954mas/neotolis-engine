@@ -124,8 +124,7 @@ void nt_metrics_reset(void) {
 // #endregion
 
 // #region user counters (owned here)
-/* Slot for `name` by full hash, appending if new. Full table / truncated-name collision assert
-   (config bug); UINT16_MAX is the asserts-off drop so the fixed arrays never overflow. */
+/* Slot for `name` by full hash, appending if new. Full table / truncated-name collision assert. */
 static uint16_t user_slot_for(const char *name) {
     uint64_t h = nt_hash64_str(name).value;
     for (uint16_t i = 0; i < s_metrics.user_count; i++) {
@@ -133,10 +132,7 @@ static uint16_t user_slot_for(const char *name) {
             return i;
         }
     }
-    if (s_metrics.user_count >= NT_METRICS_MAX_USER_CHANNELS) {
-        NT_ASSERT(false && "nt_metrics: user-counter table full; raise NT_METRICS_MAX_USER_CHANNELS");
-        return UINT16_MAX;
-    }
+    NT_ASSERT(s_metrics.user_count < NT_METRICS_MAX_USER_CHANNELS && "nt_metrics: user-counter table full; raise NT_METRICS_MAX_USER_CHANNELS");
     uint16_t i = s_metrics.user_count;
     char display[NT_METRICS_USER_NAME_MAX];
     (void)snprintf(display, sizeof(display), "%s", name);
@@ -152,9 +148,6 @@ static uint16_t user_slot_for(const char *name) {
 void nt_metrics_count(const char *name, uint64_t value) {
     NT_ASSERT(name != NULL);
     uint16_t i = user_slot_for(name);
-    if (i == UINT16_MAX) {
-        return;
-    }
     s_metrics.user_u[i] = value;
     s_metrics.user_is_float[i] = false;
 }
@@ -164,9 +157,6 @@ void nt_metrics_count_f(const char *name, double value) {
     /* Reject non-finite at the boundary: cJSON serializes NaN/Inf as `null` and poisons aggregates. */
     NT_ASSERT(isfinite(value));
     uint16_t i = user_slot_for(name);
-    if (i == UINT16_MAX) {
-        return;
-    }
     s_metrics.user_f[i] = value;
     s_metrics.user_is_float[i] = true;
 }

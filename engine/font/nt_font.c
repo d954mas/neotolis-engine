@@ -80,16 +80,9 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
         font_provider_clear(user_data);
         return;
     }
-    /* The runtime format guard remains active even with NT_ASSERT_MODE=OFF. */
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
     NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
     NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
-    if (hdr->magic != NT_FONT_MAGIC || hdr->version != NT_FONT_VERSION) {
-        /* Reject: this corrupt pack is now the published winner, so the previous winner's pack is
-         * no longer pinned and may be evicted — stop pointing at it. Degrade to tofu. */
-        font_provider_clear(user_data);
-        return;
-    }
     nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
     if (p == NULL) {
         p = (nt_font_provider_t *)calloc(1, sizeof(*p));
@@ -287,12 +280,10 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
                 /* gi is bounded by construction in rebuild_ascii_index;
                  * the bounds check guards blob corruption between load and access. */
                 NT_ASSERT(gi < hdr->glyph_count);
-                if (gi < hdr->glyph_count) {
-                    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
-                    *out_resource_index = ri;
-                    *out_glyph_entry = glyphs + gi;
-                    return true;
-                }
+                const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
+                *out_resource_index = ri;
+                *out_glyph_entry = glyphs + gi;
+                return true;
             }
         }
         /* ASCII char not in any resource — fall through (tofu fallback). */
@@ -1062,10 +1053,6 @@ static uint16_t parse_contour_points(const uint8_t **rp, int32_t *pts_x, int32_t
     memcpy(&first_y, *rp, 2);
     *rp += 2;
     NT_ASSERT(point_count <= NT_FONT_MAX_POINTS_PER_CONTOUR);
-    /* Hard cap (OFF-safe, where NT_ASSERT is a no-op): a corrupt pack could record point_count past
-     * the static buffer; clamp WRITES to the buffer while still advancing rp over every delta so the
-     * later passes/contours stay byte-aligned. Builder guarantees the cap; this is the safety net. */
-    uint16_t cap = (point_count < NT_FONT_MAX_POINTS_PER_CONTOUR) ? point_count : NT_FONT_MAX_POINTS_PER_CONTOUR;
     pts_x[0] = first_x;
     pts_y[0] = first_y;
     pts_on[0] = (flags[0] & 1U) != 0;
@@ -1076,13 +1063,11 @@ static uint16_t parse_contour_points(const uint8_t **rp, int32_t *pts_x, int32_t
         int16_t dy = read_varlen_delta(rp);
         px += dx;
         py += dy;
-        if (p < cap) {
-            pts_x[p] = px;
-            pts_y[p] = py;
-            pts_on[p] = (flags[p / 8] & (1U << (p % 8))) != 0;
-        }
+        pts_x[p] = px;
+        pts_y[p] = py;
+        pts_on[p] = (flags[p / 8] & (1U << (p % 8))) != 0;
     }
-    return cap;
+    return point_count;
 }
 
 /* Decode v4 point-based contour data into absolute float curves (implicit midpoints between
@@ -1413,13 +1398,10 @@ static void create_font_textures(nt_font_slot_t *slot) {
 static void destroy_font_textures(nt_font_slot_t *slot) { nt_gfx_destroy_texture(slot->curve_texture); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_result_t nt_font_init(const nt_font_desc_t *desc) {
+void nt_font_init(const nt_font_desc_t *desc) {
     NT_ASSERT(!s_font.initialized);
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_fonts > 0);
-    if (s_font.initialized || !desc || desc->max_fonts == 0) {
-        return NT_ERR_INIT_FAILED;
-    }
 
     nt_pool_init(&s_font.pool, desc->max_fonts);
 
@@ -1435,7 +1417,6 @@ nt_result_t nt_font_init(const nt_font_desc_t *desc) {
 
     s_font.last_resolve_epoch = 0;
     s_font.initialized = true;
-    return NT_OK;
 }
 
 void nt_font_shutdown(void) {
@@ -1465,9 +1446,6 @@ void nt_font_shutdown(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_font_step(void) {
     NT_ASSERT(s_font.initialized);
-    if (!s_font.initialized) {
-        return;
-    }
 
     // #region Context restore: re-create GPU textures
     /* Derived from the textures, not latched on context_restored, so a rebuild
@@ -1637,9 +1615,6 @@ static void rebuild_ascii_index(nt_font_slot_t *slot) {
 nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(desc);
-    if (!s_font.initialized || !desc) {
-        return NT_FONT_INVALID;
-    }
 
     /* 2048 rows is the WebGL2 guaranteed MAX_TEXTURE_SIZE; slot 0 holds tofu. */
     NT_ASSERT(desc->max_glyphs > 1 && desc->max_glyphs <= 2048 && "max_glyphs: tofu + glyphs, at most 2048 texture rows");
@@ -1719,7 +1694,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
 
 void nt_font_destroy(nt_font_t font) {
     NT_ASSERT(s_font.initialized);
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
+    if (!nt_pool_valid(&s_font.pool, font.id)) {
         return;
     }
 
@@ -1767,9 +1742,6 @@ void nt_font_add(nt_font_t font, nt_resource_t resource) {
 nt_font_metrics_t nt_font_get_metrics(nt_font_t font) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return (nt_font_metrics_t){0};
-    }
     nt_font_slot_t *slot = get_slot(font);
     if (!slot->metrics_set) {
         return (nt_font_metrics_t){0}; /* resources not loaded yet */
@@ -1780,9 +1752,6 @@ nt_font_metrics_t nt_font_get_metrics(nt_font_t font) {
 nt_font_stats_t nt_font_get_stats(nt_font_t font) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return (nt_font_stats_t){0};
-    }
     nt_font_slot_t *slot = get_slot(font);
     uint16_t cached = 0;
     uint32_t curve_texels = 0;
@@ -1915,9 +1884,6 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
 nt_texture_t nt_font_get_curve_texture(nt_font_t font) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return (nt_texture_t){0};
-    }
     return get_slot(font)->curve_texture;
 }
 
@@ -2053,13 +2019,11 @@ static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *s
             if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
                 const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
                 NT_ASSERT(gi < hdr->glyph_count); /* see find_glyph_in_resources rationale */
-                if (gi < hdr->glyph_count) {
-                    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
-                    out.entry = glyphs + gi;
-                    out.blob = blob;
-                    out.blob_size = blob_size;
-                    return out;
-                }
+                const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
+                out.entry = glyphs + gi;
+                out.blob = blob;
+                out.blob_size = blob_size;
+                return out;
             }
         }
     }

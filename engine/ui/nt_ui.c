@@ -52,7 +52,7 @@ _Static_assert(sizeof(s_default_element_data) == 256 * sizeof(nt_ui_element_data
 // #endregion
 
 // #region clay_error_handler
-/* All Clay errors are fatal; assert compiles out in NT_ASSERT_OFF builds. */
+/* All Clay errors are fatal. */
 static void nt_ui_clay_error_cb(Clay_ErrorData err) {
 #if NT_LOG_MIN_LEVEL < 3
     /* errorText is .length + .chars, NOT NUL-terminated. */
@@ -670,7 +670,6 @@ static inline uint32_t widget_probe_slot(const nt_ui_widget_slot_t *registry, ui
         }
     }
     NT_ASSERT(0 && "widget_registry full — load factor exceeded (raise max_elements)");
-    return 0U;
 }
 
 /* Registry clears each nt_ui_begin, so a slot already holding this id == a duplicate
@@ -1358,10 +1357,6 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
-    /* Fail-closed in OFF builds — assert vanishes; the stack[(*depth)++] below would corrupt memory. */
-    if ((uint32_t)*depth >= NT_UI_WALKER_SCISSOR_DEPTH_CAP) {
-        return;
-    }
 
     /* Both-axes-false is reserved for Clay's floating clipTo=ATTACHED_PARENT marker;
      * user code must always set at least one axis true (asserted below). */
@@ -2235,29 +2230,19 @@ static bool raycast_hit(const float inv_view_proj[16], const nt_ui_baked_xform_t
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py, float screen_w, float screen_h) {
     uint32_t cur_id = start_clip_id;
-    /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang.
-     * Decrement + bail are UNCONDITIONAL (NT_ASSERT vanishes in OFF builds). */
+    /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang. */
     uint32_t guard = NT_UI_WALKER_SCISSOR_DEPTH_CAP;
     while (cur_id != 0U) {
         NT_ASSERT(guard > 0U && "hit_clip_chain: parent chain exceeded scissor depth cap (cycle or runaway nesting)");
-        if (guard == 0U) {
-            return false;
-        }
         guard--;
         float cx;
         float cy;
         float cw;
         float ch;
-        /* Fail-closed on invariant violation rather than letting input through. */
-        if (!nt_ui_clay_priv_bbox_for_id(ctx->clay, cur_id, &cx, &cy, &cw, &ch)) {
-            NT_ASSERT(false && "hit_clip_chain: clip ancestor missing from Clay hashmap");
-            return false;
-        }
+        const bool found = nt_ui_clay_priv_bbox_for_id(ctx->clay, cur_id, &cx, &cy, &cw, &ch);
+        NT_ASSERT(found && "hit_clip_chain: clip ancestor missing from Clay hashmap");
         const int32_t cur_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, cur_id);
-        if (cur_slot < 0 || cur_slot >= N) {
-            NT_ASSERT(false && "hit_clip_chain: clip ancestor slot OOB");
-            return false;
-        }
+        NT_ASSERT(cur_slot >= 0 && cur_slot < N && "hit_clip_chain: clip ancestor slot OOB");
         const nt_ui_baked_xform_t cb = ctx->hit_baked[cur_slot];
         float clx;
         float cly;

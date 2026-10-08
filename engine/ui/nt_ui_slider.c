@@ -274,18 +274,11 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     // #endregion
     // #region axis guard (orientation = AXIS, fill_direction = anchor within it)
     NT_ASSERT((style->orientation == NT_UI_SLIDER_HORIZONTAL || style->orientation == NT_UI_SLIDER_VERTICAL) && "nt_ui_slider: style.orientation must be HORIZONTAL or VERTICAL");
-    /* Coerce a bad/unknown anchor in a LOCAL effective direction; never write back into the caller's
-     * (maybe shared/static) style — that would corrupt other widgets across frames. The local default,
-     * not the NT_ASSERT (gone in OFF), is the real guard against rendering the wrong axis/anchor. */
     const bool vertical = (style->orientation == NT_UI_SLIDER_VERTICAL);
     /* Supported anchors: vertical -> BOTTOM_UP/TOP_DOWN; horizontal -> LTR only. Horizontal RTL is
      * rejected (fill right-anchors while drag/thumb/thumb_pos stay LTR — inconsistent); any UNKNOWN enum
-     * value also fails the explicit test and coerces to the axis default. */
+     * value also fails the explicit test. */
     const bool bad_fill = vertical ? !(style->fill_direction == NT_UI_FILL_BOTTOM_UP || style->fill_direction == NT_UI_FILL_TOP_DOWN) : (style->fill_direction != NT_UI_FILL_LTR);
-    nt_ui_fill_direction_t effective_fill_direction = style->fill_direction;
-    if (bad_fill) {
-        effective_fill_direction = vertical ? NT_UI_FILL_BOTTOM_UP : NT_UI_FILL_LTR;
-    }
     NT_ASSERT(!bad_fill && "nt_ui_slider: unsupported fill_direction for orientation (horizontal: LTR; vertical: BOTTOM_UP/TOP_DOWN)");
     // #endregion
     // #region interaction
@@ -303,7 +296,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     // #region drag math (press-ON-thumb grab vs track jump)
     float frac = nt_ui_clampf(in_frac, 0.0F, 1.0F);
     if (enabled && (in.pressed_now || in.pressed)) {
-        frac = slider_resolve_drag(ctx, id, &in, style, effective_fill_direction, frac, min, max);
+        frac = slider_resolve_drag(ctx, id, &in, style, style->fill_direction, frac, min, max);
     } else {
         /* Release OR disabled-mid-drag: drop the cell so re-enable can't resume a stale grab. */
         nt_ui_state_clear(ctx, slider_drag_id(id));
@@ -344,9 +337,9 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     view->thumb_w = style->thumb_w;
     view->thumb_h = style->thumb_h;
     view->orientation = (uint8_t)style->orientation;
-    view->invert = (uint8_t)(vertical && (effective_fill_direction == NT_UI_FILL_BOTTOM_UP)); /* matches the emit invert */
+    view->invert = (uint8_t)(vertical && (style->fill_direction == NT_UI_FILL_BOTTOM_UP)); /* matches the emit invert */
 
-    slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, effective_fill_direction, eased_frac, a->opacity, decl, enabled);
+    slider_compose(ctx, data, label_layer, id, label, cell, &style->states[NT_UI_SLIDER_IDLE], style, style->fill_direction, eased_frac, a->opacity, decl, enabled);
 
     /* Changed when the drag moved the (snapped) fraction off the incoming game value. */
     *changed = enabled && (fabsf(frac - in_frac) > 1e-6F);

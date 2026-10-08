@@ -693,15 +693,10 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_atlas)
 
-    # nt_atlas.c recompiled with NT_ASSERT_MODE=0: proves the runtime-pack
-    # validator's documented hard-rejection contract does not depend on asserts.
-    # This is a parser-contract test, not general support for OFF. The wrapper
-    # uses #undef because a per-target -D collides with CI's global definition.
-    add_executable(test_atlas_assert_off unit/test_atlas_assert_off.c unit/test_helpers/nt_atlas_assert_off_tu.c)
-    target_link_libraries(test_atlas_assert_off PRIVATE nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
-    target_include_directories(test_atlas_assert_off PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit" "${CMAKE_SOURCE_DIR}/engine" "${CMAKE_SOURCE_DIR}/engine/atlas" "${CMAKE_SOURCE_DIR}/shared/include")
-    target_compile_definitions(test_atlas_assert_off PRIVATE NT_LOG_DOMAIN="atlas" _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    nt_setup_test_target(test_atlas_assert_off)
+    add_executable(test_atlas_validation unit/test_atlas_validation.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_atlas_validation PRIVATE nt_atlas nt_resource nt_hash nt_http_stub nt_fs_stub nt_log_stub unity)
+    target_include_directories(test_atlas_validation PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    nt_setup_test_target(test_atlas_validation)
 
     # Parser stays independently testable without linking the benchmark executable.
     add_executable(test_atlas_bench_parse
@@ -1259,12 +1254,6 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_basisu_stub PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_basisu_stub)
 
-    # Stub recompiled with NT_ASSERT_MODE=0: proves the failure-return safety
-    # net behind the asserts (nt_gfx's activate error path stays reachable).
-    add_executable(test_basisu_stub_off unit/test_basisu_stub_off.c unit/test_helpers/nt_basisu_stub_assert_off_tu.c)
-    target_link_libraries(test_basisu_stub_off PRIVATE nt_core nt_basisu_transcoder_interface unity)
-    nt_setup_test_target(test_basisu_stub_off)
-
     # --- meshwire real impl: SOA re-interleave + index-decode rejection ---
     add_executable(test_meshwire unit/test_meshwire.c)
     target_link_libraries(test_meshwire PRIVATE nt_meshwire nt_meshwire_encoder unity)
@@ -1291,10 +1280,6 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_meshwire_stub PRIVATE nt_meshwire_stub nt_core unity)
     target_include_directories(test_meshwire_stub PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_meshwire_stub)
-
-    add_executable(test_meshwire_stub_off unit/test_meshwire_stub_off.c unit/test_helpers/nt_meshwire_stub_assert_off_tu.c)
-    target_link_libraries(test_meshwire_stub_off PRIVATE nt_core unity)
-    nt_setup_test_target(test_meshwire_stub_off)
 
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c unit/test_helpers/nt_assert_trap.c)

@@ -575,10 +575,7 @@ static void test_parse_obj_null_tagset_graceful(void) {
     TEST_ASSERT_FALSE_MESSAGE(found_object, "<obj> with NULL tagset produced NO object run (skipped)");
 }
 
-/* (8l) <img=alias:region/> with a NULL tagset -> NT_ASSERT in FULL (alias needs a tagset). Same OFF
- * hard guard (early-return inside the colon branch before nt_ui_rich_tagset_lookup_atlas derefs ts);
- * by-construction OFF-safe, not unit-testable without an OFF preset. A VALID base is supplied so the
- * trap is the tagset assert (the colon branch), not the base-NULL guard at the top of rich_parse_img. */
+/* A valid base isolates missing-tagset handling from unrelated configuration errors. */
 static void parse_img_null_tagset(const char *m) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -589,8 +586,7 @@ static void parse_img_null_tagset(const char *m) {
     base.default_atlas.atlas = s_fx.atlas.handle;
     nt_ui_rich_parse(s_fx.ctx, NULL, &base, m, strlen(m));
 }
-/* (8l) <img=alias:region/> with a NULL tagset (alias needs a tagset) -> graceful: log + skip the
- * image (early-return BEFORE the lookup derefs the NULL tagset), no IMAGE run. No trap. */
+/* An atlas alias with a NULL tagset logs and skips the image without asserting. */
 static void test_parse_img_alias_null_tagset_graceful(void) {
     parse_img_null_tagset("a<img=a:b/>b"); /* no trap */
     const uint32_t runs = nt_ui_rich_test_run_count(s_fx.ctx);
@@ -851,7 +847,7 @@ static void test_parse_over_deep_style_stack_graceful(void) {
 /* (10c) cap-parity regression (#1+#2): a BALANCED <b>xN + </b>xN at N == the parser tag cap must
  * parse WITHOUT a trap (no over-cap), and the trailing text must carry the BASE style -- proof the
  * style stack balanced exactly back to base (depth never desynced from the tag stack, so no pop
- * underflow / OOB in OFF). Sweeps N up to NT_UI_RICH_PARSE_TAG_DEPTH. */
+ * underflow / OOB). Sweeps N up to NT_UI_RICH_PARSE_TAG_DEPTH. */
 static void test_parse_balanced_at_cap_stays_synced(void) {
     /* Read the REAL NT_UI_RICH_PARSE_TAG_DEPTH (private to nt_ui_rich_text.c) via the test surface so the
      * sweep always lands on the true cap. The engine _Static_assert ties NT_UI_RICH_STACK_DEPTH == this + 1,

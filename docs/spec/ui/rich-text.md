@@ -42,8 +42,13 @@ and `valign` is one of `baseline|middle|top|bottom` (default `middle`); these
 mirror the builder `nt_ui_rich_image(ref, valign, oy, scale)` args, so a tagged
 markup `<img>` and the builder call produce a byte-identical run. A malformed
 attr (bad float, unknown key, unknown valign) is **logged once (`nt_log_warn_unique`) and skipped** —
-markup is untrusted localization DATA, so a bad value degrades gracefully (the rest renders) and never
-asserts; the code-first builder, being trusted game code, still asserts. Only the **NAMED** resolves go through the
+markup is untrusted localization DATA, so malformed attributes warn and leave the rest rendering;
+the code-first builder, being trusted game code, asserts on invalid arguments. This recovery does not
+cover block capacity or unavailable features: the game must keep runs, styles, atoms, link rects
+and distinct layers within the configured limits, for both markup and code-first calls;
+exceeding these limits asserts. The code-first text-byte limit also asserts; markup truncates
+excess literal bytes at a complete UTF-8 boundary. Excess parser nesting warns and skips tags;
+effect-slot overflow uses the identity behavior described below. Only the **NAMED** resolves go through the
 **tagset**: `<color=name>`, `<font=name>`, `<fx=name>` (optionally tuned:
 `<fx=name amp=8 speed=3>` — `key=value` float pairs after the name, tunable effects
 only), an `<img=alias:region/>` atlas alias, and the self-closing
@@ -102,9 +107,8 @@ same requirement. This also applies to syntactically valid markup: a positive
 `<outline>` width or `<b>` that requires missing synthetic support is a game
 configuration error and asserts. Malformed tags and values still warn and are
 skipped; they are not requests for an unavailable feature. A real bold family
-face remains valid with OFF. FULL diagnoses, release TRAP terminates. Disabling assertions
-does not promise recovery after violating this precondition. Existing finite
-input normalization remains unchanged.
+face remains valid with the feature OFF. FULL diagnoses, release TRAP terminates.
+Existing finite input normalization remains unchanged.
 
 The showcase displays an opt-in instruction in the synthetic weight/outline
 sections under OFF and keeps real font styles and other decorations active.
@@ -238,7 +242,7 @@ nt_ui_rich_pop(ctx);
   is **set/clear, NOT push/pop**: `nt_ui_rich_link(ctx, id)` starts a pending
   link, `nt_ui_rich_link(ctx, 0)` ends it (`</link>` does the same); links never
   nest (HTML no-nested-anchor rule). Style push/pop is separate — popping past
-  the base style asserts in debug and hard-no-ops in shipping.
+  the base style asserts in both FULL and TRAP.
 - **Custom objects** (`<obj>`): a Flutter-style WidgetSpan — the solver reserves
   a box via `measure_fn` (text wraps around it); the widget calls the game's
   `draw_fn(user_data, x, y, w, h, color, world_mat4)` at the solved box. The engine
@@ -276,13 +280,11 @@ z, each atom carries a **layer** (z-order band):
   **any** kind takes layer N, overriding the per-kind default. `</layer>` /
   `nt_ui_rich_pop` restores. The parser drives the same builder, so `<layer=N>`
   produces a **byte-identical** run-list to `push_layer(N)`. Malformed / out-of-range
-  (`255`, `>254`, empty, non-numeric) is a builder-validate assert in DEBUG and a
-  **hard skip to AUTO** that survives `NT_ASSERT` OFF (untrusted-markup hard-guard
-  rule).
+  (`255`, `>254`, empty, non-numeric) markup warns and falls back to AUTO in
+  every build. The code-first builder accepts `255` as the AUTO sentinel.
 - **Layer-ordered self-emit.** The self-emit gathers the **distinct** layers present
-  (insertion-sorted ascending, capped at `NT_UI_RICH_MAX_LAYERS = 16` with a hard
-  drop guard — the over-cap distinct layers are dropped **by encounter order**, not by
-  value, and the drop asserts in DEBUG), then for each band ascending emits `{font-grouped text
+  (insertion-sorted ascending, capped at `NT_UI_RICH_MAX_LAYERS = 16`; exceeding
+  the cap asserts), then for each band ascending emits `{font-grouped text
   → images → objects}` in call order, so band N fully lands before band N+1 and the block is
   a self-contained z island.
 - **Within-band z (text < image < object).** Inside ONE band the self-emit draws the

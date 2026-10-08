@@ -79,7 +79,6 @@ def main():
     assert "font-contract-accepted" in run(command)
     cache = (build / "CMakeCache.txt").read_text(encoding="utf-8")
     assert "NT_FONT_EMBOLDEN_ENABLED:BOOL=OFF" in cache, "composition check requires default embolden OFF"
-    assert "NT_ASSERT_MODE:STRING=0\n" not in cache, "rejection requires supported assertions"
     for mode in ("positive", "negative", "tiny", "outline"):
         rejected = subprocess.run(command + [mode], capture_output=True, text=True, encoding="utf-8", errors="replace")
         assert "font-contract-ready" in rejected.stdout, (mode, rejected.stdout, rejected.stderr)

@@ -47,7 +47,7 @@ void setUp(void) {
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_resource_init(&rdesc));
     /* material runtime + component, for the NT_REF_MATERIAL label-resolution test. */
     nt_material_desc_t matdesc = nt_material_desc_defaults();
-    TEST_ASSERT_EQUAL_INT(NT_OK, nt_material_init(&matdesc));
+    nt_material_init(&matdesc);
     nt_material_comp_desc_t mcdesc = nt_material_comp_desc_defaults();
     TEST_ASSERT_EQUAL_INT(NT_OK, nt_material_comp_init(&mcdesc));
     nt_skin_comp_desc_t sdesc = nt_skin_comp_desc_defaults();

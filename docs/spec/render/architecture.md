@@ -116,7 +116,7 @@ its `nt_gfx_end_frame`, so a toggle inside a frame could split them.
 one frame, allocated once at init; `nt_gfx_desc_defaults()` sets 32 KiB (over three times
 the largest measured frame, Sponza at 8.9 KB; a mesh run records 60-100 bytes),
 and init asserts at least 4 bytes. The stream never grows: an overflow logs the
-needed and free bytes and stops the program, with assertions OFF too, because
+needed and free bytes and stops the program because
 the capacity is the game's budget. `nt_gfx_counters_t.stream_bytes` reports the
 bytes the frame recorded, to size the capacity from a real scene.
 
@@ -500,7 +500,7 @@ stream at 0, so the game sets the budget of each stream it uses. A zero
 capacity disables the stream: no staging and no buffer, and its allocations stop the program as an
 overflow, so a game pays only for the streams it uses.
 Storage never grows: an overflow logs the stream, the needed and the free bytes
-and stops the program, with assertions OFF too, because the capacity is the
+and stops the program because the capacity is the
 game's budget. `nt_gfx_counters_t.frame_bytes` reports each stream's use of the
 frame, final after `end_frame`, to size the capacities from a real scene.
 Text uses VERTEX and INDEX: 208 bytes of vertices and 24 bytes of indices per

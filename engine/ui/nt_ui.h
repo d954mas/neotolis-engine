@@ -76,7 +76,7 @@
  * encloses it — including a game floating's own zIndex, and there is no way out of that context: a
  * game floating that must stay under all UI belongs at the root level. Budget: that game zIndex plus
  * one stride per overlay level opened inside it must fit int16, or Clay clamps and reports it
- * (nt_ui asserts; an NT_ASSERT_OFF build paints the merged band).
+ * (nt_ui asserts).
  * Per-context override via nt_ui_create_desc_t.modal_zband_stride (seeded from this in
  * nt_ui_create_desc_defaults; must be > 1 — an overlay's catcher needs the band below its panel). */
 #define NT_UI_MODAL_ZBAND_STRIDE 1000

@@ -229,7 +229,7 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
     NT_ASSERT(hdr->magic == NT_ATLAS_MAGIC && "atlas blob: bad magic (not an atlas or corrupted)");
     NT_ASSERT(hdr->version == NT_ATLAS_VERSION && "atlas blob: version mismatch (rebuild packs with current builder)");
-    if (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION || hdr->page_count > NT_ATLAS_MAX_PAGES || !(hdr->inverse_pixels_per_unit > 0.0F) || !isfinite(hdr->inverse_pixels_per_unit)) {
+    if (hdr->page_count > NT_ATLAS_MAX_PAGES || !(hdr->inverse_pixels_per_unit > 0.0F) || !isfinite(hdr->inverse_pixels_per_unit)) {
         return false;
     }
 
@@ -307,10 +307,7 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     return true;
 }
 
-/* AUX_BACKED slots become READY after activate, so malformed blobs must fail
- * before the resource registry publishes a winner. on_resolve re-validates the
- * same bytes: both entry points stay independently safe (tests drive resolve
- * directly), and the duplicate scan runs once per blob change, not per frame. */
+/* AUX_BACKED slots become READY after activate, so validation precedes publication. */
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
     nt_atlas_blob_view_t view;
     return atlas_try_validate_and_carve_blob(data, size, &view) ? 1U : 0U;
@@ -345,13 +342,9 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     }
 
     nt_atlas_blob_view_t view;
-    /* Runtime pack bytes are untrusted: validation is both a hard gate and what
-     * carves the view used below. */
+    /* Activation already validated this blob; resolve revalidates and carves its view. */
     const bool blob_ok = atlas_try_validate_and_carve_blob(data, size, &view);
     NT_ASSERT(blob_ok && "atlas blob: validation failed");
-    if (!blob_ok) {
-        return;
-    }
 
     nt_atlas_data_t *ad = (nt_atlas_data_t *)*user_data;
 

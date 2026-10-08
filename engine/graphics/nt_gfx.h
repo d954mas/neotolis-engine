@@ -1048,7 +1048,7 @@ typedef struct {
 
 extern nt_gfx_frame_storage_t g_nt_gfx_frame_storage[NT_GFX_FRAME_STREAM_COUNT];
 
-/* Logs the needed and free bytes and stops, also with assertions OFF: the capacity is the game's budget. */
+/* Logs the needed and free bytes and stops: the capacity is the game's budget. */
 _Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align);
 
 /* Returns size bytes at an offset that is a multiple of align; writes the offset to *out_offset. */

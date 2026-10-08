@@ -955,8 +955,7 @@ void nt_devapi_register_input(void) {
     /* The only core coupling point: core/net call these generic hooks, never the group symbols. */
     nt_devapi_register_tick(nt_devapi_input_update);
     nt_devapi_register_reset(nt_devapi_input_reset);
-    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT
-       compiles out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
+    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
     int n = (int)(sizeof(k_input_cmds) / sizeof(k_input_cmds[0]));
     for (int i = 0; i < n; i++) {
         nt_result_t rr = nt_devapi_register(&k_input_cmds[i], k_input_handlers[i], NULL);

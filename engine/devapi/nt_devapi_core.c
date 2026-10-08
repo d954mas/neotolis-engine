@@ -75,8 +75,7 @@ static const nt_devapi_handler_fn k_core_handlers[] = {cmd_ping, cmd_engine_info
 _Static_assert(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]) == sizeof(k_core_handlers) / sizeof(k_core_handlers[0]), "core: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_core(void) {
-    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT
-       compiles out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
+    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
     int n = (int)(sizeof(k_core_cmds) / sizeof(k_core_cmds[0]));
     for (int i = 0; i < n; i++) {
         nt_result_t rr = nt_devapi_register(&k_core_cmds[i], k_core_handlers[i], NULL);

@@ -90,7 +90,8 @@ void nt_ui_rich_tagset_register_effect(nt_ui_rich_tagset_t *ts, const char *name
 void nt_ui_rich_tagset_register_effect_fn(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_fx_fn fn, void *user_data);
 void nt_ui_rich_tagset_register_object_tag(nt_ui_rich_tagset_t *ts, const char *name, nt_ui_rich_object_measure_fn measure_fn, nt_ui_rich_object_draw_fn draw_fn, void *user_data);
 
-/* ---- Lookup by name_hash (xxh64). Returns true + writes the out param on hit. ---- */
+/* ---- Lookup by name_hash (xxh64). Tagset and output pointers must be non-NULL.
+ * Returns true and writes outputs on hit; false leaves outputs unchanged. ---- */
 bool nt_ui_rich_tagset_lookup_font(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_font_t out_family[4]);
 bool nt_ui_rich_tagset_lookup_atlas(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, nt_resource_t *out_atlas);
 bool nt_ui_rich_tagset_lookup_color(const nt_ui_rich_tagset_t *ts, uint64_t name_hash, uint32_t *out_color_abgr);
