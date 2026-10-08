@@ -96,8 +96,8 @@ static inline nt_material_desc_t nt_material_desc_defaults(void) {
 
 typedef struct {
     /* Borrowed: the material never links, destroys or inspects it. May name a
-     * program that died with the GL context or that its owner destroyed -- ask
-     * nt_gfx_program_ready(program) before building a pipeline from it. */
+     * program still linking, one that died with the GL context or one its owner
+     * destroyed -- ask nt_gfx_program_ready(program) before drawing with it. */
     nt_program_t program;
     /* Declared at create and never rewritten (unlike params). Renderers normally
      * resolve these at draw; a documented supplied semantic may replace its

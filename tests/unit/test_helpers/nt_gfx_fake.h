@@ -54,8 +54,11 @@ int nt_gfx_fake_uniform_int_value_at(uint32_t index);
 uint32_t nt_gfx_fake_uniform_vec4_count(void);
 uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index);
 void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]);
-void nt_gfx_fake_fail_next_program_create(void);
+/* Program links finish in nt_gfx_begin_frame; these act there. Hold keeps every link pending. */
+void nt_gfx_fake_fail_next_program_link(void);
+void nt_gfx_fake_hold_program_links(bool hold);
 void nt_gfx_fake_lose_context_on_program_create(void);
+void nt_gfx_fake_lose_context_on_program_link(void);
 void nt_gfx_fake_fail_next_pipeline_create(void);
 void nt_gfx_fake_fail_next_sampler_create(void);
 /* Viewport size the front-end passed to the last begin_pass; 0 for the default framebuffer. */

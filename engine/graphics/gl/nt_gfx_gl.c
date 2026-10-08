@@ -28,6 +28,11 @@
 #define nt_gl_clear_depth(d) NT_GL(glClearDepth, (double)(d))
 #endif
 
+/* KHR and ARB_parallel_shader_compile share the value; GLES3 headers lack it. */
+#ifndef GL_COMPLETION_STATUS_KHR
+#define GL_COMPLETION_STATUS_KHR 0x91B1
+#endif
+
 #if NT_GFX_GPU_TIMING_ENABLED
 /* EXT_disjoint_timer_query_webgl2 / ARB_timer_query constants. Spec-fixed
  * values — define them inline so the file compiles on both GLES3 (where
@@ -126,7 +131,7 @@ typedef struct {
  * state, and core profile rejects it with VAO 0 bound (INVALID_OPERATION). */
 static GLuint s_ebo_upload_vao;
 
-static nt_gfx_gl_program_t *s_programs;           /* linked programs, indexed by slot */
+static nt_gfx_gl_program_t *s_programs;           /* programs, linked or linking, indexed by slot */
 static nt_gfx_gl_pipeline_t *s_pipelines;         /* pipeline data, indexed by slot */
 static nt_gfx_gl_vertex_input_t *s_vertex_inputs; /* vertex-input VAOs, indexed by slot */
 static GLuint *s_buffer_gl;                       /* GL buffer names, indexed by slot */
@@ -1219,7 +1224,7 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
 
     NT_GL(glCompileShader, shader);
     /* Per MDN best practice: do NOT check GL_COMPILE_STATUS here.
-     * Checking forces synchronous compilation.  Errors surface at link time. */
+     * Checking forces synchronous compilation.  Errors surface when nt_gfx_begin_frame finishes the link. */
     return (uint32_t)shader;
 }
 
@@ -1280,44 +1285,21 @@ void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     NT_GL(glDeleteShader, (GLuint)backend_handle);
 }
 
-/* Links a stage pair and binds every registered global UBO block. Returns 0 on
- * link failure, after logging both stages and the program log. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
-static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
-    /* Emscripten's glCreateProgram throws on the null program some browsers return on a lost context. */
-    if (nt_gfx_gl_ctx_query_lost()) {
-        return 0;
-    }
-    GLuint program = NT_GL_RET0(glCreateProgram);
-    NT_GL(glAttachShader, program, (GLuint)vs_backend);
-    NT_GL(glAttachShader, program, (GLuint)fs_backend);
-    NT_GL(glLinkProgram, program);
-
-    GLint linked = 0;
-    NT_GL(glGetProgramiv, program, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        /* A loss fails the link before its event arrives; the query latches it for the caller. */
-        if (!nt_gfx_gl_ctx_query_lost()) {
-            nt_gfx_gl_log_shader(vs_backend, "vertex");
-            nt_gfx_gl_log_shader(fs_backend, "fragment");
-            nt_gfx_gl_log_program(program);
-        }
-
-        NT_GL(glDeleteProgram, program);
-        return 0;
-    }
-
-    const nt_global_block_t *blocks = s_init_desc.global_blocks;
-    for (uint32_t bi = 0; bi < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; bi++) {
-        if (blocks[bi].name == NULL) {
+/* Compile errors surface only here: shader creation never reads COMPILE_STATUS. */
+static void nt_gfx_gl_log_link_failure(GLuint program) {
+    nt_gfx_gl_log_program(program);
+    GLsizei count = 0;
+    GLuint stages[2] = {0, 0};
+    NT_GL(glGetAttachedShaders, program, 2, &count, stages);
+    for (GLsizei i = 0; i < count; i++) {
+        /* Emscripten drops a deleted stage's name mapping, and reading its log would throw. */
+        if (!NT_GL_RET(glIsShader, stages[i])) {
             continue;
         }
-        GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, blocks[bi].name);
-        if (block_index != GL_INVALID_INDEX) {
-            NT_GL(glUniformBlockBinding, program, block_index, (GLuint)blocks[bi].binding_slot);
-        }
+        GLint type = 0;
+        NT_GL(glGetShaderiv, stages[i], GL_SHADER_TYPE, &type);
+        nt_gfx_gl_log_shader(stages[i], type == GL_VERTEX_SHADER ? "vertex" : "fragment");
     }
-    return program;
 }
 
 static void nt_gfx_gl_write_array_index(char *suffix, GLint element) {
@@ -1488,11 +1470,10 @@ static void write_sampler_units(GLuint program, const nt_gfx_gl_program_t *rec) 
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend) {
-    GLuint program = nt_gfx_gl_link_program(vs_backend, fs_backend);
-    if (program == 0) {
+    /* Emscripten's glCreateProgram throws on the null program some browsers return on a lost context. */
+    if (nt_gfx_gl_ctx_query_lost()) {
         return 0;
     }
-
     uint32_t slot = 0;
     for (uint32_t i = 1; i <= s_init_desc.max_programs; i++) {
         if (s_programs[i].program == 0) {
@@ -1501,23 +1482,61 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
         }
     }
     if (slot == 0) {
-        NT_GL(glDeleteProgram, program);
         return 0; /* no free slots */
     }
+    GLuint program = NT_GL_RET0(glCreateProgram);
+    if (program == 0) {
+        return 0; /* a zero name would leave the slot marked free */
+    }
+    NT_GL(glAttachShader, program, (GLuint)vs_backend);
+    NT_GL(glAttachShader, program, (GLuint)fs_backend);
+    NT_GL(glLinkProgram, program);
+    s_programs[slot].program = program;
+    return slot;
+}
 
-    if (!nt_gfx_gl_cache_uniforms(program, &s_programs[slot])) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- issued-call records expand at owning sites
+nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle, bool poll) {
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_programs && s_programs[backend_handle].program != 0);
+    nt_gfx_gl_program_t *rec = &s_programs[backend_handle];
+    /* Any other program query before completion blocks until the driver finishes the link. */
+    GLint done = GL_TRUE;
+    if (poll) {
+        NT_GL(glGetProgramiv, rec->program, GL_COMPLETION_STATUS_KHR, &done);
+    }
+    if (!done) {
+        return NT_GFX_RESULT_UNREADY;
+    }
+    GLint linked = 0;
+    NT_GL(glGetProgramiv, rec->program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        /* A loss fails the link before its event arrives; the caller's query latches it. */
+        if (!nt_gfx_gl_ctx_query_lost()) {
+            nt_gfx_gl_log_link_failure(rec->program);
+        }
+        return NT_GFX_RESULT_BACKEND_FAILURE;
+    }
+    const nt_global_block_t *blocks = s_init_desc.global_blocks;
+    for (uint32_t bi = 0; bi < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; bi++) {
+        if (blocks[bi].name == NULL) {
+            continue;
+        }
+        GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, rec->program, blocks[bi].name);
+        if (block_index != GL_INVALID_INDEX) {
+            NT_GL(glUniformBlockBinding, rec->program, block_index, (GLuint)blocks[bi].binding_slot);
+        }
+    }
+    if (!nt_gfx_gl_cache_uniforms(rec->program, rec)) {
         if (!nt_gfx_gl_ctx_query_lost()) {
             NT_LOG_ERROR("program uniform reflection failed");
         }
-        NT_GL(glDeleteProgram, program);
-        return 0;
+        return NT_GFX_RESULT_BACKEND_FAILURE;
     }
-    write_sampler_units(program, &s_programs[slot]);
-    s_programs[slot].program = program;
+    write_sampler_units(rec->program, rec);
 #if NT_GFX_CAPTURE_ENABLED
-    capture_program_definition(slot);
+    capture_program_definition(backend_handle);
 #endif
-    return slot;
+    return NT_GFX_RESULT_ACCEPTED;
 }
 
 void nt_gfx_backend_destroy_program(uint32_t backend_handle) {

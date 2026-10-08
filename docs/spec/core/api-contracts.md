@@ -150,19 +150,26 @@ A program's linked executable and identity are immutable after
 `nt_gfx_make_program`; its uniform values and block bindings remain mutable.
 Recovery requires the owner to destroy the old program and link a new handle.
 
-Handle validity and GPU liveness are separate. `nt_gfx_program_valid` reports
+Handle validity and readiness are separate. `nt_gfx_program_valid` reports
 whether the handle still refers to a live slot; `nt_gfx_program_ready` reports
-whether the GL program behind it exists. Processing context loss clears readiness while
-handles stay valid, and because no API relinks, a valid handle that is not ready
-never becomes ready again -- that state is terminal, not transitional.
-`nt_gfx_make_pipeline` requires readiness.
+whether the link finished on the current context. `nt_gfx_make_program` only
+starts the link, and `nt_gfx_begin_frame` finishes it, so a new program is
+ready no earlier than the next frame and never becomes ready inside a
+frame (see [shader](../render/shader.md#runtime-objects-shadercode-program)).
+Processing context loss clears readiness while handles stay valid, and because
+no API relinks, that program never becomes ready again: a valid program that is
+not ready is either still linking or lost. `nt_gfx_make_pipeline` accepts a
+linking or ready program; while the loss is latched it returns invalid, and after
+the restore a lost program asserts. Binding a pipeline whose program is not
+ready asserts.
 
 `nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op and asserts on
 a stale non-zero handle. Clear the owner's variable to `NT_PROGRAM_INVALID`
 when destroying it.
 
-A link failure is a developer error and asserts, alongside an invalid stage
-handle, and an exhausted program pool.
+A link failure is a developer error and asserts in the `nt_gfx_begin_frame`
+that finishes the link; an invalid stage handle and an exhausted program pool
+assert at `nt_gfx_make_program`.
 
 `nt_gfx_desc_t.global_blocks` declares the global name -> binding slot list at
 `nt_gfx_init` (up to `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS`; an entry with a NULL name is unused); every
@@ -184,7 +191,7 @@ overflow. On a lost context the call allocates nothing and ends `CONTEXT_LOST`.
 `nt_gfx_make_program` returns `NT_PROGRAM_INVALID` for the two states a context
 loss leaves behind, and for nothing else. The first is the loss itself: a loss
 already latched (by `nt_gfx_begin_frame` or an earlier failed call, which also
-covers a stage the loss left 0), or a link the browser reports lost, which latches it. The second
+covers a stage the loss left 0), or a program creation the browser reports lost, which latches it. The second
 is a stage handle that is still live but whose GPU object that loss discarded —
 permanently unready (END result `UNREADY`), so the owner recreates the stage and
 links again. Both are
@@ -209,12 +216,11 @@ pipeline resolved at `set_material` stays live for the frame's draws.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
-the first assignment, after context loss is processed, or after program
-destruction. The mesh, sprite and text renderers skip unready programs and warn once until
-a pipeline is built again. The immediate-mode `nt_sprite_renderer_set_material` /
-`nt_text_renderer_set_material` entry points assert only that a program was
-assigned. Renderers skip unready programs, and `nt_gfx_make_pipeline` checks
-context loss before asserting readiness.
+the first assignment, while the program links, after context loss is processed,
+or after program destruction. The mesh, sprite and text renderers skip unready
+programs silently: a linking program is a normal state of every cold start. The
+immediate-mode `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material`
+entry points assert only that a program was assigned.
 
 Every material declares a slot for every sampler its program uses. A specialized
 renderer may document that it supplies the runtime resource and sampler for a
@@ -360,7 +366,7 @@ The sampler class is part of the linked interface:
 | `sampler2DShadow` | Depth | Comparison enabled |
 | `usampler2D` | Unsigned integer | Comparison disabled |
 
-`isampler2D` and sampler dimensions other than 2D are rejected at link because
+`isampler2D` and sampler dimensions other than 2D are rejected when the link finishes because
 the public texture formats cannot satisfy them.
 
 ### Texture activation

@@ -99,6 +99,7 @@ static void route_a_handler(const nt_ui_custom_frame_t *frame, void *userdata) {
  * with the per-vertex a_radial block baked in. */
 static void test_route_a_custom_binds_radial_material(void) {
     route_a_ctx_t rc = {.atlas = s_fx.atlas.handle, .region_index = s_fx.atlas.white_region_idx, .radial_mat = make_radial_material(), .calls = 0};
+    ui_walker_fixture_next_frame(&s_fx);
     nt_ui_set_custom_handler(s_fx.ctx, route_a_handler, &rc);
 
     static nt_ui_custom_data_t cd;
@@ -130,6 +131,7 @@ static void test_route_a_custom_binds_radial_material(void) {
  * each emit continues the previous draw: one draw for all N. */
 static void test_route_a_custom_shared_material_merges(void) {
     route_a_ctx_t rc = {.atlas = s_fx.atlas.handle, .region_index = s_fx.atlas.white_region_idx, .radial_mat = make_radial_material(), .calls = 0};
+    ui_walker_fixture_next_frame(&s_fx);
     nt_ui_set_custom_handler(s_fx.ctx, route_a_handler, &rc);
 
     static nt_ui_custom_data_t cd[4];
@@ -189,6 +191,7 @@ static void make_image(int idx, float x, nt_resource_t atlas, uint32_t region_in
 /* N IMAGE radials sharing ONE material record one draw: the draw-call count is CONSTANT in N. */
 static void test_route_b_shared_material_batches(void) {
     const nt_material_t radial = make_radial_material();
+    ui_walker_fixture_next_frame(&s_fx);
     const uint32_t region = s_fx.atlas.white_region_idx;
 
     /* Two radials sharing one material. */
@@ -219,6 +222,7 @@ static void test_route_b_shared_material_batches(void) {
  * correctly: base (RECT) + radial (IMAGE) = a material switch (2 draws). */
 static void test_route_b_distinct_material_switches(void) {
     const nt_material_t radial = make_radial_material();
+    ui_walker_fixture_next_frame(&s_fx);
 
     /* RECT on base material, then a radial IMAGE with a distinct material. */
     Clay_RenderCommand *r = &s_test_cmds[0];
@@ -347,6 +351,7 @@ static void test_radial_style_abi(void) {
 static void test_radial_emit_bakes_payload(void) {
     nt_ui_radial_style_t style = nt_ui_radial_style_defaults();
     style.material = make_radial_material();
+    ui_walker_fixture_next_frame(&s_fx);
     style.inner_radius_norm = 0.5F;
 
     const float start = 0.25F;
@@ -386,6 +391,7 @@ static void test_radial_emit_bakes_payload(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_image_custom_injects_aspect(void) {
     const nt_material_t mat = make_radial_material();
+    ui_walker_fixture_next_frame(&s_fx);
     const float block[8] = {7.0F, 8.0F, 9.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
 
     nt_pointer_t mouse = {0};
@@ -444,6 +450,7 @@ static void test_image_custom_name_bound_reorder_safe(void) {
     desc.attr_map_count = 2;
     desc.label = "perm_test_material";
     const nt_material_t mat = nt_material_create(&desc);
+    ui_walker_fixture_next_frame(&s_fx);
 
     /* Block in attr_map order: a_layout placeholders @0..3, a_radial data @4..7. */
     const float block[8] = {0.0F, 0.0F, 0.0F, 0.0F, 7.0F, 8.0F, 9.0F, 0.0F};
@@ -489,6 +496,7 @@ static void test_image_custom_name_bound_reorder_safe(void) {
 static void test_radial_fill_emit_payload(void) {
     nt_ui_radial_style_t style = nt_ui_radial_style_defaults();
     style.material = make_radial_material();
+    ui_walker_fixture_next_frame(&s_fx);
 
     const float start = 0.0F;
     const float sweep = 2.0F * WGT_PI;
@@ -583,6 +591,7 @@ static void radial_image_walk(nt_atlas_region_ref_t *ref, nt_ui_radial_image_sty
 static void test_radial_image_region_bakes_payload(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
     style.material = make_radial_image_material();
+    ui_walker_fixture_next_frame(&s_fx);
     style.inner_radius_norm = 0.5F;
 
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
@@ -612,7 +621,8 @@ static void test_radial_image_region_bakes_payload(void) {
 static void test_radial_image_reveal_mode_plumbed(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
     style.material = make_radial_image_material_mode(NT_UI_RADIAL_REVEAL_HIDE); /* == 2 */
-    style.tint_color_packed = 0xFF0080FFU;                                      /* 0xAABBGGRR: r=255, g=128, b=0 -> orange */
+    ui_walker_fixture_next_frame(&s_fx);
+    style.tint_color_packed = 0xFF0080FFU; /* 0xAABBGGRR: r=255, g=128, b=0 -> orange */
     style.tint_strength = 0.75F;
 
     /* The material carries the baked mode before any walk. */
@@ -660,6 +670,7 @@ static void test_radial_image_style_abi(void) {
 static void test_radial_image_packed_region_bakes_uvrect(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
     style.material = make_radial_image_material();
+    ui_walker_fixture_next_frame(&s_fx);
 
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.packed_region_idx);
     radial_image_walk(&ref, &style, 64.0F, 64.0F);
@@ -681,6 +692,7 @@ static void test_radial_image_packed_region_bakes_uvrect(void) {
 static void test_radial_image_fill_emit(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
     style.material = make_radial_image_material();
+    ui_walker_fixture_next_frame(&s_fx);
 
     const float start = 0.0F;
     const float sweep = 2.0F * WGT_PI;
@@ -729,6 +741,7 @@ static void radial_image_walk_under_opacity(nt_atlas_region_ref_t *ref, nt_ui_ra
 static void test_radial_image_opacity_preserves_tint_strength(void) {
     nt_ui_radial_image_style_t style = nt_ui_radial_image_style_defaults();
     style.material = make_radial_image_material_mode(NT_UI_RADIAL_REVEAL_TINT);
+    ui_walker_fixture_next_frame(&s_fx);
     style.tint_strength = 0.6F; /* defaults to 0.6, asserted below as the un-faded value */
 
     nt_atlas_region_ref_t ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);

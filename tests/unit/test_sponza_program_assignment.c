@@ -1,4 +1,5 @@
 #include "test_helpers/nt_gfx_fake.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -109,6 +110,13 @@ static void load_all_stages(void) {
     nt_resource_step();
 }
 
+/* Assignment happens when a link starts; the link finishes at a later begin_frame. */
+static void wait_scene_links(void) {
+    for (uint32_t type = 0; type < 3U; type++) {
+        nt_test_gfx_link_wait(s_programs[type].program);
+    }
+}
+
 static void assert_scene_programs(void) {
     for (uint32_t i = 0; i < TEST_NODE_COUNT; i++) {
         const nt_material_info_t *info = nt_material_get_info(s_materials[i]);
@@ -178,6 +186,7 @@ static void test_stages_before_manifest_assigns_at_material_creation(void) {
     load_all_stages();
     link_programs();
     load_manifest();
+    wait_scene_links();
     assert_scene_programs();
     assert_idle_link();
 }
@@ -191,6 +200,7 @@ static void test_manifest_before_stages_assigns_all_programs_in_one_step(void) {
     s_assignment_count = 0;
     link_programs();
     TEST_ASSERT_EQUAL_UINT32(TEST_NODE_COUNT, s_assignment_count);
+    wait_scene_links();
     assert_scene_programs();
     assert_idle_link();
 }
@@ -206,7 +216,8 @@ static void test_shader_pairs_arrive_in_separate_steps(void) {
     load_stage(SPONZA_SHADER_DIFFUSE, NT_SHADER_STAGE_VERTEX);
     nt_resource_step();
     link_programs();
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(nt_material_get_info(s_materials[0])->program));
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(nt_material_get_info(s_materials[0])->program));
+    nt_test_gfx_link_wait(nt_material_get_info(s_materials[0])->program);
     TEST_ASSERT_EQUAL_UINT32(0, nt_material_get_info(s_materials[1])->program.id);
     TEST_ASSERT_EQUAL_UINT32(0, nt_material_get_info(s_materials[2])->program.id);
     assert_idle_link();
@@ -216,6 +227,7 @@ static void test_shader_pairs_arrive_in_separate_steps(void) {
     load_stage(SPONZA_SHADER_ALPHA, NT_SHADER_STAGE_FRAGMENT);
     nt_resource_step();
     link_programs();
+    wait_scene_links();
     assert_scene_programs();
     assert_idle_link();
 }
@@ -224,6 +236,7 @@ static void test_context_restore_reassigns_existing_material_handles(void) {
     load_manifest();
     load_all_stages();
     link_programs();
+    wait_scene_links();
     assert_scene_programs();
     nt_material_t materials[TEST_NODE_COUNT];
     nt_program_t programs[3];
@@ -254,6 +267,7 @@ static void test_context_restore_reassigns_existing_material_handles(void) {
     for (uint32_t type = 0; type < 3U; type++) {
         TEST_ASSERT_NOT_EQUAL_UINT32(programs[type].id, s_programs[type].program.id);
     }
+    wait_scene_links();
     assert_scene_programs();
     assert_idle_link();
 }

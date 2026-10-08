@@ -28,6 +28,7 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.has_bc7 = GLAD_GL_ARB_texture_compression_bptc != 0;
     caps.has_astc = GLAD_GL_KHR_texture_compression_astc_ldr != 0;
     caps.has_etc2 = GLAD_GL_ARB_ES3_compatibility != 0;
+    caps.has_parallel_shader_compile = GLAD_GL_KHR_parallel_shader_compile != 0 || GLAD_GL_ARB_parallel_shader_compile != 0;
 
     /* BC7 is core in GL 4.2+, ETC2 in GL 4.3+ — available without extensions */
     GLint major = 0;

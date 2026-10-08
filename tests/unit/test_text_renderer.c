@@ -120,8 +120,9 @@ static void republish_stage(const char *name, uint32_t shader_id) { nt_resource_
 
 static nt_shader_t make_stage(nt_shader_type_t type) { return nt_gfx_make_shader(&(nt_shader_desc_t){.type = type, .source = (type == NT_SHADER_FRAGMENT) ? "f" : "void main(){}"}); }
 
-/* A ref reclaims a program lost with the context and waits for ready stages before relinking. */
-void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
+/* A ref links once: update starts the link and keeps the program, ready or not, until the owner
+ * drops it; after a context loss the owner drops it and the ref links again once the stages are back. */
+void test_program_ref_links_once_and_relinks_after_drop(void) {
     nt_gfx_end_pass();
     nt_program_ref_t ref = {0};
     ref.vs = publish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
@@ -130,38 +131,36 @@ void test_program_ref_reclaims_a_program_killed_by_context_loss(void) {
 
     TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
     const nt_program_t first = ref.program;
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref)); /* idempotent once linked */
+    TEST_ASSERT_FALSE(nt_gfx_program_ready(first)); /* the link finishes at a begin_frame */
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    nt_test_gfx_link_wait(first);
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
 
-    /* Context dies: handles stay valid, GPU objects do not. */
+    /* Context dies: handles stay valid, GPU objects do not; the ref keeps its program. */
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(false);
     TEST_ASSERT_FALSE(nt_gfx_program_ready(first));
-
-    /* No drop() anywhere. The stages are dead too, so the ref waits instead of
-     * relinking from corpses -- and must not keep handing out the old program. */
     TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
-    TEST_ASSERT_FALSE(nt_gfx_program_valid(first));
-
-    /* Stages come back the way the resource step brings them back. */
-    republish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
-    republish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
-    nt_resource_step();
-
-    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
-    TEST_ASSERT_EQUAL_UINT32(0, ref.program.id);
+    TEST_ASSERT_EQUAL_UINT32(first.id, ref.program.id);
 
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_program_ref_drop(&ref);
+    TEST_ASSERT_FALSE(nt_gfx_program_valid(first));
+
+    /* The stages died too: no link until the resource step brings them back. */
+    TEST_ASSERT_FALSE(nt_program_ref_update(&ref));
+    TEST_ASSERT_EQUAL_UINT32(0, ref.program.id);
     republish_stage("ref_vs", make_stage(NT_SHADER_VERTEX).id);
     republish_stage("ref_fs", make_stage(NT_SHADER_FRAGMENT).id);
     nt_resource_step();
 
     TEST_ASSERT_TRUE(nt_program_ref_update(&ref));
     TEST_ASSERT_NOT_EQUAL_UINT32(first.id, ref.program.id);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(ref.program));
+    nt_test_gfx_link_wait(ref.program);
 
     nt_program_ref_drop(&ref);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
@@ -196,7 +195,9 @@ void setUp(void) {
     nt_resource_step();
     nt_font_step();
 
-    select_material(create_test_material_with_blend(nt_blend_alpha()));
+    const nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    nt_test_gfx_link_wait(nt_material_get_info(material)->program);
+    select_material(material);
     nt_test_frame_begin_pass();
 }
 
@@ -233,6 +234,7 @@ void test_text_renderer_forwards_material_blend_state(void) {
     blend.op_alpha = NT_BLEND_OP_MAX;
     nt_material_t material = create_test_material_with_blend(blend);
 
+    nt_test_frame_finish_links();
     nt_gfx_fake_reset();
     select_material(material);
     draw_and_execute();
@@ -247,6 +249,7 @@ void test_text_renderer_forwards_material_blend_state(void) {
 /* The font texture lands on the unit its program assigned, and nothing writes a sampler int. */
 void test_text_renderer_font_texture_lands_on_its_program_unit(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    nt_test_frame_finish_links();
     nt_gfx_fake_reset();
     select_material(material);
     draw_and_execute();
@@ -260,8 +263,12 @@ void test_text_renderer_font_texture_lands_on_its_program_unit(void) {
 
 void test_text_renderer_rejects_unrelated_second_sampler(void) {
     nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture", "u_extra"}, 2);
-    select_material(create_test_material_with_blend(nt_blend_alpha()));
+    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
+    nt_test_frame_finish_links();
+    select_material(material);
+    nt_test_assert_last_expr[0] = 0;
     NT_TEST_EXPECT_ASSERT(draw_and_execute());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "active sampler coverage is incomplete"));
 }
 
 /* ---- UTF-8 decode Cyrillic ---- */
@@ -410,6 +417,7 @@ void test_text_material_with_textures_asserts_at_set_material(void) {
         .texture_count = 1,
     });
 
+    nt_test_frame_finish_links();
     NT_TEST_EXPECT_ASSERT(nt_text_renderer_set_material(textured));
 }
 
@@ -417,6 +425,7 @@ void test_text_material_with_textures_asserts_at_set_material(void) {
 void test_zero_frame_capacity_asserts_at_set_material(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_opaque());
     const nt_gfx_frame_stream_t kinds[] = {NT_GFX_FRAME_VERTEX, NT_GFX_FRAME_INDEX};
+    nt_test_frame_finish_links();
     for (uint32_t i = 0; i < 2U; i++) {
         const uint32_t capacity = g_nt_gfx_frame_storage[kinds[i]].capacity;
         g_nt_gfx_frame_storage[kinds[i]].capacity = 0;
@@ -523,6 +532,7 @@ void test_material_params_record_once_per_change(void) {
     nt_material_t b = nt_material_create(
         &(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE, .params[0] = {.name = "u_tint", .value = {0, 1, 0, 1}}, .param_count = 1});
 
+    nt_test_frame_finish_links();
     nt_gfx_fake_reset();
     select_material(a);
     nt_text_renderer_draw(&style, s_identity, "A");
@@ -574,6 +584,7 @@ void test_materials_sharing_a_program_share_one_pipeline(void) {
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
+    nt_test_frame_finish_links();
     nt_gfx_fake_reset();
     select_material(a);
     draw_and_execute();
@@ -591,6 +602,7 @@ void test_one_program_with_two_render_states_builds_two_pipelines(void) {
     nt_material_t opaque_mat = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_opaque(), .cull_mode = NT_CULL_NONE});
     nt_material_t blended = nt_material_create(&(nt_material_create_desc_t){.program = shared, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
+    nt_test_frame_finish_links();
     nt_gfx_fake_reset();
     select_material(opaque_mat);
     draw_and_execute();
@@ -613,6 +625,7 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
     nt_material_t a = nt_material_create(&(nt_material_create_desc_t){.program = p0, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_BACK});
     nt_material_t b = nt_material_create(&(nt_material_create_desc_t){.program = p1, .blend = nt_blend_alpha(), .cull_mode = NT_CULL_NONE});
 
+    nt_test_frame_finish_links();
     nt_gfx_fake_reset();
     nt_gfx_fake_draw_trace_reset(true);
     select_material(a);
@@ -632,6 +645,7 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
     nt_material_t mat = create_test_material_with_blend(nt_blend_opaque());
     const nt_program_t dead = nt_material_get_info(mat)->program;
 
+    nt_test_frame_finish_links();
     const uint16_t base = nt_text_renderer_test_pipeline_cache_count();
     nt_gfx_fake_reset();
     select_material(mat);
@@ -770,6 +784,7 @@ void test_switching_back_to_a_material_reuses_its_pipeline(void) {
     nt_material_t a = create_test_material_with_blend(nt_blend_alpha());
     nt_material_t b = create_test_material_with_blend(nt_blend_opaque());
 
+    nt_test_frame_finish_links();
     nt_gfx_fake_reset();
     select_material(a);
     draw_and_execute();
@@ -789,6 +804,7 @@ void test_a_new_program_after_shutdown_does_not_reuse_the_old_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"});
 
+    nt_test_frame_finish_links();
     nt_gfx_fake_reset();
     select_material(mat);
     draw_and_execute();
@@ -809,6 +825,7 @@ void test_a_new_program_after_shutdown_does_not_reuse_the_old_pipeline(void) {
  * looks like, so the selection draws nothing rather than trapping. */
 void test_a_destroyed_program_draws_nothing(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_opaque());
+    nt_test_frame_finish_links();
     nt_test_frame_close();
     /* The material keeps the handle: recovery destroys programs, not materials. */
     nt_gfx_destroy_program(nt_material_get_info(material)->program);
@@ -833,6 +850,7 @@ void test_context_loss_recovers_without_a_restore_call(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_opaque());
     const nt_program_t first = nt_material_get_info(material)->program;
 
+    nt_test_frame_finish_links();
     nt_gfx_fake_reset();
     select_material(material);
     draw_and_execute();
@@ -856,6 +874,7 @@ void test_context_loss_recovers_without_a_restore_call(void) {
     nt_program_t second = nt_gfx_make_program(nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}"}),
                                               nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}"}));
     nt_material_set_program(material, second);
+    nt_test_gfx_link_wait(second);
     nt_font_step();
 
     nt_gfx_fake_reset();
@@ -1245,7 +1264,7 @@ int main(void) {
     RUN_TEST(test_one_program_with_two_render_states_builds_two_pipelines);
     RUN_TEST(test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines);
     RUN_TEST(test_a_reused_program_slot_does_not_hit_the_dead_entry);
-    RUN_TEST(test_program_ref_reclaims_a_program_killed_by_context_loss);
+    RUN_TEST(test_program_ref_links_once_and_relinks_after_drop);
     RUN_TEST(test_full_glyph_cache_still_draws_the_entire_run);
     RUN_TEST(test_decoration_only_run_draws);
     RUN_TEST(test_unready_font_skips_glyph_and_decoration_uploads);

@@ -312,13 +312,15 @@ work queued before the loss names pipelines and vertex inputs the loss freed.
 
 No step needs pool headroom over the steady state: every rebuild destroys before
 it recreates, whether it is a renderer relinking inside its own restore entry
-point or `nt_program_ref_update` reclaiming a dead handle before linking again.
+point or `nt_program_ref_drop` freeing a dead handle before `nt_program_ref_update` links again.
 
 Restore entry points leave never-initialized or explicitly shut-down modules
 untouched, so a game may call all of them without activating unused renderers.
 
 `nt_shape_renderer` and `nt_postfx_blur` own their programs and relink embedded
-sources inside their restore entry points. A loss during a restore latches in
+sources inside their restore entry points. Until those links finish (at startup and
+after a restore), shape flush drops its queued shapes and `nt_postfx_blur_gaussian`
+validates its pass, records nothing and returns false, leaving `dest` unwritten. A loss during a restore latches in
 gfx, and the next context restore calls the entry points again; owners keep no
 retry state. `nt_mesh_renderer`,
 `nt_skinned_mesh_renderer`,
@@ -335,7 +337,7 @@ Draw entry points that check handles before gfx (`nt_mesh_renderer` and
 once while `g_nt_gfx.context_lost`, so a game may keep calling them through a loss,
 including after a restore that met a second loss and left handles 0.
 `nt_sprite_renderer_set_material` accepts a material whose relink met that loss;
-its emits draw nothing until the program is linked again.
+its emits draw nothing until its new program is ready.
 
 Every restore entry point is an inactive no-op and returns void. GPU creation
 inside it runs in a straight line: a loss latches in gfx and the next context
@@ -363,8 +365,8 @@ an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
 re-activate on the next step within the activation budget; an evicted pack must
 re-download first. Rebuild resource-dependent render state after publication.
 
-The mesh, sprite and text renderers skip a material whose program is not ready and warn
-once until a pipeline is built again. The skip is normal runtime state, not a
+The mesh, sprite and text renderers skip a material whose program is not ready
+(still linking, or lost). The skip is normal runtime state, not a
 caller error: `nt_sprite_renderer_set_material` asserts only that a program was
 assigned, and its emits draw nothing until the program is ready.
 `nt_text_renderer_set_material` also asserts only assignment, not liveness; the

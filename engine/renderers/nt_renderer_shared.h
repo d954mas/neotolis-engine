@@ -46,8 +46,7 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_find(const nt_renderer_pi
 
 /* Reap dead entries before checking capacity; exhaustion asserts.
  * Leave failed pipeline creation uncached so a later miss retries. */
-static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeline_entry_t *entries, uint16_t *count, uint16_t cap, const nt_gfx_pipeline_key_t *key, const nt_pipeline_desc_t *desc,
-                                                              bool *warned) {
+static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeline_entry_t *entries, uint16_t *count, uint16_t cap, const nt_gfx_pipeline_key_t *key, const nt_pipeline_desc_t *desc) {
     for (uint16_t i = 0; i < *count;) {
         if (!nt_gfx_pipeline_valid(entries[i].pipeline)) {
             entries[i] = entries[--(*count)];
@@ -67,7 +66,6 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeli
     entries[*count].key = *key;
     entries[*count].pipeline = pip;
     (*count)++;
-    *warned = false;
     return pip;
 }
 
@@ -278,16 +276,6 @@ static inline void nt_renderer_set_material_uniforms(const nt_material_info_t *m
     }
 }
 
-/* Warn once to explain skipped draws without per-frame spam; pipeline insertion re-arms the flag. */
-static inline void nt_renderer_warn_program_not_ready(bool *warned, const nt_material_info_t *mat_info) {
-    if (*warned) {
-        return;
-    }
-    NT_LOG_WARN("skipping '%s': its program is not ready -- assign one with nt_material_set_program, and after a context loss invalidate NT_ASSET_SHADER_CODE so the stages come back",
-                (mat_info != NULL && mat_info->label != NULL) ? mat_info->label : "(unlabeled)");
-    *warned = true;
-}
-
 // #region mesh draw
 /* Pipeline and vertex-input caches of one mesh renderer. */
 typedef struct {
@@ -297,8 +285,6 @@ typedef struct {
     const char *label; /* pipeline fallback and vertex-input label */
     uint16_t max_pipelines;
     uint16_t pipeline_count;
-    /* One-shot so a load-time skip does not spam; re-armed when a pipeline is built. */
-    bool warned_program_not_ready;
 } nt_renderer_mesh_caches_t;
 
 static inline nt_result_t nt_renderer_mesh_caches_init(nt_renderer_mesh_caches_t *c, uint16_t max_pipelines, uint16_t max_mesh_layouts, const nt_vertex_layout_t *instance_layout, const char *label) {
@@ -323,7 +309,6 @@ static inline void nt_renderer_mesh_caches_reset(nt_renderer_mesh_caches_t *c) {
     }
     c->pipeline_count = 0;
     nt_renderer_mesh_vi_cache_reset(&c->vi_cache);
-    c->warned_program_not_ready = false;
 }
 
 static inline void nt_renderer_mesh_caches_shutdown(nt_renderer_mesh_caches_t *c) {
@@ -346,13 +331,12 @@ typedef struct {
 } nt_renderer_mesh_draw_t;
 
 /* Resolves pipeline and vertex input, reusing the previous run's on equal handles (creating
- * them on a cache miss). False skips the run: the program is not ready (warned once) or a
+ * them on a cache miss). False skips the run: the program is not ready (linking or lost) or a
  * create failed (retried by the next run). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_renderer_mesh_draw_t *d, nt_material_t material, const nt_material_info_t *mi, nt_mesh_t mesh,
                                             const nt_gfx_mesh_info_t *mesh_info) {
     if (!nt_gfx_program_ready(mi->program)) {
-        nt_renderer_warn_program_not_ready(&c->warned_program_not_ready, mi);
         return false;
     }
     const bool material_changed = material.id != d->material.id;
@@ -362,7 +346,7 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
         const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
         d->pipeline = nt_renderer_pipeline_cache_find(c->pipelines, c->pipeline_count, &key);
         if (d->pipeline.id == 0) {
-            d->pipeline = nt_renderer_pipeline_cache_insert(c->pipelines, &c->pipeline_count, c->max_pipelines, &key, &desc, &c->warned_program_not_ready);
+            d->pipeline = nt_renderer_pipeline_cache_insert(c->pipelines, &c->pipeline_count, c->max_pipelines, &key, &desc);
         }
     }
     /* Vertex-input identity is (mesh row, material-derived layout): a mesh change re-resolves too. */

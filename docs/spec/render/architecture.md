@@ -539,7 +539,7 @@ from a column-major world matrix.
 
  A run whose program is not ready, or whose
 pipeline or vertex input could not be created (load, context loss), records
-nothing and allocates nothing; an unready program warns once. Both resolve the
+nothing and allocates nothing. Both resolve the
 pipeline and vertex input at the call — creating them on a cache miss — and
 read the material's params and texture publications there. Consequences:
 
@@ -588,7 +588,7 @@ A shadow list drawn in several cascades packs once per cascade; to pack once,
 the game writes the instances itself and draws them through the core in each
 cascade. The sprite and text renderers record into frame storage at each emit
 or draw, inside a pass; the shape renderer copies each kind into frame storage at
-`flush`. Lifetime work (resource unmounts, `nt_program_ref_update`,
+`flush`. Lifetime work (resource unmounts, `nt_program_ref_drop`,
 renderer restores, any destroy) runs before the first pass or after
 `nt_gfx_end_frame` (the frame rule); `nt_gfx_read_pixels` runs after
 `nt_gfx_end_frame`, before the swap.
@@ -945,7 +945,10 @@ request arguments, and one RESULT, carrying the outcome `result`; a creator's
 RESULT carries the new handle (zero on failure), while its backend slot and
 names are in the DEFINITION record. BEGIN and RESULT are recorded at the call.
 The BACKEND and backend SKIP records of recorded commands appear when the
-stream executes in `nt_gfx_end_frame`, outside any BEGIN/RESULT pair. Immediate backend work inside a
+stream executes in `nt_gfx_end_frame`, outside any BEGIN/RESULT pair, and so do the BACKEND
+records of program links that `nt_gfx_begin_frame` finishes, followed by each finished program's
+DEFINITION. A program's DEFINITION does not imply readiness: one recorded while it links carries
+no reflection. Immediate backend work inside a
 draw-phase call, such as a lazy sampler recreation, stays inside its pair.
 Operations issued inside another operation
 (default samplers, cascaded destroys) nest between its BEGIN and

@@ -42,6 +42,9 @@ void setUp(void) {
     nt_gfx_fake_reset();
     nt_gfx_fake_set_samplers((const char *const[]){"u_source"}, 1);
     nt_postfx_blur_init();
+    /* The fake finishes the blur program's link at the next begin_frame. */
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
     nt_gfx_fake_draw_trace_reset(true);
 }
 
@@ -292,12 +295,12 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     nt_texture_t temp_color = nt_gfx_render_target_color(temp);
     uint32_t creates_before = nt_gfx_fake_render_target_create_count();
 
-    nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+    TEST_ASSERT_TRUE(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = source,
         .temp = temp,
         .dest = dest,
         .radius = 4.0F,
-    });
+    }));
 
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_fake_render_target_create_count());
@@ -309,6 +312,28 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(source), nt_gfx_fake_bound_texture_at(0));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(temp_color), nt_gfx_fake_bound_texture_at(1));
+}
+
+static void test_blur_records_nothing_and_says_so_while_its_program_links(void) {
+    nt_render_target_t source_rt = make_blur_target(64, 32);
+    nt_render_target_t temp = make_blur_target(64, 32);
+    nt_render_target_t dest = make_blur_target(64, 32);
+    const nt_postfx_blur_pass_t pass = {.source = nt_gfx_render_target_color(source_rt), .temp = temp, .dest = dest, .radius = 4.0F};
+    nt_gfx_fake_hold_program_links(true);
+    nt_postfx_blur_restore_gpu();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+
+    TEST_ASSERT_FALSE(nt_postfx_blur_gaussian(&pass));
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
+
+    nt_gfx_fake_hold_program_links(false);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(nt_postfx_blur_gaussian(&pass));
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
+    nt_gfx_begin_frame();
 }
 
 static void test_blur_binds_its_own_nearest_clamp_sampler(void) {
@@ -429,6 +454,7 @@ int main(void) {
     RUN_TEST(test_blur_binds_its_own_nearest_clamp_sampler);
     RUN_TEST(test_blur_lifecycle_misuse_asserts);
     RUN_TEST(test_a_loss_during_restore_is_retried_by_the_next_one);
+    RUN_TEST(test_blur_records_nothing_and_says_so_while_its_program_links);
     RUN_TEST(test_blur_fs_keeps_the_masked_kernel_index);
     RUN_TEST(test_source_does_not_expose_blur_through_nt_gfx_or_allocate_targets);
     return UNITY_END();

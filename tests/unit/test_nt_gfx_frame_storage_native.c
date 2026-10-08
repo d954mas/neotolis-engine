@@ -4,6 +4,7 @@
 
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_frame.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -57,7 +58,9 @@ void tearDown(void) { nt_gfx_shutdown(); }
 static nt_pipeline_t make_pipeline(const char *vs_src, const char *fs_src) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_src});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_src});
-    return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
+    return nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
 }
 
 /* A position at offset 0 of each stride-sized vertex, over the frame vertex and index storage. */

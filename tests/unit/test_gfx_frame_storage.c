@@ -1,5 +1,6 @@
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 
 #include <string.h>
 
@@ -9,11 +10,13 @@
 
 #define TEST_DESC NT_GFX_TEST_DESC(.max_shaders = 4, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = 4, .max_render_targets = 4)
 
+static nt_program_t s_program;
 static nt_pipeline_t s_pipeline;
 static nt_vertex_input_t s_empty_input;
 
 static void make_draw_state(void) {
-    s_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_fake_make_program(NULL, 0)});
+    s_program = nt_gfx_fake_make_program(NULL, 0);
+    s_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_program});
     s_empty_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
 }
 
@@ -246,6 +249,7 @@ static void test_restore_makes_new_buffers_and_a_lost_frame_uploads_nothing(void
     }
     /* A loss frees pipelines and vertex inputs: the draw state is made again, like a game would. */
     make_draw_state();
+    nt_test_gfx_link_wait(s_program);
     (void)alloc_filled(NT_GFX_FRAME_VERTEX, 24, 4, 0);
     draw_pass();
     nt_gfx_end_frame();

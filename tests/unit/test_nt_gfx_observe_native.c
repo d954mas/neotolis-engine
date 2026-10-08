@@ -1,4 +1,5 @@
 #include "graphics/nt_gfx.h"
+#include "test_helpers/nt_gfx_test_frame.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -211,13 +212,19 @@ static void test_capture_publishes_attachment_mappings_and_skip_reasons(void) {
 }
 
 static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
-    nt_gfx_capture_request();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D a; uniform sampler2D b; out vec4 color; void main(){color=texture(a,vec2(0.0))+texture(b,vec2(0.0));}"});
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    /* Record the frame whose begin_frame finishes the link; a parallel-compile driver may take several. */
+    const struct timespec link_start = nt_test_link_wait_start();
+    do {
+        nt_test_link_wait_check(&link_start);
+        nt_gfx_capture_request();
+        nt_gfx_end_frame();
+        nt_gfx_begin_frame();
+    } while (!nt_gfx_program_ready(program));
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
     const float matrix[16] = {0};
@@ -276,6 +283,7 @@ static void test_initial_uniform_records_cover_only_vec4(void) {
         &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform vec4 tint; uniform int mode; out vec4 color; void main(){color=tint*float(mode);}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
     TEST_ASSERT_NOT_EQUAL(0, program.id);
+    nt_test_gfx_link_wait(program);
     nt_gfx_capture_request();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
@@ -336,12 +344,14 @@ static void test_issued_calls_record_floats_names_and_payloads(void) {
 
 /* Frame storage reaches its buffer before the replayed draw that reads it, in issued order. */
 static void test_frame_storage_upload_is_issued_before_the_replayed_draw(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; out vec4 color; void main(){color=vec4(1.0);}"});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
     nt_gfx_capture_request();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float; out vec4 color; void main(){color=vec4(1.0);}"});
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 16, 4, &offset), 0, 16);
@@ -374,13 +384,19 @@ static void test_frame_storage_upload_is_issued_before_the_replayed_draw(void) {
 static void test_complete_capture_matches_gl_counters(void) {
     const uint8_t pixels[16] = {0};
     const float tint[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-    nt_gfx_capture_request();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){gl_Position=vec4(0.0);}"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D tex; uniform vec4 tint; out vec4 color; void main(){color=texture(tex,vec2(0.5))*tint;}"});
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    /* Record the frame whose begin_frame finishes the link; a parallel-compile driver may take several. */
+    const struct timespec link_start = nt_test_link_wait_start();
+    do {
+        nt_test_link_wait_check(&link_start);
+        nt_gfx_capture_request();
+        nt_gfx_end_frame();
+        nt_gfx_begin_frame();
+    } while (!nt_gfx_program_ready(program));
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 2, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixels});
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = sizeof(pixels), .data = pixels});
@@ -639,7 +655,9 @@ static void test_repeated_frames_separate_requests_from_issued_calls(void) {
     const char *fs_source = "precision mediump float; uniform vec4 u_color; out vec4 color; void main() { color = u_color; }";
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_make_program(vs, fs)});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     const float block[16] = {0};
     const float color[4] = {1.0F, 0.5F, 0.0F, 1.0F};
