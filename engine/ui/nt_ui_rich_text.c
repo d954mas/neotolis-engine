@@ -695,7 +695,7 @@ static uint8_t rich_parse_layer(const char *s, uint32_t n) {
 
 /* pushed_style records whether THIS open actually pushed a style entry (so close pops iff it did).
  * A named-tag miss (unknown <font=>/<color=>/<fx=>) or <link> opens with NO style push -> false; its
- * close must not pop the enclosing style (OFF-safe -- in DEBUG the miss already trapped at the open). */
+ * close must not pop the enclosing style. */
 typedef struct {
     rich_tag_kind_t kind;
     bool pushed_style;
@@ -706,7 +706,7 @@ typedef struct {
     uint32_t depth;
 } rich_tag_stack_t;
 
-/* Map an <img valign=> keyword to its enum; 0xFF on unknown so the caller can hard-skip (OFF-safe). */
+/* Map an <img valign=> keyword to its enum; 0xFF on unknown so the caller can skip it. */
 static uint8_t rich_parse_valign(const char *s, uint32_t n) {
     if (rich_name_eq(s, n, "baseline")) {
         return (uint8_t)NT_RICH_VALIGN_BASELINE;

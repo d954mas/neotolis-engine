@@ -23,9 +23,6 @@ nt_result_t nt_material_init(const nt_material_desc_t *desc) {
     NT_ASSERT(!s_mat.initialized);      /* double init */
     NT_ASSERT(desc);                    /* NULL descriptor */
     NT_ASSERT(desc->max_materials > 0); /* must specify capacity */
-    if (s_mat.initialized || !desc || desc->max_materials == 0) {
-        return NT_ERR_INIT_FAILED;
-    }
 
     nt_pool_init(&s_mat.pool, desc->max_materials);
 
@@ -51,9 +48,6 @@ void nt_material_shutdown(void) {
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(s_mat.initialized); /* create before init */
     NT_ASSERT(desc);              /* NULL descriptor */
-    if (!s_mat.initialized || !desc) {
-        return NT_MATERIAL_INVALID;
-    }
 
     /* Range-check before a slot is taken: the cache keys pack these into fixed bit
      * lanes. Unconditional -- a disabled blend still has to hold valid values. */
@@ -141,7 +135,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
 
 void nt_material_destroy(nt_material_t mat) {
     NT_ASSERT(s_mat.initialized); /* destroy before init */
-    if (mat.id == 0 || !s_mat.initialized) {
+    if (mat.id == 0) {
         return;
     }
     nt_pool_free(&s_mat.pool, mat.id);
@@ -157,7 +151,7 @@ bool nt_material_valid(nt_material_t mat) {
 /* Returns mutable info pointer for a valid handle, or NULL */
 static nt_material_info_t *get_mutable_info(nt_material_t mat) {
     NT_ASSERT(s_mat.initialized && "material module not initialized");
-    if (!s_mat.initialized || mat.id == 0) {
+    if (mat.id == 0) {
         return NULL;
     }
     if (!nt_pool_valid(&s_mat.pool, mat.id)) {
@@ -198,18 +192,12 @@ bool nt_material_has_param_h(nt_material_t mat, nt_hash32_t name_hash) {
 
 bool nt_material_has_param(nt_material_t mat, const char *name) { return nt_material_has_param_h(mat, nt_hash32_str(name)); }
 
-/* Resolve info + param index, or return -1 on failure (asserts in debug) */
+/* Resolve info + param index; invalid handles and undeclared parameters assert. */
 static int resolve_param(nt_material_t mat, uint32_t name_hash, nt_material_info_t **out_info) {
     nt_material_info_t *info = get_mutable_info(mat);
     NT_ASSERT(info && "set_param on invalid material handle");
-    if (!info) {
-        return -1;
-    }
     int idx = find_param_index(info, name_hash);
     NT_ASSERT(idx >= 0 && "material param not found -- use nt_material_has_param to check");
-    if (idx < 0) {
-        return -1;
-    }
     *out_info = info;
     return idx;
 }
@@ -217,9 +205,6 @@ static int resolve_param(nt_material_t mat, uint32_t name_hash, nt_material_info
 void nt_material_set_param_h(nt_material_t mat, nt_hash32_t name_hash, const float value[4]) {
     nt_material_info_t *info = NULL;
     int idx = resolve_param(mat, name_hash.value, &info);
-    if (idx < 0) {
-        return;
-    }
     memcpy(info->params[idx], value, sizeof(float) * 4);
 }
 
@@ -227,14 +212,8 @@ void nt_material_set_param(nt_material_t mat, const char *name, const float valu
 
 void nt_material_set_param_component_h(nt_material_t mat, nt_hash32_t name_hash, uint8_t index, float value) {
     NT_ASSERT(index <= 3 && "component index must be 0-3");
-    if (index > 3) {
-        return;
-    }
     nt_material_info_t *info = NULL;
     int idx = resolve_param(mat, name_hash.value, &info);
-    if (idx < 0) {
-        return;
-    }
     info->params[idx][index] = value;
 }
 

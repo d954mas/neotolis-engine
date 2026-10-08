@@ -1875,7 +1875,6 @@ static const uint8_t d4_inverse_table[8] = {0, 1, 2, 3, 4, 6, 5, 7};
 
 uint8_t d4_compose(uint8_t a, uint8_t b) {
     NT_BUILD_ASSERT(a < 8 && b < 8 && "d4_compose: transform value outside D4");
-    /* Mask independently of the assert — an asserts-off build must not over-read. */
     return d4_compose_table[a & 7U][b & 7U];
 }
 

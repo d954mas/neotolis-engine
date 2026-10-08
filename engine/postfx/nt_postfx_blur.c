@@ -106,9 +106,6 @@ static float sigma_or_derived(float radius, float sigma) {
 
 static uint32_t build_kernel(float radius, float sigma, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) {
     NT_ASSERT(out_weights != NULL);
-    if (out_weights == NULL) {
-        return 0;
-    }
     uint32_t r = radius_to_int(radius);
     float s = sigma_or_derived(radius, sigma);
     if (r == 0 || !isfinite(s) || s <= 0.0F) {
@@ -236,10 +233,10 @@ static bool validate_module_and_pass(const nt_postfx_blur_pass_t *pass) {
     NT_ASSERT(s_blur.initialized && "nt_postfx_blur_gaussian: module is not initialized");
     NT_ASSERT(pass != NULL && "nt_postfx_blur_gaussian: NULL pass");
     /* A lost context leaves this module's and the caller's GPU objects unusable; nothing would draw. */
-    return s_blur.initialized && pass != NULL && !g_nt_gfx.context_lost;
+    return !g_nt_gfx.context_lost;
 }
 
-static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_targets_t *targets) {
+static void resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_targets_t *targets) {
     targets->temp_color = nt_gfx_render_target_color(pass->temp);
     targets->dest_color = nt_gfx_render_target_color(pass->dest);
     bool source_ready = nt_gfx_texture_ready(pass->source);
@@ -249,10 +246,9 @@ static bool resolve_pass_targets(const nt_postfx_blur_pass_t *pass, blur_pass_ta
     NT_ASSERT(source_ready && "nt_postfx_blur_gaussian: source texture is not ready");
     NT_ASSERT(source_format_valid && "nt_postfx_blur_gaussian: source must use a sampler2D color format");
     NT_ASSERT(colors_valid && "nt_postfx_blur_gaussian: temp or dest target is stale or has no color");
-    return source_ready && source_format_valid && colors_valid;
 }
 
-static bool validate_target_sizes(const nt_postfx_blur_pass_t *pass, const blur_pass_targets_t *targets) {
+static void validate_target_sizes(const nt_postfx_blur_pass_t *pass, const blur_pass_targets_t *targets) {
     uint16_t source_width = 0;
     uint16_t source_height = 0;
     uint16_t temp_width = 0;
@@ -264,23 +260,15 @@ static bool validate_target_sizes(const nt_postfx_blur_pass_t *pass, const blur_
     bool dest_size_valid = nt_gfx_texture_size(targets->dest_color, &dest_width, &dest_height);
     bool sizes_valid = source_size_valid && temp_size_valid && dest_size_valid;
     NT_ASSERT(sizes_valid && "nt_postfx_blur_gaussian: texture dimensions unavailable");
-    if (!sizes_valid) {
-        return false;
-    }
     bool sizes_match = source_width == temp_width && source_width == dest_width && source_height == temp_height && source_height == dest_height;
     NT_ASSERT(sizes_match && "nt_postfx_blur_gaussian: source, temp, and dest dimensions must match");
-    if (!sizes_match) {
-        return false;
-    }
-    return true;
 }
 
-static bool validate_no_aliasing(const nt_postfx_blur_pass_t *pass, const blur_pass_targets_t *targets) {
+static void validate_no_aliasing(const nt_postfx_blur_pass_t *pass, const blur_pass_targets_t *targets) {
     bool source_aliases_temp = pass->source.id == targets->temp_color.id;
     bool targets_alias = pass->temp.id == pass->dest.id || targets->temp_color.id == targets->dest_color.id;
     NT_ASSERT(!source_aliases_temp && "nt_postfx_blur_gaussian: source aliases temp target");
     NT_ASSERT(!targets_alias && "nt_postfx_blur_gaussian: temp and dest share a target or color texture");
-    return !source_aliases_temp && !targets_alias;
 }
 
 static void validate_kernel_parameters(const nt_postfx_blur_pass_t *pass) {
@@ -290,16 +278,12 @@ static void validate_kernel_parameters(const nt_postfx_blur_pass_t *pass) {
     NT_ASSERT(sigma_valid && "nt_postfx_blur_gaussian: invalid sigma");
 }
 
-static bool build_validated_kernel(const nt_postfx_blur_pass_t *pass, uint32_t *out_radius, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) {
+static void build_validated_kernel(const nt_postfx_blur_pass_t *pass, uint32_t *out_radius, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) {
     uint32_t count = build_kernel(pass->radius, pass->sigma, out_weights);
     NT_ASSERT(count != 0 && "nt_postfx_blur_gaussian: invalid kernel");
-    if (count == 0) {
-        return false;
-    }
     uint32_t radius = (count - 1U) / 2U;
     NT_ASSERT(radius <= NT_POSTFX_BLUR_MAX_RADIUS);
     *out_radius = radius;
-    return true;
 }
 
 static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radius, float out_weights[NT_POSTFX_BLUR_MAX_KERNEL]) {
@@ -307,17 +291,12 @@ static bool validate_pass(const nt_postfx_blur_pass_t *pass, uint32_t *out_radiu
         return false;
     }
     blur_pass_targets_t targets;
-    if (!resolve_pass_targets(pass, &targets)) {
-        return false;
-    }
-    if (!validate_target_sizes(pass, &targets)) {
-        return false;
-    }
-    if (!validate_no_aliasing(pass, &targets)) {
-        return false;
-    }
+    resolve_pass_targets(pass, &targets);
+    validate_target_sizes(pass, &targets);
+    validate_no_aliasing(pass, &targets);
     validate_kernel_parameters(pass);
-    return build_validated_kernel(pass, out_radius, out_weights);
+    build_validated_kernel(pass, out_radius, out_weights);
+    return true;
 }
 
 static void upload_kernel(uint32_t radius, const float packed[20]) {

@@ -132,8 +132,7 @@ static const char *http_default_content_type(const nt_http_options_t *opts) {
 }
 
 /* RFC 7230 token — fetch() throws on anything else (space, CTL, separators),
- * native curl would put the raw bytes on the wire. static inline: referenced
- * only from NT_ASSERT, which vanishes in the OFF config. */
+ * native curl would put the raw bytes on the wire. */
 static inline bool http_method_is_token(const char *m) {
     if (*m == '\0') {
         return false;
