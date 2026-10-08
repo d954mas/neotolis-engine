@@ -31,9 +31,17 @@ void setUp(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_devapi_init());
     nt_devapi_register_capture();
     nt_devapi_capture_arm(); /* mark capture-capable: the test drives the seam directly, no window hook. */
+    /* The seam runs between end_frame and the swap, where readback is allowed. */
+    const nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    nt_gfx_init(&gfx_desc);
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
 }
 
-void tearDown(void) { nt_devapi_shutdown(); }
+void tearDown(void) {
+    nt_gfx_shutdown();
+    nt_devapi_shutdown();
+}
 
 /* ---- helpers ---- */
 

@@ -76,7 +76,9 @@ two slots on one unit would fight over it at every draw.
 > handle until reassignment.
 >
 > Pipeline cache keys include the program handle. Destroying the replaced
-> program frees its pipelines; dead cache records are removed during insertion
+> program frees its pipelines; it happens before the first pass or after
+> `nt_gfx_end_frame` (the frame rule in
+> [render architecture](architecture.md#draw-phase-command-stream)). Dead cache records are removed during insertion
 > after a miss or on cache reset. For staged-work behavior, see
 > [Program handles](../core/api-contracts.md#program-handles).
 
@@ -163,7 +165,8 @@ frame is unsupported: commands already open keep the handles they resolved.
 
 Publication is not GPU lifetime. `nt_resource_invalidate` and
 `nt_resource_unmount` destroy the GPU objects of file-pack assets immediately
-(virtual-pack handles stay game-owned), while the slot keeps publishing the dead
+(virtual-pack handles stay game-owned), so they run outside a drawn frame (the
+frame rule), while the slot keeps publishing the dead
 handle until the next `nt_resource_step`. A game that invalidates textures —
 after a context restore, for instance — steps resources before it emits or
 draws, or skips that frame.

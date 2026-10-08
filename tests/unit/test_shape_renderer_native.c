@@ -50,6 +50,13 @@ void tearDown(void) {
 /* Sample one pixel from a top-left-oriented full-frame readback. */
 static const uint8_t *pixel_at(const uint8_t *frame, int x, int y_top) { return &frame[(((size_t)y_top * RT_W) + (size_t)x) * 4U]; }
 
+/* Ends the pass and the frame, then reads the whole target top-left first. */
+static void end_frame_and_read(uint8_t *frame) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(s_target, 0, 0, RT_W, RT_H, frame, RT_W * RT_H * 4U));
+}
+
 static void assert_pixel(const uint8_t *frame, int x, int y_top, uint8_t r, uint8_t g, uint8_t b) {
     const uint8_t *p = pixel_at(frame, x, y_top);
     TEST_ASSERT_UINT8_WITHIN(1, r, p[0]);
@@ -85,9 +92,7 @@ static void test_several_flushes_of_one_frame_render_in_place(void) {
     nt_shape_renderer_flush();
 
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
 
     assert_pixel(frame, 16, 32, 255, 0, 0);   /* left half: red rect */
     assert_pixel(frame, 48, 32, 0, 255, 0);   /* cube center: green */
@@ -107,9 +112,7 @@ static void test_wire_circle_has_closed_outer_joins(void) {
     nt_shape_renderer_circle_wire((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     assert_pixel(frame, 32, 12, 255, 255, 255);
     assert_pixel(frame, 51, 32, 255, 255, 255);
     assert_pixel(frame, 32, 32, 0, 0, 0);
@@ -125,9 +128,7 @@ static void test_wire_template_at_an_index_offset_renders(void) {
     nt_shape_renderer_sphere_wire((float[3]){0, 0, 0}, 0.5F, NULL, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     /* Diagonals: only the XY ring passes there; the edge-on XZ and YZ rings are bands along the axes. */
     assert_pixel(frame, 43, 20, 255, 255, 255); /* the XY ring at 45 degrees */
     assert_pixel(frame, 20, 43, 255, 255, 255); /* and at 225 degrees */
@@ -144,9 +145,7 @@ static void test_overlay_strokes_draw_over_fills_until_flush(void) {
     nt_shape_renderer_rect((float[3]){-0.25F, 0, 0}, (float[2]){0.5F, 0.5F}, NULL, NT_RGBA8(0, 0, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     assert_pixel(frame, 40, 32, 0, 255, 0);
     assert_pixel(frame, 40, 20, 255, 0, 0);
     assert_pixel(frame, 24, 32, 0, 0, 255);
@@ -173,9 +172,7 @@ static void test_pixel_width_is_constant_across_depth_and_restore(void) {
     nt_shape_renderer_line((float[3]){-1.5F, 1, -4}, (float[3]){1.5F, 1, -4}, white);
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 32, 0, 32));
     TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 32, 32, 64));
 }
@@ -189,9 +186,7 @@ static void test_pixel_join_bevel_is_bounded(void) {
     nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     assert_pixel(frame, 31, 19, 255, 255, 255);
     assert_pixel(frame, 32, 5, 0, 0, 0);
 }
@@ -207,9 +202,7 @@ static void test_pixel_line_clips_at_near_plane(void) {
     nt_shape_renderer_line((float[3]){-1, 0.5F, 0.2F}, (float[3]){1, 0.5F, -0.5F}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 35, 0, 64));
     assert_pixel(frame, 16, 16, 0, 0, 0);
     assert_pixel(frame, 48, 48, 0, 0, 0);
@@ -226,9 +219,7 @@ static void test_ortho_world_width_off_axis(void) {
     nt_shape_renderer_line((float[3]){-90, 80, 0}, (float[3]){90, 80, 0}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     TEST_ASSERT_EQUAL_UINT32(8, lit_column(frame, 32, 0, 32));
 }
 
@@ -244,9 +235,7 @@ static void test_pixel_join_clips_hidden_neighbor(void) {
     nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     assert_pixel(frame, 37, 31, 255, 255, 255);
     assert_pixel(frame, 37, 32, 255, 255, 255);
     TEST_ASSERT_EQUAL_UINT32(0, lit_column(frame, 10, 0, 64));
@@ -265,9 +254,7 @@ static void test_polyline_outer_corner_and_butt_end(void) {
     nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     assert_pixel(frame, 35, 51, 255, 255, 255);
     assert_pixel(frame, 32, 14, 0, 0, 0);
 }
@@ -281,9 +268,7 @@ static void test_pixel_width_uses_active_viewport_height(void) {
     nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
-    nt_gfx_end_pass();
-    TEST_ASSERT_TRUE(read_ok);
+    end_frame_and_read(frame);
     TEST_ASSERT_EQUAL_UINT32(6, lit_column(frame, 32, 0, RT_H));
     assert_pixel(frame, 32, 48, 255, 255, 255);
 }

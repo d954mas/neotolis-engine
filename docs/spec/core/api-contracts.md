@@ -164,11 +164,12 @@ when destroying it.
 A link failure is a developer error and asserts, alongside an invalid stage
 handle, and an exhausted program pool.
 
-`nt_gfx_register_global_block` applies the global name -> binding slot registry
-to existing and future programs; registration may precede or follow linking.
-There is no per-program override. The registry borrows `name` without copying:
-the string must remain valid and unchanged until `nt_gfx_shutdown`. Registration
-survives context loss.
+`nt_gfx_desc_t.global_blocks` declares the global name -> binding slot list at
+`nt_gfx_init` (up to `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS`; an entry with a NULL name is unused); every
+program that declares a listed block gets its slot at link. There is no
+per-program override and no later registration. Names are borrowed without
+copying: each string must remain valid and unchanged until `nt_gfx_shutdown`.
+The list survives context loss: programs linked after a restore bind it too.
 
 `nt_gfx_bind_uniform_block(slot, data, size)` copies `size` bytes into the
 uniform frame stream at the next multiple of
@@ -203,8 +204,8 @@ compares the program as well as the handle; draws already recorded keep their
 pipeline. Sprite `draw_list` resolves each run's material itself. The text
 renderer writes material params only when `{program, material, params}` differ
 from its last write, so nothing else may write the uniforms of a program that
-text materials use. A program is not destroyed between `set_material` and the
-frame's draws through it: the draw would bind a dead pipeline and assert.
+text materials use. A program is destroyed only outside a drawn frame (the frame rule), so a
+pipeline resolved at `set_material` stays live for the frame's draws.
 
 A material carries no readiness field. Callers derive readiness with
 `nt_gfx_program_ready(nt_material_get_info(mat)->program)`, which is false before
@@ -257,7 +258,8 @@ height, in em) and `v_color`, and computes coverage with `SlugRender(coord,
 glyph, band_transform)` from `common/slug_coverage.glsl`.
 
 Pipeline cache keys include the program handle, so replacement selects a
-different entry. Destroying the old program frees its pipelines immediately;
+different entry. Destroying the old program (before the first pass or after
+`nt_gfx_end_frame`, by the frame rule) frees its pipelines immediately;
 renderers remove their dead cache records on the next insertion after a miss,
 or when resetting the cache. Lookup validates a matching pipeline but does not
 remove records. An unassigned program kept alive by its owner keeps its pipelines
@@ -398,7 +400,8 @@ nothing: no handle, no pool slot, no open transcoder session. Live-context uploa
 errors remain unchecked, as in the public constructor. Texture pool exhaustion
 during activation is an asserted precondition, exactly as in
 `nt_gfx_make_texture`, not a
-rejection.
+rejection. Mesh activation asserts on an exhausted mesh pool
+(`nt_gfx_desc_t.max_meshes`) the same way.
 
 ### Render-target handles
 
@@ -432,8 +435,8 @@ size. The engine never recreates a target and never preserves pixels: consumers
 redraw offscreen contents after making a target.
 Context loss latches at `nt_gfx_begin_frame`, at the start of the host
 iteration, or at the first backend call inside an iteration that fails on it;
-calls after the latch take their lost path, pass calls on a lost context do
-nothing, and `end_pass` still closes a pass opened before the latch. Work issued
+calls after the latch take their lost path, and pass calls on a lost context keep
+their sequencing asserts and record nothing (see Passes and draw state). Work issued
 before the latch is issued but does nothing, and the next begin_frame that takes
 the lost event wipes. While the browser reports the context lost, begin_frame does
 not attempt recreation. A failed recreation is a context-creation failure: it
@@ -455,10 +458,11 @@ descriptor carries no sampler state.
 
 An unsupported color or depth format, a target with no attachment, and an
 invalid, husk, multi-level or differently sized attachment texture are
-developer errors and assert, as are exhausted configured target capacity,
-creating a target inside an active pass, and destroying a live target there.
-Destroying an invalid or stale target is a no-op even inside a pass: the handle
-check runs first. A returned invalid target therefore means a lost context, a
+developer errors and assert, as are exhausted configured target capacity and
+destroying a live target while the frame is being drawn (the frame rule).
+Creating a target is allowed anywhere, inside a pass too: the create is immediate,
+and a pass binds its framebuffer only when the stream executes. Destroying an invalid or stale target is a
+no-op even then: the handle check runs first. A returned invalid target therefore means a lost context, a
 failed backend allocation, or an incomplete framebuffer, such as `RGBA16F`
 without float rendering. `nt_gfx_make_pipeline`
 follows the same split: a
@@ -486,15 +490,16 @@ upload VAO with a live context asserts.
 
 `nt_gfx_begin_pass` asserts on invalid sequencing (a nested pass or a pass
 outside `nt_gfx_begin_frame`..`nt_gfx_end_frame`, also on a lost context), on discarding
-the default framebuffer color, and on an invalid or stale target. Callers check `nt_gfx_render_target_valid` before a pass on a target
+the default framebuffer color, and, on a live context, on an invalid or stale
+target (a loss frees every target). Callers check `nt_gfx_render_target_valid` before a pass on a target
 that a loss or a cascade may have freed; there is no non-asserting pass-begin
 variant.
 
 Draw-state calls require an open pass. `nt_gfx_set_scissor`, `nt_gfx_set_scissor_enabled`,
 `nt_gfx_set_viewport` and
 `nt_gfx_bind_uniform_block` assert
-without an open pass; on a lost context they return before the check, as other
-binds do. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
+without an open pass, also on a lost context: every pass-scoped call checks the
+pass before it returns `NT_GFX_RESULT_CONTEXT_LOST`. `nt_gfx_begin_pass` disables scissor, sets the viewport to the whole
 target and clears the bound pipeline, vertex input, instance binding and texture
 set. The scissor rectangle and uniform-block bindings
 carry over, so a pass sets the scissor rectangle before it enables scissor. A
@@ -503,14 +508,15 @@ exception, the always-recording uniform-block bind and the slot limit are in
 [binding dedup](../render/architecture.md#binding-dedup-and-draw-merge).
 `nt_gfx_begin_segment` and `nt_gfx_end_segment` assert outside an open frame.
 
-`nt_gfx_clear` requires an open pass and a non-NULL descriptor; violations assert
-on a live context. The descriptor is borrowed only for the call, with no retained
+`nt_gfx_clear` requires an open pass (asserted on a lost context too) and, on a live
+context, a non-NULL descriptor. The descriptor is borrowed only for the call, with no retained
 pointer. `color` and `depth` select independent clears; unselected values are
 ignored. The current scissor limits the clear, while a disabled scissor clears
 the whole attachment; the pass clear of `nt_gfx_begin_pass` is never scissored.
 Clear preserves draw state and restores the depth write
 mask after a depth clear. No selections is an accepted operation without GPU
-work. On a known lost context clear does nothing, as pass calls do.
+work. On a known lost context clear checks the pass, then ends `CONTEXT_LOST` and
+records nothing.
 
 ## Hot Path Rule
 

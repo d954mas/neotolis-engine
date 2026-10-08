@@ -3,6 +3,7 @@
 
 /* Shared setUp/tearDown for nt_ui walker tests. */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "font/nt_font.h"
@@ -41,6 +42,7 @@ typedef struct {
     nt_font_t stub_font;
     uint8_t *real_font_blob; /* shared by every ui_walker_fixture_make_real_font font; freed at shutdown */
     uint32_t real_font_blob_size;
+    bool frame_ended; /* ui_walker_fixture_end_frame closed the fixture pass and frame */
 } ui_walker_fixture_t;
 
 /* Text vertex layout in frame storage (nt_text_renderer's vertex). */
@@ -50,6 +52,10 @@ typedef struct {
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind);
 void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx);
+/* Ends the fixture pass and frame: the fake executes the recorded draws only here. */
+void ui_walker_fixture_end_frame(ui_walker_fixture_t *fx);
+/* Ends the frame if still open, then opens a new frame and the fixture pass. */
+void ui_walker_fixture_next_frame(ui_walker_fixture_t *fx);
 /* Installs a hand-built command stream as the frozen frame. Runs an empty frame first so the stream's
  * nt_layout_index 0 (zeroed) resolves to the baked root: identity transform, band 0. */
 void ui_walker_fixture_inject_cmds(ui_walker_fixture_t *fx, Clay_RenderCommand *cmds, int32_t count, int32_t capacity);

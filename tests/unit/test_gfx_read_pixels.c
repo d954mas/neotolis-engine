@@ -8,11 +8,12 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Readback is a gfx operation, so it runs inside a tick. */
+/* Readback reads an executed frame: between nt_gfx_end_frame and the next begin. */
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
+    nt_gfx_end_frame();
 }
 void tearDown(void) { nt_gfx_shutdown(); }
 
@@ -28,7 +29,7 @@ void test_read_pixels_rejects_too_small_cap(void) {
     memset(buf, kGuard, sizeof(buf));
 
     /* Cap one byte short of the required w*h*4. */
-    bool ok = nt_gfx_read_pixels(0, 0, W, H, buf, (uint32_t)(W * H * 4) - 1U);
+    bool ok = nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, W, H, buf, (uint32_t)(W * H * 4) - 1U);
     TEST_ASSERT_FALSE(ok);
     /* Nothing was written — every byte still the guard value. */
     for (size_t i = 0; i < sizeof(buf); i++) {
@@ -43,7 +44,7 @@ void test_read_pixels_top_left_orientation(void) {
     uint8_t buf[W * H * 4];
     memset(buf, 0, sizeof(buf));
 
-    bool ok = nt_gfx_read_pixels(0, 0, W, H, buf, (uint32_t)sizeof(buf));
+    bool ok = nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, W, H, buf, (uint32_t)sizeof(buf));
     TEST_ASSERT_TRUE(ok);
 
     /* out row 0 R-channel must be GL row (h-1) = 3. out last row must be GL row 0. */
@@ -64,7 +65,7 @@ void test_read_pixels_channel_layout_rgba8(void) {
     uint8_t buf[W * H * 4];
     memset(buf, 0, sizeof(buf));
 
-    bool ok = nt_gfx_read_pixels(0, 0, W, H, buf, (uint32_t)sizeof(buf));
+    bool ok = nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, W, H, buf, (uint32_t)sizeof(buf));
     TEST_ASSERT_TRUE(ok);
 
     for (int i = 0; i < W * H; i++) {
@@ -79,10 +80,10 @@ void test_read_pixels_rejects_bad_size(void) {
     const uint8_t kGuard = 0xCDU;
     memset(buf, kGuard, sizeof(buf));
 
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels(0, 0, 0, 4, buf, (uint32_t)sizeof(buf)));
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels(0, 0, 4, 0, buf, (uint32_t)sizeof(buf)));
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels(0, 0, -1, 4, buf, (uint32_t)sizeof(buf)));
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels(0, 0, 4, -1, buf, (uint32_t)sizeof(buf)));
+    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 0, 4, buf, (uint32_t)sizeof(buf)));
+    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 4, 0, buf, (uint32_t)sizeof(buf)));
+    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, -1, 4, buf, (uint32_t)sizeof(buf)));
+    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 4, -1, buf, (uint32_t)sizeof(buf)));
     for (size_t i = 0; i < sizeof(buf); i++) {
         TEST_ASSERT_EQUAL_UINT8(kGuard, buf[i]);
     }

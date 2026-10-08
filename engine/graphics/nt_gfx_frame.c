@@ -79,20 +79,15 @@ _Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_
     __builtin_trap(); /* the allocation would point past the staging */
 }
 
-/* Sends the bytes allocated since the previous upload; the stream's draws read them after this. */
+/* Sends each stream's bytes of the frame; the stream's draws read them after this. */
 static void upload_storage(void) {
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[s];
-        /* frame_bytes is the part already sent; open_frame zeroes it with the storage. */
-        const uint32_t offset = g_nt_gfx.counters.frame_bytes[s];
-        if (storage->used == offset) {
+        if (storage->used == 0) {
             continue;
         }
         g_nt_gfx.counters.frame_bytes[s] = storage->used;
-        const uint32_t size = storage->used - offset;
-        NT_GFX_BEGIN_REQUEST(NT_GFX_OP_BUFFER_UPLOAD, NT_GFX_OBJECT_BUFFER, storage->buffer.id, event->data.resource.size = size; event->data.resource.related[0] = offset;
-                             event->data.resource.flags = 1);
-        NT_GFX_END(nt_gfx_buffer_update(storage->buffer, offset, storage->staging + offset, size));
+        nt_gfx_update_buffer(storage->buffer, 0, storage->staging, storage->used);
     }
 }
 // #endregion
@@ -111,10 +106,7 @@ void nt_gfx_frame_execute(void) {
     }
     const uint32_t *w = g_nt_gfx_stream.words;
     const uint32_t *end = w + g_nt_gfx_stream.used;
-    const uint32_t bytes = g_nt_gfx_stream.used * 4U;
-    if (bytes > g_nt_gfx.counters.stream_bytes) {
-        g_nt_gfx.counters.stream_bytes = bytes;
-    }
+    g_nt_gfx.counters.stream_bytes += g_nt_gfx_stream.used * 4U;
     g_nt_gfx_stream.used = 0;
     g_nt_gfx_stream.merge_end = 0; /* an executed draw is never extended */
     while (w < end) {

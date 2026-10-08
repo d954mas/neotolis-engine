@@ -631,11 +631,9 @@ int main(int argc, char **argv) {
     gfx_desc.max_vertex_inputs = 256 * 4 + 48;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = MAX_SCENE_NODES * (uint32_t)sizeof(nt_mesh_instance_t);
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * 512U; /* view and lighting blocks: 256 B or less each, plus any offset alignment up to 256 */
+    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
+    gfx_desc.global_blocks[1] = (nt_global_block_t){"Lighting", 1};
     nt_gfx_init(&gfx_desc);
-
-    /* Register global UBO blocks */
-    nt_gfx_register_global_block("Globals", 0);
-    nt_gfx_register_global_block("Lighting", 1);
 
     /* 5. I/O init */
     nt_http_init();

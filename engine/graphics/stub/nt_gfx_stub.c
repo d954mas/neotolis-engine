@@ -14,17 +14,6 @@ _Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_
     __builtin_trap();
 }
 
-void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
-    (void)name;
-    (void)binding_slot;
-}
-
-void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count) {
-    NT_ASSERT(blocks != NULL && count != NULL);
-    *blocks = NULL;
-    *count = 0;
-}
-
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
     (void)desc;
     g_nt_gfx = (nt_gfx_t){0};
@@ -240,7 +229,8 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
 // Signature follows the public readback API.
 // NOLINTNEXTLINE(readability-non-const-parameter)
-bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap) {
+    (void)src;
     (void)x;
     (void)y;
     (void)w;
@@ -264,12 +254,6 @@ void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size) {
     (void)buf;
     (void)offset;
-    (void)data;
-    (void)size;
-}
-
-void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
-    (void)buf;
     (void)data;
     (void)size;
 }

@@ -546,8 +546,8 @@ int main(void) {
     gfx_desc.max_pipelines = 32;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = RTT_SHOWCASE_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = RTT_SHOWCASE_INDEX_BYTES;
+    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
-    nt_gfx_register_global_block("Globals", 0);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB
     nt_fs_init();

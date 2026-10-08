@@ -44,21 +44,22 @@ higher-priority pack republishing a stage changes only what `nt_resource_get`
 returns: nothing relinks, and no material changes. A game that wants the new
 stage links a second program and assigns it with `nt_material_set_program` --
 a supported flat replace, and the only runtime shader replacement there is.
-Pipeline cache keys include the program handle. Destroying the old program frees
-its pipelines; renderers remove dead records during insertion after a cache miss
+Pipeline cache keys include the program handle. Destroying the old program
+(outside a drawn frame, the frame rule) frees its pipelines; renderers remove dead records during insertion after a cache miss
 or on reset. Sprite and text draws record with the pipeline resolved at
-`set_material`; mesh draws with the pipeline resolved at their call. Every
-program must stay live until the recorded draws execute. Numeric material params
+`set_material`; mesh draws with the pipeline resolved at their call. A program
+is destroyed only outside a drawn frame (the frame rule in
+[render architecture](architecture.md#draw-phase-command-stream)). Numeric material params
 remain mutable and are read at the draw; snapshot timing is specified in
 [API contracts](../core/api-contracts.md#program-handles).
 
 Uniform block bindings are program state, not material state: a program is
 shared by many materials, so a material-declared binding would be
-last-writer-wins across them. The engine keeps one global name -> slot registry
-instead, and `nt_gfx_register_global_block` applies it to existing and future
-programs that declare the block. The registry borrows each name without copying;
-the string must remain valid and unchanged until `nt_gfx_shutdown`. Registrations
-survive context loss. The data varies per draw: `nt_gfx_bind_uniform_block` copies a
+last-writer-wins across them. The game declares one global name -> slot list
+instead, in `nt_gfx_desc_t.global_blocks`, and every program that declares a
+listed block gets its slot at link. Names are borrowed without copying; each
+string must remain valid and unchanged until `nt_gfx_shutdown`. The list
+survives context loss. The data varies per draw: `nt_gfx_bind_uniform_block` copies a
 block into the uniform frame stream and binds it to a slot.
 
 The GL backend caches at most 16 active standalone non-sampler uniform locations

@@ -166,22 +166,22 @@ static void test_end_frame_uploads_allocations_without_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(updates + 1U, nt_gfx_fake_update_buffer_count()); /* nothing allocated, nothing sent */
 }
 
-static void test_a_mid_frame_execution_uploads_and_the_next_one_sends_only_the_delta(void) {
-    const nt_buffer_t game = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
+/* Bytes filled after the frame's last draw still belong to the frame: end_frame sends each used storage once. */
+static void test_end_frame_uploads_each_used_storage_once_including_bytes_after_the_last_draw(void) {
     (void)alloc_filled(NT_GFX_FRAME_VERTEX, 24, 4, 0);
     const uint32_t updates = nt_gfx_fake_update_buffer_count();
     draw_pass();
-    nt_gfx_update_buffer(game, 0, (const uint8_t[16]){0}, 16); /* executes the stream first */
-    TEST_ASSERT_EQUAL_UINT32(updates + 2U, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_BUFFER_UPLOAD]); /* the frame storage upload, then the game write */
     (void)alloc_filled(NT_GFX_FRAME_VERTEX, 10, 4, 0);
-    draw_pass();
+    (void)alloc_filled(NT_GFX_FRAME_UNIFORM, 16, 256, 0xCD);
+    TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
     nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(updates + 3U, nt_gfx_fake_update_buffer_count());
-    TEST_ASSERT_EQUAL_UINT32(24, nt_gfx_fake_last_update_buffer_offset());
-    TEST_ASSERT_EQUAL_UINT32(10, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_UINT32(updates + 2U, nt_gfx_fake_update_buffer_count()); /* the empty index storage sends nothing */
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_BUFFER_UPLOAD]);
+    TEST_ASSERT_EQUAL_UINT32(34, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_VERTEX]); /* both vertex allocations in one upload */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_update_buffer_offset());
+    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_PTR(g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging, nt_gfx_fake_last_update_buffer_data());
     nt_gfx_begin_frame();
-    nt_gfx_destroy_buffer(game);
 }
 
 static void test_allocating_between_draws_keeps_the_merge(void) {
@@ -307,7 +307,7 @@ int main(void) {
     RUN_TEST(test_end_frame_publishes_use_and_begin_frame_empties_the_storage);
     RUN_TEST(test_execution_uploads_each_allocated_storage_once_before_its_draws);
     RUN_TEST(test_end_frame_uploads_allocations_without_draws);
-    RUN_TEST(test_a_mid_frame_execution_uploads_and_the_next_one_sends_only_the_delta);
+    RUN_TEST(test_end_frame_uploads_each_used_storage_once_including_bytes_after_the_last_draw);
     RUN_TEST(test_allocating_between_draws_keeps_the_merge);
     RUN_TEST(test_indexed_draws_read_the_index_storage_as_uint32);
     RUN_TEST(test_restore_makes_new_buffers_and_a_lost_frame_uploads_nothing);

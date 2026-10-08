@@ -1,7 +1,9 @@
 /* Real-GL coverage for frame storage: absolute uint32 indices over mixed strides,
- * uniform blocks allocated after the first pass, and delta uploads mid-frame. */
+ * uniform blocks allocated after the first pass, delta uploads mid-frame, and the
+ * queue order of buffer and texture writes against the frame's draws. */
 
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_frame.h"
 #include "unity.h"
 #include "window/nt_window.h"
 
@@ -44,6 +46,7 @@ void setUp(void) {
     desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 1024U * 1024U;
     desc.frame_capacity[NT_GFX_FRAME_INDEX] = 64U * 1024U;
     desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
+    desc.global_blocks[0] = (nt_global_block_t){"Color", 0};
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -88,7 +91,7 @@ static uint32_t alloc_indices(uint32_t first_vertex) {
     return offset / 4U;
 }
 
-static void read_pixel(int x, int y, uint8_t out[4]) { TEST_ASSERT_TRUE(nt_gfx_read_pixels(x, y, 1, 1, out, 4)); }
+static void read_pixel(int x, int y, uint8_t out[4]) { TEST_ASSERT_TRUE(nt_gfx_read_pixels((nt_render_target_t){0}, x, y, 1, 1, out, 4)); }
 
 static void assert_red_left_green_right(void) {
     uint8_t left[4] = {0};
@@ -122,54 +125,49 @@ static void test_absolute_uint32_indices_over_two_strides_in_one_frame(void) {
     nt_gfx_bind_pipeline(green);
     nt_gfx_bind_vertex_input(wide);
     nt_gfx_draw_indexed(right_first, 3, 3);
-    assert_red_left_green_right();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    assert_red_left_green_right();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_begin_frame();
 }
 
-static void assert_center(uint8_t red, uint8_t green) {
-    uint8_t pixel[4] = {0};
-    read_pixel((int)(g_nt_window.fb_width / 2U), (int)(g_nt_window.fb_height / 2U), pixel);
-    TEST_ASSERT_EQUAL_UINT8(red, pixel[0]);
-    TEST_ASSERT_EQUAL_UINT8(green, pixel[1]);
-}
-
-/* The first pass executes (read_pixels) before the second block exists, so the
- * late block reaches the uniform buffer as a delta of a later execution. Each pass
- * draws with its own block. */
+/* A block allocated after the first pass reaches its later draw, and each pass draws with
+ * its own block: both reach the GPU in the one upload of end_frame. */
 static void test_a_block_allocated_after_the_first_pass_reaches_a_later_draw(void) {
     static const float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
     static const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
-    nt_gfx_register_global_block("Color", 0);
     const nt_pipeline_t pipeline = make_pipeline(s_vertexid_vs_src, s_fs_block_src);
     const nt_vertex_input_t empty = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
 
+    const int half = (int)(g_nt_window.fb_width / 2U);
+    const int height = (int)g_nt_window.fb_height;
     begin_black_pass();
+    nt_gfx_set_viewport(0, 0, half, height);
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(empty);
     nt_gfx_bind_uniform_block(0, red, sizeof(red));
     nt_gfx_draw(0, 3);
-    assert_center(255, 0);
     nt_gfx_end_pass();
 
     /* Produced while the frame is being drawn, as after UI layout. */
-    begin_black_pass();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.load_color = true, .clear_depth = 1.0F});
+    nt_gfx_set_viewport(half, 0, half, height);
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(empty);
     nt_gfx_bind_uniform_block(0, green, sizeof(green));
     nt_gfx_draw(0, 3);
-    assert_center(0, 255);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_BUFFER_UPLOAD]);
+    assert_red_left_green_right();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_begin_frame();
 }
 
-/* A buffer write executes the stream mid-frame; the next execution sends only the
- * new vertices and indices. */
-static void test_a_mid_frame_execution_and_a_delta_upload_draw_both_halves(void) {
+/* A buffer write between two draws does not split the frame: both allocations
+ * reach the GPU in the one upload of end_frame. */
+static void test_storage_allocated_around_a_buffer_write_draws_both_halves(void) {
     const nt_pipeline_t red = make_pipeline(s_vs_src, s_fs_red_src);
     const nt_pipeline_t green = make_pipeline(s_vs_src, s_fs_green_src);
     const nt_vertex_input_t input = make_frame_input(12);
@@ -185,15 +183,15 @@ static void test_a_mid_frame_execution_and_a_delta_upload_draw_both_halves(void)
     const uint32_t right_first = alloc_indices(alloc_triangle(12, 3, s_right));
     nt_gfx_bind_pipeline(green);
     nt_gfx_draw_indexed(right_first, 3, 3);
-    assert_red_left_green_right();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    assert_red_left_green_right();
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_begin_frame();
 }
 
-/* An index upload runs while the last replayed draw's vertex input is bound; that
- * input keeps its own index buffer, so it draws the same triangle afterwards. */
+/* The frame's index upload rewires no input: `own` keeps its own index buffer and
+ * draws the same triangle before and after a draw from frame storage. */
 static void test_an_index_upload_leaves_a_bound_input_with_its_own_index_buffer(void) {
     static const uint16_t indices[3] = {0, 1, 2};
     const nt_pipeline_t red = make_pipeline(s_vs_src, s_fs_red_src);
@@ -206,13 +204,11 @@ static void test_an_index_upload_leaves_a_bound_input_with_its_own_index_buffer(
         .index_buffer = ibo,
     });
     const nt_vertex_input_t frame = make_frame_input(12);
-    const nt_buffer_t other = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 16});
 
     begin_black_pass();
     nt_gfx_bind_pipeline(red);
     nt_gfx_bind_vertex_input(own);
     nt_gfx_draw_indexed(0, 3, 3);
-    nt_gfx_update_buffer(other, 0, (const uint8_t[16]){0}, 16); /* replays: `own` is the bound input */
 
     const uint32_t right_first = alloc_indices(alloc_triangle(12, 3, s_right));
     nt_gfx_bind_pipeline(green);
@@ -223,11 +219,141 @@ static void test_an_index_upload_leaves_a_bound_input_with_its_own_index_buffer(
     nt_gfx_bind_pipeline(red);
     nt_gfx_bind_vertex_input(own);
     nt_gfx_draw_indexed(0, 3, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     uint8_t left[4] = {0};
     read_pixel((int)(g_nt_window.fb_width * 3U / 16U), (int)(g_nt_window.fb_height / 2U), left);
     TEST_ASSERT_EQUAL_UINT8(255, left[0]);
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+    nt_gfx_begin_frame();
+}
+
+static const char *s_color_vs_src = "precision mediump float;\n"
+                                    "layout(location = 0) in vec2 a_position;\n"
+                                    "layout(location = 1) in vec4 a_color;\n"
+                                    "out vec4 v_color;\n"
+                                    "void main() { v_color = a_color; gl_Position = vec4(a_position, 0.0, 1.0); }\n";
+
+static const char *s_color_fs_src = "precision mediump float;\n"
+                                    "in vec4 v_color;\n"
+                                    "out vec4 frag_color;\n"
+                                    "void main() { frag_color = v_color; }\n";
+
+static const char *s_textured_fs_src = "precision mediump float;\n"
+                                       "uniform sampler2D u_texture;\n"
+                                       "out vec4 frag_color;\n"
+                                       "void main() { frag_color = texture(u_texture, vec2(0.5)); }\n";
+
+/* Vertices 0..2 are the left triangle, 3..5 the right one, each with one color. */
+typedef struct {
+    float position[2];
+    float color[4];
+} color_vertex_t;
+
+static void fill_color_vertices(color_vertex_t out[6], float red, float green) {
+    for (uint32_t v = 0; v < 6; v++) {
+        const float *corner = (v < 3U ? s_left : s_right) + ((size_t)(v % 3U) * 2U);
+        out[v] = (color_vertex_t){{corner[0], corner[1]}, {red, green, 0.0F, 1.0F}};
+    }
+}
+
+static nt_vertex_input_t make_color_input(nt_buffer_t vbo) {
+    return nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = {.attr_count = 2,
+                   .stride = (uint16_t)sizeof(color_vertex_t),
+                   .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2}, {.location = 1, .type = NT_VERTEX_FLOAT, .count = 4, .offset = (uint16_t)offsetof(color_vertex_t, color)}}},
+        .vertex_buffer = vbo,
+    });
+}
+
+static void assert_both_halves(uint8_t red, uint8_t green) {
+    uint8_t left[4] = {0};
+    uint8_t right[4] = {0};
+    read_pixel((int)(g_nt_window.fb_width * 3U / 16U), (int)(g_nt_window.fb_height / 2U), left);
+    read_pixel((int)(g_nt_window.fb_width * 12U / 16U), (int)(g_nt_window.fb_height / 2U), right);
+    TEST_ASSERT_EQUAL_UINT8(red, left[0]);
+    TEST_ASSERT_EQUAL_UINT8(green, left[1]);
+    TEST_ASSERT_EQUAL_UINT8(red, right[0]);
+    TEST_ASSERT_EQUAL_UINT8(green, right[1]);
+}
+
+/* Writes follow queue semantics: the frame executes at end_frame after every write
+ * issued before it, so a draw recorded before the write reads the written data too. */
+static void test_a_buffer_write_between_two_draws_reaches_both(void) {
+    color_vertex_t vertices[6];
+    fill_color_vertices(vertices, 1.0F, 0.0F);
+    const nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .data = vertices, .size = sizeof(vertices)});
+    const nt_vertex_input_t input = make_color_input(vbo);
+    const nt_pipeline_t pipeline = make_pipeline(s_color_vs_src, s_color_fs_src);
+
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_draw(0, 3);
+    fill_color_vertices(vertices, 0.0F, 1.0F);
+    nt_gfx_update_buffer(vbo, 0, vertices, sizeof(vertices));
+    nt_gfx_draw(3, 3);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    assert_both_halves(0, 255);
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+    nt_gfx_begin_frame();
+}
+
+static void test_a_texture_write_between_two_draws_reaches_both(void) {
+    static const uint8_t red[4] = {255, 0, 0, 255};
+    static const uint8_t green[4] = {0, 255, 0, 255};
+    color_vertex_t vertices[6];
+    fill_color_vertices(vertices, 0.0F, 0.0F);
+    const nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = vertices, .size = sizeof(vertices)});
+    const nt_vertex_input_t input = make_color_input(vbo);
+    const nt_pipeline_t pipeline = make_pipeline(s_color_vs_src, s_textured_fs_src);
+    const nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = red, .format = NT_TEXTURE_FORMAT_RGBA8});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    const nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_texture"), .texture = tex, .sampler = NT_SAMPLER_DEFAULT};
+
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(&binding, 1);
+    nt_gfx_draw(0, 3);
+    nt_gfx_update_texture(tex, 0, 0, 1, 1, green);
+    nt_gfx_draw(3, 3);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    assert_both_halves(0, 255);
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+    nt_gfx_begin_frame();
+}
+
+/* A write after end_frame belongs to the next frame: the executed frame keeps its pixels. */
+static void test_a_buffer_write_after_end_frame_shows_in_the_next_frame(void) {
+    color_vertex_t vertices[6];
+    fill_color_vertices(vertices, 1.0F, 0.0F);
+    const nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .data = vertices, .size = sizeof(vertices)});
+    const nt_vertex_input_t input = make_color_input(vbo);
+    const nt_pipeline_t pipeline = make_pipeline(s_color_vs_src, s_color_fs_src);
+
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_draw(0, 6);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    assert_both_halves(255, 0);
+
+    fill_color_vertices(vertices, 0.0F, 1.0F);
+    nt_gfx_update_buffer(vbo, 0, vertices, sizeof(vertices));
+    assert_both_halves(255, 0);
+
+    nt_gfx_begin_frame();
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_draw(0, 6);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    assert_both_halves(0, 255);
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
     nt_gfx_begin_frame();
 }
@@ -243,8 +369,11 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_absolute_uint32_indices_over_two_strides_in_one_frame);
     RUN_TEST(test_a_block_allocated_after_the_first_pass_reaches_a_later_draw);
-    RUN_TEST(test_a_mid_frame_execution_and_a_delta_upload_draw_both_halves);
+    RUN_TEST(test_storage_allocated_around_a_buffer_write_draws_both_halves);
     RUN_TEST(test_an_index_upload_leaves_a_bound_input_with_its_own_index_buffer);
+    RUN_TEST(test_a_buffer_write_between_two_draws_reaches_both);
+    RUN_TEST(test_a_texture_write_between_two_draws_reaches_both);
+    RUN_TEST(test_a_buffer_write_after_end_frame_shows_in_the_next_frame);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

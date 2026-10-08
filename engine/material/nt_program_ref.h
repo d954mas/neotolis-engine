@@ -18,7 +18,8 @@ typedef struct {
 /* ref is required, with both stage resources assigned. Returns true only when a program is linked.
  * Reclaims an unready owned program before retrying; linking waits for both stages to be ready.
  *
- * May be called each frame; the caller assigns ref->program to materials when true. */
+ * May be called each frame, before the first pass (it may destroy an unready program); the
+ * caller assigns ref->program to materials when true. */
 static inline bool nt_program_ref_update(nt_program_ref_t *ref) {
     NT_ASSERT(ref != NULL && "nt_program_ref_update: ref is required");
     NT_ASSERT(ref->vs.id != 0 && ref->fs.id != 0 && "nt_program_ref: request both stage resources before update()");

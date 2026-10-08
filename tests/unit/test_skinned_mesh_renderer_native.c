@@ -338,8 +338,11 @@ static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t 
     } else {
         nt_mesh_renderer_draw_list(&item, 1);
     }
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const bool read = nt_gfx_read_pixels(s_target, 0, 0, RT_W, RT_H, out, FRAME_BYTES);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(read);
 }
 
 /* The list draws as one instanced draw of all its items. */
@@ -356,8 +359,11 @@ static void render_list(const nt_render_item_t *items, uint32_t count, bool skin
     }
     TEST_ASSERT_EQUAL_UINT32(draws + 1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     TEST_ASSERT_EQUAL_UINT64(instances + count, g_nt_gfx.counters.instances);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RT_W, RT_H, out, FRAME_BYTES));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const bool read = nt_gfx_read_pixels(s_target, 0, 0, RT_W, RT_H, out, FRAME_BYTES);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(read);
 }
 
 static const float *palette_row(uint16_t origin_x, uint16_t origin_y, uint8_t joint, uint8_t row) {

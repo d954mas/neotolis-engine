@@ -39,9 +39,12 @@ static uint32_t lit_column(const uint8_t *frame, int x, int begin, int end) {
 
 static void begin_probe_pass(nt_render_target_t target) { nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0, 0, 0, 1}, .clear_depth = 1.0F}); }
 
-static bool read_probe_pass(uint8_t frame[RT_W * RT_H * 4U]) {
-    bool read_ok = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, RT_W * RT_H * 4U);
+/* The pass executes at end_frame; the next probe draws in a fresh frame. */
+static bool read_probe_pass(nt_render_target_t target, uint8_t frame[RT_W * RT_H * 4U]) {
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    bool read_ok = nt_gfx_read_pixels(target, 0, 0, RT_W, RT_H, frame, RT_W * RT_H * 4U);
+    nt_gfx_begin_frame();
     return read_ok;
 }
 
@@ -58,7 +61,7 @@ static bool probe_multi_flush_ring(nt_render_target_t target) {
     nt_shape_renderer_rect((float[3]){0.5F, 0.6F, 0}, (float[2]){0.6F, 0.4F}, NULL, blue);
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    return read_probe_pass(frame) && pixel_is(frame, 16, 32, 255, 0, 0) && pixel_is(frame, 48, 32, 0, 255, 0) && pixel_is(frame, 48, 13, 0, 0, 255) && pixel_is(frame, 56, 56, 0, 0, 0);
+    return read_probe_pass(target, frame) && pixel_is(frame, 16, 32, 255, 0, 0) && pixel_is(frame, 48, 32, 0, 255, 0) && pixel_is(frame, 48, 13, 0, 0, 255) && pixel_is(frame, 56, 56, 0, 0, 0);
 }
 
 static bool probe_closed_circle(nt_render_target_t target) {
@@ -68,7 +71,7 @@ static bool probe_closed_circle(nt_render_target_t target) {
     nt_shape_renderer_circle_wire((float[3]){0, 0, 0}, 0.5F, (float[4]){0.70710678F, 0, 0, 0.70710678F}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    return read_probe_pass(frame) && pixel_is(frame, 32, 12, 255, 255, 255) && pixel_is(frame, 51, 32, 255, 255, 255) && pixel_is(frame, 32, 32, 0, 0, 0);
+    return read_probe_pass(target, frame) && pixel_is(frame, 32, 12, 255, 255, 255) && pixel_is(frame, 51, 32, 255, 255, 255) && pixel_is(frame, 32, 32, 0, 0, 0);
 }
 
 static bool probe_overlay_order(nt_render_target_t target) {
@@ -82,7 +85,7 @@ static bool probe_overlay_order(nt_render_target_t target) {
     nt_shape_renderer_rect((float[3]){-0.25F, 0, 0}, (float[2]){0.5F, 0.5F}, NULL, NT_RGBA8(0, 0, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    return read_probe_pass(frame) && pixel_is(frame, 40, 32, 0, 255, 0) && pixel_is(frame, 40, 20, 255, 0, 0) && pixel_is(frame, 24, 32, 0, 0, 255);
+    return read_probe_pass(target, frame) && pixel_is(frame, 40, 32, 0, 255, 0) && pixel_is(frame, 40, 20, 255, 0, 0) && pixel_is(frame, 24, 32, 0, 0, 255);
 }
 
 static bool probe_pixel_width_depth(nt_render_target_t target) {
@@ -94,7 +97,7 @@ static bool probe_pixel_width_depth(nt_render_target_t target) {
     nt_shape_renderer_line((float[3]){-1.5F, 1, -4}, (float[3]){1.5F, 1, -4}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    return read_probe_pass(frame) && lit_column(frame, 32, 0, 32) == 6 && lit_column(frame, 32, 32, 64) == 6;
+    return read_probe_pass(target, frame) && lit_column(frame, 32, 0, 32) == 6 && lit_column(frame, 32, 32, 64) == 6;
 }
 
 static bool probe_pixel_bevel(nt_render_target_t target) {
@@ -105,7 +108,7 @@ static bool probe_pixel_bevel(nt_render_target_t target) {
     nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    return read_probe_pass(frame) && pixel_is(frame, 31, 19, 255, 255, 255) && pixel_is(frame, 32, 5, 0, 0, 0);
+    return read_probe_pass(target, frame) && pixel_is(frame, 31, 19, 255, 255, 255) && pixel_is(frame, 32, 5, 0, 0, 0);
 }
 
 static bool probe_near_clip(nt_render_target_t target) {
@@ -117,7 +120,7 @@ static bool probe_near_clip(nt_render_target_t target) {
     nt_shape_renderer_line((float[3]){-1, 0.5F, 0.2F}, (float[3]){1, 0.5F, -0.5F}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    return read_probe_pass(frame) && lit_column(frame, 35, 0, 64) == 6 && pixel_is(frame, 16, 16, 0, 0, 0) && pixel_is(frame, 48, 48, 0, 0, 0);
+    return read_probe_pass(target, frame) && lit_column(frame, 35, 0, 64) == 6 && pixel_is(frame, 16, 16, 0, 0, 0) && pixel_is(frame, 48, 48, 0, 0, 0);
 }
 
 static bool probe_outer_corner(nt_render_target_t target) {
@@ -132,7 +135,7 @@ static bool probe_outer_corner(nt_render_target_t target) {
     nt_shape_renderer_polyline(points, 3, false, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    return read_probe_pass(frame) && pixel_is(frame, 35, 51, 255, 255, 255) && pixel_is(frame, 32, 14, 0, 0, 0);
+    return read_probe_pass(target, frame) && pixel_is(frame, 35, 51, 255, 255, 255) && pixel_is(frame, 32, 14, 0, 0, 0);
 }
 
 static bool probe_active_viewport(nt_render_target_t target) {
@@ -143,7 +146,7 @@ static bool probe_active_viewport(nt_render_target_t target) {
     nt_shape_renderer_line((float[3]){-0.5F, 0, 0}, (float[3]){0.5F, 0, 0}, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     uint8_t frame[RT_W * RT_H * 4U] = {0};
-    return read_probe_pass(frame) && lit_column(frame, 32, 0, RT_H) == 6 && pixel_is(frame, 32, 48, 255, 255, 255);
+    return read_probe_pass(target, frame) && lit_column(frame, 32, 0, RT_H) == 6 && pixel_is(frame, 32, 48, 255, 255, 255);
 }
 
 NT_TEST_KEEPALIVE uint32_t nt_test_shape_stroke_probe(void) {

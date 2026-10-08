@@ -27,7 +27,7 @@ static inline nt_gl_offset_t nt_gl_offset(uintptr_t bytes) { return (nt_gl_offse
  * A frame is always open between init and shutdown, so every call lands in one. */
 #define NT_GL_COUNT_(call) ((void)g_nt_gfx.counters.gl[call]++)
 
-/* One count per call with non-NULL data; NULL storage (including NULL orphaning) does not count. */
+/* One count per call with non-NULL data; NULL storage does not count. */
 static inline void nt_gl_count_buffer_upload(const void *data, uint64_t bytes) {
     if (data == NULL) {
         return;

@@ -65,8 +65,9 @@ static void test_scissor_enable_dedups_before_the_backend(void) {
     nt_gfx_fake_reset();
     nt_gfx_set_scissor_enabled(true);
     nt_gfx_set_scissor_enabled(true);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_set_scissor_enabled_count());
     nt_gfx_set_scissor_enabled(false);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_set_scissor_enabled_count());
 }
 
@@ -75,11 +76,11 @@ static void test_scissor_enable_dedups_before_the_backend(void) {
 static void test_context_restore_resets_the_scissor_mirror(void) {
     nt_gfx_fake_reset();
     nt_gfx_set_scissor_enabled(true);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_set_scissor_enabled_count());
 
-    nt_gfx_end_pass();
     nt_gfx_fake_set_context_lost(true);
-    nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     nt_gfx_fake_set_context_lost(false);
@@ -90,6 +91,8 @@ static void test_context_restore_resets_the_scissor_mirror(void) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor_enabled(true);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_set_scissor_enabled_count());
 }
 
