@@ -143,6 +143,51 @@ static const char *s_mesh_fs_src = "precision mediump float;\n"
                                    "uniform vec4 u_probe_color;\n"
                                    "void main() { frag_color = u_probe_color; }\n";
 
+/* The GL probes draw with programs linked at startup and after a restore: a link finishes
+ * in a later frame, so a probe cannot link and draw inside one call. */
+enum { PROBE_FLOAT, PROBE_BASIS, PROBE_DEPTH, PROBE_OBSERVE, PROBE_COUNT };
+typedef struct {
+    const char *vs_source;
+    const char *fs_source;
+    nt_shader_t vs;
+    nt_shader_t fs;
+    nt_program_t program;
+} probe_program_t;
+static probe_program_t s_probe_programs[PROBE_COUNT] = {
+    [PROBE_FLOAT] = {.vs_source = "void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }",
+                     .fs_source = "precision highp float; uniform sampler2D u_probe; out vec4 color; void main() { color = texture(u_probe, vec2(0.5)); }"},
+    /* Explicit LOD, not screen-space derivatives: the level under test must not depend on how the
+     * driver rounds lambda for a 1x1 viewport. */
+    [PROBE_BASIS] = {.vs_source = "void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }",
+                     .fs_source = "precision highp float; uniform sampler2D u_basis; uniform vec4 u_basis_uv; out vec4 color;\n"
+                                  "void main() { color = textureLod(u_basis, u_basis_uv.xy, u_basis_uv.z); }"},
+    [PROBE_DEPTH] = {.vs_source = "uniform vec4 u_depth; void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, u_depth.x, 1.0); }",
+                     .fs_source = "precision highp float; out vec4 color; void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }"},
+    [PROBE_OBSERVE] = {.vs_source = "void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}",
+                       .fs_source = "precision mediump float;uniform sampler2D tex;uniform vec4 tint;out vec4 color;void main(){color=texture(tex,vec2(0.5))*tint;}"},
+};
+
+static void probe_programs_create(void) {
+    for (int i = 0; i < PROBE_COUNT; i++) {
+        probe_program_t *p = &s_probe_programs[i];
+        p->vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = p->vs_source});
+        p->fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = p->fs_source});
+        p->program = nt_gfx_make_program(p->vs, p->fs);
+    }
+}
+
+static void probe_programs_destroy(void) {
+    for (int i = 0; i < PROBE_COUNT; i++) {
+        probe_program_t *p = &s_probe_programs[i];
+        nt_gfx_destroy_program(p->program);
+        nt_gfx_destroy_shader(p->fs);
+        nt_gfx_destroy_shader(p->vs);
+        p->program = NT_PROGRAM_INVALID;
+        p->fs = (nt_shader_t){0};
+        p->vs = (nt_shader_t){0};
+    }
+}
+
 /* False when the context is (still) lost mid-restore: the caller retries on a
  * later frame; partial handles are {0}-safe for mesh_probe_destroy. */
 static bool mesh_probe_create(void) {
@@ -277,9 +322,18 @@ EMSCRIPTEN_KEEPALIVE int nt_test_ready(void) { return s_nt_ready; }
 /* A fresh draw is required in addition to the test's pixel comparison. */
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_drawn_frames(void) { return s_nt_drawn_frames; }
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_restore_frames(void) { return s_nt_restore_frames; }
-/* Both game programs linked and assigned -- false through the whole window
+static bool probe_programs_ready(void) {
+    for (int i = 0; i < PROBE_COUNT; i++) {
+        if (!nt_gfx_program_ready(s_probe_programs[i].program)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The game programs and the probe programs linked -- false through the whole window
  * between the loss and the relink. */
-EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program)) ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program) && probe_programs_ready()) ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_float_texture_linear(void) { return nt_gfx_gpu_caps()->has_float_texture_linear ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_diagnostics_config(int field) {
     const int values[] = {NT_LOG_MIN_LEVEL, NT_UI_TIMING_ENABLED, NT_GFX_GPU_TIMING_ENABLED, NT_METRICS_ENABLED};
@@ -317,12 +371,7 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
         }
     }
     NT_ASSERT(texture.id != 0);
-    const char *vs_source = "void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }";
-    const char *fs_source = "precision highp float; uniform sampler2D u_probe; out vec4 color; void main() { color = texture(u_probe, vec2(0.5)); }";
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_probe_programs[PROBE_FLOAT].program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     if (target.id != 0) {
         nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_color = {0.25F, 0.5F, 0.75F, 1.0F}});
@@ -340,9 +389,6 @@ EMSCRIPTEN_KEEPALIVE int nt_test_float_probe(int use_texture) {
     bool read = nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
-    nt_gfx_destroy_program(program);
-    nt_gfx_destroy_shader(fs);
-    nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(texture);
     return read ? (int)((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U)) : -3;
 }
@@ -440,15 +486,7 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     }
     nt_sampler_t sampler =
         nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = (level == 0) ? NT_FILTER_NEAREST : NT_FILTER_NEAREST_MIPMAP_NEAREST, .mag_filter = NT_FILTER_NEAREST, .label = "basis_probe_sampler"});
-    const char *vs_source = "void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }";
-    /* Explicit LOD, not screen-space derivatives: the level under test must not depend on how the
-     * driver rounds lambda for a 1x1 viewport. */
-    const char *fs_source = "precision highp float; uniform sampler2D u_basis; uniform vec4 u_basis_uv; out vec4 color;\n"
-                            "void main() { color = textureLod(u_basis, u_basis_uv.xy, u_basis_uv.z); }";
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_probe_programs[PROBE_BASIS].program});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     /* Centre of texel (0,0) at the requested level (the single texel at level 7). */
     const float texel = 0.5F / (BASIS_FIXTURE_SIZE / (float)(1 << level));
@@ -466,9 +504,6 @@ EMSCRIPTEN_KEEPALIVE unsigned int nt_test_basis_sample(int level) {
     bool read = nt_gfx_read_pixels(target, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
-    nt_gfx_destroy_program(program);
-    nt_gfx_destroy_shader(fs);
-    nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_texture(color);
     return read ? ((uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8U) | ((uint32_t)pixel[2] << 16U) | ((uint32_t)pixel[3] << 24U)) : 0xFFFFFFFFU;
 }
@@ -491,11 +526,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_texture_t depth = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 2, .height = 1, .format = NT_TEXTURE_FORMAT_DEPTH24});
     nt_render_target_t prepass = nt_gfx_make_render_target(&(nt_render_target_desc_t){.depth = depth});
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color, .depth = depth});
-    const char *vs_source = "uniform vec4 u_depth; void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, u_depth.x, 1.0); }";
-    const char *fs_source = "precision highp float; out vec4 color; void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }";
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vs_source});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fs_source});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_program_t program = s_probe_programs[PROBE_DEPTH].program;
     nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_write = true, .depth_func = NT_DEPTH_LESS});
     nt_pipeline_t overwrite = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_func = NT_DEPTH_ALWAYS});
     nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
@@ -612,9 +643,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_pass_actions_probe(int capture) {
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_pipeline(overwrite);
-    nt_gfx_destroy_program(program);
-    nt_gfx_destroy_shader(fs);
-    nt_gfx_destroy_shader(vs);
     nt_gfx_destroy_render_target(target);
     nt_gfx_destroy_render_target(prepass);
     nt_gfx_destroy_texture(color);
@@ -670,12 +698,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
         return 0;
     }
     nt_render_target_t target = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = color});
-    nt_shader_t vs =
-        nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}"});
-    nt_shader_t fs = nt_gfx_make_shader(
-        &(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "precision mediump float;uniform sampler2D tex;uniform vec4 tint;out vec4 color;void main(){color=texture(tex,vec2(0.5))*tint;}"});
-    nt_program_t program = nt_gfx_make_program(vs, fs);
-    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = s_probe_programs[PROBE_OBSERVE].program});
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pipeline);
@@ -698,9 +721,6 @@ EMSCRIPTEN_KEEPALIVE uint32_t nt_test_observe_probe(int mode) {
     bool read = nt_gfx_read_pixels(target, 0, 0, 1, 1, pixel, sizeof(pixel));
     nt_gfx_destroy_vertex_input(vi);
     nt_gfx_destroy_pipeline(pipeline);
-    nt_gfx_destroy_program(program);
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_texture(color);
     nt_gfx_destroy_texture(texture);
     nt_gfx_destroy_texture(spare);
@@ -1046,6 +1066,8 @@ static bool gpu_restore_step(void) {
     /* The probe's mesh and vertex input died with the context. */
     mesh_probe_destroy();
     ok = mesh_probe_create() && ok;
+    probe_programs_destroy();
+    probe_programs_create();
     return ok;
 }
 
@@ -1267,6 +1289,7 @@ int main(int argc, char *argv[]) {
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});             /* base + 4 rich faces */
 
     nt_shape_renderer_init();
+    probe_programs_create();
     const bool probe_ok = mesh_probe_create();
     NT_ASSERT(probe_ok && "mesh probe creation failed at startup"); /* cold start: the context is alive */
     (void)probe_ok;
