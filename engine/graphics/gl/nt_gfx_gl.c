@@ -1311,7 +1311,7 @@ static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
     }
 
     const nt_global_block_t *blocks = s_init_desc.global_blocks;
-    for (uint32_t bi = 0; bi < NT_GFX_MAX_GLOBAL_BLOCKS; bi++) {
+    for (uint32_t bi = 0; bi < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; bi++) {
         if (blocks[bi].name == NULL) {
             continue;
         }

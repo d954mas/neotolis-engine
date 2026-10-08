@@ -259,11 +259,11 @@ static void spawn_n_defold(uint32_t n) {
 
 /* ---- Frame callback ---- */
 
-/* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
 #if NT_METRICS_ENABLED && NT_GFX_GPU_TIMING_ENABLED
 static bool s_gpu_timing_on = true;
 static bool s_gpu_timing_toggle; /* the T key; applied between frames */
 
+/* Poll the gfx "frame" GPU timer segment; ms, or -1 when no timer is available. */
 static float bunnymark_poll_gpu_ms(void) {
     uint64_t gpu_ns = 0;
     bool ready = false;

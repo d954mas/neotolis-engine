@@ -3464,8 +3464,9 @@ void test_full_global_block_list_inits(void) {
     nt_gfx_shutdown();
     nt_gfx_desc_t desc =
         NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16);
-    static const char *const names[NT_GFX_MAX_GLOBAL_BLOCKS] = {"B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"};
-    for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS; i++) {
+    static const char *const names[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS] = {"B0",  "B1",  "B2",  "B3",  "B4",  "B5",  "B6",  "B7",  "B8",  "B9",  "B10", "B11",
+                                                                       "B12", "B13", "B14", "B15", "B16", "B17", "B18", "B19", "B20", "B21", "B22", "B23"};
+    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
         desc.global_blocks[i] = (nt_global_block_t){names[i], NT_GFX_MAX_UNIFORM_BUFFER_SLOTS - 1U - i};
     }
     nt_gfx_init(&desc);

@@ -57,7 +57,7 @@ Resident pack bytes are queried from existing state even with timing OFF. See
 for last-call semantics and nested duration boundaries.
 
 GPU timing OFF removes timer rings, timer-extension probes and query calls.
-Segment/toggle calls are inert; supported returns false and poll returns false
+Segment calls are inert; supported returns false and poll returns false
 with a zero output. Segment names must have static lifetime in every
 configuration: with timing ON the begin call records the pointer until the
 stream executes. Segment names and poll output pointers must be non-NULL;
@@ -67,7 +67,9 @@ not in the stub.
 With timing compiled ON, the GL implementation leaves output unchanged on an
 unsuccessful poll. `nt_gfx_stub` always returns
 false and zeroes output, regardless of the timing flag.
-The runtime choice starts enabled and survives context loss. Runtime disable
+The runtime choice starts enabled and survives context loss. The toggle asserts
+unless called between `nt_gfx_end_frame` and the next `nt_gfx_begin_frame`, with
+timing OFF too (not in the stub): recorded segments execute at `end_frame`. Runtime disable
 closes an active segment and its native debug group, cancels pending samples,
 and retains query objects until shutdown. Re-enable starts fresh samples.
 Dead-context cleanup performs no GL calls. Support reports capability,

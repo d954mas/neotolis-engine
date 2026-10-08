@@ -217,7 +217,7 @@ static void test_stale_destroy_leaves_the_target_that_reused_its_slot(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_destroy_count());
 }
 
-/* Creation only records a new object, so it is allowed in a pass. */
+/* A new object is named by no recorded command, so creation is allowed in a pass. */
 static void test_make_in_a_pass_is_allowed_and_a_rejected_destroy_keeps_the_target(void) {
     nt_texture_t color = make_color();
     nt_render_target_t rt = make_target(color, NO_TEXTURE);

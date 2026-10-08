@@ -81,7 +81,8 @@ executes the stream in call order. Nothing is recorded outside a frame.
 Every other operation is immediate: creates, destroys, buffer and texture
 updates, activation, queries, the GPU timing toggle and polling.
 `nt_gfx_end_frame` is the only place the stream executes, so every immediate
-operation of a frame runs before every recorded command of that frame. Two
+operation issued before `nt_gfx_end_frame` runs before every recorded command of
+that frame. Two
 rules follow from that order.
 
 **Writes follow queue semantics**, like WebGPU `queue.writeBuffer` and
@@ -103,8 +104,8 @@ module shutdown, unmount or restore that destroys GPU objects, because a recorde
 command may still name it. Before the first pass and after `nt_gfx_end_frame`
 destroys are allowed; a destroy of a stale or invalid handle keeps its own
 contract. A lost frame follows the same order: `nt_gfx_begin_pass` on a lost
-context records nothing but still opens the pass, and every draw-phase call
-checks the pass before it returns `NT_GFX_RESULT_CONTEXT_LOST`. The check is one compare per
+context records nothing but still opens the pass, and every pass-scoped call
+checks the pass before it returns `NT_GFX_RESULT_CONTEXT_LOST` (segments check the frame). The check is one compare per
 destroy; draws pay nothing.
 
 `nt_gfx_set_gpu_timing_enabled` runs only between frames: disabling closes an
@@ -424,10 +425,9 @@ but not free: Mali drivers under ANGLE track the whole buffer, not the written
 range, so the write waits for those draws or copies around them. Measured on
 the reference phone:
 
-- appending per-draw data between draws of one frame (the former mesh,
-  skinned and shape instance rings) costs 2-15x frame time when the frame is
+- appending per-draw data between draws of one frame costs 2-15x frame time when the frame is
   not GPU-bound;
-- a partial rewrite from offset 0 (the former shape batch) stalls the same way;
+- a partial rewrite from offset 0 stalls the same way;
 - a full-size rewrite does not stall: Chrome gives the buffer new storage;
 - rewriting a buffer one frame after its last read does not stall;
 - orphaning (`glBufferData` per write) removes the wait but allocates storage on
@@ -817,8 +817,9 @@ begin_frame takes the lost event, so the recorded stream and capture stay
 consistent; a frame can see `context_restored` and a new latched loss together.
 `nt_gfx_init` latches the same way when its capability probe meets a loss, so
 nothing is made from the zero caps a lost context reports.
-Pass calls on a lost context are no-ops, not traps, except that `end_pass` closes a
-pass opened before the latch and `end_segment` closes its segment.
+On a lost context pass calls keep their sequencing asserts and record nothing:
+`begin_pass` still opens the pass, pass-scoped calls end `CONTEXT_LOST` after the
+pass check, and `end_pass` closes the pass (its END is a backend no-op without a BEGIN).
 
 A backend call that reports a failure (a create, a readback, a lazy sampler recreate at bind or on a
 cache hit) asks the browser: a loss latches as above and ends the operation with
@@ -993,8 +994,8 @@ remain meaningful after resource destruction or slot reuse.
 
 The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, arg 0 =
 context lost) opens the snapshot; pass-scoped bindings are not recorded, because the
-first `begin_pass` discards them. The scissor records (the state that carries over
-frames) and the
+first `begin_pass` discards them. The scissor enable and rectangle records (the rectangle
+carries over frames) and the
 frontend resource definitions follow, then the backend `INITIAL/STATE` record
 (`NT_GFX_INITIAL_BACKEND`, cached GL names and framebuffer size) and the backend's
 own definitions. While the context is known lost, the backend records hold the

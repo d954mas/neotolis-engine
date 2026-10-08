@@ -279,7 +279,7 @@ static void capture_initial_state(void) {
     /* Pass-scoped mirrors are discarded by the first begin_pass, so only frame-crossing state is recorded. */
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_STATE, event->detail = NT_GFX_INITIAL_FRONTEND; event->data.state.integers[0] = g_nt_gfx.context_lost;);
     NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR_ENABLE, event->data.state.integers[0] = s_gfx.scissor_enabled);
-    /* The carried-over binding mirrors explain an equal bind that ends CACHE in the capture. */
+    /* The carried-over scissor box explains an equal set_scissor that ends CACHE in the capture. */
     if (s_gfx.scissor_rect[2] < 0) {
         NT_GFX_RECORD(NT_GFX_EVENT_INITIAL, NT_GFX_OP_SCISSOR, event->result = NT_GFX_RESULT_UNKNOWN);
     } else {
@@ -320,7 +320,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_vertex_inputs > 0 && "nt_gfx_desc_t.max_vertex_inputs is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     NT_ASSERT(desc->max_render_targets > 0 && "nt_gfx_desc_t.max_render_targets is 0 -- use nt_gfx_desc_defaults() or set explicitly");
-    for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS; i++) {
+    for (uint32_t i = 0; i < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; i++) {
         NT_ASSERT((desc->global_blocks[i].name == NULL || desc->global_blocks[i].binding_slot < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS) &&
                   "nt_gfx_desc_t.global_blocks: slot >= NT_GFX_MAX_UNIFORM_BUFFER_SLOTS");
     }
@@ -1527,7 +1527,7 @@ static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    /* Destroy clears the mirror, so an equal nonzero id is live. */
+    /* begin_pass resets the mirror and the frame rule keeps the bound object alive, so an equal nonzero id is live. */
     if (s_gfx.bound_pipeline != 0 && pip.id == s_gfx.bound_pipeline) {
         return NT_GFX_RESULT_CACHE;
     }
@@ -2183,7 +2183,7 @@ static nt_gfx_result_t bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offse
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    /* Destroying the buffer clears the mirror, so an equal nonzero id is live. */
+    /* begin_pass resets the mirror and the frame rule keeps the bound object alive, so an equal nonzero id is live. */
     if (s_gfx.bound_instance.buffer != 0 && buf.id == s_gfx.bound_instance.buffer && byte_offset == s_gfx.bound_instance.offset && s_gfx.bound_vertex_input == s_gfx.bound_instance.vertex_input) {
         return NT_GFX_RESULT_CACHE;
     }
@@ -2348,8 +2348,6 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 }
 
 /* ---- Mesh side table helpers ---- */
-
-/* mesh_table_alloc and mesh_handle_make replaced by nt_pool_alloc(&s_gfx.mesh_pool) */
 
 /* ---- Asset activators ---- */
 

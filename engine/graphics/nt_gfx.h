@@ -88,10 +88,6 @@ typedef struct {
     nt_sampler_t sampler;
 } nt_gfx_texture_binding_t;
 
-/* ---- Global uniform blocks (compile-time limit) ---- */
-
-#define NT_GFX_MAX_GLOBAL_BLOCKS 8
-
 /* Samplers are deduplicated by their (filter/wrap/compare) descriptor; most apps
  * use 3-10 unique configs. 128 is headroom, not coverage — all 324 combinations
  * are constructible. Costs ~4 KB of BSS, not binary size; the linear scan
@@ -346,12 +342,12 @@ typedef struct {
     /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: 0 (disabled);
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
-    nt_global_block_t global_blocks[NT_GFX_MAX_GLOBAL_BLOCKS]; /* default: none; slots below NT_GFX_MAX_UNIFORM_BUFFER_SLOTS */
-    bool depth;                                                /* request depth buffer (default: true) */
-    bool stencil;                                              /* request stencil buffer (default: false) */
-    bool antialias;                                            /* MSAA (default: false) */
-    bool alpha;                                                /* transparent canvas/window (default: false) */
-    bool premultiplied_alpha;                                  /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
+    nt_global_block_t global_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* default: none; sized for one name per slot */
+    bool depth;                                                       /* request depth buffer (default: true) */
+    bool stencil;                                                     /* request stencil buffer (default: false) */
+    bool antialias;                                                   /* MSAA (default: false) */
+    bool alpha;                                                       /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha;                                         /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {
@@ -897,8 +893,7 @@ nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc
 void nt_gfx_destroy_shader(nt_shader_t shd);
 /* Destroys the program and its pipelines; materials retain the now-unready handle.
  * Renderer caches drop dead entries on insertion/reset. INVALID is a no-op; stale nonzero handles assert.
- * Clear
- * the caller's handle to NT_PROGRAM_INVALID after destruction. */
+ * Clear the caller's handle to NT_PROGRAM_INVALID after destruction. */
 void nt_gfx_destroy_program(nt_program_t prog);
 /* Invalid and stale handles are no-ops: program destruction also destroys
  * pipelines, and a context loss frees every pipeline slot. */
