@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 7ef509e
+# Commit: e6206c8
 
 ## WASM Section Sizes
 
@@ -7,55 +7,55 @@ Section                Size
 ---------------- ----------
 Type                 170 B
 Import               493 B
-Function             101 B
+Function             100 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                65 B
 Elem                  33 B
-Code               77291 B
+Code               77381 B
 Data               12551 B
-Custom              3988 B
+Custom              3965 B
 ---------------- ----------
-TOTAL              94713 B
+TOTAL              94779 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-20467 B   main
-14082 B   frame
- 5041 B   nt_gfx_frame_execute
+20827 B   main
+18953 B   frame
  3002 B   fmt_fp
- 2605 B   printf_core
- 2118 B   nt_gfx_make_program
+ 2603 B   printf_core
+ 2061 B   nt_gfx_make_program
  1845 B   __rem_pio2f
  1809 B   wire_template_path
  1610 B   nt_shape_renderer_flush
  1480 B   nt_gfx_make_vertex_input
  1220 B   nt_hash32_str
- 1077 B   draw_instances
+ 1080 B   draw_instances
  1024 B   nt_input_web_on_blur
   850 B   nt_gfx_make_pipeline
   844 B   nt_gfx_gl_cache_ground_state
   809 B   nt_input_web_on_pointer_move
   769 B   nt_input_web_on_pointer_down
-  708 B   nt_gfx_make_buffer
+  699 B   nt_gfx_make_buffer
   690 B   pop_arg_long_double
   540 B   claim_more_memory
   519 B   __memcpy
   501 B   emmalloc_memalign
-  486 B   nt_gfx_buffer_update
+  487 B   nt_gfx_update_buffer
   434 B   vsnprintf
   424 B   nt_app_web_frame
   409 B   attempt_allocate
-  407 B   nt_gfx_destroy_buffer
   404 B   nt_log_write
   393 B   apply_rotation
   393 B   nt_gfx_frame_create_buffers
+  385 B   sinf
+  376 B   nt_gfx_destroy_buffer
 
-Total functions: 100
-Total code size: 77128 B
+Total functions: 99
+Total code size: 77219 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94204 B
-libnt_gfx.a                95654 B
-libnt_gfx_stub.a            6172 B
+libnt_gfx.a                93406 B
+libnt_gfx_stub.a            5944 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,7 +122,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         2960980 B
+TOTAL (archives)         2958504 B
 
 ## Data Segments Summary
 

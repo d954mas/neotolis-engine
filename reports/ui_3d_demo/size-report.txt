@@ -1,5 +1,5 @@
 # Size Report: ui_3d_demo (wasm-analysis-paired)
-# Commit: 7ef509e
+# Commit: e6206c8
 
 ## WASM Section Sizes
 
@@ -7,31 +7,30 @@ Section                Size
 ---------------- ----------
 Type                 311 B
 Import               584 B
-Function             188 B
+Function             187 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                  54 B
-Code              238359 B
+Code              238118 B
 Data               19609 B
-Custom              6428 B
+Custom              6405 B
 ---------------- ----------
-TOTAL             265643 B
+TOTAL             265378 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-63663 B   frame
+68526 B   frame
 17026 B   dispatch_command
 15445 B   create_gpu
-10031 B   main
+10134 B   main
  8787 B   Clay__ConfigureOpenElementPtr
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
  5288 B   nt_ui_button_begin
- 5047 B   nt_gfx_frame_execute
  4146 B   upload_glyph
  3992 B   Clay__MeasureTextCached
  3527 B   nt_sprite_renderer_set_material
@@ -42,8 +41,8 @@ TOTAL             265643 B
  2605 B   nt_http_request
  2428 B   printf_core
  2367 B   atlas_on_resolve
- 2346 B   nt_gfx_apply_texture_bindings
- 2203 B   nt_gfx_make_program
+ 2336 B   nt_gfx_apply_texture_bindings
+ 2147 B   nt_gfx_make_program
  2020 B   nt_text_renderer_draw_n
  1931 B   wire_template_path
  1887 B   Clay__InitializePersistentMemory
@@ -53,9 +52,10 @@ TOTAL             265643 B
  1678 B   nt_font_lookup_glyph_offset
  1486 B   nt_gfx_make_vertex_input
  1465 B   emit_glyph_pass
+ 1371 B   nt_text_renderer_set_material
 
-Total functions: 186
-Total code size: 238038 B
+Total functions: 185
+Total code size: 237798 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94204 B
-libnt_gfx.a                95654 B
-libnt_gfx_stub.a            6172 B
+libnt_gfx.a                93406 B
+libnt_gfx_stub.a            5944 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,7 +122,7 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         2960980 B
+TOTAL (archives)         2958504 B
 
 ## Data Segments Summary
 

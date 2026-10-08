@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: 7ef509e
+# Commit: e6206c8
 
 ## WASM Section Sizes
 
@@ -7,41 +7,40 @@ Section                Size
 ---------------- ----------
 Type                 240 B
 Import               605 B
-Function             171 B
+Function             170 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                89 B
 Elem                  78 B
-Code              199889 B
-Data              212178 B
-Custom             10659 B
+Code              199787 B
+Data              212145 B
+Custom             10622 B
 ---------------- ----------
-TOTAL             423929 B
+TOTAL             423756 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
+34260 B   frame
 31497 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
-29595 B   frame
-27330 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
+27324 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17617 B   nt_gfx_activate_texture
  5759 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
- 5175 B   main
- 4952 B   nt_gfx_activate_mesh
- 4816 B   nt_gfx_frame_execute
+ 5555 B   main
+ 4949 B   nt_gfx_activate_mesh
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
  3313 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
  3047 B   nt_gfx_make_texture
- 3007 B   fmt_fp
+ 3002 B   fmt_fp
  2621 B   nt_http_request_ex
  2588 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
  2536 B   basist::pack_eac_high_quality(basist::eac_block&, unsigned char const*, unsigned int)
  2472 B   basist::unpack_uastc(unsigned int, unsigned int, basist::color32 const&, basist::astc_block_desc const&, basist::color32*, bool)
- 2427 B   printf_core
- 2073 B   nt_gfx_make_program
+ 2426 B   printf_core
+ 2017 B   nt_gfx_make_program
  1851 B   __rem_pio2f
  1678 B   basist::bitwise_decoder::read_huffman_table(basist::huffman_decoding_table&)
  1444 B   nt_gfx_make_vertex_input
@@ -53,9 +52,10 @@ TOTAL             423929 B
   809 B   nt_input_web_on_pointer_move
   778 B   nt_gfx_gl_cache_ground_state
   770 B   __cxx_global_array_dtor
+  769 B   nt_input_web_on_pointer_down
 
-Total functions: 169
-Total code size: 199614 B
+Total functions: 168
+Total code size: 199513 B
 
 ## Built Engine Archives
 
@@ -77,8 +77,8 @@ libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94204 B
-libnt_gfx.a                95654 B
-libnt_gfx_stub.a            6172 B
+libnt_gfx.a                93406 B
+libnt_gfx_stub.a            5944 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
 libnt_http_stub.a          11400 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4616 B
 libnt_window_stub.a         2476 B
 ------------------------ ----------
-TOTAL (archives)         2960980 B
+TOTAL (archives)         2958504 B
 
 ## Data Segments Summary
 
 Segments: 155
-Total data size: 211008 B
+Total data size: 210976 B
