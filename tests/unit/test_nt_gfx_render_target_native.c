@@ -1558,6 +1558,9 @@ static void count_fragment_stage_logs(nt_log_level_t level, const char *domain, 
 
 /* A failed link asserts where it finishes, after logging the stage that broke it. */
 static void test_failed_link_logs_its_stage_and_asserts_at_begin_frame(void) {
+    /* Mesa reports the compile error through KHR_debug, whose callback asserts at compile; this pins the link path. */
+    const GLboolean debug_output = glIsEnabled(GL_DEBUG_OUTPUT);
+    glDisable(GL_DEBUG_OUTPUT);
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 frag_color;\nvoid main() { frag_color = undeclared_value; }\n"});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
@@ -1569,6 +1572,9 @@ static void test_failed_link_logs_its_stage_and_asserts_at_begin_frame(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "program link failed"));
     TEST_ASSERT_EQUAL_UINT32(NT_LOG_MIN_LEVEL <= NT_LOG_LEVEL_ERROR ? 1U : 0U, s_fragment_stage_logs);
     nt_gfx_destroy_program(prog);
+    if (debug_output) {
+        glEnable(GL_DEBUG_OUTPUT);
+    }
 }
 
 static void test_pass_load_preserves_color_and_depth_independently(void) {
