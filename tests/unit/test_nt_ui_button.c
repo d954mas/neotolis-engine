@@ -307,6 +307,7 @@ static void test_button_label_walks_in_3d_ctx(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
 
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, ui_walker_fx_draw_count(nt_material_get_info(s_fx.text_material)->program));
 }

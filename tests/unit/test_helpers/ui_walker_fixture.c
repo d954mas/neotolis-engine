@@ -50,6 +50,8 @@ static nt_material_t make_material(bool with_page_sampler) {
     return mat;
 }
 
+static const nt_pass_desc_t FIXTURE_PASS = {.clear_depth = 1.0F};
+
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind) {
     NT_ASSERT(fx != NULL);
     NT_ASSERT(arena != NULL);
@@ -68,7 +70,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     /* Open a frame/pass so sprite/text renderers can draw_indexed without
      * tripping the stub gfx backend's "no active pass" guard (mirrors the
      * test_nt_sprite_renderer setUp). */
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_begin_pass(&FIXTURE_PASS);
 
     nt_ui_module_init();
 
@@ -107,6 +109,23 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     nt_ui_set_custom_handler(fx->ctx, NULL, NULL);
 }
 
+void ui_walker_fixture_end_frame(ui_walker_fixture_t *fx) {
+    NT_ASSERT(fx != NULL && !fx->frame_ended);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    fx->frame_ended = true;
+}
+
+void ui_walker_fixture_next_frame(ui_walker_fixture_t *fx) {
+    NT_ASSERT(fx != NULL);
+    if (!fx->frame_ended) {
+        ui_walker_fixture_end_frame(fx);
+    }
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&FIXTURE_PASS);
+    fx->frame_ended = false;
+}
+
 void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     NT_ASSERT(fx != NULL);
     if (fx->ctx != NULL) {
@@ -120,8 +139,10 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
         nt_ui_destroy_context(fx->ctx);
         fx->ctx = NULL;
     }
-    /* Texture destruction is pass-forbidden: close the fixture pass first. */
-    nt_gfx_end_pass();
+    /* Destroys wait until the frame is no longer being drawn. */
+    if (!fx->frame_ended) {
+        ui_walker_fixture_end_frame(fx);
+    }
     if (nt_font_valid(fx->stub_font)) {
         nt_font_destroy(fx->stub_font);
     }

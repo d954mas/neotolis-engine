@@ -193,9 +193,11 @@ static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformati
     nt_skinned_mesh_renderer_draw_list(skinned_items, 2);
     /* One instanced draw per list: the two mesh and two skinned instances each share a run. */
     const bool batched = nt_gfx_draw_calls(&g_nt_gfx.counters) == draws + 3 && g_nt_gfx.counters.instances == instances + 5;
-    uint8_t frame[RT_W * RT_H * 4U] = {0};
-    const bool read = nt_gfx_read_pixels(0, 0, RT_W, RT_H, frame, sizeof(frame));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    uint8_t frame[RT_W * RT_H * 4U] = {0};
+    const bool read = nt_gfx_read_pixels(target, 0, 0, RT_W, RT_H, frame, sizeof(frame));
+    nt_gfx_begin_frame();
 
     uint32_t mask = batched ? 1U << 5U : 0;
     if (read) {

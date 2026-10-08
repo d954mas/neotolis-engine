@@ -302,8 +302,9 @@ void setUp(void) {
 }
 
 void tearDown(void) {
-    nt_sprite_renderer_shutdown();
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_sprite_renderer_shutdown();
 
     nt_material_shutdown();
     nt_atlas_test_reset();

@@ -2771,8 +2771,8 @@ int main(int argc, char *argv[]) {
         (2U * SKELETAL_SHOWCASE_MAX_INSTANCES * (uint32_t)sizeof(nt_skinned_mesh_instance_t)) + SKELETAL_SHOWCASE_UI_VERTEX_BYTES + SKELETAL_SHOWCASE_SHAPE_VERTEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = SKELETAL_SHOWCASE_UI_INDEX_BYTES;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 3U * 512U; /* two stage views and the UI view: 256 B or less each, plus any offset alignment up to 256 */
+    gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};
     nt_gfx_init(&gfx_desc);
-    nt_gfx_register_global_block("Globals", 0);
     nt_http_init();
 #ifndef NT_PLATFORM_WEB
     nt_fs_init();

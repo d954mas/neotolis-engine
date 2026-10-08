@@ -286,10 +286,13 @@ static void test_a_sampler_recreate_and_a_readback_latch_a_loss(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+    nt_gfx_end_frame();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
     uint8_t pixel[4];
     nt_gfx_fake_set_context_lost(true);
-    TEST_ASSERT_FALSE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_FALSE(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel)));
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
+    nt_gfx_begin_frame();
 }
 
 /* Loading after init lands in the first frame, so its creations are counted like any frame's. */
@@ -410,7 +413,7 @@ static void test_draw_state_in_a_pass_on_a_lost_context_does_not_assert(void) {
     nt_gfx_fake_set_context_lost(true);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    /* The game's pass does not open on a lost context; its draw state calls return quietly. */
+    /* On a lost context the game's pass opens without recording; its draw state calls return quietly. */
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor(0, 0, 1, 1);
     nt_gfx_set_scissor_enabled(true);
@@ -486,7 +489,9 @@ static void test_clear_copies_requests_and_skips_known_loss(void) {
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.last_frame.accepted[NT_GFX_OP_CLEAR]);
     nt_gfx_fake_set_context_lost(true);
     record_next_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_clear(NULL);
+    nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_RESULT_CONTEXT_LOST, result_of(nt_gfx_capture_read(), NT_GFX_OP_CLEAR, NT_GFX_OBJECT_RENDER_TARGET));
@@ -508,17 +513,21 @@ static void test_render_target_work_on_a_known_loss_ends_context_lost(void) {
 }
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* FULL traps before the rejection returns, so the recorded operation has a BEGIN and no RESULT. */
+/* The frame rule traps before the destroy is recorded, so the capture holds no DESTROY at all. */
 static void test_rejected_destroys_assert_inside_a_recorded_frame(void) {
     nt_texture_t texture = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8});
     record_next_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(texture));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "inside a pass"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, result_of(nt_gfx_capture_read(), NT_GFX_OP_DESTROY, NT_GFX_OBJECT_TEXTURE));
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    for (uint32_t i = 0; i < capture.count; i++) {
+        TEST_ASSERT_FALSE(capture.events[i].operation == NT_GFX_OP_DESTROY && capture.events[i].object_kind == NT_GFX_OBJECT_TEXTURE);
+    }
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_RGBA8, nt_gfx_texture_format(texture)); /* still alive */
 }
 #endif
 
@@ -536,7 +545,7 @@ static void test_restore_is_one_context_operation_after_the_lost_snapshot(void) 
     TEST_ASSERT_FALSE(capture.overflow);
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_EVENT_INITIAL, capture.events[0].kind);
     TEST_ASSERT_EQUAL_UINT32(NT_GFX_INITIAL_FRONTEND, capture.events[0].detail);
-    TEST_ASSERT_EQUAL_UINT32(1, capture.events[0].data.state.integers[5]); /* context_lost */
+    TEST_ASSERT_EQUAL_UINT32(1, capture.events[0].data.state.integers[0]); /* context_lost */
     uint32_t restores = 0;
     bool pipeline_defined = false;
     for (uint32_t i = 0; i < capture.count; i++) {
@@ -790,19 +799,15 @@ static uint32_t initial_records(nt_gfx_capture_view_t capture, nt_gfx_operation_
     return count;
 }
 
-/* A context loss forgets uniform-block slots and the scissor rectangle. */
+/* A context loss forgets the scissor rectangle. */
 static void test_capture_initial_state_forgets_lost_bindings(void) {
-    const float block[4] = {0};
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor(1, 2, 3, 4);
-    nt_gfx_bind_uniform_block(2, block, sizeof(block));
-    nt_gfx_bind_uniform_block(3, block, sizeof(block));
     nt_gfx_end_pass();
     record_next_frame();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT32(2, initial_records(capture, NT_GFX_OP_UBO, NT_GFX_RESULT_NONE));
     TEST_ASSERT_EQUAL_UINT32(0, initial_records(capture, NT_GFX_OP_SCISSOR, NT_GFX_RESULT_UNKNOWN));
 
     nt_gfx_fake_lose_and_restore_context();
@@ -813,7 +818,6 @@ static void test_capture_initial_state_forgets_lost_bindings(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     capture = nt_gfx_capture_read();
-    TEST_ASSERT_EQUAL_UINT32(0, initial_records(capture, NT_GFX_OP_UBO, NT_GFX_RESULT_NONE));
     TEST_ASSERT_EQUAL_UINT32(1, initial_records(capture, NT_GFX_OP_SCISSOR, NT_GFX_RESULT_UNKNOWN));
 }
 
@@ -850,27 +854,24 @@ static void test_capture_shows_cache_for_equal_binds_and_merged_draws(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&capture.counters));
 }
 
-/* The scissor rectangle and the uniform-block slots carry over frames: the snapshot shows the
- * state the GL context holds. A block bind always records; its BEGIN carries the resolved range. */
+/* The scissor rectangle carries over frames: the snapshot shows the state the GL context holds.
+ * A block bind always records; its BEGIN carries the resolved range. */
 static void test_capture_initial_state_holds_carried_over_bindings(void) {
     const uint8_t block[128] = {0};
     const nt_buffer_t ubo = nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor(1, 2, 3, 4);
-    nt_gfx_bind_uniform_block(4, block, sizeof(block));
-    nt_gfx_bind_uniform_block(5, block, sizeof(block)); /* offset 256 */
     nt_gfx_end_pass();
     record_next_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     nt_gfx_set_scissor(1, 2, 3, 4);
     nt_gfx_bind_uniform_block(4, block, sizeof(block));
-    nt_gfx_bind_uniform_block(5, block, sizeof(block));
+    nt_gfx_bind_uniform_block(5, block, sizeof(block)); /* offset 256 */
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
     bool scissor_found = false;
-    bool ubo_found = false;
     uint32_t ubo_begins = 0;
     uint32_t cache_results = 0;
     for (uint32_t i = 0; i < capture.count; i++) {
@@ -881,12 +882,6 @@ static void test_capture_initial_state_holds_carried_over_bindings(void) {
             TEST_ASSERT_EQUAL_UINT32(3, e->data.state.integers[2]);
             TEST_ASSERT_EQUAL_UINT32(4, e->data.state.integers[3]);
             scissor_found = true;
-        }
-        if (e->kind == NT_GFX_EVENT_INITIAL && e->operation == NT_GFX_OP_UBO && e->data.binding.slot == 5) {
-            TEST_ASSERT_EQUAL_UINT32(ubo.id, e->object);
-            TEST_ASSERT_EQUAL_UINT32(256, e->data.binding.offset);
-            TEST_ASSERT_EQUAL_UINT32(128, e->data.binding.size);
-            ubo_found = true;
         }
         if (e->kind == NT_GFX_EVENT_BEGIN && e->operation == NT_GFX_OP_UBO && e->data.binding.slot == 5) {
             TEST_ASSERT_EQUAL_UINT32(ubo.id, e->object);
@@ -899,7 +894,6 @@ static void test_capture_initial_state_holds_carried_over_bindings(void) {
         }
     }
     TEST_ASSERT_TRUE(scissor_found);
-    TEST_ASSERT_TRUE(ubo_found);
     TEST_ASSERT_EQUAL_UINT32(1, ubo_begins);
     TEST_ASSERT_EQUAL_UINT32(1, cache_results); /* the scissor; a block bind never ends CACHE */
 }

@@ -75,35 +75,56 @@ index type of the bound vertex input), and GPU timing
 segment begin and end. Descriptors and uniform values are copied
 into the stream. A binding equal to the current one and an indexed draw that
 continues the previous one record nothing new (see Binding dedup and draw
-merge). `nt_gfx_end_frame` executes the stream in call order; every execution
-first uploads the frame storage allocated since the previous one (see Frame
-storage). Nothing is recorded outside a frame.
+merge). `nt_gfx_end_frame` first uploads the frame storage (see Frame storage), then
+executes the stream in call order. Nothing is recorded outside a frame.
 
 Every other operation is immediate: creates, destroys, buffer and texture
-updates, activation, queries, `nt_gfx_read_pixels`, the GPU timing toggle and
-polling. Recorded commands keep their mutual order. A temporary rule keeps
-today's order for the operations that need it: `nt_gfx_update_buffer`,
-`nt_gfx_orphan_buffer`, every destroy of a live handle, `nt_gfx_read_pixels`,
-`nt_gfx_register_global_block` and, with GPU timing compiled ON,
-`nt_gfx_set_gpu_timing_enabled` first execute the commands recorded so far, so
-they see every earlier draw. Other immediate operations may run before
-draw-phase calls recorded earlier in the same frame. A texture write is not
-ordered against the draws of its frame: write a sampled region at most once per
-frame, before the first draw that samples it.
+updates, activation, queries, the GPU timing toggle and polling.
+`nt_gfx_end_frame` is the only place the stream executes, so every immediate
+operation issued before `nt_gfx_end_frame` runs before every recorded command of
+that frame. Two
+rules follow from that order.
 
-`nt_gfx_desc_t.stream_capacity` is the byte budget of draw-phase commands
-recorded between executions, allocated once at init; `nt_gfx_desc_defaults()`
-sets 256 KiB, and init asserts at least 4 bytes. The stream never grows: an
-overflow logs the needed and free bytes and stops the program because the capacity
-is the game's budget. `nt_gfx_counters_t.stream_bytes` reports the frame's peak
-recorded bytes between executions, to size the capacity from a real scene.
+**Writes follow queue semantics**, like WebGPU `queue.writeBuffer` and
+`queue.writeTexture` before `submit`. `nt_gfx_update_buffer` and
+`nt_gfx_update_texture` are allowed at any time and unchecked. A write issued
+before `nt_gfx_end_frame` lands before the frame's first recorded command, so
+every draw of the frame reads the last write: writing one region twice in a
+frame gives the second content to every draw, including draws recorded before
+it. A write issued after `nt_gfx_end_frame` belongs to the next frame. Rendering
+into an attachment is recorded, so it still overwrites the attachment in pass
+order. Arguments of recorded calls (uniform values, descriptors, uniform blocks)
+are copied at the call; buffer, texture and frame storage contents are read at
+execution.
+
+**The frame rule.** A frame is *being drawn* from its first `nt_gfx_begin_pass`
+until `nt_gfx_end_frame`. While it is being drawn, destroying a live object
+asserts: every `nt_gfx_destroy_*` and `nt_gfx_deactivate_*`, and so every
+module shutdown, unmount or restore that destroys GPU objects, because a recorded
+command may still name it. Before the first pass and after `nt_gfx_end_frame`
+destroys are allowed; a destroy of a stale or invalid handle keeps its own
+contract. A lost frame follows the same order: `nt_gfx_begin_pass` on a lost
+context records nothing but still opens the pass, and every pass-scoped call
+checks the pass before it returns `NT_GFX_RESULT_CONTEXT_LOST` (segments check the frame). The check is one compare per
+destroy; draws pay nothing.
+
+`nt_gfx_set_gpu_timing_enabled` runs only between frames: disabling closes an
+active timer segment at the call, while the segments a frame records execute in
+its `nt_gfx_end_frame`, so a toggle inside a frame could split them.
+
+`nt_gfx_desc_t.stream_capacity` is the byte budget of the draw-phase commands of
+one frame, allocated once at init; `nt_gfx_desc_defaults()` sets 32 KiB (over three times
+the largest measured frame, Sponza at 8.9 KB; a mesh run records 60-100 bytes),
+and init asserts at least 4 bytes. The stream never grows: an overflow logs the
+needed and free bytes and stops the program because
+the capacity is the game's budget. `nt_gfx_counters_t.stream_bytes` reports the
+bytes the frame recorded, to size the capacity from a real scene.
 
 GL `begin_pass`
 reads the window framebuffer size at execution, which equals the size at the
 call: the window size changes only in `nt_window_poll`, between frames. GL errors
 and backend asserts without a front-end equivalent fire at execution, inside
-`nt_gfx_end_frame` or an operation that executes the stream first; see Frame
-observation for counters and capture.
+`nt_gfx_end_frame`; see Frame observation for counters and capture.
 
 ### Binding dedup and draw merge
 
@@ -123,11 +144,12 @@ and publishes the whole set and ends `ACCEPTED`, but records a unit bind only
 when that unit's texture or sampler changed in the pass. A uniform block is
 frame data at a fresh offset of the uniform frame stream, so its bind always
 records and ends `ACCEPTED`; GL keeps the slot binding across passes and frames.
-Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind or
-a global block registration at that slot or above asserts.
+Uniform-block slots are below `NT_GFX_MAX_UNIFORM_BUFFER_SLOTS` (24, the WebGL2 minimum); a bind at
+that slot or above asserts, and so does `nt_gfx_init` for a global block declared there.
 
 The compare runs after the pass check; an equal value was validated when it was
-recorded and every path that could invalidate it clears the mirror. An invalid
+recorded, `begin_pass` discards the pass-scoped mirrors, and the frame rule keeps
+every recorded object alive until `nt_gfx_end_frame`. An invalid
 pipeline or vertex-input handle clears its mirror (the unbind); other invalid
 binds leave their mirrors unchanged. Uniform values are not deduplicated by
 the front-end. The GL backend keeps caches for
@@ -199,13 +221,12 @@ keeps renderer-cached vertex inputs from outliving mesh buffers; mesh caches
 revalidate handles with `nt_gfx_vertex_input_valid` on lookup. Because the
 cascade makes stale handles routine, `nt_gfx_destroy_vertex_input` tolerates
 stale and INVALID handles as no-ops. The dynamically captured instance
-buffer is *not* cascade-destroyed, but destroying the one the pass pointed clears
-that instance binding: the next draw of that vertex input asserts until
-`nt_gfx_bind_instance_buffer` re-points it, and the GL attachment's storage
-lingers until that re-point or the vertex input's death.
-Buffer *contents* may change at any time for correctness — `update`/`orphan`
-keep the GL name, so baked attachments survive per-flush orphaning; what a
-write costs depends on when it happens (see Dynamic data lifetime) — and
+buffer is *not* cascade-destroyed: it can be destroyed only outside a drawn frame
+(the frame rule), and every pass re-points its instance buffers anyway; the GL
+attachment's storage lingers until that re-point or the vertex input's death.
+Buffer *contents* may change at any time (queue semantics, see Draw-phase
+command stream) — an update keeps the GL name, so baked attachments survive it;
+what a write costs depends on when it happens (see Dynamic data lifetime) — and
 index-buffer data ops run inside a service upload VAO in the backend,
 because the element-array binding is VAO state — it would otherwise be
 silently rewired into whichever vertex input is bound, and core-profile GL
@@ -404,22 +425,19 @@ but not free: Mali drivers under ANGLE track the whole buffer, not the written
 range, so the write waits for those draws or copies around them. Measured on
 the reference phone:
 
-- appending per-draw data between draws of one frame (the former mesh,
-  skinned and shape instance rings) costs 2-15x frame time when the frame is
+- appending per-draw data between draws of one frame costs 2-15x frame time when the frame is
   not GPU-bound;
-- a partial rewrite from offset 0 (the former shape batch) stalls the same way;
+- a partial rewrite from offset 0 stalls the same way;
 - a full-size rewrite does not stall: Chrome gives the buffer new storage;
 - rewriting a buffer one frame after its last read does not stall;
-- orphaning (`nt_gfx_orphan_buffer`) removes the wait but allocates storage on
+- orphaning (`glBufferData` per write) removes the wait but allocates storage on
   every call.
 
-Policy: per-frame data lives in frame storage (below). It is written to CPU
-staging at any point of the frame and reaches its buffer when the stream
-executes, before the draws that read it, so a frame that executes once (in
-`nt_gfx_end_frame`) writes each frame buffer once, one frame after its last
-read. A buffer write or destroy that executes the stream earlier (see
-Draw-phase command stream) makes the next execution append to frame buffers
-that earlier draws of the frame read: the waiting case above.
+Policy: the stream executes once per frame, in `nt_gfx_end_frame`, so no write
+ever lands between draws of one frame: every write of a frame precedes all its
+draws and lands one frame after the previous frame read the buffer. Per-frame
+data lives in frame storage (below): it is written to CPU staging at any point
+of the frame and reaches its buffer in one upload per stream, before the replay.
 The sprite, text and shape renderers write their geometry to frame storage, so a
 frame drawn by engine renderers alone uploads it once, in `nt_gfx_end_frame`.
 
@@ -450,10 +468,9 @@ point between `nt_gfx_begin_frame` and `nt_gfx_end_frame`, in a pass or after UI
 layout, and never ends a draw merge. `end_frame` sends everything allocated in
 the frame; bytes allocated after it would never reach the GPU, so the next
 `begin_frame` asserts on them.
-Execution sends each stream's bytes allocated since the previous execution with
-one buffer update, then replays: fill an allocation before the next `nt_gfx`
-call, since its bytes are sent once. Offsets and pointers stay valid until the
-next `nt_gfx_begin_frame`, which empties the storage. Alignment padding is
+`nt_gfx_end_frame` sends each stream's bytes with one buffer update, then
+replays: fill an allocation before `nt_gfx_end_frame`. Offsets and pointers stay
+valid until the next `nt_gfx_begin_frame`, which empties the storage. Alignment padding is
 zeroed once at init and keeps old payload bytes afterwards; consumers read only
 the bytes they allocated.
 
@@ -472,8 +489,8 @@ Alignment follows the reader:
   reads only blocks bound in its own frame.
 
 `nt_gfx_frame_buffer(stream)` returns an ordinary buffer handle; apart from
-`nt_gfx_bind_uniform_block`, the gfx front-end treats it like any buffer. The handle is borrowed: never update,
-orphan or destroy it, and read it again every frame, because a context restore
+`nt_gfx_bind_uniform_block`, the gfx front-end treats it like any buffer. The handle is borrowed: never update
+or destroy it, and read it again every frame, because a context restore
 replaces it (vertex inputs over it die with the context anyway). Each enabled
 stream's buffer counts against `nt_gfx_desc_t.max_buffers`.
 
@@ -490,9 +507,9 @@ Text uses VERTEX and INDEX: 208 bytes of vertices and 24 bytes of indices per
 glyph quad, decoration quads included.
 
 Each upload is one `NT_GFX_OP_BUFFER_UPLOAD` operation on its frame buffer,
-recorded and counted where the execution runs (see Frame observation). Every
-execution uploads, also one with no recorded command, so `end_frame` always
-leaves the storage sent. An upload goes through the same checks as
+recorded and counted where the execution runs (see Frame observation). `nt_gfx_end_frame`
+uploads also when the frame recorded no command, so it always leaves the
+storage sent. An upload goes through the same checks as
 `nt_gfx_update_buffer`: while the context is lost it ends `CONTEXT_LOST`, and the
 begin_frame that restores the context makes new buffers, which that frame's data
 reaches. A frame buffer that cannot be made asserts unless the context is lost. `nt_gfx_stub` has zero capacity: every allocation
@@ -513,7 +530,7 @@ call, in the current pass. Each has two entry points:
   texture), allocates and packs each run's instances from the transform,
   drawable (and skin) components, and records it as the core does.
 
-The core's instances are filled before the next `nt_gfx` call (see Frame
+The core's instances are filled before `nt_gfx_end_frame` (see Frame
 storage). One allocation may be drawn any number of times in any passes of the
 frame, so shadow cascades draw one packing. Each core call resolves pipeline,
 vertex input and material state: draw a batch per call, not one object.
@@ -530,7 +547,7 @@ read the material's params and texture publications there. Consequences:
 - Entity bindings are read at the call, so one entity can enter several lists
   with different materials (multipass) by rebinding between the calls.
 - The material is read at the call; its program and textures and the mesh stay
-  live until the recorded draws execute.
+  live until `nt_gfx_end_frame` (the frame rule).
 
 ### Frame order
 
@@ -571,7 +588,10 @@ A shadow list drawn in several cascades packs once per cascade; to pack once,
 the game writes the instances itself and draws them through the core in each
 cascade. The sprite and text renderers record into frame storage at each emit
 or draw, inside a pass; the shape renderer copies each kind into frame storage at
-`flush`.
+`flush`. Lifetime work (resource unmounts, `nt_program_ref_update`,
+renderer restores, any destroy) runs before the first pass or after
+`nt_gfx_end_frame` (the frame rule); `nt_gfx_read_pixels` runs after
+`nt_gfx_end_frame`, before the swap.
 
 ### Render targets
 
@@ -624,11 +644,10 @@ Pass color and depth clears are pass-owned operations. In particular,
 state; pipeline write masks affect draws, not the next pass initialization. Bound
 pipeline, vertex input, the instance binding and the logical complete texture
 set are pass-scoped: `begin_pass` discards them. The texture set is additionally tied to the bound
-program and is discarded when that program changes or when the bound pipeline is
-destroyed. Pipeline and vertex-input binds, texture-set application,
+program and is discarded when that program changes. Pipeline and vertex-input binds, texture-set application,
 instance-buffer re-pointing, uniform writes and draws outside a pass assert.
-Destroying a texture or a live render target inside a pass asserts: pass-scoped
-draw state may still sample it.
+Destroying a live object from the first pass until `nt_gfx_end_frame` asserts
+(the frame rule, see Draw-phase command stream).
 Physical texture/sampler GL bindings and uniform-block binds remain context
 state. The backend deduplicates texture/sampler binds across passes;
 every uniform-block bind records one `glBindBufferRange`. A depth clear forces the depth
@@ -653,7 +672,7 @@ size change is new textures and new targets.
 
 A depth-only target (a shadow map) has no color attachment. It is
 framebuffer-complete, the pass color clear is a no-op, and
-`nt_gfx_read_pixels` inside such a pass asserts.
+`nt_gfx_read_pixels` with it as the source asserts.
 
 Attachments are ordinary textures: `NT_SAMPLER_DEFAULT` selects the sampler of
 their own descriptor, and a binding may override it, for example with a
@@ -798,8 +817,9 @@ begin_frame takes the lost event, so the recorded stream and capture stay
 consistent; a frame can see `context_restored` and a new latched loss together.
 `nt_gfx_init` latches the same way when its capability probe meets a loss, so
 nothing is made from the zero caps a lost context reports.
-Pass calls on a lost context are no-ops, not traps, except that `end_pass` closes a
-pass opened before the latch and `end_segment` closes its segment.
+On a lost context pass calls keep their sequencing asserts and record nothing:
+`begin_pass` still opens the pass, pass-scoped calls end `CONTEXT_LOST` after the
+pass check, and `end_pass` closes the pass (its END is a backend no-op without a BEGIN).
 
 A backend call that reports a failure (a create, a readback, a lazy sampler recreate at bind or on a
 cache hit) asks the browser: a loss latches as above and ends the operation with
@@ -850,9 +870,8 @@ configuration; `nt_gfx_capture_request`, `nt_gfx_capture_read` and
 `gl[]` counts, by `nt_gfx_gl_call_t`, every GL call the GL backend issues
 through its `NT_GL*` funnel, queries included. Platform context management
 (context create/destroy, loss events, `isContextLost` queries)
-is not counted. Draw-phase calls issue their GL calls when the stream executes, at
-`nt_gfx_end_frame` or an earlier execution point, always within the frame that
-recorded them. The funnel
+is not counted. Draw-phase calls issue their GL calls when the stream executes, in
+the `nt_gfx_end_frame` of the frame that recorded them. The funnel
 counts with an inline constant-index increment and (with capture) records in the same
 expression that issues the call; a grep gate rejects any bare `gl*` call in
 `engine/graphics/gl`. The funnel does no per-call frame check: a frame is
@@ -865,8 +884,7 @@ statement just before the JS call; the
 JS that Emscripten's GL layer runs behind a C call (lazy uniform location
 lookup, state shadowing) is a documented boundary: counters and capture see the
 C API call. Payload fields count calls with non-NULL CPU data and their bytes,
-in the same funnel; NULL storage and generated mips are excluded, non-NULL
-orphaning counts once, texture bytes use the actual GPU format for each
+in the same funnel; NULL storage and generated mips are excluded, texture bytes use the actual GPU format for each
 mip/subrectangle, and failed creates keep already-issued work.
 
 `accepted[]` counts public operations by `nt_gfx_operation_t` whose END result
@@ -927,8 +945,7 @@ request arguments, and one RESULT, carrying the outcome `result`; a creator's
 RESULT carries the new handle (zero on failure), while its backend slot and
 names are in the DEFINITION record. BEGIN and RESULT are recorded at the call.
 The BACKEND and backend SKIP records of recorded commands appear when the
-stream executes, at `nt_gfx_end_frame` or before the BEGIN of an operation that
-executes it first, outside any BEGIN/RESULT pair. Immediate backend work inside a
+stream executes in `nt_gfx_end_frame`, outside any BEGIN/RESULT pair. Immediate backend work inside a
 draw-phase call, such as a lazy sampler recreation, stays inside its pair.
 Operations issued inside another operation
 (default samplers, cascaded destroys) nest between its BEGIN and
@@ -975,8 +992,10 @@ no fresh definition; pipelines, vertex inputs and render targets that the first
 detection frees get no DESTROY record. Samplers are re-defined when lazily recreated. Definitions
 remain meaningful after resource destruction or slot reuse.
 
-The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, bound
-frontend handles) opens the snapshot. The other frontend INITIAL records and the
+The frontend `INITIAL/STATE` record (`detail` `NT_GFX_INITIAL_FRONTEND`, arg 0 =
+context lost) opens the snapshot; pass-scoped bindings are not recorded, because the
+first `begin_pass` discards them. The scissor enable and rectangle records (the rectangle
+carries over frames) and the
 frontend resource definitions follow, then the backend `INITIAL/STATE` record
 (`NT_GFX_INITIAL_BACKEND`, cached GL names and framebuffer size) and the backend's
 own definitions. While the context is known lost, the backend records hold the
@@ -1003,10 +1022,8 @@ pipeline definition carries the program handle in `related[0]`. Backend
 vertex-input backend slot in `detail`; initial state uses the current raw
 program name. Vertex-input creation copies each static/instance attribute with
 its divisor, layout, and known buffer. The initial SCISSOR record holds the
-carried-over rectangle and the initial UBO records hold each bound slot's
-buffer, offset and size, from the front-end slot records. The rectangle is
-`UNKNOWN` before the first set and after a context loss; an unbound slot has no
-record. A bind inside the capture that
+carried-over rectangle; it is `UNKNOWN` before the first set and after a
+context loss. Uniform-block bindings are not recorded: each block lives one frame. A bind inside the capture that
 ends `CACHE` matches this state or one set earlier in the frame. Inherited
 layouts unavailable in existing CPU state are explicitly unknown. Capture
 never adds a GL-state mirror of its own or queries GL to reconstruct state.

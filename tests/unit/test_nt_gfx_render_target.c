@@ -7,6 +7,7 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -73,10 +74,11 @@ static void test_depth_only_target_passes_its_size_to_the_pass(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_last_depth_texture_backend());
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(rt), nt_gfx_fake_last_pass_target());
     TEST_ASSERT_EQUAL_UINT16(48, nt_gfx_fake_last_pass_width());
     TEST_ASSERT_EQUAL_UINT16(16, nt_gfx_fake_last_pass_height());
-    nt_gfx_end_pass();
 }
 
 static void test_color_depth_target_passes_both_backends(void) {
@@ -89,9 +91,10 @@ static void test_color_depth_target_passes_both_backends(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(depth), nt_gfx_fake_last_depth_texture_backend());
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT16(64, nt_gfx_fake_last_pass_width());
     TEST_ASSERT_EQUAL_UINT16(32, nt_gfx_fake_last_pass_height());
-    nt_gfx_end_pass();
 }
 
 static void test_half_float_color_is_accepted(void) {
@@ -214,20 +217,21 @@ static void test_stale_destroy_leaves_the_target_that_reused_its_slot(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_destroy_count());
 }
 
-static void test_make_and_destroy_reject_active_pass(void) {
+/* A new object is named by no recorded command, so creation is allowed in a pass. */
+static void test_make_in_a_pass_is_allowed_and_a_rejected_destroy_keeps_the_target(void) {
     nt_texture_t color = make_color();
     nt_render_target_t rt = make_target(color, NO_TEXTURE);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
-    NT_TEST_EXPECT_ASSERT(make_target(color, NO_TEXTURE));
-    NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_render_target(rt));
-    /* The pass check runs before the cascade, so the target survives. */
+    TEST_ASSERT_TRUE(nt_gfx_render_target_valid(make_target(color, NO_TEXTURE)));
+    /* The frame rule runs before the cascade, so the target survives. */
     NT_TEST_EXPECT_ASSERT(nt_gfx_destroy_texture(color));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "frame rule"));
     nt_gfx_end_pass();
 
     TEST_ASSERT_TRUE(nt_gfx_render_target_valid(rt));
     TEST_ASSERT_TRUE(nt_gfx_texture_ready(color));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_render_target_create_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_render_target_create_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_render_target_destroy_count());
 }
 
@@ -252,9 +256,10 @@ static void test_recreate_at_new_size_without_spare_slots(void) {
     TEST_ASSERT_TRUE(nt_gfx_render_target_valid(rt));
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT16(128, nt_gfx_fake_last_pass_width());
     TEST_ASSERT_EQUAL_UINT16(64, nt_gfx_fake_last_pass_height());
-    nt_gfx_end_pass();
 }
 // #endregion
 
@@ -346,12 +351,15 @@ static void test_zero_pass_target_routes_to_default_framebuffer_after_render_tar
     nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_color = {0.1F, 0.2F, 0.3F, 1.0F}, .clear_depth = 1.0F});
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_pass_target());
     nt_gfx_end_pass();
-
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = NT_RENDER_TARGET_INVALID, .clear_depth = 1.0F});
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_pass_target());
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_pass_target_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_render_target_backend_id(rt), nt_gfx_fake_pass_target_at(0));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_pass_target_at(0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_pass_target_at(1));
 }
 
 static void test_begin_pass_asserts_for_invalid_or_stale_target(void) {
@@ -379,14 +387,89 @@ static void test_pass_sequencing_and_capacity_misuse_assert(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_init(&invalid_desc));
 }
 
+/* Draws execute at end_frame, so a read inside the frame (also after end_pass) would see none of them. */
+static void test_read_pixels_asserts_inside_a_frame(void) {
+    nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
+    uint8_t pixel[4];
+
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels((nt_render_target_t){0}, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: read between nt_gfx_end_frame and nt_gfx_begin_frame"));
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: read between nt_gfx_end_frame and nt_gfx_begin_frame"));
+    nt_gfx_end_pass();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: read between nt_gfx_end_frame and nt_gfx_begin_frame"));
+
+    nt_gfx_end_frame();
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    nt_gfx_begin_frame();
+}
+
 /* A depth-only target has no color to read. */
-static void test_read_pixels_asserts_inside_depth_only_pass(void) {
+static void test_read_pixels_asserts_on_depth_only_source(void) {
     nt_render_target_t rt = make_target(NO_TEXTURE, make_depth());
     uint8_t pixel[4];
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
-    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: the source needs an RGBA8 color attachment"));
+    nt_gfx_begin_frame();
+}
+
+/* WebGL reads RGBA/UNSIGNED_BYTE only from a normalized color buffer: a half-float target is rejected. */
+static void test_read_pixels_asserts_on_half_float_source(void) {
+    nt_render_target_t rt = make_target(make_attachment(NT_TEXTURE_FORMAT_RGBA16F, 64, 32), NO_TEXTURE);
+    uint8_t pixel[4];
+
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: the source needs an RGBA8 color attachment"));
+    nt_gfx_begin_frame();
+}
+
+static void test_read_pixels_asserts_on_a_rect_outside_the_target(void) {
+    nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
+    uint8_t pixels[4 * 4];
+
+    const int rects[][4] = {{-1, 0, 1, 1}, {0, -1, 1, 1}, {63, 0, 2, 1}, {0, 31, 1, 2}, {INT_MAX, 0, 1, 1}};
+
+    nt_gfx_end_frame();
+    for (size_t i = 0; i < sizeof(rects) / sizeof(rects[0]); i++) {
+        NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, rects[i][0], rects[i][1], rects[i][2], rects[i][3], pixels, sizeof(pixels)));
+        TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: rect outside the render target"));
+    }
+    nt_gfx_begin_frame();
+}
+
+static void test_read_pixels_asserts_on_a_destroyed_source(void) {
+    nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
+    uint8_t pixel[4];
+
+    nt_gfx_destroy_render_target(rt);
+    nt_gfx_end_frame();
+    NT_TEST_EXPECT_ASSERT(nt_gfx_read_pixels(rt, 0, 0, 1, 1, pixel, sizeof(pixel)));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "read_pixels: invalid render target"));
+    nt_gfx_begin_frame();
+}
+
+/* A rect touching the far corner is inside: the bounds are exclusive of width and height only. */
+static void test_read_pixels_reads_an_rgba8_target_between_frames(void) {
+    nt_render_target_t rt = make_target(make_color(), NO_TEXTURE);
+    uint8_t pixels[2 * 2 * 4];
+    memset(pixels, 0, sizeof(pixels));
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = rt, .clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(rt, 62, 30, 2, 2, pixels, sizeof(pixels)));
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x40, pixels[(i * 4U) + 2U]);
+        TEST_ASSERT_EQUAL_HEX8(0xFF, pixels[(i * 4U) + 3U]);
+    }
+    nt_gfx_begin_frame();
 }
 // #endregion
 
@@ -419,9 +502,10 @@ static void test_active_attachments_cannot_be_sampled(void) {
     NT_TEST_EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
     binding.texture = depth;
     NT_TEST_EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_bound_texture_count());
-    nt_gfx_end_pass();
 }
 
 /* Attachments are ordinary textures: NT_SAMPLER_DEFAULT is the sampler of their own desc. */
@@ -438,8 +522,9 @@ static void test_attachments_bind_with_their_default_sampler(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     apply_one_texture(depth, NT_SAMPLER_DEFAULT);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
 }
 
 static void test_depth_texture_rejects_linear_sampler_override(void) {
@@ -536,6 +621,7 @@ static void test_integer_texture_rejects_comparison_sampler(void) {
     NT_TEST_EXPECT_ASSERT(apply_one_texture(integer, comparison));
 
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_destroy_texture(integer);
 }
 
@@ -660,7 +746,7 @@ int main(void) {
     RUN_TEST(test_destroying_a_texture_destroys_only_its_targets);
     RUN_TEST(test_destroy_render_target_tolerates_invalid_and_stale_handles);
     RUN_TEST(test_stale_destroy_leaves_the_target_that_reused_its_slot);
-    RUN_TEST(test_make_and_destroy_reject_active_pass);
+    RUN_TEST(test_make_in_a_pass_is_allowed_and_a_rejected_destroy_keeps_the_target);
     RUN_TEST(test_recreate_at_new_size_without_spare_slots);
     RUN_TEST(test_context_loss_frees_targets_and_leaves_texture_husks);
     RUN_TEST(test_make_over_husk_while_lost_returns_invalid);
@@ -670,7 +756,12 @@ int main(void) {
     RUN_TEST(test_zero_pass_target_routes_to_default_framebuffer_after_render_target);
     RUN_TEST(test_begin_pass_asserts_for_invalid_or_stale_target);
     RUN_TEST(test_pass_sequencing_and_capacity_misuse_assert);
-    RUN_TEST(test_read_pixels_asserts_inside_depth_only_pass);
+    RUN_TEST(test_read_pixels_asserts_inside_a_frame);
+    RUN_TEST(test_read_pixels_asserts_on_depth_only_source);
+    RUN_TEST(test_read_pixels_asserts_on_half_float_source);
+    RUN_TEST(test_read_pixels_asserts_on_a_rect_outside_the_target);
+    RUN_TEST(test_read_pixels_asserts_on_a_destroyed_source);
+    RUN_TEST(test_read_pixels_reads_an_rgba8_target_between_frames);
     RUN_TEST(test_active_attachments_cannot_be_sampled);
     RUN_TEST(test_attachments_bind_with_their_default_sampler);
     RUN_TEST(test_depth_texture_rejects_linear_sampler_override);

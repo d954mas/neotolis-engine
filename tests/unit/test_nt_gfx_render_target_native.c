@@ -14,6 +14,8 @@
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
+#include "test_helpers/nt_gfx_test_gl_read.h"
+
 static PFNGLINVALIDATEFRAMEBUFFERPROC s_invalidate;
 static uint32_t s_invalidate_count;
 static GLenum s_invalidated[3];
@@ -40,10 +42,19 @@ static void assert_rgba(const uint8_t *pixels, uint32_t pixel_count, uint8_t r, 
     }
 }
 
+/* The public readback needs an ended frame, so this closes the pass and the frame, reads, and opens the next frame. */
+static void read_after_frame(nt_render_target_t src, int width, int height, uint8_t *out, uint32_t out_cap) {
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_TRUE(nt_gfx_read_pixels(src, 0, 0, width, height, out, out_cap));
+    nt_gfx_begin_frame();
+}
+
 void setUp(void) {
     nt_gfx_desc_t desc = nt_gfx_desc_defaults();
     desc.max_textures = 3;
     desc.max_render_targets = 2;
+    desc.global_blocks[0] = (nt_global_block_t){"Globals", 3};
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
@@ -102,8 +113,7 @@ static void test_render_target_recreate_at_new_size_without_spare_slots(void) {
         .clear_color = {0.25F, 0.5F, 0.75F, 1.0F},
         .clear_depth = 1.0F,
     });
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, first_pixels, sizeof(first_pixels)));
-    nt_gfx_end_pass();
+    read_after_frame(target.target, 4, 4, first_pixels, sizeof(first_pixels));
     assert_rgba(first_pixels, 16, 64, 128, 191, 255);
 
     destroy_test_target(&target);
@@ -116,8 +126,7 @@ static void test_render_target_recreate_at_new_size_without_spare_slots(void) {
         .clear_color = {1.0F, 0.25F, 0.5F, 1.0F},
         .clear_depth = 1.0F,
     });
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 7, 5, second_pixels, sizeof(second_pixels)));
-    nt_gfx_end_pass();
+    read_after_frame(target.target, 7, 5, second_pixels, sizeof(second_pixels));
     assert_rgba(second_pixels, 35, 255, 64, 128, 255);
 
     destroy_test_target(&target);
@@ -263,9 +272,29 @@ static void test_custom_blend_state_reaches_gl_unchanged(void) {
     TEST_ASSERT_INT_WITHIN(1, 500, (int)(constant[3] * 1000.0F));
 
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
     nt_gfx_destroy_pipeline(pipeline);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
+}
+
+/* Binds a pipeline with this blend in its own frame and reads one GL blend state mid-pass. */
+static GLint blend_value_in_pass(nt_program_t prog, nt_blend_state_t blend, GLenum query) {
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .program = prog,
+        .blend = blend,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_frame_execute();
+    GLint actual = 0;
+    glGetIntegerv(query, &actual);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_destroy_pipeline(pipeline);
+    nt_gfx_begin_frame();
+    return actual;
 }
 
 static void test_all_public_blend_enums_reach_gl(void) {
@@ -299,39 +328,17 @@ static void test_all_public_blend_enums_reach_gl(void) {
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
     nt_program_t prog = nt_gfx_make_program(vs, fs);
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0, 0, 0, 0}});
     for (size_t i = 0; i < sizeof(factor_cases) / sizeof(factor_cases[0]); i++) {
         nt_blend_state_t blend = nt_blend_alpha();
         blend.src_rgb = factor_cases[i].factor;
         blend.dst_rgb = NT_BLEND_ZERO;
-        nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-            .program = prog,
-            .blend = blend,
-        });
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
-        nt_gfx_bind_pipeline(pipeline);
-        nt_gfx_frame_execute();
-        GLint actual = 0;
-        glGetIntegerv(GL_BLEND_SRC_RGB, &actual);
-        TEST_ASSERT_EQUAL_INT((GLint)factor_cases[i].expected, actual);
-        nt_gfx_destroy_pipeline(pipeline);
+        TEST_ASSERT_EQUAL_INT((GLint)factor_cases[i].expected, blend_value_in_pass(prog, blend, GL_BLEND_SRC_RGB));
     }
     for (size_t i = 0; i < sizeof(op_cases) / sizeof(op_cases[0]); i++) {
         nt_blend_state_t blend = nt_blend_alpha();
         blend.op_rgb = op_cases[i].op;
-        nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-            .program = prog,
-            .blend = blend,
-        });
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
-        nt_gfx_bind_pipeline(pipeline);
-        nt_gfx_frame_execute();
-        GLint actual = 0;
-        glGetIntegerv(GL_BLEND_EQUATION_RGB, &actual);
-        TEST_ASSERT_EQUAL_INT((GLint)op_cases[i].expected, actual);
-        nt_gfx_destroy_pipeline(pipeline);
+        TEST_ASSERT_EQUAL_INT((GLint)op_cases[i].expected, blend_value_in_pass(prog, blend, GL_BLEND_EQUATION_RGB));
     }
-    nt_gfx_end_pass();
 
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
@@ -370,8 +377,7 @@ static void test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha(v
     nt_gfx_bind_pipeline(pipeline);
     nt_gfx_bind_vertex_input(vertex_input);
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
-    nt_gfx_end_pass();
+    read_after_frame(target.target, 4, 4, pixels, sizeof(pixels));
 
     assert_rgba(pixels, 16, 26, 26, 153, 153);
     destroy_test_target(&target);
@@ -457,8 +463,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_set_uniform_float(nt_hash32_str("u_ref"), 0.5F);
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
-    nt_gfx_end_pass();
+    read_after_frame((nt_render_target_t){0}, RAMP_WIDTH, 1, row, sizeof(row));
 
     GLint sampler_binding = 0;
     glGetIntegerv(GL_SAMPLER_BINDING, &sampler_binding);
@@ -483,8 +488,7 @@ static void test_depth_comparison_sampler_blends_comparison_results(void) {
     nt_gfx_apply_texture_bindings(&raw_binding, 1);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, sizeof(row)));
-    nt_gfx_end_pass();
+    read_after_frame((nt_render_target_t){0}, RAMP_WIDTH, 1, row, sizeof(row));
 
     TEST_ASSERT_UINT8_WITHIN(2, 51, ramp_at(row, RAMP_NEAR));
     TEST_ASSERT_UINT8_WITHIN(2, 204, ramp_at(row, RAMP_FAR));
@@ -559,8 +563,7 @@ static void render_shadow_ramp(const shadow_probe_t *probe, const test_target_t 
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_set_uniform_float(nt_hash32_str("u_ref"), 0.5F);
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, RAMP_WIDTH * 4));
-    nt_gfx_end_pass();
+    read_after_frame((nt_render_target_t){0}, RAMP_WIDTH, 1, row, RAMP_WIDTH * 4);
 }
 
 /* A shadow map needs no color: GL 3.3 core only completes the FBO with draw
@@ -603,8 +606,7 @@ static void read_raw_depth_row(nt_pipeline_t raw_pip, const shadow_probe_t *prob
     nt_gfx_apply_texture_bindings(&binding, 1);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, RAMP_WIDTH, 1, row, RAMP_WIDTH * 4));
-    nt_gfx_end_pass();
+    read_after_frame((nt_render_target_t){0}, RAMP_WIDTH, 1, row, RAMP_WIDTH * 4);
 }
 
 /* Every pass clears its depth, so a depth test cannot carry across targets;
@@ -659,6 +661,7 @@ static void test_half_float_target_is_complete_and_keeps_values_above_one(void) 
     float pixels[4 * 4 * 4] = {0};
     glReadPixels(0, 0, 4, 4, GL_RGBA, GL_FLOAT, pixels);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     /* Unity float asserts are disabled in this build; compare in millis. */
     TEST_ASSERT_INT_WITHIN(10, 3500, (int)(pixels[0] * 1000.0F));
@@ -699,8 +702,7 @@ static void test_rgba32f_linear_filtering_and_generated_mips(void) {
     nt_gfx_apply_texture_bindings(&binding, 1);
     nt_gfx_draw(0, 3);
     uint8_t pixel[4] = {0};
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
-    nt_gfx_end_pass();
+    read_after_frame((nt_render_target_t){0}, 1, 1, pixel, sizeof(pixel));
     /* Both the bilinear base lookup and the reduced mip must average the four colors. */
     assert_rgba(pixel, 1, 128, 128, 128, 255);
     nt_gfx_destroy_texture(texture);
@@ -743,6 +745,7 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depth_write_enabled);
     TEST_ASSERT_EQUAL_INT(GL_FALSE, depth_write_enabled);
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     destroy_test_target(&target);
     nt_gfx_destroy_pipeline(no_depth_write_pipeline);
@@ -750,8 +753,8 @@ static void test_begin_pass_clears_depth_after_depth_writes_were_disabled(void) 
     nt_gfx_destroy_shader(vertex_shader);
 }
 
-/* Real GL must record the registered block binding when the program links. */
-static void test_global_block_registered_before_link_binds_in_the_program(void) {
+/* Real GL must record the declared block binding when the program links. */
+static void test_global_block_from_the_desc_binds_in_the_program(void) {
     static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
                                        "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
     static const char *fragment_source = "#ifdef GL_ES\n"
@@ -759,8 +762,6 @@ static void test_global_block_registered_before_link_binds_in_the_program(void) 
                                          "#endif\n"
                                          "out vec4 frag_color;\n"
                                          "void main() { frag_color = vec4(1.0); }\n";
-
-    nt_gfx_register_global_block("Globals", 3);
 
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
@@ -784,6 +785,7 @@ static void test_global_block_registered_before_link_binds_in_the_program(void) 
     TEST_ASSERT_EQUAL_INT(3, binding);
 
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
 
     nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_program(prog);
@@ -830,9 +832,8 @@ static void test_uniform_values_are_shared_by_pipelines_on_one_program(void) {
     nt_gfx_draw(0, 3);
 
     uint8_t pixels[4 * 4 * 4] = {0};
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
+    read_after_frame(target.target, 4, 4, pixels, sizeof(pixels));
     assert_rgba(pixels, 16, 0, 255, 0, 255);
-    nt_gfx_end_pass();
 
     destroy_test_target(&target);
     nt_gfx_destroy_pipeline(pip_b);
@@ -876,17 +877,15 @@ static void test_each_pipeline_binds_its_own_program(void) {
     nt_gfx_bind_pipeline(pip_red);
     bind_empty_vertex_input();
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
+    read_after_frame(target.target, 4, 4, pixels, sizeof(pixels));
     assert_rgba(pixels, 16, 255, 0, 0, 255);
-    nt_gfx_end_pass();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {0.0F, 0.0F, 0.0F, 1.0F}, .clear_depth = 1.0F});
     nt_gfx_bind_pipeline(pip_blue);
     bind_empty_vertex_input();
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
+    read_after_frame(target.target, 4, 4, pixels, sizeof(pixels));
     assert_rgba(pixels, 16, 0, 0, 255, 255);
-    nt_gfx_end_pass();
 
     destroy_test_target(&target);
     nt_gfx_destroy_pipeline(pip_blue);
@@ -929,52 +928,11 @@ static void test_destroying_one_pipeline_leaves_the_shared_program_alive(void) {
     nt_gfx_bind_pipeline(pip_b);
     bind_empty_vertex_input();
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 4, pixels, sizeof(pixels)));
+    read_after_frame(target.target, 4, 4, pixels, sizeof(pixels));
     assert_rgba(pixels, 16, 0, 255, 0, 255);
-    nt_gfx_end_pass();
 
     destroy_test_target(&target);
     nt_gfx_destroy_pipeline(pip_b);
-    nt_gfx_destroy_program(prog);
-    nt_gfx_destroy_shader(fs);
-    nt_gfx_destroy_shader(vs);
-}
-
-/* Late block registration must reach programs linked before the game registered the binding. */
-static void test_global_block_registered_after_link_binds_in_that_program(void) {
-    static const char *vertex_source = "layout(std140) uniform Globals { vec4 g_offset; };\n"
-                                       "void main() { gl_Position = vec4(g_offset.xy, 0.0, 1.0); }\n";
-    static const char *fragment_source = "#ifdef GL_ES\n"
-                                         "precision mediump float;\n"
-                                         "#endif\n"
-                                         "out vec4 frag_color;\n"
-                                         "void main() { frag_color = vec4(1.0); }\n";
-
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
-
-    /* Registration must update this already-linked program. */
-    nt_program_t prog = nt_gfx_make_program(vs, fs);
-    TEST_ASSERT_TRUE(nt_gfx_program_ready(prog));
-    nt_gfx_register_global_block("Globals", 5);
-
-    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_frame_execute();
-
-    GLint current_program = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
-    TEST_ASSERT_NOT_EQUAL_INT(0, current_program);
-    GLuint block_index = glGetUniformBlockIndex((GLuint)current_program, "Globals");
-    TEST_ASSERT_NOT_EQUAL_UINT32(GL_INVALID_INDEX, block_index);
-    GLint binding = -1;
-    glGetActiveUniformBlockiv((GLuint)current_program, block_index, GL_UNIFORM_BLOCK_BINDING, &binding);
-    TEST_ASSERT_EQUAL_INT(5, binding);
-
-    nt_gfx_end_pass();
-
-    nt_gfx_destroy_pipeline(pip);
     nt_gfx_destroy_program(prog);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
@@ -1323,8 +1281,7 @@ static void test_samplers_read_their_link_time_units_without_uniform_writes(void
     nt_gfx_apply_texture_bindings(bindings, 2);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
-    nt_gfx_end_pass();
+    read_after_frame((nt_render_target_t){0}, 1, 1, pixel, sizeof(pixel));
 
     assert_rgba(pixel, 1, 255, 255, 0, 255);
 }
@@ -1373,15 +1330,14 @@ static void test_two_draws_on_one_program_bind_at_their_queried_units(void) {
     nt_gfx_apply_texture_bindings(bindings, 2);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, first, sizeof(first)));
+    nt_test_gl_read_in_pass(0, 0, 1, 1, first);
 
     /* Second draw puts red on u_b's unit only: u_a must keep reading red (red has no green). */
     bindings[1].texture = tex_red;
     nt_gfx_apply_texture_bindings(bindings, 2);
     TEST_ASSERT_EQUAL_UINT8(NT_GFX_TEXTURE_SET_APPLIED, nt_gfx_test_texture_set_state());
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, second, sizeof(second)));
-    nt_gfx_end_pass();
+    read_after_frame((nt_render_target_t){0}, 1, 1, second, sizeof(second));
 
     assert_rgba(first, 1, 255, 255, 0, 255);
     assert_rgba(second, 1, 255, 0, 0, 255);
@@ -1439,8 +1395,7 @@ static void test_linking_a_program_keeps_the_bound_pipelines_program_current(voi
     const float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
     nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), green);
     nt_gfx_draw(0, 3);
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 1, 1, pixel, sizeof(pixel)));
-    nt_gfx_end_pass();
+    read_after_frame((nt_render_target_t){0}, 1, 1, pixel, sizeof(pixel));
 
     assert_rgba(pixel, 1, 0, 255, 0, 255);
 }
@@ -1533,31 +1488,28 @@ static void test_pass_load_preserves_color_and_depth_independently(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {1, 0, 0, 1}, .clear_depth = 0.75F, .load_color = true, .load_depth = true});
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    uint8_t pixels[8] = {0};
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)));
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(colors, pixels, sizeof(colors));
     float depth = 0.0F;
     glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
     TEST_ASSERT_UINT32_WITHIN(1, 250, (uint32_t)((depth * 1000.0F) + 0.5F));
-    nt_gfx_end_pass();
+    uint8_t pixels[8] = {0};
+    read_after_frame(target.target, 2, 1, pixels, sizeof(pixels));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(colors, pixels, sizeof(colors));
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_depth = 0.75F, .load_color = true});
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)));
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(colors, pixels, sizeof(colors));
     glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
     TEST_ASSERT_UINT32_WITHIN(1, 750, (uint32_t)((depth * 1000.0F) + 0.5F));
-    nt_gfx_end_pass();
+    read_after_frame(target.target, 2, 1, pixels, sizeof(pixels));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(colors, pixels, sizeof(colors));
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {1, 0, 0, 1}, .load_depth = true});
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 2, 1, pixels, sizeof(pixels)));
-    assert_rgba(pixels, 2, 255, 0, 0, 255);
     glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
     TEST_ASSERT_UINT32_WITHIN(1, 750, (uint32_t)((depth * 1000.0F) + 0.5F));
-    nt_gfx_end_pass();
+    read_after_frame(target.target, 2, 1, pixels, sizeof(pixels));
+    assert_rgba(pixels, 2, 255, 0, 0, 255);
     destroy_test_target(&target);
 }
 
@@ -1570,9 +1522,6 @@ static void test_pass_clear_covers_attachment_and_starts_with_scissor_off(void) 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {0, 1, 0, 1}, .clear_depth = 0.75F});
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    uint8_t pixels[48] = {0};
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 3, pixels, sizeof(pixels)));
-    assert_rgba(pixels, 12, 0, 255, 0, 255);
     float depth[12] = {0};
     glReadPixels(0, 0, 4, 3, GL_DEPTH_COMPONENT, GL_FLOAT, depth);
     for (uint32_t i = 0; i < 12; i++) {
@@ -1580,7 +1529,9 @@ static void test_pass_clear_covers_attachment_and_starts_with_scissor_off(void) 
     }
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
     TEST_ASSERT_FALSE(glIsEnabled(GL_SCISSOR_TEST));
-    nt_gfx_end_pass();
+    uint8_t pixels[48] = {0};
+    read_after_frame(target.target, 4, 3, pixels, sizeof(pixels));
+    assert_rgba(pixels, 12, 0, 255, 0, 255);
     destroy_test_target(&target);
 }
 
@@ -1611,9 +1562,10 @@ static void test_pass_discard_maps_attachments_and_finishes_before_unbind(void) 
     TEST_ASSERT_EQUAL_HEX32(GL_COLOR_ATTACHMENT0, s_invalidated[0]);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target});
     nt_gfx_end_pass();
-    nt_gfx_frame_execute();
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(2, s_invalidate_count);
     destroy_test_target(&target);
+    nt_gfx_begin_frame();
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.discard_depth = true});
     nt_gfx_end_pass();
@@ -1649,9 +1601,9 @@ static void test_explicit_clear_preserves_unselected_pixels_and_draw_state(void)
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
     uint8_t pixels[48] = {0};
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 3, pixels, sizeof(pixels)));
-    uint8_t expected[48] = {0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0,   0, 255, 255, 0,   0, 255, 255, 0, 0, 255, 255,
-                            0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 255, 0, 0,   255, 255, 0, 0,   255, 0, 0, 255, 255};
+    nt_test_gl_read_in_pass(0, 0, 4, 3, pixels);
+    uint8_t expected[48] = {0, 0, 255, 255, 255, 0, 0,   255, 255, 0, 0,   255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255,
+                            0, 0, 255, 255, 0,   0, 255, 255, 0,   0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255};
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, pixels, sizeof(pixels));
     float depths[12] = {0};
     glReadPixels(0, 0, 4, 3, GL_DEPTH_COMPONENT, GL_FLOAT, depths);
@@ -1662,7 +1614,7 @@ static void test_explicit_clear_preserves_unselected_pixels_and_draw_state(void)
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
     uint8_t unchanged[48] = {0};
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 3, unchanged, sizeof(unchanged)));
+    nt_test_gl_read_in_pass(0, 0, 4, 3, unchanged);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(pixels, unchanged, sizeof(pixels));
     uint32_t clears = g_nt_gfx.counters.gl[NT_GFX_GL_glClear];
     nt_gfx_clear(&(nt_clear_desc_t){.clear_color = {1, 1, 1, 1}, .clear_depth = 1});
@@ -1673,22 +1625,22 @@ static void test_explicit_clear_preserves_unselected_pixels_and_draw_state(void)
     nt_gfx_draw(0, 3);
     nt_gfx_frame_execute();
     TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 3, pixels, sizeof(pixels)));
+    nt_test_gl_read_in_pass(0, 0, 4, 3, pixels);
     const uint8_t green[8] = {0, 255, 0, 255, 0, 255, 0, 255};
-    memcpy(&expected[36], green, sizeof(green));
+    memcpy(&expected[4], green, sizeof(green));
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, pixels, sizeof(pixels));
     glReadPixels(0, 0, 4, 3, GL_DEPTH_COMPONENT, GL_FLOAT, depths);
     for (uint32_t i = 0; i < 12; i++) {
         TEST_ASSERT_UINT32_WITHIN(1, i == 1 || i == 2 ? 750 : 250, (uint32_t)((depths[i] * 1000.0F) + 0.5F));
     }
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {1, 0, 0, 1}});
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 3, pixels, sizeof(pixels)));
+    nt_test_gl_read_in_pass(0, 0, 4, 3, pixels);
     const uint8_t red[8] = {255, 0, 0, 255, 255, 0, 0, 255};
-    memcpy(&expected[36], red, sizeof(red));
+    memcpy(&expected[4], red, sizeof(red));
     TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, pixels, sizeof(pixels));
     nt_gfx_set_scissor_enabled(false);
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .clear_color = {1, 0, 0, 1}});
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 3, pixels, sizeof(pixels)));
+    nt_test_gl_read_in_pass(0, 0, 4, 3, pixels);
     assert_rgba(pixels, 12, 255, 0, 0, 255);
     nt_gfx_clear(&(nt_clear_desc_t){.depth = true, .clear_depth = 0.9F});
     nt_gfx_frame_execute();
@@ -1698,13 +1650,13 @@ static void test_explicit_clear_preserves_unselected_pixels_and_draw_state(void)
     }
     nt_gfx_end_pass();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {0, 0, 1, 1}, .clear_depth = 0.25F});
-    TEST_ASSERT_TRUE(nt_gfx_read_pixels(0, 0, 4, 3, pixels, sizeof(pixels)));
-    assert_rgba(pixels, 12, 0, 0, 255, 255);
+    nt_gfx_frame_execute();
     glReadPixels(0, 0, 4, 3, GL_DEPTH_COMPONENT, GL_FLOAT, depths);
     for (uint32_t i = 0; i < 12; i++) {
         TEST_ASSERT_UINT32_WITHIN(1, 250, (uint32_t)((depths[i] * 1000.0F) + 0.5F));
     }
-    nt_gfx_end_pass();
+    read_after_frame(target.target, 4, 3, pixels, sizeof(pixels));
+    assert_rgba(pixels, 12, 0, 0, 255, 255);
     nt_gfx_destroy_vertex_input(input);
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
@@ -1741,8 +1693,7 @@ int main(void) {
     RUN_TEST(test_half_float_target_is_complete_and_keeps_values_above_one);
     RUN_TEST(test_rgba32f_linear_filtering_and_generated_mips);
     RUN_TEST(test_begin_pass_clears_depth_after_depth_writes_were_disabled);
-    RUN_TEST(test_global_block_registered_before_link_binds_in_the_program);
-    RUN_TEST(test_global_block_registered_after_link_binds_in_that_program);
+    RUN_TEST(test_global_block_from_the_desc_binds_in_the_program);
     RUN_TEST(test_uniform_values_are_shared_by_pipelines_on_one_program);
     RUN_TEST(test_each_pipeline_binds_its_own_program);
     RUN_TEST(test_destroying_one_pipeline_leaves_the_shared_program_alive);

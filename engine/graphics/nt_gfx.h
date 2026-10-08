@@ -88,20 +88,16 @@ typedef struct {
     nt_sampler_t sampler;
 } nt_gfx_texture_binding_t;
 
-/* ---- Global UBO block registry (compile-time limit) ---- */
-
-#define NT_GFX_MAX_GLOBAL_BLOCKS 8
-
 /* Samplers are deduplicated by their (filter/wrap/compare) descriptor; most apps
  * use 3-10 unique configs. 128 is headroom, not coverage — all 324 combinations
  * are constructible. Costs ~4 KB of BSS, not binary size; the linear scan
  * iterates sampler_count, not capacity, so capacity is free for the hot path. */
 #define NT_GFX_MAX_SAMPLERS 128
 
+/* A uniform block every program binds to binding_slot at link, when it declares one with this name. */
 typedef struct {
-    const char *name; /* borrowed unchanged until nt_gfx_shutdown */
+    const char *name; /* borrowed unchanged until nt_gfx_shutdown; NULL = unused entry */
     uint32_t binding_slot;
-    bool active;
 } nt_global_block_t;
 
 /* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
@@ -310,7 +306,7 @@ typedef enum {
  * copy for per-draw re-pointing, and max_vertex_inputs slots exist. */
 #define NT_GFX_MAX_INSTANCE_ATTRS 8
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
-/* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS; the front-end mirrors each slot's binding. */
+/* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS, so every slot works on every device. */
 #define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS 24
 
 typedef struct {
@@ -342,15 +338,16 @@ typedef struct {
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
-    uint32_t stream_capacity;    /* draw-phase command bytes recorded between executions, default: 256 KiB; allocated once at init */
+    uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
     /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: 0 (disabled);
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
-    bool depth;               /* request depth buffer (default: true) */
-    bool stencil;             /* request stencil buffer (default: false) */
-    bool antialias;           /* MSAA (default: false) */
-    bool alpha;               /* transparent canvas/window (default: false) */
-    bool premultiplied_alpha; /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
+    nt_global_block_t global_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* default: none; sized for one name per slot */
+    bool depth;                                                       /* request depth buffer (default: true) */
+    bool stencil;                                                     /* request stencil buffer (default: false) */
+    bool antialias;                                                   /* MSAA (default: false) */
+    bool alpha;                                                       /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha;                                         /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {
@@ -520,10 +517,8 @@ typedef enum {
     NT_GFX_OP_UNIFORM_VEC4,
     NT_GFX_OP_UNIFORM_FLOAT,
     NT_GFX_OP_UNIFORM_INT,
-    NT_GFX_OP_UNIFORM_BLOCK,
     NT_GFX_OP_UBO,
     NT_GFX_OP_BUFFER_UPLOAD,
-    NT_GFX_OP_BUFFER_ORPHAN,
     NT_GFX_OP_TEXTURE_UPLOAD,
     NT_GFX_OP_ATTRIBUTE,
     NT_GFX_OP_INSTANCE_BUFFER,
@@ -661,7 +656,7 @@ typedef struct {
     uint64_t texture_upload_calls;
     uint64_t texture_upload_bytes;
     uint32_t accepted[NT_GFX_OP_COUNT]; /* operations whose END result was ACCEPTED */
-    uint32_t stream_bytes;              /* peak draw-phase command bytes recorded between executions */
+    uint32_t stream_bytes;              /* draw-phase command bytes the frame recorded */
     /* Frame storage bytes allocated in the frame and sent, padding included; final after end_frame. */
     uint32_t frame_bytes[NT_GFX_FRAME_STREAM_COUNT];
     uint32_t gl[NT_GFX_GL_COUNT];
@@ -824,18 +819,11 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_meshes = 128,
         .max_vertex_inputs = 560,
         .max_render_targets = 16,
-        .stream_capacity = 256U * 1024U,
+        .stream_capacity = 32U * 1024U,
         .depth = true,
         .premultiplied_alpha = true,
     };
 }
-
-/* ---- Global UBO block registration ---- */
-
-/* Registers the block binding for existing and future programs.
- * name is required and borrowed unchanged until nt_gfx_shutdown; gfx never frees it. */
-void nt_gfx_register_global_block(const char *name, uint32_t binding_slot);
-void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count);
 
 /* ---- Lifecycle ---- */
 
@@ -863,8 +851,8 @@ void nt_gfx_begin_frame(void);
  * end_pass and before nt_window_swap_buffers. Requires an open frame with no open pass.
  * Executes the frame's recorded draw-phase calls in call order. */
 void nt_gfx_end_frame(void);
-/* Passes do not nest and run only between begin_frame and end_frame; on a lost context
- * both calls are no-ops, but begin_pass still asserts that order. */
+/* Passes do not nest and run only between begin_frame and end_frame. On a lost context they
+ * record nothing but still open and close the pass, so the order and the frame rule assert. */
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc);
 void nt_gfx_end_pass(void);
 /* Requires an open pass and a non-NULL desc, borrowed only for this call.
@@ -896,14 +884,16 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
  * errors assert. */
 nt_render_target_t nt_gfx_make_render_target(const nt_render_target_desc_t *desc);
 
-/* ---- Resource destruction ---- */
+/* ---- Resource destruction ----
+ *
+ * Frame rule: destroying a live object asserts from the first nt_gfx_begin_pass until
+ * nt_gfx_end_frame, also through nt_gfx_deactivate_*. */
 
 /* Already linked programs remain usable after their stages are destroyed. */
 void nt_gfx_destroy_shader(nt_shader_t shd);
 /* Destroys the program and its pipelines; materials retain the now-unready handle.
  * Renderer caches drop dead entries on insertion/reset. INVALID is a no-op; stale nonzero handles assert.
- * Clear
- * the caller's handle to NT_PROGRAM_INVALID after destruction. */
+ * Clear the caller's handle to NT_PROGRAM_INVALID after destruction. */
 void nt_gfx_destroy_program(nt_program_t prog);
 /* Invalid and stale handles are no-ops: program destruction also destroys
  * pipelines, and a context loss frees every pipeline slot. */
@@ -911,9 +901,8 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 /* Invalid and stale handles are no-ops because buffer destruction also
  * destroys dependent vertex inputs (see nt_gfx_destroy_buffer). */
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi);
-/* Destroys VIs that borrow this vertex/index buffer. Destroying a captured
- * instance buffer instead makes every draw assert until it is re-pointed;
- * GL retains the old storage until that re-point or the VI's destruction. */
+/* Destroys VIs that borrow this vertex/index buffer. A captured instance buffer is not
+ * cascade-destroyed; GL retains its storage until the next re-point or the VI's destruction. */
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 /* Destroys render targets that borrow this texture. */
 void nt_gfx_destroy_texture(nt_texture_t tex);
@@ -1010,10 +999,13 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 
-/* Reads an (x,y,w,h) sub-rect of the bound default framebuffer into caller-owned `out`:
- * rgba8 (row pitch w*4), TOP-LEFT origin (GL's bottom-left read is y-flipped once here),
- * straight alpha. Returns false on w<=0 || h<=0 or w*h*4 > out_cap (no write past the cap). */
-bool nt_gfx_read_pixels(int x, int y, int w, int h, uint8_t *out, uint32_t out_cap);
+/* Reads an (x,y,w,h) sub-rect of `src` (0 = the window) into caller-owned `out`, only between
+ * nt_gfx_end_frame and the next nt_gfx_begin_frame (the window: before the swap). (x, y) is the
+ * rect's bottom-left corner, as in GL; `out` is rgba8 (row pitch w*4), TOP-LEFT origin (y-flipped
+ * once here), straight alpha. A render target needs an RGBA8 color attachment the rect fits in;
+ * after a pass that discarded its color the content is undefined. Returns false on w<=0 || h<=0,
+ * w*h*4 > out_cap (no write past the cap) or a lost context. */
+bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap);
 
 /* ---- Instance buffer ---- */
 
@@ -1032,18 +1024,16 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size);
 
 /* update_buffer = glBufferSubData at byte offset; offset + size must fit the
- * buffer, data must point to size bytes (NULL only with size 0). Disjoint
- * offsets keep in-flight data untouched. orphan_buffer = glBufferData. */
+ * buffer, data must point to size bytes (NULL only with size 0). Allowed at any time:
+ * a write before nt_gfx_end_frame lands before every draw of the frame, so every draw
+ * reads the frame's last write; a write after it belongs to the next frame. */
 void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
-void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* ---- Frame storage ----
  *
- * Per-frame vertex, index and uniform data at any point of the frame. Allocate between
- * nt_gfx_begin_frame and nt_gfx_end_frame. Every execution of the recorded calls first
- * uploads the bytes allocated since the previous one, so fill an allocation before the
- * next nt_gfx call: its bytes are sent once. Offsets and pointers are valid until the
- * next nt_gfx_begin_frame. Align vertex data read by index
+ * Per-frame vertex, index and uniform data at any point of the frame. Allocate and fill between
+ * nt_gfx_begin_frame and nt_gfx_end_frame, which uploads each stream once before the
+ * replay. Offsets and pointers are valid until the next nt_gfx_begin_frame. Align vertex data read by index
  * to its stride (vertex i at i * stride; indices are absolute), instance data to 4
  * and indices to 4 (first_index = offset / 4). The uniform stream is filled by
  * nt_gfx_bind_uniform_block. */
@@ -1074,7 +1064,7 @@ static inline void *nt_gfx_frame_alloc(nt_gfx_frame_stream_t stream, uint32_t si
     return s->staging + offset;
 }
 
-/* Borrowed: never update, orphan or destroy it. Re-read every frame: a context restore
+/* Borrowed: never update or destroy it. Re-read every frame: a context restore
  * replaces it. The index buffer is NT_INDEX_UINT32. */
 static inline nt_buffer_t nt_gfx_frame_buffer(nt_gfx_frame_stream_t stream) { return g_nt_gfx_frame_storage[stream].buffer; }
 
@@ -1089,13 +1079,15 @@ void nt_gfx_end_segment(void);
 bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
 
 /* Requires compiled support; the runtime choice starts enabled and survives context loss.
- * Disable cancels active/pending samples. Supported reports capability. */
+ * Disable cancels active/pending samples. Only between nt_gfx_end_frame and the next
+ * nt_gfx_begin_frame: recorded segments execute at end_frame. Supported reports capability. */
 void nt_gfx_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_is_gpu_timing_supported(void);
 
 /* ---- Texture update (uncompressed, non-mipmapped, non-depth textures only, level 0) ---- */
 
-/* Not ordered against this frame's draws: write a sampled region at most once per frame, before its first draw. */
+/* Allowed at any time: a write before nt_gfx_end_frame lands before every draw of the frame, so
+ * every draw reads the frame's last write; a write after it belongs to the next frame. */
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */

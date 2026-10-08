@@ -147,76 +147,32 @@ static bool s_fake_fail_next_vertex_input_create;
 static nt_vertex_layout_t s_fake_last_vertex_input_layout; /* recorder: per-vertex layout of the last VI create */
 
 uint32_t nt_gfx_fake_last_sampler(uint32_t slot) {
-    nt_gfx_frame_execute();
     if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
         return 0;
     }
     return s_fake_last_sampler[slot];
 }
 
-uint32_t nt_gfx_fake_bind_sampler_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_bind_sampler_count;
-}
-uint32_t nt_gfx_fake_set_scissor_enabled_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_set_scissor_enabled_count;
-}
-uint32_t nt_gfx_fake_last_pass_target(void) {
-    nt_gfx_frame_execute();
-    return s_fake_last_pass_target;
-}
-uint32_t nt_gfx_fake_pass_target_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_pass_target_count;
-}
-uint32_t nt_gfx_fake_pass_target_at(uint32_t index) {
-    nt_gfx_frame_execute();
-    return index < s_fake_pass_target_count ? s_fake_pass_targets[index] : 0;
-}
-uint32_t nt_gfx_fake_bound_texture_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_bound_texture_count;
-}
-uint32_t nt_gfx_fake_bound_texture_at(uint32_t index) {
-    nt_gfx_frame_execute();
-    return index < s_fake_bound_texture_count ? s_fake_bound_textures[index] : 0;
-}
-uint32_t nt_gfx_fake_bound_texture_slot_at(uint32_t index) {
-    nt_gfx_frame_execute();
-    return index < s_fake_bound_texture_count ? s_fake_bound_texture_slots[index] : UINT32_MAX;
-}
+uint32_t nt_gfx_fake_bind_sampler_count(void) { return s_fake_bind_sampler_count; }
+uint32_t nt_gfx_fake_set_scissor_enabled_count(void) { return s_fake_set_scissor_enabled_count; }
+uint32_t nt_gfx_fake_last_pass_target(void) { return s_fake_last_pass_target; }
+uint32_t nt_gfx_fake_pass_target_count(void) { return s_fake_pass_target_count; }
+uint32_t nt_gfx_fake_pass_target_at(uint32_t index) { return index < s_fake_pass_target_count ? s_fake_pass_targets[index] : 0; }
+uint32_t nt_gfx_fake_bound_texture_count(void) { return s_fake_bound_texture_count; }
+uint32_t nt_gfx_fake_bound_texture_at(uint32_t index) { return index < s_fake_bound_texture_count ? s_fake_bound_textures[index] : 0; }
+uint32_t nt_gfx_fake_bound_texture_slot_at(uint32_t index) { return index < s_fake_bound_texture_count ? s_fake_bound_texture_slots[index] : UINT32_MAX; }
 uint32_t nt_gfx_fake_render_target_create_count(void) { return s_fake_render_target_create_count; }
 uint32_t nt_gfx_fake_render_target_destroy_count(void) { return s_fake_render_target_destroy_count; }
 uint32_t nt_gfx_fake_texture_create_count(void) { return s_fake_texture_create_count; }
 uint32_t nt_gfx_fake_program_create_count(void) { return s_fake_program_create_count; }
 uint32_t nt_gfx_fake_pipeline_create_count(void) { return s_fake_pipeline_create_count; }
-uint32_t nt_gfx_fake_bind_pipeline_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_bind_pipeline_count;
-}
-uint32_t nt_gfx_fake_uniform_int_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_uniform_int_count;
-}
-uint32_t nt_gfx_fake_uniform_int_hash_at(uint32_t index) {
-    nt_gfx_frame_execute();
-    return index < s_fake_uniform_int_count && index < NT_GFX_FAKE_UNIFORM_NAMES ? s_fake_uniform_int_hashes[index] : 0;
-}
-int nt_gfx_fake_uniform_int_value_at(uint32_t index) {
-    nt_gfx_frame_execute();
-    return index < s_fake_uniform_int_count && index < NT_GFX_FAKE_UNIFORM_NAMES ? s_fake_uniform_int_values[index] : -1;
-}
-uint32_t nt_gfx_fake_uniform_vec4_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_uniform_vec4_count;
-}
-uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index) {
-    nt_gfx_frame_execute();
-    return index < s_fake_uniform_vec4_count && index < NT_GFX_FAKE_UNIFORM_NAMES ? s_fake_uniform_vec4_hashes[index] : 0;
-}
+uint32_t nt_gfx_fake_bind_pipeline_count(void) { return s_fake_bind_pipeline_count; }
+uint32_t nt_gfx_fake_uniform_int_count(void) { return s_fake_uniform_int_count; }
+uint32_t nt_gfx_fake_uniform_int_hash_at(uint32_t index) { return index < s_fake_uniform_int_count && index < NT_GFX_FAKE_UNIFORM_NAMES ? s_fake_uniform_int_hashes[index] : 0; }
+int nt_gfx_fake_uniform_int_value_at(uint32_t index) { return index < s_fake_uniform_int_count && index < NT_GFX_FAKE_UNIFORM_NAMES ? s_fake_uniform_int_values[index] : -1; }
+uint32_t nt_gfx_fake_uniform_vec4_count(void) { return s_fake_uniform_vec4_count; }
+uint32_t nt_gfx_fake_uniform_vec4_hash_at(uint32_t index) { return index < s_fake_uniform_vec4_count && index < NT_GFX_FAKE_UNIFORM_NAMES ? s_fake_uniform_vec4_hashes[index] : 0; }
 void nt_gfx_fake_uniform_vec4_value_at(uint32_t index, float out[4]) {
-    nt_gfx_frame_execute();
     const bool valid = index < s_fake_uniform_vec4_count && index < NT_GFX_FAKE_UNIFORM_NAMES;
     for (uint32_t i = 0; i < 4; i++) {
         out[i] = valid ? s_fake_uniform_vec4_values[index][i] : 0.0F;
@@ -234,36 +190,17 @@ uint32_t nt_gfx_fake_last_vertex_buffer_hash(void) { return s_fake_last_vertex_b
 uint32_t nt_gfx_fake_last_index_buffer_hash(void) { return s_fake_last_index_buffer_hash; }
 uint32_t nt_gfx_fake_backend_restore_count(void) { return s_fake_backend_restore_count; }
 uint32_t nt_gfx_fake_gpu_caps_probe_count(void) { return s_fake_gpu_caps_probe_count; }
-uint32_t nt_gfx_fake_ubo_bind_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_ubo_bind_count;
-}
+uint32_t nt_gfx_fake_ubo_bind_count(void) { return s_fake_ubo_bind_count; }
 nt_gfx_fake_ubo_bind_t nt_gfx_fake_ubo_bind_at(uint32_t index) {
-    nt_gfx_frame_execute();
     bool valid = index < s_fake_ubo_bind_count && index < NT_GFX_FAKE_HISTORY_CAPACITY;
     return valid ? s_fake_ubo_binds[index] : (nt_gfx_fake_ubo_bind_t){0};
 }
 void nt_gfx_fake_set_uniform_buffer_offset_alignment(uint32_t alignment) { s_fake_uniform_buffer_offset_alignment = alignment; }
-uint16_t nt_gfx_fake_last_pass_width(void) {
-    nt_gfx_frame_execute();
-    return s_fake_last_pass_width;
-}
-uint16_t nt_gfx_fake_last_pass_height(void) {
-    nt_gfx_frame_execute();
-    return s_fake_last_pass_height;
-}
-nt_pass_desc_t nt_gfx_fake_last_pass_desc(void) {
-    nt_gfx_frame_execute();
-    return s_fake_last_pass_desc;
-}
-nt_clear_desc_t nt_gfx_fake_last_clear_desc(void) {
-    nt_gfx_frame_execute();
-    return s_fake_last_clear_desc;
-}
-void nt_gfx_fake_last_uniform_mat4(float out[16]) {
-    nt_gfx_frame_execute();
-    memcpy(out, s_fake_last_uniform_mat4, sizeof(s_fake_last_uniform_mat4));
-}
+uint16_t nt_gfx_fake_last_pass_width(void) { return s_fake_last_pass_width; }
+uint16_t nt_gfx_fake_last_pass_height(void) { return s_fake_last_pass_height; }
+nt_pass_desc_t nt_gfx_fake_last_pass_desc(void) { return s_fake_last_pass_desc; }
+nt_clear_desc_t nt_gfx_fake_last_clear_desc(void) { return s_fake_last_clear_desc; }
+void nt_gfx_fake_last_uniform_mat4(float out[16]) { memcpy(out, s_fake_last_uniform_mat4, sizeof(s_fake_last_uniform_mat4)); }
 nt_texture_desc_t nt_gfx_fake_last_texture_desc(void) { return s_fake_last_texture_desc; }
 nt_buffer_desc_t nt_gfx_fake_last_buffer_desc(void) { return s_fake_last_buffer_desc; }
 uint32_t nt_gfx_fake_last_color_texture_backend(void) { return s_fake_last_color_texture_backend; }
@@ -292,33 +229,17 @@ void nt_gfx_fake_set_context_lost(bool lost) {
 }
 void nt_gfx_fake_lose_and_restore_context(void) { s_fake_loss_pending = true; }
 uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update_buffer_offset; }
-uint32_t nt_gfx_fake_last_instance_offset(void) {
-    nt_gfx_frame_execute();
-    return s_fake_last_instance_offset;
-}
-uint32_t nt_gfx_fake_last_instance_vertex_input(void) {
-    nt_gfx_frame_execute();
-    return s_fake_last_instance_vertex_input;
-}
+uint32_t nt_gfx_fake_last_instance_offset(void) { return s_fake_last_instance_offset; }
+uint32_t nt_gfx_fake_last_instance_vertex_input(void) { return s_fake_last_instance_vertex_input; }
 nt_blend_state_t nt_gfx_fake_last_pipeline_blend(void) { return s_fake_last_pipeline_blend; }
 uint32_t nt_gfx_fake_vertex_input_create_count(void) { return s_fake_vertex_input_create_count; }
-uint32_t nt_gfx_fake_bind_vertex_input_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_bind_vertex_input_count;
-}
-uint32_t nt_gfx_fake_last_bound_vertex_input(void) {
-    nt_gfx_frame_execute();
-    return s_fake_last_bound_vertex_input;
-}
-uint32_t nt_gfx_fake_last_uniform_program(void) {
-    nt_gfx_frame_execute();
-    return s_fake_last_uniform_program;
-}
+uint32_t nt_gfx_fake_bind_vertex_input_count(void) { return s_fake_bind_vertex_input_count; }
+uint32_t nt_gfx_fake_last_bound_vertex_input(void) { return s_fake_last_bound_vertex_input; }
+uint32_t nt_gfx_fake_last_uniform_program(void) { return s_fake_last_uniform_program; }
 void nt_gfx_fake_fail_next_vertex_input_create(void) { s_fake_fail_next_vertex_input_create = true; }
 nt_vertex_layout_t nt_gfx_fake_last_vertex_input_layout(void) { return s_fake_last_vertex_input_layout; }
 
 void nt_gfx_fake_reset(void) {
-    nt_gfx_frame_execute();
     for (uint32_t i = 0; i < NT_GFX_MAX_TEXTURE_SLOTS; i++) {
         s_fake_last_sampler[i] = 0;
     }
@@ -391,23 +312,15 @@ static bool s_fake_draw_enabled;
 static bool s_fake_draw_overflow;
 
 void nt_gfx_fake_draw_trace_reset(bool enabled) {
-    nt_gfx_frame_execute();
     s_fake_draw_count = 0;
     s_fake_draw_overflow = false;
     s_fake_draw_enabled = enabled;
 }
 
-uint32_t nt_gfx_fake_draw_trace_count(void) {
-    nt_gfx_frame_execute();
-    return s_fake_draw_count;
-}
-bool nt_gfx_fake_draw_trace_overflowed(void) {
-    nt_gfx_frame_execute();
-    return s_fake_draw_overflow;
-}
+uint32_t nt_gfx_fake_draw_trace_count(void) { return s_fake_draw_count; }
+bool nt_gfx_fake_draw_trace_overflowed(void) { return s_fake_draw_overflow; }
 
 nt_gfx_fake_draw_t nt_gfx_fake_draw_trace_at(uint32_t index) {
-    nt_gfx_frame_execute();
     NT_ASSERT(index < s_fake_draw_count);
     return s_fake_draws[index];
 }
@@ -500,7 +413,8 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) {
 
 /* Synthetic readback: r = GL row, g = column, bottom-left order like glReadPixels,
  * so the shared-layer Y-flip is observable (out row 0 must carry GL row h-1). */
-bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
+bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8) {
+    (void)render_target_backend;
     (void)x;
     (void)y;
     uint8_t *p = (uint8_t *)out_rgba8;
@@ -680,12 +594,6 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     s_fake_update_buffer_count++;
 }
 
-void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
-    (void)backend_handle;
-    (void)data;
-    (void)size;
-}
-
 void nt_gfx_backend_begin_segment(const char *name) { (void)name; }
 void nt_gfx_backend_end_segment(void) {}
 void nt_gfx_backend_drop_timer_segments(void) {}
@@ -757,12 +665,6 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, 
         s_fake_ubo_binds[s_fake_ubo_bind_count] = (nt_gfx_fake_ubo_bind_t){backend_handle, slot, offset, size};
     }
     s_fake_ubo_bind_count++;
-}
-
-void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
-    (void)program_backend;
-    (void)block_name;
-    (void)slot;
 }
 
 void nt_gfx_backend_set_uniform_mat4(uint32_t program_backend, uint32_t name_hash, const float *matrix) {

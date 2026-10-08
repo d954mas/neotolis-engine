@@ -1016,14 +1016,23 @@ void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { gl_set_viewport(x
 /* Raw GL readback, bottom-left origin. Y-flip to top-left is done once in
  * the shared layer (nt_gfx_read_pixels). rgba8 rows are 4*w bytes -> already
  * 4-aligned; set GL_PACK_ALIGNMENT=4 explicitly so it never depends on state. */
-bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8) {
+bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8) {
+    /* Between frames the window is bound; a target is bound for this read only. */
+    const GLuint fbo = render_target_backend != 0 ? s_render_target_gl[render_target_backend] : 0;
+    if (fbo != 0) {
+        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, fbo);
+    }
     NT_GL(glPixelStorei, GL_PACK_ALIGNMENT, 4);
     /* Drain any stale GL error so the post-read check is attributable to THIS readback. */
     nt_gfx_gl_drain_errors();
     NT_GL(glReadPixels, x, y, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, out_rgba8);
     /* A failed read (incomplete FB, invalid read buffer, no current context) leaves out_rgba8
        partly/wholly untouched — report it so the dev-only capture path yields capture_failed, not garbage. */
-    return NT_GL_RET0(glGetError) == GL_NO_ERROR;
+    const bool ok = NT_GL_RET0(glGetError) == GL_NO_ERROR;
+    if (fbo != 0) {
+        NT_GL(glBindFramebuffer, GL_FRAMEBUFFER, 0);
+    }
+    return ok;
 }
 
 /* ---- Pipeline bind ---- */
@@ -1298,10 +1307,11 @@ static GLuint nt_gfx_gl_link_program(uint32_t vs_backend, uint32_t fs_backend) {
         return 0;
     }
 
-    const nt_global_block_t *blocks;
-    uint32_t block_count;
-    nt_gfx_get_global_blocks(&blocks, &block_count);
-    for (uint32_t bi = 0; bi < block_count; bi++) {
+    const nt_global_block_t *blocks = s_init_desc.global_blocks;
+    for (uint32_t bi = 0; bi < NT_GFX_MAX_UNIFORM_BUFFER_SLOTS; bi++) {
+        if (blocks[bi].name == NULL) {
+            continue;
+        }
         GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, blocks[bi].name);
         if (block_index != GL_INVALID_INDEX) {
             NT_GL(glUniformBlockBinding, program, block_index, (GLuint)blocks[bi].binding_slot);
@@ -1715,28 +1725,6 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, cons
     }
 }
 
-void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
-        return;
-    }
-    GLuint buf = s_buffer_gl[backend_handle];
-    GLenum target = s_buffer_targets[backend_handle];
-    bool unhook_vao = target == GL_ELEMENT_ARRAY_BUFFER;
-    if (unhook_vao) {
-        ebo_upload_begin();
-    }
-    NT_GL(glBindBuffer, target, buf);
-    /* glBufferData with non-NULL data both orphans the existing storage and
-     * uploads in one call. The driver may allocate fresh memory for the new
-     * contents and reclaim the old block once the GPU finishes consuming it,
-     * avoiding the pipeline stall that glBufferSubData can introduce when
-     * rewriting a buffer that's still in flight. */
-    NT_GL_BUFFER_UPLOAD(data, size, glBufferData, target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
-    if (unhook_vao) {
-        ebo_upload_end();
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record and assert macros expand at owning sites
 void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset) {
     NT_ASSERT(buffer_backend != 0 && buffer_backend <= s_init_desc.max_buffers && s_buffer_gl[buffer_backend] != 0 && "bind_instance_buffer: requires a live buffer");
@@ -1760,20 +1748,6 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size) {
     NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_buffers && s_buffer_gl[backend_handle] != 0 && "bind_uniform_buffer: requires a live buffer");
     NT_GL(glBindBufferRange, GL_UNIFORM_BUFFER, slot, s_buffer_gl[backend_handle], (GLintptr)offset, (GLsizeiptr)size);
-}
-
-void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot) {
-    if (program_backend == 0 || program_backend > s_init_desc.max_programs) {
-        return;
-    }
-    GLuint program = s_programs[program_backend].program;
-    if (program == 0) {
-        return;
-    }
-    GLuint block_index = NT_GL_RET(glGetUniformBlockIndex, program, block_name);
-    if (block_index != GL_INVALID_INDEX) {
-        NT_GL(glUniformBlockBinding, program, block_index, slot);
-    }
 }
 
 /* ---- Texture management ---- */

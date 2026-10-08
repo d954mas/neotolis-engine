@@ -110,10 +110,12 @@ static inline void nt_gfx_end_op(const nt_gfx_scope_t *scope, uint32_t object, n
 
 /* ---- Render state machine ---- */
 
+/* States from PASS on are a frame being drawn: the frame rule forbids destroying live objects. */
 typedef enum {
-    NT_GFX_STATE_IDLE = 0, /* frame open, no pass */
+    NT_GFX_STATE_IDLE = 0, /* frame open, no pass yet */
+    NT_GFX_STATE_ENDED,    /* after init or end_frame: passes wait for begin_frame */
     NT_GFX_STATE_PASS,
-    NT_GFX_STATE_ENDED, /* after init or end_frame: passes wait for begin_frame */
+    NT_GFX_STATE_DRAWN, /* frame open, a pass has ended */
 } nt_gfx_render_state_t;
 
 typedef enum {
@@ -182,7 +184,6 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle);
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, uint32_t offset, const void *data, uint32_t size);
-void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size);
 
 /* Creates the name and uploads every declared level from desc->data: levels
  * 0..N-1 back to back, N = desc->level_count > 1 ? desc->level_count : 1. */
@@ -216,14 +217,14 @@ void nt_gfx_backend_set_scissor(int x, int y, int w, int h);
 void nt_gfx_backend_set_scissor_enabled(bool enabled);
 void nt_gfx_backend_set_viewport(int x, int y, int w, int h);
 
-/* Framebuffer readback. Writes w*h rgba8 pixels into out_rgba8 in raw GL
- * bottom-left order; the single Y-flip to top-left is done in the shared
- * nt_gfx.c layer. Returns false on read failure so the caller never encodes garbage. */
-bool nt_gfx_backend_read_pixels(int x, int y, int w, int h, void *out_rgba8);
+/* Framebuffer readback from render target slot render_target_backend (0 = the window).
+ * Writes w*h rgba8 pixels into out_rgba8 in raw GL bottom-left order; the single Y-flip
+ * to top-left is done in the shared nt_gfx.c layer. Returns false on read failure so the
+ * caller never encodes garbage. */
+bool nt_gfx_backend_read_pixels(uint32_t render_target_backend, int x, int y, int w, int h, void *out_rgba8);
 
 /* size 0 binds the whole buffer; otherwise [offset, offset + size), validated by the frontend. */
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot, uint32_t offset, uint32_t size);
-void nt_gfx_backend_set_uniform_block(uint32_t program_backend, const char *block_name, uint32_t slot);
 
 /* Uniform locations and values are program state, so the write names its
  * program; it must be the one currently bound. */
@@ -237,9 +238,6 @@ void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices, uint32_t 
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type);
 
 bool nt_gfx_backend_recreate_all_resources(void);
-
-/* The checked buffer write behind nt_gfx_update_buffer, without the stream execution; frame storage uploads through it. */
-nt_gfx_result_t nt_gfx_buffer_update(nt_buffer_t buf, uint32_t offset, const void *data, uint32_t size);
 
 /* GPU caps detection — implemented per-backend. */
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);

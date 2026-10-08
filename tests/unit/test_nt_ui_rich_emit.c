@@ -15,6 +15,7 @@
 #include "clay.h"
 #include "color/nt_color.h"
 #include "font/nt_font.h"
+#include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
@@ -125,6 +126,7 @@ static void test_emit_produces_text_spans(void) {
     s_body_font = ui_walker_fixture_make_real_font(&s_fx);
     nt_gfx_fake_draw_trace_reset(true);
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT);
+    ui_walker_fixture_end_frame(&s_fx);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_emit_span_count(s_fx.ctx), "two style runs on one line -> two draw_n spans");
     /* The spans reach the renderer: one quad per visible glyph of "Hello world" (the space has none). */
@@ -144,6 +146,7 @@ static void test_rich_only_frame_binds_text_material(void) {
 
     nt_gfx_fake_draw_trace_reset(true);
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT); /* rich block only, no nt_ui_label */
+    ui_walker_fixture_end_frame(&s_fx);
 
     TEST_ASSERT_TRUE_MESSAGE(ui_walker_fx_draw_count(text_program()) > 0U, "rich-only frame draws its glyphs with the ctx text material");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, ui_walker_fx_draw_count(nt_material_get_info(s_fx.text_material_b)->program), "no glyph draws with the foreign material");
@@ -261,6 +264,7 @@ static void test_emit_groups_text_by_font(void) {
     make_real_fonts(fam, 4);
     nt_gfx_fake_draw_trace_reset(true);
     frame_multi_face(fam);
+    ui_walker_fixture_end_frame(&s_fx);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, ui_walker_fx_draw_count(text_program()), "one text draw per DISTINCT font (4), not per transition (7)");
 }
@@ -270,6 +274,7 @@ static void test_emit_single_face_one_font_switch(void) {
     s_body_font = ui_walker_fixture_make_real_font(&s_fx);
     nt_gfx_fake_draw_trace_reset(true);
     frame_two_run_text(400.0F, NT_RICH_ALIGN_LEFT); /* two color runs, ONE font */
+    ui_walker_fixture_end_frame(&s_fx);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, ui_walker_fx_draw_count(text_program()), "single-face block: the two runs merge into one text draw");
 }
 
@@ -304,6 +309,7 @@ static void test_emit_synth_italic_wires_oblique(void) {
     s_body_font = ui_walker_fixture_make_real_font(&s_fx);
     nt_gfx_fake_draw_trace_reset(true);
     frame_synth_italic();
+    ui_walker_fixture_end_frame(&s_fx);
 
     uint32_t leaning = 0;
     for (uint32_t i = 0; i < ui_walker_fx_draw_count(text_program()); i++) {
@@ -323,6 +329,7 @@ static void test_emit_real_italic_face_no_oblique(void) {
     make_real_fonts(fam, 4);
     nt_gfx_fake_draw_trace_reset(true);
     frame_multi_face(fam); /* pushes italic / bold-italic against a family that HAS those faces */
+    ui_walker_fixture_end_frame(&s_fx);
     const uint32_t draws = ui_walker_fx_draw_count(text_program());
     TEST_ASSERT_TRUE(draws > 0U);
     for (uint32_t i = 0; i < draws; i++) {
@@ -367,6 +374,7 @@ static void test_emit_synth_bold_wires_weight(void) {
     s_body_font = ui_walker_fixture_make_real_font(&s_fx);
     nt_gfx_fake_draw_trace_reset(true);
     frame_synth_bold();
+    ui_walker_fixture_end_frame(&s_fx);
 
     uint32_t grown = 0;
     for (uint32_t i = 0; i < ui_walker_fx_draw_count(text_program()); i++) {
@@ -386,6 +394,7 @@ static void test_emit_real_bold_face_no_weight(void) {
     make_real_fonts(fam, 4);
     nt_gfx_fake_draw_trace_reset(true);
     frame_multi_face(fam); /* pushes bold / italic / bold-italic against a family that HAS those faces */
+    ui_walker_fixture_end_frame(&s_fx);
     const uint32_t draws = ui_walker_fx_draw_count(text_program());
     TEST_ASSERT_TRUE(draws > 0U);
     for (uint32_t i = 0; i < draws; i++) {
@@ -433,6 +442,7 @@ static void test_emit_more_than_four_fonts_no_drop(void) {
     make_real_fonts(fam, 6);
     nt_gfx_fake_draw_trace_reset(true);
     frame_six_distinct_fonts(fam);
+    ui_walker_fixture_end_frame(&s_fx);
 
     /* Count the band's TEXT atoms: every one must produce a span (no drop). */
     const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
@@ -656,6 +666,7 @@ static void frame_two_images(nt_material_t img_mat) {
 static void test_two_inline_images_coalesce(void) {
     const nt_material_t mat = s_fx.sprite_material;
     frame_two_images(mat);
+    ui_walker_fixture_end_frame(&s_fx);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "both inline images emit in the immediate pass");
     /* The LAST image emitted is a 4-vert region quad with the right tint (white, full opacity). */
@@ -2113,6 +2124,7 @@ static void test_default_layers_by_kind(void) {
  * runs, so both land under whatever the object draws. */
 static uint32_t s_order_img_at_object_draw;
 static uint32_t s_order_draws_at_object_draw;
+static uint32_t s_order_draws_before;
 static void order_recording_draw(void *user_data, float x, float y, float w, float h, uint32_t color, const float world_mat4[16]) {
     (void)user_data;
     (void)x;
@@ -2122,7 +2134,7 @@ static void order_recording_draw(void *user_data, float x, float y, float w, flo
     (void)color;
     (void)world_mat4;
     s_order_img_at_object_draw = nt_ui_rich_test_image_emit_count(s_fx.ctx);
-    s_order_draws_at_object_draw = nt_gfx_fake_draw_trace_count();
+    s_order_draws_at_object_draw = nt_gfx_draw_calls(&g_nt_gfx.counters) - s_order_draws_before;
 }
 
 /* (L2) <layer=5> override: a push_layer(5) around mixed text + image -> EVERY enclosed atom (any kind)
@@ -2139,6 +2151,7 @@ static void test_layer_override(void) {
 
     s_order_img_at_object_draw = 0xFFFFFFFFU;   /* sentinel: stays unset if the object never draws */
     s_order_draws_at_object_draw = 0xFFFFFFFFU; /* sentinel: stays unset if the object never draws */
+    s_order_draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("rich_lo_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(200)}}}) {
@@ -2155,6 +2168,7 @@ static void test_layer_override(void) {
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     walk_traced(&target);
+    ui_walker_fixture_end_frame(&s_fx);
     const nt_sprite_test_emit_t image = nt_sprite_test_last_emit();
 
     const uint32_t n = nt_ui_rich_test_atom_count(s_fx.ctx);
@@ -2211,6 +2225,7 @@ static void test_later_band_text_reselects_block_text_material(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_walk(s_fx.ctx, &target);
+    ui_walker_fixture_end_frame(&s_fx);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, ui_walker_fx_draw_count(text_program()), "band 1 text is drawn with the block's text material");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, ui_walker_fx_draw_count(nt_material_get_info(s_fx.text_material_b)->program), "not with the object's");
 }
@@ -2260,6 +2275,7 @@ static void test_font_group_per_layer(void) {
     make_real_fonts(fam, 4);
     nt_gfx_fake_draw_trace_reset(true);
     frame_multi_face_two_layers(fam);
+    ui_walker_fixture_end_frame(&s_fx);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(4U, ui_walker_fx_draw_count(text_program()), "2 fonts in band 0 + 2 in band 1 = 4 text draws");
 }
 
@@ -2294,6 +2310,7 @@ static void test_font_group_does_not_cross_layers(void) {
     nt_ui_end(s_fx.ctx);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     walk_traced(&target);
+    ui_walker_fixture_end_frame(&s_fx);
     TEST_ASSERT_EQUAL_UINT32(3U, ui_walker_fx_draw_count(text_program()));
 }
 
@@ -2362,6 +2379,7 @@ static void test_layer_drain_orders_ascending(void) {
  * the IMAGE band (1); the stub object (band 2) draws nothing. */
 static void test_default_mixed_block_paints_bands_in_order(void) {
     frame_text_image_object();
+    ui_walker_fixture_end_frame(&s_fx);
     const nt_sprite_test_emit_t image = nt_sprite_test_last_emit();
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, nt_ui_rich_test_image_emit_count(s_fx.ctx), "one inline image in the mixed block");
@@ -2592,7 +2610,9 @@ static void test_nonfinite_base_outline_emits_plain_text(void) {
         nt_ui_end(s_fx.ctx);
         nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
         walk_traced(&target);
+        ui_walker_fixture_end_frame(&s_fx);
         TEST_ASSERT_EQUAL_UINT32_MESSAGE(1U, ui_walker_fx_quads(ui_walker_fx_draw_at(text_program(), 0)), "one fill quad, no outline pass");
+        ui_walker_fixture_next_frame(&s_fx);
     }
 }
 

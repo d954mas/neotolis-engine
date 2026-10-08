@@ -57,7 +57,7 @@ Resident pack bytes are queried from existing state even with timing OFF. See
 for last-call semantics and nested duration boundaries.
 
 GPU timing OFF removes timer rings, timer-extension probes and query calls.
-Segment/toggle calls are inert; supported returns false and poll returns false
+Segment calls are inert; supported returns false and poll returns false
 with a zero output. Segment names must have static lifetime in every
 configuration: with timing ON the begin call records the pointer until the
 stream executes. Segment names and poll output pointers must be non-NULL;
@@ -67,7 +67,9 @@ not in the stub.
 With timing compiled ON, the GL implementation leaves output unchanged on an
 unsuccessful poll. `nt_gfx_stub` always returns
 false and zeroes output, regardless of the timing flag.
-The runtime choice starts enabled and survives context loss. Runtime disable
+The runtime choice starts enabled and survives context loss. The toggle asserts
+unless called between `nt_gfx_end_frame` and the next `nt_gfx_begin_frame`, with
+timing OFF too (not in the stub): recorded segments execute at `end_frame`. Runtime disable
 closes an active segment and its native debug group, cancels pending samples,
 and retains query objects until shutdown. Re-enable starts fresh samples.
 Dead-context cleanup performs no GL calls. Support reports capability,
@@ -267,7 +269,7 @@ Symmetric to `entity.list` reads, the **`entity_write`** group adds **`entity.se
 
 A bot / AI / smoke-test grabs a **rendered frame** over devapi and verifies it — with **no engine file I/O and no PPM**. Three layers, mirroring the other capability groups:
 
-- **L1 — engine capability (`nt_gfx_read_pixels`).** `nt_gfx_read_pixels(x, y, w, h, out, out_cap)` reads the default framebuffer into a caller buffer: explicit `GL_PACK_ALIGNMENT`, a single in-place Y-flip resolved once in the shared `nt_gfx` layer (the GL backend reads bottom-left; the contract is **top-left origin, straight alpha, `rgba8`**). It is cap-checked (`w*h*4 > out_cap` → false; the product is computed in `uint64` so it cannot overflow) and early-returns false on a lost context. The test-only `nt_gfx_fake` backend supplies deterministic pixels so CTest can exercise the contract (and the flip) with no GL. The production gfx stub returns false and never fabricates pixels.
+- **L1 — engine capability (`nt_gfx_read_pixels`).** `nt_gfx_read_pixels(src, x, y, w, h, out, out_cap)` reads the window (`src.id == 0`) or a render target with an `RGBA8` color attachment into a caller buffer, only between `nt_gfx_end_frame` and the next `nt_gfx_begin_frame` (asserts otherwise): the frame has executed by then, and the window still holds it before the swap. A target rect must fit the target; after a pass that discarded the target color the content is undefined. The read uses explicit `GL_PACK_ALIGNMENT`, a single in-place Y-flip resolved once in the shared `nt_gfx` layer (the GL backend reads bottom-left; the contract is **top-left origin, straight alpha, `rgba8`**). It is cap-checked (`w*h*4 > out_cap` → false; the product is computed in `uint64` so it cannot overflow) and early-returns false on a lost context. The test-only `nt_gfx_fake` backend supplies deterministic pixels so CTest can exercise the contract (and the flip) with no GL. The production gfx stub returns false and never fabricates pixels.
 - **L2 — devapi veneer (`NT_DEVAPI_GROUP_CAPTURE`).** Two commands — `capture.frame` and `capture.region` — produce a uniform `{width, height, format:"png", data:<base64>}` payload, identical on native and (later) web. The readback is RGBA8 but the wire is a **24-bit RGB PNG** (the constant alpha is stripped: smaller, faster, lossless). The PNG is encoded by the vendored `fpng` (real PNG, native SIMD + scalar fallback) behind a thin `extern "C"` wrapper, then base64-encoded into the JSON envelope. The group inits its own encoder (`nt_fpng_init`) when the host registers it (`nt_devapi_register_capture`, or `nt_devapi_register_default`) — a host needs no fpng knowledge.
 - **Harness.** A Python pixel-health check decodes the payload (one code path) and asserts decode + dims + not-blank; Pillow/numpy are confined to that decode module, the harness core stays stdlib-only.
 

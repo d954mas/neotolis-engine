@@ -96,6 +96,7 @@ static void test_invalid_descriptors_assert_without_draw(void) {
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = NAN}));
     NT_TEST_EXPECT_ASSERT(nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){.source = source, .temp = temp, .dest = dest, .radius = 4.0F, .sigma = -1.0F}));
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
@@ -118,6 +119,7 @@ static void test_feedback_aliases_assert_without_draw(void) {
         .radius = 4.0F,
     }));
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
@@ -134,6 +136,7 @@ static void test_targets_sharing_one_color_texture_assert_without_draw(void) {
         .radius = 4.0F,
     }));
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
@@ -151,6 +154,7 @@ static void test_stale_source_asserts_without_draw(void) {
         .radius = 4.0F,
     }));
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
@@ -175,6 +179,7 @@ static void test_integer_source_asserts_without_draw(void) {
         .radius = 4.0F,
     }));
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
@@ -201,6 +206,7 @@ static void test_compressed_source_blurs(void) {
         .radius = 4.0F,
     });
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
 }
 
@@ -223,6 +229,7 @@ static void test_depth_source_asserts_without_draw(void) {
         .radius = 4.0F,
     }));
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
@@ -238,8 +245,9 @@ static void test_blur_inside_active_pass_asserts_without_closing_it(void) {
         .dest = dest,
         .radius = 4.0F,
     }));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
     nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
 static void test_stale_target_asserts_without_draw(void) {
@@ -256,6 +264,7 @@ static void test_stale_target_asserts_without_draw(void) {
         .radius = 4.0F,
     }));
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
@@ -271,6 +280,7 @@ static void test_mixed_size_targets_assert_without_draw(void) {
         .radius = 4.0F,
     }));
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
 }
 
@@ -289,6 +299,7 @@ static void test_valid_blur_uses_two_passes_and_no_hidden_target_allocation(void
         .radius = 4.0F,
     });
 
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(creates_before, nt_gfx_fake_render_target_create_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.counters));
@@ -312,6 +323,7 @@ static void test_blur_binds_its_own_nearest_clamp_sampler(void) {
         .radius = 4.0F,
     });
 
+    nt_gfx_end_frame();
     /* make_sampler dedupes, so the same desc names the blur's sampler. */
     nt_sampler_t expected =
         nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST, .wrap_u = NT_WRAP_CLAMP_TO_EDGE, .wrap_v = NT_WRAP_CLAMP_TO_EDGE});
@@ -347,10 +359,9 @@ static void test_a_loss_during_restore_is_retried_by_the_next_one(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
-
     nt_gfx_fake_set_context_lost(false);
     nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_draw_trace_count());
     nt_gfx_begin_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     nt_postfx_blur_restore_gpu();
@@ -364,6 +375,7 @@ static void test_a_loss_during_restore_is_retried_by_the_next_one(void) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_postfx_blur_gaussian(&pass);
+    nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());
 }
 

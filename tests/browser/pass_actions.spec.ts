@@ -55,8 +55,9 @@ test('pass actions preserve shared depth, clear fully, clear under scissor and i
       expect(run.calls.filter(call => call.name === 'clear').map(call => call.args[0])).toEqual([0x4100, 0x100, 0x4000, 0x4000, 0x100, 0x4000]);
       expect(run.calls.filter(call => call.name === 'drawArrays')).toHaveLength(6);
       const firstDiscard = run.calls.findIndex(call => call.name === 'invalidateFramebuffer');
-      expect(run.calls.slice(firstDiscard - 1, firstDiscard + 2).map(call => call.name)).toEqual([
-        'drawArrays', 'invalidateFramebuffer', 'bindFramebuffer',
+      // end_pass unbinds the target right after the invalidate; the readback after end_frame binds it again.
+      expect(run.calls.slice(firstDiscard - 1, firstDiscard + 3).map(call => [call.name, call.fbo])).toEqual([
+        ['drawArrays', true], ['invalidateFramebuffer', true], ['bindFramebuffer', false], ['bindFramebuffer', true],
       ]);
     }
     if (cycle === 0) {

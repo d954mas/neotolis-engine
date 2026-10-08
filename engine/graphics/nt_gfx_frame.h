@@ -55,8 +55,8 @@ void nt_gfx_frame_shutdown(void);
 void nt_gfx_frame_create_buffers(void);
 /* Empties the storage; asserts that the closing frame uploaded every allocation. */
 void nt_gfx_frame_begin(void);
-/* Uploads the frame storage allocated since the previous execution, then replays the
- * recorded commands in call order and empties the stream. */
+/* Run by nt_gfx_end_frame: uploads the frame storage, then replays the recorded commands
+ * in call order and empties the stream. */
 void nt_gfx_frame_execute(void);
 /* Cold path: logs needed/free bytes and stops; it never returns. */
 _Noreturn void nt_gfx_frame_overflow(uint32_t needed_words);

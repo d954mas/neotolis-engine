@@ -293,6 +293,7 @@ static void test_debug_labels_draw_after_all_fills(void) {
     nt_gfx_fake_draw_trace_reset(true);
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_debug_draw_hit_zones(s_fx.ctx, &target, NT_UI_DEBUG_HIT_ALL, font, 12.0F);
+    ui_walker_fixture_end_frame(&s_fx);
 
     const uint32_t text_prog = nt_material_get_info(s_fx.text_material)->program.id;
     const uint32_t sprite_prog = nt_material_get_info(s_fx.sprite_material)->program.id;

@@ -59,7 +59,7 @@ void nt_mesh_renderer_shutdown(void);
 void nt_mesh_renderer_restore_gpu(void);
 
 /* Records one instanced draw in the current pass: count > 0 instances (nt_mesh_instance_t) at
- * byte offset in NT_GFX_FRAME_VERTEX, filled before the next nt_gfx call; one allocation may be
+ * byte offset in NT_GFX_FRAME_VERTEX, filled before nt_gfx_end_frame; one allocation may be
  * drawn in any number of passes. Records nothing while the program is not ready or a pipeline
  * or vertex input cannot be created. */
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t offset, uint32_t count);
