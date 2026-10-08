@@ -205,6 +205,28 @@ draw continues the primitive numbering. WebGL2's GLSL ES 3.00 has no
 `gl_PrimitiveID`; the rule keeps native GL builds identical. Instanced draws
 never merge, so `gl_InstanceID` keeps its per-draw meaning.
 
+## Precision
+
+Mobile GPUs run `mediump` as fp16 (max 65504, 11-bit significand) in both
+stages, and a vertex output's precision sets how many bytes the varying costs
+per vertex. Desktop GL and ANGLE on D3D compute everything in fp32, so desktop
+pixels never show a precision bug; engine shaders follow these rules:
+
+- Vertex shaders default to `highp`: positions and matrices need fp32.
+- Varyings holding colors (UNORM8 sources), tints and unit normals/tangents are
+  `mediump`; UVs, world positions and SDF/text coordinates stay `highp`.
+- A fragment input is interpolated at the lower of its two declared precisions,
+  so a `mediump` fragment shader declares its UV input `highp`.
+- Fragment shaders may default to `mediump` for color math and keep `highp` for
+  values that cancel or need range: view vectors from world positions,
+  normal-map Z reconstruction, specular powers, derivative-based AA, text
+  coverage.
+- A uniform or uniform-block member declared in both stages must have the same
+  precision, or the WebGL link fails; a fragment shader that includes
+  `common/globals.glsl` keeps the `highp` default of the vertex stage.
+- `sampler2D` defaults to `lowp`, and `texture()` returns the sampler's
+  precision: a sampler over depth or numeric data is qualified explicitly.
+
 ## Fragment output and blending
 
 The fragment shader defines the source color representation; material blend
