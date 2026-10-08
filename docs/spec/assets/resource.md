@@ -312,7 +312,7 @@ work queued before the loss names pipelines and vertex inputs the loss freed.
 
 No step needs pool headroom over the steady state: every rebuild destroys before
 it recreates, whether it is a renderer relinking inside its own restore entry
-point or `nt_program_ref_update` reclaiming a dead handle before linking again.
+point or `nt_program_ref_drop` freeing a dead handle before `nt_program_ref_update` links again.
 
 Restore entry points leave never-initialized or explicitly shut-down modules
 untouched, so a game may call all of them without activating unused renderers.
@@ -363,8 +363,8 @@ an assignment latch. A blob-resident pack (the default, `NT_BLOB_KEEP`) can
 re-activate on the next step within the activation budget; an evicted pack must
 re-download first. Rebuild resource-dependent render state after publication.
 
-The mesh, sprite and text renderers skip a material whose program is not ready and warn
-once until a pipeline is built again. The skip is normal runtime state, not a
+The mesh, sprite and text renderers skip a material whose program is not ready
+(still linking, or lost). The skip is normal runtime state, not a
 caller error: `nt_sprite_renderer_set_material` asserts only that a program was
 assigned, and its emits draw nothing until the program is ready.
 `nt_text_renderer_set_material` also asserts only assignment, not liveness; the

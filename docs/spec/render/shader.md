@@ -22,6 +22,22 @@ A program's linked executable and identity are immutable after
 Recovery requires the owner to destroy the old program and link a new handle;
 a program whose readiness was lost never becomes ready again.
 
+Linking is asynchronous. `nt_gfx_make_program` starts the link and returns a
+valid handle without reading its status: browsers link on a worker thread, and
+asking for the status at once blocks the main thread until it finishes.
+`nt_gfx_begin_frame` finishes pending links. With
+`KHR_parallel_shader_compile` (web) or `KHR`/`ARB_parallel_shader_compile`
+(native) it asks each pending program once per frame whether the link is
+complete and leaves unfinished ones pending; without the extension it finishes
+every pending link there, which may block. Finishing reads the link status,
+binds the global blocks, reflects uniforms and samplers and writes the sampler
+units. A program is therefore ready no earlier than the frame after
+`nt_gfx_make_program`, and readiness changes only in `nt_gfx_begin_frame`, by
+a destroy or by a loss, so it is constant within a frame. Until then
+`nt_gfx_program_ready` is false: `nt_gfx_make_pipeline` accepts the program,
+binding a pipeline on it asserts, and renderers and games skip draws that
+need it.
+
 The program has a single owner — whoever called `nt_gfx_make_program` — and the
 engine never dedupes: two calls with the same pair give two programs. A game
 that wants one program behind many materials links it once and passes the same
@@ -96,26 +112,31 @@ nor inspects shader sources and creates no programs; see
 [stub semantics](../core/module-layout.md#stub-semantics-and-capability-queries). Each
 sampler element, array elements included, takes one unit, numbered 0..n-1 in
 reflection order. A program may not use more than `NT_GFX_MAX_TEXTURE_SLOTS`
-sampler units (asserted at link). The backend writes the units once with
+sampler units (asserted when the link finishes). The backend writes the units once with
 `glUniform1i` immediately after reflection, restoring the program that was
-current, because linking may happen while a pipeline is bound.
+current.
 The unit table is backend-private: `nt_gfx_apply_texture_bindings` consumes it to
 map a complete name-keyed set to units, and callers never observe or choose unit
 numbers. A name absent after driver optimization is inactive and ignored before
 its texture or sampler handle is inspected.
 
-A reflection query that reports nothing discards the new program before
-publication, so the next frame links again rather than caching half a location
-table. Nothing catches an exception thrown out of reflection: on the web the
-Emscripten GL layer dereferences a null result in two of its own reflection
+A reflection query that reports nothing fails the finish rather than caching
+half a location table: on a lost context the program stays unready and its
+owner links a new one after the restore; on a live context it traps like a
+failed link. Nothing catches an exception thrown out of reflection: on the web
+the Emscripten GL layer dereferences a null result in two of its own reflection
 helpers. The browser reports a loss through `isContextLost` at once (only the
-lost event is queued), and program creation queries it before the link and
-after a failed one, so the throw needs a loss that lands after a successful
-link and before reflection within one create. The engine accepts that race
-rather than wrap Emscripten's helpers.
+lost event is queued), and the finish queries it after a failed link, so the
+throw needs a loss that lands after a successful link status and before
+reflection within one finish. The engine accepts that race rather than wrap
+Emscripten's helpers.
 
-A link failure is a developer error and traps (`NT_ASSERT`) rather than
-returning an invalid handle. `nt_gfx_make_program` returns an invalid handle on
+A link failure is a developer error and traps (`NT_ASSERT`) in the
+`nt_gfx_begin_frame` that finishes the link, after logging the program log
+and the logs of its stages; stage creation never reads its compile status, so
+compile errors surface there too. A link the browser fails because the context
+was lost latches the loss instead and leaves the program unready.
+`nt_gfx_make_program` returns an invalid handle on
 a lost context, including a loss the browser reports before its lost event
 arrives (the failed call latches it) and pending engine recovery after the browser has restored it, and for a live stage handle whose GPU object an earlier loss discarded --
 that stage is permanently unready, so the owner recreates it and links again.
