@@ -80,16 +80,9 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
         font_provider_clear(user_data);
         return;
     }
-    /* Reject malformed runtime font headers before exposing their tables. */
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
     NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
     NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
-    if (hdr->magic != NT_FONT_MAGIC || hdr->version != NT_FONT_VERSION) {
-        /* Reject: this corrupt pack is now the published winner, so the previous winner's pack is
-         * no longer pinned and may be evicted — stop pointing at it. Degrade to tofu. */
-        font_provider_clear(user_data);
-        return;
-    }
     nt_font_provider_t *p = (nt_font_provider_t *)*user_data;
     if (p == NULL) {
         p = (nt_font_provider_t *)calloc(1, sizeof(*p));
