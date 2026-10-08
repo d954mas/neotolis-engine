@@ -670,7 +670,6 @@ static inline uint32_t widget_probe_slot(const nt_ui_widget_slot_t *registry, ui
         }
     }
     NT_ASSERT(0 && "widget_registry full — load factor exceeded (raise max_elements)");
-    return 0U;
 }
 
 /* Registry clears each nt_ui_begin, so a slot already holding this id == a duplicate

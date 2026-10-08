@@ -280,12 +280,10 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
                 /* gi is bounded by construction in rebuild_ascii_index;
                  * the bounds check guards blob corruption between load and access. */
                 NT_ASSERT(gi < hdr->glyph_count);
-                if (gi < hdr->glyph_count) {
-                    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
-                    *out_resource_index = ri;
-                    *out_glyph_entry = glyphs + gi;
-                    return true;
-                }
+                const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
+                *out_resource_index = ri;
+                *out_glyph_entry = glyphs + gi;
+                return true;
             }
         }
         /* ASCII char not in any resource — fall through (tofu fallback). */
@@ -1055,10 +1053,6 @@ static uint16_t parse_contour_points(const uint8_t **rp, int32_t *pts_x, int32_t
     memcpy(&first_y, *rp, 2);
     *rp += 2;
     NT_ASSERT(point_count <= NT_FONT_MAX_POINTS_PER_CONTOUR);
-    /* Hard cap: a corrupt pack could record point_count past
-     * the static buffer; clamp WRITES to the buffer while still advancing rp over every delta so the
-     * later passes/contours stay byte-aligned. Builder guarantees the cap; this is the safety net. */
-    uint16_t cap = (point_count < NT_FONT_MAX_POINTS_PER_CONTOUR) ? point_count : NT_FONT_MAX_POINTS_PER_CONTOUR;
     pts_x[0] = first_x;
     pts_y[0] = first_y;
     pts_on[0] = (flags[0] & 1U) != 0;
@@ -1069,13 +1063,11 @@ static uint16_t parse_contour_points(const uint8_t **rp, int32_t *pts_x, int32_t
         int16_t dy = read_varlen_delta(rp);
         px += dx;
         py += dy;
-        if (p < cap) {
-            pts_x[p] = px;
-            pts_y[p] = py;
-            pts_on[p] = (flags[p / 8] & (1U << (p % 8))) != 0;
-        }
+        pts_x[p] = px;
+        pts_y[p] = py;
+        pts_on[p] = (flags[p / 8] & (1U << (p % 8))) != 0;
     }
-    return cap;
+    return point_count;
 }
 
 /* Decode v4 point-based contour data into absolute float curves (implicit midpoints between
@@ -2027,13 +2019,11 @@ static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *s
             if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
                 const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
                 NT_ASSERT(gi < hdr->glyph_count); /* see find_glyph_in_resources rationale */
-                if (gi < hdr->glyph_count) {
-                    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
-                    out.entry = glyphs + gi;
-                    out.blob = blob;
-                    out.blob_size = blob_size;
-                    return out;
-                }
+                const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
+                out.entry = glyphs + gi;
+                out.blob = blob;
+                out.blob_size = blob_size;
+                return out;
             }
         }
     }

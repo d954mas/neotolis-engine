@@ -1350,7 +1350,6 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
         return true;
     case GL_INT_SAMPLER_2D:
         NT_ASSERT(false && "program sampler requires a signed integer texture format");
-        return false;
     case GL_SAMPLER_3D:
     case GL_SAMPLER_CUBE:
     case GL_SAMPLER_CUBE_SHADOW:
@@ -1391,7 +1390,6 @@ static bool uniform_sampler_class(GLenum utype, nt_gfx_sampler_class_t *out_clas
     case GL_UNSIGNED_INT_SAMPLER_BUFFER:
 #endif
         NT_ASSERT(false && "program declares an unsupported sampler type");
-        return false;
     default:
         return false;
     }

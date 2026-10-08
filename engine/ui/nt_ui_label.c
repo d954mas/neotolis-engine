@@ -22,15 +22,10 @@ const nt_ui_widget_def_t NT_UI_LABEL_DEF = {
 
 static bool label_style_has_decoration(const nt_ui_label_style_t *s) { return s->variant != 0U || s->weight != 0.0F || s->outline_w > 0.0F || (s->shadow_color >> 24) != 0U; }
 
-/* Copy into private frame scratch so the shared per-layer element_data singleton is never mutated;
- * on scratch exhaustion return `base` unchanged (text still renders, undecorated). */
+/* Copy into private frame scratch so the shared per-layer element_data singleton is never mutated. */
 static const nt_ui_element_data_t *label_attach_decoration(const nt_ui_element_data_t *base, const nt_ui_label_style_t *s) {
     nt_ui_label_deco_t *d = (nt_ui_label_deco_t *)nt_mem_scratch_alloc(sizeof *d, alignof(nt_ui_label_deco_t));
     nt_ui_element_data_t *ed = (nt_ui_element_data_t *)nt_mem_scratch_alloc(sizeof *ed, alignof(nt_ui_element_data_t));
-    if (d == NULL || ed == NULL) {
-        NT_ASSERT(0 && "nt_ui_label: scratch exhausted for label decoration");
-        return base;
-    }
     d->variant = s->variant;
     d->weight = s->weight;
     d->outline_w = s->outline_w;
