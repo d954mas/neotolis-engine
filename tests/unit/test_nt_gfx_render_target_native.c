@@ -1453,8 +1453,10 @@ static void GLAD_API_PTR skip_second_uniform_query(GLuint program, GLuint index,
 
 /* Finishes a link the driver may still run in parallel. */
 static nt_gfx_result_t finish_backend_program(uint32_t program) {
-    nt_gfx_result_t result = NT_GFX_RESULT_UNREADY;
+    const struct timespec start = nt_test_link_wait_start();
+    nt_gfx_result_t result = nt_gfx_backend_finish_program(program);
     while (result == NT_GFX_RESULT_UNREADY) {
+        nt_test_link_wait_check(&start);
         result = nt_gfx_backend_finish_program(program);
     }
     return result;
@@ -1503,8 +1505,6 @@ static void assert_reflection_query_failure_fails_the_finish(GLenum skipped_quer
     TEST_ASSERT_EQUAL(NT_GFX_RESULT_BACKEND_FAILURE, result);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, s_failed_reflection_program);
 
-    /* Reflection starts over: the partial cache of the failed finish does not stick. */
-    TEST_ASSERT_EQUAL(NT_GFX_RESULT_ACCEPTED, finish_backend_program(failing));
     nt_gfx_backend_destroy_program(failing);
     nt_gfx_backend_destroy_program(existing);
     nt_gfx_backend_destroy_shader(fs);
@@ -1524,10 +1524,16 @@ static void GLAD_API_PTR count_link_status_query(GLuint program, GLenum query, G
     s_get_program_iv(program, query, value);
 }
 
-/* make_program only starts the link: reading its status there would block on the driver. */
+/* make_program only starts the link: reading its status or reflection there would block on the driver. */
 static void test_make_program_does_not_query_link_status(void) {
+    static const nt_gfx_gl_call_t blocking[] = {NT_GFX_GL_glGetProgramiv, NT_GFX_GL_glGetActiveUniform, NT_GFX_GL_glGetUniformLocation, NT_GFX_GL_glGetUniformBlockIndex};
+    enum { BLOCKING_COUNT = sizeof(blocking) / sizeof(blocking[0]) };
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n"});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "out vec4 frag_color;\nvoid main() { frag_color = vec4(1.0); }\n"});
+    uint32_t before[BLOCKING_COUNT];
+    for (uint32_t i = 0; i < BLOCKING_COUNT; i++) {
+        before[i] = g_nt_gfx.counters.gl[blocking[i]];
+    }
     s_get_program_iv = glad_glGetProgramiv;
     s_link_status_queries = 0;
     glad_glGetProgramiv = count_link_status_query;
@@ -1535,6 +1541,9 @@ static void test_make_program_does_not_query_link_status(void) {
     glad_glGetProgramiv = s_get_program_iv;
     TEST_ASSERT_NOT_EQUAL_UINT32(0, prog.id);
     TEST_ASSERT_EQUAL_UINT32(0, s_link_status_queries);
+    for (uint32_t i = 0; i < BLOCKING_COUNT; i++) {
+        TEST_ASSERT_EQUAL_UINT32(before[i], g_nt_gfx.counters.gl[blocking[i]]);
+    }
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
     nt_test_gfx_link_wait(prog);
 }

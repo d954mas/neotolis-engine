@@ -1487,6 +1487,9 @@ uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend)
         return 0; /* no free slots */
     }
     GLuint program = NT_GL_RET0(glCreateProgram);
+    if (program == 0) {
+        return 0; /* a zero name would leave the slot marked free */
+    }
     NT_GL(glAttachShader, program, (GLuint)vs_backend);
     NT_GL(glAttachShader, program, (GLuint)fs_backend);
     NT_GL(glLinkProgram, program);

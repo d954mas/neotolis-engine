@@ -521,6 +521,29 @@ void test_draw_list_skips_a_run_whose_program_was_destroyed(void) {
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
 }
 
+/* A linking program is skipped like an invalid one: no pipeline, no bind, until a begin_frame finishes it. */
+void test_draw_list_skips_a_linking_program_until_its_link_finishes(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t entity = create_test_entity(mesh, mat);
+    nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+
+    nt_gfx_fake_hold_program_links(true);
+    nt_material_set_program(mat, create_test_program());
+    mark_draws();
+    nt_mesh_renderer_draw_list(&item, 1); /* the frame that made the program */
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
+    draw_list(&item, 1); /* later frames, link still held */
+    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
+
+    nt_gfx_fake_hold_program_links(false);
+    draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
+}
+
 /* Same reset contract as the sprite renderer: a cached pipeline borrows the
  * material's program, so it must not survive into the next epoch. */
 void test_reset_drops_cached_pipelines(void) {
@@ -1835,6 +1858,7 @@ int main(void) {
     RUN_TEST(test_draw_list_same_material_mesh_batching);
     RUN_TEST(test_draw_list_skips_a_not_ready_run_without_packing_it);
     RUN_TEST(test_draw_list_skips_a_run_whose_program_was_destroyed);
+    RUN_TEST(test_draw_list_skips_a_linking_program_until_its_link_finishes);
     RUN_TEST(test_reset_drops_cached_pipelines);
     RUN_TEST(test_draw_list_different_materials);
     RUN_TEST(test_draw_list_alternating_materials);

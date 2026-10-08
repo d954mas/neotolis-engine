@@ -217,7 +217,9 @@ static void test_new_program_defines_sampler_names_and_inactive_uniforms(void) {
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D a; uniform sampler2D b; out vec4 color; void main(){color=texture(a,vec2(0.0))+texture(b,vec2(0.0));}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
     /* Record the frame whose begin_frame finishes the link; a parallel-compile driver may take several. */
+    const struct timespec link_start = nt_test_link_wait_start();
     do {
+        nt_test_link_wait_check(&link_start);
         nt_gfx_capture_request();
         nt_gfx_end_frame();
         nt_gfx_begin_frame();
@@ -387,7 +389,9 @@ static void test_complete_capture_matches_gl_counters(void) {
         .type = NT_SHADER_FRAGMENT, .source = "precision mediump float; uniform sampler2D tex; uniform vec4 tint; out vec4 color; void main(){color=texture(tex,vec2(0.5))*tint;}"});
     nt_program_t program = nt_gfx_make_program(vs, fs);
     /* Record the frame whose begin_frame finishes the link; a parallel-compile driver may take several. */
+    const struct timespec link_start = nt_test_link_wait_start();
     do {
+        nt_test_link_wait_check(&link_start);
         nt_gfx_capture_request();
         nt_gfx_end_frame();
         nt_gfx_begin_frame();

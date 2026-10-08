@@ -675,6 +675,27 @@ void test_sprite_renderer_set_material_survives_a_destroyed_program(void) {
     TEST_ASSERT_EQUAL_UINT32(draws_before, recorded_draws());
 }
 
+/* A linking program leaves the material not drawable until a begin_frame finishes the link. */
+void test_sprite_renderer_skips_a_linking_program_until_its_link_finishes(void) {
+    s_atlas_res = register_test_atlas(0xC7ULL);
+    nt_gfx_fake_hold_program_links(true);
+    nt_material_t mat = create_test_material();
+    nt_test_frame_next();
+    nt_sprite_renderer_set_material(mat);
+    const uint32_t draws_before = recorded_draws();
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(draws_before, recorded_draws());
+
+    nt_gfx_fake_hold_program_links(false);
+    nt_test_frame_next();
+    nt_sprite_renderer_set_material(mat);
+    const uint32_t linked_before = recorded_draws();
+    nt_sprite_renderer_emit_region(s_atlas_res, 0, NT_MATH_MAT4_IDENTITY, 0, 0, 0xFFFFFFFFU, 0, NULL, 0U);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_pipeline_cache_count());
+    TEST_ASSERT_EQUAL_UINT32(linked_before + 1, recorded_draws());
+}
+
 void test_sprite_renderer_forwards_material_blend_state(void) {
     nt_blend_state_t blend = nt_blend_alpha();
     blend.constant_color[1] = 0.5F;
@@ -2320,6 +2341,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_neighbouring_programs_one_depth_write_step_apart_get_their_own_pipelines);
     RUN_TEST(test_sprite_renderer_set_material_survives_a_destroyed_program);
+    RUN_TEST(test_sprite_renderer_skips_a_linking_program_until_its_link_finishes);
     RUN_TEST(test_sprite_renderer_forwards_material_blend_state);
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_same_material_two_pages_state);

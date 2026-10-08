@@ -284,9 +284,9 @@ void test_gfx_double_destroy_buffer(void) {
     nt_gfx_destroy_buffer(buf);
 }
 
-/* ---- Pipeline: an unlinked program is a developer error ---- */
+/* ---- Pipeline: an invalid program is a developer error ---- */
 
-void test_gfx_pipeline_asserts_unready_program(void) { EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = NT_PROGRAM_INVALID})); }
+void test_gfx_pipeline_asserts_invalid_program(void) { EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = NT_PROGRAM_INVALID})); }
 
 /* ---- Program: helpers ---- */
 
@@ -407,6 +407,7 @@ void test_gfx_link_failure_asserts_in_begin_frame(void) {
     TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
     nt_gfx_end_frame();
     EXPECT_ASSERT(nt_gfx_begin_frame());
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "program link failed"));
 }
 
 /* ---- Program: the link runs across frames and only a begin_frame finishes it ---- */
@@ -421,6 +422,7 @@ void test_gfx_program_links_at_a_begin_frame(void) {
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     EXPECT_ASSERT(nt_gfx_bind_pipeline(pip));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "program is not ready"));
     nt_gfx_end_pass();
     for (int i = 0; i < 3; i++) {
         nt_gfx_end_frame();
@@ -458,6 +460,7 @@ void test_gfx_destroy_while_linking_frees_the_slot(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(pending.id, reused.id);
     nt_gfx_end_frame();
     EXPECT_ASSERT(nt_gfx_begin_frame());
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "program link failed"));
 }
 
 /* ---- Program: a loss met while finishing a link latches it, never asserts ---- */
@@ -1172,8 +1175,8 @@ static void expect_pipeline_blend_accept(nt_blend_state_t blend) {
 
 void test_gfx_pipeline_asserts_null_desc(void) { EXPECT_ASSERT(nt_gfx_make_pipeline(NULL)); }
 
-/* Context loss is what zeroes a program's backend, so it must not read as the
- * developer error "program is not linked" -- the handle is still pool-valid. */
+/* Context loss is what zeroes a program's backend, so while the loss is latched it must not
+ * read as the developer error of an invalid program -- the handle is still pool-valid. */
 void test_gfx_pipeline_context_lost_returns_invalid(void) {
     nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
     nt_test_gfx_link_wait(prog);
@@ -1187,6 +1190,21 @@ void test_gfx_pipeline_context_lost_returns_invalid(void) {
     TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
     TEST_ASSERT_FALSE(nt_gfx_program_ready(prog));
     TEST_ASSERT_EQUAL_UINT32(0, pip.id);
+}
+
+/* After the restore the context is live again, so a program the loss discarded is a stale handle. */
+void test_gfx_pipeline_asserts_program_lost_before_restore(void) {
+    nt_program_t prog = nt_gfx_make_program(make_test_vs(), make_test_fs());
+    nt_test_gfx_link_wait(prog);
+
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    TEST_ASSERT_TRUE(nt_gfx_program_valid(prog));
+
+    EXPECT_ASSERT(nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = prog}));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "context loss discarded"));
 }
 
 void test_gfx_pipeline_pool_full_asserts(void) {
@@ -3776,7 +3794,8 @@ int main(void) {
     RUN_TEST(test_gfx_state_machine_valid_cycle);
     RUN_TEST(test_gfx_double_destroy_shader);
     RUN_TEST(test_gfx_double_destroy_buffer);
-    RUN_TEST(test_gfx_pipeline_asserts_unready_program);
+    RUN_TEST(test_gfx_pipeline_asserts_invalid_program);
+    RUN_TEST(test_gfx_pipeline_asserts_program_lost_before_restore);
     RUN_TEST(test_gfx_two_pipelines_share_one_program);
     RUN_TEST(test_gfx_sampler_queries_use_each_program_backend);
     RUN_TEST(test_gfx_new_program_does_not_inherit_a_destroyed_sampler_table);

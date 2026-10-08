@@ -133,8 +133,9 @@ Emscripten's helpers.
 
 A link failure is a developer error and traps (`NT_ASSERT`) in the
 `nt_gfx_begin_frame` that finishes the link, after logging the program log
-and the logs of its stages; stage creation never reads its compile status, so
-compile errors surface there too. A link the browser fails because the context
+and the logs of its stages that are still alive; stage creation never reads
+its compile status, so compile errors surface there too (keep stages until the
+program is ready to see them on the web). A link the browser fails because the context
 was lost latches the loss instead and leaves the program unready.
 `nt_gfx_make_program` returns an invalid handle on
 a lost context, including a loss the browser reports before its lost event

@@ -1,9 +1,8 @@
 #ifndef NT_GFX_TEST_FRAME_H
 #define NT_GFX_TEST_FRAME_H
 
-#include "graphics/nt_gfx.h"
-
 #include "core/nt_assert.h"
+#include "graphics/nt_gfx.h"
 
 #include <stdbool.h>
 #include <time.h>
@@ -43,20 +42,30 @@ static inline void nt_test_frame_next(void) {
  * program links, so a test calls this after making its programs and before it draws. */
 static inline void nt_test_frame_finish_links(void) { nt_test_frame_next(); }
 
-/* In an open frame with no pass: starts frames until the program's link finished, leaving a
- * frame open. A driver with parallel compile may need several, so the bound is time. */
-static inline void nt_test_gfx_link_wait(nt_program_t program) {
+/* A driver with parallel compile may need several polls to finish a link, so a link wait is
+ * bounded by time. Tests that expect an assert from a link check its message, not just that one fired. */
+static inline struct timespec nt_test_link_wait_start(void) {
     struct timespec start;
     (void)timespec_get(&start, TIME_UTC);
+    return start;
+}
+
+static inline void nt_test_link_wait_check(const struct timespec *start) {
+    struct timespec now;
+    (void)timespec_get(&now, TIME_UTC);
+    NT_ASSERT(now.tv_sec - start->tv_sec < 10 && "program link did not finish within 10 s");
+}
+
+/* In an open frame with no pass: starts frames until the program's link finished, leaving a frame open. */
+static inline void nt_test_gfx_link_wait(nt_program_t program) {
+    const struct timespec start = nt_test_link_wait_start();
     for (;;) {
         nt_gfx_end_frame();
         nt_gfx_begin_frame();
         if (nt_gfx_program_ready(program)) {
             return;
         }
-        struct timespec now;
-        (void)timespec_get(&now, TIME_UTC);
-        NT_ASSERT(now.tv_sec - start.tv_sec < 10 && "nt_test_gfx_link_wait: link did not finish");
+        nt_test_link_wait_check(&start);
     }
 }
 

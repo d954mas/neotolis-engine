@@ -873,8 +873,8 @@ static nt_gfx_result_t make_program(nt_shader_t vs, nt_shader_t fs, nt_program_t
         return NT_GFX_RESULT_UNREADY;
     }
 
-    /* Before the link, not after: the GL backend's program table has the same
-     * capacity, so linking first makes exhaustion surface as a link failure. */
+    /* Before the backend create: its program table has the same capacity, so this
+     * assert is where exhaustion surfaces with an actionable message. */
     uint32_t id = nt_pool_alloc(&s_gfx.program_pool);
     NT_ASSERT(id != 0 && "program pool full -- raise nt_gfx_desc_t.max_programs");
 

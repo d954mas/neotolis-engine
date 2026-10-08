@@ -167,13 +167,17 @@ static probe_program_t s_probe_programs[PROBE_COUNT] = {
                        .fs_source = "precision mediump float;uniform sampler2D tex;uniform vec4 tint;out vec4 color;void main(){color=texture(tex,vec2(0.5))*tint;}"},
 };
 
-static void probe_programs_create(void) {
+/* False when a loss interrupted creation: the restore step runs again. */
+static bool probe_programs_create(void) {
+    bool ok = true;
     for (int i = 0; i < PROBE_COUNT; i++) {
         probe_program_t *p = &s_probe_programs[i];
         p->vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = p->vs_source});
         p->fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = p->fs_source});
         p->program = nt_gfx_make_program(p->vs, p->fs);
+        ok = ok && p->program.id != 0;
     }
+    return ok;
 }
 
 static void probe_programs_destroy(void) {
@@ -1067,7 +1071,7 @@ static bool gpu_restore_step(void) {
     mesh_probe_destroy();
     ok = mesh_probe_create() && ok;
     probe_programs_destroy();
-    probe_programs_create();
+    ok = probe_programs_create() && ok;
     return ok;
 }
 
@@ -1289,9 +1293,9 @@ int main(int argc, char *argv[]) {
     nt_font_init(&(nt_font_desc_t){.max_fonts = 5});             /* base + 4 rich faces */
 
     nt_shape_renderer_init();
-    probe_programs_create();
-    const bool probe_ok = mesh_probe_create();
-    NT_ASSERT(probe_ok && "mesh probe creation failed at startup"); /* cold start: the context is alive */
+    bool probe_ok = probe_programs_create();
+    probe_ok = mesh_probe_create() && probe_ok;
+    NT_ASSERT(probe_ok && "probe creation failed at startup"); /* cold start: the context is alive */
     (void)probe_ok;
 
     nt_ui_module_init();

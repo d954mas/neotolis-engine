@@ -26,7 +26,8 @@ void game_shutdown(void);
 platform_step
 nt_gfx_begin_frame    ← closes the previous frame into g_nt_gfx.last_frame, syncs
                         context loss/restore, empties frame storage, opens this frame,
-                        finishes completed program links
+                        finishes program links (completed ones with parallel
+                        compile; every pending one, blocking, without it)
 input_begin_frame
     → if pointer pressed && audio suspended → audio_try_resume()
 input_event_apply

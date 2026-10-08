@@ -263,9 +263,12 @@ void test_text_renderer_font_texture_lands_on_its_program_unit(void) {
 
 void test_text_renderer_rejects_unrelated_second_sampler(void) {
     nt_gfx_fake_set_samplers((const char *const[]){"u_curve_texture", "u_extra"}, 2);
-    select_material(create_test_material_with_blend(nt_blend_alpha()));
+    nt_material_t material = create_test_material_with_blend(nt_blend_alpha());
     nt_test_frame_finish_links();
+    select_material(material);
+    nt_test_assert_last_expr[0] = 0;
     NT_TEST_EXPECT_ASSERT(draw_and_execute());
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "active sampler coverage is incomplete"));
 }
 
 /* ---- UTF-8 decode Cyrillic ---- */

@@ -11,7 +11,7 @@ type LinkWindow = Window & {
   __nt?: { ready: boolean; programs_ready(): boolean; drawn_frames(): number };
 };
 
-// Timing checks need a release build: Emscripten GL_DEBUG reads the program log right after linkProgram.
+// Needs NT_GFX_WEB_GL_DEBUG OFF (the default): Emscripten GL_DEBUG reads the program log right after linkProgram.
 for (const parallel of [true, false]) {
   test('program linking: ' + (parallel ? 'held KHR completion never blocks and the scene appears after release' : 'without the extension every link finishes and the scene renders'), async ({ page }) => {
     test.setTimeout(60_000);
@@ -72,9 +72,10 @@ for (const parallel of [true, false]) {
         const reads = Array.from({ length: 20 }, () => state.__nt!.programs_ready());
         const polledByReads = state.linkControl.completionQueries - before;
         await new Promise(resolve => setTimeout(resolve, 300));
-        return { ready: reads.some(Boolean), polledByReads, advanced: state.linkControl.completionQueries > before };
+        return { ready: reads.some(Boolean), drawn: state.__nt!.drawn_frames(), polledByReads, advanced: state.linkControl.completionQueries > before };
       });
-      expect(held).toEqual({ ready: false, polledByReads: 0, advanced: true });
+      // Nothing draws while held, so the drawn frames awaited below all come after the release.
+      expect(held).toEqual({ ready: false, drawn: 0, polledByReads: 0, advanced: true });
       expect(await page.evaluate(() => (window as LinkWindow).linkControl.earlySyncCalls)).toBe(0);
       await page.evaluate(() => { (window as LinkWindow).linkControl.hold = false; });
     }

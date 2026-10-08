@@ -158,12 +158,11 @@ void nt_gfx_backend_clear(const nt_clear_desc_t *desc);
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc);
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle);
 
-/* Links the pair, caches its uniform locations and fixes one texture unit per
- * active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS).
- * Returns 0 on link failure. */
-/* Starts the link; 0 on a lost context or a full table. */
+/* Starts the link; 0 on a lost context, a GL failure or a full table. */
 uint32_t nt_gfx_backend_create_program(uint32_t vs_backend, uint32_t fs_backend);
-/* UNREADY while the link runs, ACCEPTED once linked and reflected, BACKEND_FAILURE on a failed link or a loss. */
+/* UNREADY while the link runs; ACCEPTED once linked, with uniform locations cached and one texture
+ * unit per active sampler element (reflection order, 0..n-1, n <= NT_GFX_MAX_TEXTURE_SLOTS);
+ * BACKEND_FAILURE on a failed link or a loss. */
 nt_gfx_result_t nt_gfx_backend_finish_program(uint32_t backend_handle);
 void nt_gfx_backend_destroy_program(uint32_t backend_handle);
 

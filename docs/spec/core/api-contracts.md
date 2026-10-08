@@ -159,8 +159,9 @@ frame (see [shader](../render/shader.md#runtime-objects-shadercode-program)).
 Processing context loss clears readiness while handles stay valid, and because
 no API relinks, that program never becomes ready again: a valid program that is
 not ready is either still linking or lost. `nt_gfx_make_pipeline` accepts a
-linking or ready program and asserts on a lost one; binding a pipeline whose
-program is not ready asserts.
+linking or ready program; while the loss is latched it returns invalid, and after
+the restore a lost program asserts. Binding a pipeline whose program is not
+ready asserts.
 
 `nt_gfx_destroy_program` accepts `NT_PROGRAM_INVALID` as a no-op and asserts on
 a stale non-zero handle. Clear the owner's variable to `NT_PROGRAM_INVALID`
