@@ -25,9 +25,6 @@ bool nt_window_add_pre_swap_hook(nt_window_pre_swap_hook_fn fn) {
         }
     }
     NT_ASSERT(s_pre_swap_hook_count < NT_WINDOW_MAX_PRE_SWAP_HOOKS);
-    if (s_pre_swap_hook_count >= NT_WINDOW_MAX_PRE_SWAP_HOOKS) {
-        return false; /* OFF-build safety net: table full -> not installed, so the caller must not arm. */
-    }
     s_pre_swap_hooks[s_pre_swap_hook_count++] = fn;
     return true;
 }

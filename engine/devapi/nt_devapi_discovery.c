@@ -136,8 +136,7 @@ static const nt_devapi_handler_fn k_discovery_handlers[] = {cmd_endpoints, cmd_c
 _Static_assert(sizeof(k_discovery_cmds) / sizeof(k_discovery_cmds[0]) == sizeof(k_discovery_handlers) / sizeof(k_discovery_handlers[0]), "discovery: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_discovery(void) {
-    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: NT_ASSERT
-       compiles out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
+    /* Engine-internal dup is a build-time bug → assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
     int n = (int)(sizeof(k_discovery_cmds) / sizeof(k_discovery_cmds[0]));
     for (int i = 0; i < n; i++) {
         nt_result_t rr = nt_devapi_register(&k_discovery_cmds[i], k_discovery_handlers[i], NULL);

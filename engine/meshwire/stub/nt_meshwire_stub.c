@@ -15,7 +15,6 @@ bool nt_meshwire_decode_indices(void *dst, uint32_t index_count, uint32_t elem_s
     (void)src_size;
     (void)vertex_count;
     NT_MESHWIRE_STUB_TRAP();
-    return false;
 }
 
 // NOLINTNEXTLINE(readability-non-const-parameter) — out param signature must match the real decoder
@@ -26,5 +25,4 @@ bool nt_meshwire_reinterleave(uint8_t *dst, const uint8_t *src, uint32_t vertex_
     (void)stream_elem_sizes;
     (void)stream_count;
     NT_MESHWIRE_STUB_TRAP();
-    return false;
 }

@@ -915,9 +915,6 @@ static void invalidate_attachments(GLbitfield mask) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc, uint32_t render_target_backend, uint16_t width, uint16_t height) {
     NT_ASSERT(desc != NULL);
-    if (desc == NULL) {
-        return;
-    }
     GLsizei viewport_w = (GLsizei)g_nt_window.fb_width;
     GLsizei viewport_h = (GLsizei)g_nt_window.fb_height;
     GLuint fbo = 0;

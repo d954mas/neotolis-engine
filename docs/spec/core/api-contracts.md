@@ -310,8 +310,8 @@ or generated chain. With successful storage allocation, the texture is complete
 for every minification filter. An undetected upload or mipmap-generation failure
 may leave it incomplete. A mipmap filter over a single-level texture is legal
 in both the descriptor and a sampler override; it samples level 0.
-`nt_gfx_update_texture` on a compressed or multi-level texture asserts, then
-returns without touching storage; whole
+`nt_gfx_update_texture` on a compressed or multi-level texture asserts before
+touching storage; whole
 levels are replaced by recreating the texture.
 
 `RGBA32F` requires `gpu_caps.has_float_texture_linear` for any linear filtering,

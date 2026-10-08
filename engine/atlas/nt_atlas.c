@@ -349,9 +349,6 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
      * carves the view used below. */
     const bool blob_ok = atlas_try_validate_and_carve_blob(data, size, &view);
     NT_ASSERT(blob_ok && "atlas blob: validation failed");
-    if (!blob_ok) {
-        return;
-    }
 
     nt_atlas_data_t *ad = (nt_atlas_data_t *)*user_data;
 

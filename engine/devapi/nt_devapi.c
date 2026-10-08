@@ -156,8 +156,7 @@ static const char *resp_serialize(cJSON *tree) {
 }
 
 /* cJSON_Add{String,Number,Bool,Null}ToObject wrappers that assert success (OOM traps rather
-   than silently dropping a field). Result captured first — NT_ASSERT compiles out at
-   NT_ASSERT_MODE=0, so the call must not live inside the macro. */
+   than silently dropping a field). Result captured first — assert expressions must stay side-effect-free. */
 void devapi_add_string(cJSON *obj, const char *key, const char *value) {
     cJSON *item = cJSON_AddStringToObject(obj, key, value);
     NT_ASSERT(item != NULL);

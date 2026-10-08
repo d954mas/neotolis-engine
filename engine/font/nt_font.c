@@ -80,7 +80,7 @@ static void font_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
         font_provider_clear(user_data);
         return;
     }
-    /* The runtime format guard remains active even with NT_ASSERT_MODE=OFF. */
+    /* Reject malformed runtime font headers before exposing their tables. */
     const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)data;
     NT_ASSERT(hdr->magic == NT_FONT_MAGIC && "font blob: bad magic");
     NT_ASSERT(hdr->version == NT_FONT_VERSION && "font blob: version mismatch — rebuild packs");
@@ -1062,7 +1062,7 @@ static uint16_t parse_contour_points(const uint8_t **rp, int32_t *pts_x, int32_t
     memcpy(&first_y, *rp, 2);
     *rp += 2;
     NT_ASSERT(point_count <= NT_FONT_MAX_POINTS_PER_CONTOUR);
-    /* Hard cap (OFF-safe, where NT_ASSERT is a no-op): a corrupt pack could record point_count past
+    /* Hard cap: a corrupt pack could record point_count past
      * the static buffer; clamp WRITES to the buffer while still advancing rp over every delta so the
      * later passes/contours stay byte-aligned. Builder guarantees the cap; this is the safety net. */
     uint16_t cap = (point_count < NT_FONT_MAX_POINTS_PER_CONTOUR) ? point_count : NT_FONT_MAX_POINTS_PER_CONTOUR;
@@ -1417,9 +1417,6 @@ nt_result_t nt_font_init(const nt_font_desc_t *desc) {
     NT_ASSERT(!s_font.initialized);
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_fonts > 0);
-    if (s_font.initialized || !desc || desc->max_fonts == 0) {
-        return NT_ERR_INIT_FAILED;
-    }
 
     nt_pool_init(&s_font.pool, desc->max_fonts);
 
@@ -1465,9 +1462,6 @@ void nt_font_shutdown(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_font_step(void) {
     NT_ASSERT(s_font.initialized);
-    if (!s_font.initialized) {
-        return;
-    }
 
     // #region Context restore: re-create GPU textures
     /* Derived from the textures, not latched on context_restored, so a rebuild
@@ -1637,9 +1631,6 @@ static void rebuild_ascii_index(nt_font_slot_t *slot) {
 nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(desc);
-    if (!s_font.initialized || !desc) {
-        return NT_FONT_INVALID;
-    }
 
     /* 2048 rows is the WebGL2 guaranteed MAX_TEXTURE_SIZE; slot 0 holds tofu. */
     NT_ASSERT(desc->max_glyphs > 1 && desc->max_glyphs <= 2048 && "max_glyphs: tofu + glyphs, at most 2048 texture rows");
@@ -1719,7 +1710,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
 
 void nt_font_destroy(nt_font_t font) {
     NT_ASSERT(s_font.initialized);
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
+    if (!nt_pool_valid(&s_font.pool, font.id)) {
         return;
     }
 
@@ -1767,9 +1758,6 @@ void nt_font_add(nt_font_t font, nt_resource_t resource) {
 nt_font_metrics_t nt_font_get_metrics(nt_font_t font) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return (nt_font_metrics_t){0};
-    }
     nt_font_slot_t *slot = get_slot(font);
     if (!slot->metrics_set) {
         return (nt_font_metrics_t){0}; /* resources not loaded yet */
@@ -1780,9 +1768,6 @@ nt_font_metrics_t nt_font_get_metrics(nt_font_t font) {
 nt_font_stats_t nt_font_get_stats(nt_font_t font) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return (nt_font_stats_t){0};
-    }
     nt_font_slot_t *slot = get_slot(font);
     uint16_t cached = 0;
     uint32_t curve_texels = 0;
@@ -1915,9 +1900,6 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
 nt_texture_t nt_font_get_curve_texture(nt_font_t font) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return (nt_texture_t){0};
-    }
     return get_slot(font)->curve_texture;
 }
 

@@ -335,9 +335,7 @@ static void test_vlist_one_clip(void) {
     TEST_ASSERT_FALSE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 3U, VL_RING), VL_SCRL_TAG));
 }
 
-/* ---- (h) oversized window vs id_ring (a too-small id_ring would alias two visible rows onto one
- * recycle slot -> DUPLICATE_ID). FULL asserts on the unclamped count; OFF clamps to id_ring-1. Each
- * build tests the path it takes. ---- */
+/* A too-small id ring must assert before visible rows alias a recycled slot. */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 static void test_vlist_window_exceeds_ring_asserts(void) {
     nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
@@ -362,31 +360,6 @@ static void test_vlist_window_exceeds_ring_asserts(void) {
     nt_mem_scratch_reset();
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
     NT_TEST_EXPECT_ASSERT((void)nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 1000U, 10.0F, NT_UI_AXIS_Y, &st, &decl));
-}
-#else
-static void test_vlist_window_ring_clamp_off(void) {
-    const uint32_t ring = 8U;
-    nt_ui_vlist_range_t r = {1U, 0U};
-    for (int f = 0; f < 2; ++f) { /* frame 1 establishes the bbox; frame 2 sees the real viewport */
-        nt_mem_scratch_reset();
-        nt_pointer_t p = {0};
-        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1);
-        CLAY({.id = CLAY_ID("rclamp_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}}) {
-            nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
-            st.id_ring = ring; /* tiny ring; the 200px viewport over 10px rows would otherwise show ~29 rows */
-            st.overscan = 4;
-            const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(VL_VIEW), CLAY_SIZING_FIXED(VL_VIEW)}}};
-            r = nt_ui_vlist_begin(s_fx.ctx, NULL, VL_ID, 1000U, 10.0F, NT_UI_AXIS_Y, &st, &decl);
-            for (uint32_t i = r.first; i <= r.last && i < 1000U; ++i) {
-                CLAY({.id = (Clay_ElementId){.id = nt_ui_vlist_item_id(s_fx.ctx, i)}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(10.0F)}}}) {}
-            }
-            nt_ui_vlist_end(s_fx.ctx);
-        }
-        nt_ui_end(s_fx.ctx);
-    }
-    const uint32_t window = (r.last >= r.first) ? (r.last - r.first + 1U) : 0U;
-    TEST_ASSERT_TRUE(window > 0U);   /* still renders rows */
-    TEST_ASSERT_TRUE(window < ring); /* (last-first+1) <= ring-1: no two visible rows alias a slot */
 }
 #endif
 
@@ -472,22 +445,14 @@ static void test_vlist_nested_scroll_reversals_no_crash(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, degrades, "ring recycling must keep Clay's hashmap bounded (no saturation/degrade)");
 }
 
-/* BACKSTOP coverage: recycling disabled (id_ring==0) saturates Clay's hashmap deterministically -> a
- * stale floating parent. FULL: build_tree asserts (developer error). OFF: the assert is compiled out,
- * seed degrades to identity and the counter records it (count > 0). */
+/* Disabling recycling saturates Clay's hashmap and must assert on a stale floating parent. */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 static void test_vlist_saturation_asserts(void) { NT_TEST_EXPECT_ASSERT((void)vlist_nested_sweep(0U)); }
-#else
-static void test_vlist_saturation_degrades_off(void) {
-    const uint32_t degrades = vlist_nested_sweep(0U);
-    TEST_ASSERT_TRUE_MESSAGE(degrades > 0U, "absolute-id sweep must saturate Clay's hashmap -> build_tree degrade in OFF");
-}
 #endif
 
 /* ---- Death tests (NT_ASSERT_FULL only): begin signals a developer error on a bad gap ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* A negative / non-finite style.gap fires the developer-signal assert ON TOP of the OFF-safe clamp
- * (gap_px -> 0). The assert fires before the owned scroll opens, so the frame stays balanced. */
+/* Invalid gap asserts before the owned scroll opens, so the frame stays balanced. */
 static void vlist_begin_with_gap_expect_assert(uint32_t root_id, float item_extent, float gap) {
     nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
     st.gap = gap;
@@ -503,7 +468,7 @@ static void vlist_begin_with_gap_expect_assert(uint32_t root_id, float item_exte
 static void test_vlist_begin_negative_gap_asserts(void) { vlist_begin_with_gap_expect_assert(nt_ui_id("badgap_neg"), 10.0F, -20.0F); }
 static void test_vlist_begin_nan_gap_asserts(void) { vlist_begin_with_gap_expect_assert(nt_ui_id("badgap_nan"), 10.0F, NAN); }
 
-/* Negative overscan is a developer error: begin asserts (the window keeps its own OFF-safe clamp). */
+/* Negative overscan is a developer error: begin asserts. */
 static void test_vlist_begin_negative_overscan_asserts(void) {
     nt_ui_vlist_style_t st = nt_ui_vlist_style_defaults();
     st.overscan = -1;
@@ -534,14 +499,10 @@ int main(void) {
     RUN_TEST(test_vlist_one_clip);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vlist_window_exceeds_ring_asserts);
-#else
-    RUN_TEST(test_vlist_window_ring_clamp_off);
 #endif
     RUN_TEST(test_vlist_nested_scroll_reversals_no_crash);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vlist_saturation_asserts);
-#else
-    RUN_TEST(test_vlist_saturation_degrades_off);
 #endif
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_vlist_begin_negative_gap_asserts);

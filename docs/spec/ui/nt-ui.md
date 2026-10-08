@@ -353,7 +353,7 @@ overhang past the track even at zero style pad. An `orientation` style field sel
 AXIS (horizontal default / vertical): the SAME `nt_ui_slider_float` / `_int` branch on it, with
 `fill_direction` the anchor WITHIN the axis (vertical defaults to BOTTOM_UP — value 0 at the
 bottom; horizontal to LTR). A `fill_direction` whose axis disagrees with `orientation` is a
-developer assert and falls back to the axis default locally — the caller's style is never mutated.
+developer assert; the caller's style is never mutated.
 Slider and progress share one fill-emit
 helper (STRETCH slice9 stretch vs CROP scissor-reveal × four directions).
 
@@ -421,7 +421,7 @@ the content still measures `count × extent` and the existing scrollbar geometry
 10k-row list costs ~the visible count, not the row count. Per-row ids RECYCLE over a frame-stable
 ring (`id_ring`, slot = `index % id_ring`), so the distinct ids per list are bounded by the ring,
 never the row count, and a long list never saturates Clay's persistent element hashmap; the visible
-window is hard-clamped below the ring so two simultaneously-visible rows can never alias a slot.
+window must stay below the ring; exceeding it asserts before two visible rows can alias a slot.
 Because ids follow the screen SLOT, the game dispatches per-row ACTIONS by the ABSOLUTE index and
 keeps per-row PERSISTENT state game-owned (keyed by absolute index), never hung off the recycled
 id — transient UI state (hover/press) follows the slot, standard IM virtualization. Both axes (Y

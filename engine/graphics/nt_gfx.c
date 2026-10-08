@@ -534,10 +534,6 @@ static nt_gfx_result_t destroy_texture(nt_texture_t tex) {
     }
     /* Pass-scoped draw state may still sample it; lifetime changes stay outside passes. */
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS && "destroy_texture called inside a pass");
-    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("destroy_texture called inside a pass");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     /* Dependent render targets baked this texture into their framebuffer and can
      * never draw correctly again -- reclaim them now. */
     for (uint32_t i = 1; i <= s_gfx.render_target_pool.capacity; i++) {
@@ -699,9 +695,6 @@ static nt_gfx_result_t read_pixels(int x, int y, int w, int h, uint8_t *out, uin
         return NT_GFX_RESULT_INVALID_ARGUMENT;
     }
     NT_ASSERT(out != NULL); /* L1 writes the readback (and row-swaps) through out — NULL is a caller bug. */
-    if (out == NULL) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     NT_ASSERT((s_gfx.active_render_target == 0 || s_gfx.render_target_metas[nt_pool_slot_index(s_gfx.active_render_target)].attachments[NT_GFX_RT_COLOR].id != 0) &&
               "read_pixels: the active render target has no color attachment");
     /* A lost context returns uninitialized garbage as a "successful" read — every other GL wrapper
@@ -752,10 +745,6 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     }
 
     NT_ASSERT(desc != NULL);
-    if (desc == NULL) {
-        NT_LOG_ERROR("begin_pass: NULL desc");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     NT_ASSERT((desc->target.id != 0 || !desc->discard_color) && "begin_pass: discarding the window color loses the presented frame");
 
     uint32_t render_target_backend = 0;
@@ -764,10 +753,6 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     if (desc->target.id != 0) {
         bool valid = nt_pool_valid(&s_gfx.render_target_pool, desc->target.id);
         NT_ASSERT(valid && "begin_pass: invalid render target");
-        if (!valid) {
-            NT_LOG_ERROR("begin_pass: invalid render target");
-            return NT_GFX_RESULT_UNREADY;
-        }
         render_target_backend = nt_pool_slot_index(desc->target.id);
         const nt_gfx_texture_meta_t *size = render_target_size_meta(render_target_backend);
         width = size->width;
@@ -814,10 +799,6 @@ static nt_gfx_result_t end_pass(void) {
     }
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("end_pass called outside PASS state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
     s_gfx.active_render_target = 0;
@@ -1213,9 +1194,6 @@ static nt_gfx_result_t make_texture(const nt_texture_desc_t *desc, nt_texture_t 
 
     bool format_valid = nt_texture_format_valid(local_desc.format);
     NT_ASSERT(format_valid && "make_texture: format is required");
-    if (!format_valid) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
 
     /* Mipmaps require initial data — GL cannot generate from empty storage */
     NT_ASSERT((!local_desc.gen_mipmaps || local_desc.data) && "make_texture: gen_mipmaps requires data");
@@ -1327,23 +1305,12 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, nt_render_target_t *out) {
     NT_ASSERT(desc != NULL);
-    if (!desc) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
-    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("make_render_target called inside a pass");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     bool has_attachment = desc->color.id != 0 || desc->depth.id != 0;
     NT_ASSERT(has_attachment && "make_render_target: needs a color or depth attachment");
-    if (!has_attachment) {
-        NT_LOG_ERROR("make_render_target: needs a color or depth attachment");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
 
     const nt_texture_t attachments[NT_GFX_RT_ATTACHMENTS] = {desc->color, desc->depth};
     uint32_t backends[NT_GFX_RT_ATTACHMENTS] = {0};
@@ -1368,23 +1335,11 @@ static nt_gfx_result_t make_render_target(const nt_render_target_desc_t *desc, n
     nt_texture_format_t color_format = nt_gfx_texture_format(desc->color);
     bool color_format_valid = desc->color.id == 0 || color_format == NT_TEXTURE_FORMAT_RGBA8 || color_format == NT_TEXTURE_FORMAT_RGBA16F;
     NT_ASSERT(color_format_valid && "make_render_target: color texture must be RGBA8 or RGBA16F");
-    if (!color_format_valid) {
-        NT_LOG_ERROR("make_render_target: color texture must be RGBA8 or RGBA16F");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     bool depth_format_valid = desc->depth.id == 0 || nt_texture_format_is_depth(nt_gfx_texture_format(desc->depth));
     NT_ASSERT(depth_format_valid && "make_render_target: depth texture must be DEPTH*");
-    if (!depth_format_valid) {
-        NT_LOG_ERROR("make_render_target: depth texture must be DEPTH*");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
 
     uint32_t id = nt_pool_alloc(&s_gfx.render_target_pool);
     NT_ASSERT(id != 0 && "render target pool full; raise nt_gfx_desc_t.max_render_targets");
-    if (id == 0) {
-        NT_LOG_ERROR("render target pool full");
-        return NT_GFX_RESULT_CAPACITY;
-    }
     uint32_t slot = nt_pool_slot_index(id);
     uint32_t backend = nt_gfx_backend_create_render_target(backends, slot);
     if (backend == 0) {
@@ -1567,10 +1522,6 @@ static nt_gfx_result_t destroy_render_target(nt_render_target_t rt) {
         return NT_GFX_RESULT_INVALID_HANDLE;
     }
     NT_ASSERT(s_gfx.render_state != NT_GFX_STATE_PASS);
-    if (s_gfx.render_state == NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("destroy_render_target called inside a pass");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     uint32_t slot = nt_pool_slot_index(rt.id);
     nt_gfx_backend_destroy_render_target(slot);
     memset(&s_gfx.render_target_metas[slot], 0, sizeof(nt_gfx_render_target_meta_t));
@@ -1656,10 +1607,6 @@ static nt_gfx_result_t bind_pipeline(nt_pipeline_t pip) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_pipeline: must be called inside a pass");
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("bind_pipeline called outside PASS state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     /* Destroy clears the mirror, so an equal nonzero id is live. */
     if (s_gfx.bound_pipeline != 0 && pip.id == s_gfx.bound_pipeline) {
         return NT_GFX_RESULT_CACHE;
@@ -1696,10 +1643,6 @@ static nt_gfx_result_t bind_vertex_input(nt_vertex_input_t vi) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_vertex_input: must be called inside a pass");
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("bind_vertex_input called outside PASS state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     if (s_gfx.bound_vertex_input != 0 && vi.id == s_gfx.bound_vertex_input) {
         return NT_GFX_RESULT_CACHE;
     }
@@ -1774,9 +1717,6 @@ static nt_gfx_result_t resolve_sampler_backend(uint32_t texture_slot, nt_sampler
     nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[effective.id - 1];
     bool compatible = texture_sampler_compatible(texture_slot, &e->desc);
     NT_ASSERT(compatible && "apply_texture_bindings: sampler is incompatible with texture storage");
-    if (!compatible) {
-        return NT_GFX_RESULT_UNREADY;
-    }
     const bool class_ok = texture_matches_sampler_class(texture_slot, &e->desc, sampler_class);
     NT_ASSERT(class_ok && "apply_texture_bindings: texture and sampler do not match the program sampler type");
     if (e->backend == 0) {
@@ -1813,9 +1753,6 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "apply_texture_bindings: must be called inside a pass");
     NT_ASSERT(s_gfx.bound_pipeline != 0 && "apply_texture_bindings: no pipeline bound");
     NT_ASSERT((bindings != NULL || count == 0) && "apply_texture_bindings: NULL bindings with nonzero count");
-    if (s_gfx.render_state != NT_GFX_STATE_PASS || s_gfx.bound_pipeline == 0 || (bindings == NULL && count != 0)) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     const uint32_t program = s_gfx.pipeline_programs[nt_pool_slot_index(s_gfx.bound_pipeline)];
     const uint32_t program_backend = s_gfx.program_backends[nt_pool_slot_index(program)];
     const uint8_t required_mask = (uint8_t)nt_gfx_backend_program_sampler_mask(program_backend);
@@ -1861,10 +1798,6 @@ static nt_gfx_result_t apply_texture_bindings(const nt_gfx_texture_binding_t *bi
         NT_LOG_ERROR_ONCE("apply_texture_bindings: program=%08x sampler coverage missing=%02x", program, (uint8_t)(required_mask & (uint8_t)~applied_mask));
     }
     NT_ASSERT(applied_mask == required_mask && "apply_texture_bindings: active sampler coverage is incomplete");
-    if (applied_mask != required_mask) {
-        s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_FAILED;
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     for (uint8_t unit = 0; unit < NT_GFX_MAX_TEXTURE_SLOTS; unit++) {
         nt_gfx_unit_binding_t *bound = &s_gfx.bound_units[unit];
         if ((applied_mask & (uint8_t)(1U << unit)) == 0 || (bound->texture == texture_backends[unit] && bound->sampler == sampler_backends[unit])) {
@@ -2205,9 +2138,6 @@ static bool texture_set_ready(void) {
 
 /* Enabled-but-unpointed instance attribs are invalid GL that fails silently. */
 static void assert_instance_attribs_pointed(void) {
-    if (s_gfx.bound_vertex_input == 0) {
-        return; /* the missing bind itself already trapped */
-    }
     NT_ASSERT((s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)].instance_attr_count == 0 || s_gfx.bound_instance.vertex_input == s_gfx.bound_vertex_input) &&
               "draw: bound vertex input has instance attribs that bind_instance_buffer has not pointed in this pass");
 }
@@ -2226,15 +2156,7 @@ static nt_gfx_result_t draw(uint32_t first_vertex, uint32_t num_vertices) {
     }
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("draw called outside PASS state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     NT_ASSERT(s_gfx.bound_pipeline != 0);
-    if (s_gfx.bound_pipeline == 0) {
-        NT_LOG_ERROR("draw called without bound pipeline");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     if (!texture_set_ready()) {
         return NT_GFX_RESULT_UNREADY;
     }
@@ -2259,15 +2181,7 @@ static nt_gfx_result_t draw_instanced(uint32_t first_vertex, uint32_t num_vertic
     }
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("draw_instanced called outside PASS state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     NT_ASSERT(s_gfx.bound_pipeline != 0);
-    if (s_gfx.bound_pipeline == 0) {
-        NT_LOG_ERROR("draw_instanced called without bound pipeline");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     if (!texture_set_ready()) {
         return NT_GFX_RESULT_UNREADY;
     }
@@ -2293,15 +2207,7 @@ static nt_gfx_result_t draw_indexed(uint32_t first_index, uint32_t num_indices, 
     }
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("draw_indexed called outside PASS state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     NT_ASSERT(s_gfx.bound_pipeline != 0);
-    if (s_gfx.bound_pipeline == 0) {
-        NT_LOG_ERROR("draw_indexed called without bound pipeline");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     if (!texture_set_ready()) {
         return NT_GFX_RESULT_UNREADY;
     }
@@ -2328,15 +2234,7 @@ static nt_gfx_result_t draw_indexed_instanced(uint32_t first_index, uint32_t num
     }
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("draw_indexed_instanced called outside PASS state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     NT_ASSERT(s_gfx.bound_pipeline != 0);
-    if (s_gfx.bound_pipeline == 0) {
-        NT_LOG_ERROR("draw_indexed_instanced called without bound pipeline");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     if (!texture_set_ready()) {
         return NT_GFX_RESULT_UNREADY;
     }
@@ -2365,10 +2263,6 @@ static nt_gfx_result_t bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offse
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_instance_buffer: must be called inside a pass");
-    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        NT_LOG_ERROR("bind_instance_buffer called outside PASS state");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     /* Destroying the buffer clears the mirror, so an equal nonzero id is live. */
     if (s_gfx.bound_instance.buffer != 0 && buf.id == s_gfx.bound_instance.buffer && byte_offset == s_gfx.bound_instance.offset && s_gfx.bound_vertex_input == s_gfx.bound_instance.vertex_input) {
         return NT_GFX_RESULT_CACHE;
@@ -2379,24 +2273,12 @@ static nt_gfx_result_t bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offse
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
     NT_ASSERT(s_gfx.buffer_metas[slot].type == NT_BUFFER_VERTEX);
-    if (s_gfx.buffer_metas[slot].type != NT_BUFFER_VERTEX) {
-        NT_LOG_ERROR("bind_instance_buffer: buffer is not vertex type");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     /* Pool slots survive context loss; pointing into a zeroed backend would
      * silently draw garbage on the restored context. */
     NT_ASSERT(s_gfx.buffer_backends[slot] != 0 && "bind_instance_buffer: buffer has no live backend -- recreate it after context restore");
-    if (s_gfx.buffer_backends[slot] == 0) {
-        NT_LOG_ERROR_ONCE("bind_instance_buffer: buffer has no live backend");
-        return NT_GFX_RESULT_UNREADY;
-    }
     NT_ASSERT(byte_offset <= s_gfx.buffer_metas[slot].size && "bind_instance_buffer: offset exceeds buffer capacity");
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_instance_buffer: offset must be 4-byte aligned (WebGL2 attrib rule)");
     NT_ASSERT(s_gfx.bound_vertex_input != 0 && "bind_instance_buffer: requires a bound vertex input");
-    if (s_gfx.bound_vertex_input == 0) {
-        NT_LOG_ERROR("bind_instance_buffer: no vertex input bound");
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     uint32_t vi_slot = nt_pool_slot_index(s_gfx.bound_vertex_input);
     NT_ASSERT(s_gfx.vertex_input_metas[vi_slot].instance_attr_count > 0 && "bind_instance_buffer: bound vertex input declares no instance layout");
     s_gfx.bound_instance = (nt_gfx_instance_binding_t){.vertex_input = s_gfx.bound_vertex_input, .buffer = buf.id, .offset = byte_offset};
@@ -2561,25 +2443,13 @@ static nt_gfx_result_t update_texture(nt_texture_t tex, uint16_t x, uint16_t y, 
     uint8_t stored_format = s_gfx.texture_metas[slot].format;
     bool format_valid = nt_texture_format_valid((nt_texture_format_t)stored_format);
     NT_ASSERT(format_valid && "update_texture: invalid stored format");
-    if (!format_valid) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     NT_ASSERT(data != NULL && "update_texture: NULL data pointer");
     NT_ASSERT(w > 0 && h > 0 && "update_texture: zero-size region");
     bool is_compressed = nt_texture_format_is_compressed((nt_texture_format_t)stored_format);
     NT_ASSERT(!is_compressed && "update_texture: compressed textures cannot be sub-updated");
-    if (is_compressed) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: multi-level textures cannot be sub-updated -- recreate the texture");
-    if (s_gfx.texture_metas[slot].mip_count > 1) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     bool is_depth = nt_texture_format_is_depth((nt_texture_format_t)stored_format);
     NT_ASSERT(!is_depth && "update_texture: depth texture updates are not supported");
-    if (is_depth) {
-        return NT_GFX_RESULT_INVALID_ARGUMENT;
-    }
     NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
     NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
     /* A husk here is a texture whose owner skipped the recreate contract -- a programmer error. */

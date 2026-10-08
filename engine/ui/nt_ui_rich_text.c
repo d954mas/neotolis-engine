@@ -24,9 +24,7 @@
 #include "ui/nt_ui_rich_tagset.h"
 #include "utf8/nt_utf8.h"
 
-/* Distinct z-order bands the self-emit walks. A block with more
- * distinct <layer>s than this drops the over-cap layers BY ENCOUNTER ORDER (not by value) rather than OOB
- * the per-layer scratch. */
+/* Maximum distinct z-order bands the self-emit walks; exceeding it asserts. */
 #ifndef NT_UI_RICH_MAX_LAYERS
 #define NT_UI_RICH_MAX_LAYERS 16
 #endif
@@ -177,19 +175,12 @@ nt_ui_rich_style_t nt_ui_rich_style_defaults(void) {
 
 static nt_ui_rich_style_t *rich_style_top(nt_ui_rich_state_t *st) {
     NT_ASSERT(st->stack_depth > 0 && "rich style stack underflow");
-    /* HARD clamp (survives NT_ASSERT OFF): a desynced depth==0 would index stack[(uint32_t)-1] OOB.
-     * Floor to the base slot rather than underflow the index (defense-in-depth with nt_ui_rich_pop). */
-    const uint32_t i = st->stack_depth ? st->stack_depth - 1U : 0U;
+    const uint32_t i = st->stack_depth - 1U;
     return &st->stack[i];
 }
 
 static void rich_push_copy(nt_ui_rich_state_t *st) {
     NT_ASSERT(st->stack_depth < NT_UI_RICH_STACK_DEPTH && "rich style stack overflow");
-    /* HARD cap (survives NT_ASSERT OFF): the parser drives this from untrusted nesting; without the
-     * bound a deep open-tag run would write past stack[] (and a matching </> would underflow-pop). */
-    if (st->stack_depth >= NT_UI_RICH_STACK_DEPTH) {
-        return;
-    }
     st->stack[st->stack_depth] = st->stack[st->stack_depth - 1];
     st->stack_depth++;
 }
@@ -249,11 +240,6 @@ static uint16_t rich_intern_style(nt_ui_rich_state_t *st, const nt_ui_rich_style
         }
     }
     NT_ASSERT(st->style_count < st->max_styles && "rich style table overflow");
-    /* HARD cap (survives NT_ASSERT OFF): untrusted markup can mint many distinct composed styles;
-     * once full, reuse the last slot rather than write past styles[] (a wrong tint beats an OOB). */
-    if (st->style_count >= st->max_styles) {
-        return (uint16_t)(st->max_styles - 1U);
-    }
     st->styles[st->style_count] = *s;
     return (uint16_t)(st->style_count++);
 }
@@ -268,10 +254,7 @@ static bool rich_run_extends_text(const nt_ui_rich_state_t *st, uint16_t style_i
 
 static nt_ui_rich_run_t *rich_new_run(nt_ui_rich_state_t *st, nt_rich_atom_kind_t kind) {
     NT_ASSERT(st->run_count < st->max_runs && "rich run-list overflow");
-    /* HARD cap (survives NT_ASSERT OFF): the parser appends one run per style change in untrusted
-     * markup. Once full, overwrite the last slot rather than index past runs[] -- callers only
-     * memset+fill the returned pointer, so the worst OFF outcome is a dropped run, never an OOB. */
-    const uint32_t idx = (st->run_count < st->max_runs) ? st->run_count++ : (st->max_runs - 1U);
+    const uint32_t idx = st->run_count++;
     nt_ui_rich_run_t *r = &st->runs[idx];
     memset(r, 0, sizeof *r);
     r->kind = kind;
@@ -316,12 +299,6 @@ void nt_ui_rich_push_color(nt_ui_context_t *ctx, uint32_t color_abgr) {
 
 void nt_ui_rich_push_scale(nt_ui_context_t *ctx, float mult) {
     NT_ASSERT(mult > 0.0F && isfinite(mult) && "rich scale must be finite > 0 (zero/negative -> negative font size)");
-    /* HARD clamp (survives NT_ASSERT OFF): <scale=0> / <scale=-2> feed a non-positive mult here. In OFF
-     * the assert is elided, so a non-positive mult would drive font_size <= 0 -> size <= 0 into nt_font_measure_n.
-     * Fall back to identity (1.0) so font_size stays positive, bounded like every other markup path. */
-    if (!(mult > 0.0F) || !isfinite(mult)) {
-        mult = 1.0F;
-    }
     nt_ui_rich_state_t *st = rich_state(ctx);
     rich_push_copy(st);
     rich_style_top(st)->font_size *= mult; /* multiplicative; folds into the resolved size */
@@ -350,8 +327,8 @@ void nt_ui_rich_push_italic(nt_ui_context_t *ctx) {
 }
 
 void nt_ui_rich_push_outline(nt_ui_context_t *ctx, float width, uint32_t color_abgr) {
-    /* HARD clamp (survives NT_ASSERT OFF): a bad/negative/NaN width would poison the emit key_offset.
-     * Non-positive -> clear the outline (width 0), mirroring the img-scale degrade. */
+    /* Clamp: a bad/negative/NaN width would poison the emit key_offset.
+     * Non-positive -> clear the outline (width 0). */
     if (!(width > 0.0F) || !isfinite(width)) {
         width = 0.0F;
     }
@@ -366,7 +343,7 @@ void nt_ui_rich_push_outline(nt_ui_context_t *ctx, float width, uint32_t color_a
 }
 
 void nt_ui_rich_push_shadow(nt_ui_context_t *ctx, float dx, float dy, uint32_t color_abgr) {
-    /* HARD guard (survives NT_ASSERT OFF): a NaN offset would poison the shadow-pass translate. */
+    /* Guard: a NaN offset would poison the shadow-pass translate. */
     if (!isfinite(dx) || !isfinite(dy)) {
         dx = 0.0F;
         dy = 0.0F;
@@ -448,12 +425,6 @@ void nt_ui_rich_push_effect_ex(nt_ui_context_t *ctx, nt_ui_rich_fx_fn fn, const 
 void nt_ui_rich_pop(nt_ui_context_t *ctx) {
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(st->stack_depth > 1 && "rich pop past base style");
-    /* HARD floor (survives NT_ASSERT OFF): this is the LONE style-stack mutator without an `if (cap)`
-     * guard. An over-cap or unbalanced close (e.g. balanced </b> beyond what push could honour) would
-     * wrap stack_depth below the base style -> later rich_style_top reads stack[(uint32_t)-1] OOB. */
-    if (st->stack_depth <= 1U) {
-        return;
-    }
     st->stack_depth--;
 }
 
@@ -500,7 +471,7 @@ void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
     }
     nt_ui_rich_state_t *st = rich_state(ctx);
     NT_ASSERT(st->text_len + len <= st->max_text_bytes && "rich text buffer overflow");
-    /* HARD overflow guard (survives NT_ASSERT OFF + cannot wrap): on wasm32 size_t is 32-bit, so
+    /* Overflow guard: on wasm32 size_t is 32-bit, so
      * `text_len + len` can wrap past the cap and bypass the assert. Subtraction-form bound: reject
      * any len past the cap, and any len that would not fit the remaining room, before the memcpy. */
     if (len > (size_t)st->max_text_bytes || st->text_len > st->max_text_bytes - (uint32_t)len) {
@@ -515,12 +486,6 @@ void nt_ui_rich_text_n(nt_ui_context_t *ctx, const char *utf8, size_t len) {
 
 void nt_ui_rich_image(nt_ui_context_t *ctx, nt_atlas_region_ref_t ref, nt_rich_valign_t valign, float offset_y, float scale) {
     NT_ASSERT(scale > 0.0F && isfinite(scale) && "rich image scale must be finite > 0 (negative -> negative Clay fixed size)");
-    /* HARD clamp (survives NT_ASSERT OFF): <img scale=0/-2/NaN/huge> feeds rich_parse_float straight
-     * here. In OFF the assert is elided, so a bad scale would multiply the box dims -> 0/NaN box into
-     * the solver. Fall back to identity (1.0) so OFF stays bounded, mirroring nt_ui_rich_push_scale. */
-    if (!(scale > 0.0F) || !isfinite(scale)) {
-        scale = 1.0F;
-    }
     nt_ui_rich_state_t *st = rich_state(ctx);
     const uint16_t style_idx = rich_intern_style(st, rich_style_top(st));
     nt_ui_rich_run_t *r = rich_new_run(st, NT_RICH_ATOM_IMAGE);
@@ -1505,11 +1470,6 @@ static uint8_t rich_effective_layer(const nt_ui_rich_style_t *style, nt_rich_ato
 static void rich_push_text_atom(rich_atom_t *out, uint32_t *n, uint32_t cap, const nt_ui_rich_run_t *run, nt_font_t font, float size, uint32_t color, uint8_t effect_id, uint8_t layer, float t_asc,
                                 float t_desc, uint32_t off, uint32_t len, float advance, bool breakable_before, uint16_t run_idx) {
     NT_ASSERT(*n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
-    /* HARD cap (survives NT_ASSERT OFF): atom stream is content-proportional but capped at
-     * NT_UI_RICH_MAX_GLYPHS; drop atoms past the cap rather than write past out[]. */
-    if (*n >= cap) {
-        return;
-    }
     rich_atom_t *a = &out[(*n)++];
     memset(a, 0, sizeof *a);
     a->kind = NT_RICH_ATOM_TEXT;
@@ -1621,9 +1581,6 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
             const float src_w = (reg != NULL) ? (float)reg->source_w : 1.0F;
             const float src_h = (reg != NULL) ? (float)reg->source_h : 1.0F;
             NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
-            if (n >= cap) {
-                break; /* HARD cap (survives NT_ASSERT OFF): no write past out[] */
-            }
             rich_atom_t *a = &out[n++];
             memset(a, 0, sizeof *a);
             a->kind = NT_RICH_ATOM_IMAGE;
@@ -1643,15 +1600,10 @@ static uint32_t rich_build_atoms(nt_ui_rich_state_t *st, float container_w, rich
             const nt_ui_rich_object_measure_t m = run->object_measure(run->object_user);
             /* measure_fn is game-trusted: fail early on a garbage box. */
             NT_ASSERT(isfinite(m.width) && isfinite(m.height) && isfinite(m.ascent) && m.width >= 0.0F && m.height >= 0.0F && "rich object: measure_fn must return finite, non-negative width/height");
-            /* HARD clamp (survives NT_ASSERT OFF): a NaN/negative box must not reach rich_break_lines
-             * (wrap), ascent/descent accumulation, or the Clay FIXED block size. */
-            const float obj_w = (isfinite(m.width) && m.width >= 0.0F) ? m.width : 0.0F;
-            const float obj_h = (isfinite(m.height) && m.height >= 0.0F) ? m.height : 0.0F;
-            const float obj_asc = isfinite(m.ascent) ? m.ascent : 0.0F;
+            const float obj_w = m.width;
+            const float obj_h = m.height;
+            const float obj_asc = m.ascent;
             NT_ASSERT(n < cap && "rich atom overflow (NT_UI_RICH_MAX_GLYPHS)");
-            if (n >= cap) {
-                break; /* HARD cap (survives NT_ASSERT OFF): no write past out[] */
-            }
             rich_atom_t *a = &out[n++];
             memset(a, 0, sizeof *a);
             a->kind = NT_RICH_ATOM_OBJECT;
@@ -1858,11 +1810,6 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
             }
             const rich_atom_t *a = &atoms[i];
             NT_ASSERT(st->solved_count < na && "rich solved-atom overflow");
-            /* HARD cap (survives NT_ASSERT OFF): solved[] is sized to atom_cap >= na; each atom is
-             * visited once so this is structurally bounded, but guard the write regardless. */
-            if (st->solved_count >= na) {
-                break;
-            }
             nt_ui_rich_solved_atom_t *s = &st->solved[st->solved_count++];
             s->kind = a->kind;
             s->x = pen_x;
@@ -1892,11 +1839,8 @@ static void rich_solve(nt_ui_context_t *ctx, nt_ui_rich_state_t *st, uint32_t id
                 nt_ui_rich_link_rect_t *last = (st->link_count > 0U) ? &st->links[st->link_count - 1] : NULL;
                 if (last != NULL && prev_link_id == a->link_id && last->link_id == a->link_id && last->line == L) {
                     last->w = (pen_x + a->w) - last->x; /* extend to cover this atom (adjacent same-link) */
-                } else if (st->link_count >= NT_UI_RICH_MAX_LINKS) {
-                    /* HARD cap (survives NT_ASSERT OFF): drop hitboxes past the cap rather than write
-                     * past links[] -- untrusted markup can declare many disjoint <link> rects. */
-                    NT_ASSERT(false && "rich link-rect overflow");
                 } else {
+                    NT_ASSERT(st->link_count < NT_UI_RICH_MAX_LINKS && "rich link-rect overflow");
                     nt_ui_rich_link_rect_t *lr = &st->links[st->link_count++];
                     lr->link_id = a->link_id;
                     lr->line = L;
@@ -2152,10 +2096,7 @@ static void rich_emit_text_layer(nt_ui_rich_state_t *st, const nt_ui_custom_fram
     }
 }
 
-/* Gather the DISTINCT layers present across the solved atoms, insertion-sorted ascending, into out[].
- * Capped at NT_UI_RICH_MAX_LAYERS with a HARD guard that survives NT_ASSERT OFF. The drop is by ENCOUNTER
- * order (the 17th distinct layer seen, of any value), so over-cap content silently vanishes -- the assert
- * fires in DEBUG; OFF keeps the hard skip rather than OOB. Returns the count. */
+/* Gather distinct layers in ascending order; exceeding the configured capacity asserts. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one insertion-sort pass: dup-skip + cap-guard + shift
 static uint32_t rich_gather_layers(const nt_ui_rich_state_t *st, uint8_t out[NT_UI_RICH_MAX_LAYERS]) {
     uint32_t count = 0;
@@ -2172,17 +2113,14 @@ static uint32_t rich_gather_layers(const nt_ui_rich_state_t *st, uint8_t out[NT_
         if (dup) {
             continue;
         }
-        if (count >= NT_UI_RICH_MAX_LAYERS) {
-            NT_ASSERT(false && "rich distinct-layer count over NT_UI_RICH_MAX_LAYERS (raise the cap)");
-            continue; /* HARD skip (survives NT_ASSERT OFF): drop the over-cap distinct layer, never write past out[] */
-        }
+        NT_ASSERT(count < NT_UI_RICH_MAX_LAYERS && "rich distinct-layer count over NT_UI_RICH_MAX_LAYERS (raise the cap)");
         for (uint32_t k = count; k > pos; k--) {
             out[k] = out[k - 1]; /* shift up to keep ascending order */
         }
         out[pos] = L;
         count++;
     }
-    /* Structural invariant: the >= cap guard above makes overflow unreachable; this can never fire. */
+    /* The per-insert assertion bounds the final count. */
     NT_ASSERT(count <= NT_UI_RICH_MAX_LAYERS && "rich layer gather overflow");
     return count;
 }

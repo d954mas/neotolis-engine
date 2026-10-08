@@ -330,30 +330,19 @@ typedef struct {
     nt_introspect_sink base;
     cJSON *stack[NT_INTROSPECT_MAX_DEPTH];
     uint8_t depth;
-    uint8_t skipped; /* begin_groups refused past MAX_DEPTH; end_group unwinds them before popping */
 } obs_json_sink;
 
 static cJSON *json_top(obs_json_sink *j) { return j->stack[j->depth - 1]; }
 
 static void j_begin_group(nt_introspect_sink *s, const char *key) {
     obs_json_sink *j = (obs_json_sink *)s;
-    if (j->depth >= NT_INTROSPECT_MAX_DEPTH) {
-        /* Asserts-off safety net: refuse to overflow the fixed stack. A describe() nesting this deep is
-           a bug; deeper fields fold into the current container instead of writing out of bounds. */
-        NT_ASSERT(false && "nt_introspect: begin_group past NT_INTROSPECT_MAX_DEPTH");
-        j->skipped++;
-        return;
-    }
+    NT_ASSERT(j->depth < NT_INTROSPECT_MAX_DEPTH && "nt_introspect: begin_group past NT_INTROSPECT_MAX_DEPTH");
     cJSON *child = cJSON_AddObjectToObject(json_top(j), key);
     NT_ASSERT(child != NULL);
     j->stack[j->depth++] = child;
 }
 static void j_end_group(nt_introspect_sink *s) {
     obs_json_sink *j = (obs_json_sink *)s;
-    if (j->skipped > 0) {
-        j->skipped--;
-        return;
-    }
     NT_ASSERT(j->depth > 1); /* never pop the seed entity object */
     j->depth--;
 }
@@ -441,7 +430,6 @@ static void obs_json_sink_init(obs_json_sink *j, cJSON *root) {
     };
     j->stack[0] = root;
     j->depth = 1;
-    j->skipped = 0;
 }
 
 /* Serialize one entity (core fields + each present component as a named group) into the entities
@@ -867,8 +855,7 @@ static const nt_devapi_handler_fn k_obs_handlers[] = {
 _Static_assert(sizeof(k_obs_cmds) / sizeof(k_obs_cmds[0]) == sizeof(k_obs_handlers) / sizeof(k_obs_handlers[0]), "obs: descriptor/handler arrays must have equal length");
 
 void nt_devapi_register_obs(void) {
-    /* Engine-internal dup is a build-time bug -> assert NT_OK. Capture first: NT_ASSERT compiles
-       out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
+    /* Engine-internal dup is a build-time bug -> assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
     int n = (int)(sizeof(k_obs_cmds) / sizeof(k_obs_cmds[0]));
     for (int i = 0; i < n; i++) {
         nt_result_t rr = nt_devapi_register(&k_obs_cmds[i], k_obs_handlers[i], NULL);

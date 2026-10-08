@@ -1358,10 +1358,6 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, clip_cache_entry_t *clip_cache, int *clip_cache_len) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
-    /* Fail-closed in OFF builds — assert vanishes; the stack[(*depth)++] below would corrupt memory. */
-    if ((uint32_t)*depth >= NT_UI_WALKER_SCISSOR_DEPTH_CAP) {
-        return;
-    }
 
     /* Both-axes-false is reserved for Clay's floating clipTo=ATTACHED_PARENT marker;
      * user code must always set at least one axis true (asserted below). */
@@ -2235,14 +2231,10 @@ static bool raycast_hit(const float inv_view_proj[16], const nt_ui_baked_xform_t
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool hit_clip_chain(const nt_ui_context_t *ctx, uint32_t start_clip_id, int32_t N, float px, float py, float screen_w, float screen_h) {
     uint32_t cur_id = start_clip_id;
-    /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang.
-     * Decrement + bail are UNCONDITIONAL (NT_ASSERT vanishes in OFF builds). */
+    /* Cap iterations to scissor stack depth so a malformed parent_id cycle can't hang. */
     uint32_t guard = NT_UI_WALKER_SCISSOR_DEPTH_CAP;
     while (cur_id != 0U) {
         NT_ASSERT(guard > 0U && "hit_clip_chain: parent chain exceeded scissor depth cap (cycle or runaway nesting)");
-        if (guard == 0U) {
-            return false;
-        }
         guard--;
         float cx;
         float cy;

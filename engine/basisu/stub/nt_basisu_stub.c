@@ -14,7 +14,6 @@ bool nt_basisu_info(const void *basis_data, uint32_t basis_size, nt_basisu_info_
     (void)basis_size;
     (void)out_info;
     NT_BASISU_STUB_TRAP();
-    return false;
 }
 
 bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, const nt_basisu_info_t *info, nt_texture_format_t format, void *output, uint32_t capacity_bytes) {
@@ -25,5 +24,4 @@ bool nt_basisu_transcode_chain(const void *basis_data, uint32_t basis_size, cons
     (void)output;
     (void)capacity_bytes;
     NT_BASISU_STUB_TRAP();
-    return false;
 }

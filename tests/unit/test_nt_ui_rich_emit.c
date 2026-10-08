@@ -1744,10 +1744,7 @@ static void test_object_world_mat4_matches_block_transform(void) {
     TEST_ASSERT_TRUE_MESSAGE(ty_present, "world_mat4 translation carries the block's Y transform offset");
 }
 
-/* (15f) degenerate measure_fn return: a stub returning {NaN, -5, NaN} must (a) trap the fail-early
- * assert in FULL, and (b) -- proven separately via the clamp -- keep the block size finite. This
- * death test pins the FULL assert; the OFF hard clamp (non-finite/negative -> 0) is by-construction
- * bounded (clamps width/height/ascent BEFORE rich_break_lines / the Clay FIXED block size). */
+/* Invalid object measurements assert before entering the layout solver. */
 static nt_ui_rich_object_measure_t stub_measure_degenerate(void *user_data) {
     (void)user_data;
     return (nt_ui_rich_object_measure_t){.width = NAN, .height = -5.0F, .ascent = NAN};
@@ -2422,9 +2419,7 @@ static void test_mixed_auto_and_explicit_layers(void) {
     TEST_ASSERT_TRUE_MESSAGE(saw_explicit && saw_auto_text && saw_auto_image, "block carried explicit-5 text + AUTO text + AUTO image");
 }
 
-/* (L8) CAP-16 HARD GUARD: a block with >16 DISTINCT push_layer values must not crash and must surface
- * exactly NT_UI_RICH_MAX_LAYERS distinct layers (the OFF-mode over-cap drop path). Run under the assert
- * trap so the DEBUG over-cap assert is caught, proving the hard skip survives. */
+/* More than NT_UI_RICH_MAX_LAYERS distinct layers must assert before overflowing scratch. */
 static void frame_over_cap_layers(void) {
     nt_mem_scratch_reset();
     s_fx.ctx->pending_rich = NULL;
@@ -2451,8 +2446,7 @@ static void frame_over_cap_layers(void) {
 }
 
 static void test_over_cap_layers_hard_guard(void) {
-    /* Over-cap distinct-band assert fires in rich_gather_layers (trap catches it); the hard `count >= cap`
-     * skip also runs in assert-OFF builds, so a >16-distinct-layer block never writes past out[NT_UI_RICH_MAX_LAYERS]. */
+    /* The handler catches the capacity assertion in rich_gather_layers. */
     NT_TEST_EXPECT_ASSERT(frame_over_cap_layers());
 }
 

@@ -550,8 +550,7 @@ void nt_devapi_register_ui(void) {
     /* No tick/reset hook: ui.click/drag/scroll delegate scheduling to the input group's single
        scheduler, drained by nt_devapi_input_update. The host-owned ctx table survives client
        disconnects, so there is no ui-owned transient state to reset. */
-    /* Engine-internal dup is a build-time bug -> assert NT_OK. Capture first: NT_ASSERT compiles
-       out under NT_ASSERT_MODE=0, so the call must not live inside the macro. */
+    /* Engine-internal dup is a build-time bug -> assert NT_OK. Capture first: assert expressions must stay side-effect-free. */
     int n = (int)(sizeof(k_ui_cmds) / sizeof(k_ui_cmds[0]));
     for (int i = 0; i < n; i++) {
         nt_result_t rr = nt_devapi_register(&k_ui_cmds[i], k_ui_handlers[i], NULL);
