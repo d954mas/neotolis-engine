@@ -320,7 +320,7 @@ untouched, so a game may call all of them without activating unused renderers.
 `nt_shape_renderer` and `nt_postfx_blur` own their programs and relink embedded
 sources inside their restore entry points. Until those links finish (at startup and
 after a restore), shape flush drops its queued shapes and `nt_postfx_blur_gaussian`
-validates its pass and records nothing, leaving `dest` unwritten. A loss during a restore latches in
+validates its pass, records nothing and returns false, leaving `dest` unwritten. A loss during a restore latches in
 gfx, and the next context restore calls the entry points again; owners keep no
 retry state. `nt_mesh_renderer`,
 `nt_skinned_mesh_renderer`,

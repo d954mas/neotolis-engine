@@ -319,11 +319,11 @@ static void draw_blur_pass(nt_texture_t source, nt_render_target_t target, const
     nt_gfx_end_pass();
 }
 
-void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
+bool nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
     float weights[NT_POSTFX_BLUR_MAX_KERNEL];
     uint32_t radius = 0;
     if (!validate_pass(pass, &radius, weights)) {
-        return;
+        return false;
     }
     float packed[20];
     pack_kernel_pairs(weights, radius, packed);
@@ -332,6 +332,7 @@ void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass) {
     static const float vertical[4] = {0.0F, 1.0F, 0.0F, 0.0F};
     draw_blur_pass(pass->source, pass->temp, horizontal, radius, packed);
     draw_blur_pass(nt_gfx_render_target_color(pass->temp), pass->dest, vertical, radius, packed);
+    return true;
 }
 
 #ifdef NT_TEST_ACCESS

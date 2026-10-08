@@ -162,7 +162,10 @@ taps land on texel centres. Its own passes start with scissor disabled, so the
 caller's scissor does not affect it. The helper does not restore prior graphics
 bindings.
 Blur arguments, readiness of the source and validity of the targets are preconditions
-and assert when violated, as does a link failure in the helper's program.
+and assert when violated, as does a link failure in the helper's program. Until
+that link finishes (after init and after a restore) a call validates its pass,
+records nothing and returns false, leaving `dest` unwritten; true means both
+passes were recorded into the frame.
 Initialization and restore create in a straight line and return nothing. A loss met
 on the way latches in gfx, and the next context restore calls
 `nt_postfx_blur_restore_gpu` again; a backend failure on a live context asserts,

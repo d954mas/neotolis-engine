@@ -440,13 +440,15 @@ static void draw_textured_quad(nt_texture_t texture, uint32_t quad, int mode, co
 
 static void draw_solid_quad(uint32_t quad, const float color[4]) { draw_textured_quad(s_demo.white, quad, 0, color); }
 
-static void draw_default_frame(void) {
+static void draw_default_frame(bool blurred) {
     float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     float frame[4] = {0.08F, 0.10F, 0.13F, 1.0F};
     draw_solid_quad(QUAD_LEFT_FRAME, frame);
     draw_solid_quad(QUAD_RIGHT_FRAME, frame);
     draw_textured_quad(s_demo.scene_color, QUAD_SCENE, 0, white);
-    draw_textured_quad(s_demo.blur_color, QUAD_BLUR, 0, white);
+    if (blurred) {
+        draw_textured_quad(s_demo.blur_color, QUAD_BLUR, 0, white);
+    }
     draw_textured_quad(s_demo.scene_depth, QUAD_DEPTH, 1, white);
 }
 
@@ -463,7 +465,7 @@ static void render_frame(void) {
     draw_scene_contents();
     nt_gfx_end_pass();
 
-    nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
+    const bool blurred = nt_postfx_blur_gaussian(&(nt_postfx_blur_pass_t){
         .source = s_demo.scene_color,
         .temp = s_demo.temp,
         .dest = s_demo.blur,
@@ -474,7 +476,7 @@ static void render_frame(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.015F, 0.018F, 0.025F, 1.0F}, .clear_depth = 1.0F});
     /* The quad program links over the next frames, at startup and after a restore. */
     if (nt_gfx_program_ready(s_demo.quad_program)) {
-        draw_default_frame();
+        draw_default_frame(blurred);
     }
     draw_ui_overlay();
     nt_gfx_end_pass();

@@ -27,8 +27,10 @@ void nt_postfx_blur_restore_gpu(void);
  * R8/RG8/RGB8/RGBA8/RGBA16F/RGBA32F (sampler2D).
  * The source is sampled NEAREST with clamped edges; taps land on texel centres.
  * Runs outside a pass; its own passes start with scissor disabled. Pass and binding state are not restored.
- * The helper never creates, destroys, or stores caller handles. */
-void nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass);
+ * The helper never creates, destroys, or stores caller handles.
+ * True when both passes were recorded into this frame. False on a lost context or while the
+ * helper's program links (after init and after a restore): dest is not written this frame. */
+bool nt_postfx_blur_gaussian(const nt_postfx_blur_pass_t *pass);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

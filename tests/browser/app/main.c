@@ -337,7 +337,9 @@ static bool probe_programs_ready(void) {
 
 /* The game programs and the probe programs linked -- false through the whole window
  * between the loss and the relink. */
-EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) { return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program) && probe_programs_ready()) ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE int nt_test_programs_ready(void) {
+    return (nt_gfx_program_ready(s_sprite_program.program) && nt_gfx_program_ready(s_text_program.program) && nt_gfx_program_ready(s_mesh_program) && probe_programs_ready()) ? 1 : 0;
+}
 EMSCRIPTEN_KEEPALIVE int nt_test_float_texture_linear(void) { return nt_gfx_gpu_caps()->has_float_texture_linear ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE int nt_test_diagnostics_config(int field) {
     const int values[] = {NT_LOG_MIN_LEVEL, NT_UI_TIMING_ENABLED, NT_GFX_GPU_TIMING_ENABLED, NT_METRICS_ENABLED};
