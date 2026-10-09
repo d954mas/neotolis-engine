@@ -64,13 +64,12 @@ typedef struct {
 typedef struct {
     uint32_t vbo_id; /* full buffer handles: destroy_buffer cascades on exact match */
     uint32_t ibo_id;
-    uint32_t instance_buffer_id;
-    uint32_t instance_size;   /* instance buffer capacity: instanced draws assert their range against it */
-    uint32_t instance_extent; /* bytes one instance reads: max attr offset + attr size (may exceed the stride) */
+    uint32_t instance_buffer_id; /* nonzero iff the vertex input has an instance layout (asserted at make) */
+    uint32_t instance_size;      /* instance buffer capacity: instanced draws assert their range against it */
+    uint32_t instance_extent;    /* bytes one instance reads: max attr offset + attr size (may exceed the stride) */
     uint16_t instance_stride;
     uint8_t instance_stream; /* frame stream whose buffer is the instance buffer (its `used` bounds the range); 0 = none */
     uint8_t index_type;      /* captured from the IBO; NT_INDEX_NONE for non-indexed */
-    uint8_t instance_attr_count;
 } nt_gfx_vertex_input_meta_t;
 
 typedef struct {
@@ -1096,7 +1095,6 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
         .instance_extent = instance_extent,
         .instance_stream = instance_stream,
         .index_type = index_type,
-        .instance_attr_count = desc->instance_layout.attr_count,
     };
 
     out->id = id;
@@ -1646,7 +1644,7 @@ static nt_gfx_result_t bind_vertex_input(nt_vertex_input_t vi) {
      * vertex input was validated this pass and the frame rule keeps it alive. */
     const bool same_vi = s_gfx.bound_vertex_input != 0 && vi.id == s_gfx.bound_vertex_input;
     const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
-    NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_attr_count == 0 && "bind_vertex_input: the vertex input declares an instance layout -- use nt_gfx_bind_vertex_input_instanced");
+    NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_buffer_id == 0 && "bind_vertex_input: the vertex input declares an instance layout -- use nt_gfx_bind_vertex_input_instanced");
     if (same_vi) {
         return NT_GFX_RESULT_CACHE;
     }
@@ -1667,7 +1665,7 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_
     }
     const bool same_vi = s_gfx.bound_vertex_input != 0 && vi.id == s_gfx.bound_vertex_input;
     const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
-    NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_attr_count > 0 && "bind_vertex_input_instanced: the vertex input declares no instance layout");
+    NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_buffer_id != 0 && "bind_vertex_input_instanced: the vertex input declares no instance layout");
     if (same_vi && byte_offset == s_gfx.bound_instance_offset) {
         return NT_GFX_RESULT_CACHE;
     }
@@ -2158,7 +2156,7 @@ static void assert_vertex_input_bound(void) { NT_ASSERT(s_gfx.bound_vertex_input
  * instanced vertex input reads one instance. */
 static void assert_instances_in_range(uint32_t instance_count) {
     const nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)];
-    if (meta->instance_attr_count == 0 || instance_count == 0) {
+    if (meta->instance_buffer_id == 0 || instance_count == 0) {
         return;
     }
     const uint64_t limit = meta->instance_stream != 0 ? g_nt_gfx_frame_storage[meta->instance_stream].used : meta->instance_size;

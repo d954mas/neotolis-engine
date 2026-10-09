@@ -138,6 +138,21 @@ void test_shape_makes_stream_vertex_inputs_on_first_selection(void) {
     TEST_ASSERT_EQUAL_UINT32(before + 4U, nt_gfx_fake_vertex_input_create_count());
 }
 
+/* A failed create on a live context is retried by the next selection, which makes only the missing
+ * vertex input and keeps the live ones. */
+void test_shape_stream_selection_retries_only_missing_vertex_inputs(void) {
+    const uint32_t before = nt_gfx_fake_vertex_input_create_count();
+    nt_gfx_fake_fail_next_vertex_input_create(); /* the stream's fill vertex input */
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 1);
+    TEST_ASSERT_EQUAL_UINT32(before + 4U, nt_gfx_fake_vertex_input_create_count());
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX);
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 1);
+    TEST_ASSERT_EQUAL_UINT32(before + 5U, nt_gfx_fake_vertex_input_create_count());
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX);
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 1);
+    TEST_ASSERT_EQUAL_UINT32(before + 5U, nt_gfx_fake_vertex_input_create_count());
+}
+
 void test_shape_set_depth_auto_flush(void) {
     float a[3] = {0, 0, 0};
     float b[3] = {1, 0, 0};
@@ -807,5 +822,6 @@ int main(void) {
     RUN_TEST(test_shape_set_stream_routes_instances);
     RUN_TEST(test_shape_restore_rebuilds_stream_vertex_inputs);
     RUN_TEST(test_shape_makes_stream_vertex_inputs_on_first_selection);
+    RUN_TEST(test_shape_stream_selection_retries_only_missing_vertex_inputs);
     return UNITY_END();
 }
