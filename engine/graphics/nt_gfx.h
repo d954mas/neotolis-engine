@@ -282,11 +282,16 @@ static inline nt_blend_state_t nt_blend_multiply(void) {
     };
 }
 
+/* Every GL/WebGPU comparison, with literal meaning; values are pipeline-key lane bits. */
 typedef enum {
     NT_DEPTH_LESS = 0,
     NT_DEPTH_LEQUAL,
     NT_DEPTH_ALWAYS,
-    NT_DEPTH_GEQUAL, /* reversed depth: the game supplies its projection and clears depth to 0 */
+    NT_DEPTH_GEQUAL,
+    NT_DEPTH_GREATER,
+    NT_DEPTH_EQUAL,
+    NT_DEPTH_NOTEQUAL,
+    NT_DEPTH_NEVER,
 } nt_depth_func_t;
 
 typedef enum {
@@ -305,12 +310,19 @@ typedef enum {
 } nt_texture_wrap_t;
 
 /* Depth comparison on sampler objects. NONE is zero so a zero-filled descriptor
- * is a plain sampler; enabling comparison names its function, since LEQUAL and
- * LESS differ exactly on a receiver at its own stored depth. */
+ * is a plain sampler; enabling comparison names one of the eight GL/WebGPU
+ * functions, since e.g. LEQUAL and LESS differ exactly on a receiver at its own
+ * stored depth and reversed depth compares the other way. */
 typedef enum {
     NT_COMPARE_NONE = 0,
     NT_COMPARE_LEQUAL,
     NT_COMPARE_LESS,
+    NT_COMPARE_GEQUAL,
+    NT_COMPARE_GREATER,
+    NT_COMPARE_EQUAL,
+    NT_COMPARE_NOTEQUAL,
+    NT_COMPARE_ALWAYS,
+    NT_COMPARE_NEVER,
 } nt_compare_func_t;
 
 /* ---- Vertex layout ---- */
@@ -404,7 +416,7 @@ typedef struct {
  * truncate onto a valid neighbour and skip make_pipeline's validation on a cache hit. */
 _Static_assert(NT_BLEND_SRC_ALPHA_SATURATE < 16, "blend factor lane is 4 bits");
 _Static_assert(NT_BLEND_OP_MAX < 8, "blend op lane is 3 bits");
-_Static_assert(NT_DEPTH_GEQUAL < 4, "depth func lane is 2 bits");
+_Static_assert(NT_DEPTH_NEVER < 8, "depth func lane is 3 bits");
 /* Partial tripwire for the packer: catches a desc field that moves a later offset or the
  * size. A field that fits an existing padding hole moves nothing -- review by hand. */
 _Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipeline_desc_t, cull_mode) == 12 && offsetof(nt_pipeline_desc_t, blend) == 16 &&
@@ -418,7 +430,7 @@ _Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipe
 static inline nt_gfx_pipeline_key_t nt_gfx_pipeline_key(const nt_pipeline_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     NT_ASSERT(desc->cull_mode <= 2 && "cull_mode out of range");
-    NT_ASSERT((uint32_t)desc->depth_func <= NT_DEPTH_GEQUAL && "depth_func out of range");
+    NT_ASSERT((uint32_t)desc->depth_func <= NT_DEPTH_NEVER && "depth_func out of range");
     NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
               desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "blend factor out of range");
     NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "blend op out of range");
@@ -426,8 +438,8 @@ static inline nt_gfx_pipeline_key_t nt_gfx_pipeline_key(const nt_pipeline_desc_t
     const nt_blend_state_t blend = desc->blend.enabled ? desc->blend : nt_blend_opaque();
     nt_gfx_pipeline_key_t key;
     key.bits = (uint64_t)desc->program.id | (uint64_t)(desc->depth_test ? 1U : 0U) << 32 | (uint64_t)(desc->depth_write ? 1U : 0U) << 33 | (uint64_t)(desc->polygon_offset ? 1U : 0U) << 34 |
-               (uint64_t)(blend.enabled ? 1U : 0U) << 35 | (uint64_t)desc->depth_func << 36 | (uint64_t)desc->cull_mode << 38 | (uint64_t)blend.src_rgb << 40 | (uint64_t)blend.dst_rgb << 44 |
-               (uint64_t)blend.src_alpha << 48 | (uint64_t)blend.dst_alpha << 52 | (uint64_t)blend.op_rgb << 56 | (uint64_t)blend.op_alpha << 59;
+               (uint64_t)(blend.enabled ? 1U : 0U) << 35 | (uint64_t)desc->depth_func << 36 | (uint64_t)desc->cull_mode << 39 | (uint64_t)blend.src_rgb << 41 | (uint64_t)blend.dst_rgb << 45 |
+               (uint64_t)blend.src_alpha << 49 | (uint64_t)blend.dst_alpha << 53 | (uint64_t)blend.op_rgb << 57 | (uint64_t)blend.op_alpha << 60;
     /* Bit patterns: exact, so -0.0 vs 0.0 can only over-split, never alias. Disabled offset packs as zero. */
     const float float_bits[6] = {blend.constant_color[0],
                                  blend.constant_color[1],

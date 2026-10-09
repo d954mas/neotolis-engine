@@ -233,7 +233,8 @@ static void test_all_public_depth_functions_reach_gl(void) {
         nt_depth_func_t function;
         GLenum expected;
     } cases[] = {
-        {NT_DEPTH_LESS, GL_LESS}, {NT_DEPTH_LEQUAL, GL_LEQUAL}, {NT_DEPTH_ALWAYS, GL_ALWAYS}, {NT_DEPTH_GEQUAL, GL_GEQUAL}, {NT_DEPTH_LESS, GL_LESS},
+        {NT_DEPTH_LESS, GL_LESS},   {NT_DEPTH_LEQUAL, GL_LEQUAL},     {NT_DEPTH_ALWAYS, GL_ALWAYS}, {NT_DEPTH_GEQUAL, GL_GEQUAL}, {NT_DEPTH_GREATER, GL_GREATER},
+        {NT_DEPTH_EQUAL, GL_EQUAL}, {NT_DEPTH_NOTEQUAL, GL_NOTEQUAL}, {NT_DEPTH_NEVER, GL_NEVER},   {NT_DEPTH_LESS, GL_LESS},
     };
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_depth_vs});
     nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
@@ -256,6 +257,28 @@ static void test_all_public_depth_functions_reach_gl(void) {
     nt_gfx_destroy_program(program);
     nt_gfx_destroy_shader(fs);
     nt_gfx_destroy_shader(vs);
+}
+
+/* Each sampler comparison reaches the GL sampler object as its literal function. */
+static void test_all_sampler_compare_functions_reach_gl(void) {
+    static const struct {
+        nt_compare_func_t function;
+        GLint expected;
+    } cases[] = {
+        {NT_COMPARE_LEQUAL, GL_LEQUAL}, {NT_COMPARE_LESS, GL_LESS},         {NT_COMPARE_GEQUAL, GL_GEQUAL}, {NT_COMPARE_GREATER, GL_GREATER},
+        {NT_COMPARE_EQUAL, GL_EQUAL},   {NT_COMPARE_NOTEQUAL, GL_NOTEQUAL}, {NT_COMPARE_ALWAYS, GL_ALWAYS}, {NT_COMPARE_NEVER, GL_NEVER},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        const nt_sampler_t sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR, .mag_filter = NT_FILTER_LINEAR, .compare_func = cases[i].function});
+        const GLuint name = (GLuint)nt_gfx_test_sampler_backend_id(sampler);
+        GLint mode = 0;
+        GLint function = 0;
+        glGetSamplerParameteriv(name, GL_TEXTURE_COMPARE_MODE, &mode);
+        glGetSamplerParameteriv(name, GL_TEXTURE_COMPARE_FUNC, &function);
+        TEST_ASSERT_EQUAL_INT(GL_COMPARE_REF_TO_TEXTURE, mode);
+        TEST_ASSERT_EQUAL_INT(cases[i].expected, function);
+    }
+    TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
 }
 
 static void test_gequal_depth_accepts_equal_and_nearer_fragments(void) {
@@ -1870,6 +1893,7 @@ int main(void) {
     RUN_TEST(test_render_target_recreate_at_new_size_without_spare_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format);
     RUN_TEST(test_all_public_depth_functions_reach_gl);
+    RUN_TEST(test_all_sampler_compare_functions_reach_gl);
     RUN_TEST(test_gequal_depth_accepts_equal_and_nearer_fragments);
     RUN_TEST(test_custom_blend_state_reaches_gl_unchanged);
     RUN_TEST(test_all_public_blend_enums_reach_gl);

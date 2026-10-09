@@ -531,6 +531,14 @@ static GLenum map_depth_func(nt_depth_func_t f) {
         return GL_ALWAYS;
     case NT_DEPTH_GEQUAL:
         return GL_GEQUAL;
+    case NT_DEPTH_GREATER:
+        return GL_GREATER;
+    case NT_DEPTH_EQUAL:
+        return GL_EQUAL;
+    case NT_DEPTH_NOTEQUAL:
+        return GL_NOTEQUAL;
+    case NT_DEPTH_NEVER:
+        return GL_NEVER;
     default:
         return GL_LESS;
     }
@@ -591,6 +599,18 @@ static GLenum map_compare_func(nt_compare_func_t f) {
     switch (f) {
     case NT_COMPARE_LESS:
         return GL_LESS;
+    case NT_COMPARE_GEQUAL:
+        return GL_GEQUAL;
+    case NT_COMPARE_GREATER:
+        return GL_GREATER;
+    case NT_COMPARE_EQUAL:
+        return GL_EQUAL;
+    case NT_COMPARE_NOTEQUAL:
+        return GL_NOTEQUAL;
+    case NT_COMPARE_ALWAYS:
+        return GL_ALWAYS;
+    case NT_COMPARE_NEVER:
+        return GL_NEVER;
     case NT_COMPARE_NONE:
     case NT_COMPARE_LEQUAL:
     default:

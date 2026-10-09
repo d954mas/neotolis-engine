@@ -275,10 +275,11 @@ Materials retain the stale program handle until reassignment; readiness reports
 false without mutating the material.
 
 `nt_pipeline_desc_t.depth_func` is the fragment depth comparison, independent of
-the pass's clear value and of `nt_sampler_desc_t.compare_func`. It accepts
-`NT_DEPTH_LESS` (zero/default), `NT_DEPTH_LEQUAL`, `NT_DEPTH_ALWAYS`, and
-`NT_DEPTH_GEQUAL`. The game supplies a matching projection and pass clear;
-gfx does not infer or enable reversed depth from the comparison alone.
+the pass's clear value and of `nt_sampler_desc_t.compare_func`. It accepts all
+eight GL/WebGPU comparisons with their literal meaning: `NT_DEPTH_LESS`
+(zero/default), `LEQUAL`, `ALWAYS`, `GEQUAL`, `GREATER`, `EQUAL`, `NOTEQUAL` and
+`NEVER`. The game supplies a matching projection and pass clear; gfx does not
+infer or enable reversed depth from the comparison alone.
 
 ### Texture descriptors
 
