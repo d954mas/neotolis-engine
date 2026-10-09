@@ -7,6 +7,7 @@
 #include "input/nt_input_internal.h"
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
+#include "nt_mesh_format.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "unity.h"
 
@@ -602,7 +603,7 @@ static void test_scene_options_are_portable_and_bounded(void) {
     TEST_ASSERT_FALSE(scene_arg_u32(3, invalid, "--complexity", 9, &value));
 }
 
-static void test_optimized_sort_preserves_exact_tuple_identity_and_stability(void) {
+static void test_grouped_sort_preserves_exact_tuple_identity_and_stability(void) {
     asteroid_draw_item_t items[] = {{(1ULL << 32U) | 1U, 0}, {(2ULL << 32U) | 0U, 1}, {(1ULL << 32U) | 2U, 2}, {(1ULL << 32U) | 1U, 3}, {0U, 4}, {(49ULL << 32U) | 3999U, 5}};
     asteroid_draw_item_t scratch[6];
     sort_asteroid_items(NULL, 0, NULL);
@@ -615,22 +616,68 @@ static void test_optimized_sort_preserves_exact_tuple_identity_and_stability(voi
     TEST_ASSERT_EQUAL_UINT64((49ULL << 32U) | 3999U, items[5].sort_key);
 }
 
-static void test_optimized_packing_preserves_every_source_instance_and_lod(void) {
+static void assert_instance_rgb(const asteroid_instance_t *actual, const ast_reference_runtime_instance *source, bool colors, const float deep[3], const float shallow[3]) {
+    TEST_ASSERT_EQUAL_MEMORY(colors ? deep : source->deep, actual->deep, 3U * sizeof(float));
+    TEST_ASSERT_EQUAL_MEMORY(colors ? shallow : source->shallow, actual->shallow, 3U * sizeof(float));
+}
+
+/* World and LOD math are separately checked against pinned upstream vectors. */
+static uint32_t expected_source_instance(asteroid_instance_t *expected, const ast_reference_runtime_instance *source, const complexity_t *complexity, const float deep_palette[AST_SUBDIVISIONS][3],
+                                         const float shallow_palette[AST_SUBDIVISIONS][3]) {
+    float world[16];
+    asteroid_world_matrix(world, source, s_elapsed);
+    const float dx = s_camera.eye[0] - world[12];
+    const float dy = s_camera.eye[1] - world[13];
+    const float dz = s_camera.eye[2] - world[14];
+    const uint32_t lod = asteroid_lod_index(source->scale, sqrtf((dx * dx) + (dy * dy) + (dz * dz)), s_min_screen_size, AST_SUBDIVISIONS);
+    const uint32_t subset = (lod * complexity->unique_meshes) + source->mesh_index;
+    for (uint32_t row = 0; row < 3; row++) {
+        for (uint32_t column = 0; column < 4; column++) {
+            expected->world_rows[(row * 4U) + column] = world[(column * 4U) + row];
+        }
+    }
+    memcpy(expected->deep, s_lod_colors ? deep_palette[lod] : source->deep, sizeof(source->deep));
+    memcpy(expected->shallow, s_lod_colors ? shallow_palette[lod] : source->shallow, sizeof(source->shallow));
+    expected->deep[3] = s_subsets[subset].depth_min;
+    expected->shallow[3] = s_subsets[subset].depth_max;
+    return subset;
+}
+
+static void assert_planet_instance(const asteroid_instance_t *actual, double elapsed) {
+    const float angle = (float)(-0.1 * elapsed);
+    const float rows[12] = {45.0F * cosf(angle), 0, 45.0F * sinf(angle), 0, 0, 45, 0, 0, -45.0F * sinf(angle), 0, 45.0F * cosf(angle), 0};
+    for (uint32_t component = 0; component < 12; component++) {
+        TEST_ASSERT_TRUE(fabsf(rows[component] - actual->world_rows[component]) < 0.00001F);
+    }
+    const float zero_colors[8] = {0};
+    TEST_ASSERT_EQUAL_MEMORY(zero_colors, actual->deep, sizeof(zero_colors));
+}
+
+static void test_grouped_packing_preserves_every_source_instance_and_lod(void) {
     const uint32_t old_level = s_level;
-    const bool old_optimized = s_optimized;
     const bool old_colors = s_lod_colors;
     const double old_elapsed = s_elapsed;
     const camera_orientation_t old_camera = s_camera;
     const ast_reference_runtime_instance *old_asteroids = s_asteroids;
     const geometry_subset_t *old_subsets = s_subsets;
+    float old_deep[AST_SUBDIVISIONS][3];
+    float old_shallow[AST_SUBDIVISIONS][3];
+    memcpy(old_deep, s_lod_deep, sizeof(old_deep));
+    memcpy(old_shallow, s_lod_shallow, sizeof(old_shallow));
+    const float deep_palette[AST_SUBDIVISIONS][3] = {{0.11F, 0.12F, 0.13F}, {0.21F, 0.22F, 0.23F}, {0.31F, 0.32F, 0.33F}, {0.41F, 0.42F, 0.43F}};
+    const float shallow_palette[AST_SUBDIVISIONS][3] = {{0.51F, 0.52F, 0.53F}, {0.61F, 0.62F, 0.63F}, {0.71F, 0.72F, 0.73F}, {0.81F, 0.82F, 0.83F}};
+    memcpy(s_lod_deep, deep_palette, sizeof(s_lod_deep));
+    memcpy(s_lod_shallow, shallow_palette, sizeof(s_lod_shallow));
     ast_reference_runtime_instance *records = calloc(AST_MAX, sizeof(*records));
     geometry_subset_t *subsets = calloc(4000, sizeof(*subsets));
     asteroid_instance_t *expected = calloc(AST_MAX + 1U, sizeof(*expected));
     bool *seen = calloc(AST_MAX, sizeof(*seen));
+    uint32_t *expected_subsets = calloc(AST_MAX, sizeof(*expected_subsets));
     TEST_ASSERT_NOT_NULL(records);
     TEST_ASSERT_NOT_NULL(subsets);
     TEST_ASSERT_NOT_NULL(expected);
     TEST_ASSERT_NOT_NULL(seen);
+    TEST_ASSERT_NOT_NULL(expected_subsets);
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
     gfx.frame_capacity[NT_GFX_FRAME_VERTEX] = (AST_MAX + 1U) * (uint32_t)sizeof(*expected);
     nt_gfx_init(&gfx);
@@ -648,24 +695,23 @@ static void test_optimized_packing_preserves_every_source_instance_and_lod(void)
             records[i].mesh_index = i % complexity->unique_meshes;
             records[i].texture_index = (i / 3U) % complexity->textures;
             records[i].deep[0] = (float)i / (float)AST_MAX;
+            records[i].shallow[2] = 1.0F - ((float)i / (float)AST_MAX);
         }
         for (uint32_t i = 0; i < complexity->unique_meshes * AST_SUBDIVISIONS; i++) {
             subsets[i] = (geometry_subset_t){.index_count = 60U << (2U * (i / complexity->unique_meshes)), .depth_min = 0.5F + ((float)i * 0.0001F), .depth_max = 2.0F};
         }
-        s_optimized = false;
-        nt_gfx_begin_frame();
-        const uint32_t reference_base = prepare_instances();
+        uint32_t expected_lods[AST_SUBDIVISIONS] = {0};
+        uint64_t expected_triangles = 0;
+        for (uint32_t source = 0; source < complexity->instances; source++) {
+            const uint32_t subset = expected_source_instance(&expected[source], &records[source], complexity, deep_palette, shallow_palette);
+            expected_subsets[source] = subset;
+            expected_lods[subset / complexity->unique_meshes]++;
+            expected_triangles += subsets[subset].index_count / 3U;
+        }
         const uint32_t bytes = (complexity->instances + 1U) * (uint32_t)sizeof(*expected);
-        memcpy(expected, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + reference_base, bytes);
-        uint32_t expected_lods[AST_SUBDIVISIONS];
-        memcpy(expected_lods, s_lod_counts, sizeof(expected_lods));
-        const uint64_t expected_triangles = s_triangles;
-        nt_gfx_end_frame();
-
-        s_optimized = true;
         nt_gfx_begin_frame();
-        const uint32_t optimized_base = prepare_instances();
-        const asteroid_instance_t *actual = (const asteroid_instance_t *)(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + optimized_base);
+        const uint32_t base = prepare_instances();
+        const asteroid_instance_t *actual = (const asteroid_instance_t *)(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + base);
         memset(seen, 0, AST_MAX * sizeof(*seen));
         uint64_t previous_key = 0;
         for (uint32_t i = 0; i < complexity->instances; i++) {
@@ -674,20 +720,17 @@ static void test_optimized_packing_preserves_every_source_instance_and_lod(void)
             TEST_ASSERT_FALSE(seen[source]);
             seen[source] = true;
             TEST_ASSERT_EQUAL_MEMORY(&expected[source], &actual[i], sizeof(*expected));
-            TEST_ASSERT_EQUAL_UINT64(((uint64_t)records[source].texture_index << 32U) | s_selected_subsets[source], s_draw_items[i].sort_key);
-            TEST_ASSERT_TRUE(previous_key <= s_draw_items[i].sort_key);
+            const uint32_t lod = expected_subsets[source] / complexity->unique_meshes;
+            TEST_ASSERT_LESS_THAN_UINT32(AST_SUBDIVISIONS, lod);
+            assert_instance_rgb(&actual[i], &records[source], s_lod_colors, deep_palette[lod], shallow_palette[lod]);
+            TEST_ASSERT_EQUAL_UINT64(((uint64_t)records[source].texture_index << 32U) | expected_subsets[source], s_draw_items[i].sort_key);
+            TEST_ASSERT_GREATER_OR_EQUAL_UINT64(previous_key, s_draw_items[i].sort_key);
             previous_key = s_draw_items[i].sort_key;
         }
-        TEST_ASSERT_EQUAL_MEMORY(&expected[complexity->instances], &actual[complexity->instances], sizeof(*expected));
+        assert_planet_instance(&actual[complexity->instances], s_elapsed);
         TEST_ASSERT_EQUAL_MEMORY(expected_lods, s_lod_counts, sizeof(expected_lods));
         TEST_ASSERT_EQUAL_UINT64(expected_triangles, s_triangles);
         TEST_ASSERT_EQUAL_UINT32(bytes, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
-        nt_gfx_end_frame();
-
-        s_optimized = false;
-        nt_gfx_begin_frame();
-        const uint32_t restored_base = prepare_instances();
-        TEST_ASSERT_EQUAL_MEMORY(expected, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging + restored_base, bytes);
         nt_gfx_end_frame();
     }
     nt_gfx_shutdown();
@@ -695,13 +738,164 @@ static void test_optimized_packing_preserves_every_source_instance_and_lod(void)
     free(subsets);
     free(expected);
     free(seen);
+    free(expected_subsets);
     s_level = old_level;
-    s_optimized = old_optimized;
     s_lod_colors = old_colors;
     s_elapsed = old_elapsed;
     s_camera = old_camera;
     s_asteroids = old_asteroids;
     s_subsets = old_subsets;
+    memcpy(s_lod_deep, old_deep, sizeof(s_lod_deep));
+    memcpy(s_lod_shallow, old_shallow, sizeof(s_lod_shallow));
+}
+
+static mesh_binding_t make_submission_mesh(bool instanced) {
+    uint8_t bytes[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 36 + 18] = {0};
+    const NtMeshAssetHeader header = {
+        .magic = NT_MESH_MAGIC, .version = NT_MESH_VERSION, .stream_count = 1, .index_type = NT_INDEX_UINT16, .vertex_count = 3, .index_count = 9, .vertex_data_size = 36, .index_data_size = 18};
+    const NtStreamDesc stream = {.name_hash = 1, .type = NT_STREAM_FLOAT32, .count = 3};
+    memcpy(bytes, &header, sizeof(header));
+    memcpy(bytes + sizeof(header), &stream, sizeof(stream));
+    mesh_binding_t binding = {.mesh = {.id = nt_gfx_activate_mesh(bytes, sizeof(bytes))}};
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, binding.mesh.id);
+    const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info(binding.mesh);
+    nt_vertex_input_desc_t desc = {.layout = {.attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}}, .attr_count = 1, .stride = 12}, .vertex_buffer = info->vbo, .index_buffer = info->ibo};
+    if (instanced) {
+        desc.instance_layout = (nt_vertex_layout_t){.attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 4}}, .attr_count = 1, .stride = sizeof(asteroid_instance_t)};
+    }
+    binding.input = nt_gfx_make_vertex_input(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, binding.input.id);
+    return binding;
+}
+
+#if NT_GFX_CAPTURE_ENABLED
+static void assert_submission_capture(uint32_t base) {
+    const uint32_t expected[] = {0, 2, 5, 999, 1000};
+    const nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    TEST_ASSERT_FALSE(capture.overflow);
+    uint32_t binds = 0;
+    uint32_t textures = 0;
+    for (uint32_t i = 0; i < capture.count; i++) {
+        const nt_gfx_event_t *event = &capture.events[i];
+        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_INSTANCE_BUFFER) {
+            TEST_ASSERT_LESS_THAN_UINT32(5, binds);
+            TEST_ASSERT_EQUAL_UINT32(base + (expected[binds] * (uint32_t)sizeof(asteroid_instance_t)), event->data.binding.offset);
+            const nt_vertex_input_t input = binds == 4 ? s_planet_mesh.input : s_rock_meshes[binds % 2U].input;
+            TEST_ASSERT_EQUAL_UINT32(input.id, event->data.binding.secondary);
+            binds++;
+        }
+        if (event->kind == NT_GFX_EVENT_ARGUMENT && event->operation == NT_GFX_OP_TEXTURE_SET) {
+            if (textures < 6) {
+                TEST_ASSERT_EQUAL_UINT32(s_noise[textures / 3U][textures % 3U].id, event->object);
+                TEST_ASSERT_EQUAL_UINT32(s_noise_names[textures % 3U].value, event->data.binding.name);
+            }
+            textures++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(5, binds);
+    TEST_ASSERT_EQUAL_UINT32(13, textures);
+}
+#endif
+
+static void test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_tail(void) {
+    const uint32_t old_level = s_level;
+    const geometry_subset_t *old_subsets = s_subsets;
+    const mesh_binding_t old_rock[2] = {s_rock_meshes[0], s_rock_meshes[1]};
+    const mesh_binding_t old_planet = s_planet_mesh;
+    const mesh_binding_t old_sky = s_sky_mesh;
+    nt_pipeline_t old_pipelines[3];
+    nt_texture_t old_noise[2][3];
+    nt_hash32_t old_names[3];
+    memcpy(old_pipelines, s_pipelines, sizeof(old_pipelines));
+    memcpy(old_noise, s_noise, sizeof(old_noise));
+    memcpy(old_names, s_noise_names, sizeof(old_names));
+    const geometry_subset_t subsets[2] = {{.chunk_index = 0, .first_index = 0, .index_count = 3, .vertex_count = 3}, {.chunk_index = 1, .first_index = 3, .index_count = 6, .vertex_count = 3}};
+    s_level = 0;
+    s_subsets = subsets;
+    nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
+    gfx.frame_capacity[NT_GFX_FRAME_VERTEX] = 128U * 1024U;
+    gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
+    gfx.capture_capacity = 1024;
+    nt_gfx_init(&gfx);
+    const char *const samplers[] = {"u_noise0", "u_noise1", "u_noise2"};
+    const nt_program_t rocks = nt_gfx_fake_make_program(samplers, 3);
+    s_pipelines[0] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = rocks});
+    /* Textureless tail programs isolate asteroid bindings while executing both real tail draws. */
+    s_pipelines[1] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_fake_make_program(NULL, 0)});
+    s_pipelines[2] = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = nt_gfx_fake_make_program(NULL, 0)});
+    s_rock_meshes[0] = make_submission_mesh(true);
+    s_rock_meshes[1] = make_submission_mesh(true);
+    s_planet_mesh = make_submission_mesh(true);
+    s_sky_mesh = make_submission_mesh(false);
+    const uint8_t pixel[4] = {255, 255, 255, 255};
+    for (uint32_t texture = 0; texture < 2; texture++) {
+        for (uint32_t layer = 0; layer < 3; layer++) {
+            s_noise_names[layer] = nt_hash32_str(samplers[layer]);
+            s_noise[texture][layer] = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .format = NT_TEXTURE_FORMAT_RGBA8, .data = pixel});
+            TEST_ASSERT_TRUE(nt_gfx_texture_ready(s_noise[texture][layer]));
+        }
+    }
+    const uint32_t ends[] = {2, 5, 999, 1000};
+    uint32_t begin = 0;
+    for (uint32_t run = 0; run < 4; run++) {
+        for (uint32_t i = begin; i < ends[run]; i++) {
+            s_draw_items[i] = (asteroid_draw_item_t){.sort_key = ((uint64_t)(run / 2U) << 32U) | (run % 2U), .source_index = 999U - i};
+        }
+        begin = ends[run];
+    }
+    nt_gfx_begin_frame();
+    nt_gfx_end_frame();
+    nt_gfx_fake_reset();
+    nt_gfx_fake_draw_trace_reset(true);
+#if NT_GFX_CAPTURE_ENABLED
+    nt_gfx_capture_request();
+#endif
+    nt_gfx_begin_frame();
+    uint32_t base = 0;
+    (void)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 96, 4, &base);
+    (void)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 1001U * (uint32_t)sizeof(asteroid_instance_t), 4, &base);
+    TEST_ASSERT_EQUAL_UINT32(96, base);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){0});
+    const nt_frame_uniforms_t globals = {0};
+    draw_world(base, &globals);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_count());
+    const uint32_t counts[] = {2, 3, 994, 1, 1, 1};
+    const uint32_t indices[] = {3, 6, 3, 6, 9, 9};
+    const uint32_t starts[] = {0, 3, 0, 3, 0, 0};
+    for (uint32_t i = 0; i < 6; i++) {
+        const nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(i);
+        TEST_ASSERT_EQUAL_UINT32(counts[i], draw.instance_count);
+        TEST_ASSERT_EQUAL_UINT32(indices[i], draw.num_indices);
+        TEST_ASSERT_EQUAL_UINT32(starts[i], draw.first_index);
+        TEST_ASSERT_EQUAL_UINT8(NT_INDEX_UINT16, draw.index_type);
+        const uint32_t pipeline = i < 4 ? 0 : i - 3U;
+        TEST_ASSERT_EQUAL_UINT32(s_pipelines[pipeline].id, draw.pipeline.id);
+    }
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    TEST_ASSERT_EQUAL_UINT64(1001, g_nt_gfx.counters.instances);
+    TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_bound_texture_count());
+    for (uint32_t i = 0; i < 6; i++) {
+        TEST_ASSERT_EQUAL_UINT32(i % 3U, nt_gfx_fake_bound_texture_slot_at(i));
+    }
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_bound_texture_at(0), nt_gfx_fake_bound_texture_at(3));
+    TEST_ASSERT_EQUAL_UINT32(base + (1000U * (uint32_t)sizeof(asteroid_instance_t)), nt_gfx_fake_last_instance_offset());
+#if NT_GFX_CAPTURE_ENABLED
+    assert_submission_capture(base);
+#endif
+    nt_gfx_shutdown();
+    nt_gfx_fake_reset();
+    s_level = old_level;
+    s_subsets = old_subsets;
+    s_rock_meshes[0] = old_rock[0];
+    s_rock_meshes[1] = old_rock[1];
+    s_planet_mesh = old_planet;
+    s_sky_mesh = old_sky;
+    memcpy(s_pipelines, old_pipelines, sizeof(old_pipelines));
+    memcpy(s_noise, old_noise, sizeof(old_noise));
+    memcpy(s_noise_names, old_names, sizeof(old_names));
 }
 
 int main(void) {
@@ -726,7 +920,8 @@ int main(void) {
     RUN_TEST(test_memory_labels_distinguish_pending_unavailable_and_diagnostics);
     RUN_TEST(test_noise_creation_failure_retries_without_publishing_incomplete_set);
     RUN_TEST(test_scene_options_are_portable_and_bounded);
-    RUN_TEST(test_optimized_sort_preserves_exact_tuple_identity_and_stability);
-    RUN_TEST(test_optimized_packing_preserves_every_source_instance_and_lod);
+    RUN_TEST(test_grouped_sort_preserves_exact_tuple_identity_and_stability);
+    RUN_TEST(test_grouped_packing_preserves_every_source_instance_and_lod);
+    RUN_TEST(test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_tail);
     return UNITY_END();
 }

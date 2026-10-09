@@ -8,7 +8,7 @@
         if (!canvas) return;
         canvas.addEventListener('keydown', function (event) {
             if (event.ctrlKey && !event.altKey && !event.metaKey &&
-                (event.code === 'KeyP' || event.code === 'KeyL' || event.code === 'KeyF')) {
+                (event.code === 'KeyP' || event.code === 'KeyL')) {
                 event.preventDefault();
             }
         });

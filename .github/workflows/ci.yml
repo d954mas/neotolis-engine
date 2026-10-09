@@ -936,6 +936,9 @@ jobs:
             if [ -f "$example_dir/PARITY.md" ]; then
               cp "$example_dir/PARITY.md" "gh-pages-data/wasm/$example_name/"
             fi
+            if [ -f "$example_dir/README.md" ]; then
+              cp "$example_dir/README.md" "gh-pages-data/wasm/$example_name/"
+            fi
             if [ -d "$example_dir/licenses" ]; then
               cp -r "$example_dir/licenses" "gh-pages-data/wasm/$example_name/"
             fi

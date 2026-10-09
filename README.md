@@ -14,9 +14,10 @@ engine/game ownership boundary is
 
 ## Examples
 
-[Asteroids](examples/asteroids/README.md): a source-derived Methane Asteroids baseline with
-1,000–50,000 objects, original mesh/texture variation, four LODs and one draw per asteroid.
-[Methane reference and asset credits](examples/asteroids/CREDITS.md).
+[Asteroids](examples/asteroids/README.md): a Neotolis port of
+[Evgeny Gorodetskiy’s Methane Asteroids](https://github.com/MethanePowered/MethaneAsteroids),
+with 1,000–50,000 objects, original mesh/texture variation, four LODs and grouped indexed instancing.
+[Original demo and asset credits](examples/asteroids/CREDITS.md).
 
 ## Prerequisites
 

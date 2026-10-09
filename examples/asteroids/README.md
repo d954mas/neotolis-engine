@@ -29,9 +29,9 @@ is the original demo author under Apache 2.0.
 | 9 | 50,000 | 1,000 | 50 |
 
 Every unique mesh has the original four independently generated LODs. Every
-noise texture retains three 256×256 layers. The baseline submits **one draw per
-asteroid**, with no frustum culling or batch merging. Packing mesh variants into
-bounded GLB chunks changes storage, not geometry, draw ranges or draw count.
+noise texture retains three 256×256 layers. The demo submits every asteroid,
+grouping compatible mesh/texture instances without frustum culling. Packing mesh
+variants into bounded GLB chunks changes storage, not geometry or draw ranges.
 
 Original camera, orbit/scale distributions, palettes, light, spin/orbit animation,
 LOD equation, planet geometry and Mars/Galaxy images are retained. Raw sRGB Mars
@@ -66,35 +66,40 @@ harness: 60 warmup frames, measured CPU frame time/counters, final framebuffer
 checksum, then exit. `--paused 1` and hidden HUD make image comparisons repeatable.
 This harness is additional instrumentation, not an upstream benchmark mode.
 
-## Optimized rendering
+## Rendering
 
-Reference rendering remains the default (`--optimized 0`). Enable **Optimized
-rendering** in Settings, or start with `--optimized 1`. The mode can change while
-paused, so both paths can render the same camera, animation time and scene.
+Grouped indexed instancing is the only rendering path. There is no alternate
+renderer, mode flag or command-line choice. The original implementation remains
+in the preserved Git checkpoint, outside production code. Tests construct
+expected instance records independently and check the actual grouped submissions.
 
-The optimized path uses the pinned engine's existing typed radix sort,
+The rendering path uses the pinned engine's existing typed radix sort,
 per-frame vertex storage, indexed instancing and state cache. It sorts opaque
 asteroids by their exact texture set and selected geometry subset, packs their
 unchanged instance attributes in that order, and draws each compatible run once.
-Texture bindings are applied at texture-set transitions. Different meshes, LODs
+The exact key carries both the texture and subset through submission, without a
+parallel per-object subset table. Texture bindings are applied at texture-set
+transitions. Different meshes, LODs
 or textures never share an instanced draw. Per-object colors remain per-instance.
 
 There is no frustum culling, object-count reduction, lower-resolution texture,
-different geometry, changed LOD threshold or shader simplification. Both modes
-update and submit every source asteroid. Planet and sky rendering are unchanged.
+different geometry, changed LOD threshold or shader simplification. The renderer
+updates and submits every source asteroid. Planet and sky rendering are unchanged.
 All source scene packs stay byte-identical. Sorting changes opaque draw order;
 pixel comparison is part of validation, rather than an assumed consequence of
 matching triangle totals.
 
-The current OSMesa check found small framebuffer differences from opaque draw
+The earlier paired OSMesa check found small framebuffer differences from opaque draw
 ordering: 16–62 of 256,000 pixels across six 640×400 cases (54 pixels at the
 initial 50,000-object scene). The strict pixel-equality check therefore fails for
-Optimized; it is not claimed pixel-identical. Reference matches the preserved
-original byte-for-byte in all six cases, including after switching back.
+the grouped renderer; it is not claimed pixel-identical. The then-present
+source-order comparison matched the preserved original byte-for-byte in all six
+cases; that comparison code has since been removed.
 In three diagnostic cases, retained depth buffers matched bit-for-bit and
 sorted, unbatched draws produced exactly the instanced image. This isolates the
 change to draw ordering/equal-depth winners under GEQUAL in the confirmed
-24-bit software depth buffer. Keep Reference when original tie ordering matters.
+24-bit software depth buffer. The preserved checkpoint retains the original
+comparison implementation; the current demo contains only the grouped renderer.
 
 With 50,000 asteroids at the source camera and time zero, the actual scene-only
 native draw count was 50,002 → 40,582 (18.8% fewer), and issued GL calls were
@@ -103,12 +108,11 @@ triangles remained; scene vertex uploads stayed at 4,000,080 bytes. These are
 single-thread llvmpipe correctness/counter results with a hidden HUD, not a
 hardware timing benchmark.
 
-The added work is a bounded sort plus an instance-data copy each optimized
+The rendering work includes a bounded sort plus an instance-data copy each
 frame. Preallocated CPU storage totals 5,600,000 bytes (5.34 MiB): 4 MB for
 instance staging and two 800 KB sort buffers. The sorter uses an 8 KB stack
 histogram. No heap allocation occurs in this path, and the scene's GPU upload
-remains 80 bytes per asteroid plus the planet. Reference mode skips the sort
-and copy. The built-in generic mesh renderer has a different instance ABI
+remains 80 bytes per asteroid plus the planet. The built-in generic mesh renderer has a different instance ABI
 (world transform plus packed color) and draws whole meshes; this sample retains
 its specialized 80-byte material attributes and chunk subset ranges through
 the existing graphics primitives instead of adding a new engine API.
@@ -143,6 +147,12 @@ pointer gestures remain separately owned through release. Browser shortcuts are
 reserved only on the focused example canvas where the browser permits it; the
 native buttons provide alternatives. Browser runtime behavior is still unverified.
 
+The Settings footer credits the original author, identifies this as a Neotolis
+port, and displays the [upstream repository](https://github.com/MethanePowered/MethaneAsteroids).
+Its native **Copy upstream link** button uses the engine clipboard API. Web
+system-clipboard writes are best-effort and may be blocked by browser permissions;
+the full URL remains visible. No new URL-opening platform API is introduced.
+
 ## Controls
 
 - 0–9 or `[` / `]`: complexity
@@ -151,11 +161,12 @@ native buttons provide alternatives. Browser runtime behavior is still unverifie
 - Left drag: camera rotation; middle drag: pan; right drag: light rotation
 - Wheel or `-` / `=`: zoom; `,` / `.`: roll
 - Touch (native UI mode): one finger orbits; two-finger pinch zooms, including while paused
-- Settings offers pause, complexity, LOD, reset view/light, and the render-path toggle
+- Settings offers pause, complexity, LOD, reset view/light, and upstream authorship
 - Alt+P: camera pivot; Alt+R: reset camera; Ctrl+L: reset light
 - `;` / `'`: double / halve minimum screen size for LOD
 - F1: help; F2: supported command-line options; F3: controls/parameters; F4: HUD
-- Ctrl+F: fullscreen; Escape or Ctrl+Q: exit native
+- Ctrl+F: fullscreen (native); Escape or Ctrl+Q: exit native
+- Web: use the page shell's Fullscreen button (browser user-gesture requirement)
 
 P reports that parallel command-list recording is unavailable in this backend.
 Typed punctuation depends on keyboard layout; it is not an exact physical-held-key

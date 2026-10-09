@@ -423,7 +423,9 @@ On Linux without Wayland development packages, configure with
 source screenshot's 35,000-object workload and 9 is the explicit 50,000 maximum.
 Ctrl+P pauses; L selects source LOD colors. See the example README for controls,
 measurement scope and known backend differences. There is no CPU culling or
-batch reduction in the source baseline.
+batch reduction in the source baseline; the current default renderer groups
+compatible subsets with existing indexed instancing. See the example README for
+measured command reductions and the small draw-order pixel differences.
 
 For native Release measurements, explicitly enable GPU timing if wanted:
 `cmake --preset native-release -DNT_GFX_GPU_TIMING_ENABLED=ON -DNT_SKIP_EXAMPLE_PACKS=sponza`,

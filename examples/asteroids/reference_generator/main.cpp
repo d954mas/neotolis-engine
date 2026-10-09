@@ -373,9 +373,27 @@ static void write_metadata(const fs::path &output, uint32_t unique, uint32_t see
     require(static_cast<bool>(binary), "could not write binary metadata");
     std::ofstream json(output / "geometry.json");
     json << std::setprecision(std::numeric_limits<float>::max_digits10) << "{\n\"schema_version\":1,\"unique_count\":" << unique << ",\"seed\":" << seed
-         << ",\"ordering\":\"serial_subdivision_then_variant\",\"simd\":\"SSE2\",\"fastnoise_math\":\"relaxed\",\"compiler\":\"" << __VERSION__ << "\",\"libstdcxx_date\":" << __GLIBCXX__
-         << ",\"libstdcxx_release\":" << _GLIBCXX_RELEASE
-         << ",\"fastsimd\":\"16450dae9528727e500e7254f635a671f9c7ee2d\",\"methane_asteroids\":\"16a5751e835dd0776d976e51438604dc8de27d16\",\"methane_kit\":"
+         << ",\"ordering\":\"serial_subdivision_then_variant\",\"simd\":\"SSE2\",\"fastnoise_math\":\"relaxed\"";
+#if defined(__VERSION__)
+    json << ",\"compiler\":\"" << __VERSION__ << "\"";
+#elif defined(_MSC_FULL_VER)
+    json << ",\"compiler\":\"MSVC " << _MSC_FULL_VER << "\"";
+#else
+    json << ",\"compiler\":\"unidentified\"";
+#endif
+#if defined(__GLIBCXX__)
+    json << ",\"libstdcxx_date\":" << __GLIBCXX__;
+#if defined(_GLIBCXX_RELEASE)
+    json << ",\"libstdcxx_release\":" << _GLIBCXX_RELEASE;
+#endif
+#elif defined(_LIBCPP_VERSION)
+    json << ",\"libcpp_version\":" << _LIBCPP_VERSION;
+#elif defined(_MSVC_STL_VERSION)
+    json << ",\"msvc_stl_version\":" << _MSVC_STL_VERSION;
+#else
+    json << ",\"standard_library\":\"unidentified\"";
+#endif
+    json << ",\"fastsimd\":\"16450dae9528727e500e7254f635a671f9c7ee2d\",\"methane_asteroids\":\"16a5751e835dd0776d976e51438604dc8de27d16\",\"methane_kit\":"
             "\"04a95fb78334252594427c69737839518e53c4a0\",\"fastnoise2\":"
             "\"903c1f2d2f9d53ddce94cd223f32727d9ab3aeaa\",\"hlslpp\":\"3a5b1cf0d807f945ec861201b316c425e9cf5061\",\"chunks\":[\n";
     for (size_t i = 0; i < chunks.size(); ++i) {

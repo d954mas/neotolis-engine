@@ -1,5 +1,10 @@
 # Baseline parity record
 
+This records the source-order checkpoint before grouped rendering became the
+default. Historical draw counts and build results below belong to that baseline;
+see [current rendering behavior and validation limits](README.md#rendering)
+for the Neotolis-native path. The baseline remains available in Git history.
+
 Reference: Methane Asteroids `16a5751e835dd0776d976e51438604dc8de27d16`.
 Source paths below are in that revision, unless a dependency is named.
 

@@ -20,6 +20,7 @@ README.md for compatibility limits.
 #include "../shared/nt_example_frames.h"
 #include "app/nt_app.h"
 #include "atlas/nt_atlas.h"
+#include "clipboard/nt_clipboard.h"
 #include "color/nt_color.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
@@ -136,14 +137,15 @@ static float s_zoom_elapsed, s_zoom_until, s_zoom_factor = 1.0F;
 static int s_zoom_direction;
 static bool s_eye_pivot;
 static uint32_t s_level = 1, s_requested_level = 1;
-static bool s_paused, s_lod_colors, s_hide_hud, s_show_help, s_ready, s_bad_data, s_fullscreen, s_hide_parameters, s_show_command_line;
+static bool s_paused, s_lod_colors, s_hide_hud, s_show_help, s_ready, s_bad_data, s_hide_parameters, s_show_command_line;
+#ifndef NT_PLATFORM_WEB
+static bool s_fullscreen;
+#endif
 static float s_min_screen_size = 0.06F;
 static double s_elapsed, s_last_tick, s_frame_ms, s_cpu_ms, s_update_ms, s_render_ms, s_gpu_ms = -1.0;
 static uint64_t s_mem_used, s_triangles;
 static bool s_memory_sampled;
-static uint32_t s_lod_counts[AST_SUBDIVISIONS], s_selected_subsets[AST_MAX];
-static bool s_optimized;
-static const char *const s_render_mode_names[2] = {"reference", "optimized"};
+static uint32_t s_lod_counts[AST_SUBDIVISIONS];
 static asteroid_instance_t s_instance_staging[AST_MAX];
 static asteroid_draw_item_t s_draw_items[AST_MAX], s_draw_scratch[AST_MAX];
 static float s_lod_deep[AST_SUBDIVISIONS][3], s_lod_shallow[AST_SUBDIVISIONS][3];
@@ -161,6 +163,7 @@ static nt_font_t s_font;
 static nt_hash32_t s_core_pack, s_space_pack, s_level_pack, s_noise_pack;
 static nt_hash32_t s_noise_names[3], s_sky_names[6], s_diffuse_name, s_light_name;
 static char s_notice[160];
+static const char s_upstream_url[] = "https://github.com/MethanePowered/MethaneAsteroids";
 
 static bool s_use_ui = true, s_ui_panel_open, s_ui_built, s_ui_atlas_bound;
 static bool s_ui_escape_consumed, s_ui_keyboard_blocked;
@@ -771,8 +774,6 @@ static void ui_settings(float width) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Preview freely. Apply loads one preset.", &s_ui_caption);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "SIMULATION", &s_ui_section);
     const Clay_ElementDeclaration toggle = {.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44)}}};
-    (void)nt_ui_toggle(s_ui, NT_UI_DATA_LAYER(1), 2, CLAY_ID("asteroids.optimized").id, "Optimized rendering", &s_optimized, &s_ui_toggle, &toggle, true);
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), s_optimized ? "Grouped draws. Same asteroids and LODs." : "Reference: one draw per asteroid.", &s_ui_caption);
     (void)nt_ui_toggle(s_ui, NT_UI_DATA_LAYER(1), 2, CLAY_ID("asteroids.pause").id, "Pause animations", &s_paused, &s_ui_toggle, &toggle, true);
     (void)nt_ui_toggle(s_ui, NT_UI_DATA_LAYER(1), 2, CLAY_ID("asteroids.lod_colors").id, "Color by mesh LOD", &s_lod_colors, &s_ui_toggle, &toggle, true);
     (void)snprintf(text, sizeof(text), "%.5g", (double)s_min_screen_size);
@@ -800,6 +801,18 @@ static void ui_settings(float width) {
     }
     (void)nt_ui_toggle(s_ui, NT_UI_DATA_LAYER(1), 2, CLAY_ID("asteroids.pivot").id, "Eye-centered pivot", &s_eye_pivot, &s_ui_toggle, &toggle, true);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Middle drag: pan. Right drag: light.\nF4 hides every overlay.", &s_ui_caption);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "AUTHORS & SOURCE", &s_ui_section);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Methane Asteroids\nOriginal: Evgeny Gorodetskiy\nNeotolis C17 port", &s_ui_caption);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Galaxy panorama: ESO/S. Brunier, CC BY 4.0; adapted as a cubemap in Methane Asteroids.", &s_ui_caption);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "https://github.com/\nMethanePowered/MethaneAsteroids", &s_ui_caption);
+    if (ui_action("asteroids.copy_upstream", "Copy upstream link", false, nt_clipboard_available(), 0)) {
+        nt_clipboard_set_text(s_upstream_url);
+#ifdef NT_PLATFORM_WEB
+        (void)snprintf(s_notice, sizeof(s_notice), "Copy requested. Browser clipboard permissions may block it.");
+#else
+        (void)snprintf(s_notice, sizeof(s_notice), "%s", strcmp(nt_clipboard_get_text(), s_upstream_url) == 0 ? "Repository URL copied." : "Clipboard unavailable. Use the URL above.");
+#endif
+    }
 }
 
 static void ui_statistics(void) {
@@ -852,10 +865,7 @@ static void ui_statistics(void) {
 #else
     ui_metric("Process RSS", value);
 #endif
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2),
-                s_optimized ? "Indexed instances grouped by mesh and texture.\nNo frustum culling. Same source LODs.\nTextures: 256 x 256, 3 sampled layers."
-                            : "One indexed draw per asteroid.\nNo frustum culling or draw merging.\nTextures: 256 x 256, 3 sampled layers.",
-                &s_ui_caption);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Indexed instances grouped by mesh and texture.\nNo frustum culling. Same source LODs.\nTextures: 256 x 256, 3 sampled layers.", &s_ui_caption);
 }
 
 static void ui_help(void) {
@@ -868,11 +878,10 @@ static void ui_help(void) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "KEYBOARD SHORTCUTS", &s_ui_section);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2),
                 "0-9 / [ ]   Load complexity\nCtrl+P      Pause animations\nL           LOD colors\n; / '       Coarser / finer LOD\nF1 / F2     Help / CLI options\nF3          Collapse controls\nF4 "
-                "         Hide all overlays\nCtrl+F      Fullscreen\nCtrl+Q      Quit (native)\nEscape      Close modal / quit",
+                "         Hide all overlays\nCtrl+F      Fullscreen (native)\nWeb         Fullscreen button\nCtrl+Q      Quit (native)\nEscape      Close modal / quit",
                 &s_ui_body);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "COMMAND LINE", &s_ui_section);
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "--complexity 0..9 (or -c)\n--optimized 0|1\n--paused 0|1\n--ui 0|1 (source HUD / native UI)\n--hide-hud 0|1\n--frames N (native diagnostics)",
-                &s_ui_caption);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "--complexity 0..9 (or -c)\n--paused 0|1\n--ui 0|1 (source HUD / native UI)\n--hide-hud 0|1\n--frames N (native diagnostics)", &s_ui_caption);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "COMPATIBILITY", &s_ui_section);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2),
                 "Source scene, camera and LOD math preserved. GL/WebGL uses three 2D samplers per asteroid and six for the sky. Parallel command lists, device selection and swapchain-buffer controls "
@@ -880,7 +889,7 @@ static void ui_help(void) {
                 &s_ui_caption);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "CREDITS", &s_ui_section);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2),
-                "Methane Asteroids\nEvgeny Gorodetskiy / Apache 2.0\n\nMars: Solar System Scope / INOVE\nCC BY 4.0. Original JPG unchanged.\n\nGalaxy: exact upstream faces.\nPanorama: ESO/S. Brunier, CC BY 4.0; "
+                "Methane Asteroids\nEvgeny Gorodetskiy / Apache 2.0\n\nMars: Solar System Scope / INOVE\nCC BY 4.0. Original JPG unchanged.\n\nGalaxy panorama: ESO/S. Brunier, CC BY 4.0; "
                 "adapted as a cubemap in Methane Asteroids.\n\nUI: native Neotolis components.\nFont: DejaVu Sans Mono.\nFull sources and licenses: CREDITS.md",
                 &s_ui_caption);
 }
@@ -1328,11 +1337,11 @@ static void handle_input(float dt) {
     if (!s_use_ui && nt_input_key_is_pressed(NT_KEY_F4)) {
         s_hide_hud = !s_hide_hud;
     }
+#ifndef NT_PLATFORM_WEB
     if (ctrl && nt_input_key_is_pressed(NT_KEY_F)) {
         s_fullscreen = !s_fullscreen;
         nt_window_set_fullscreen(s_fullscreen);
     }
-#ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || (ctrl && nt_input_key_is_pressed(NT_KEY_Q))) {
         nt_app_quit();
     }
@@ -1448,7 +1457,7 @@ static uint32_t prepare_instances(void) {
     uint32_t base = 0;
     const complexity_t *complexity = &s_complexities[s_level];
     asteroid_instance_t *frame_instances = nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, (complexity->instances + 1U) * (uint32_t)sizeof(asteroid_instance_t), 4, &base);
-    asteroid_instance_t *instances = s_optimized ? s_instance_staging : frame_instances;
+    asteroid_instance_t *instances = s_instance_staging;
     memset(s_lod_counts, 0, sizeof(s_lod_counts));
     s_triangles = 0;
     for (uint32_t i = 0; i < complexity->instances; i++) {
@@ -1460,7 +1469,6 @@ static uint32_t prepare_instances(void) {
         const uint32_t subdivision = asteroid_lod_index(asteroid->scale, glm_vec3_norm(difference), s_min_screen_size, AST_SUBDIVISIONS);
         const uint32_t subset_index = (subdivision * complexity->unique_meshes) + asteroid->mesh_index;
         const geometry_subset_t *subset = &s_subsets[subset_index];
-        s_selected_subsets[i] = subset_index;
         s_lod_counts[subdivision]++;
         s_triangles += subset->index_count / 3U;
         instance_world_rows(&instances[i], world);
@@ -1468,15 +1476,11 @@ static uint32_t prepare_instances(void) {
         memcpy(instances[i].shallow, s_lod_colors ? s_lod_shallow[subdivision] : asteroid->shallow, sizeof(asteroid->shallow));
         instances[i].deep[3] = subset->depth_min;
         instances[i].shallow[3] = subset->depth_max;
-        if (s_optimized) {
-            s_draw_items[i] = (asteroid_draw_item_t){.sort_key = ((uint64_t)asteroid->texture_index << 32U) | subset_index, .source_index = i};
-        }
+        s_draw_items[i] = (asteroid_draw_item_t){.sort_key = ((uint64_t)asteroid->texture_index << 32U) | subset_index, .source_index = i};
     }
-    if (s_optimized) {
-        sort_asteroid_items(s_draw_items, complexity->instances, s_draw_scratch);
-        for (uint32_t i = 0; i < complexity->instances; i++) {
-            frame_instances[i] = instances[s_draw_items[i].source_index];
-        }
+    sort_asteroid_items(s_draw_items, complexity->instances, s_draw_scratch);
+    for (uint32_t i = 0; i < complexity->instances; i++) {
+        frame_instances[i] = instances[s_draw_items[i].source_index];
     }
     float planet[16];
     matrix_rotation_axis(planet, (float[3]){0, 1, 0}, (float)(-0.1 * s_elapsed));
@@ -1498,19 +1502,17 @@ static void draw_world(uint32_t base, const nt_frame_uniforms_t *globals) {
     const nt_buffer_t instance_buffer = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX);
     uint32_t previous_texture = UINT32_MAX;
     for (uint32_t i = 0; i < s_complexities[s_level].instances;) {
-        const uint32_t source_index = s_optimized ? s_draw_items[i].source_index : i;
-        const geometry_subset_t *subset = &s_subsets[s_selected_subsets[source_index]];
-        const uint32_t texture = s_asteroids[source_index].texture_index;
+        const uint64_t key = s_draw_items[i].sort_key;
+        const geometry_subset_t *subset = &s_subsets[(uint32_t)key];
+        const uint32_t texture = (uint32_t)(key >> 32U);
         uint32_t end = i + 1U;
-        if (s_optimized) {
-            while (end < s_complexities[s_level].instances && s_draw_items[end].sort_key == s_draw_items[i].sort_key) {
-                end++;
-            }
+        while (end < s_complexities[s_level].instances && s_draw_items[end].sort_key == s_draw_items[i].sort_key) {
+            end++;
         }
         const mesh_binding_t *binding = &s_rock_meshes[subset->chunk_index];
         nt_gfx_bind_vertex_input(binding->input);
         nt_gfx_bind_instance_buffer(instance_buffer, base + (i * (uint32_t)sizeof(asteroid_instance_t)));
-        if (!s_optimized || texture != previous_texture) {
+        if (texture != previous_texture) {
             nt_gfx_texture_binding_t textures[3];
             for (uint32_t layer = 0; layer < 3; layer++) {
                 textures[layer] = (nt_gfx_texture_binding_t){.name = s_noise_names[layer], .texture = s_noise[texture][layer]};
@@ -1518,7 +1520,6 @@ static void draw_world(uint32_t base, const nt_frame_uniforms_t *globals) {
             nt_gfx_apply_texture_bindings(textures, 3);
             previous_texture = texture;
         }
-        /* The reference path keeps count=1; only equal geometry and texture sets share a run. */
         nt_gfx_draw_indexed_instanced(subset->first_index, subset->index_count, subset->vertex_count, end - i);
         i = end;
     }
@@ -1565,8 +1566,8 @@ static void draw_hud(void) {
     } else {
         (void)snprintf(gpu, sizeof(gpu), "%.2f ms", s_gpu_ms);
     }
-    (void)snprintf(text, sizeof(text), "F1 Help    Methane Asteroids / Neotolis [%s]\n%.0f FPS   frame %.2f ms   CPU %.2f ms\nGPU scene %s   %u x %u   %u draws", s_render_mode_names[s_optimized],
-                   s_frame_ms > 0 ? 1000.0 / s_frame_ms : 0, s_frame_ms, s_cpu_ms, gpu, g_nt_window.fb_width, g_nt_window.fb_height, nt_gfx_draw_calls(&g_nt_gfx.last_frame));
+    (void)snprintf(text, sizeof(text), "F1 Help    Methane Asteroids / Neotolis\n%.0f FPS   frame %.2f ms   CPU %.2f ms\nGPU scene %s   %u x %u   %u draws", s_frame_ms > 0 ? 1000.0 / s_frame_ms : 0,
+                   s_frame_ms, s_cpu_ms, gpu, g_nt_window.fb_width, g_nt_window.fb_height, nt_gfx_draw_calls(&g_nt_gfx.last_frame));
     nt_text_renderer_draw(&style, (const float *)model, text);
     const complexity_t *complexity = &s_complexities[s_level];
     (void)snprintf(text, sizeof(text),
@@ -1613,7 +1614,6 @@ static void draw_hud(void) {
         nt_text_renderer_draw(&style, (const float *)model,
                               "Command line:\n"
                               "  -c / --complexity 0..9\n"
-                              "  --optimized 0|1: reference / grouped instances\n"
                               "  --frames N: native-only fixed-step diagnostic\n"
                               "  --paused 1: fixed initial scene\n"
                               "  --hide-hud 1: scene-only diagnostic capture\n"
@@ -1632,7 +1632,8 @@ static void draw_hud(void) {
                               "Alt+R: reset view   Alt+P: change camera pivot\n"
                               "Right drag: light   Ctrl+L: reset light\n"
                               "F2: CLI help   F3: parameters   F4: HUD on/off\n"
-                              "Ctrl+F: fullscreen   Ctrl+Q / Escape: close\n"
+                              "Ctrl+F: fullscreen (native)   Web: Fullscreen button\n"
+                              "Ctrl+Q / Escape: close (native)\n"
                               "Device selection / swapchain count: unavailable");
     }
     if (s_notice[0] != '\0') {
@@ -1672,8 +1673,8 @@ static void frame(void) {
     const bool ready = prepare_gpu();
     if (ready && !s_ready) {
         s_notice[0] = '\0';
-        nt_log_info("Methane Asteroids ready: complexity=%u instances=%u unique_meshes=%u textures=%u subdivisions=4 chunks=%u seed=1123; render=%s", s_level, s_complexities[s_level].instances,
-                    s_complexities[s_level].unique_meshes, s_complexities[s_level].textures, s_chunk_count, s_render_mode_names[s_optimized]);
+        nt_log_info("Methane Asteroids ready: complexity=%u instances=%u unique_meshes=%u textures=%u subdivisions=4 chunks=%u seed=1123; grouped indexed instances", s_level,
+                    s_complexities[s_level].instances, s_complexities[s_level].unique_meshes, s_complexities[s_level].textures, s_chunk_count);
 #ifdef NT_PLATFORM_WEB
         nt_platform_web_loading_complete();
 #endif
@@ -1730,9 +1731,9 @@ static void frame(void) {
         s_mem_used = nt_platform_memory_usage().used;
         s_memory_sampled = true;
         if (ready) {
-            nt_log_info("Asteroids render=%s complexity=%u count=%u lod=%u/%u/%u/%u triangles=%" PRIu64 " draws=%u update_ms=%.3f render_submit_ms=%.3f cpu_frame_ms=%.3f gpu_ms=%.3f memory=%" PRIu64,
-                        s_render_mode_names[s_optimized], s_level, s_complexities[s_level].instances, s_lod_counts[0], s_lod_counts[1], s_lod_counts[2], s_lod_counts[3], s_triangles,
-                        nt_gfx_draw_calls(&g_nt_gfx.counters), s_update_ms, s_render_ms, s_cpu_ms, s_gpu_ms, s_mem_used);
+            nt_log_info("Asteroids complexity=%u count=%u lod=%u/%u/%u/%u triangles=%" PRIu64 " draws=%u update_ms=%.3f render_submit_ms=%.3f cpu_frame_ms=%.3f gpu_ms=%.3f memory=%" PRIu64, s_level,
+                        s_complexities[s_level].instances, s_lod_counts[0], s_lod_counts[1], s_lod_counts[2], s_lod_counts[3], s_triangles, nt_gfx_draw_calls(&g_nt_gfx.counters), s_update_ms,
+                        s_render_ms, s_cpu_ms, s_gpu_ms, s_mem_used);
         }
     }
     nt_window_swap_buffers();
@@ -1768,16 +1769,14 @@ int main(int argc, char **argv) {
     uint32_t hide_hud = 0;
     uint32_t paused = 0;
     uint32_t ui = 1;
-    uint32_t optimized = 0;
     if (!scene_arg_u32(argc, argv, "--complexity", 9, &s_level) || !scene_arg_u32(argc, argv, "-c", 9, &s_level) || !scene_arg_u32(argc, argv, "--hide-hud", 1, &hide_hud) ||
-        !scene_arg_u32(argc, argv, "--paused", 1, &paused) || !scene_arg_u32(argc, argv, "--ui", 1, &ui) || !scene_arg_u32(argc, argv, "--optimized", 1, &optimized)) {
-        (void)fprintf(stderr, "Asteroids: --complexity / -c expects 0..9; --hide-hud, --paused, --ui and --optimized expect 0 or 1.\n");
+        !scene_arg_u32(argc, argv, "--paused", 1, &paused) || !scene_arg_u32(argc, argv, "--ui", 1, &ui)) {
+        (void)fprintf(stderr, "Asteroids: --complexity / -c expects 0..9; --hide-hud, --paused and --ui expect 0 or 1.\n");
         return 1;
     }
     s_requested_level = s_level;
     s_ui_staged_level = (int)s_level;
     s_use_ui = ui != 0;
-    s_optimized = optimized != 0;
     s_hide_hud = hide_hud != 0;
     s_paused = paused != 0;
     s_camera = s_initial_camera;
