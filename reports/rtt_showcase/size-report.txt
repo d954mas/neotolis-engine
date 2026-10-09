@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: bfff6dc
+# Commit: 5f6ba78
 
 ## WASM Section Sizes
 
@@ -14,10 +14,10 @@ Global                 9 B
 Export                83 B
 Elem                  54 B
 Code              236618 B
-Data               20910 B
-Custom              6787 B
+Data               20933 B
+Custom              6799 B
 ---------------- ----------
-TOTAL             265617 B
+TOTAL             265652 B
 
 ## Top 30 Functions by Size
 
@@ -99,10 +99,10 @@ libnt_meshwire_stub.a        722 B
 libnt_metrics.a             1530 B
 libnt_platform.a             824 B
 libnt_pool.a                1376 B
-libnt_postfx_blur.a         7796 B
+libnt_postfx_blur.a         7802 B
 libnt_render.a              7668 B
 libnt_resource.a          215122 B
-libnt_shape_renderer.a   1229404 B
+libnt_shape_renderer.a   1229416 B
 libnt_skeletal.a            7464 B
 libnt_skeletal_assets.a     7796 B
 libnt_skeletal_gpu.a        2622 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2963008 B
+TOTAL (archives)         2963026 B
 
 ## Data Segments Summary
 
-Segments: 48
-Total data size: 20570 B
+Segments: 49
+Total data size: 20586 B
