@@ -38,6 +38,12 @@ and never picks a format; the transcoder is a codec with no GPU knowledge. That
 staging buffer is the same one mesh activation re-interleaves SoA vertices
 through — one grow-on-demand allocation, freed once it goes idle.
 
+RAW `SRGBA8` uses the same four-byte RGBA layout as `RGBA8`, preserving
+source bytes for the GPU's sRGB decode before filtering. Its enum value is
+appended as 15; existing format values and the TTEX v3 header layout do not
+change. BASIS with an `SRGBA8` header is rejected, because the current Basis
+targets are linear storage only; it never silently falls back to `RGBA8`.
+
 The target selector walks a fixed per-codec order and takes the first
 candidate that the GPU (`nt_gfx_gpu_caps()`) reports and the build admits
 (`NT_BASISU_HAS_ETC2/BC7/ASTC`,

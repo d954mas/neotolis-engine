@@ -42,7 +42,8 @@ static const format_row_t k_format_rows[] = {
     {NT_TEXTURE_FORMAT_ETC2_RGBA8,     true,  false, true,       false,   true,          false,       0},
     {NT_TEXTURE_FORMAT_BC7_RGBA,       true,  false, true,       false,   true,          false,       0},
     {NT_TEXTURE_FORMAT_ASTC_4x4_RGBA,  true,  false, true,       false,   true,          false,       0},
-    {15,                               false, false, false,      false,   false,         false,       0},
+    {NT_TEXTURE_FORMAT_SRGBA8,         true,  false, false,      false,   true,          true,        4},
+    {16,                               false, false, false,      false,   false,         false,       0},
 };
 /* clang-format on */
 
@@ -77,6 +78,7 @@ void test_level_bytes_uncompressed(void) {
     TEST_ASSERT_EQUAL_UINT64(273, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGB8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(6, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGB8, 2, 1));
     TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA8, 13, 7));
+    TEST_ASSERT_EQUAL_UINT64(364, nt_texture_level_bytes(NT_TEXTURE_FORMAT_SRGBA8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(182, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RG8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(91, nt_texture_level_bytes(NT_TEXTURE_FORMAT_R8, 13, 7));
     TEST_ASSERT_EQUAL_UINT64(32, nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA16F, 2, 2));
@@ -87,6 +89,7 @@ void test_level_bytes_uncompressed(void) {
 void test_level_bytes_max_size_does_not_wrap(void) {
     /* Exactly 2^32: a 32-bit accumulator would report 0 here. */
     TEST_ASSERT_EQUAL_UINT64(UINT64_C(4294967296), nt_texture_level_bytes(NT_TEXTURE_FORMAT_RGBA8, 32768, 32768));
+    TEST_ASSERT_EQUAL_UINT64(UINT64_C(4294967296), nt_texture_level_bytes(NT_TEXTURE_FORMAT_SRGBA8, 32768, 32768));
 }
 
 void test_level_bytes_unsized_formats_are_zero(void) {

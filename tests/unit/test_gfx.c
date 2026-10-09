@@ -1276,13 +1276,14 @@ static uint32_t key_variants(uint32_t program_id, nt_gfx_pipeline_key_t *out) {
     VARIANT(d.blend.constant_color[2] = 0.5F);
     VARIANT(d.blend.constant_color[3] = 0.5F);
     VARIANT(d.depth_func = NT_DEPTH_ALWAYS);
+    VARIANT(d.depth_func = NT_DEPTH_GEQUAL);
     VARIANT(d.polygon_offset = true; d.polygon_offset_factor = 2.0F);
     VARIANT(d.polygon_offset = true; d.polygon_offset_units = 2.0F);
 #undef VARIANT
     return n;
 }
 
-#define KEY_VARIANT_COUNT 21
+#define KEY_VARIANT_COUNT 22
 
 void test_gfx_pipeline_key_neighbouring_programs_never_alias(void) {
     nt_gfx_pipeline_key_t keys[4 * KEY_VARIANT_COUNT];
@@ -1295,6 +1296,26 @@ void test_gfx_pipeline_key_neighbouring_programs_never_alias(void) {
     for (uint32_t i = 0; i < n; i++) {
         for (uint32_t j = 0; j < i; j++) {
             TEST_ASSERT_FALSE_MESSAGE(nt_gfx_pipeline_key_equal(&keys[i], &keys[j]), "two distinct descs share a key");
+        }
+    }
+}
+
+void test_gfx_pipeline_key_preserves_depth_lane_values(void) {
+    static const nt_depth_func_t functions[] = {NT_DEPTH_LESS, NT_DEPTH_LEQUAL, NT_DEPTH_ALWAYS, NT_DEPTH_GEQUAL};
+    for (uint32_t enabled = 0; enabled < 2; enabled++) {
+        for (uint32_t depth = 0; depth < 4; depth++) {
+            const nt_pipeline_desc_t desc = {
+                .program.id = UINT32_C(0xABCD1234),
+                .depth_test = enabled != 0,
+                .depth_write = true,
+                .depth_func = functions[depth],
+                .cull_mode = 2,
+            };
+            const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
+            const uint64_t expected = UINT64_C(0xABCD1234) | (uint64_t)enabled << 32 | UINT64_C(1) << 33 | (uint64_t)depth << 36 | UINT64_C(2) << 38;
+            TEST_ASSERT_EQUAL_UINT64(expected, key.bits);
+            const uint32_t zero_payload[6] = {0};
+            TEST_ASSERT_EQUAL_UINT32_ARRAY(zero_payload, key.float_bits, 6);
         }
     }
 }
@@ -1347,7 +1368,7 @@ void test_gfx_pipeline_key_asserts_out_of_range_lanes(void) {
     d.cull_mode = 3;
     EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
     d = key_base_desc(3);
-    const int bad_depth_func = NT_DEPTH_ALWAYS + 1; /* memcpy: an enum cast of a literal trips the analyzer */
+    const int bad_depth_func = NT_DEPTH_GEQUAL + 1; /* memcpy: an enum cast of a literal trips the analyzer */
     memcpy(&d.depth_func, &bad_depth_func, sizeof(d.depth_func));
     EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
     d = key_base_desc(3);
@@ -1985,6 +2006,54 @@ void test_activate_texture_valid_blob(void) {
     uint32_t handle = nt_gfx_activate_texture(blob, blob_size);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_gfx_deactivate_texture(handle);
+}
+
+void test_activate_srgba8_preserves_raw_storage_and_sampler_defaults(void) {
+    uint8_t blob[sizeof(NtTextureAssetHeader) + 16] = {0};
+    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
+    *hdr = (NtTextureAssetHeader){
+        .magic = NT_TEXTURE_MAGIC,
+        .version = NT_TEXTURE_VERSION,
+        .format = NT_TEXTURE_FORMAT_SRGBA8,
+        .width = 2,
+        .height = 2,
+        .mip_count = 1,
+        .compression = NT_TEXTURE_COMPRESSION_RAW,
+        .default_min_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
+        .default_mag_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
+        .default_wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
+        .data_size = 16,
+    };
+    /* Core normalized storage requires none of the optional float/compressed caps. */
+    nt_texture_t tex = {.id = nt_gfx_activate_texture(blob, sizeof(blob))};
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGBA8, nt_gfx_texture_format(tex));
+    nt_texture_desc_t seen = nt_gfx_fake_last_texture_desc();
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGBA8, seen.format);
+    TEST_ASSERT_EQUAL_PTR(blob + sizeof(*hdr), seen.data);
+    TEST_ASSERT_EQUAL_INT(NT_FILTER_LINEAR, seen.min_filter);
+    TEST_ASSERT_EQUAL_INT(NT_FILTER_LINEAR, seen.mag_filter);
+    TEST_ASSERT_EQUAL_INT(NT_WRAP_REPEAT, seen.wrap_u);
+    nt_gfx_update_texture(tex, 0, 0, 2, 2, blob + sizeof(*hdr));
+    EXPECT_ASSERT(nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = tex}));
+
+    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
+    begin_texture_binding_test_pass(program);
+    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = tex, .sampler = NT_SAMPLER_DEFAULT};
+    apply_texture_set(&binding, 1);
+    binding.sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR, .mag_filter = NT_FILTER_LINEAR});
+    apply_texture_set(&binding, 1);
+    binding.sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
+    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
+    end_texture_binding_test_pass();
+    nt_gfx_destroy_texture(tex);
+
+    const uint32_t creates = nt_gfx_fake_texture_create_count();
+    hdr->data_size = 15;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, sizeof(blob)));
+    hdr->data_size = 16;
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, sizeof(blob) - 1));
+    TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
 }
 
 /* ---- Activator: texture bad magic ---- */
@@ -3858,6 +3927,7 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_constant_color);
     RUN_TEST(test_gfx_pipeline_key_neighbouring_programs_never_alias);
+    RUN_TEST(test_gfx_pipeline_key_preserves_depth_lane_values);
     RUN_TEST(test_gfx_pipeline_key_canonicalizes_disabled_blend_and_offset);
     RUN_TEST(test_gfx_pipeline_key_ignores_label_and_splits_on_float_payloads);
     RUN_TEST(test_gfx_pipeline_key_asserts_out_of_range_lanes);
@@ -3891,6 +3961,7 @@ int main(void) {
     RUN_TEST(test_gfx_texture_pool_full_asserts);
     /* Activator tests */
     RUN_TEST(test_activate_texture_valid_blob);
+    RUN_TEST(test_activate_srgba8_preserves_raw_storage_and_sampler_defaults);
     RUN_TEST(test_activate_texture_bad_magic);
     RUN_TEST(test_activate_texture_too_small);
     RUN_TEST(test_activate_mesh_valid_blob);

@@ -427,6 +427,10 @@ void test_header_boundaries_reject_without_touching_the_pool(void) {
     expect_rejected(&alpha, alpha.size, "compressed storage format in the header");
     *fixture_header(&alpha) = good;
 
+    fixture_header(&alpha)->format = NT_TEXTURE_FORMAT_SRGBA8;
+    expect_rejected(&alpha, alpha.size, "sRGB Basis storage is unsupported");
+    *fixture_header(&alpha) = good;
+
     fixture_header(&alpha)->compression = NT_TEXTURE_COMPRESSION_BASIS + 1;
     expect_rejected(&alpha, alpha.size, "unknown compression");
     *fixture_header(&alpha) = good;

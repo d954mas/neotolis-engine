@@ -228,6 +228,90 @@ static nt_vertex_input_t make_test_vertex_input(const nt_vertex_layout_t *layout
 /* gl_VertexID draws still need a bound vertex input: the empty one. */
 static void bind_empty_vertex_input(void) { nt_gfx_bind_vertex_input(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0})); }
 
+static void test_all_public_depth_functions_reach_gl(void) {
+    static const struct {
+        nt_depth_func_t function;
+        GLenum expected;
+    } cases[] = {
+        {NT_DEPTH_LESS, GL_LESS}, {NT_DEPTH_LEQUAL, GL_LEQUAL}, {NT_DEPTH_ALWAYS, GL_ALWAYS}, {NT_DEPTH_GEQUAL, GL_GEQUAL}, {NT_DEPTH_LESS, GL_LESS},
+    };
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_depth_vs});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_depth_fs});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 0.0F});
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_func = cases[i].function});
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+        nt_gfx_bind_pipeline(pipeline);
+        nt_gfx_frame_execute();
+        GLint actual = 0;
+        glGetIntegerv(GL_DEPTH_FUNC, &actual);
+        TEST_ASSERT_EQUAL_INT(cases[i].expected, actual);
+        TEST_ASSERT_TRUE(glIsEnabled(GL_DEPTH_TEST));
+        TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
+    }
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+}
+
+static void test_gequal_depth_accepts_equal_and_nearer_fragments(void) {
+    static const char *vertex_source = "uniform float u_depth;\n"
+                                       "void main() {\n"
+                                       "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+                                       "    gl_Position = vec4(p * 2.0 - 1.0, u_depth, 1.0);\n"
+                                       "}\n";
+    static const char *fragment_source = "precision highp float;\n"
+                                         "uniform vec4 u_color;\n"
+                                         "out vec4 frag_color;\n"
+                                         "void main() { frag_color = u_color; }\n";
+    /* Clip depths map to window depths 0, 0.5, 0.5, 0.25, 0.75. */
+    static const struct {
+        float clip_depth;
+        float color[4];
+        uint8_t expected[4];
+    } draws[] = {
+        {-1.0F, {1, 0, 0, 1}, {255, 0, 0, 255}}, {0.0F, {0, 1, 0, 1}, {0, 255, 0, 255}},     {0.0F, {0, 0, 1, 1}, {0, 0, 255, 255}},
+        {-0.5F, {1, 0, 0, 1}, {0, 0, 255, 255}}, {0.5F, {1, 1, 1, 1}, {255, 255, 255, 255}},
+    };
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = vertex_source});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = fragment_source});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
+    nt_pipeline_t pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program, .depth_test = true, .depth_write = true, .depth_func = NT_DEPTH_GEQUAL});
+    nt_vertex_input_t input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
+    test_target_t target = make_test_target(4, 4, NT_TEXTURE_FORMAT_RGBA8, NT_TEXTURE_FORMAT_DEPTH32F);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pipeline.id);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.target = target.target, .clear_color = {0, 0, 0, 1}, .clear_depth = 0.0F});
+    nt_gfx_bind_pipeline(pipeline);
+    nt_gfx_bind_vertex_input(input);
+    nt_gfx_apply_texture_bindings(NULL, 0);
+    for (size_t i = 0; i < sizeof(draws) / sizeof(draws[0]); i++) {
+        nt_gfx_set_uniform_float(nt_hash32_str("u_depth"), draws[i].clip_depth);
+        nt_gfx_set_uniform_vec4(nt_hash32_str("u_color"), draws[i].color);
+        nt_gfx_draw(0, 3);
+        uint8_t pixels[4U * 4U * 4U] = {0};
+        nt_test_gl_read_in_pass(0, 0, 4, 4, pixels);
+        assert_rgba(pixels, 16, draws[i].expected[0], draws[i].expected[1], draws[i].expected[2], draws[i].expected[3]);
+    }
+    float depths[16] = {0};
+    glReadPixels(0, 0, 4, 4, GL_DEPTH_COMPONENT, GL_FLOAT, depths);
+    for (uint32_t i = 0; i < 16; i++) {
+        TEST_ASSERT_EQUAL_UINT32(750, (uint32_t)(depths[i] * 1000.0F));
+    }
+    TEST_ASSERT_EQUAL_HEX32(GL_NO_ERROR, glGetError());
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_destroy_vertex_input(input);
+    nt_gfx_destroy_program(program);
+    nt_gfx_destroy_shader(fs);
+    nt_gfx_destroy_shader(vs);
+    destroy_test_target(&target);
+}
+
 static void test_custom_blend_state_reaches_gl_unchanged(void) {
     nt_blend_state_t blend = nt_blend_alpha();
     blend.constant_color[0] = 0.2F;
@@ -1785,6 +1869,8 @@ int main(void) {
     RUN_TEST(test_pass_clear_covers_attachment_and_starts_with_scissor_off);
     RUN_TEST(test_render_target_recreate_at_new_size_without_spare_slots);
     RUN_TEST(test_depth_texture_uses_explicit_format);
+    RUN_TEST(test_all_public_depth_functions_reach_gl);
+    RUN_TEST(test_gequal_depth_accepts_equal_and_nearer_fragments);
     RUN_TEST(test_custom_blend_state_reaches_gl_unchanged);
     RUN_TEST(test_all_public_blend_enums_reach_gl);
     RUN_TEST(test_multiply_blend_multiplies_rgb_and_preserves_destination_alpha);

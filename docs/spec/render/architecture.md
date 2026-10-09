@@ -320,6 +320,14 @@ pipelines, and a context loss frees every pipeline slot; renderers remove
 dead cache records during insertion after a miss or when resetting their
 caches.
 
+**Depth comparison.** `nt_pipeline_desc_t.depth_func` selects `NT_DEPTH_LESS`
+(zero/default), `NT_DEPTH_LEQUAL`, `NT_DEPTH_ALWAYS`, or `NT_DEPTH_GEQUAL`.
+The shared native GL/WebGL 2 backend uses the corresponding GL comparison
+unchanged. Reversed depth is game-owned: use `GEQUAL` with a projection that
+maps nearer surfaces to larger depth values and a pass `clear_depth` of 0.
+Selecting the comparison does not change the projection, clear value, clip
+range, or depth-sampling comparison state.
+
 **Cache identity.** Renderers key their pipeline caches on the exact
 identity of the descriptor, `nt_gfx_pipeline_key_t` from
 `nt_gfx_pipeline_key(desc)`: every enum and bool field packed bit-exact into
@@ -331,7 +339,9 @@ involved, so identity does not rest on a collision argument. Two
 canonicalisations apply, both in the packer: a disabled blend packs as opaque
 (factors, ops and constant ignored) and a disabled polygon offset packs its
 factor/units as zero; nothing else is normalised, so depth lanes are exact even
-when depth test is off. Lane inputs are range-asserted: material-owned lanes at
+when depth test is off. The two-bit depth-function lane retains `LESS=0`,
+`LEQUAL=1`, `ALWAYS=2`, and `GEQUAL=3`, without changing any other lane.
+Lane inputs are range-asserted: material-owned lanes at
 `nt_material_create` and again in the packer, renderer-owned lanes (`depth_func`,
 polygon offset) in the packer alone — unconditionally, a disabled blend included:
 canonicalisation is about identity, validity has no exceptions. So an
@@ -447,6 +457,13 @@ stages can differ from a single float product by one step per stage. Every
 float-to-byte conversion saturates and rounds half up (NaN gives 0), so an
 opacity fold gives the same alpha on a packed color and on a Clay color with the
 same byte values.
+
+Texture transfer functions are explicit storage choices. `SRGBA8` samples
+sRGB-encoded RGB as linear light, with decode before filtering and linear alpha,
+on both native GL and WebGL 2. `RGBA8` continues to sample its byte values
+without a transfer conversion. This adds no implicit conversion of vertex tints,
+material uniforms or framebuffer output; lighting and output encoding remain
+game shader policy. `SRGBA8` is sampled storage, not a supported color attachment.
 
 Every mesh and skinned mesh instance carries the entity's drawable color
 (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs

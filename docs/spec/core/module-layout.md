@@ -153,7 +153,7 @@ call; their dimensions must match. The helper owns its shader stages, program,
 pipeline, and fullscreen primitive, but it does not allocate, destroy, or retain
 caller handles.
 The source uses any `sampler2D` color format — the uncompressed set (`R8`,
-`RG8`, `RGB8`, `RGBA8`, `RGBA16F`, `RGBA32F`) and the block-compressed set
+`RG8`, `RGB8`, `RGBA8`, `SRGBA8`, `RGBA16F`, `RGBA32F`) and the block-compressed set
 (`ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA`, `ASTC_4x4_RGBA`); integer and depth
 formats are invalid. `temp` and
 `dest` are distinct valid `RGBA8` targets matching the source size. The helper

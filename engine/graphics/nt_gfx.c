@@ -2516,6 +2516,11 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
+    if (hdr2->format == NT_TEXTURE_FORMAT_SRGBA8) {
+        NT_LOG_ERROR("activate_texture: SRGBA8 requires RAW storage; sRGB Basis targets are not supported");
+        return 0;
+    }
+
     /* Lazy transcoder init */
     if (!s_transcoder_initialized) {
         nt_basisu_transcoder_global_init();

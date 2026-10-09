@@ -286,6 +286,7 @@ typedef enum {
     NT_DEPTH_LESS = 0,
     NT_DEPTH_LEQUAL,
     NT_DEPTH_ALWAYS,
+    NT_DEPTH_GEQUAL, /* reversed depth: the game supplies its projection and clears depth to 0 */
 } nt_depth_func_t;
 
 typedef enum {
@@ -403,7 +404,7 @@ typedef struct {
  * truncate onto a valid neighbour and skip make_pipeline's validation on a cache hit. */
 _Static_assert(NT_BLEND_SRC_ALPHA_SATURATE < 16, "blend factor lane is 4 bits");
 _Static_assert(NT_BLEND_OP_MAX < 8, "blend op lane is 3 bits");
-_Static_assert(NT_DEPTH_ALWAYS < 4, "depth func lane is 2 bits");
+_Static_assert(NT_DEPTH_GEQUAL < 4, "depth func lane is 2 bits");
 /* Partial tripwire for the packer: catches a desc field that moves a later offset or the
  * size. A field that fits an existing padding hole moves nothing -- review by hand. */
 _Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipeline_desc_t, cull_mode) == 12 && offsetof(nt_pipeline_desc_t, blend) == 16 &&
@@ -417,7 +418,7 @@ _Static_assert(offsetof(nt_pipeline_desc_t, depth_func) == 8 && offsetof(nt_pipe
 static inline nt_gfx_pipeline_key_t nt_gfx_pipeline_key(const nt_pipeline_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     NT_ASSERT(desc->cull_mode <= 2 && "cull_mode out of range");
-    NT_ASSERT((uint32_t)desc->depth_func <= NT_DEPTH_ALWAYS && "depth_func out of range");
+    NT_ASSERT((uint32_t)desc->depth_func <= NT_DEPTH_GEQUAL && "depth_func out of range");
     NT_ASSERT(desc->blend.src_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.dst_rgb <= NT_BLEND_SRC_ALPHA_SATURATE && desc->blend.src_alpha <= NT_BLEND_SRC_ALPHA_SATURATE &&
               desc->blend.dst_alpha <= NT_BLEND_SRC_ALPHA_SATURATE && "blend factor out of range");
     NT_ASSERT(desc->blend.op_rgb <= NT_BLEND_OP_MAX && desc->blend.op_alpha <= NT_BLEND_OP_MAX && "blend op out of range");

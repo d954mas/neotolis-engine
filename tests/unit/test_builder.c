@@ -420,6 +420,58 @@ void test_texture_round_trip(void) {
     (void)fclose(f);
 }
 
+void test_texture_srgba8_encoding_preserves_source_bytes(void) {
+    static const uint8_t pixels[8] = {12, 128, 255, 64, 230, 42, 7, 192};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_SRGBA8;
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGBA8, nt_builder_assert_texture_opts(&opts));
+    uint8_t *encoded = NULL;
+    uint32_t size = 0;
+    nt_builder_encode_texture_to_buf(pixels, 2, 1, &opts, 1, &encoded, &size);
+    TEST_ASSERT_NOT_NULL(encoded);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(NtTextureAssetHeader) + sizeof(pixels), size);
+    const NtTextureAssetHeader *hdr = (const NtTextureAssetHeader *)encoded;
+    TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, hdr->magic);
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION, hdr->version);
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_SRGBA8, hdr->format);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, hdr->compression);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_GEN_MIPMAPS, hdr->flags);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(pixels), hdr->data_size);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(pixels, encoded + sizeof(*hdr), sizeof(pixels));
+    free(encoded);
+}
+
+void test_texture_srgba8_rejects_basis_and_premultiplication(void) {
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_SRGBA8;
+    opts.compress = nt_tex_compress_etc1s_default();
+    EXPECT_BUILD_ASSERT(NULL, (void)nt_builder_assert_texture_opts(&opts));
+    opts.compress = nt_tex_compress_uastc_default();
+    EXPECT_BUILD_ASSERT(NULL, (void)nt_builder_assert_texture_opts(&opts));
+    opts.compress = (nt_basisu_encode_opts_t){0};
+    opts.premultiplied = true;
+    EXPECT_BUILD_ASSERT(NULL, (void)nt_builder_assert_texture_opts(&opts));
+}
+
+void test_texture_srgba8_resize_filters_in_linear_light(void) {
+    static const uint8_t pixels[8] = {0, 0, 0, 128, 255, 255, 255, 128};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.format = NT_TEXTURE_FORMAT_SRGBA8;
+    opts.max_size = 1;
+    uint8_t *resized = NULL;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    TEST_ASSERT_EQUAL_INT(NT_BUILD_OK, nt_builder_decode_texture_raw(pixels, 2, 1, &opts, &resized, &width, &height));
+    TEST_ASSERT_NOT_NULL(resized);
+    TEST_ASSERT_EQUAL_UINT32(1, width);
+    TEST_ASSERT_EQUAL_UINT32(1, height);
+    for (uint32_t i = 0; i < 3; i++) {
+        TEST_ASSERT_UINT8_WITHIN(1, 188, resized[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT8(128, resized[3]);
+    free(resized);
+}
+
 void test_texture_invalid_compress_mode_asserts_at_add(void) {
     const char *png_path = TMP_DIR "/invalid_compress_mode.png";
     write_test_png(png_path);
@@ -9421,6 +9473,9 @@ int main(void) {
     /* Round-trip tests */
     RUN_TEST(test_shader_round_trip);
     RUN_TEST(test_texture_round_trip);
+    RUN_TEST(test_texture_srgba8_encoding_preserves_source_bytes);
+    RUN_TEST(test_texture_srgba8_rejects_basis_and_premultiplication);
+    RUN_TEST(test_texture_srgba8_resize_filters_in_linear_light);
     RUN_TEST(test_texture_invalid_compress_mode_asserts_at_add);
     RUN_TEST(test_texture_compress_rdo_boundaries);
     RUN_TEST(test_texture_option_aliases_are_canonicalized);

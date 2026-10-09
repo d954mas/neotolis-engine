@@ -1,0 +1,52 @@
+{
+  "sources": [
+    {
+      "file": "App/AsteroidsApp.cpp",
+      "repository": "MethanePowered/MethaneAsteroids",
+      "revision": "16a5751e835dd0776d976e51438604dc8de27d16",
+      "source_path": "App/AsteroidsApp.cpp",
+      "git_blob_sha1": "51bf4197e96749427688cc772a8ed7dd00695ede",
+      "source_url": "https://github.com/MethanePowered/MethaneAsteroids/blob/16a5751e835dd0776d976e51438604dc8de27d16/App/AsteroidsApp.cpp"
+    },
+    {
+      "file": "MethaneKit/Color.hpp",
+      "repository": "MethanePowered/MethaneKit",
+      "revision": "04a95fb78334252594427c69737839518e53c4a0",
+      "source_path": "Modules/Graphics/Types/Include/Methane/Graphics/Color.hpp",
+      "git_blob_sha1": "0ddd3ee572b525b1d0af1b38c61b9302cf5878f4",
+      "source_url": "https://github.com/MethanePowered/MethaneKit/blob/04a95fb78334252594427c69737839518e53c4a0/Modules/Graphics/Types/Include/Methane/Graphics/Color.hpp"
+    },
+    {
+      "file": "Modules/Simulation/Asteroid.cpp",
+      "repository": "MethanePowered/MethaneAsteroids",
+      "revision": "16a5751e835dd0776d976e51438604dc8de27d16",
+      "source_path": "Modules/Simulation/Asteroid.cpp",
+      "git_blob_sha1": "776fa22ac2f023a20c68a282544d101450bcf838",
+      "source_url": "https://github.com/MethanePowered/MethaneAsteroids/blob/16a5751e835dd0776d976e51438604dc8de27d16/Modules/Simulation/Asteroid.cpp"
+    },
+    {
+      "file": "Modules/Simulation/Asteroid.h",
+      "repository": "MethanePowered/MethaneAsteroids",
+      "revision": "16a5751e835dd0776d976e51438604dc8de27d16",
+      "source_path": "Modules/Simulation/Asteroid.h",
+      "git_blob_sha1": "b08028ce7ed6b1fa058c520123bd8738529b2528",
+      "source_url": "https://github.com/MethanePowered/MethaneAsteroids/blob/16a5751e835dd0776d976e51438604dc8de27d16/Modules/Simulation/Asteroid.h"
+    },
+    {
+      "file": "Modules/Simulation/AsteroidsArray.cpp",
+      "repository": "MethanePowered/MethaneAsteroids",
+      "revision": "16a5751e835dd0776d976e51438604dc8de27d16",
+      "source_path": "Modules/Simulation/AsteroidsArray.cpp",
+      "git_blob_sha1": "d3fa1679116931ffd549abae7234da12c6e183e6",
+      "source_url": "https://github.com/MethanePowered/MethaneAsteroids/blob/16a5751e835dd0776d976e51438604dc8de27d16/Modules/Simulation/AsteroidsArray.cpp"
+    },
+    {
+      "file": "Modules/Simulation/AsteroidsArray.h",
+      "repository": "MethanePowered/MethaneAsteroids",
+      "revision": "16a5751e835dd0776d976e51438604dc8de27d16",
+      "source_path": "Modules/Simulation/AsteroidsArray.h",
+      "git_blob_sha1": "2ee1392e5141bfd66f5a7fedd703660e5655c6c9",
+      "source_url": "https://github.com/MethanePowered/MethaneAsteroids/blob/16a5751e835dd0776d976e51438604dc8de27d16/Modules/Simulation/AsteroidsArray.h"
+    }
+  ]
+}

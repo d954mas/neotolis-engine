@@ -12,6 +12,12 @@ packed offline so the runtime carries no parsers. The full statement with its
 engine/game ownership boundary is
 [docs/spec/core/principles.md](docs/spec/core/principles.md).
 
+## Examples
+
+[Asteroids](examples/asteroids/README.md): a source-derived Methane Asteroids baseline with
+1,000–50,000 objects, original mesh/texture variation, four LODs and one draw per asteroid.
+[Methane reference and asset credits](examples/asteroids/CREDITS.md).
+
 ## Prerequisites
 
 - **CMake** 3.25+
