@@ -41,9 +41,11 @@ instances (about 9 ms for 50,000).
   one noise evaluation and keep the same silhouette. All shapes live in one
   vertex/index buffer (snorm16 positions, snorm8 normals, 12 bytes per vertex).
 - **Textures (GPU):** one pass renders all 50 noise textures as tiles of an RGBA8
-  atlas (16-bit fBm value in R and G). After the frame the tiles are read back,
-  normalized to their own range and uploaded as 256 × 256 R8 with mipmaps, which
-  a render target cannot hold. The rock shader samples them triplanar.
+  atlas (16-bit fBm value in R and G). After the frame the atlas is read back,
+  each 256 × 256 tile is normalized to its own range, and the result is uploaded
+  as one 2048 × 2048 R8 atlas with mipmaps, which a render target cannot hold.
+  Tiles are power-of-two aligned, so mip reduction never mixes tiles; the rock
+  shader clamps half a mip texel inside its tile and samples it triplanar.
 - **Instances:** PCG32 from seed 1123, using the original distributions.
 
 Generation blocks one frame after a notice is shown; Statistics reports its time.
@@ -62,12 +64,38 @@ all Basis ETC1S (about 3.4 MiB).
 
 ## Rendering
 
-Every asteroid is updated and submitted each frame, with no culling. Draw items
-are radix-sorted by (texture, LOD, shape); each run of equal keys becomes one
-indexed instanced draw, and the noise texture is bound only on a texture change.
-Instances go to their own frame vertex stream. With 50 textures × 1,000 shapes ×
-4 LODs, most runs hold one asteroid, so complexity 9 issues about 40,000 draws:
-the scene is a draw-call benchmark.
+Every asteroid is updated and submitted each frame, with no culling. The noise
+texture is an atlas tile chosen per instance, so draw items are radix-sorted by
+(LOD, shape) only; each run of equal keys becomes one indexed instanced draw.
+Instances go to their own frame vertex stream.
+
+WebGL2 has no base instance, so an instanced draw is located by pointing the
+instance attributes at its run's offset. Each key therefore has its own vertex
+input (as a game has one per mesh) over the shared rock buffers, and a fixed
+slot range of the stream with a quarter spare plus one slot: an asteroid that
+crosses an LOD threshold changes one count without moving the other runs, so
+each vertex input keeps its pointers from frame to frame. The layout is rebuilt
+only when a key outgrows its range, about once per 60–120 frames at complexity 9.
+
+The per-frame update builds each instance's rows in closed form (spin, scale,
+ring translation and the orbit about +Y), picks the LOD with three distance
+compares instead of logarithms, and computes the spin and orbit sin/cos four
+asteroids at a time on SIMD builds.
+
+Measured at complexity 9 (50,000 asteroids) on one desktop PC with Intel UHD
+and RTX 4080 Laptop GPUs (which GPU each run used was not checked), ABBA runs:
+
+| | Start | Now |
+|---|---:|---:|
+| Draws / GL calls per frame | 40,000 / 242,000 | 3,000 / 6,100 |
+| Native Release frame (CPU) | 11–14 ms | about 6 ms |
+| Chrome render submission (SIMD build) | not measured | 1.3–2 ms |
+| Chrome CPU per frame (SIMD build) | about 26 ms (single vertex input) | 3.6–5 ms |
+
+Per-key vertex inputs trade the attribute re-pointing for a vertex array switch
+per draw. In Chrome that cut submission from 22–25 ms to under 2 ms; natively
+the switch costs more than re-pointing (submission 0.8 → 4.7 ms). WebGL is the
+target, so the demo keeps per-key inputs. Phones are unmeasured.
 
 ## Build and run
 

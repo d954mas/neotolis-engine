@@ -20,6 +20,7 @@ out vec3 v_normal;
 out vec3 v_albedo;
 out vec3 v_uvw;
 out vec3 v_weights;
+flat out vec2 v_tile;
 void main() {
     vec4 position = vec4(a_position, 1.0);
     v_world = vec3(dot(a_world_row0, position), dot(a_world_row1, position), dot(a_world_row2, position));
@@ -29,6 +30,8 @@ void main() {
     v_uvw = a_position / 0.9 * 0.5 + 0.5;
     v_weights = clamp((abs(normalize(a_position)) - 0.2) * 7.0, 0.0, 1.0);
     v_weights /= v_weights.x + v_weights.y + v_weights.z;
+    /* a_deep.w is the noise texture index: a tile of an 8-column atlas. */
+    v_tile = vec2(mod(a_deep.w, 8.0), floor(a_deep.w / 8.0)) * 256.0;
     gl_Position = view_proj * vec4(v_world, 1.0);
     gl_Position.z = 2.0 * gl_Position.z - gl_Position.w;
 }

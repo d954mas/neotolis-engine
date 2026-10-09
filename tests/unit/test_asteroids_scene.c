@@ -124,6 +124,24 @@ static void test_rock_lods_share_positions_and_have_unit_normals(void) {
     }
 }
 
+#ifdef AST_SIMD
+static void test_sincos_x4_matches_libm_over_session_angles(void) {
+    ast_rng_t rng = rng_make(AST_SEED, 31);
+    float worst = 0.0F;
+    for (uint32_t i = 0; i < 50000; i++) {
+        const float scale = i < 25000 ? 10.0F : 100000.0F;
+        const ast_f4 x = {rng_uniform(&rng, -scale, scale), rng_uniform(&rng, -scale, scale), rng_uniform(&rng, -1.0F, 1.0F), (float)i * 0.25F};
+        ast_f4 sin_v;
+        ast_f4 cos_v;
+        sincos_x4(x, &sin_v, &cos_v);
+        for (uint32_t k = 0; k < 4; k++) {
+            worst = fmaxf(worst, fmaxf(fabsf(sin_v[k] - sinf(x[k])), fabsf(cos_v[k] - cosf(x[k]))));
+        }
+    }
+    TEST_ASSERT_TRUE(worst < 2e-5F);
+}
+#endif
+
 /* The 4-wide path and the scalar tail/fallback compute the same fBm. */
 static void test_rock_noise_matches_scalar_fbm(void) {
     float noise[AST_FINE_VERTICES];
@@ -157,9 +175,34 @@ static void test_instances_are_seeded_and_within_their_level(void) {
     }
 }
 
-/* Row-vector convention: world = spin * scale_translate * orbit. With no spin
- * and a quarter orbit the ring translation (r, h, 0) rotates to (0, h, r). */
-static void test_world_matrix_spins_in_place_and_orbits_the_planet(void) {
+/* The scalar sin/cos path of the per-frame update, for one asteroid. */
+static void asteroid_world_rows(float rows[12], const asteroid_t *asteroid, double elapsed_seconds) {
+    const float elapsed_radians = (float)(AST_PI * elapsed_seconds);
+    const float spin = asteroid_spin_angle(asteroid, elapsed_radians);
+    const float orbit = asteroid_orbit_angle(asteroid, elapsed_radians);
+    const float sincos[4] = {sinf(spin), cosf(spin), sinf(orbit), cosf(orbit)};
+    asteroid_world_rows_sincos(rows, asteroid, sincos);
+}
+
+/* Independent oracle: the full row-vector product spin * scale_translate * orbit. */
+static void reference_world(float out[16], const asteroid_t *asteroid, double elapsed_seconds) {
+    const float elapsed_radians = (float)(AST_PI * elapsed_seconds);
+    float spin[16];
+    float orbit[16];
+    float spin_scale[16];
+    matrix_rotation_axis(spin, asteroid->spin_axis, asteroid->spin_angle + (asteroid->spin_speed * elapsed_radians));
+    matrix_rotation_axis(orbit, (float[3]){0, 1, 0}, asteroid->orbit_angle - (asteroid->orbit_speed * elapsed_radians));
+    matrix_multiply(spin_scale, spin, asteroid->scale_translate);
+    matrix_multiply(out, spin_scale, orbit);
+}
+
+static uint32_t reference_lod(float scale, float distance, float min_screen_size) {
+    const float subdivision = roundf(log2f(scale / sqrtf(distance)) - log2f(min_screen_size));
+    return (uint32_t)fminf(3.0F, fmaxf(0.0F, subdivision));
+}
+
+/* With no spin and a quarter orbit the ring translation (r, h, 0) rotates to (0, h, r). */
+static void test_world_rows_spin_in_place_and_orbit_the_planet(void) {
     asteroid_t asteroid = {.spin_axis = {0, 1, 0}, .orbit_angle = -(float)AST_PI / 2.0F};
     asteroid.scale_translate[0] = 2;
     asteroid.scale_translate[5] = 3;
@@ -167,12 +210,51 @@ static void test_world_matrix_spins_in_place_and_orbits_the_planet(void) {
     asteroid.scale_translate[12] = 100;
     asteroid.scale_translate[13] = 7;
     asteroid.scale_translate[15] = 1;
-    float world[16];
-    asteroid_world_matrix(world, &asteroid, 0.0);
-    TEST_ASSERT_TRUE(fabsf((world[12]) - (0.0F)) <= 0.001F);
-    TEST_ASSERT_TRUE(fabsf((world[13]) - (7.0F)) <= 0.001F);
-    TEST_ASSERT_TRUE(fabsf((fabsf(world[14])) - (100.0F)) <= 0.001F);
-    TEST_ASSERT_TRUE(fabsf((world[5]) - (3.0F)) <= 0.001F);
+    float rows[12];
+    asteroid_world_rows(rows, &asteroid, 0.0);
+    TEST_ASSERT_TRUE(fabsf(rows[3]) <= 0.001F);
+    TEST_ASSERT_TRUE(fabsf(rows[7] - 7.0F) <= 0.001F);
+    TEST_ASSERT_TRUE(fabsf(fabsf(rows[11]) - 100.0F) <= 0.001F);
+    TEST_ASSERT_TRUE(fabsf(rows[5] - 3.0F) <= 0.001F);
+}
+
+/* The closed-form rows match the full matrix product for real generated asteroids. */
+static void test_world_rows_match_the_full_matrix_product(void) {
+    generate_instances(&s_complexities[9]);
+    for (uint32_t i = 0; i < s_complexities[9].instances; i += 97U) {
+        const double elapsed = (double)i * 0.013;
+        float world[16];
+        float rows[12];
+        reference_world(world, &s_asteroids[i], elapsed);
+        asteroid_world_rows(rows, &s_asteroids[i], elapsed);
+        for (uint32_t row = 0; row < 3; row++) {
+            for (uint32_t col = 0; col < 4; col++) {
+                const float expected = world[(col * 4U) + row];
+                TEST_ASSERT_TRUE(fabsf(rows[(row * 4U) + col] - expected) <= 0.0001F * fmaxf(1.0F, fabsf(expected)));
+            }
+        }
+    }
+}
+
+/* The compare form agrees with the source's log form away from rounding ties. */
+static void test_lod_compares_match_the_log_formula(void) {
+    ast_rng_t rng = rng_make(AST_SEED, 77);
+    uint32_t seen[AST_SUBDIVISIONS] = {0};
+    for (uint32_t i = 0; i < 20000; i++) {
+        const float scale = rng_uniform(&rng, 0.1F, 10.0F);
+        const float distance = rng_uniform(&rng, 1.0F, 500.0F);
+        const float min_screen = rng_uniform(&rng, 0.001F, 0.5F);
+        const float exact = log2f(scale / sqrtf(distance)) - log2f(min_screen);
+        if (fabsf(exact - floorf(exact) - 0.5F) < 0.001F) {
+            continue;
+        }
+        const uint32_t lod = asteroid_lod(scale, distance, min_screen);
+        TEST_ASSERT_EQUAL_UINT32(reference_lod(scale, distance, min_screen), lod);
+        seen[lod]++;
+    }
+    for (uint32_t lod = 0; lod < AST_SUBDIVISIONS; lod++) {
+        TEST_ASSERT_GREATER_THAN_UINT32(0, seen[lod]);
+    }
 }
 
 static void test_instance_attributes_transpose_source_matrix_once(void) {
@@ -207,11 +289,9 @@ static void test_original_complexity_counts_are_not_batch_counts(void) {
     }
 }
 
-static void test_lod_clamps_and_subdivision_count_match_source_policy(void) {
-    TEST_ASSERT_EQUAL_UINT32(0, asteroid_lod_index(0.01F, 10000, 0.06F, 4));
-    TEST_ASSERT_EQUAL_UINT32(3, asteroid_lod_index(100, 1, 0.06F, 4));
-    TEST_ASSERT_EQUAL_UINT32(1, asteroid_lod_index(100, 1, 0.06F, 2));
-    TEST_ASSERT_EQUAL_UINT32(0, asteroid_lod_index(100, 1, 0.06F, 1));
+static void test_lod_clamps_to_the_four_subdivisions(void) {
+    TEST_ASSERT_EQUAL_UINT32(0, asteroid_lod(0.01F, 10000, 0.06F));
+    TEST_ASSERT_EQUAL_UINT32(3, asteroid_lod(100, 1, 0.06F));
 }
 
 /* Pinned ActionCamera.cpp calls Move(current_world - pressed_world), and
@@ -641,6 +721,7 @@ static void test_memory_labels_distinguish_pending_unavailable_and_diagnostics(v
 static void test_content_is_generated_once_and_levels_reselect_instances(void) {
     const uint32_t old_level = s_level;
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
+    gfx.max_vertex_inputs = AST_KEY_COUNT + 32U;
     nt_gfx_init(&gfx);
     nt_gfx_fake_reset();
     const nt_program_t noise_program = nt_gfx_fake_make_program(NULL, 0);
@@ -652,11 +733,10 @@ static void test_content_is_generated_once_and_levels_reselect_instances(void) {
     TEST_ASSERT_TRUE(s_generated);
     TEST_ASSERT_FALSE(s_noise_pending);
     TEST_ASSERT_FALSE(nt_gfx_render_target_valid(s_noise_atlas));
-    /* 50 R8 textures plus the transient atlas. */
-    TEST_ASSERT_EQUAL_UINT32(AST_MAX_TEXTURES + 1U, nt_gfx_fake_texture_create_count());
-    for (uint32_t t = 0; t < AST_MAX_TEXTURES; t++) {
-        TEST_ASSERT_TRUE(nt_gfx_texture_ready(s_noise[t]));
-    }
+    /* The R8 atlas plus the transient render target. */
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_create_count());
+    TEST_ASSERT_TRUE(nt_gfx_texture_ready(s_noise));
+    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_R8, nt_gfx_texture_format(s_noise));
     uint32_t vertices = 0;
     uint32_t indices = 0;
     for (uint32_t lod = 0; lod < AST_SUBDIVISIONS; lod++) {
@@ -675,10 +755,10 @@ static void test_content_is_generated_once_and_levels_reselect_instances(void) {
     TEST_ASSERT_EQUAL_UINT32(2, s_level);
     TEST_ASSERT_EQUAL_INT(2, s_ui_staged_level);
     TEST_ASSERT_EQUAL_UINT32(rocks.id, s_rocks.vbo.id);
-    TEST_ASSERT_EQUAL_UINT32(AST_MAX_TEXTURES + 1U, nt_gfx_fake_texture_create_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_create_count());
     drop_generated();
     TEST_ASSERT_FALSE(s_generated);
-    TEST_ASSERT_EQUAL_UINT32(0, s_noise[0].id);
+    TEST_ASSERT_EQUAL_UINT32(0, s_noise.id);
     nt_gfx_shutdown();
     nt_gfx_fake_reset();
     s_level = old_level;
@@ -725,11 +805,11 @@ static void test_grouped_sort_preserves_exact_tuple_identity_and_stability(void)
 /* An independent recomputation of one instance: world rows, LOD colors and the sort subset. */
 static uint32_t expected_instance(asteroid_instance_t *expected, const asteroid_t *source, const float deep_palette[AST_SUBDIVISIONS][3], const float shallow_palette[AST_SUBDIVISIONS][3]) {
     float world[16];
-    asteroid_world_matrix(world, source, s_elapsed);
+    reference_world(world, source, s_elapsed);
     const float dx = s_camera.eye[0] - world[12];
     const float dy = s_camera.eye[1] - world[13];
     const float dz = s_camera.eye[2] - world[14];
-    const uint32_t lod = asteroid_lod_index(source->scale, sqrtf((dx * dx) + (dy * dy) + (dz * dz)), s_min_screen_size, AST_SUBDIVISIONS);
+    const uint32_t lod = asteroid_lod(source->scale, sqrtf((dx * dx) + (dy * dy) + (dz * dz)), s_min_screen_size);
     memset(expected, 0, sizeof(*expected));
     for (uint32_t row = 0; row < 3; row++) {
         for (uint32_t column = 0; column < 4; column++) {
@@ -738,6 +818,7 @@ static uint32_t expected_instance(asteroid_instance_t *expected, const asteroid_
     }
     memcpy(expected->deep, s_lod_colors ? deep_palette[lod] : source->deep, sizeof(source->deep));
     memcpy(expected->shallow, s_lod_colors ? shallow_palette[lod] : source->shallow, sizeof(source->shallow));
+    expected->deep[3] = (float)source->texture_index;
     return (lod * AST_MAX_SHAPES) + source->mesh_index;
 }
 
@@ -749,6 +830,31 @@ static void assert_planet_instance(const asteroid_instance_t *actual, double ela
     }
     const float zero_colors[8] = {0};
     TEST_ASSERT_EQUAL_MEMORY(zero_colors, actual->deep, sizeof(zero_colors));
+}
+
+/* Sorted runs are ascending and stable, and each run starts at its key's fixed
+ * slot, fits its capacity and carries exactly the expected instances. */
+static void assert_packed_runs(const asteroid_instance_t *actual, const asteroid_instance_t *expected, const uint32_t *expected_subsets, bool *seen, uint32_t count) {
+    uint64_t previous_key = 0;
+    uint32_t run_index = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        const uint32_t source = s_draw_items[i].source_index;
+        TEST_ASSERT_LESS_THAN_UINT32(count, source);
+        TEST_ASSERT_FALSE(seen[source]);
+        seen[source] = true;
+        const uint32_t key = (uint32_t)s_draw_items[i].sort_key;
+        run_index = (i > 0 && key == previous_key) ? run_index + 1U : 0U;
+        TEST_ASSERT_LESS_THAN_UINT32(s_key_capacity[key], run_index);
+        const asteroid_instance_t *slot = &actual[s_key_slot[key] + run_index];
+        for (uint32_t c = 0; c < 12; c++) {
+            const float want = expected[source].world_rows[c];
+            TEST_ASSERT_TRUE(fabsf(slot->world_rows[c] - want) <= 0.0001F * fmaxf(1.0F, fabsf(want)));
+        }
+        TEST_ASSERT_EQUAL_MEMORY(expected[source].deep, slot->deep, sizeof(slot->deep) + sizeof(slot->shallow));
+        TEST_ASSERT_EQUAL_UINT64(expected_subsets[source], s_draw_items[i].sort_key);
+        TEST_ASSERT_GREATER_OR_EQUAL_UINT64(previous_key, s_draw_items[i].sort_key);
+        previous_key = s_draw_items[i].sort_key;
+    }
 }
 
 static void test_grouped_packing_preserves_every_instance_and_lod(void) {
@@ -771,7 +877,7 @@ static void test_grouped_packing_preserves_every_instance_and_lod(void) {
     TEST_ASSERT_NOT_NULL(seen);
     TEST_ASSERT_NOT_NULL(expected_subsets);
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
-    gfx.frame_capacity[AST_STREAM_INSTANCES] = (AST_MAX + 1U) * (uint32_t)sizeof(*expected);
+    gfx.frame_capacity[AST_STREAM_INSTANCES] = (AST_MAX_SLOTS + 1U) * (uint32_t)sizeof(*expected);
     nt_gfx_init(&gfx);
     s_camera = s_initial_camera;
     const uint32_t levels[] = {0, 1, 9, 0};
@@ -789,23 +895,13 @@ static void test_grouped_packing_preserves_every_instance_and_lod(void) {
             expected_lods[subset / AST_MAX_SHAPES]++;
             expected_triangles += s_lod_indices[subset / AST_MAX_SHAPES] / 3U;
         }
-        const uint32_t bytes = (complexity->instances + 1U) * (uint32_t)sizeof(*expected);
         nt_gfx_begin_frame();
         const uint32_t base = prepare_instances();
+        const uint32_t bytes = (s_slot_count + 1U) * (uint32_t)sizeof(*expected);
         const asteroid_instance_t *actual = (const asteroid_instance_t *)(g_nt_gfx_frame_storage[AST_STREAM_INSTANCES].staging + base);
         memset(seen, 0, AST_MAX * sizeof(*seen));
-        uint64_t previous_key = 0;
-        for (uint32_t i = 0; i < complexity->instances; i++) {
-            const uint32_t source = s_draw_items[i].source_index;
-            TEST_ASSERT_LESS_THAN_UINT32(complexity->instances, source);
-            TEST_ASSERT_FALSE(seen[source]);
-            seen[source] = true;
-            TEST_ASSERT_EQUAL_MEMORY(&expected[source], &actual[i], sizeof(*expected));
-            TEST_ASSERT_EQUAL_UINT64(((uint64_t)s_asteroids[source].texture_index << 32U) | expected_subsets[source], s_draw_items[i].sort_key);
-            TEST_ASSERT_GREATER_OR_EQUAL_UINT64(previous_key, s_draw_items[i].sort_key);
-            previous_key = s_draw_items[i].sort_key;
-        }
-        assert_planet_instance(&actual[complexity->instances], s_elapsed);
+        assert_packed_runs(actual, expected, expected_subsets, seen, complexity->instances);
+        assert_planet_instance(&actual[s_slot_count], s_elapsed);
         TEST_ASSERT_EQUAL_MEMORY(expected_lods, s_lod_counts, sizeof(expected_lods));
         TEST_ASSERT_EQUAL_UINT64(expected_triangles, s_triangles);
         TEST_ASSERT_EQUAL_UINT32(bytes, g_nt_gfx_frame_storage[AST_STREAM_INSTANCES].used);
@@ -823,8 +919,35 @@ static void test_grouped_packing_preserves_every_instance_and_lod(void) {
     memcpy(s_lod_shallow, old_shallow, sizeof(s_lod_shallow));
 }
 
-/* Runs: (texture 0, LOD 0 mesh 1) x2, (texture 0, LOD 1 mesh 0) x3,
- * (texture 1, LOD 0 mesh 1) x994, (texture 1, LOD 1 mesh 0) x1, then planet and sky. */
+static void test_run_slots_stay_put_until_a_key_outgrows_its_capacity(void) {
+    s_slot_count = 0;
+    for (uint32_t i = 0; i < 8; i++) {
+        s_draw_items[i] = (asteroid_draw_item_t){.sort_key = i < 4U ? 7U : 9U, .source_index = i};
+    }
+    place_runs(8);
+    const uint32_t slot_7 = s_key_slot[7];
+    const uint32_t slot_9 = s_key_slot[9];
+    TEST_ASSERT_EQUAL_UINT32(4U + 1U + 1U, s_key_capacity[7]);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(slot_7 + s_key_capacity[7], slot_9);
+    /* One more instance under key 7 still fits: nothing moves. */
+    for (uint32_t i = 0; i < 9; i++) {
+        s_draw_items[i] = (asteroid_draw_item_t){.sort_key = i < 5U ? 7U : 9U, .source_index = i};
+    }
+    place_runs(9);
+    TEST_ASSERT_EQUAL_UINT32(slot_7, s_key_slot[7]);
+    TEST_ASSERT_EQUAL_UINT32(slot_9, s_key_slot[9]);
+    /* Key 7 outgrows its range: the layout is rebuilt around the new counts. */
+    for (uint32_t i = 0; i < 12; i++) {
+        s_draw_items[i] = (asteroid_draw_item_t){.sort_key = i < 8U ? 7U : 9U, .source_index = i};
+    }
+    place_runs(12);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(8, s_key_capacity[7]);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(s_key_slot[7] + s_key_capacity[7], s_key_slot[9]);
+    s_slot_count = 0;
+}
+
+/* Runs of equal keys: (LOD 0 shape 1) x2, (LOD 1 shape 0) x3, (LOD 2 shape 1) x994,
+ * (LOD 3 shape 999) x1, then planet and sky. */
 static void test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_tail(void) {
     const uint32_t old_level = s_level;
     nt_pipeline_t old_pipelines[3];
@@ -832,8 +955,9 @@ static void test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_
     const nt_hash32_t old_name = s_noise_name;
     s_level = 0;
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
-    gfx.frame_capacity[AST_STREAM_INSTANCES] = 128U * 1024U;
+    gfx.frame_capacity[AST_STREAM_INSTANCES] = 96U + ((AST_MAX_SLOTS + 1U) * (uint32_t)sizeof(asteroid_instance_t));
     gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
+    gfx.max_vertex_inputs = AST_KEY_COUNT + 32U;
     nt_gfx_init(&gfx);
     const char *const samplers[] = {"u_noise"};
     s_noise_name = nt_hash32_str(samplers[0]);
@@ -847,13 +971,12 @@ static void test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_
     nt_gfx_end_frame();
     collect_pending_noise();
     s_level = 0;
-    const uint32_t unique = AST_MAX_SHAPES;
-    const uint32_t subsets[] = {1, unique, 1, unique};
+    const uint32_t keys[] = {1, AST_MAX_SHAPES, (2U * AST_MAX_SHAPES) + 1U, (4U * AST_MAX_SHAPES) - 1U};
     const uint32_t ends[] = {2, 5, 999, 1000};
     uint32_t begin = 0;
     for (uint32_t run = 0; run < 4; run++) {
         for (uint32_t i = begin; i < ends[run]; i++) {
-            s_draw_items[i] = (asteroid_draw_item_t){.sort_key = ((uint64_t)(run / 2U) << 32U) | subsets[run], .source_index = 999U - i};
+            s_draw_items[i] = (asteroid_draw_item_t){.sort_key = keys[run], .source_index = 999U - i};
         }
         begin = ends[run];
     }
@@ -864,7 +987,9 @@ static void test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_
     nt_gfx_begin_frame();
     uint32_t base = 0;
     (void)nt_gfx_frame_alloc(AST_STREAM_INSTANCES, 96, 4, &base);
-    (void)nt_gfx_frame_alloc(AST_STREAM_INSTANCES, 1001U * (uint32_t)sizeof(asteroid_instance_t), 4, &base);
+    s_slot_count = 0;
+    place_runs(1000);
+    (void)nt_gfx_frame_alloc(AST_STREAM_INSTANCES, (s_slot_count + 1U) * (uint32_t)sizeof(asteroid_instance_t), 4, &base);
     TEST_ASSERT_EQUAL_UINT32(96, base);
     nt_gfx_begin_pass(&(nt_pass_desc_t){0});
     const nt_frame_uniforms_t globals = {0};
@@ -874,8 +999,8 @@ static void test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_
     TEST_ASSERT_FALSE(nt_gfx_fake_draw_trace_overflowed());
     TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_fake_draw_trace_count());
     const uint32_t counts[] = {2, 3, 994, 1, 1, 1};
-    const uint32_t indices[] = {60, 240, 60, 240, s_planet_mesh.index_count, 36};
-    const uint32_t starts[] = {60, s_lod_first_index[1], 60, s_lod_first_index[1], 0, 0};
+    const uint32_t indices[] = {60, 240, 960, 3840, s_planet_mesh.index_count, 36};
+    const uint32_t starts[] = {60, s_lod_first_index[1], s_lod_first_index[2] + 960U, s_lod_first_index[3] + (999U * 3840U), 0, 0};
     for (uint32_t i = 0; i < 6; i++) {
         const nt_gfx_fake_draw_t draw = nt_gfx_fake_draw_trace_at(i);
         TEST_ASSERT_EQUAL_UINT32(counts[i], draw.instance_count);
@@ -887,10 +1012,9 @@ static void test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_
     }
     TEST_ASSERT_EQUAL_UINT32(6, nt_gfx_draw_calls(&g_nt_gfx.counters));
     TEST_ASSERT_EQUAL_UINT64(1001, g_nt_gfx.counters.instances);
-    /* One noise binding per texture transition. */
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bound_texture_count());
-    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_fake_bound_texture_at(0), nt_gfx_fake_bound_texture_at(1));
-    TEST_ASSERT_EQUAL_UINT32(base + (1000U * (uint32_t)sizeof(asteroid_instance_t)), nt_gfx_fake_last_instance_offset());
+    /* The noise atlas is bound once for every run. */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bound_texture_count());
+    TEST_ASSERT_EQUAL_UINT32(base + (s_slot_count * (uint32_t)sizeof(asteroid_instance_t)), nt_gfx_fake_last_instance_offset());
     drop_generated();
     nt_gfx_shutdown();
     nt_gfx_fake_reset();
@@ -909,12 +1033,17 @@ int main(void) {
     RUN_TEST(test_rock_shapes_fill_the_shader_radius_range_and_are_seeded);
     RUN_TEST(test_rock_lods_share_positions_and_have_unit_normals);
     RUN_TEST(test_rock_noise_matches_scalar_fbm);
+#ifdef AST_SIMD
+    RUN_TEST(test_sincos_x4_matches_libm_over_session_angles);
+#endif
     RUN_TEST(test_instances_are_seeded_and_within_their_level);
-    RUN_TEST(test_world_matrix_spins_in_place_and_orbits_the_planet);
+    RUN_TEST(test_world_rows_spin_in_place_and_orbit_the_planet);
+    RUN_TEST(test_world_rows_match_the_full_matrix_product);
+    RUN_TEST(test_lod_compares_match_the_log_formula);
     RUN_TEST(test_instance_attributes_transpose_source_matrix_once);
     RUN_TEST(test_left_handed_camera_preserves_reversed_zero_to_one_depth);
     RUN_TEST(test_original_complexity_counts_are_not_batch_counts);
-    RUN_TEST(test_lod_clamps_and_subdivision_count_match_source_policy);
+    RUN_TEST(test_lod_clamps_to_the_four_subdivisions);
     RUN_TEST(test_pan_matches_source_event_accumulation);
     RUN_TEST(test_routed_pan_preserves_source_math_for_all_pointer_slots);
     RUN_TEST(test_ui_owned_drag_stays_blocked_until_release);
@@ -931,6 +1060,7 @@ int main(void) {
     RUN_TEST(test_scene_options_are_portable_and_bounded);
     RUN_TEST(test_grouped_sort_preserves_exact_tuple_identity_and_stability);
     RUN_TEST(test_grouped_packing_preserves_every_instance_and_lod);
+    RUN_TEST(test_run_slots_stay_put_until_a_key_outgrows_its_capacity);
     RUN_TEST(test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_tail);
     return UNITY_END();
 }

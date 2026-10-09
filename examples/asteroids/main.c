@@ -66,10 +66,50 @@ in the source; the sky and Mars images come from packs. See CREDITS.md.
 #define AST_MAX 50000U
 #define AST_SUBDIVISIONS 4U
 #define AST_MAX_TEXTURES 50U
+/* The noise textures are tiles of one atlas; rock.frag hardcodes this grid. */
+#define AST_NOISE_COLUMNS 8U
+#define AST_NOISE_ROWS 8U
 #define AST_MAX_SHAPES 1000U
+/* Draw key = lod * AST_MAX_SHAPES + shape. */
+#define AST_KEY_COUNT (AST_SUBDIVISIONS * AST_MAX_SHAPES)
+/* Worst case of the stable instance layout: every key padded by a quarter, rounded up. */
+#define AST_MAX_SLOTS (AST_MAX + (AST_MAX / 4U) + (2U * AST_KEY_COUNT))
 #define AST_NOISE_SIZE 256U
 #define AST_PI 3.14159265358979323846
 #define AST_SEED 1123U
+
+/* Four float lanes through clang/gcc vector extensions (wasm simd128, SSE2,
+ * NEON) for the hot startup noise and per-frame trigonometry; other builds run
+ * the same math in scalar code. */
+#if (defined(__clang__) || defined(__GNUC__)) && (defined(__wasm_simd128__) || defined(__SSE2__) || defined(__ARM_NEON))
+#define AST_SIMD 1
+typedef float ast_f4 __attribute__((vector_size(16)));
+typedef int32_t ast_i4 __attribute__((vector_size(16)));
+
+static ast_f4 f4_splat(float v) { return (ast_f4){v, v, v, v}; }
+
+static ast_f4 f4_select(ast_i4 mask, ast_f4 a, ast_f4 b) { return (ast_f4)(((ast_i4)a & mask) | ((ast_i4)b & ~mask)); }
+
+/* sin and cos of four angles: Cody-Waite reduction by pi/2 in three parts, then
+ * the Cephes minimax polynomials on [-pi/4, pi/4]; within ~1e-6 of sinf/cosf
+ * for |x| < 1e5, the range the asteroid angles reach in a long session. */
+static void sincos_x4(ast_f4 x, ast_f4 *sin_out, ast_f4 *cos_out) {
+    const ast_i4 quadrant = __builtin_convertvector((x * f4_splat(0.636619772F)) + f4_select(x >= f4_splat(0.0F), f4_splat(0.5F), f4_splat(-0.5F)), ast_i4);
+    const ast_f4 q = __builtin_convertvector(quadrant, ast_f4);
+    const ast_f4 r = ((x - (q * f4_splat(1.5703125F))) - (q * f4_splat(4.837512969970703125e-4F))) - (q * f4_splat(7.549789948768648e-8F));
+    const ast_f4 r2 = r * r;
+    const ast_f4 sin_r = r + (r * r2 * (f4_splat(-1.6666654611e-1F) + (r2 * (f4_splat(8.3321608736e-3F) + (r2 * f4_splat(-1.9515295891e-4F))))));
+    const ast_f4 cos_r = f4_splat(1.0F) - (f4_splat(0.5F) * r2) + (r2 * r2 * (f4_splat(4.166664568298827e-2F) + (r2 * (f4_splat(-1.388731625493765e-3F) + (r2 * f4_splat(2.443315711809948e-5F))))));
+    const ast_i4 odd = (quadrant & 1) != 0;
+    const ast_f4 s = f4_select(odd, cos_r, sin_r);
+    const ast_f4 c = f4_select(odd, sin_r, cos_r);
+    const ast_i4 sin_sign = (quadrant & 2) << 30;
+    const ast_i4 cos_sign = ((quadrant + 1) & 2) << 30;
+    *sin_out = (ast_f4)((ast_i4)s ^ sin_sign);
+    *cos_out = (ast_f4)((ast_i4)c ^ cos_sign);
+}
+
+#endif
 
 /* Asteroid instances get their own frame vertex stream, so their offsets stay
  * put while the UI and text change the general stream. */
@@ -160,8 +200,13 @@ static float s_lod_deep[AST_SUBDIVISIONS][3], s_lod_shallow[AST_SUBDIVISIONS][3]
 /* All variants of one subdivision are contiguous in one shared rock mesh. */
 static uint32_t s_lod_first_index[AST_SUBDIVISIONS];
 static mesh_binding_t s_rocks, s_planet_mesh, s_sky_mesh;
+/* One vertex input per draw key over the shared rock buffers, as a game has one per mesh. */
+static nt_vertex_input_t s_rock_inputs[AST_KEY_COUNT];
+/* Each key owns a fixed slot range of the instance stream; see place_runs. */
+static uint32_t s_key_slot[AST_KEY_COUNT], s_key_capacity[AST_KEY_COUNT], s_key_count[AST_KEY_COUNT];
+static uint32_t s_slot_count;
 static nt_resource_t s_mars, s_sky_faces[6];
-static nt_texture_t s_noise[AST_MAX_TEXTURES];
+static nt_texture_t s_noise;
 /* rock, planet, sky, text, noise */
 static nt_program_ref_t s_programs[5];
 static nt_pipeline_t s_pipelines[3];
@@ -212,9 +257,7 @@ static void matrix_multiply(float out[16], const float left[16], const float rig
     memcpy(out, result, sizeof(result));
 }
 
-static void matrix_rotation_axis(float out[16], const float axis[3], float angle) {
-    const float s = sinf(angle);
-    const float c = cosf(angle);
+static void matrix_rotation_sincos(float out[16], const float axis[3], float s, float c) {
     const float ax = axis[0] * s;
     const float ay = axis[1] * s;
     const float az = axis[2] * s;
@@ -228,21 +271,74 @@ static void matrix_rotation_axis(float out[16], const float axis[3], float angle
     memcpy(out, rotation, sizeof(rotation));
 }
 
-static void asteroid_world_matrix(float out[16], const asteroid_t *asteroid, double elapsed_seconds) {
-    const float elapsed_radians = (float)(AST_PI * elapsed_seconds);
+static void matrix_rotation_axis(float out[16], const float axis[3], float angle) { matrix_rotation_sincos(out, axis, sinf(angle), cosf(angle)); }
+
+/* world = spin * scale_translate * orbit (row vectors), written as the three
+ * transposed instance rows. scale_translate is a diagonal scale plus a ring
+ * translation (r, h, 0), and the orbit turns about +Y, mixing only x and z. */
+static float asteroid_spin_angle(const asteroid_t *asteroid, float elapsed_radians) { return asteroid->spin_angle + (asteroid->spin_speed * elapsed_radians); }
+
+static float asteroid_orbit_angle(const asteroid_t *asteroid, float elapsed_radians) { return asteroid->orbit_angle - (asteroid->orbit_speed * elapsed_radians); }
+
+/* sincos holds sin and cos of the spin angle, then of the orbit angle. */
+static void asteroid_world_rows_sincos(float rows[12], const asteroid_t *asteroid, const float sincos[4]) {
     float spin[16];
-    float orbit[16];
-    float spin_scale[16];
-    matrix_rotation_axis(spin, asteroid->spin_axis, asteroid->spin_angle + (asteroid->spin_speed * elapsed_radians));
-    matrix_rotation_axis(orbit, (float[3]){0, 1, 0}, asteroid->orbit_angle - (asteroid->orbit_speed * elapsed_radians));
-    matrix_multiply(spin_scale, spin, asteroid->scale_translate);
-    matrix_multiply(out, spin_scale, orbit);
+    matrix_rotation_sincos(spin, asteroid->spin_axis, sincos[0], sincos[1]);
+    const float s = sincos[2];
+    const float c = sincos[3];
+    const float *st = asteroid->scale_translate;
+    for (uint32_t r = 0; r < 3; r++) {
+        const float *spin_row = &spin[(size_t)r * 4U];
+        const float x = spin_row[0] * st[0];
+        const float z = spin_row[2] * st[10];
+        rows[r] = (x * c) + (z * s);
+        rows[4U + r] = spin_row[1] * st[5];
+        rows[8U + r] = (z * c) - (x * s);
+    }
+    rows[3] = st[12] * c;
+    rows[7] = st[13];
+    rows[11] = -st[12] * s;
 }
 
-static uint32_t asteroid_lod_index(float scale, float distance, float min_screen_size, uint32_t subdivisions) {
-    const float relative_screen_size_log_2 = log2f(scale / sqrtf(distance));
-    const float subdivision = roundf(relative_screen_size_log_2 - log2f(min_screen_size));
-    return (uint32_t)fminf((float)(subdivisions - 1U), fmaxf(0.0F, subdivision));
+/* Spin and orbit sin/cos for up to four consecutive asteroids; trigonometry
+ * dominates the per-frame update, so a full group runs as four SIMD lanes. */
+static void asteroid_sincos4(float out[4][4], const asteroid_t *asteroids, uint32_t count, float elapsed_radians) {
+#ifdef AST_SIMD
+    if (count == 4) {
+        ast_f4 spin;
+        ast_f4 orbit;
+        for (uint32_t k = 0; k < 4; k++) {
+            spin[k] = asteroid_spin_angle(&asteroids[k], elapsed_radians);
+            orbit[k] = asteroid_orbit_angle(&asteroids[k], elapsed_radians);
+        }
+        ast_f4 values[4];
+        sincos_x4(spin, &values[0], &values[1]);
+        sincos_x4(orbit, &values[2], &values[3]);
+        for (uint32_t k = 0; k < 4; k++) {
+            for (uint32_t v = 0; v < 4; v++) {
+                out[k][v] = values[v][k];
+            }
+        }
+        return;
+    }
+#endif
+    for (uint32_t k = 0; k < count; k++) {
+        const float spin = asteroid_spin_angle(&asteroids[k], elapsed_radians);
+        const float orbit = asteroid_orbit_angle(&asteroids[k], elapsed_radians);
+        out[k][0] = sinf(spin);
+        out[k][1] = cosf(spin);
+        out[k][2] = sinf(orbit);
+        out[k][3] = cosf(orbit);
+    }
+}
+
+/* The source picks round(log2(scale / sqrt(distance)) - log2(min_screen_size)),
+ * clamped to the subdivisions. Level k >= 1 is reached when distance <=
+ * (scale / min_screen_size)^2 * 2^(1 - 2k), so three compares replace the logs. */
+static uint32_t asteroid_lod(float scale, float distance, float min_screen_size) {
+    const float ratio = scale / min_screen_size;
+    const float q = ratio * ratio;
+    return (distance <= q * 0.5F ? 1U : 0U) + (distance <= q * 0.125F ? 1U : 0U) + (distance <= q * 0.03125F ? 1U : 0U);
 }
 
 static void camera_basis(const camera_orientation_t *camera, float right[3], float up[3], float look[3]) {
@@ -445,8 +541,7 @@ static float fbm3(float x, float y, float z, float lacunarity, float gain) {
 static const uint32_t s_lod_vertices[AST_SUBDIVISIONS] = {12, 42, 162, 642};
 static const uint32_t s_lod_indices[AST_SUBDIVISIONS] = {60, 240, 960, 3840};
 static float s_sphere[AST_FINE_VERTICES][3];
-#if (defined(__clang__) || defined(__GNUC__)) && (defined(__wasm_simd128__) || defined(__SSE2__) || defined(__ARM_NEON))
-#define AST_SIMD_NOISE 1
+#ifdef AST_SIMD
 static float s_sphere_soa[3][AST_FINE_VERTICES];
 #endif
 static uint16_t s_sphere_indices[AST_SUBDIVISIONS][3840];
@@ -496,7 +591,7 @@ static void sphere_init(void) {
         }
         NT_ASSERT(vertex_count == s_lod_vertices[level]);
     }
-#ifdef AST_SIMD_NOISE
+#ifdef AST_SIMD
     for (uint32_t i = 0; i < AST_FINE_VERTICES; i++) {
         for (uint32_t axis = 0; axis < 3; axis++) {
             s_sphere_soa[axis][i] = s_sphere[i][axis];
@@ -508,16 +603,8 @@ static void sphere_init(void) {
 /* Round half to even without a libm call; exact for |v| < 2^22. */
 static int32_t round_even(float v) { return (int32_t)((v + 12582912.0F) - 12582912.0F); }
 
-#ifdef AST_SIMD_NOISE
-/* simplex3 four points at a time through clang/gcc vector extensions (wasm
- * simd128, SSE2, NEON); same operations as the scalar version, lane by lane. */
-typedef float ast_f4 __attribute__((vector_size(16)));
-typedef int32_t ast_i4 __attribute__((vector_size(16)));
-
-static ast_f4 f4_splat(float v) { return (ast_f4){v, v, v, v}; }
-
-static ast_f4 f4_select(ast_i4 mask, ast_f4 a, ast_f4 b) { return (ast_f4)(((ast_i4)a & mask) | ((ast_i4)b & ~mask)); }
-
+#ifdef AST_SIMD
+/* simplex3 four points at a time; same operations as the scalar version, lane by lane. */
 static ast_i4 perm4(ast_i4 index) { return (ast_i4){s_perm[index[0]], s_perm[index[1]], s_perm[index[2]], s_perm[index[3]]}; }
 
 static ast_f4 simplex_corner4(ast_i4 hash, ast_f4 x, ast_f4 y, ast_f4 z) {
@@ -581,7 +668,7 @@ static void rock_noise(uint32_t variant, float noise[AST_FINE_VERTICES]) {
     const float gain = rng_normal(&rng, 0.95F, 0.04F);
     const float offset[3] = {rng_uniform(&rng, 0, 100), rng_uniform(&rng, 0, 100), rng_uniform(&rng, 0, 100)};
     uint32_t i = 0;
-#ifdef AST_SIMD_NOISE
+#ifdef AST_SIMD
     for (; i + 4U <= AST_FINE_VERTICES; i += 4U) {
         ast_f4 p[3];
         for (uint32_t axis = 0; axis < 3; axis++) {
@@ -725,6 +812,10 @@ static void generate_rocks(void) {
         .attr_count = 2,
         .stride = sizeof(rock_vertex_t)};
     upload_mesh(&s_rocks, vertices, vertex_total * (uint32_t)sizeof(rock_vertex_t), indices, index_total, &layout, true, "asteroid_rocks");
+    for (uint32_t key = 0; key < AST_KEY_COUNT; key++) {
+        s_rock_inputs[key] = nt_gfx_make_vertex_input(
+            &(nt_vertex_input_desc_t){.layout = layout, .instance_layout = s_instance_layout, .vertex_buffer = s_rocks.vbo, .index_buffer = s_rocks.ibo, .label = "asteroid_rock_key"});
+    }
     free(indices);
     free(vertices);
 }
@@ -744,9 +835,9 @@ static noise_params_t noise_params(uint32_t texture) {
     return params;
 }
 
-/* Each texture is stretched to its own full byte range, as in the source. */
-static void make_noise_texture(uint32_t texture, const float *values) {
-    static uint8_t pixels[AST_NOISE_SIZE * AST_NOISE_SIZE];
+/* Each texture is stretched to its own full byte range, as in the source, and
+ * written to its tile of the R8 atlas (rows bottom-up, as GL uploads them). */
+static void write_noise_tile(uint8_t *atlas, uint32_t texture, const float *values) {
     float low = FLT_MAX;
     float high = -FLT_MAX;
     for (uint32_t i = 0; i < AST_NOISE_SIZE * AST_NOISE_SIZE; i++) {
@@ -754,33 +845,28 @@ static void make_noise_texture(uint32_t texture, const float *values) {
         high = fmaxf(high, values[i]);
     }
     const float scale = high > low ? 255.0F / (high - low) : 0.0F;
-    for (uint32_t i = 0; i < AST_NOISE_SIZE * AST_NOISE_SIZE; i++) {
-        pixels[i] = (uint8_t)fminf(255.0F, (values[i] - low) * scale);
+    const uint32_t x0 = (texture % AST_NOISE_COLUMNS) * AST_NOISE_SIZE;
+    const uint32_t y0 = (texture / AST_NOISE_COLUMNS) * AST_NOISE_SIZE;
+    for (uint32_t y = 0; y < AST_NOISE_SIZE; y++) {
+        uint8_t *row = atlas + (((size_t)(y0 + y) * ((size_t)AST_NOISE_COLUMNS * AST_NOISE_SIZE)) + x0);
+        for (uint32_t x = 0; x < AST_NOISE_SIZE; x++) {
+            row[x] = (uint8_t)fminf(255.0F, (values[(y * AST_NOISE_SIZE) + x] - low) * scale);
+        }
     }
-    s_noise[texture] = nt_gfx_make_texture(&(nt_texture_desc_t){.width = AST_NOISE_SIZE,
-                                                                .height = AST_NOISE_SIZE,
-                                                                .data = pixels,
-                                                                .format = NT_TEXTURE_FORMAT_R8,
-                                                                .min_filter = NT_FILTER_LINEAR_MIPMAP_NEAREST,
-                                                                .mag_filter = NT_FILTER_LINEAR,
-                                                                .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-                                                                .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-                                                                .gen_mipmaps = true,
-                                                                .label = "asteroid_noise"});
 }
 
 /* GPU noise: one pass renders every texture as a tile of an RGBA8 atlas (16-bit
  * value in R and G); after end_frame the tiles are read back, normalized and
- * uploaded as R8 with mipmaps, which a render target cannot carry itself. */
-#define AST_NOISE_COLUMNS 8U
+ * uploaded as one R8 atlas with mipmaps, which a render target cannot carry.
+ * Tiles are power-of-two aligned, so 2x2 mip reduction never mixes tiles. */
 static nt_texture_t s_noise_atlas_color;
 static nt_render_target_t s_noise_atlas;
 static nt_vertex_input_t s_empty_input;
 
 static void record_noise_atlas(nt_program_t program) {
-    const uint32_t rows = (AST_MAX_TEXTURES + AST_NOISE_COLUMNS - 1U) / AST_NOISE_COLUMNS;
-    s_noise_atlas_color = nt_gfx_make_texture(
-        &(nt_texture_desc_t){.width = (uint16_t)(AST_NOISE_COLUMNS * AST_NOISE_SIZE), .height = (uint16_t)(rows * AST_NOISE_SIZE), .format = NT_TEXTURE_FORMAT_RGBA8, .label = "asteroid_noise_atlas"});
+    _Static_assert(AST_NOISE_COLUMNS * AST_NOISE_ROWS >= AST_MAX_TEXTURES, "noise atlas grid holds every texture");
+    s_noise_atlas_color = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = (uint16_t)(AST_NOISE_COLUMNS * AST_NOISE_SIZE), .height = (uint16_t)(AST_NOISE_ROWS * AST_NOISE_SIZE), .format = NT_TEXTURE_FORMAT_RGBA8, .label = "asteroid_noise_render"});
     s_noise_atlas = nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = s_noise_atlas_color, .label = "asteroid_noise_atlas"});
     if (!nt_gfx_vertex_input_valid(s_empty_input)) {
         s_empty_input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.label = "asteroid_noise"});
@@ -810,12 +896,12 @@ static void record_noise_atlas(nt_program_t program) {
 /* Runs between end_frame and the next begin_frame, where readback is allowed.
  * One readback of the whole atlas: on WebGL each readPixels waits for the GPU. */
 static void collect_noise_atlas(void) {
-    const uint32_t rows = (AST_MAX_TEXTURES + AST_NOISE_COLUMNS - 1U) / AST_NOISE_COLUMNS;
     const uint32_t width = AST_NOISE_COLUMNS * AST_NOISE_SIZE;
-    const uint32_t height = rows * AST_NOISE_SIZE;
+    const uint32_t height = AST_NOISE_ROWS * AST_NOISE_SIZE;
     const uint32_t bytes = width * height * 4U;
     uint8_t *rgba = malloc(bytes);
-    NT_ASSERT(rgba != NULL);
+    uint8_t *atlas = calloc((size_t)width * height, 1);
+    NT_ASSERT(rgba != NULL && atlas != NULL);
     if (nt_gfx_read_pixels(s_noise_atlas, 0, 0, (int)width, (int)height, rgba, bytes)) {
         static float values[AST_NOISE_SIZE * AST_NOISE_SIZE];
         for (uint32_t t = 0; t < AST_MAX_TEXTURES; t++) {
@@ -828,9 +914,20 @@ static void collect_noise_atlas(void) {
                     values[(y * AST_NOISE_SIZE) + x] = (float)(((uint32_t)row[(size_t)x * 4U] << 8U) | row[((size_t)x * 4U) + 1U]);
                 }
             }
-            make_noise_texture(t, values);
+            write_noise_tile(atlas, t, values);
         }
+        s_noise = nt_gfx_make_texture(&(nt_texture_desc_t){.width = (uint16_t)width,
+                                                           .height = (uint16_t)height,
+                                                           .data = atlas,
+                                                           .format = NT_TEXTURE_FORMAT_R8,
+                                                           .min_filter = NT_FILTER_LINEAR_MIPMAP_NEAREST,
+                                                           .mag_filter = NT_FILTER_LINEAR,
+                                                           .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+                                                           .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+                                                           .gen_mipmaps = true,
+                                                           .label = "asteroid_noise"});
     }
+    free(atlas);
     free(rgba);
     nt_gfx_destroy_render_target(s_noise_atlas);
     nt_gfx_destroy_texture(s_noise_atlas_color);
@@ -925,13 +1022,13 @@ static void generate_environment(void) {
 }
 
 static void drop_generated(void) {
+    /* Destroying the shared rock buffers destroys every key's vertex input. */
     destroy_mesh(&s_rocks);
+    memset(s_rock_inputs, 0, sizeof(s_rock_inputs));
     destroy_mesh(&s_planet_mesh);
     destroy_mesh(&s_sky_mesh);
-    for (uint32_t t = 0; t < AST_MAX_TEXTURES; t++) {
-        nt_gfx_destroy_texture(s_noise[t]);
-        s_noise[t] = (nt_texture_t){0};
-    }
+    nt_gfx_destroy_texture(s_noise);
+    s_noise = (nt_texture_t){0};
     s_generated = false;
 }
 
@@ -952,6 +1049,7 @@ static void start_content(nt_program_t noise_program) {
 
 static void select_level(uint32_t level) {
     generate_instances(&s_complexities[level]);
+    s_slot_count = 0;
     s_level = level;
     s_ui_staged_level = (int)level;
 }
@@ -1310,7 +1408,7 @@ static void ui_statistics(void) {
 #else
     ui_metric("Process RSS", value);
 #endif
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Indexed instances grouped by mesh, LOD and texture.\nNo frustum culling. Noise textures: 256 x 256 R8.", &s_ui_caption);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Indexed instances grouped by LOD and shape.\nNo frustum culling. Noise: 50 R8 tiles in one atlas.", &s_ui_caption);
 }
 
 static void ui_help(void) {
@@ -1871,33 +1969,67 @@ static void handle_input(float dt) {
 // #endregion
 
 // #region scene submission
+/* Each draw key owns a fixed slot range of the instance stream with a quarter
+ * spare, so a key whose count changes (an asteroid crossing an LOD threshold)
+ * does not move the other runs. Each key's vertex input then keeps its instance
+ * pointers frame to frame, and WebGL skips the per-draw attribute re-pointing.
+ * The layout is rebuilt only when a key outgrows its range. */
+static void place_runs(uint32_t count) {
+    memset(s_key_count, 0, sizeof(s_key_count));
+    for (uint32_t i = 0; i < count; i++) {
+        s_key_count[s_draw_items[i].sort_key]++;
+    }
+    bool fits = s_slot_count != 0;
+    for (uint32_t key = 0; key < AST_KEY_COUNT && fits; key++) {
+        fits = s_key_count[key] <= s_key_capacity[key];
+    }
+    if (fits) {
+        return;
+    }
+    uint32_t slot = 0;
+    for (uint32_t key = 0; key < AST_KEY_COUNT; key++) {
+        const uint32_t n = s_key_count[key];
+        s_key_slot[key] = slot;
+        s_key_capacity[key] = n + ((n + 3U) / 4U) + 1U;
+        slot += s_key_capacity[key];
+    }
+    s_slot_count = slot;
+}
+
 static uint32_t prepare_instances(void) {
     uint32_t base = 0;
     const complexity_t *complexity = &s_complexities[s_level];
-    asteroid_instance_t *frame_instances = nt_gfx_frame_alloc(AST_STREAM_INSTANCES, (complexity->instances + 1U) * (uint32_t)sizeof(asteroid_instance_t), 4, &base);
     asteroid_instance_t *instances = s_instance_staging;
     memset(s_lod_counts, 0, sizeof(s_lod_counts));
     s_triangles = 0;
+    const float elapsed_radians = (float)(AST_PI * s_elapsed);
+    float sincos[4][4];
     for (uint32_t i = 0; i < complexity->instances; i++) {
         const asteroid_t *asteroid = &s_asteroids[i];
-        float world[16];
-        float difference[3];
-        asteroid_world_matrix(world, asteroid, s_elapsed);
-        glm_vec3_sub(s_camera.eye, &world[12], difference);
-        const uint32_t lod = asteroid_lod_index(asteroid->scale, glm_vec3_norm(difference), s_min_screen_size, AST_SUBDIVISIONS);
+        if ((i & 3U) == 0) {
+            asteroid_sincos4(sincos, asteroid, complexity->instances - i < 4U ? complexity->instances - i : 4U, elapsed_radians);
+        }
+        asteroid_world_rows_sincos(instances[i].world_rows, asteroid, sincos[i & 3U]);
+        const float difference[3] = {s_camera.eye[0] - instances[i].world_rows[3], s_camera.eye[1] - instances[i].world_rows[7], s_camera.eye[2] - instances[i].world_rows[11]};
+        const uint32_t lod = asteroid_lod(asteroid->scale, glm_vec3_norm((float *)difference), s_min_screen_size);
         s_lod_counts[lod]++;
         s_triangles += s_lod_indices[lod] / 3U;
-        instance_world_rows(&instances[i], world);
         memcpy(instances[i].deep, s_lod_colors ? s_lod_deep[lod] : asteroid->deep, sizeof(asteroid->deep));
         memcpy(instances[i].shallow, s_lod_colors ? s_lod_shallow[lod] : asteroid->shallow, sizeof(asteroid->shallow));
-        instances[i].deep[3] = 0;
+        instances[i].deep[3] = (float)asteroid->texture_index;
         instances[i].shallow[3] = 0;
-        const uint32_t subset = (lod * AST_MAX_SHAPES) + asteroid->mesh_index;
-        s_draw_items[i] = (asteroid_draw_item_t){.sort_key = ((uint64_t)asteroid->texture_index << 32U) | subset, .source_index = i};
+        /* The texture is an atlas tile chosen per instance, so only the mesh splits draws. */
+        s_draw_items[i] = (asteroid_draw_item_t){.sort_key = (lod * AST_MAX_SHAPES) + asteroid->mesh_index, .source_index = i};
     }
     sort_asteroid_items(s_draw_items, complexity->instances, s_draw_scratch);
-    for (uint32_t i = 0; i < complexity->instances; i++) {
-        frame_instances[i] = instances[s_draw_items[i].source_index];
+    place_runs(complexity->instances);
+    asteroid_instance_t *frame_instances = nt_gfx_frame_alloc(AST_STREAM_INSTANCES, (s_slot_count + 1U) * (uint32_t)sizeof(asteroid_instance_t), 4, &base);
+    for (uint32_t i = 0; i < complexity->instances;) {
+        const uint64_t key = s_draw_items[i].sort_key;
+        asteroid_instance_t *run = &frame_instances[s_key_slot[key]];
+        for (uint32_t j = 0; i < complexity->instances && s_draw_items[i].sort_key == key; i++, j++) {
+            run[j] = instances[s_draw_items[i].source_index];
+        }
     }
     float planet[16];
     matrix_rotation_axis(planet, (float[3]){0, 1, 0}, (float)(-0.1 * s_elapsed));
@@ -1906,8 +2038,8 @@ static uint32_t prepare_instances(void) {
             planet[(row * 4U) + col] *= 45.0F;
         }
     }
-    memset(&frame_instances[complexity->instances], 0, sizeof(asteroid_instance_t));
-    instance_world_rows(&frame_instances[complexity->instances], planet);
+    memset(&frame_instances[s_slot_count], 0, sizeof(asteroid_instance_t));
+    instance_world_rows(&frame_instances[s_slot_count], planet);
     return base;
 }
 
@@ -1917,29 +2049,24 @@ static void draw_world(uint32_t base, const nt_frame_uniforms_t *globals) {
     nt_gfx_bind_pipeline(s_pipelines[0]);
     const float light[4] = {s_light.eye[0], s_light.eye[1], s_light.eye[2], 1};
     nt_gfx_set_uniform_vec4(s_light_name, light);
-    uint32_t previous_texture = UINT32_MAX;
+    const nt_gfx_texture_binding_t noise = {.name = s_noise_name, .texture = s_noise};
+    nt_gfx_apply_texture_bindings(&noise, 1);
     for (uint32_t i = 0; i < complexity->instances;) {
         const uint64_t key = s_draw_items[i].sort_key;
         const uint32_t subset = (uint32_t)key;
-        const uint32_t texture = (uint32_t)(key >> 32U);
         const uint32_t lod = subset / AST_MAX_SHAPES;
         const uint32_t mesh = subset % AST_MAX_SHAPES;
         uint32_t end = i + 1U;
         while (end < complexity->instances && s_draw_items[end].sort_key == key) {
             end++;
         }
-        nt_gfx_bind_vertex_input_instanced(s_rocks.input, AST_STREAM_INSTANCES, base + (i * (uint32_t)sizeof(asteroid_instance_t)));
-        if (texture != previous_texture) {
-            const nt_gfx_texture_binding_t noise = {.name = s_noise_name, .texture = s_noise[texture]};
-            nt_gfx_apply_texture_bindings(&noise, 1);
-            previous_texture = texture;
-        }
+        nt_gfx_bind_vertex_input_instanced(s_rock_inputs[subset], AST_STREAM_INSTANCES, base + (s_key_slot[subset] * (uint32_t)sizeof(asteroid_instance_t)));
         nt_gfx_draw_indexed_instanced(s_lod_first_index[lod] + (mesh * s_lod_indices[lod]), s_lod_indices[lod], s_lod_vertices[lod], end - i);
         i = end;
     }
     nt_gfx_bind_pipeline(s_pipelines[1]);
     nt_gfx_set_uniform_vec4(s_light_name, light);
-    nt_gfx_bind_vertex_input_instanced(s_planet_mesh.input, AST_STREAM_INSTANCES, base + (complexity->instances * (uint32_t)sizeof(asteroid_instance_t)));
+    nt_gfx_bind_vertex_input_instanced(s_planet_mesh.input, AST_STREAM_INSTANCES, base + (s_slot_count * (uint32_t)sizeof(asteroid_instance_t)));
     const nt_gfx_texture_binding_t mars = {.name = s_diffuse_name, .texture = {.id = nt_resource_get(s_mars)}};
     nt_gfx_apply_texture_bindings(&mars, 1);
     nt_gfx_draw_indexed_instanced(0, s_planet_mesh.index_count, s_planet_mesh.vertex_count, 1);
@@ -2114,7 +2241,8 @@ int main(int argc, char **argv) {
     gfx.max_textures = 128;
     gfx.stream_capacity = 16U * 1024U * 1024U;
     gfx.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U;
-    gfx.frame_capacity[AST_STREAM_INSTANCES] = (AST_MAX + 1U) * (uint32_t)sizeof(asteroid_instance_t);
+    gfx.frame_capacity[AST_STREAM_INSTANCES] = (AST_MAX_SLOTS + 1U) * (uint32_t)sizeof(asteroid_instance_t);
+    gfx.max_vertex_inputs = AST_KEY_COUNT + 32U;
     gfx.frame_capacity[NT_GFX_FRAME_INDEX] = 64U * 1024U;
     gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * 512U;
     gfx.global_blocks[0] = (nt_global_block_t){"Globals", 0};
