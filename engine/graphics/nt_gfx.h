@@ -989,8 +989,9 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
  * byte_offset of its instance buffer. The offset must be 4-byte aligned (WebGL2 rejects
  * unaligned attrib offsets); asserted. The GL VAO keeps the pointers of its last offset, so a
  * vertex input bound at the same offset every frame re-points nothing; one bound at two
- * offsets in a frame re-points between them. Every draw over it asserts that its instances lie
- * inside the buffer, or inside this frame's allocations for a frame stream (a plain draw reads one). */
+ * offsets in a frame re-points between them. The bind asserts that the first instance, and every
+ * instanced draw that all its instances, lie inside the buffer, or inside this frame's
+ * allocations for a frame stream. */
 void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t byte_offset);
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.

@@ -207,11 +207,12 @@ shared stream a count change shifts every later run of the frame. An empty
 layout with no buffers is the attribute-less `gl_VertexID` path; every draw
 asserts a bound vertex input.
 
-A draw over a vertex input with an instance layout asserts that its instances
-lie in the instance buffer: `offset + (count - 1) * stride + extent` is at most
-the buffer size, or, for a frame vertex stream's buffer, the bytes allocated in
-that stream this frame (bytes past them are not uploaded and would draw the
-previous frame's data); a plain draw reads one instance. `extent` is the bytes
+An instanced draw asserts that its instances lie in the instance buffer:
+`offset + (count - 1) * stride + extent` is at most the buffer size, or, for a
+frame vertex stream's buffer, the bytes allocated in that stream this frame
+(bytes past them are not uploaded and would draw the previous frame's data).
+The instanced bind asserts the same for its first instance, which is all a
+plain draw over it reads, so plain draws carry no check. `extent` is the bytes
 one instance reads (the furthest attribute end), so attributes past the stride
 are covered. An instance layout needs a nonzero stride (asserted): GL reads
 stride 0 as tightly packed per attribute. The vertex input records at creation
@@ -245,8 +246,8 @@ rejects. Pack data never reaches those asserts: mesh activation hard-rejects
 invalid per-stream type/count/normalized, duplicate name hashes, and
 misaligned offsets/strides before any vertex input exists. Renderer-owned
 vertex inputs are created on a cache miss and then reused, so creation
-validation is absent from the steady-state hot path; draws keep the one
-instance range assert.
+validation is absent from the steady-state hot path; instanced binds and
+draws keep the one instance range assert.
 
 **Lifetime and the destroy cascade.** `nt_gfx_destroy_buffer` destroys every
 live vertex input referencing that buffer as its vertex, index or instance

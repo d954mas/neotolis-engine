@@ -1635,6 +1635,18 @@ static uint32_t publish_vertex_input(nt_vertex_input_t vi) {
     return slot;
 }
 
+/* Instances must lie in the instance buffer, and in a frame stream inside this frame's allocations:
+ * bytes past `used` are not uploaded and would draw the previous frame's data. */
+static void assert_instances_in_range(uint32_t instance_count) {
+    const nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)];
+    if (meta->instance_buffer_id == 0 || instance_count == 0) {
+        return;
+    }
+    const uint64_t limit = meta->instance_stream != 0 ? g_nt_gfx_frame_storage[meta->instance_stream].used : meta->instance_size;
+    const uint64_t end = (uint64_t)s_gfx.bound_instance_offset + ((uint64_t)(instance_count - 1U) * meta->instance_stride) + meta->instance_extent;
+    NT_ASSERT(end <= limit && "draw: instances lie outside the instance buffer or this frame's allocations in its stream");
+}
+
 static nt_gfx_result_t bind_vertex_input(nt_vertex_input_t vi) {
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_vertex_input: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
@@ -1671,6 +1683,8 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_
     }
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_vertex_input_instanced: offset must be 4-byte aligned (WebGL2 attrib rule)");
     s_gfx.bound_instance_offset = byte_offset;
+    /* The first instance: plain draws read only it and need no check of their own. */
+    assert_instances_in_range(1);
     nt_gfx_frame_bind_vertex_input_instanced(slot, byte_offset);
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -2151,19 +2165,6 @@ void nt_gfx_set_uniform_int(nt_hash32_t name, int val) {
 /* Every draw reads vertex-input state; attribute-less draws bind an empty one. */
 static void assert_vertex_input_bound(void) { NT_ASSERT(s_gfx.bound_vertex_input != 0 && "draw: no vertex input bound -- bind one with nt_gfx_bind_vertex_input"); }
 
-/* Instances must lie in the instance buffer, and in a frame stream inside this frame's allocations:
- * bytes past `used` are not uploaded and would draw the previous frame's data. A plain draw over an
- * instanced vertex input reads one instance. */
-static void assert_instances_in_range(uint32_t instance_count) {
-    const nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)];
-    if (meta->instance_buffer_id == 0 || instance_count == 0) {
-        return;
-    }
-    const uint64_t limit = meta->instance_stream != 0 ? g_nt_gfx_frame_storage[meta->instance_stream].used : meta->instance_size;
-    const uint64_t end = (uint64_t)s_gfx.bound_instance_offset + ((uint64_t)(instance_count - 1U) * meta->instance_stride) + meta->instance_extent;
-    NT_ASSERT(end <= limit && "draw: instances lie outside the instance buffer or this frame's allocations in its stream");
-}
-
 /* FAILED was already reported by apply; NONE means the caller never applied a set. */
 static bool texture_set_ready(void) {
     NT_ASSERT(s_gfx.texture_set_state != NT_GFX_TEXTURE_SET_NONE && "draw: bound program requires a texture set -- call nt_gfx_apply_texture_bindings");
@@ -2188,7 +2189,6 @@ static nt_gfx_result_t draw(uint32_t first_vertex, uint32_t num_vertices) {
         return NT_GFX_RESULT_UNREADY;
     }
     assert_vertex_input_bound();
-    assert_instances_in_range(1);
 
     g_nt_gfx.counters.vertices += num_vertices;
     /* A merged call records nothing new: CACHE keeps it out of accepted[] and draw_calls. */
@@ -2238,7 +2238,6 @@ static nt_gfx_result_t draw_indexed(uint32_t first_index, uint32_t num_indices, 
     }
     assert_vertex_input_bound();
     assert_indexed_draw_has_index_type();
-    assert_instances_in_range(1);
 
     g_nt_gfx.counters.vertices += num_vertices;
     g_nt_gfx.counters.indices += num_indices;
