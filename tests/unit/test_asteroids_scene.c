@@ -721,7 +721,9 @@ static void test_memory_labels_distinguish_pending_unavailable_and_diagnostics(v
 static void test_content_is_generated_once_and_levels_reselect_instances(void) {
     const uint32_t old_level = s_level;
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
-    gfx.max_vertex_inputs = AST_KEY_COUNT + 32U;
+    gfx.max_vertex_inputs = AST_KEY_COUNT + 64U;
+    /* Vertex inputs bake the instance stream's buffer, so the stream needs storage. */
+    gfx.frame_capacity[AST_STREAM_INSTANCES] = 4096;
     nt_gfx_init(&gfx);
     nt_gfx_fake_reset();
     const nt_program_t noise_program = nt_gfx_fake_make_program(NULL, 0);
@@ -957,7 +959,7 @@ static void test_grouped_submission_draws_exact_runs_textures_offsets_and_scene_
     nt_gfx_desc_t gfx = nt_gfx_desc_defaults();
     gfx.frame_capacity[AST_STREAM_INSTANCES] = 96U + ((AST_MAX_SLOTS + 1U) * (uint32_t)sizeof(asteroid_instance_t));
     gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = 4096;
-    gfx.max_vertex_inputs = AST_KEY_COUNT + 32U;
+    gfx.max_vertex_inputs = AST_KEY_COUNT + 64U;
     nt_gfx_init(&gfx);
     const char *const samplers[] = {"u_noise"};
     s_noise_name = nt_hash32_str(samplers[0]);

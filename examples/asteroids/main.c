@@ -762,8 +762,12 @@ static void upload_mesh(mesh_binding_t *mesh, const void *vertices, uint32_t ver
     mesh->vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = vertices, .size = vertex_bytes, .label = label});
     mesh->ibo = nt_gfx_make_buffer(
         &(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = indices, .size = index_count * (uint32_t)sizeof(uint32_t), .index_type = NT_INDEX_UINT32, .label = label});
-    mesh->input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
-        .layout = *layout, .instance_layout = instanced ? s_instance_layout : (nt_vertex_layout_t){0}, .vertex_buffer = mesh->vbo, .index_buffer = mesh->ibo, .label = label});
+    mesh->input = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = *layout,
+                                                                     .instance_layout = instanced ? s_instance_layout : (nt_vertex_layout_t){0},
+                                                                     .instance_buffer = instanced ? nt_gfx_frame_buffer(AST_STREAM_INSTANCES) : (nt_buffer_t){0},
+                                                                     .vertex_buffer = mesh->vbo,
+                                                                     .index_buffer = mesh->ibo,
+                                                                     .label = label});
     mesh->index_count = index_count;
     mesh->vertex_count = vertex_bytes / layout->stride;
 }
@@ -813,8 +817,12 @@ static void generate_rocks(void) {
         .stride = sizeof(rock_vertex_t)};
     upload_mesh(&s_rocks, vertices, vertex_total * (uint32_t)sizeof(rock_vertex_t), indices, index_total, &layout, true, "asteroid_rocks");
     for (uint32_t key = 0; key < AST_KEY_COUNT; key++) {
-        s_rock_inputs[key] = nt_gfx_make_vertex_input(
-            &(nt_vertex_input_desc_t){.layout = layout, .instance_layout = s_instance_layout, .vertex_buffer = s_rocks.vbo, .index_buffer = s_rocks.ibo, .label = "asteroid_rock_key"});
+        s_rock_inputs[key] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = layout,
+                                                                                .instance_layout = s_instance_layout,
+                                                                                .instance_buffer = nt_gfx_frame_buffer(AST_STREAM_INSTANCES),
+                                                                                .vertex_buffer = s_rocks.vbo,
+                                                                                .index_buffer = s_rocks.ibo,
+                                                                                .label = "asteroid_rock_key"});
     }
     free(indices);
     free(vertices);
@@ -2066,13 +2074,13 @@ static void draw_world(uint32_t base, const nt_frame_uniforms_t *globals) {
         while (end < complexity->instances && s_draw_items[end].sort_key == key) {
             end++;
         }
-        nt_gfx_bind_vertex_input_instanced(s_rock_inputs[subset], AST_STREAM_INSTANCES, base + (s_key_slot[subset] * (uint32_t)sizeof(asteroid_instance_t)));
+        nt_gfx_bind_vertex_input_instanced(s_rock_inputs[subset], base + (s_key_slot[subset] * (uint32_t)sizeof(asteroid_instance_t)));
         nt_gfx_draw_indexed_instanced(s_lod_first_index[lod] + (mesh * s_lod_indices[lod]), s_lod_indices[lod], s_lod_vertices[lod], end - i);
         i = end;
     }
     nt_gfx_bind_pipeline(s_pipelines[1]);
     nt_gfx_set_uniform_vec4(s_light_name, light);
-    nt_gfx_bind_vertex_input_instanced(s_planet_mesh.input, AST_STREAM_INSTANCES, base + (s_slot_count * (uint32_t)sizeof(asteroid_instance_t)));
+    nt_gfx_bind_vertex_input_instanced(s_planet_mesh.input, base + (s_slot_count * (uint32_t)sizeof(asteroid_instance_t)));
     const nt_gfx_texture_binding_t mars = {.name = s_diffuse_name, .texture = {.id = nt_resource_get(s_mars)}};
     nt_gfx_apply_texture_bindings(&mars, 1);
     nt_gfx_draw_indexed_instanced(0, s_planet_mesh.index_count, s_planet_mesh.vertex_count, 1);
@@ -2248,7 +2256,8 @@ int main(int argc, char **argv) {
     gfx.stream_capacity = 16U * 1024U * 1024U;
     gfx.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U;
     gfx.frame_capacity[AST_STREAM_INSTANCES] = (AST_MAX_SLOTS + 1U) * (uint32_t)sizeof(asteroid_instance_t);
-    gfx.max_vertex_inputs = AST_KEY_COUNT + 32U;
+    /* Every draw key has its own vertex input; the rest covers the text, sprite and UI renderers. */
+    gfx.max_vertex_inputs = AST_KEY_COUNT + 64U;
     gfx.frame_capacity[NT_GFX_FRAME_INDEX] = 64U * 1024U;
     gfx.frame_capacity[NT_GFX_FRAME_UNIFORM] = 2U * 512U;
     gfx.global_blocks[0] = (nt_global_block_t){"Globals", 0};
