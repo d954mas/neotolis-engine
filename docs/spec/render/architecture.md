@@ -226,7 +226,8 @@ when its offset changes (cheap after per-pass streams), drawing the whole range
 needs no re-point at all, and a vertex input per offset removes re-points
 entirely at the cost of a VAO each. Writes follow queue semantics: a region
 holds one content for the whole frame, so two different contents in one frame
-need two regions.
+need two regions. The mesh renderer draws such data through caller-owned vertex
+inputs (see [Mesh draws](#mesh-draws)).
 
 A vertex attribute is the raw GL triple `(type, count 1-4,
 normalized)` plus location and byte offset (`nt_vertex_attr_t`) — no enum of
@@ -570,7 +571,8 @@ asserts.
 ### Mesh draws
 
 `nt_mesh_renderer` and `nt_skinned_mesh_renderer` record their draws at the
-call, in the current pass. Each has two entry points:
+call, in the current pass. Each has two entry points for frame data, and the mesh
+renderer a third pair for persistent instance data:
 
 - the core, `nt_mesh_renderer_draw(mesh, material, stream, offset, count)`
   (skinned: `nt_skinned_mesh_renderer_draw(mesh, material, deformation, stream,
@@ -584,7 +586,21 @@ call, in the current pass. Each has two entry points:
   runs of adjacent equal batch keys (the skinned renderer also splits on the
   deformation texture), allocates and packs each run's instances in `stream`
   from the transform, drawable (and skin) components, and records it as the
-  core does.
+  core does;
+- caller-owned instance data: `nt_mesh_renderer_make_vertex_input(mesh,
+  material, instances)` builds a vertex input from the same derived layout as
+  the cache, over the caller's `NT_BUFFER_VERTEX` buffer, and the caller owns
+  it; `nt_mesh_renderer_draw_vertex_input(mesh, material, vi, offset, count)`
+  records it as the core does, resolving only the pipeline (no cached vertex
+  input). The vertex input must come from this mesh and a material with the
+  same derived layout; that is a contract, not a check, while an invalid
+  vertex input asserts at the bind. The destroy cascade reaches it through
+  `instances`, and through the mesh's buffers only when the vertex input
+  references them (a material mapping no mesh stream over a non-indexed mesh
+  references none); after a context loss the caller recreates
+  `instances`, then the vertex input, and after a mesh or layout change it
+  rebuilds it even if still valid. How many to make is the caller's trade-off
+  (see Vertex inputs, Persistent instance data).
 
 The core's instances are filled before `nt_gfx_end_frame` (see Frame
 storage). One allocation may be drawn any number of times in any passes of the
@@ -599,9 +615,10 @@ from a column-major world matrix.
 
  A run whose program is not ready, or whose
 pipeline or vertex input could not be created (load, context loss), records
-nothing and allocates nothing. Both resolve the
+nothing and allocates nothing. The core and the adapter resolve the
 pipeline and vertex input at the call — creating them on a cache miss — and
-read the material's params and texture publications there. Consequences:
+`draw_vertex_input` resolves only the pipeline; all read the material's params
+and texture publications there. Consequences:
 
 - Batching happens in `draw_list`, so the game's item order decides what merges.
 - Entity bindings are read at the call, so one entity can enter several lists

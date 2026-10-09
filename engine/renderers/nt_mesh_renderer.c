@@ -79,6 +79,40 @@ void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t stre
     }
 }
 
+nt_vertex_input_t nt_mesh_renderer_make_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_buffer_t instances) {
+    NT_ASSERT(s_mesh_renderer.initialized);
+    /* A lost context can leave a game-activated mesh 0; gfx could not create it anyway. */
+    if (g_nt_gfx.context_lost) {
+        return NT_VERTEX_INPUT_INVALID;
+    }
+    const nt_material_info_t *mat_info = nt_material_get_info(material);
+    const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
+    NT_ASSERT(mat_info != NULL && mesh_info != NULL && "make_vertex_input references a destroyed material or mesh");
+    uint64_t cache_key = 0; /* the cache's identity; a caller-owned vertex input needs none */
+    const nt_vertex_layout_t layout = nt_renderer_build_mesh_vertex_layout(mat_info, mesh_info, &cache_key);
+    const nt_vertex_input_desc_t desc = nt_renderer_mesh_vi_desc(&layout, mesh_info, &s_instance_layout, instances, "mesh_renderer_owned");
+    return nt_gfx_make_vertex_input(&desc);
+}
+
+void nt_mesh_renderer_draw_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, uint32_t offset, uint32_t count) {
+    NT_ASSERT(s_mesh_renderer.initialized);
+    /* A lost context can leave a game-activated mesh 0 and the vertex input stale; nothing would draw. */
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    NT_ASSERT(count > 0);
+    const nt_material_info_t *mat_info = nt_material_get_info(material);
+    const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
+    NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh draw references a destroyed material or mesh");
+    if (!nt_gfx_program_ready(mat_info->program)) {
+        return;
+    }
+    nt_renderer_mesh_draw_t draw = {.pipeline = nt_renderer_mesh_pipeline(&s_mesh_renderer.caches, mat_info), .vertex_input = vi, .material = material, .mesh = mesh};
+    if (draw.pipeline.id != 0) {
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, 0, (nt_texture_t){0}, offset, count);
+    }
+}
+
 static uint32_t find_run_end(const nt_render_item_t *items, uint32_t run_start, uint32_t count) {
     uint32_t run_end = run_start + 1;
     while (run_end < count && items[run_end].batch_key == items[run_start].batch_key) {

@@ -63,6 +63,27 @@ void nt_mesh_renderer_restore_gpu(void);
  * the program is not ready or a pipeline or vertex input cannot be created. */
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t stream, uint32_t offset, uint32_t count);
 
+/* Instance data the caller keeps in its own buffer (persistent instance data, see
+ * render/architecture.md): a vertex input for `mesh` drawn with `material`'s vertex layout and
+ * nt_mesh_instance_t instances read from `instances`. Mesh and material must be live and
+ * `instances` a live NT_BUFFER_VERTEX buffer (asserted). The caller owns the result and destroys
+ * it with nt_gfx_destroy_vertex_input. Destroying a buffer it references destroys it too:
+ * `instances`, and the mesh's vertex and index buffers when the material maps a mesh stream or
+ * the mesh is indexed; otherwise only `instances` reaches it, so destroy it before replacing the
+ * mesh. After a context loss recreate and refill `instances`, then the vertex input; after a mesh
+ * or material layout change rebuild it even if still valid. INVALID means a lost context or a
+ * backend failure. One vertex input bound at one offset never re-points; how many to make is the
+ * caller's trade-off. */
+nt_vertex_input_t nt_mesh_renderer_make_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_buffer_t instances);
+
+/* nt_mesh_renderer_draw over a caller-owned vertex input from nt_mesh_renderer_make_vertex_input
+ * for this mesh and a material with the same vertex layout (not checked): count > 0 instances at
+ * byte offset of its instance buffer. `vi` must be valid (asserted at the bind): recreate it after
+ * the destroy cascade or a context restore. Writes to that buffer follow queue semantics -- a region
+ * holds one content for the whole frame. Records nothing while the program is not ready or the
+ * pipeline cannot be created; creates no cached vertex input. */
+void nt_mesh_renderer_draw_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, uint32_t offset, uint32_t count);
+
 /* ECS adapter: adjacent equal batch keys form one run, packed into frame vertex stream `stream`
  * from transform and drawable and drawn as one instanced draw in the current pass. A pass with
  * its own stream keeps its runs' offsets, and so its instance pointers, while counts stay. The
