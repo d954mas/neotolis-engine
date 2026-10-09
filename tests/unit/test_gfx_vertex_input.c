@@ -299,24 +299,24 @@ void test_bind_vi_reaches_backend(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_bound_vertex_input());
 }
 
-void test_bind_invalid_vi_clears_mirror(void) {
+/* A destroyed vertex input traps in both bind forms; the bound one stays. */
+void test_bind_of_a_stale_vi_asserts(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
+    nt_vertex_input_t stale_inst = make_inst_vi(vbo);
     nt_vertex_input_t live = make_vi(vbo, (nt_buffer_t){0});
-    begin_test_pass();
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
     nt_gfx_destroy_vertex_input(vi);
+    nt_gfx_destroy_vertex_input(stale_inst);
     begin_test_pass();
     nt_gfx_bind_vertex_input(live);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
-    nt_gfx_bind_vertex_input(vi); /* stale: clears the mirror instead of trapping */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    const uint32_t bound = nt_gfx_test_bound_vertex_input();
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale vertex input"));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(stale_inst, NT_GFX_FRAME_VERTEX, 0));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale vertex input"));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input(NT_VERTEX_INPUT_INVALID));
+    TEST_ASSERT_EQUAL_UINT32(bound, nt_gfx_test_bound_vertex_input());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_vertex_input_count());
 }
 
 void test_bind_pipeline_preserves_bound_vi(void) {
@@ -555,22 +555,8 @@ void test_vi_make_during_context_loss_returns_invalid(void) {
     nt_gfx_fake_set_context_lost(false);
 }
 
-/* A stale vertex input clears the mirror in the instanced bind too, instead of trapping. */
-void test_instanced_bind_of_a_stale_vi_clears_mirror(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t stale = make_inst_vi(vbo);
-    nt_vertex_input_t live = make_inst_vi(vbo);
-    nt_gfx_destroy_vertex_input(stale);
-    begin_test_pass();
-    nt_gfx_bind_vertex_input_instanced(live, NT_GFX_FRAME_VERTEX, 0);
-    nt_gfx_bind_vertex_input_instanced(stale, NT_GFX_FRAME_VERTEX, 0);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_vertex_input_count());
-}
-/* Loss frees vertex-input slots outright: the handle goes stale, the bind is
- * the ordinary invalid-handle path, and every slot is allocatable again. */
+/* Loss frees vertex-input slots outright: the handle goes stale, binding it traps, and
+ * every slot is allocatable again. */
 void test_vi_slots_freed_by_context_loss(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
@@ -584,8 +570,7 @@ void test_vi_slots_freed_by_context_loss(void) {
 
     TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));
     begin_test_pass();
-    nt_gfx_bind_vertex_input(vi); /* stale: ordinary invalid path, no trap */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi)); /* stale: the owner recreates it first */
     nt_gfx_end_pass();
     nt_gfx_destroy_vertex_input(vi); /* stale: tolerated no-op, also after a pass */
     nt_gfx_end_frame();
@@ -620,7 +605,7 @@ int main(void) {
     RUN_TEST(test_destroy_ibo_cascades_to_vi);
     RUN_TEST(test_deactivate_mesh_cascades_to_vi);
     RUN_TEST(test_bind_vi_reaches_backend);
-    RUN_TEST(test_bind_invalid_vi_clears_mirror);
+    RUN_TEST(test_bind_of_a_stale_vi_asserts);
     RUN_TEST(test_bind_pipeline_preserves_bound_vi);
     RUN_TEST(test_begin_pass_clears_bound_vi);
     RUN_TEST(test_bind_vertex_input_instanced_reaches_backend);
@@ -636,7 +621,6 @@ int main(void) {
     RUN_TEST(test_instanced_bind_rejects_unaligned_offset);
     RUN_TEST(test_draw_without_vertex_input_asserts);
     RUN_TEST(test_vi_make_during_context_loss_returns_invalid);
-    RUN_TEST(test_instanced_bind_of_a_stale_vi_clears_mirror);
     RUN_TEST(test_vi_slots_freed_by_context_loss);
     return UNITY_END();
 }

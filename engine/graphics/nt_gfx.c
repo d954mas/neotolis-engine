@@ -1589,14 +1589,9 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
 }
 
 /* Validates a vertex input that is not the bound one and publishes it; 0 = invalid handle, already logged. */
-static uint32_t publish_vertex_input(nt_vertex_input_t vi, const char *caller) {
-    if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi.id)) {
-        /* Clearing the mirrors is the whole unbind: draws trap on it. */
-        s_gfx.bound_vertex_input = 0;
-        s_gfx.bound_index_type = NT_INDEX_NONE;
-        NT_LOG_ERROR("%s: invalid handle", caller);
-        return 0;
-    }
+static uint32_t publish_vertex_input(nt_vertex_input_t vi) {
+    /* Owners revalidate cached handles and recreate them after a loss, so a stale one here is a bug. */
+    NT_ASSERT(nt_pool_valid(&s_gfx.vertex_input_pool, vi.id) && "bind_vertex_input: invalid or stale vertex input");
     uint32_t slot = nt_pool_slot_index(vi.id);
     /* Loss frees vertex-input slots, so a live slot always has a backend. */
     s_gfx.bound_vertex_input = vi.id;
@@ -1614,10 +1609,7 @@ static nt_gfx_result_t bind_vertex_input(nt_vertex_input_t vi) {
     if (s_gfx.bound_vertex_input != 0 && vi.id == s_gfx.bound_vertex_input && s_gfx.bound_instance_stream == 0) {
         return NT_GFX_RESULT_CACHE;
     }
-    const uint32_t slot = publish_vertex_input(vi, "bind_vertex_input");
-    if (slot == 0) {
-        return NT_GFX_RESULT_INVALID_HANDLE;
-    }
+    const uint32_t slot = publish_vertex_input(vi);
     NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_attr_count == 0 && "bind_vertex_input: the vertex input declares an instance layout -- use nt_gfx_bind_vertex_input_instanced");
     s_gfx.bound_instance_stream = 0;
     nt_gfx_frame_bind_vertex_input(slot);
@@ -1640,10 +1632,7 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_
     if (same_vi && stream == s_gfx.bound_instance_stream && byte_offset == s_gfx.bound_instance_offset) {
         return NT_GFX_RESULT_CACHE;
     }
-    const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi, "bind_vertex_input_instanced");
-    if (slot == 0) {
-        return NT_GFX_RESULT_INVALID_HANDLE;
-    }
+    const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
     const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[stream];
     NT_ASSERT(storage->capacity > 0 && "bind_vertex_input_instanced: the stream has no frame_capacity");
     /* Bytes past `used` were never written this frame and are not uploaded. */

@@ -150,9 +150,10 @@ that slot or above asserts, and so does `nt_gfx_init` for a global block declare
 
 The compare runs after the pass check; an equal value was validated when it was
 recorded, `begin_pass` discards the pass-scoped mirrors, and the frame rule keeps
-every recorded object alive until `nt_gfx_end_frame`. An invalid
-pipeline or vertex-input handle clears its mirror (the unbind); other invalid
-binds leave their mirrors unchanged. Uniform values are not deduplicated by
+every recorded object alive until `nt_gfx_end_frame`. An invalid or stale
+vertex-input handle asserts: owners revalidate cached handles and recreate them
+after a loss. An invalid pipeline handle clears its mirror (the unbind); other
+invalid binds leave their mirrors unchanged. Uniform values are not deduplicated by
 the front-end. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
