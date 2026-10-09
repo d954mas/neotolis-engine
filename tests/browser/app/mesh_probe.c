@@ -40,7 +40,7 @@ uint32_t nt_test_mesh_color_probe(void);
     "layout(location = " #r0 ") in vec4 a_world_row0;\n"                                                                                                                                               \
     "layout(location = " #r1 ") in vec4 a_world_row1;\n"                                                                                                                                               \
     "layout(location = " #r2 ") in vec4 a_world_row2;\n"                                                                                                                                               \
-    "out vec4 v_color;\n"                                                                                                                                                                              \
+    "out mediump vec4 v_color;\n"                                                                                                                                                                      \
     "vec4 world_position() { vec4 p = vec4(a_position, 1.0); return vec4(dot(a_world_row0, p), dot(a_world_row1, p), dot(a_world_row2, p), 1.0); }\n"
 
 static const char *s_mesh_vs_src = MESH_PROBE_VS_HEAD MESH_PROBE_WORLD(4, 5, 6) "layout(location = 7) in vec4 a_color;\n"

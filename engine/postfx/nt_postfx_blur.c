@@ -21,8 +21,9 @@ static const char *s_blur_vs_src = "precision highp float;\n"
                                    "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
                                    "}\n";
 
+/* mediump sampler, not the lowp default: float sources carry values beyond lowp's +-2 range. */
 static const char *s_blur_fs_src = "precision mediump float;\n"
-                                   "uniform sampler2D u_source;\n"
+                                   "uniform mediump sampler2D u_source;\n"
                                    "uniform vec4 u_direction;\n"
                                    "uniform int u_radius;\n"
                                    "uniform vec4 u_kernel0;\n"

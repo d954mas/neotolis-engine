@@ -207,16 +207,19 @@ never merge, so `gl_InstanceID` keeps its per-draw meaning.
 
 ## Precision
 
-Mobile GPUs run `mediump` as fp16 (max 65504, 11-bit significand) in both
-stages, and a vertex output's precision sets how many bytes the varying costs
-per vertex. Desktop GL and ANGLE on D3D compute everything in fp32, so desktop
-pixels never show a precision bug; engine shaders follow these rules:
+GLSL ES guarantees `mediump` less range and precision than fp16; the target
+Mali GPUs run it as fp16 (max 65504, 11-bit significand) in both stages, and
+on such tilers a vertex output's precision sets how many bytes the varying
+costs per vertex. Desktop GL and ANGLE on D3D compute everything in fp32, so
+desktop pixels never show a precision bug. Shaders that render follow these
+rules; builder test fixtures that only compile are exempt:
 
 - Vertex shaders default to `highp`: positions and matrices need fp32.
 - Varyings holding colors (UNORM8 sources), tints and unit normals/tangents are
   `mediump`; UVs, world positions and SDF/text coordinates stay `highp`.
-- A fragment input is interpolated at the lower of its two declared precisions,
-  so a `mediump` fragment shader declares its UV input `highp`.
+- A fragment input may be interpolated at the lower of its two declared
+  precisions, so a UV is `highp` on both sides, also in a `mediump` fragment
+  shader.
 - Fragment shaders may default to `mediump` for color math and keep `highp` for
   values that cancel or need range: view vectors from world positions,
   normal-map Z reconstruction, specular powers, derivative-based AA, text

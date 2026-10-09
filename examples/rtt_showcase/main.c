@@ -59,7 +59,7 @@ static const char *s_quad_vs_src = "precision highp float;\n"
                                    "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
                                    "}\n";
 
-/* highp: the depth view reads DEPTH24 through this sampler, and zoom pushes sample_uv to +-500. */
+/* highp: the depth view reads DEPTH24 through this sampler, which fp16 cannot hold. */
 static const char *s_quad_fs_src = "precision highp float;\n"
                                    "uniform highp sampler2D u_texture;\n"
                                    "uniform vec4 u_tint;\n"
