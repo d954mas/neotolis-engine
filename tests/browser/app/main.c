@@ -264,7 +264,7 @@ static void mesh_probe_destroy(void) {
 }
 
 static void mesh_probe_draw(void) {
-    if (s_mesh_vi.id == 0 || !nt_gfx_program_ready(s_mesh_program)) {
+    if (s_mesh_vi.id == 0 || s_mesh_vi_high.id == 0 || !nt_gfx_program_ready(s_mesh_program)) {
         return;
     }
     /* Instance data 8 bytes into a frame storage allocation, two instances per draw, one draw

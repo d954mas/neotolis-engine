@@ -264,7 +264,7 @@ static struct {
         nt_buffer_t wire_ibo;
         nt_buffer_t line_vbo;
         nt_buffer_t line_ibo;
-        /* Instanced kinds, one per sized frame vertex stream: each bakes its stream's buffer. */
+        /* Instanced kinds per frame vertex stream, each over its stream's buffer; made on first selection. */
         nt_vertex_input_t fill_vi[NT_GFX_MAX_VERTEX_STREAMS];
         nt_vertex_input_t wire_vi[NT_GFX_MAX_VERTEX_STREAMS];
         nt_vertex_input_t line_vi[NT_GFX_MAX_VERTEX_STREAMS];
@@ -813,6 +813,37 @@ static nt_buffer_t make_static_buffer(nt_buffer_type_t type, const void *data, u
 }
 
 /* Straight line: a loss met on the way latches in gfx, every later create returns 0, and the next restore makes all again. */
+/* The instanced kinds over one sized stream's buffer, made when the stream is first selected:
+ * an unused stream takes no vertex-input slots. */
+static void make_stream_vertex_inputs(uint32_t stream) {
+    const uint32_t k = stream - NT_GFX_FRAME_VERTEX;
+    const nt_buffer_t instances = nt_gfx_frame_buffer(stream);
+    s_shape.gpu.fill_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_fill_template_layout,
+                                                                                .instance_layout = k_shape_instance_layout,
+                                                                                .vertex_buffer = s_shape.gpu.fill_vbo,
+                                                                                .index_buffer = s_shape.gpu.fill_ibo,
+                                                                                .instance_buffer = instances,
+                                                                                .label = "shape_fill_vi"});
+    s_shape.gpu.wire_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_wire_vertex_layout,
+                                                                                .instance_layout = k_wire_instance_layout,
+                                                                                .vertex_buffer = s_shape.gpu.wire_vbo,
+                                                                                .index_buffer = s_shape.gpu.wire_ibo,
+                                                                                .instance_buffer = instances,
+                                                                                .label = "shape_wire_vi"});
+    s_shape.gpu.line_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_line_template_layout,
+                                                                                .instance_layout = k_line_instance_layout,
+                                                                                .vertex_buffer = s_shape.gpu.line_vbo,
+                                                                                .index_buffer = s_shape.gpu.line_ibo,
+                                                                                .instance_buffer = instances,
+                                                                                .label = "shape_line_vi"});
+    s_shape.gpu.stroke_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_line_template_layout,
+                                                                                  .instance_layout = k_stroke_instance_layout,
+                                                                                  .vertex_buffer = s_shape.gpu.line_vbo,
+                                                                                  .index_buffer = s_shape.gpu.line_ibo,
+                                                                                  .instance_buffer = instances,
+                                                                                  .label = "shape_stroke_vi"});
+}
+
 static void create_gpu(void) {
     s_shape.gpu.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_shape_fs_src, .label = "shape_fs"});
     s_shape.gpu.fill_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_fill_vs_src, .label = "shape_fill_vs"});
@@ -846,36 +877,7 @@ static void create_gpu(void) {
     s_shape.gpu.line_ibo = make_static_buffer(NT_BUFFER_INDEX, s_stroke_indices, sizeof(s_stroke_indices), "shape_line_template");
 
     s_shape.gpu.batch_vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_batch_layout, .vertex_buffer = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), .label = "shape_batch_vi"});
-    for (uint32_t k = 0; k < NT_GFX_MAX_VERTEX_STREAMS; k++) {
-        const nt_buffer_t instances = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + k);
-        if (instances.id == 0) {
-            continue; /* unsized stream: set_stream asserts it is never selected */
-        }
-        s_shape.gpu.fill_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_fill_template_layout,
-                                                                                    .instance_layout = k_shape_instance_layout,
-                                                                                    .vertex_buffer = s_shape.gpu.fill_vbo,
-                                                                                    .index_buffer = s_shape.gpu.fill_ibo,
-                                                                                    .instance_buffer = instances,
-                                                                                    .label = "shape_fill_vi"});
-        s_shape.gpu.wire_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_wire_vertex_layout,
-                                                                                    .instance_layout = k_wire_instance_layout,
-                                                                                    .vertex_buffer = s_shape.gpu.wire_vbo,
-                                                                                    .index_buffer = s_shape.gpu.wire_ibo,
-                                                                                    .instance_buffer = instances,
-                                                                                    .label = "shape_wire_vi"});
-        s_shape.gpu.line_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_line_template_layout,
-                                                                                    .instance_layout = k_line_instance_layout,
-                                                                                    .vertex_buffer = s_shape.gpu.line_vbo,
-                                                                                    .index_buffer = s_shape.gpu.line_ibo,
-                                                                                    .instance_buffer = instances,
-                                                                                    .label = "shape_line_vi"});
-        s_shape.gpu.stroke_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_line_template_layout,
-                                                                                      .instance_layout = k_stroke_instance_layout,
-                                                                                      .vertex_buffer = s_shape.gpu.line_vbo,
-                                                                                      .index_buffer = s_shape.gpu.line_ibo,
-                                                                                      .instance_buffer = instances,
-                                                                                      .label = "shape_stroke_vi"});
-    }
+    make_stream_vertex_inputs(s_shape.stream);
 }
 
 /* A buffer takes its vertex inputs and a program its pipelines along: the instanced vertex inputs
@@ -1090,6 +1092,9 @@ void nt_shape_renderer_set_stream(uint32_t stream) {
     }
     nt_shape_renderer_flush();
     s_shape.stream = (uint8_t)stream;
+    if (!nt_gfx_vertex_input_valid(s_shape.gpu.fill_vi[stream - NT_GFX_FRAME_VERTEX])) {
+        make_stream_vertex_inputs(stream);
+    }
 }
 
 /* ---- Line ---- */

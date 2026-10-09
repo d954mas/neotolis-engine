@@ -1135,6 +1135,62 @@ void test_owned_vertex_input_failures_record_nothing(void) {
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 }
 
+/* An unsized stream has no buffer to bake: the draw names the missing capacity. */
+void test_draw_from_an_unsized_stream_asserts(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_test_frame_next();
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, NT_GFX_FRAME_VERTEX + 2, 0, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "no frame_capacity"));
+    nt_test_frame_next();
+}
+
+/* A real loss frees every vertex input and replaces the frame buffers: the cache rebuilds over the
+ * new stream buffer without restore_gpu, and the game's recreated buffer and vertex input draw. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_real_restore_rebinds_new_stream_and_owned_buffers(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_test_entity(mesh, mat);
+    nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+    nt_buffer_t owned = make_owned_instances(2);
+    nt_vertex_input_t vi = nt_mesh_renderer_make_vertex_input(mesh, mat, owned);
+    nt_test_frame_next();
+    nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
+    nt_test_frame_next();
+    const uint32_t old_stream = nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1));
+    TEST_ASSERT_EQUAL_UINT32(old_stream, nt_gfx_fake_last_instance_buffer());
+
+    nt_test_frame_close();
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_begin_frame(); /* restores: every vertex input is freed, frame buffers are new */
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));
+    /* The game reloads what it owns: mesh, program, its instance buffer, then the vertex input. */
+    nt_gfx_deactivate_mesh(mesh.id);
+    nt_gfx_destroy_buffer(owned);
+    mesh = create_test_mesh();
+    *nt_mesh_comp_handle(e) = mesh;
+    item.batch_key = nt_mesh_renderer_batch_key(mat, mesh);
+    nt_material_set_program(mat, create_test_program());
+    owned = make_owned_instances(2);
+    vi = nt_mesh_renderer_make_vertex_input(mesh, mat, owned);
+    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
+    nt_gfx_end_frame();
+    nt_test_frame_open();
+
+    nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
+    nt_test_frame_next();
+    const uint32_t new_stream = nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1));
+    TEST_ASSERT_NOT_EQUAL_UINT32(old_stream, new_stream);
+    TEST_ASSERT_EQUAL_UINT32(new_stream, nt_gfx_fake_last_instance_buffer());
+    mark_draws();
+    nt_mesh_renderer_draw_vertex_input(mesh, mat, vi, 0, 2);
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(owned), nt_gfx_fake_last_instance_buffer());
+}
+
 /* The core draw reads instances the game allocated in the named stream this frame. */
 void test_core_draw_asserts_on_instances_outside_the_stream(void) {
     nt_mesh_t mesh = create_test_mesh();
@@ -2200,6 +2256,8 @@ int main(void) {
     RUN_TEST(test_owned_vertex_input_asserts_past_its_buffer);
     RUN_TEST(test_owned_vertex_input_lifetime);
     RUN_TEST(test_owned_vertex_input_failures_record_nothing);
+    RUN_TEST(test_draw_from_an_unsized_stream_asserts);
+    RUN_TEST(test_real_restore_rebinds_new_stream_and_owned_buffers);
     RUN_TEST(test_core_draw_asserts_on_instances_outside_the_stream);
     return UNITY_END();
 }

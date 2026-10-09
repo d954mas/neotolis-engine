@@ -350,8 +350,8 @@ typedef struct {
     uint16_t max_meshes;    /* default: 128 */
     /* default: 560 = max_meshes(128) * max_mesh_vertex_inputs(4) + 48 other vertex inputs. A mesh takes
      * one per (material layout, frame vertex stream) it is drawn with. The other budget also holds
-     * 4 per sized vertex stream for shapes and one bufferless per used stream and mesh renderer:
-     * raise it with the sized streams (8 streams take about 48 alone). Add
+     * 4 per stream shapes draw from and one bufferless per used stream and mesh renderer:
+     * raise it with the streams in use (8 streams take about 48 alone). Add
      * max_meshes * skinned.max_mesh_vertex_inputs when using both mesh renderers; raise the extra
      * budget near the 64-layout sprite limit and for the game's own vertex inputs. */
     uint16_t max_vertex_inputs;
@@ -449,8 +449,9 @@ typedef struct {
     nt_vertex_layout_t instance_layout; /* optional per-instance attrs, divisor 1; offset set by nt_gfx_bind_vertex_input_instanced */
     nt_buffer_t vertex_buffer;          /* NT_BUFFER_VERTEX; required iff layout.attr_count > 0 */
     nt_buffer_t index_buffer;           /* optional ({0} = non-indexed); NT_BUFFER_INDEX with index_type != NT_INDEX_NONE */
-    nt_buffer_t instance_buffer;        /* NT_BUFFER_VERTEX; required iff instance_layout.attr_count > 0: a frame vertex stream
-                                           buffer (nt_gfx_frame_buffer) or a caller-owned buffer */
+    nt_buffer_t instance_buffer;        /* NT_BUFFER_VERTEX; required iff instance_layout.attr_count > 0: a caller-owned buffer
+                                           (draws stay inside its size) or a frame storage buffer (nt_gfx_frame_buffer;
+                                           draws stay inside this frame's allocations) */
     const char *label;                  /* optional debug name; borrowed for the call */
 } nt_vertex_input_desc_t;
 
@@ -988,8 +989,8 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
  * byte_offset of its instance buffer. The offset must be 4-byte aligned (WebGL2 rejects
  * unaligned attrib offsets); asserted. The GL VAO keeps the pointers of its last offset, so a
  * vertex input bound at the same offset every frame re-points nothing; one bound at two
- * offsets in a frame re-points between them. Instanced draws assert that their instances lie
- * inside the buffer, or inside this frame's allocations when it is a frame vertex stream. */
+ * offsets in a frame re-points between them. Every draw over it asserts that its instances lie
+ * inside the buffer, or inside this frame's allocations for a frame stream (a plain draw reads one). */
 void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t byte_offset);
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.

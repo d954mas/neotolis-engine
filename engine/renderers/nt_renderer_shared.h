@@ -234,8 +234,6 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
                                                                          const nt_gfx_mesh_info_t *mesh_info, const nt_vertex_layout_t *instance_layout, uint32_t stream, const char *label) {
     const uint32_t slot = nt_pool_slot_index(mesh.id);
     NT_ASSERT(slot != 0 && slot <= cache->mesh_capacity);
-    /* Callers assert the stream range; an unsized stream has no buffer to bake. */
-    NT_ASSERT(g_nt_gfx_frame_storage[stream].capacity > 0 && "mesh draw: the stream has no frame_capacity");
     nt_renderer_mesh_vi_version_t *row = &cache->versions[(size_t)(slot - 1) * cache->max_versions];
     if (cache->meshes[slot - 1].id != mesh.id) {
         /* The old mesh's buffer destroys took its own versions; the shared bufferless ones stay. */
@@ -264,10 +262,12 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
         }
     }
     if (reusable == NULL) {
-        NT_LOG_ERROR("%s vertex-input versions exhausted -- raise max_mesh_vertex_inputs", label != NULL ? label : "mesh renderer");
+        NT_LOG_ERROR("%s vertex-input versions exhausted: one per (layout, stream) pair a mesh is drawn with -- raise max_mesh_vertex_inputs", label != NULL ? label : "mesh renderer");
     }
     /* Crash instead of hiding VAO churn behind version eviction. */
     NT_ASSERT(reusable != NULL && "mesh vertex-input versions exhausted -- raise renderer max_mesh_vertex_inputs");
+    /* Callers assert the stream range; an unsized stream has no buffer to bake. */
+    NT_ASSERT(g_nt_gfx_frame_storage[stream].capacity > 0 && "mesh draw: the stream has no frame_capacity");
 
     const nt_vertex_input_desc_t desc = nt_renderer_mesh_vi_desc(&layout, mesh_info, instance_layout, nt_gfx_frame_buffer(stream), label);
     nt_vertex_input_t vi;

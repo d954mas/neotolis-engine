@@ -317,7 +317,8 @@ void nt_gfx_backend_capture_initial_state(void) {
             const nt_gfx_gl_attr_t *attr = &s_vertex_inputs[i].instance_attrs[a];
             NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->detail = i; event->result = NT_GFX_RESULT_UNKNOWN; event->data.attribute.location = attr->location;
                           event->data.attribute.type = (uint32_t)attr->type; event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized;
-                          event->data.attribute.offset = attr->offset; event->data.attribute.stride = s_vertex_inputs[i].instance_stride; event->data.attribute.divisor = 1;);
+                          event->data.attribute.offset = attr->offset; event->data.attribute.stride = s_vertex_inputs[i].instance_stride; event->data.attribute.divisor = 1;
+                          event->data.attribute.buffer = s_vertex_inputs[i].instance_buffer;);
         }
     }
     for (uint32_t i = 1; i <= s_init_desc.max_render_targets; i++) {

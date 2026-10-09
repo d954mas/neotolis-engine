@@ -64,12 +64,12 @@ typedef struct {
 typedef struct {
     uint32_t vbo_id; /* full buffer handles: destroy_buffer cascades on exact match */
     uint32_t ibo_id;
-    uint32_t inst_id;
-    uint32_t inst_size;   /* instance buffer capacity: instanced draws assert their range against it */
-    uint32_t inst_extent; /* bytes one instance reads: max attr offset + attr size (may exceed the stride) */
-    uint16_t inst_stride;
-    uint8_t inst_stream; /* frame stream whose buffer is the instance buffer (its `used` bounds the range); 0 = none */
-    uint8_t index_type;  /* captured from the IBO; NT_INDEX_NONE for non-indexed */
+    uint32_t instance_buffer_id;
+    uint32_t instance_size;   /* instance buffer capacity: instanced draws assert their range against it */
+    uint32_t instance_extent; /* bytes one instance reads: max attr offset + attr size (may exceed the stride) */
+    uint16_t instance_stride;
+    uint8_t instance_stream; /* frame stream whose buffer is the instance buffer (its `used` bounds the range); 0 = none */
+    uint8_t index_type;      /* captured from the IBO; NT_INDEX_NONE for non-indexed */
     uint8_t instance_attr_count;
 } nt_gfx_vertex_input_meta_t;
 
@@ -156,8 +156,8 @@ static struct {
 } s_gfx;
 
 _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
-/* The index stream's buffer is NT_BUFFER_INDEX and never an instance source, so inst_stream 0 is free. */
-_Static_assert(NT_GFX_FRAME_INDEX == 0 && NT_GFX_FRAME_STREAM_COUNT <= UINT8_MAX, "inst_stream: 0 marks a buffer outside frame storage");
+/* The index stream's buffer is NT_BUFFER_INDEX and never an instance source, so instance_stream 0 is free. */
+_Static_assert(NT_GFX_FRAME_INDEX == 0 && NT_GFX_FRAME_STREAM_COUNT <= UINT8_MAX, "instance_stream: 0 marks a buffer outside frame storage");
 
 static void discard_texture_set(void) { s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_NONE; }
 
@@ -241,7 +241,7 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 event->data.resource.backend = slot;
                 event->data.resource.related[0] = s_gfx.vertex_input_metas[slot].vbo_id;
                 event->data.resource.related[1] = s_gfx.vertex_input_metas[slot].ibo_id;
-                event->data.resource.related[2] = s_gfx.vertex_input_metas[slot].inst_id;
+                event->data.resource.related[2] = s_gfx.vertex_input_metas[slot].instance_buffer_id;
                 event->data.resource.type = s_gfx.vertex_input_metas[slot].index_type;
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
@@ -1054,25 +1054,25 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
     /* GL reads stride 0 as tightly packed per attribute, which the draw range check cannot bound. */
     NT_ASSERT((desc->instance_layout.attr_count == 0 || desc->instance_layout.stride > 0) && "make_vertex_input: instance_layout needs a nonzero stride");
     uint32_t inst_backend = 0;
-    uint32_t inst_size = 0;
-    uint8_t inst_stream = 0;
-    uint32_t inst_extent = 0;
+    uint32_t instance_size = 0;
+    uint8_t instance_stream = 0;
+    uint32_t instance_extent = 0;
     if (desc->instance_buffer.id != 0) {
         NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, desc->instance_buffer.id) && "make_vertex_input: invalid instance_buffer handle");
         uint32_t inst_slot = nt_pool_slot_index(desc->instance_buffer.id);
         NT_ASSERT(s_gfx.buffer_metas[inst_slot].type == NT_BUFFER_VERTEX && "make_vertex_input: instance_buffer is not vertex type");
         inst_backend = s_gfx.buffer_backends[inst_slot];
         NT_ASSERT(inst_backend != 0 && "make_vertex_input: instance_buffer has no live backend -- recreate it after context restore");
-        inst_size = s_gfx.buffer_metas[inst_slot].size;
+        instance_size = s_gfx.buffer_metas[inst_slot].size;
         for (uint32_t stream = 0; stream < NT_GFX_FRAME_STREAM_COUNT; stream++) {
             if (g_nt_gfx_frame_storage[stream].buffer.id == desc->instance_buffer.id) {
-                inst_stream = (uint8_t)stream;
+                instance_stream = (uint8_t)stream;
             }
         }
         for (uint8_t i = 0; i < desc->instance_layout.attr_count; i++) {
             const nt_vertex_attr_t *attr = &desc->instance_layout.attrs[i];
             const uint32_t end = attr->offset + (nt_vertex_type_size(attr->type) * attr->count);
-            inst_extent = end > inst_extent ? end : inst_extent;
+            instance_extent = end > instance_extent ? end : instance_extent;
         }
     }
 
@@ -1090,11 +1090,11 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
     s_gfx.vertex_input_metas[slot] = (nt_gfx_vertex_input_meta_t){
         .vbo_id = desc->vertex_buffer.id,
         .ibo_id = desc->index_buffer.id,
-        .inst_id = desc->instance_buffer.id,
-        .inst_size = inst_size,
-        .inst_stride = desc->instance_layout.stride,
-        .inst_extent = inst_extent,
-        .inst_stream = inst_stream,
+        .instance_buffer_id = desc->instance_buffer.id,
+        .instance_size = instance_size,
+        .instance_stride = desc->instance_layout.stride,
+        .instance_extent = instance_extent,
+        .instance_stream = instance_stream,
         .index_type = index_type,
         .instance_attr_count = desc->instance_layout.attr_count,
     };
@@ -1479,7 +1479,7 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
      * reaches no renderer, so renderer caches rely on this cascade. */
     for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
         const nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[i];
-        if (meta->vbo_id == buf.id || meta->ibo_id == buf.id || meta->inst_id == buf.id) {
+        if (meta->vbo_id == buf.id || meta->ibo_id == buf.id || meta->instance_buffer_id == buf.id) {
             nt_gfx_destroy_vertex_input((nt_vertex_input_t){s_gfx.vertex_input_pool.slots[i].id});
         }
     }
@@ -2161,8 +2161,8 @@ static void assert_instances_in_range(uint32_t instance_count) {
     if (meta->instance_attr_count == 0 || instance_count == 0) {
         return;
     }
-    const uint64_t limit = meta->inst_stream != 0 ? g_nt_gfx_frame_storage[meta->inst_stream].used : meta->inst_size;
-    const uint64_t end = (uint64_t)s_gfx.bound_instance_offset + ((uint64_t)(instance_count - 1U) * meta->inst_stride) + meta->inst_extent;
+    const uint64_t limit = meta->instance_stream != 0 ? g_nt_gfx_frame_storage[meta->instance_stream].used : meta->instance_size;
+    const uint64_t end = (uint64_t)s_gfx.bound_instance_offset + ((uint64_t)(instance_count - 1U) * meta->instance_stride) + meta->instance_extent;
     NT_ASSERT(end <= limit && "draw: instances lie outside the instance buffer or this frame's allocations in its stream");
 }
 

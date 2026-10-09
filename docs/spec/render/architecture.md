@@ -187,8 +187,8 @@ The caller that creates it owns the handle and destroys it with
 optional instance buffer handles. It bakes those buffers together with a vertex
 layout and an optional per-instance layout (GL: one VAO). The instance buffer is
 any `NT_BUFFER_VERTEX` buffer, required exactly when the instance layout has
-attributes: a frame vertex stream's buffer (`nt_gfx_frame_buffer`, see Frame
-storage) or one the caller owns. gfx does not care who fills it or when. One bind
+attributes: a frame storage buffer (`nt_gfx_frame_buffer`, see Frame storage)
+or one the caller owns. gfx does not care who fills it or when. One bind
 selects the whole geometry for the following draws: `nt_gfx_bind_vertex_input(vi)`
 for a vertex input without an instance layout,
 `nt_gfx_bind_vertex_input_instanced(vi, offset)` for one with an instance layout,
@@ -244,8 +244,9 @@ through the builder's validator, and desktop GL accepts what the browser
 rejects. Pack data never reaches those asserts: mesh activation hard-rejects
 invalid per-stream type/count/normalized, duplicate name hashes, and
 misaligned offsets/strides before any vertex input exists. Renderer-owned
-vertex inputs are created on a cache miss and then reused, so validation is
-absent from the steady-state hot path.
+vertex inputs are created on a cache miss and then reused, so creation
+validation is absent from the steady-state hot path; draws keep the one
+instance range assert.
 
 **Lifetime and the destroy cascade.** `nt_gfx_destroy_buffer` destroys every
 live vertex input referencing that buffer as its vertex, index or instance
@@ -597,9 +598,11 @@ renderer a third pair for persistent instance data:
   vertex input asserts at the bind. The destroy cascade reaches it through
   `instances`, and through the mesh's buffers only when the vertex input
   references them (a material mapping no mesh stream over a non-indexed mesh
-  references none); after a context loss the caller recreates
-  `instances`, then the vertex input, and after a mesh or layout change it
-  rebuilds it even if still valid. How many to make is the caller's trade-off
+  references none, so destroy it before replacing the mesh). After a context
+  loss the caller recreates and refills `instances`, then, once the mesh and
+  material are live again, the vertex input; after a mesh or layout change it
+  rebuilds it even if still valid. Writes to `instances` follow queue
+  semantics. How many to make is the caller's trade-off
   (see Vertex inputs, Persistent instance data).
 
 The core's instances are filled before `nt_gfx_end_frame` (see Frame
@@ -1068,8 +1071,9 @@ zero for an absent attachment, and the size of those textures.
 Shader, program and vertex-input definitions carry result `UNKNOWN`: the frontend
 retains no shader stage or source, program stage pair or vertex-input layout, so
 those fields are absent, not zero. A vertex input created during a recorded frame
-follows its definition with `DEFINITION/ATTRIBUTE` records; instance attribute
-records name the instance buffer. A vertex-input definition relates its vertex,
+follows its definition with `DEFINITION/ATTRIBUTE` records; its instance
+attribute records name the instance buffer handle. The backend's attribute
+records at capture start name its GL name. A vertex-input definition relates its vertex,
 index and instance buffer handles in `related[0..2]`. The backend defines the
 vertex input's VAO with the GL name of its instance buffer (0 without one) in
 `backend.args[2]` and the instance offset its pointers hold in `args[3]` (0

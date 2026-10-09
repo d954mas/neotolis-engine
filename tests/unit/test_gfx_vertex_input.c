@@ -450,9 +450,11 @@ void test_instanced_draw_asserts_its_instance_range(void) {
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     nt_gfx_bind_vertex_input_instanced(frame_vi, 64);
     EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 1)); /* past `used`: last frame's bytes */
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     nt_gfx_bind_vertex_input_instanced(own_vi, 48);
     nt_gfx_draw_instanced(0, 3, 1);
     EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.counters));
     nt_gfx_end_pass();
 }
@@ -474,8 +476,10 @@ void test_instance_range_uses_the_attribute_extent(void) {
     nt_gfx_bind_vertex_input_instanced(past_vi, 16);
     nt_gfx_draw_instanced(0, 3, 1); /* reads 48..64 */
     EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     nt_gfx_bind_vertex_input_instanced(past_vi, 0xFFFFFFF0U);
     EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 0xFFFFFFFFU)); /* no 32-bit wrap */
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     nt_gfx_end_pass();
 }
 
@@ -501,10 +505,14 @@ void test_every_draw_form_checks_its_own_stream(void) {
     nt_gfx_bind_vertex_input_instanced(vi1, 96);
     nt_gfx_draw_indexed_instanced(0, 3, 3, 2); /* ends at 128 */
     EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 3, 3, 3));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     nt_gfx_bind_vertex_input_instanced(vi0, 64);
     EXPECT_ASSERT(nt_gfx_draw_indexed_instanced(0, 3, 3, 1)); /* stream 0 holds only 64 */
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 3, 3));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     EXPECT_ASSERT(nt_gfx_draw(0, 3));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
     nt_gfx_bind_vertex_input_instanced(vi0, 48);
     nt_gfx_draw_indexed(0, 3, 3);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.counters));

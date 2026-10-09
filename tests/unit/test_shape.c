@@ -105,13 +105,17 @@ void test_shape_set_stream_routes_instances(void) {
     NT_TEST_EXPECT_ASSERT(nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 2)); /* unsized */
 }
 
-/* Restore rebuilds the instanced vertex inputs of every sized stream over its buffer. */
+/* After a real loss the frame buffers are new: a stream selected after restore gets its instanced
+ * vertex inputs over the new buffer. */
 void test_shape_restore_rebuilds_stream_vertex_inputs(void) {
     const float c[3] = {0, 0, 0};
     const float size[3] = {1, 1, 1};
+    const uint32_t old_stream = nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    nt_gfx_fake_lose_and_restore_context();
     nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     nt_shape_renderer_restore_gpu();
     nt_gfx_end_frame(); /* program links finish in begin_frame */
     nt_gfx_begin_frame();
@@ -120,7 +124,18 @@ void test_shape_restore_rebuilds_stream_vertex_inputs(void) {
     nt_shape_renderer_cube(c, size, NULL, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     nt_test_frame_next();
+    TEST_ASSERT_NOT_EQUAL_UINT32(old_stream, nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)), nt_gfx_fake_last_instance_buffer());
+}
+
+/* Instanced vertex inputs of a stream are made when it is first selected, once. */
+void test_shape_makes_stream_vertex_inputs_on_first_selection(void) {
+    const uint32_t before = nt_gfx_fake_vertex_input_create_count();
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 1);
+    TEST_ASSERT_EQUAL_UINT32(before + 4U, nt_gfx_fake_vertex_input_create_count());
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX);
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 1);
+    TEST_ASSERT_EQUAL_UINT32(before + 4U, nt_gfx_fake_vertex_input_create_count());
 }
 
 void test_shape_set_depth_auto_flush(void) {
@@ -791,5 +806,6 @@ int main(void) {
     RUN_TEST(test_shape_restore_on_inactive_renderer_does_nothing);
     RUN_TEST(test_shape_set_stream_routes_instances);
     RUN_TEST(test_shape_restore_rebuilds_stream_vertex_inputs);
+    RUN_TEST(test_shape_makes_stream_vertex_inputs_on_first_selection);
     return UNITY_END();
 }
