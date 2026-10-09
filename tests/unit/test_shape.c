@@ -88,8 +88,10 @@ void test_shape_set_stream_routes_instances(void) {
     const float b[3] = {0, 1, 0};
     const uint32_t col = NT_RGBA8(255, 255, 255, 255);
     nt_shape_renderer_cube(c, size, NULL, col);
+    const uint32_t before = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used;
     nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 1);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_instance_count(NT_SHAPE_TEST_CUBE)); /* flushed to the general stream */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_instance_count(NT_SHAPE_TEST_CUBE));
+    TEST_ASSERT_GREATER_THAN_UINT32(before, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used); /* flushed to the general stream */
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX + 1].used);
     const uint32_t general = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used;
 

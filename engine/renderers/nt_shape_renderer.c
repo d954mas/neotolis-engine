@@ -7,6 +7,8 @@
 
 #include <string.h>
 
+_Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 5, "shape instance layout needs 5 attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
+
 #define NT_SHAPE_SEGMENTS 16
 
 /* Derived template sizes (compile-time, used for stack arrays) */
@@ -299,7 +301,7 @@ static struct {
     float line_width;
     float pixel_scale[4];
     bool depth_enabled;
-    uint8_t stream; /* uint32_t of instance data */
+    uint8_t stream; /* frame vertex stream of instanced kinds */
     bool initialized;
 
     /* Sin/Cos lookup table (fixed NT_SHAPE_SEGMENTS) */

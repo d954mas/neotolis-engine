@@ -12,6 +12,8 @@
 
 #include <string.h>
 
+_Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 4, "mesh instance layout needs 4 attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
+
 static struct {
     nt_renderer_mesh_caches_t caches;
     bool initialized;

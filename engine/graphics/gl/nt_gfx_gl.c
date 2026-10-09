@@ -1696,7 +1696,7 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
     NT_GL(glBindVertexArray, s_gl_cache.vao);
     vi->vao[0] = vao;
     NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = slot; event->data.backend.args[1] = vao;
-                  event->data.backend.args[2] = 0;);
+                  event->data.backend.args[2] = 0; event->data.backend.args[3] = NT_GFX_GL_NOT_POINTED;);
     return slot;
 }
 
@@ -1737,7 +1737,7 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t buffer_b
         vi->vao[clone] = vao;
         s_gl_cache.vao = vao;
         NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = backend_handle; event->data.backend.args[1] = vao;
-                      event->data.backend.args[2] = clone;);
+                      event->data.backend.args[2] = clone; event->data.backend.args[3] = NT_GFX_GL_NOT_POINTED;);
     } else if (s_gl_cache.vao != vao) {
         NT_GL(glBindVertexArray, vao);
         s_gl_cache.vao = vao;

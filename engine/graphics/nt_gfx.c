@@ -1640,15 +1640,15 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_
     if (same_vi && stream == s_gfx.bound_instance_stream && byte_offset == s_gfx.bound_instance_offset) {
         return NT_GFX_RESULT_CACHE;
     }
+    const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi, "bind_vertex_input_instanced");
+    if (slot == 0) {
+        return NT_GFX_RESULT_INVALID_HANDLE;
+    }
     const nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[stream];
     NT_ASSERT(storage->capacity > 0 && "bind_vertex_input_instanced: the stream has no frame_capacity");
     /* Bytes past `used` were never written this frame and are not uploaded. */
     NT_ASSERT(byte_offset < storage->used && "bind_vertex_input_instanced: offset outside this frame's allocations in the stream");
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_vertex_input_instanced: offset must be 4-byte aligned (WebGL2 attrib rule)");
-    const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi, "bind_vertex_input_instanced");
-    if (slot == 0) {
-        return NT_GFX_RESULT_INVALID_HANDLE;
-    }
     NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_attr_count > 0 && "bind_vertex_input_instanced: the vertex input declares no instance layout");
     /* Restore recreates the frame storage buffers before any frame, so a live context has their backends. */
     const uint32_t buffer_backend = s_gfx.buffer_backends[nt_pool_slot_index(storage->buffer.id)];

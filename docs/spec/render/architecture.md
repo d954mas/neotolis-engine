@@ -67,7 +67,8 @@ renderer_draw_sprite(...);
 Draw-phase calls are deferred. At the call, the front-end validates and updates
 its logical state and geometry counters, then records the
 backend-resolved arguments of the backend call into one command stream: begin
-and end pass, clear, pipeline, vertex-input and instance-buffer binds,
+and end pass, clear, pipeline and vertex-input binds (an instanced one carries its
+instance stream and offset),
 texture-unit and uniform-block binds, the mat4, vec4, float
 and int uniform setters, scissor rectangle and enable, viewport, the plain and
 indexed draws (both carry an instance count; the indexed draw also carries the
@@ -597,7 +598,8 @@ for (uint32_t i = 0; i < character_count; i++) {
 nt_skeletal_gpu_flush();
 
 /* Game-owned passes; each list is read and packed when it is drawn, into its pass's stream:
- * enum { GAME_STREAM_GENERAL = NT_GFX_FRAME_VERTEX, GAME_STREAM_MAIN, GAME_STREAM_SHADOW }; */
+ * enum { GAME_STREAM_GENERAL = NT_GFX_FRAME_VERTEX, GAME_STREAM_MAIN, GAME_STREAM_SHADOW, // + CASCADES - 1
+ *        GAME_STREAM_COUNT = GAME_STREAM_SHADOW + CASCADES }; */
 bind_shadow_materials();
 for (uint32_t c = 0; c < CASCADES; c++) {
     nt_gfx_begin_pass(&shadow_pass[c]);

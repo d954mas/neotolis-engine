@@ -316,8 +316,9 @@ typedef enum {
 /* ---- Vertex layout ---- */
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
-/* NT_GFX_MAX_INSTANCE_ATTRS comes from CMake (default 8, at most 16): the backend keeps
- * a per-vertex-input copy of the instance layout, and max_vertex_inputs slots exist. */
+/* NT_GFX_MAX_INSTANCE_ATTRS comes from CMake (default 8, at most 16): the GL backend keeps
+ * a packed copy of both layouts per vertex-input slot to build a VAO per stream, and
+ * max_vertex_inputs slots exist. */
 #if NT_GFX_MAX_INSTANCE_ATTRS < 1 || NT_GFX_MAX_INSTANCE_ATTRS > NT_GFX_MAX_VERTEX_ATTRS
 #error "NT_GFX_MAX_INSTANCE_ATTRS must be 1-16"
 #endif

@@ -779,6 +779,7 @@ static void test_a_stream_vao_is_defined_when_the_replay_builds_it(void) {
         const nt_gfx_event_t *event = &capture.events[i];
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_VERTEX_INPUT && event->data.backend.args[2] == 1U) {
             TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[1]);
+            TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, event->data.backend.args[3]); /* built unpointed */
             defined = true;
         }
         if (event->operation == NT_GFX_OP_VERTEX_INPUT && event->data.binding.slot == NT_GFX_FRAME_VERTEX + 1U && event->data.binding.offset == offset + 16U) {

@@ -561,6 +561,11 @@ static void test_destroying_vertex_input_with_a_bound_clone(void) {
     nt_gfx_bind_vertex_input(vi_b);
     nt_gfx_draw(0, 3);
     TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
+    /* An instanced vertex input reusing the freed slot starts unpointed in every stream: its
+     * first bind points both instance attributes, after the static pointer of each new VAO. */
+    nt_gfx_destroy_vertex_input(vi_b);
+    nt_vertex_input_t vi_c = make_instanced_vi();
+    TEST_ASSERT_EQUAL_UINT32(1 + 1 + 2, instanced_frame(pip, &(instanced_run_t){vi_c, NT_GFX_FRAME_VERTEX + 1, 0}, 1));
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 

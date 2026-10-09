@@ -86,6 +86,7 @@ static nt_vertex_input_t make_inst_vi(nt_buffer_t vbo) { return nt_gfx_make_vert
 
 /* Re-inits gfx with `count` sized vertex streams and opens a frame, as setUp does. */
 static void init_with_streams(uint32_t count) {
+    nt_gfx_end_frame();
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS,
                                           .max_render_targets = 4);

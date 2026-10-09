@@ -14,6 +14,8 @@
 
 #include <string.h>
 
+_Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 6, "skinned mesh instance layout needs 6 attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
+
 static struct {
     nt_renderer_mesh_caches_t caches;
     uint32_t skin_sampler_hash;
