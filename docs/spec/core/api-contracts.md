@@ -441,7 +441,9 @@ size. The engine never recreates a target and never preserves pixels: consumers
 redraw offscreen contents after making a target.
 Context loss latches at `nt_gfx_begin_frame`, at the start of the host
 iteration, or at the first backend call inside an iteration that fails on it;
-calls after the latch take their lost path, and pass calls on a lost context keep
+the replay of recorded commands in `nt_gfx_end_frame` latches nothing (a lazily
+built VAO that gets no name on the lost context skips its bind), so the next
+`nt_gfx_begin_frame` latches that loss. Calls after the latch take their lost path, and pass calls on a lost context keep
 their sequencing asserts and record nothing (see Passes and draw state). Work issued
 before the latch is issued but does nothing, and the next begin_frame that takes
 the lost event wipes. While the browser reports the context lost, begin_frame does
