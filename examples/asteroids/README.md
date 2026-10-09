@@ -58,7 +58,7 @@ other builds use the identical scalar code, about 145 ms for the shapes.
 In desktop Chrome (paired release build, same PC) startup generation takes about
 220 ms with the SIMD binary and about 540 ms with the baseline one: shapes about
 95–125 ms (SIMD) or 290–400 ms (baseline), buffer upload about 30 ms, and the
-single atlas readback plus R8 uploads about 65–95 ms. Phones are unmeasured. The
+single atlas readback plus R8 uploads about 65–95 ms. Phone startup is unmeasured. The
 packs contain only shaders, the font, the UI atlas, Mars and the six sky faces,
 all Basis ETC1S (about 3.4 MiB).
 
@@ -95,7 +95,16 @@ and RTX 4080 Laptop GPUs (which GPU each run used was not checked), ABBA runs:
 Per-key vertex inputs trade the attribute re-pointing for a vertex array switch
 per draw. In Chrome that cut submission from 22–25 ms to under 2 ms; natively
 the switch costs more than re-pointing (submission 0.8 → 4.7 ms). WebGL is the
-target, so the demo keeps per-key inputs. Phones are unmeasured.
+target, so the demo keeps per-key inputs.
+
+On the reference phone (Huawei P40, Mali-G76, Chromium 156, vsync off, warm,
+ABBA per [measuring performance on phones](../../docs/perf-measurement.md)),
+complexity 9 went from 1.8–2.3 FPS (p95 616–735 ms) to 18.8–24.2 FPS (p95
+100–122 ms), 0.41 → 3.9–4.7 FPS per 100 GPU MHz. The phone is limited by
+Chrome's GPU-process main thread (`CrGpuMain`) executing the ~3,000 draws: it is
+~99% busy, the page thread waits on it for over half the frame, and without the
+rock draws the same page runs at ~97 FPS. The instance update (~11 ms) and the
+5 MB instance upload are secondary.
 
 ## Build and run
 

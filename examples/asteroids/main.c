@@ -1412,6 +1412,13 @@ static void ui_statistics(void) {
 }
 
 static void ui_help(void) {
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "ABOUT THIS DEMO", &s_ui_section);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2),
+                "A rendering stress test. Every asteroid is animated and drawn every frame; nothing is culled.\n\nEach asteroid uses one of up to 1000 shapes, each in 4 LODs chosen by "
+                "screen size, and one of 50 noise textures packed in one atlas. Asteroids sharing a shape and LOD become one instanced draw, so DC is the number of shape x LOD "
+                "pairs in use: about 3000 at complexity 9.\n\nOn phones the limit is the browser's GPU process executing those draws, not the asteroid count.",
+                &s_ui_body);
+    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "CONTROLS", &s_ui_section);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Mouse: drag to orbit, wheel to zoom.\nTouch: one finger orbit, pinch zoom.\nSettings: pause, quality, reset view.", &s_ui_body);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "SCENE CONTROLS", &s_ui_section);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2),
