@@ -1,4 +1,5 @@
 #include "graphics/nt_gfx.h"
+#include "pool/nt_pool.h"
 #include "test_helpers/nt_gfx_test_frame.h"
 #include "unity.h"
 #include "window/nt_window.h"
@@ -752,15 +753,18 @@ static void test_compressed_mips_use_issued_block_sizes(void) {
 }
 
 #if NT_GFX_CAPTURE_ENABLED
-/* The first instanced bind of a stream builds that stream's VAO during the replay and defines it
- * with its stream index; the request carries the stream and the offset. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks two record kinds
-static void test_a_stream_vao_is_defined_when_the_replay_builds_it(void) {
+/* A capture that starts after a vertex input was made still names its instance buffer: the
+ * frontend definition relates the buffer handle, the backend one the VAO, the instance buffer's
+ * GL name and the offset its pointers hold (0 from creation). The bind request carries the offset. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks three record kinds
+static void test_a_captured_vertex_input_names_its_instance_buffer(void) {
     nt_buffer_t vertices = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 64});
+    const nt_buffer_t instances = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1);
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .vertex_buffer = vertices,
         .layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2}}},
         .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 4}}},
+        .instance_buffer = instances,
     });
     nt_gfx_capture_request();
     nt_gfx_end_frame();
@@ -768,24 +772,31 @@ static void test_a_stream_vao_is_defined_when_the_replay_builds_it(void) {
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX + 1, 32, 4, &offset), 0, 32);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX + 1, offset + 16U);
+    nt_gfx_bind_vertex_input_instanced(vi, offset + 16U);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
+    bool related = false;
     bool defined = false;
     bool requested = false;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_VERTEX_INPUT && event->data.backend.args[2] == 1U) {
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_CREATE && event->object_kind == NT_GFX_OBJECT_VERTEX_INPUT && event->object == vi.id) {
+            TEST_ASSERT_EQUAL_UINT32(instances.id, event->data.resource.related[2]);
+            related = true;
+        }
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_VERTEX_INPUT && event->data.backend.args[0] == nt_pool_slot_index(vi.id)) {
             TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[1]);
-            TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, event->data.backend.args[3]); /* built unpointed */
+            TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[2]);
+            TEST_ASSERT_EQUAL_UINT32(0, event->data.backend.args[3]);
             defined = true;
         }
-        if (event->operation == NT_GFX_OP_VERTEX_INPUT && event->data.binding.slot == NT_GFX_FRAME_VERTEX + 1U && event->data.binding.offset == offset + 16U) {
+        if (event->operation == NT_GFX_OP_VERTEX_INPUT && event->object == vi.id && event->data.binding.offset == offset + 16U) {
             requested = true;
         }
     }
+    TEST_ASSERT_TRUE(related);
     TEST_ASSERT_TRUE(defined);
     TEST_ASSERT_TRUE(requested);
 }
@@ -797,19 +808,22 @@ static void test_attribute_pointer_calls_are_counted_per_issue(void) {
         .vertex_buffer = vertices,
         .layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2}}},
         .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 4}}},
+        .instance_buffer = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX),
     });
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer]);
-    TEST_ASSERT_EQUAL_UINT32(1, s_attribute_calls);
+    /* Creation points the static attribute and the instance attribute at offset 0. */
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer]);
+    TEST_ASSERT_EQUAL_UINT32(2, s_attribute_calls);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 32, 4, &offset), 0, 32);
-    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX, offset);
-    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX, offset + 16U);
+    nt_gfx_bind_vertex_input_instanced(vi, offset);
+    nt_gfx_bind_vertex_input_instanced(vi, offset + 16U);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_counters_t counters = g_nt_gfx.last_frame;
-    /* One static pointer at creation plus one instance pointer per instanced bind. */
+    /* Two pointers at creation, none for the bind at offset 0, one for the move to 16. */
+    TEST_ASSERT_EQUAL_UINT32(0, offset);
     TEST_ASSERT_EQUAL_UINT32(3, counters.gl[NT_GFX_GL_glVertexAttribPointer]);
     TEST_ASSERT_EQUAL_UINT32(s_attribute_calls, counters.gl[NT_GFX_GL_glVertexAttribPointer]);
 }
@@ -834,7 +848,7 @@ int main(void) {
     RUN_TEST(test_explicit_clear_records_issued_calls_and_skips_empty_selections);
     RUN_TEST(test_pass_actions_capture_values_and_attachment_enums);
     RUN_TEST(test_shutdown_while_recording_writes_no_record);
-    RUN_TEST(test_a_stream_vao_is_defined_when_the_replay_builds_it);
+    RUN_TEST(test_a_captured_vertex_input_names_its_instance_buffer);
 #endif
     RUN_TEST(test_payloads_before_render_land_in_their_frame);
     RUN_TEST(test_texture_mips_storage_and_subrect_payloads);

@@ -58,7 +58,7 @@ nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t 
     NT_ASSERT(desc != NULL);
     memset(&s_skinned, 0, sizeof(s_skinned));
     s_skinned.skin_sampler_hash = nt_hash32_str("u_skin_matrices").value;
-    if (nt_renderer_mesh_caches_init(&s_skinned.caches, desc->max_pipelines, desc->max_mesh_layouts, &s_instance_layout, "skinned_mesh_renderer") != NT_OK) {
+    if (nt_renderer_mesh_caches_init(&s_skinned.caches, desc->max_pipelines, desc->max_mesh_vertex_inputs, &s_instance_layout, "skinned_mesh_renderer") != NT_OK) {
         memset(&s_skinned, 0, sizeof(s_skinned));
         return NT_ERR_INIT_FAILED;
     }
@@ -90,14 +90,12 @@ void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_te
     NT_ASSERT(count > 0);
     NT_ASSERT(deformation.id != 0 && "skinned draw requires a deformation texture");
     NT_ASSERT(stream >= NT_GFX_FRAME_VERTEX && stream < NT_GFX_FRAME_STREAM_COUNT && "draw: not a frame vertex stream");
-    /* Bounds only: equal allocations in two streams pass, so the caller owns the stream choice. */
-    NT_ASSERT((uint64_t)offset + ((uint64_t)count * sizeof(nt_skinned_mesh_instance_t)) <= g_nt_gfx_frame_storage[stream].used && "draw: instances lie outside this frame's allocations in the stream");
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned draw references a destroyed material or mesh");
     nt_renderer_mesh_draw_t draw = {0};
-    if (nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh, mesh_info)) {
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, stream, offset, count);
+    if (nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh, mesh_info, stream)) {
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, offset, count);
     }
 }
 
@@ -124,7 +122,7 @@ void nt_skinned_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t 
         const nt_material_info_t *mat_info = nt_material_get_info(material);
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
         NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned render item references a destroyed material or mesh");
-        if (!nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh, mesh_info)) {
+        if (!nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh, mesh_info, stream)) {
             continue;
         }
 
@@ -148,7 +146,7 @@ void nt_skinned_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t 
             dst->skin_alpha = binding.alpha;
             dst->color = drawable_view.colors_packed[drawable_index];
         }
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, stream, offset, instance_count);
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, offset, instance_count);
     }
 }
 

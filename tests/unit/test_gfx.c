@@ -3220,7 +3220,7 @@ void test_gfx_binds_outside_a_pass_trap(void) {
 
     EXPECT_ASSERT(nt_gfx_bind_pipeline(pip));
     EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi));
-    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX, 0));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, 0));
     EXPECT_ASSERT(nt_gfx_set_uniform_vec4(nt_hash32_str("u_tint"), vec));
 }
 

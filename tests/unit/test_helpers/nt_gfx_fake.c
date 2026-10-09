@@ -140,7 +140,8 @@ static const void *s_fake_last_update_buffer_data;
 static uint32_t s_fake_last_update_buffer_size;
 static uint32_t s_fake_last_instance_offset;
 static uint32_t s_fake_last_instance_vertex_input; /* recorder: last VI handle an instanced bind named */
-static uint32_t s_fake_last_instance_clone;        /* recorder: frame vertex stream index of the last instanced bind */
+static uint32_t s_fake_last_instance_buffer;       /* recorder: instance buffer backend of the last instanced bind */
+static uint32_t s_fake_vi_instance_buffer[1024];   /* instance buffer backend per vertex-input slot, set at create */
 static nt_blend_state_t s_fake_last_pipeline_blend;
 static uint32_t s_fake_vertex_input_create_count;
 static uint32_t s_fake_bind_vertex_input_count;
@@ -236,7 +237,7 @@ void nt_gfx_fake_lose_and_restore_context(void) { s_fake_loss_pending = true; }
 uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update_buffer_offset; }
 uint32_t nt_gfx_fake_last_instance_offset(void) { return s_fake_last_instance_offset; }
 uint32_t nt_gfx_fake_last_instance_vertex_input(void) { return s_fake_last_instance_vertex_input; }
-uint32_t nt_gfx_fake_last_instance_clone(void) { return s_fake_last_instance_clone; }
+uint32_t nt_gfx_fake_last_instance_buffer(void) { return s_fake_last_instance_buffer; }
 nt_blend_state_t nt_gfx_fake_last_pipeline_blend(void) { return s_fake_last_pipeline_blend; }
 uint32_t nt_gfx_fake_vertex_input_create_count(void) { return s_fake_vertex_input_create_count; }
 uint32_t nt_gfx_fake_bind_vertex_input_count(void) { return s_fake_bind_vertex_input_count; }
@@ -284,7 +285,7 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_update_buffer_size = 0;
     s_fake_last_instance_offset = 0;
     s_fake_last_instance_vertex_input = 0;
-    s_fake_last_instance_clone = 0;
+    s_fake_last_instance_buffer = 0; /* the per-slot table follows backend create/destroy, not observation resets */
     s_fake_last_pipeline_blend = (nt_blend_state_t){0};
     s_fake_vertex_input_create_count = 0;
     s_fake_bind_vertex_input_count = 0;
@@ -512,9 +513,10 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t inst_backend, uint32_t slot) {
     (void)vbo_backend;
     (void)ibo_backend;
+    NT_ASSERT(slot < sizeof(s_fake_vi_instance_buffer) / sizeof(s_fake_vi_instance_buffer[0]));
     s_fake_vertex_input_create_count++;
     s_fake_last_vertex_input_layout = desc->layout;
     if (s_fake_context_lost) {
@@ -524,20 +526,23 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
         s_fake_fail_next_vertex_input_create = false;
         return 0;
     }
+    s_fake_vi_instance_buffer[slot] = inst_backend;
     return slot;
 }
 
-void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) { (void)backend_handle; }
+void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
+    NT_ASSERT(backend_handle < sizeof(s_fake_vi_instance_buffer) / sizeof(s_fake_vi_instance_buffer[0]));
+    s_fake_vi_instance_buffer[backend_handle] = 0;
+}
 
-void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t buffer_backend, uint32_t byte_offset, uint32_t clone) {
+void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t byte_offset) {
     NT_ASSERT(backend_handle != 0 && "bind_vertex_input: requires a live handle");
-    NT_ASSERT(clone < NT_GFX_MAX_VERTEX_STREAMS && (buffer_backend != 0 || clone == 0));
     s_fake_bind_vertex_input_count++;
     s_fake_last_bound_vertex_input = backend_handle;
-    if (buffer_backend != 0) {
+    if (s_fake_vi_instance_buffer[backend_handle] != 0) {
         s_fake_last_instance_offset = byte_offset;
         s_fake_last_instance_vertex_input = backend_handle;
-        s_fake_last_instance_clone = clone;
+        s_fake_last_instance_buffer = s_fake_vi_instance_buffer[backend_handle];
     }
 }
 
@@ -560,7 +565,10 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     if (fail) {
         return 0;
     }
-    return 1;
+    /* Distinct names, so tests can tell which buffer a vertex input reads; never reset, as frame
+     * storage buffers made at init outlive a fake reset. */
+    static uint32_t s_next_buffer_backend;
+    return ++s_next_buffer_backend;
 }
 
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) { (void)backend_handle; }

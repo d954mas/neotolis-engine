@@ -491,8 +491,8 @@ void setUp(void) {
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 32});
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
     s_initialized = true;
-    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 4}));
 
     const bool sources_ready = compose_skin_vertex_source(&skin_source) && read_text("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
                                read_text("tests/fixtures/skinned_mesh_renderer_native.frag", &fragment_source);
@@ -678,6 +678,66 @@ static void draw_tinted_and_white_instances(nt_mesh_t mesh, nt_material_t materi
 
 static void test_mesh_instances_draw_their_own_colors(void) { draw_tinted_and_white_instances(make_mesh(k_bar), make_reference_material(3.0F), NULL); }
 
+/* Draws caller-owned instances in one frame; returns that frame's glVertexAttribPointer count. */
+static uint32_t render_owned(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, uint32_t first, uint32_t count, uint8_t out[FRAME_BYTES]) {
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    begin_target_pass();
+    nt_mesh_renderer_draw_vertex_input(mesh, material, vi, first * (uint32_t)sizeof(nt_mesh_instance_t), count);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const uint32_t pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
+    const bool read = nt_gfx_read_pixels(s_target, 0, 0, RT_W, RT_H, out, FRAME_BYTES);
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(read);
+    return pointers;
+}
+
+static nt_mesh_instance_t owned_instance(float x, float y, const float color[4]) {
+    const float world[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, 0, 1};
+    nt_mesh_instance_t instance = {.color = nt_color_pack(color)};
+    nt_mesh_instance_world_rows(instance.world_rows, world);
+    return instance;
+}
+
+/* Instances in a caller-owned IMMUTABLE buffer: [off-screen, tinted, white, off-screen]. A vertex input
+ * drawn from instance 1 shows the tinted and the white bar exactly as the ECS path does; the next
+ * frame at the same offset issues no glVertexAttribPointer; a draw from instance 2 shows only the
+ * white bar (an offset error would show an off-screen or the tinted instance). */
+static void test_owned_instances_draw_from_their_offset(void) {
+    nt_mesh_t mesh = make_mesh(k_bar);
+    nt_material_t material = make_reference_material(3.0F);
+    nt_entity_t tinted = make_entity(mesh, material, NULL);
+    nt_entity_t white = make_entity(mesh, material, NULL);
+    const float tint[4] = {0.1F, 0.2F, 0.3F, 0.5F};
+    const float one[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    nt_drawable_comp_set_color(tinted, nt_color_pack(tint));
+    nt_transform_comp_set_position(tinted, 0.0F, 0.45F, 0.0F);
+    nt_transform_comp_set_position(white, 0.0F, -0.45F, 0.0F);
+    nt_transform_comp_update();
+    const uint32_t key = nt_mesh_renderer_batch_key(material, mesh);
+    const nt_render_item_t items[2] = {{.entity = tinted.id, .batch_key = key}, {.entity = white.id, .batch_key = key}};
+    render_list(&items[0], 1, false, s_expected);
+    render_list(&items[1], 1, false, s_second_mask);
+
+    const nt_mesh_instance_t instances[4] = {owned_instance(9.0F, 0.0F, one), owned_instance(0.0F, 0.45F, tint), owned_instance(0.0F, -0.45F, one), owned_instance(0.0F, 9.0F, tint)};
+    nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = instances, .size = sizeof(instances)});
+    nt_vertex_input_t vi = nt_mesh_renderer_make_vertex_input(mesh, material, buffer);
+    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
+
+    render_owned(mesh, material, vi, 1, 2, s_actual);
+    assert_instance_colors(s_expected, s_second_mask, s_actual);
+    TEST_ASSERT_EQUAL_UINT32(0, render_owned(mesh, material, vi, 1, 2, s_actual));
+    assert_instance_colors(s_expected, s_second_mask, s_actual);
+
+    TEST_ASSERT_GREATER_THAN_UINT32(0, render_owned(mesh, material, vi, 2, 1, s_actual));
+    for (uint32_t byte = 0; byte < FRAME_BYTES; byte++) {
+        TEST_ASSERT_UINT8_WITHIN(1, s_second_mask[byte], s_actual[byte]); /* the white bar alone */
+    }
+    nt_gfx_destroy_vertex_input(vi);
+    nt_gfx_destroy_buffer(buffer);
+}
+
 static void test_skinned_instances_draw_their_own_colors(void) {
     const nt_deformation_binding_t binding = {.texture = s_palette, .x0 = 0, .y0 = 0, .x1 = 3, .y1 = 1, .alpha = 0.25F};
     draw_tinted_and_white_instances(make_mesh(k_bar), make_skinned_material(3.0F), &binding);
@@ -696,6 +756,7 @@ int main(void) {
     RUN_TEST(test_degenerate_normal_and_tangent_guards_are_finite_and_deterministic);
     RUN_TEST(test_mesh_instances_draw_their_own_colors);
     RUN_TEST(test_skinned_instances_draw_their_own_colors);
+    RUN_TEST(test_owned_instances_draw_from_their_offset);
     int failures = UNITY_END();
     nt_window_shutdown();
     return failures;

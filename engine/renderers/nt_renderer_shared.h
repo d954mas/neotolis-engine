@@ -75,19 +75,22 @@ static inline nt_pipeline_t nt_renderer_pipeline_cache_insert(nt_renderer_pipeli
 _Static_assert(NT_GFX_MAX_VERTEX_ATTRS <= 16, "mesh VI key packs a location in 4 bits");
 _Static_assert(NT_MESH_MAX_STREAMS *NT_RENDERER_MESH_VI_KEY_STREAM_BITS <= 64, "mesh VI key overflows uint64");
 
+/* Identity is (mesh row, layout key, stream). Within a context a stream's buffer is fixed and a
+ * restore frees every vertex input, so the stream number is exact. */
 typedef struct {
     uint64_t key;
     nt_vertex_input_t vi;
     uint32_t last_mat; /* most recently resolved material for this VI version */
+    uint8_t stream;
 } nt_renderer_mesh_vi_version_t;
 
 typedef struct {
     nt_renderer_mesh_vi_version_t *versions;
     nt_mesh_t *meshes; /* row ownership includes the mesh generation */
-    /* No VBO and no IBO: the one version the destroy-buffer cascade cannot reach. It holds
-     * nothing mesh-specific, so rows share it and a row reset never has to destroy. */
-    nt_vertex_input_t bufferless;
-    uint16_t max_layouts;
+    /* No VBO and no IBO: versions mesh deactivation cannot reach through the destroy cascade. They hold
+     * nothing mesh-specific, so rows share them (one per stream) and a row reset never has to destroy. */
+    nt_vertex_input_t bufferless[NT_GFX_MAX_VERTEX_STREAMS];
+    uint16_t max_versions;
     uint16_t mesh_capacity;
 } nt_renderer_mesh_vi_cache_t;
 
@@ -111,15 +114,15 @@ static inline nt_vertex_type_t nt_renderer_stream_to_vertex_type(uint8_t type) {
     }
 }
 
-static inline nt_result_t nt_renderer_mesh_vi_cache_init(nt_renderer_mesh_vi_cache_t *cache, uint16_t max_layouts) {
+static inline nt_result_t nt_renderer_mesh_vi_cache_init(nt_renderer_mesh_vi_cache_t *cache, uint16_t max_versions) {
     NT_ASSERT(cache != NULL);
-    NT_ASSERT(max_layouts > 0);
+    NT_ASSERT(max_versions > 0);
     memset(cache, 0, sizeof(*cache));
-    cache->max_layouts = max_layouts;
+    cache->max_versions = max_versions;
     cache->mesh_capacity = nt_gfx_max_meshes();
     NT_ASSERT(cache->mesh_capacity > 0 && "mesh VI cache init requires nt_gfx_init first");
 
-    cache->versions = (nt_renderer_mesh_vi_version_t *)calloc((size_t)cache->mesh_capacity * max_layouts, sizeof(nt_renderer_mesh_vi_version_t));
+    cache->versions = (nt_renderer_mesh_vi_version_t *)calloc((size_t)cache->mesh_capacity * max_versions, sizeof(nt_renderer_mesh_vi_version_t));
     cache->meshes = (nt_mesh_t *)calloc(cache->mesh_capacity, sizeof(nt_mesh_t));
     if (cache->versions == NULL || cache->meshes == NULL) {
         free(cache->meshes);
@@ -131,19 +134,25 @@ static inline nt_result_t nt_renderer_mesh_vi_cache_init(nt_renderer_mesh_vi_cac
     return NT_OK;
 }
 
+static inline bool nt_renderer_mesh_vi_is_bufferless(const nt_renderer_mesh_vi_cache_t *cache, const nt_renderer_mesh_vi_version_t *version) {
+    return version->vi.id != 0 && version->vi.id == cache->bufferless[version->stream - NT_GFX_FRAME_VERTEX].id;
+}
+
 static inline void nt_renderer_mesh_vi_cache_reset(nt_renderer_mesh_vi_cache_t *cache) {
     if (cache->versions == NULL) {
         return;
     }
-    const size_t count = (size_t)cache->mesh_capacity * cache->max_layouts;
+    const size_t count = (size_t)cache->mesh_capacity * cache->max_versions;
     for (size_t i = 0; i < count; i++) {
-        if (cache->versions[i].vi.id != cache->bufferless.id) {
+        if (!nt_renderer_mesh_vi_is_bufferless(cache, &cache->versions[i])) {
             nt_gfx_destroy_vertex_input(cache->versions[i].vi);
         }
         cache->versions[i] = (nt_renderer_mesh_vi_version_t){0};
     }
-    nt_gfx_destroy_vertex_input(cache->bufferless);
-    cache->bufferless = NT_VERTEX_INPUT_INVALID;
+    for (uint32_t s = 0; s < NT_GFX_MAX_VERTEX_STREAMS; s++) {
+        nt_gfx_destroy_vertex_input(cache->bufferless[s]);
+        cache->bufferless[s] = NT_VERTEX_INPUT_INVALID;
+    }
     memset(cache->meshes, 0, (size_t)cache->mesh_capacity * sizeof(nt_mesh_t));
 }
 
@@ -156,13 +165,16 @@ static inline void nt_renderer_mesh_vi_cache_shutdown(nt_renderer_mesh_vi_cache_
 
 static inline uint32_t nt_renderer_mesh_vi_cache_live_count(const nt_renderer_mesh_vi_cache_t *cache) {
     uint32_t live = 0;
-    const size_t count = (size_t)cache->mesh_capacity * cache->max_layouts;
+    const size_t count = (size_t)cache->mesh_capacity * cache->max_versions;
     for (size_t i = 0; i < count; i++) {
-        if (cache->versions[i].vi.id != cache->bufferless.id && nt_gfx_vertex_input_valid(cache->versions[i].vi)) {
+        if (!nt_renderer_mesh_vi_is_bufferless(cache, &cache->versions[i]) && nt_gfx_vertex_input_valid(cache->versions[i].vi)) {
             live++;
         }
     }
-    return live + (nt_gfx_vertex_input_valid(cache->bufferless) ? 1U : 0U);
+    for (uint32_t s = 0; s < NT_GFX_MAX_VERTEX_STREAMS; s++) {
+        live += nt_gfx_vertex_input_valid(cache->bufferless[s]) ? 1U : 0U;
+    }
+    return live;
 }
 
 /* The mesh fixes stream types/offsets/stride, so the exact row key needs only
@@ -203,20 +215,34 @@ static inline nt_vertex_layout_t nt_renderer_build_mesh_vertex_layout(const nt_m
     return layout;
 }
 
+/* The one place a mesh vertex input's desc is built, for cached versions and caller-owned ones
+ * alike. An empty derived layout binds no vertex buffer (attribute-less gl_VertexID shaders). */
+static inline nt_vertex_input_desc_t nt_renderer_mesh_vi_desc(const nt_vertex_layout_t *layout, const nt_gfx_mesh_info_t *mesh_info, const nt_vertex_layout_t *instance_layout, nt_buffer_t instances,
+                                                              const char *label) {
+    return (nt_vertex_input_desc_t){
+        .layout = (layout->attr_count > 0) ? *layout : (nt_vertex_layout_t){0},
+        .instance_layout = *instance_layout,
+        .vertex_buffer = (layout->attr_count > 0) ? mesh_info->vbo : (nt_buffer_t){0},
+        .index_buffer = mesh_info->ibo,
+        .instance_buffer = instances,
+        .label = label,
+    };
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_renderer_mesh_vi_cache_t *cache, nt_material_t mat, nt_mesh_t mesh, const nt_material_info_t *mat_info,
-                                                                         const nt_gfx_mesh_info_t *mesh_info, const nt_vertex_layout_t *instance_layout, const char *label) {
+                                                                         const nt_gfx_mesh_info_t *mesh_info, const nt_vertex_layout_t *instance_layout, uint32_t stream, const char *label) {
     const uint32_t slot = nt_pool_slot_index(mesh.id);
     NT_ASSERT(slot != 0 && slot <= cache->mesh_capacity);
-    nt_renderer_mesh_vi_version_t *row = &cache->versions[(size_t)(slot - 1) * cache->max_layouts];
+    nt_renderer_mesh_vi_version_t *row = &cache->versions[(size_t)(slot - 1) * cache->max_versions];
     if (cache->meshes[slot - 1].id != mesh.id) {
-        /* The old mesh's buffer destroys took its own versions; the shared bufferless one stays. */
-        memset(row, 0, sizeof(*row) * cache->max_layouts);
+        /* The old mesh's buffer destroys took its own versions; the shared bufferless ones stay. */
+        memset(row, 0, sizeof(*row) * cache->max_versions);
         cache->meshes[slot - 1] = mesh;
     }
     /* The generational material id pins attr_map. */
-    for (uint16_t i = 0; i < cache->max_layouts; i++) {
-        if (row[i].last_mat == mat.id && nt_gfx_vertex_input_valid(row[i].vi)) {
+    for (uint16_t i = 0; i < cache->max_versions; i++) {
+        if (row[i].last_mat == mat.id && row[i].stream == stream && nt_gfx_vertex_input_valid(row[i].vi)) {
             return row[i].vi;
         }
     }
@@ -224,10 +250,10 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
     uint64_t key = 0;
     const nt_vertex_layout_t layout = nt_renderer_build_mesh_vertex_layout(mat_info, mesh_info, &key);
     nt_renderer_mesh_vi_version_t *reusable = NULL;
-    for (uint16_t i = 0; i < cache->max_layouts; i++) {
+    for (uint16_t i = 0; i < cache->max_versions; i++) {
         nt_renderer_mesh_vi_version_t *entry = &row[i];
         const bool live = nt_gfx_vertex_input_valid(entry->vi);
-        if (entry->key == key && live) {
+        if (entry->key == key && entry->stream == stream && live) {
             entry->last_mat = mat.id;
             return entry->vi;
         }
@@ -236,26 +262,23 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
         }
     }
     if (reusable == NULL) {
-        NT_LOG_ERROR("%s vertex-input versions exhausted -- raise max_mesh_layouts", label != NULL ? label : "mesh renderer");
+        NT_LOG_ERROR("%s vertex-input versions exhausted: one per (layout, stream) pair a mesh is drawn with -- raise max_mesh_vertex_inputs", label != NULL ? label : "mesh renderer");
     }
     /* Crash instead of hiding VAO churn behind version eviction. */
-    NT_ASSERT(reusable != NULL && "mesh vertex-input versions exhausted -- raise renderer max_mesh_layouts");
+    NT_ASSERT(reusable != NULL && "mesh vertex-input versions exhausted -- raise renderer max_mesh_vertex_inputs");
+    /* Callers assert the stream range; an unsized stream has no buffer to bake. */
+    NT_ASSERT(g_nt_gfx_frame_storage[stream].capacity > 0 && "mesh draw: the stream has no frame_capacity");
 
+    const nt_vertex_input_desc_t desc = nt_renderer_mesh_vi_desc(&layout, mesh_info, instance_layout, nt_gfx_frame_buffer(stream), label);
     nt_vertex_input_t vi;
     if (layout.attr_count == 0 && mesh_info->ibo.id == 0) {
-        /* Empty derived layouts support attribute-less gl_VertexID shaders. */
-        if (!nt_gfx_vertex_input_valid(cache->bufferless)) {
-            cache->bufferless = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.instance_layout = *instance_layout, .label = label});
+        nt_vertex_input_t *shared = &cache->bufferless[stream - NT_GFX_FRAME_VERTEX];
+        if (!nt_gfx_vertex_input_valid(*shared)) {
+            *shared = nt_gfx_make_vertex_input(&desc);
         }
-        vi = cache->bufferless;
+        vi = *shared;
     } else {
-        vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
-            .layout = layout,
-            .instance_layout = *instance_layout,
-            .vertex_buffer = (layout.attr_count > 0) ? mesh_info->vbo : (nt_buffer_t){0},
-            .index_buffer = mesh_info->ibo,
-            .label = label,
-        });
+        vi = nt_gfx_make_vertex_input(&desc);
     }
     if (vi.id == 0) {
         return vi; /* backend/context failure stays uncached so the next miss retries */
@@ -263,6 +286,7 @@ static inline nt_vertex_input_t nt_renderer_mesh_vi_cache_find_or_create(nt_rend
     reusable->key = key;
     reusable->vi = vi;
     reusable->last_mat = mat.id;
+    reusable->stream = (uint8_t)stream;
     return vi;
 }
 
@@ -287,7 +311,8 @@ typedef struct {
     uint16_t pipeline_count;
 } nt_renderer_mesh_caches_t;
 
-static inline nt_result_t nt_renderer_mesh_caches_init(nt_renderer_mesh_caches_t *c, uint16_t max_pipelines, uint16_t max_mesh_layouts, const nt_vertex_layout_t *instance_layout, const char *label) {
+static inline nt_result_t nt_renderer_mesh_caches_init(nt_renderer_mesh_caches_t *c, uint16_t max_pipelines, uint16_t max_mesh_vertex_inputs, const nt_vertex_layout_t *instance_layout,
+                                                       const char *label) {
     NT_ASSERT(max_pipelines > 0);
     *c = (nt_renderer_mesh_caches_t){.instance_layout = instance_layout, .label = label, .max_pipelines = max_pipelines};
     c->pipelines = (nt_renderer_pipeline_entry_t *)calloc(max_pipelines, sizeof(nt_renderer_pipeline_entry_t));
@@ -295,7 +320,7 @@ static inline nt_result_t nt_renderer_mesh_caches_init(nt_renderer_mesh_caches_t
         NT_LOG_ERROR("failed to allocate pipeline cache");
         return NT_ERR_INIT_FAILED;
     }
-    if (nt_renderer_mesh_vi_cache_init(&c->vi_cache, max_mesh_layouts) != NT_OK) {
+    if (nt_renderer_mesh_vi_cache_init(&c->vi_cache, max_mesh_vertex_inputs) != NT_OK) {
         free(c->pipelines);
         c->pipelines = NULL;
         return NT_ERR_INIT_FAILED;
@@ -330,28 +355,31 @@ typedef struct {
     uint32_t applied_supplied;
 } nt_renderer_mesh_draw_t;
 
+/* Layouts live on the vertex inputs; the pipeline is program x render state. 0 = create failed. */
+static inline nt_pipeline_t nt_renderer_mesh_pipeline(nt_renderer_mesh_caches_t *c, const nt_material_info_t *mi) {
+    const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mi, c->label);
+    const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
+    const nt_pipeline_t found = nt_renderer_pipeline_cache_find(c->pipelines, c->pipeline_count, &key);
+    return found.id != 0 ? found : nt_renderer_pipeline_cache_insert(c->pipelines, &c->pipeline_count, c->max_pipelines, &key, &desc);
+}
+
 /* Resolves pipeline and vertex input, reusing the previous run's on equal handles (creating
  * them on a cache miss). False skips the run: the program is not ready (linking or lost) or a
  * create failed (retried by the next run). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_renderer_mesh_draw_t *d, nt_material_t material, const nt_material_info_t *mi, nt_mesh_t mesh,
-                                            const nt_gfx_mesh_info_t *mesh_info) {
+                                            const nt_gfx_mesh_info_t *mesh_info, uint32_t stream) {
     if (!nt_gfx_program_ready(mi->program)) {
         return false;
     }
     const bool material_changed = material.id != d->material.id;
     if (material_changed) {
-        /* Layouts live on the vertex-input versions; the pipeline is program x render state. */
-        const nt_pipeline_desc_t desc = nt_renderer_material_pipeline_desc(mi, c->label);
-        const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
-        d->pipeline = nt_renderer_pipeline_cache_find(c->pipelines, c->pipeline_count, &key);
-        if (d->pipeline.id == 0) {
-            d->pipeline = nt_renderer_pipeline_cache_insert(c->pipelines, &c->pipeline_count, c->max_pipelines, &key, &desc);
-        }
+        d->pipeline = nt_renderer_mesh_pipeline(c, mi);
     }
-    /* Vertex-input identity is (mesh row, material-derived layout): a mesh change re-resolves too. */
+    /* Vertex-input identity is (mesh row, material-derived layout, stream): a mesh change re-resolves too.
+     * The stream is fixed per draw call, and `d` lives for one call. */
     if (material_changed || mesh.id != d->mesh.id) {
-        d->vertex_input = (d->pipeline.id != 0) ? nt_renderer_mesh_vi_cache_find_or_create(&c->vi_cache, material, mesh, mi, mesh_info, c->instance_layout, c->label) : NT_VERTEX_INPUT_INVALID;
+        d->vertex_input = (d->pipeline.id != 0) ? nt_renderer_mesh_vi_cache_find_or_create(&c->vi_cache, material, mesh, mi, mesh_info, c->instance_layout, stream, c->label) : NT_VERTEX_INPUT_INVALID;
     }
     if (d->pipeline.id == 0 || d->vertex_input.id == 0) {
         d->material = (nt_material_t){0};
@@ -366,7 +394,7 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
 /* Pipeline first: uniforms and the texture set land on its program. A nonzero supplied texture
  * replaces the declaration named supplied_name. */
 static inline void nt_renderer_mesh_record(nt_renderer_mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_mesh_info_t *mesh_info, uint32_t supplied_name, nt_texture_t supplied,
-                                           uint32_t stream, uint32_t offset, uint32_t count) {
+                                           uint32_t offset, uint32_t count) {
     nt_gfx_bind_pipeline(d->pipeline);
     const bool material_changed = d->material.id != d->applied_material;
     if (material_changed) {
@@ -388,7 +416,7 @@ static inline void nt_renderer_mesh_record(nt_renderer_mesh_draw_t *d, const nt_
     }
     d->applied_material = d->material.id;
     d->applied_supplied = supplied.id;
-    nt_gfx_bind_vertex_input_instanced(d->vertex_input, stream, offset);
+    nt_gfx_bind_vertex_input_instanced(d->vertex_input, offset);
     if (mesh_info->index_count > 0) {
         nt_gfx_draw_indexed_instanced(0, mesh_info->index_count, mesh_info->vertex_count, count);
     } else {

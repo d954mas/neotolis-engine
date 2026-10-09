@@ -177,15 +177,14 @@ uint32_t nt_gfx_backend_program_sampler_mask(uint32_t program_backend);
 uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t program_backend, uint32_t slot);
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
 
-/* Bakes the desc's layouts and the given buffer backends into an owned VAO.
- * Restores the previously bound VAO before returning. Same slot contract as
- * create_pipeline: returns `slot`, or 0 on failure. */
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
+/* Bakes the desc's layouts and the given buffer backends into an owned VAO, instance attribs
+ * pointed at offset 0 of inst_backend. Restores the previously bound VAO before returning. Same
+ * slot contract as create_pipeline: returns `slot`, or 0 on failure. */
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t inst_backend, uint32_t slot);
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
-/* Binds the vertex input's VAO for frame vertex stream `clone` (0 without an instance layout),
- * creating it on first use, and points its instance attribs at buffer_backend + byte_offset
- * unless buffer_backend is 0 (no instance layout). */
-void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t buffer_backend, uint32_t byte_offset, uint32_t clone);
+/* Binds the vertex input's VAO and, when it has instance attribs, points them at byte_offset of
+ * its instance buffer unless they already point there (0 without an instance layout). */
+void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t byte_offset);
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
@@ -274,6 +273,7 @@ uint32_t nt_gfx_gl_test_cached_sampler(uint32_t slot);
 /* Backend handles owned by the frontend caches. */
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
 uint32_t nt_gfx_test_texture_backend_id(nt_texture_t tex);
+uint32_t nt_gfx_test_buffer_backend_id(nt_buffer_t buf);
 uint32_t nt_gfx_test_render_target_backend_id(nt_render_target_t rt);
 /* Pass-scoped bound state, read from its owner: the front-end. */
 uint32_t nt_gfx_test_bound_pipeline(void);

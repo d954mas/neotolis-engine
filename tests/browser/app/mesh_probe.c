@@ -154,8 +154,8 @@ static void start_modules(void) {
     (void)nt_material_comp_init(&(nt_material_comp_desc_t){.capacity = 16});
     (void)nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 16});
     (void)nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 16});
-    (void)nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 2});
-    (void)nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 2});
+    (void)nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 2});
+    (void)nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 2});
 }
 
 static void stop_modules(void) {

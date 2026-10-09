@@ -38,7 +38,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     NT_ASSERT(!s_mesh_renderer.initialized);
     NT_ASSERT(desc);
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
-    if (nt_renderer_mesh_caches_init(&s_mesh_renderer.caches, desc->max_pipelines, desc->max_mesh_layouts, &s_instance_layout, "mesh_renderer") != NT_OK) {
+    if (nt_renderer_mesh_caches_init(&s_mesh_renderer.caches, desc->max_pipelines, desc->max_mesh_vertex_inputs, &s_instance_layout, "mesh_renderer") != NT_OK) {
         return NT_ERR_INIT_FAILED;
     }
     s_mesh_renderer.initialized = true;
@@ -70,14 +70,46 @@ void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t stre
     }
     NT_ASSERT(count > 0);
     NT_ASSERT(stream >= NT_GFX_FRAME_VERTEX && stream < NT_GFX_FRAME_STREAM_COUNT && "draw: not a frame vertex stream");
-    /* Bounds only: equal allocations in two streams pass, so the caller owns the stream choice. */
-    NT_ASSERT((uint64_t)offset + ((uint64_t)count * sizeof(nt_mesh_instance_t)) <= g_nt_gfx_frame_storage[stream].used && "draw: instances lie outside this frame's allocations in the stream");
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh draw references a destroyed material or mesh");
     nt_renderer_mesh_draw_t draw = {0};
-    if (nt_renderer_mesh_resolve(&s_mesh_renderer.caches, &draw, material, mat_info, mesh, mesh_info)) {
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, 0, (nt_texture_t){0}, stream, offset, count);
+    if (nt_renderer_mesh_resolve(&s_mesh_renderer.caches, &draw, material, mat_info, mesh, mesh_info, stream)) {
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, 0, (nt_texture_t){0}, offset, count);
+    }
+}
+
+nt_vertex_input_t nt_mesh_renderer_make_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_buffer_t instances) {
+    NT_ASSERT(s_mesh_renderer.initialized);
+    /* A lost context can leave a game-activated mesh 0; gfx could not create it anyway. */
+    if (g_nt_gfx.context_lost) {
+        return NT_VERTEX_INPUT_INVALID;
+    }
+    const nt_material_info_t *mat_info = nt_material_get_info(material);
+    const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
+    NT_ASSERT(mat_info != NULL && mesh_info != NULL && "make_vertex_input references a destroyed material or mesh");
+    uint64_t cache_key = 0; /* the cache's identity; a caller-owned vertex input needs none */
+    const nt_vertex_layout_t layout = nt_renderer_build_mesh_vertex_layout(mat_info, mesh_info, &cache_key);
+    const nt_vertex_input_desc_t desc = nt_renderer_mesh_vi_desc(&layout, mesh_info, &s_instance_layout, instances, "mesh_renderer_owned");
+    return nt_gfx_make_vertex_input(&desc);
+}
+
+void nt_mesh_renderer_draw_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, uint32_t offset, uint32_t count) {
+    NT_ASSERT(s_mesh_renderer.initialized);
+    /* A lost context can leave a game-activated mesh 0 and the vertex input stale; nothing would draw. */
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    NT_ASSERT(count > 0);
+    const nt_material_info_t *mat_info = nt_material_get_info(material);
+    const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
+    NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh draw references a destroyed material or mesh");
+    if (!nt_gfx_program_ready(mat_info->program)) {
+        return;
+    }
+    nt_renderer_mesh_draw_t draw = {.pipeline = nt_renderer_mesh_pipeline(&s_mesh_renderer.caches, mat_info), .vertex_input = vi, .material = material, .mesh = mesh};
+    if (draw.pipeline.id != 0) {
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, 0, (nt_texture_t){0}, offset, count);
     }
 }
 
@@ -110,7 +142,7 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
         const nt_material_info_t *mat_info = nt_material_get_info(material);
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
         NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh render item references a destroyed material or mesh");
-        if (!nt_renderer_mesh_resolve(&s_mesh_renderer.caches, &draw, material, mat_info, mesh, mesh_info)) {
+        if (!nt_renderer_mesh_resolve(&s_mesh_renderer.caches, &draw, material, mat_info, mesh, mesh_info, stream)) {
             continue;
         }
 
@@ -127,7 +159,7 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
             nt_mesh_instance_world_rows(dst->world_rows, transform_view.world_matrices[transform_index]);
             dst->color = drawable_view.colors_packed[drawable_index];
         }
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, 0, (nt_texture_t){0}, stream, offset, instance_count);
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, 0, (nt_texture_t){0}, offset, instance_count);
     }
 }
 
