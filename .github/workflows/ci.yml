@@ -683,7 +683,6 @@ jobs:
       - name: Check formatting
         run: |
           find engine shared tools examples -name '*.c' -o -name '*.h' | \
-            grep -v 'deps/' | \
             xargs clang-format --dry-run --Werror
 
       # Module-composition gates: no engine module may link a real swappable impl, and omitting an
@@ -933,9 +932,6 @@ jobs:
             cp "$example_dir"/*.html "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
             if [ -f "$example_dir/CREDITS.md" ]; then
               cp "$example_dir/CREDITS.md" "gh-pages-data/wasm/$example_name/"
-            fi
-            if [ -f "$example_dir/PARITY.md" ]; then
-              cp "$example_dir/PARITY.md" "gh-pages-data/wasm/$example_name/"
             fi
             if [ -f "$example_dir/README.md" ]; then
               cp "$example_dir/README.md" "gh-pages-data/wasm/$example_name/"

@@ -1,47 +1,25 @@
 # Asteroids demo: sources and credits
 
-## Source-derived Neotolis port (in progress)
+## Neotolis port of Methane Asteroids
 
-The baseline follows [Methane Asteroids](https://github.com/MethanePowered/MethaneAsteroids)
-at [16a5751e835dd0776d976e51438604dc8de27d16](https://github.com/MethanePowered/MethaneAsteroids/tree/16a5751e835dd0776d976e51438604dc8de27d16).
-The earlier independent ring prototype is superseded. This version ports the
-original geometry, procedural textures, scene parameters, transforms, LOD and
-shaders to Neotolis's C17 runtime and offline NTPACK pipeline. It does not import
-Methane's RHI, DirectX, Metal or Vulkan backend.
+This demo recreates [Methane Asteroids](https://github.com/MethanePowered/MethaneAsteroids)
+at [16a5751e835dd0776d976e51438604dc8de27d16](https://github.com/MethanePowered/MethaneAsteroids/tree/16a5751e835dd0776d976e51438604dc8de27d16)
+on Neotolis's C17 runtime. It keeps the original scene: complexity presets,
+camera, lighting and material shaders, LOD equation, ring distributions, color
+palettes, Mars and the Galaxy sky. Asteroid meshes, noise textures and instances
+are generated at startup from a seed, as the original does. The noise and
+random generators are this port's own (simplex noise, PCG32), so the shapes and
+placement are equivalent, not identical. Methane's RHI and its DirectX, Metal
+and Vulkan backends are not used.
 
 - Original Methane Asteroids and MethaneKit author: Evgeny Gorodetskiy.
   Source-file notices cover 2019–2021; the project README carries 2019–2022.
-- Modified source-derived exporter/runtime/shader files retain their Apache 2.0
+- Modified source-derived runtime and shader files retain their Apache 2.0
   notices, add the Neotolis integration notice, and identify the changes.
 - Complete [Apache License 2.0](licenses/MethaneAsteroids-Apache-2.0.txt) is included.
   The pinned Methane Asteroids tree has no NOTICE file.
 - Neotolis Engine itself remains under its [MIT license](licenses/Neotolis-MIT.txt).
 - No endorsement by the original project or asset creators is implied.
-
-### Offline dependencies and source records
-
-The original algorithms require the following source-only offline dependencies;
-none is linked into the C17/WebAssembly runtime:
-
-- MethaneKit v0.8.2, commit `04a95fb78334252594427c69737839518e53c4a0`:
-  original `IcosahedronMesh`, `BaseMesh`, `SphereMesh` and `CubeMesh` methods,
-  Apache 2.0.
-- MethanePowered/FastNoise2 v1.1.1, commit
-  `903c1f2d2f9d53ddce94cd223f32727d9ab3aeaa`, MIT.
-- FastSIMD, commit `16450dae9528727e500e7254f635a671f9c7ee2d`, MIT.
-- HLSL++ 3.9, commit `3a5b1cf0d807f945ec861201b316c425e9cf5061`, MIT.
-
-Exact source URLs, per-file Git blob hashes, copied upstream method bodies,
-modification notes and full dependency licenses are under
-`reference_generator` and `reference_scene_data` in the source snapshot.
-
-The exporter preserves the original random distributions, FastNoise settings,
-independent LOD shapes, source topology/normal accumulation, level-specific RNG
-windows, palettes and instance records. It runs those operations serially with
-a recorded compiler/STL/SIMD target. Upstream parallel tasks share RNG state, so
-the original does not supply a stable task-order-to-mesh mapping. This serial
-ordering is an explicit compatibility choice, not a claim of matching any
-particular multithreaded screenshot byte-for-byte.
 
 ## Mars texture
 
@@ -53,7 +31,7 @@ particular multithreaded screenshot byte-for-byte.
   The full legal code is included in [licenses/CC-BY-4.0.txt](licenses/CC-BY-4.0.txt).
 - Downloaded from the reference revision's [Resources/Textures/Planet/Mars.jpg](https://github.com/MethanePowered/MethaneAsteroids/blob/16a5751e835dd0776d976e51438604dc8de27d16/Resources/Textures/Planet/Mars.jpg).
 - Source changes: none. The checked-in JPG is byte-for-byte identical to that
-  upstream file. The offline builder decodes it at its original resolution into raw SRGBA8; runtime mipmaps are generated.
+  upstream file. The offline builder encodes it at its original resolution as Basis ETC1S with a full mip chain; the planet shader decodes sRGB after sampling.
 - Git blob SHA-1: `b3654a9b2d21c2910c38a0287423862650d54e1f`.
 - SHA-256: `2d187f3e77a98eaa8cea5f4cc722f633c122ef170b9e94ace6b5fb6cbc3f8e01`.
 
@@ -76,7 +54,8 @@ Galaxy panorama: ESO/S. Brunier, CC BY 4.0; adapted as a cubemap in Methane Aste
 `raw/Galaxy/{Positive,Negative}{X,Y,Z}.jpg` are the six unchanged 2048×2048
 files from the pinned Methane Asteroids revision. Source URLs, Git blob hashes
 and SHA-256 values are in `raw/Galaxy/source-manifest.json`. Runtime uses all
-six full-resolution faces; it does not substitute a different star map.
+six full-resolution faces, encoded offline as Basis ETC1S; it does not substitute
+a different star map.
 
 ### Provenance evidence and distinction
 
@@ -100,9 +79,9 @@ This evidence supports the supplemental panorama credit above. Evgeny
 Gorodetskiy is credited as the demo author, not as the panorama photographer.
 
 Representation change: six 2D samplers implement cubemap lookup through the
-current Neotolis interface. Sampling/filtering differences are tracked in the
-baseline parity record; the source JPEGs are unchanged. No endorsement by ESO,
-S. Brunier or the original demo author is implied.
+current Neotolis interface, without cross-face seamless filtering. The source
+JPEGs are unchanged. No endorsement by ESO, S. Brunier or the original demo
+author is implied.
 
 ## HUD font
 
@@ -120,17 +99,8 @@ S. Brunier or the original demo author is implied.
 - Source changes: none. The builder extracts the glyphs needed by the HUD.
 - SHA-256: `54bf827eb99404e8f430c330ad30f063334f637eba0109b6a18d4f566a8e9dd8`.
 
-## Reproducible baseline data
-
-The source snapshot includes `reference_generator/README.md` and
-`reference_scene_data/README.md` with commands and validation. Original method-body oracles check positions, normals, indices,
-depth ranges, all 145,000 preset instances, and procedural texture layers.
-Generated GLBs and raw records live under the build directory and pass through
-the existing Neotolis builder. No source parsers, FastNoise or C++ run in-game.
-
 ## Native control panel
 
-The optional native panel uses existing Neotolis UI components and a small
-procedural, tintable atlas generated by this example. It adds no third-party UI
-art, font dependency or HTML overlay. Source-style presentation remains available
-with `--ui 0`. See [PARITY.md](PARITY.md) for exact compatibility and QA limits.
+The panel uses existing Neotolis UI components and a small procedural, tintable
+atlas generated by this example. It adds no third-party UI art, font dependency
+or HTML overlay.

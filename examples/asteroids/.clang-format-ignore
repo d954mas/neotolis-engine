@@ -1,4 +1,0 @@
-# Byte-identical upstream snapshots and generated source-oracle fixture.
-reference_generator/upstream/**
-reference_scene_data/upstream/**
-reference_scene_data/runtime_math_vectors.h

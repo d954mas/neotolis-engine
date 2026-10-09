@@ -255,7 +255,7 @@ const nt_atlas_stats_t *nt_builder_get_atlas_stats(const NtBuilderContext *ctx, 
 /* --- Texture options (game controls format and resize per-texture) --- */
 
 typedef struct {
-    nt_texture_pixel_format_t format; /* output pixel format; 0 = RGBA8; SRGBA8 requires RAW and straight alpha */
+    nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
     uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
     bool premultiplied;               /* RGBA8 only; default false. Premultiply to avoid dark fringes with bilinear filtering. */
@@ -352,7 +352,7 @@ typedef enum {
 
 typedef struct {
     nt_basisu_encode_opts_t compress; /* NONE = raw/uncompressed */
-    nt_texture_pixel_format_t format; /* output pixel format; 0 = RGBA8; SRGBA8 requires RAW and straight alpha */
+    nt_texture_pixel_format_t format; /* output pixel format; 0 resolves to NT_TEXTURE_FORMAT_RGBA8 */
     uint32_t max_size;                /* max atlas page dimension (default: 2048) */
     uint32_t padding;                 /* extra spacing between sprites after extrude (default: 2) */
     uint32_t margin;                  /* atlas edge margin (default: 0) */

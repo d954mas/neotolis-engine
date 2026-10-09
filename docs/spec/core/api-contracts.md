@@ -287,15 +287,6 @@ gfx does not infer or enable reversed depth from the comparison alone.
 because integer storage is never sampled through a mip filter. `DEPTH16`, `DEPTH24`,
 and `DEPTH32F` require the same, plus `data == NULL` and no mipmaps.
 
-`SRGBA8` stores four unchanged 8-bit channels, with sRGB-encoded RGB and
-linear alpha. Native GL and WebGL 2 use `GL_SRGB8_ALPHA8`: sampling decodes
-RGB to linear light before filtering, and leaves alpha linear. It is normalized
-color for `sampler2D`, with the same filters, mip levels, generated mipmaps and
-single-level sub-updates as `RGBA8`; no optional capability is required.
-It is sampled storage only in this API: render-target color attachments remain
-`RGBA8` or `RGBA16F`, and readback remains restricted to `RGBA8` targets.
-The caller supplies encoded bytes; neither creation nor sub-update converts them.
-
 `ETC2_RGB8`, `ETC2_RGBA8`, `BC7_RGBA` and `ASTC_4x4_RGBA` are block-compressed
 color storage: 4x4 blocks, 8 bytes per block for `ETC2_RGB8` and 16 for the other
 three. They require `data` and reject `gen_mipmaps`, because block data can only
@@ -400,9 +391,7 @@ blob's own dimensions must equal the header's, and its level count must equal
 both `mip_count` and the full chain down to 1x1. Every mismatch is a recoverable
 rejection with a log. The header's `format` field is range-checked at the
 boundary like every other header field, but it does not determine the target
-format. `SRGBA8` with BASIS is rejected before transcoding, because there are
-no sRGB Basis targets. For the other pixel formats, alpha and codec come from
-the blob, because the encoder drops alpha
+format: alpha and codec come from the blob, because the encoder drops alpha
 slices for a fully opaque source.
 
 The target format is the first entry of the per-codec order that the GPU

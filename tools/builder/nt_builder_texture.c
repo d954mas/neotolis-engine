@@ -57,7 +57,7 @@ nt_texture_pixel_format_t nt_builder_assert_texture_opts(const nt_tex_opts_t *op
 /* Resize RGBA pixels to fit within max_size, preserving aspect ratio.
  * Returns resized buffer (caller frees) or NULL if no resize needed.
  * On resize, *out_w and *out_h are updated. */
-static unsigned char *resize_if_needed(const unsigned char *pixels, int w, int h, uint32_t max_size, bool srgb, int *out_w, int *out_h) {
+static unsigned char *resize_if_needed(const unsigned char *pixels, int w, int h, uint32_t max_size, int *out_w, int *out_h) {
     if (max_size == 0 || ((uint32_t)w <= max_size && (uint32_t)h <= max_size)) {
         *out_w = w;
         *out_h = h;
@@ -80,11 +80,7 @@ static unsigned char *resize_if_needed(const unsigned char *pixels, int w, int h
     if (!resized) {
         return NULL;
     }
-    if (srgb) {
-        stbir_resize_uint8_srgb(pixels, w, h, 0, resized, *out_w, *out_h, 0, STBIR_RGBA);
-    } else {
-        stbir_resize_uint8_linear(pixels, w, h, 0, resized, *out_w, *out_h, 0, STBIR_RGBA);
-    }
+    stbir_resize_uint8_linear(pixels, w, h, 0, resized, *out_w, *out_h, 0, STBIR_RGBA);
     return resized;
 }
 
@@ -156,7 +152,7 @@ nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t sr
     uint32_t max_size = opts ? opts->max_size : 0;
     int rw = 0;
     int rh = 0;
-    unsigned char *resized = resize_if_needed(pixels, w, h, max_size, opts && opts->format == NT_TEXTURE_FORMAT_SRGBA8, &rw, &rh);
+    unsigned char *resized = resize_if_needed(pixels, w, h, max_size, &rw, &rh);
     if (max_size > 0 && !resized && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
         stbi_image_free(pixels);
         NT_BUILD_ASSERT(0 && "texture decode: resize_if_needed alloc failed");
@@ -188,7 +184,7 @@ nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint
     uint32_t max_size = opts ? opts->max_size : 0;
     int rw = 0;
     int rh = 0;
-    unsigned char *resized = resize_if_needed(rgba_pixels, (int)width, (int)height, max_size, opts && opts->format == NT_TEXTURE_FORMAT_SRGBA8, &rw, &rh);
+    unsigned char *resized = resize_if_needed(rgba_pixels, (int)width, (int)height, max_size, &rw, &rh);
     if (max_size > 0 && !resized && (width > max_size || height > max_size)) {
         NT_BUILD_ASSERT(0 && "texture raw: resize_if_needed alloc failed");
     }

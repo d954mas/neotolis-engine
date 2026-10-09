@@ -1870,8 +1870,6 @@ static nt_gfx_gl_fmt_t nt_gfx_gl_texture_format(nt_texture_format_t fmt) {
         return (nt_gfx_gl_fmt_t){GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, true, false};
     case NT_TEXTURE_FORMAT_RGBA8:
         return (nt_gfx_gl_fmt_t){GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true, false};
-    case NT_TEXTURE_FORMAT_SRGBA8:
-        return (nt_gfx_gl_fmt_t){GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, true, false};
     case NT_TEXTURE_FORMAT_ETC2_RGB8:
         return (nt_gfx_gl_fmt_t){GL_COMPRESSED_RGB8_ETC2, GL_RGB, GL_UNSIGNED_BYTE, true, true};
     case NT_TEXTURE_FORMAT_ETC2_RGBA8:

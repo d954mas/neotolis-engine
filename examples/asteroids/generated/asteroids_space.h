@@ -5,10 +5,6 @@
 
 #include "hash/nt_hash.h"
 
-/* --- MESH --- */
-#define ASSET_MESH_ASTEROIDS_PLANET ((nt_hash64_t){0x134B59888E019EAFULL}) /* asteroids/planet */
-#define ASSET_MESH_ASTEROIDS_SKY_CUBE ((nt_hash64_t){0xCB9292D0C0FC0605ULL}) /* asteroids/sky_cube */
-
 /* --- TEXTURE --- */
 #define ASSET_TEXTURE_ASTEROIDS_MARS ((nt_hash64_t){0xCE206EFFAC81092EULL}) /* asteroids/mars */
 #define ASSET_TEXTURE_ASTEROIDS_SKY_0 ((nt_hash64_t){0xAC924BA7B4CD986EULL}) /* asteroids/sky/0 */
@@ -21,14 +17,12 @@
 #if NT_HASH_LABELS
 static inline void asteroids_space_register_labels(void) {
     (void)nt_hash64_str("asteroids/mars");
-    (void)nt_hash64_str("asteroids/planet");
     (void)nt_hash64_str("asteroids/sky/0");
     (void)nt_hash64_str("asteroids/sky/1");
     (void)nt_hash64_str("asteroids/sky/2");
     (void)nt_hash64_str("asteroids/sky/3");
     (void)nt_hash64_str("asteroids/sky/4");
     (void)nt_hash64_str("asteroids/sky/5");
-    (void)nt_hash64_str("asteroids/sky_cube");
 }
 #endif
 

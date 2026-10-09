@@ -19,8 +19,3 @@ assets/sponza/**/*.bin filter=lfs diff=lfs merge=lfs -text
 # Benchmark fixture corpora (AUDIT-01). NOTE: assets/ is NOT globally LFS —
 # assets/sprites/bigatlas is raw git blobs, so bench PNGs need this explicit rule.
 assets/bench/**/*.png filter=lfs diff=lfs merge=lfs -text
-
-# Pinned upstream snapshots are verified by Git blob hash, including line endings.
-examples/asteroids/reference_generator/deps/** -text
-examples/asteroids/reference_generator/upstream/** -text
-examples/asteroids/reference_scene_data/upstream/** -text

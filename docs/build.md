@@ -398,37 +398,19 @@ specified in the UI chapters linked above.
   `3221225794` (`0xC0000142`) can be transient during parallel links. Retry once
   before investigating further.
 
-## Asteroids baseline
+## Asteroids
 
-The [Asteroids example](../examples/asteroids/README.md) generates the pinned Methane
-source geometry, scene records and noise offline, then builds 17 scene NTPACKs and one small native-UI pack. It needs
-C++20 for the offline generator and Python3 for validation; the runtime remains C17. Vendored dependencies
-and source images are included, with no LFS/network fetch for this example. The
-first native build generates about 340 MiB of packs; subsequent builds reuse them.
+The [Asteroids example](../examples/asteroids/README.md) generates its meshes,
+noise textures and scene at startup; its packs hold only shaders, the font, the
+UI atlas, and Basis-compressed Mars and sky (about 3.4 MiB).
 
 ```bash
-cmake --preset native-debug -DNT_SKIP_EXAMPLE_PACKS=sponza
-cmake --build --preset native-debug --target asteroids
-(cd build/examples/asteroids/native-debug && ./asteroids --complexity 8)
-
-# After native packs exist:
-source emsdk/emsdk_env.sh
-emcmake cmake --preset wasm-debug
-cmake --build --preset wasm-debug --target asteroids
-python3 -m http.server 8080 --directory build/examples/asteroids/wasm-debug
+cmake --preset native-release -DNT_GFX_GPU_TIMING_ENABLED=ON -DNT_SKIP_EXAMPLE_PACKS=sponza
+cmake --build --preset native-release --target asteroids
+(cd build/examples/asteroids/native-release && ./asteroids --complexity 8)
 ```
 
-On Linux without Wayland development packages, configure with
-`-DGLFW_BUILD_WAYLAND=OFF`. The default complexity is 1 (2,000 objects); 8 is the
-source screenshot's 35,000-object workload and 9 is the explicit 50,000 maximum.
-Ctrl+P pauses; L selects source LOD colors. See the example README for controls,
-measurement scope and known backend differences. There is no CPU culling or
-batch reduction in the source baseline; the current default renderer groups
-compatible subsets with existing indexed instancing. See the example README for
-measured command reductions and the small draw-order pixel differences.
-
-For native Release measurements, explicitly enable GPU timing if wanted:
-`cmake --preset native-release -DNT_GFX_GPU_TIMING_ENABLED=ON -DNT_SKIP_EXAMPLE_PACKS=sponza`,
-then build `asteroids` and run from its `native-release` output directory.
-Attribution is copied beside both native and web outputs. Retain the Methane
-Asteroids Apache notices and the Mars/Galaxy image credits in CREDITS.md when distributing the demo.
+The default complexity is 1 (2,000 asteroids); 8 is the original screenshot's
+35,000 and 9 the 50,000 maximum. GPU timing is opt-in, as above. Attribution is
+copied beside both native and web outputs; retain the Methane Asteroids Apache
+notices and the Mars/Galaxy credits in CREDITS.md when distributing the demo.

@@ -458,13 +458,6 @@ float-to-byte conversion saturates and rounds half up (NaN gives 0), so an
 opacity fold gives the same alpha on a packed color and on a Clay color with the
 same byte values.
 
-Texture transfer functions are explicit storage choices. `SRGBA8` samples
-sRGB-encoded RGB as linear light, with decode before filtering and linear alpha,
-on both native GL and WebGL 2. `RGBA8` continues to sample its byte values
-without a transfer conversion. This adds no implicit conversion of vertex tints,
-material uniforms or framebuffer output; lighting and output encoding remain
-game shader policy. `SRGBA8` is sampled storage, not a supported color attachment.
-
 Every mesh and skinned mesh instance carries the entity's drawable color
 (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs
 a drawable component. A shader that ignores color does not declare the color

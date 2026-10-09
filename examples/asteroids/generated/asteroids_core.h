@@ -8,6 +8,8 @@
 /* --- SHADER --- */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG ((nt_hash64_t){0xC1C3907ABE639DDCULL}) /* assets/shaders/slug_text.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT ((nt_hash64_t){0x8ECB088C8983CC2FULL}) /* assets/shaders/slug_text.vert */
+#define ASSET_SHADER_EXAMPLES_ASTEROIDS_SHADERS_NOISE_FRAG ((nt_hash64_t){0xBE6F19746AEC65BBULL}) /* examples/asteroids/shaders/noise.frag */
+#define ASSET_SHADER_EXAMPLES_ASTEROIDS_SHADERS_NOISE_VERT ((nt_hash64_t){0xBB14E6F93B69BB45ULL}) /* examples/asteroids/shaders/noise.vert */
 #define ASSET_SHADER_EXAMPLES_ASTEROIDS_SHADERS_PLANET_FRAG ((nt_hash64_t){0xDFC6B6997A0AD40EULL}) /* examples/asteroids/shaders/planet.frag */
 #define ASSET_SHADER_EXAMPLES_ASTEROIDS_SHADERS_PLANET_VERT ((nt_hash64_t){0xE52F37B252ECF32DULL}) /* examples/asteroids/shaders/planet.vert */
 #define ASSET_SHADER_EXAMPLES_ASTEROIDS_SHADERS_ROCK_FRAG ((nt_hash64_t){0xAAD047A3B47C8F90ULL}) /* examples/asteroids/shaders/rock.frag */
@@ -23,6 +25,8 @@ static inline void asteroids_core_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/slug_text.frag");
     (void)nt_hash64_str("assets/shaders/slug_text.vert");
     (void)nt_hash64_str("asteroids/font");
+    (void)nt_hash64_str("examples/asteroids/shaders/noise.frag");
+    (void)nt_hash64_str("examples/asteroids/shaders/noise.vert");
     (void)nt_hash64_str("examples/asteroids/shaders/planet.frag");
     (void)nt_hash64_str("examples/asteroids/shaders/planet.vert");
     (void)nt_hash64_str("examples/asteroids/shaders/rock.frag");

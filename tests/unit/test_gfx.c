@@ -2008,54 +2008,6 @@ void test_activate_texture_valid_blob(void) {
     nt_gfx_deactivate_texture(handle);
 }
 
-void test_activate_srgba8_preserves_raw_storage_and_sampler_defaults(void) {
-    uint8_t blob[sizeof(NtTextureAssetHeader) + 16] = {0};
-    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
-    *hdr = (NtTextureAssetHeader){
-        .magic = NT_TEXTURE_MAGIC,
-        .version = NT_TEXTURE_VERSION,
-        .format = NT_TEXTURE_FORMAT_SRGBA8,
-        .width = 2,
-        .height = 2,
-        .mip_count = 1,
-        .compression = NT_TEXTURE_COMPRESSION_RAW,
-        .default_min_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
-        .default_mag_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
-        .default_wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
-        .data_size = 16,
-    };
-    /* Core normalized storage requires none of the optional float/compressed caps. */
-    nt_texture_t tex = {.id = nt_gfx_activate_texture(blob, sizeof(blob))};
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
-    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGBA8, nt_gfx_texture_format(tex));
-    nt_texture_desc_t seen = nt_gfx_fake_last_texture_desc();
-    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGBA8, seen.format);
-    TEST_ASSERT_EQUAL_PTR(blob + sizeof(*hdr), seen.data);
-    TEST_ASSERT_EQUAL_INT(NT_FILTER_LINEAR, seen.min_filter);
-    TEST_ASSERT_EQUAL_INT(NT_FILTER_LINEAR, seen.mag_filter);
-    TEST_ASSERT_EQUAL_INT(NT_WRAP_REPEAT, seen.wrap_u);
-    nt_gfx_update_texture(tex, 0, 0, 2, 2, blob + sizeof(*hdr));
-    EXPECT_ASSERT(nt_gfx_make_render_target(&(nt_render_target_desc_t){.color = tex}));
-
-    nt_program_t program = make_sampler_program((const char *const[]){"u_tex"}, 1);
-    begin_texture_binding_test_pass(program);
-    nt_gfx_texture_binding_t binding = {.name = nt_hash32_str("u_tex"), .texture = tex, .sampler = NT_SAMPLER_DEFAULT};
-    apply_texture_set(&binding, 1);
-    binding.sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR, .mag_filter = NT_FILTER_LINEAR});
-    apply_texture_set(&binding, 1);
-    binding.sampler = nt_gfx_make_sampler(&(nt_sampler_desc_t){.compare_func = NT_COMPARE_LESS});
-    EXPECT_ASSERT(nt_gfx_apply_texture_bindings(&binding, 1));
-    end_texture_binding_test_pass();
-    nt_gfx_destroy_texture(tex);
-
-    const uint32_t creates = nt_gfx_fake_texture_create_count();
-    hdr->data_size = 15;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, sizeof(blob)));
-    hdr->data_size = 16;
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_texture(blob, sizeof(blob) - 1));
-    TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
-}
-
 /* ---- Activator: texture bad magic ---- */
 
 void test_activate_texture_bad_magic(void) {
@@ -3961,7 +3913,6 @@ int main(void) {
     RUN_TEST(test_gfx_texture_pool_full_asserts);
     /* Activator tests */
     RUN_TEST(test_activate_texture_valid_blob);
-    RUN_TEST(test_activate_srgba8_preserves_raw_storage_and_sampler_defaults);
     RUN_TEST(test_activate_texture_bad_magic);
     RUN_TEST(test_activate_texture_too_small);
     RUN_TEST(test_activate_mesh_valid_blob);

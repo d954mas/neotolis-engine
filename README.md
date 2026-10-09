@@ -16,7 +16,7 @@ engine/game ownership boundary is
 
 [Asteroids](examples/asteroids/README.md): a Neotolis port of
 [Evgeny Gorodetskiy’s Methane Asteroids](https://github.com/MethanePowered/MethaneAsteroids),
-with 1,000–50,000 objects, original mesh/texture variation, four LODs and grouped indexed instancing.
+with 1,000–50,000 objects, procedural shapes and textures in four LODs, and grouped indexed instancing.
 [Original demo and asset credits](examples/asteroids/CREDITS.md).
 
 ## Prerequisites

@@ -4,9 +4,10 @@ description: Neotolis port of Evgeny Gorodetskiy's Methane Asteroids, with 1,000
 ---
 
 A Neotolis C17/WebGL 2 port of [Methane Asteroids](https://github.com/MethanePowered/MethaneAsteroids)
-by Evgeny Gorodetskiy, Apache 2.0. The original camera, Mars, Galaxy sky,
-procedural meshes and scene workload are retained. Existing Neotolis primitives
-group compatible asteroid draws through indexed instancing.
+by Evgeny Gorodetskiy, Apache 2.0. The original camera, Mars, Galaxy sky and
+scene workload are retained; asteroid shapes, noise textures and the scene are
+generated at startup. Draws are grouped by texture, LOD and shape into indexed
+instanced runs.
 
 Keys 0–9 select complexity; Ctrl+P pauses; L shows LOD colors. Mouse drag or one
 finger orbits; the wheel or pinch zooms. Settings provides controls, statistics

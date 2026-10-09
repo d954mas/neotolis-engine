@@ -333,78 +333,6 @@ void test_prepared_upload_etc2_rgb8(void) {
 
 // #endregion
 
-// #region raw sRGB sampling
-
-void test_raw_srgba8_decodes_before_filtering_and_keeps_alpha_linear(void) {
-    /* Red/blue isolate decode-before-filter; constant mid-gray green proves a decode occurred. */
-    static const uint8_t pixels[8] = {0, 128, 255, 64, 255, 128, 0, 192};
-    uint8_t blob[sizeof(NtTextureAssetHeader) + sizeof(pixels)] = {0};
-    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
-    *hdr = (NtTextureAssetHeader){
-        .magic = NT_TEXTURE_MAGIC,
-        .version = NT_TEXTURE_VERSION,
-        .format = NT_TEXTURE_FORMAT_SRGBA8,
-        .width = 2,
-        .height = 1,
-        .mip_count = 1,
-        .compression = NT_TEXTURE_COMPRESSION_RAW,
-        .default_min_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
-        .default_mag_filter = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
-        .data_size = sizeof(pixels),
-    };
-    memcpy(blob + sizeof(*hdr), pixels, sizeof(pixels));
-    nt_texture_t tex = {.id = nt_gfx_activate_texture(blob, sizeof(blob))};
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
-    TEST_ASSERT_EQUAL_INT(NT_TEXTURE_FORMAT_SRGBA8, nt_gfx_texture_format(tex));
-    TEST_ASSERT_EQUAL_INT(0, texture_max_level(tex));
-
-    render_sampled(tex, NT_SAMPLER_DEFAULT, 1, 1, 1, 1);
-    /* (decode(0) + decode(1))/2 = 0.5; decoding the filtered 0.5 would give 0.214. */
-    TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 128, s_readback[0]);
-    TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 55, s_readback[1]);
-    TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 128, s_readback[2]);
-    TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 128, s_readback[3]);
-
-    nt_sampler_t nearest = nt_gfx_make_sampler(&(nt_sampler_desc_t){.min_filter = NT_FILTER_NEAREST, .mag_filter = NT_FILTER_NEAREST});
-    render_sampled(tex, nearest, 2, 1, 2, 1);
-    static const uint8_t decoded[8] = {0, 55, 255, 64, 255, 55, 0, 192};
-    for (uint32_t i = 0; i < sizeof(decoded); i++) {
-        TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, decoded[i], s_readback[i]);
-    }
-
-    static const uint8_t updated[8] = {128, 128, 128, 128, 128, 128, 128, 128};
-    nt_gfx_update_texture(tex, 0, 0, 2, 1, updated);
-    render_sampled(tex, NT_SAMPLER_DEFAULT, 1, 1, 1, 1);
-    for (uint32_t i = 0; i < 3; i++) {
-        TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 55, s_readback[i]);
-    }
-    TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 128, s_readback[3]);
-    nt_gfx_destroy_texture(tex);
-}
-
-void test_srgba8_generated_mips_filter_in_linear_light(void) {
-    static const uint8_t pixels[16] = {0, 128, 255, 64, 255, 128, 0, 192, 0, 128, 255, 64, 255, 128, 0, 192};
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 2,
-        .height = 2,
-        .data = pixels,
-        .format = NT_TEXTURE_FORMAT_SRGBA8,
-        .min_filter = NT_FILTER_NEAREST_MIPMAP_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .gen_mipmaps = true,
-    });
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(tex));
-    TEST_ASSERT_EQUAL_INT(1, texture_max_level(tex));
-    render_sampled(tex, NT_SAMPLER_DEFAULT, 1, 1, 1, 1);
-    TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 128, s_readback[0]);
-    TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 55, s_readback[1]);
-    TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 128, s_readback[2]);
-    TEST_ASSERT_UINT8_WITHIN(TOL_EXACT, 128, s_readback[3]);
-    nt_gfx_destroy_texture(tex);
-}
-
-// #endregion
-
 // #region (c) GL_TEXTURE_MAX_LEVEL
 
 void test_single_level_texture_caps_max_level_and_still_samples(void) {
@@ -500,8 +428,6 @@ int main(void) {
     RUN_TEST(test_activate_uastc_blob_uploads_and_samples);
 #endif
     RUN_TEST(test_prepared_upload_rgba8);
-    RUN_TEST(test_raw_srgba8_decodes_before_filtering_and_keeps_alpha_linear);
-    RUN_TEST(test_srgba8_generated_mips_filter_in_linear_light);
     /* A target whose option is OFF has no transcoded chain to upload. */
 #if NT_BASISU_HAS_BC7
     RUN_TEST(test_prepared_upload_bc7);
