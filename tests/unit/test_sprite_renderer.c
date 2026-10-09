@@ -2313,7 +2313,7 @@ void test_sprite_renderer_emit_with_previous_frame_selection_asserts(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "set_material in this frame"));
 }
 
-static void assert_set_material_traps_without_frame_capacity(nt_gfx_frame_stream_t stream) {
+static void assert_set_material_traps_without_frame_capacity(uint32_t stream) {
     tearDown();
     nt_gfx_desc_t desc = test_gfx_desc();
     desc.frame_capacity[stream] = 0;

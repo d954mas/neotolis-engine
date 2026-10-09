@@ -424,7 +424,7 @@ void test_text_material_with_textures_asserts_at_set_material(void) {
 /* A zero frame storage budget would make every text draw silently vanish. */
 void test_zero_frame_capacity_asserts_at_set_material(void) {
     nt_material_t material = create_test_material_with_blend(nt_blend_opaque());
-    const nt_gfx_frame_stream_t kinds[] = {NT_GFX_FRAME_VERTEX, NT_GFX_FRAME_INDEX};
+    const uint32_t kinds[] = {NT_GFX_FRAME_VERTEX, NT_GFX_FRAME_INDEX};
     nt_test_frame_finish_links();
     for (uint32_t i = 0; i < 2U; i++) {
         const uint32_t capacity = g_nt_gfx_frame_storage[kinds[i]].capacity;

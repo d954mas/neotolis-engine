@@ -568,7 +568,7 @@ static void frame(void) {
         nt_gfx_bind_uniform_block(1, &lighting, sizeof(lighting));
 
         /* Draw all render items */
-        nt_mesh_renderer_draw_list(items, item_count);
+        nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, item_count);
 
 #if NT_LOG_MIN_LEVEL == 0
         /* Per-second FPS + render stats */

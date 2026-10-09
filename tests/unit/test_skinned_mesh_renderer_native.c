@@ -334,9 +334,9 @@ static void render_entity(nt_entity_t entity, nt_material_t material, nt_mesh_t 
     nt_gfx_begin_frame();
     begin_target_pass();
     if (skinned) {
-        nt_skinned_mesh_renderer_draw_list(&item, 1);
+        nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1);
     } else {
-        nt_mesh_renderer_draw_list(&item, 1);
+        nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1);
     }
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -353,9 +353,9 @@ static void render_list(const nt_render_item_t *items, uint32_t count, bool skin
     const uint32_t draws = nt_gfx_draw_calls(&g_nt_gfx.counters);
     const uint64_t instances = g_nt_gfx.counters.instances;
     if (skinned) {
-        nt_skinned_mesh_renderer_draw_list(items, count);
+        nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, count);
     } else {
-        nt_mesh_renderer_draw_list(items, count);
+        nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, count);
     }
     TEST_ASSERT_EQUAL_UINT32(draws + 1, nt_gfx_draw_calls(&g_nt_gfx.counters));
     TEST_ASSERT_EQUAL_UINT64(instances + count, g_nt_gfx.counters.instances);

@@ -9,6 +9,17 @@
 #error "NT_GFX_CAPTURE_ENABLED must be defined by the nt_gfx_interface target"
 #endif
 
+#ifndef NT_GFX_MAX_VERTEX_STREAMS
+#error "NT_GFX_MAX_VERTEX_STREAMS must be defined by the nt_gfx_interface target"
+#endif
+#if NT_GFX_MAX_VERTEX_STREAMS < 1 || NT_GFX_MAX_VERTEX_STREAMS > 32
+#error "NT_GFX_MAX_VERTEX_STREAMS must be 1-32"
+#endif
+
+#ifndef NT_GFX_MAX_INSTANCE_ATTRS
+#error "NT_GFX_MAX_INSTANCE_ATTRS must be defined by the nt_gfx_interface target"
+#endif
+
 #include "core/nt_assert.h"
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
@@ -58,10 +69,10 @@ typedef struct {
     uint32_t id;
 } nt_mesh_t;
 
-/* Owned vertex-input object (GL: a VAO): vertex layout + optional instance
- * layout baked against a VBO [+ IBO]. The static half (vertex attrs + index
- * buffer) is immutable after creation; the instance attribute pointers are
- * re-specified into the bound object by each nt_gfx_bind_instance_buffer. */
+/* Owned vertex-input object (GL: a VAO per vertex stream it reads instances from):
+ * vertex layout + optional instance layout baked against a VBO [+ IBO]. The static
+ * half (vertex attrs + index buffer) is immutable after creation; the instance
+ * attribute pointers follow nt_gfx_bind_vertex_input_instanced. */
 typedef struct {
     uint32_t id;
 } nt_vertex_input_t;
@@ -131,13 +142,16 @@ typedef enum {
     NT_USAGE_STREAM,        /* GL: STREAM_DRAW */
 } nt_buffer_usage_t;
 
-/* Frame storage streams: per-frame data allocated with nt_gfx_frame_alloc. */
-typedef enum {
-    NT_GFX_FRAME_VERTEX,  /* vertex and instance data */
-    NT_GFX_FRAME_INDEX,   /* uint32_t indices, absolute into the vertex stream */
+/* Frame storage streams: per-frame data allocated with nt_gfx_frame_alloc. Vertex streams
+ * come last, so a stream past the range fails the stream < NT_GFX_FRAME_STREAM_COUNT assert.
+ * The game names its vertex streams with its own enum starting at NT_GFX_FRAME_VERTEX; stream
+ * parameters are uint32_t because those streams have no enumerator here. */
+enum {
+    NT_GFX_FRAME_INDEX,   /* uint32_t indices, absolute into the general vertex stream */
     NT_GFX_FRAME_UNIFORM, /* view blocks and other per-frame uniform data */
-    NT_GFX_FRAME_STREAM_COUNT,
-} nt_gfx_frame_stream_t;
+    NT_GFX_FRAME_VERTEX,  /* general vertex stream (sprites, text); vertex stream k is NT_GFX_FRAME_VERTEX + k */
+    NT_GFX_FRAME_STREAM_COUNT = NT_GFX_FRAME_VERTEX + NT_GFX_MAX_VERTEX_STREAMS,
+};
 
 /* Vertex attribute component type. With count (1-4) and normalized this spans
  * the vertexAttribPointer space over float/half/byte/short types -- no enum of
@@ -302,9 +316,11 @@ typedef enum {
 /* ---- Vertex layout ---- */
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
-/* Instance layouts are capped tighter: the backend keeps a per-vertex-input
- * copy for per-draw re-pointing, and max_vertex_inputs slots exist. */
-#define NT_GFX_MAX_INSTANCE_ATTRS 8
+/* NT_GFX_MAX_INSTANCE_ATTRS comes from CMake (default 8, at most 16): the backend keeps
+ * a per-vertex-input copy of the instance layout, and max_vertex_inputs slots exist. */
+#if NT_GFX_MAX_INSTANCE_ATTRS < 1 || NT_GFX_MAX_INSTANCE_ATTRS > NT_GFX_MAX_VERTEX_ATTRS
+#error "NT_GFX_MAX_INSTANCE_ATTRS must be 1-16"
+#endif
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
 /* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS, so every slot works on every device. */
 #define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS 24
@@ -339,7 +355,7 @@ typedef struct {
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
     uint32_t stream_capacity;    /* draw-phase command bytes of one frame, default: 32 KiB; allocated once at init */
-    /* Frame storage bytes per frame by nt_gfx_frame_stream_t, default: 0 (disabled);
+    /* Frame storage bytes per frame by stream (NT_GFX_FRAME_*), default: 0 (disabled);
      * each enabled stream is a CPU staging copy plus a GPU buffer, allocated once at init. */
     uint32_t frame_capacity[NT_GFX_FRAME_STREAM_COUNT];
     nt_global_block_t global_blocks[NT_GFX_MAX_UNIFORM_BUFFER_SLOTS]; /* default: none; sized for one name per slot */
@@ -427,7 +443,7 @@ static inline bool nt_gfx_pipeline_key_equal(const nt_gfx_pipeline_key_t *a, con
 
 typedef struct {
     nt_vertex_layout_t layout;          /* per-vertex attrs, divisor 0; attr_count 0 = attribute-less (gl_VertexID) */
-    nt_vertex_layout_t instance_layout; /* optional per-instance attrs, divisor 1; pointers set per draw by nt_gfx_bind_instance_buffer */
+    nt_vertex_layout_t instance_layout; /* optional per-instance attrs, divisor 1; pointed by nt_gfx_bind_vertex_input_instanced */
     nt_buffer_t vertex_buffer;          /* NT_BUFFER_VERTEX; required iff layout.attr_count > 0 */
     nt_buffer_t index_buffer;           /* optional ({0} = non-indexed); NT_BUFFER_INDEX with index_type != NT_INDEX_NONE */
     const char *label;                  /* optional debug name; borrowed for the call */
@@ -521,7 +537,6 @@ typedef enum {
     NT_GFX_OP_BUFFER_UPLOAD,
     NT_GFX_OP_TEXTURE_UPLOAD,
     NT_GFX_OP_ATTRIBUTE,
-    NT_GFX_OP_INSTANCE_BUFFER,
     NT_GFX_OP_DRAW,
     NT_GFX_OP_DRAW_INSTANCED,
     NT_GFX_OP_DRAW_INDEXED,
@@ -962,8 +977,15 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 /* One backend bind selects the whole vertex-input state (layout + buffers +
  * index binding) for the following draws. Orthogonal to pipeline binding --
  * either may change without re-binding the other. Every draw requires a bound
- * vertex input (asserted); attribute-less draws bind an empty one. */
+ * vertex input (asserted); attribute-less draws bind an empty one. The vertex
+ * input must declare no instance layout (asserted). */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
+/* Binds a vertex input that declares an instance layout (asserted) with its instance
+ * attributes at byte_offset in frame vertex stream `stream` (NT_GFX_FRAME_VERTEX + k,
+ * nonzero capacity; asserted), inside this frame's allocations of the stream (asserted). The
+ * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets); asserted. Each vertex stream has its own GL VAO per vertex
+ * input, so a run that keeps its stream and offset from frame to frame re-points nothing. */
+void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t stream, uint32_t byte_offset);
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.
  * Inactive names are ignored before their handles are read. Contract violations
@@ -1012,14 +1034,6 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
  * w*h*4 > out_cap (no write past the cap) or a lost context. */
 bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint8_t *out, uint32_t out_cap);
 
-/* ---- Instance buffer ---- */
-
-/* Re-specifies instance attrib pointers at byte_offset into the bound vertex
- * input, which must declare a nonempty instance_layout; both asserted. The
- * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets);
- * asserted. Re-bind per draw to re-point. */
-void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset);
-
 /* ---- Uniform blocks ---- */
 
 /* Copies size bytes into the uniform frame stream and binds that range to slot; every call
@@ -1038,7 +1052,8 @@ void nt_gfx_update_buffer(nt_buffer_t buf, uint32_t offset, const void *data, ui
  *
  * Per-frame vertex, index and uniform data at any point of the frame. Allocate and fill between
  * nt_gfx_begin_frame and nt_gfx_end_frame, which uploads each stream once before the
- * replay. Offsets and pointers are valid until the next nt_gfx_begin_frame. Align vertex data read by index
+ * replay. Each vertex stream is its own buffer starting at offset 0 every frame: a pass that
+ * writes its instances to its own stream keeps their offsets while its counts stay. Offsets and pointers are valid until the next nt_gfx_begin_frame. Align vertex data read by index
  * to its stride (vertex i at i * stride; indices are absolute), instance data to 4
  * and indices to 4 (first_index = offset / 4). The uniform stream is filled by
  * nt_gfx_bind_uniform_block. */
@@ -1054,10 +1069,10 @@ typedef struct {
 extern nt_gfx_frame_storage_t g_nt_gfx_frame_storage[NT_GFX_FRAME_STREAM_COUNT];
 
 /* Logs the needed and free bytes and stops: the capacity is the game's budget. */
-_Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align);
+_Noreturn void nt_gfx_frame_alloc_overflow(uint32_t stream, uint32_t size, uint32_t align);
 
 /* Returns size bytes at an offset that is a multiple of align; writes the offset to *out_offset. */
-static inline void *nt_gfx_frame_alloc(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align, uint32_t *out_offset) {
+static inline void *nt_gfx_frame_alloc(uint32_t stream, uint32_t size, uint32_t align, uint32_t *out_offset) {
     NT_ASSERT(stream < NT_GFX_FRAME_STREAM_COUNT && size > 0 && align > 0 && out_offset != NULL);
     nt_gfx_frame_storage_t *s = &g_nt_gfx_frame_storage[stream];
     const uint64_t offset = ((uint64_t)s->used + align - 1U) / align * align;
@@ -1071,7 +1086,10 @@ static inline void *nt_gfx_frame_alloc(nt_gfx_frame_stream_t stream, uint32_t si
 
 /* Borrowed: never update or destroy it. Re-read every frame: a context restore
  * replaces it. The index buffer is NT_INDEX_UINT32. */
-static inline nt_buffer_t nt_gfx_frame_buffer(nt_gfx_frame_stream_t stream) { return g_nt_gfx_frame_storage[stream].buffer; }
+static inline nt_buffer_t nt_gfx_frame_buffer(uint32_t stream) {
+    NT_ASSERT(stream < NT_GFX_FRAME_STREAM_COUNT);
+    return g_nt_gfx_frame_storage[stream].buffer;
+}
 
 /* GPU TIME_ELAPSED segments cannot nest: GL allows only one active query.
  * Inside a frame. name must be non-NULL and have static lifetime: the pointer

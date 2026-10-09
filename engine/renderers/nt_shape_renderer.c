@@ -299,6 +299,7 @@ static struct {
     float line_width;
     float pixel_scale[4];
     bool depth_enabled;
+    uint8_t stream; /* uint32_t of instance data */
     bool initialized;
 
     /* Sin/Cos lookup table (fixed NT_SHAPE_SEGMENTS) */
@@ -883,7 +884,7 @@ static void drop_queues(void) {
 }
 
 void nt_shape_renderer_init(void) {
-    /* Every flush draws from frame storage; a zero budget would make shapes vanish. */
+    /* Every flush draws from frame storage, and triangle batches always from the general stream. */
     NT_ASSERT(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].capacity > 0 && "shape renderer: set nt_gfx_desc_t.frame_capacity[NT_GFX_FRAME_VERTEX]");
     memset(&s_shape, 0, sizeof(s_shape));
     s_u_vp = nt_hash32_str("u_vp");
@@ -893,6 +894,7 @@ void nt_shape_renderer_init(void) {
     build_trig_lut();
     s_shape.line_width = 0.02F;
     s_shape.depth_enabled = true;
+    s_shape.stream = NT_GFX_FRAME_VERTEX;
     create_gpu();
     s_shape.initialized = true;
 }
@@ -918,10 +920,10 @@ void nt_shape_renderer_restore_gpu(void) {
 /* Copies one kind's staging into frame storage and draws it instanced from there. */
 static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count, bool stroke) {
     uint32_t offset = 0;
-    memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, bytes, 4, &offset), data, bytes);
+    const uint32_t stream = s_shape.stream;
+    memcpy(nt_gfx_frame_alloc(stream, bytes, 4, &offset), data, bytes);
     nt_gfx_bind_pipeline(pipeline);
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset);
+    nt_gfx_bind_vertex_input_instanced(vi, stream, offset);
     nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
     if (stroke) {
         nt_gfx_set_uniform_vec4(s_u_eye, s_shape.eye);
@@ -1053,6 +1055,15 @@ void nt_shape_renderer_set_depth(bool enabled) {
     }
     nt_shape_renderer_flush();
     s_shape.depth_enabled = enabled;
+}
+
+void nt_shape_renderer_set_stream(uint32_t stream) {
+    NT_ASSERT(stream >= NT_GFX_FRAME_VERTEX && stream < NT_GFX_FRAME_STREAM_COUNT && g_nt_gfx_frame_storage[stream].capacity > 0 && "set_stream: not a sized frame vertex stream");
+    if ((uint8_t)stream == s_shape.stream) {
+        return;
+    }
+    nt_shape_renderer_flush();
+    s_shape.stream = (uint8_t)stream;
 }
 
 /* ---- Line ---- */

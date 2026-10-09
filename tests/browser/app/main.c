@@ -260,16 +260,22 @@ static void mesh_probe_draw(void) {
     if (s_mesh_vi.id == 0 || !nt_gfx_program_ready(s_mesh_program)) {
         return;
     }
-    /* Instance data 8 bytes into a vertex frame storage allocation: proves the
-     * nonzero-offset re-pointing the mesh renderer relies on. Two stacked quads. */
-    const float inst[6] = {0.0F, 0.0F, 0.85F, -0.95F, 0.85F, -0.82F};
-    uint32_t inst_offset = 0;
-    memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(inst), 4, &inst_offset), inst, sizeof(inst));
+    /* Instance data 8 bytes into a frame storage allocation, two instances per draw, one draw
+     * per vertex stream through one vertex input (a WebGL2 VAO per stream). Each stream places
+     * only one of the two stacked quads on screen, so each quad proves its own stream's VAO,
+     * the nonzero offset and the second instance. */
+    const float low[6] = {0.0F, 0.0F, 0.85F, -0.95F, 5.0F, 5.0F};
+    const float high[6] = {0.0F, 0.0F, 5.0F, 5.0F, 0.85F, -0.82F};
+    uint32_t low_offset = 0;
+    uint32_t high_offset = 0;
+    memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(low), 4, &low_offset), low, sizeof(low));
+    memcpy(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX + 1, sizeof(high), 4, &high_offset), high, sizeof(high));
     nt_gfx_bind_pipeline(s_mesh_pipeline);
     const float color[4] = {0.25F, 0.5F, 0.75F, 1.0F};
     nt_gfx_set_uniform_vec4(s_mesh_color_name, color);
-    nt_gfx_bind_vertex_input(s_mesh_vi);
-    nt_gfx_bind_instance_buffer(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), inst_offset + 8U);
+    nt_gfx_bind_vertex_input_instanced(s_mesh_vi, NT_GFX_FRAME_VERTEX, low_offset + 8U);
+    nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
+    nt_gfx_bind_vertex_input_instanced(s_mesh_vi, NT_GFX_FRAME_VERTEX + 1, high_offset + 8U);
     nt_gfx_draw_indexed_instanced(0, s_mesh_index_count, s_mesh_vertex_count, 2);
 }
 // #endregion
@@ -1274,6 +1280,7 @@ int main(int argc, char *argv[]) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     gfx_desc.capture_capacity = 16384;
     gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 512U * 1024U; /* the mesh probe's instances, the sprites, the text and the shape probe */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX + 1] = 256U;     /* the mesh probe's second stream */
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = 128U * 1024U;
     gfx_desc.frame_capacity[NT_GFX_FRAME_UNIFORM] = 512U; /* the 256 B view block plus any offset alignment up to 256 */
     gfx_desc.global_blocks[0] = (nt_global_block_t){"Globals", 0};

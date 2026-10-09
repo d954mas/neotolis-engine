@@ -182,7 +182,10 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle);
  * create_pipeline: returns `slot`, or 0 on failure. */
 uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot);
 void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle);
-void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle);
+/* Binds the vertex input's VAO for frame vertex stream `clone` (0 without an instance layout),
+ * creating it on first use, and points its instance attribs at buffer_backend + byte_offset
+ * unless buffer_backend is 0 (no instance layout). */
+void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t buffer_backend, uint32_t byte_offset, uint32_t clone);
 
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
@@ -206,8 +209,6 @@ void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
 void nt_gfx_backend_bind_texture_unit(uint32_t texture_backend, uint32_t sampler_backend, uint32_t slot);
 
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
-/* Re-points the named vertex input's instance attribs at byte_offset. */
-void nt_gfx_backend_bind_instance_buffer(uint32_t vertex_input_backend, uint32_t buffer_backend, uint32_t byte_offset);
 
 /* Scissor and viewport (see nt_gfx.h for convention).
  * Backend implementations:

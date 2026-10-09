@@ -6,7 +6,7 @@ nt_gfx_t g_nt_gfx;
 /* Zero capacity: any frame storage allocation reaches the overflow. */
 nt_gfx_frame_storage_t g_nt_gfx_frame_storage[NT_GFX_FRAME_STREAM_COUNT];
 
-_Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align) {
+_Noreturn void nt_gfx_frame_alloc_overflow(uint32_t stream, uint32_t size, uint32_t align) {
     (void)stream;
     (void)size;
     (void)align;
@@ -157,6 +157,12 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) { (void)pip; }
 
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) { (void)vi; }
 
+void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t stream, uint32_t byte_offset) {
+    (void)vi;
+    (void)stream;
+    (void)byte_offset;
+}
+
 void nt_gfx_apply_texture_bindings(const nt_gfx_texture_binding_t *bindings, uint8_t count) {
     (void)bindings;
     (void)count;
@@ -238,11 +244,6 @@ bool nt_gfx_read_pixels(nt_render_target_t src, int x, int y, int w, int h, uint
     (void)out;
     (void)out_cap;
     return false;
-}
-
-void nt_gfx_bind_instance_buffer(nt_buffer_t buf, uint32_t byte_offset) {
-    (void)buf;
-    (void)byte_offset;
 }
 
 void nt_gfx_bind_uniform_block(uint32_t slot, const void *data, uint32_t size) {

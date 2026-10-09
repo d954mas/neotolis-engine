@@ -120,6 +120,7 @@ void nt_gfx_fake_lose_and_restore_context(void);
 uint32_t nt_gfx_fake_last_update_buffer_offset(void);
 uint32_t nt_gfx_fake_last_instance_offset(void);
 uint32_t nt_gfx_fake_last_instance_vertex_input(void);
+uint32_t nt_gfx_fake_last_instance_clone(void); /* frame vertex stream index (stream - NT_GFX_FRAME_VERTEX) of the last instanced bind */
 nt_blend_state_t nt_gfx_fake_last_pipeline_blend(void);
 uint32_t nt_gfx_fake_vertex_input_create_count(void);
 uint32_t nt_gfx_fake_bind_vertex_input_count(void);

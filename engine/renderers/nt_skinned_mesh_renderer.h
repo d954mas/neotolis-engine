@@ -46,12 +46,12 @@ void nt_skinned_mesh_renderer_restore_gpu(void);
  * common/skin.glsl and declares u_skin_matrices, which deformation replaces. Call after
  * nt_skeletal_gpu_flush: a texture write precedes the draws that sample it (render/architecture.md,
  * Draw-phase command stream). */
-void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t offset, uint32_t count);
+void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t stream, uint32_t offset, uint32_t count);
 
 /* nt_mesh_renderer_draw_list for skinned items: runs also split on the deformation texture,
  * and every item also needs a skin component with a deformation binding of this frame. Call
  * after nt_skeletal_gpu_flush. */
-void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
+void nt_skinned_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, uint32_t count);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

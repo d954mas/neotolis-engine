@@ -79,6 +79,30 @@ void test_shape_set_vp_derives_eye(void) {
 
 /* ---- 4. set_depth auto-flushes non-empty batch ---- */
 
+/* Instanced shapes follow the stream setting, which flushes on change; the triangle batch
+ * stays on the general stream. */
+void test_shape_set_stream_routes_instances(void) {
+    const float c[3] = {0, 0, 0};
+    const float size[3] = {1, 1, 1};
+    const float a[3] = {1, 0, 0};
+    const float b[3] = {0, 1, 0};
+    const uint32_t col = NT_RGBA8(255, 255, 255, 255);
+    nt_shape_renderer_cube(c, size, NULL, col);
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 1);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_instance_count(NT_SHAPE_TEST_CUBE)); /* flushed to the general stream */
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX + 1].used);
+    const uint32_t general = g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used;
+
+    nt_shape_renderer_cube(c, size, NULL, col);
+    nt_shape_renderer_triangle(c, a, b, col);
+    nt_shape_renderer_flush();
+    TEST_ASSERT_GREATER_THAN_UINT32(0, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX + 1].used);
+    TEST_ASSERT_GREATER_THAN_UINT32(general, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used); /* the triangle */
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_last_instance_clone());
+    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 2)); /* unsized */
+}
+
 void test_shape_set_depth_auto_flush(void) {
     float a[3] = {0, 0, 0};
     float b[3] = {1, 0, 0};
@@ -745,5 +769,6 @@ int main(void) {
 #endif
     RUN_TEST(test_shape_loss_during_restore_is_retried_by_the_next_one);
     RUN_TEST(test_shape_restore_on_inactive_renderer_does_nothing);
+    RUN_TEST(test_shape_set_stream_routes_instances);
     return UNITY_END();
 }
