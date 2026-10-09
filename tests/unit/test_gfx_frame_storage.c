@@ -36,7 +36,7 @@ static void next_frame(void) {
     nt_gfx_begin_frame();
 }
 
-static uint32_t alloc_filled(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align, uint8_t value) {
+static uint32_t alloc_filled(uint32_t stream, uint32_t size, uint32_t align, uint8_t value) {
     uint32_t offset = UINT32_MAX;
     memset(nt_gfx_frame_alloc(stream, size, align, &offset), value, size);
     return offset;
@@ -155,8 +155,8 @@ static void test_execution_uploads_each_allocated_storage_once_before_its_draws(
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(updates + 2U, nt_gfx_fake_update_buffer_count()); /* the empty index storage sends nothing */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_update_buffer_offset());
-    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_update_buffer_size());
-    TEST_ASSERT_EQUAL_PTR(g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging, nt_gfx_fake_last_update_buffer_data());
+    TEST_ASSERT_EQUAL_UINT32(24, nt_gfx_fake_last_update_buffer_size()); /* vertex streams upload last */
+    TEST_ASSERT_EQUAL_PTR(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging, nt_gfx_fake_last_update_buffer_data());
     nt_gfx_begin_frame();
 }
 
@@ -182,8 +182,8 @@ static void test_end_frame_uploads_each_used_storage_once_including_bytes_after_
     TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_BUFFER_UPLOAD]);
     TEST_ASSERT_EQUAL_UINT32(34, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_VERTEX]); /* both vertex allocations in one upload */
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_update_buffer_offset());
-    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_update_buffer_size());
-    TEST_ASSERT_EQUAL_PTR(g_nt_gfx_frame_storage[NT_GFX_FRAME_UNIFORM].staging, nt_gfx_fake_last_update_buffer_data());
+    TEST_ASSERT_EQUAL_UINT32(34, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_PTR(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].staging, nt_gfx_fake_last_update_buffer_data());
     nt_gfx_begin_frame();
 }
 
@@ -225,11 +225,39 @@ static void test_indexed_draws_read_the_index_storage_as_uint32(void) {
 }
 // #endregion
 
+/* Each vertex stream is its own buffer starting at 0 every frame; an empty one sends nothing. */
+static void test_vertex_streams_allocate_and_upload_separately(void) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = TEST_DESC;
+    desc.frame_capacity[NT_GFX_FRAME_VERTEX + 2] = 256;
+    nt_gfx_init(&desc);
+    make_draw_state();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX).id, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1).id);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 3).id);
+    TEST_ASSERT_EQUAL_UINT32(0, alloc_filled(NT_GFX_FRAME_VERTEX, 24, 4, 0x11));
+    TEST_ASSERT_EQUAL_UINT32(0, alloc_filled(NT_GFX_FRAME_VERTEX + 1, 40, 4, 0x22));
+    TEST_ASSERT_EQUAL_UINT32(40, alloc_filled(NT_GFX_FRAME_VERTEX + 1, 8, 4, 0x33));
+    const uint32_t updates = nt_gfx_fake_update_buffer_count();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(updates + 2U, nt_gfx_fake_update_buffer_count()); /* stream 2 is empty */
+    TEST_ASSERT_EQUAL_UINT32(24, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_VERTEX]);
+    TEST_ASSERT_EQUAL_UINT32(48, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_VERTEX + 1]);
+    TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.counters.frame_bytes[NT_GFX_FRAME_VERTEX + 2]);
+    TEST_ASSERT_EQUAL_UINT32(48, nt_gfx_fake_last_update_buffer_size());
+    TEST_ASSERT_EQUAL_PTR(g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX + 1].staging, nt_gfx_fake_last_update_buffer_data());
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, alloc_filled(NT_GFX_FRAME_VERTEX + 1, 8, 4, 0)); /* starts at 0 again */
+    NT_TEST_EXPECT_ASSERT(alloc_filled(NT_GFX_FRAME_VERTEX + 2, 260, 4, 0));     /* its own budget */
+    NT_TEST_EXPECT_ASSERT(nt_gfx_frame_buffer(NT_GFX_FRAME_STREAM_COUNT));
+}
+
 // #region restore
 static void test_restore_makes_new_buffers_and_a_lost_frame_uploads_nothing(void) {
     nt_buffer_t before[NT_GFX_FRAME_STREAM_COUNT];
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
-        before[s] = nt_gfx_frame_buffer((nt_gfx_frame_stream_t)s);
+        before[s] = nt_gfx_frame_buffer(s);
     }
     nt_gfx_fake_set_context_lost(true);
     next_frame();
@@ -243,7 +271,10 @@ static void test_restore_makes_new_buffers_and_a_lost_frame_uploads_nothing(void
     TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count());
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
-        const nt_buffer_t after = nt_gfx_frame_buffer((nt_gfx_frame_stream_t)s);
+        if (g_nt_gfx_frame_storage[s].capacity == 0) {
+            continue;
+        }
+        const nt_buffer_t after = nt_gfx_frame_buffer(s);
         TEST_ASSERT_NOT_EQUAL_UINT32(0, after.id);
         TEST_ASSERT_NOT_EQUAL_UINT32(before[s].id, after.id);
     }
@@ -262,7 +293,7 @@ static void test_a_retried_restore_reuses_the_frame_buffer_slots(void) {
     nt_gfx_end_frame();
     nt_gfx_shutdown();
     nt_gfx_desc_t desc = TEST_DESC;
-    desc.max_buffers = NT_GFX_FRAME_STREAM_COUNT;
+    desc.max_buffers = 4; /* the four sized streams of TEST_DESC */
     nt_gfx_init(&desc);
     nt_gfx_begin_frame();
     nt_gfx_fake_set_context_lost(true);
@@ -278,7 +309,7 @@ static void test_a_retried_restore_reuses_the_frame_buffer_slots(void) {
     next_frame();
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_frame_buffer((nt_gfx_frame_stream_t)s).id);
+        TEST_ASSERT_EQUAL(g_nt_gfx_frame_storage[s].capacity != 0, nt_gfx_frame_buffer(s).id != 0);
     }
 }
 
@@ -314,6 +345,7 @@ int main(void) {
     RUN_TEST(test_end_frame_uploads_each_used_storage_once_including_bytes_after_the_last_draw);
     RUN_TEST(test_allocating_between_draws_keeps_the_merge);
     RUN_TEST(test_indexed_draws_read_the_index_storage_as_uint32);
+    RUN_TEST(test_vertex_streams_allocate_and_upload_separately);
     RUN_TEST(test_restore_makes_new_buffers_and_a_lost_frame_uploads_nothing);
     RUN_TEST(test_a_retried_restore_reuses_the_frame_buffer_slots);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL

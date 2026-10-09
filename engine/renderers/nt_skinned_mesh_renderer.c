@@ -14,6 +14,8 @@
 
 #include <string.h>
 
+_Static_assert(NT_GFX_MAX_INSTANCE_ATTRS >= 6, "skinned mesh instance layout needs 6 attributes: raise NT_GFX_MAX_INSTANCE_ATTRS");
+
 static struct {
     nt_renderer_mesh_caches_t caches;
     uint32_t skin_sampler_hash;
@@ -79,7 +81,7 @@ void nt_skinned_mesh_renderer_restore_gpu(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t offset, uint32_t count) {
+void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t stream, uint32_t offset, uint32_t count) {
     NT_ASSERT(s_skinned.initialized);
     /* A lost context can leave the deformation texture or a mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
@@ -87,22 +89,26 @@ void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_te
     }
     NT_ASSERT(count > 0);
     NT_ASSERT(deformation.id != 0 && "skinned draw requires a deformation texture");
+    NT_ASSERT(stream >= NT_GFX_FRAME_VERTEX && stream < NT_GFX_FRAME_STREAM_COUNT && "draw: not a frame vertex stream");
+    /* Bounds only: equal allocations in two streams pass, so the caller owns the stream choice. */
+    NT_ASSERT((uint64_t)offset + ((uint64_t)count * sizeof(nt_skinned_mesh_instance_t)) <= g_nt_gfx_frame_storage[stream].used && "draw: instances lie outside this frame's allocations in the stream");
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned draw references a destroyed material or mesh");
     nt_renderer_mesh_draw_t draw = {0};
     if (nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh, mesh_info)) {
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, offset, count);
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, stream, offset, count);
     }
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
+void nt_skinned_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_skinned.initialized);
     /* A lost context can leave the deformation texture or a mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
         return;
     }
+    NT_ASSERT(stream >= NT_GFX_FRAME_VERTEX && stream < NT_GFX_FRAME_STREAM_COUNT && "draw_list: not a frame vertex stream");
     NT_ASSERT(count == 0 || items != NULL);
     /* Transform and drawable by inline sparse reads; the skin binding goes through its asserting accessor. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
@@ -125,7 +131,7 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
         const uint32_t instance_count = run_end - run_start;
         NT_ASSERT(instance_count <= UINT32_MAX / sizeof(nt_skinned_mesh_instance_t) && "skinned draw_list: run exceeds the frame storage address range");
         uint32_t offset = 0;
-        nt_skinned_mesh_instance_t *dst = (nt_skinned_mesh_instance_t *)nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, instance_count * (uint32_t)sizeof(nt_skinned_mesh_instance_t), 4, &offset);
+        nt_skinned_mesh_instance_t *dst = (nt_skinned_mesh_instance_t *)nt_gfx_frame_alloc(stream, instance_count * (uint32_t)sizeof(nt_skinned_mesh_instance_t), 4, &offset);
         for (uint32_t i = run_start; i < run_end; i++, dst++) {
             const nt_entity_t entity = {.id = items[i].entity};
             const uint16_t entity_index = nt_entity_index(entity);
@@ -142,7 +148,7 @@ void nt_skinned_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t 
             dst->skin_alpha = binding.alpha;
             dst->color = drawable_view.colors_packed[drawable_index];
         }
-        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, offset, instance_count);
+        nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, stream, offset, instance_count);
     }
 }
 

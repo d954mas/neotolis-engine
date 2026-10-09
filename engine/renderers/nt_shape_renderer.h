@@ -40,6 +40,10 @@ void nt_shape_renderer_set_line_width(float width);
  * Pass the active viewport dimensions, not CSS size. */
 void nt_shape_renderer_set_line_width_pixels(float width, uint32_t viewport_width, uint32_t viewport_height);
 void nt_shape_renderer_set_depth(bool enabled);
+/* Frame vertex stream for instanced shapes (default NT_GFX_FRAME_VERTEX); a pass with its own
+ * stream keeps its shapes' instance pointers while counts stay. Triangle batches stay on the
+ * general stream, which must be sized. */
+void nt_shape_renderer_set_stream(uint32_t stream);
 
 /* ---- Line ---- */
 

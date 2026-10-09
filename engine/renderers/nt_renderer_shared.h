@@ -366,7 +366,7 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
 /* Pipeline first: uniforms and the texture set land on its program. A nonzero supplied texture
  * replaces the declaration named supplied_name. */
 static inline void nt_renderer_mesh_record(nt_renderer_mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_mesh_info_t *mesh_info, uint32_t supplied_name, nt_texture_t supplied,
-                                           uint32_t offset, uint32_t count) {
+                                           uint32_t stream, uint32_t offset, uint32_t count) {
     nt_gfx_bind_pipeline(d->pipeline);
     const bool material_changed = d->material.id != d->applied_material;
     if (material_changed) {
@@ -388,8 +388,7 @@ static inline void nt_renderer_mesh_record(nt_renderer_mesh_draw_t *d, const nt_
     }
     d->applied_material = d->material.id;
     d->applied_supplied = supplied.id;
-    nt_gfx_bind_vertex_input(d->vertex_input);
-    nt_gfx_bind_instance_buffer(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset);
+    nt_gfx_bind_vertex_input_instanced(d->vertex_input, stream, offset);
     if (mesh_info->index_count > 0) {
         nt_gfx_draw_indexed_instanced(0, mesh_info->index_count, mesh_info->vertex_count, count);
     } else {

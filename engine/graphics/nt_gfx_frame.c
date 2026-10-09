@@ -38,9 +38,8 @@ void nt_gfx_frame_shutdown(void) {
 }
 
 void nt_gfx_frame_create_buffers(void) {
-    /* GL buffers are untyped; only index data has its own target in WebGL 2, so uniform blocks live in a vertex-type buffer. */
-    static const nt_buffer_type_t types[NT_GFX_FRAME_STREAM_COUNT] = {NT_BUFFER_VERTEX, NT_BUFFER_INDEX, NT_BUFFER_VERTEX};
-    static const char *const labels[NT_GFX_FRAME_STREAM_COUNT] = {"frame_vertex", "frame_index", "frame_uniform"};
+    _Static_assert(NT_GFX_FRAME_INDEX == 0 && NT_GFX_FRAME_UNIFORM == 1 && NT_GFX_FRAME_VERTEX == 2, "labels below follow the stream order");
+    static const char *const labels[NT_GFX_FRAME_VERTEX + 1] = {"frame_index", "frame_uniform", "frame_vertex"};
     for (uint32_t s = 0; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
         nt_gfx_frame_storage_t *storage = &g_nt_gfx_frame_storage[s];
         if (storage->capacity == 0) {
@@ -52,11 +51,12 @@ void nt_gfx_frame_create_buffers(void) {
         }
         /* A new context loss is the only expected failure; the next restore makes them again. */
         storage->buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-            .type = types[s],
+            /* GL buffers are untyped; only index data has its own target in WebGL 2, so uniform blocks live in a vertex-type buffer. */
+            .type = s == NT_GFX_FRAME_INDEX ? NT_BUFFER_INDEX : NT_BUFFER_VERTEX,
             .usage = NT_USAGE_STREAM,
             .size = storage->capacity,
             .index_type = s == NT_GFX_FRAME_INDEX ? NT_INDEX_UINT32 : NT_INDEX_NONE,
-            .label = labels[s],
+            .label = labels[s < NT_GFX_FRAME_VERTEX ? s : NT_GFX_FRAME_VERTEX],
         });
         NT_ASSERT((storage->buffer.id != 0 || g_nt_gfx.context_lost) && "frame storage buffer creation failed");
     }
@@ -72,9 +72,9 @@ void nt_gfx_frame_begin(void) {
     }
 }
 
-_Noreturn void nt_gfx_frame_alloc_overflow(nt_gfx_frame_stream_t stream, uint32_t size, uint32_t align) {
+_Noreturn void nt_gfx_frame_alloc_overflow(uint32_t stream, uint32_t size, uint32_t align) {
     NT_LOG_ERROR("gfx frame storage overflow: needed %u bytes aligned to %u, free %u of %u in frame_capacity[%u]", size, align,
-                 g_nt_gfx_frame_storage[stream].capacity - g_nt_gfx_frame_storage[stream].used, g_nt_gfx_frame_storage[stream].capacity, (uint32_t)stream);
+                 g_nt_gfx_frame_storage[stream].capacity - g_nt_gfx_frame_storage[stream].used, g_nt_gfx_frame_storage[stream].capacity, stream);
     NT_ASSERT(false && "gfx frame storage overflow: raise nt_gfx_desc_t.frame_capacity");
     __builtin_trap(); /* the allocation would point past the staging */
 }
@@ -130,12 +130,12 @@ void nt_gfx_frame_execute(void) {
             w += 1;
             break;
         case NT_GFX_CMD_BIND_VERTEX_INPUT:
-            nt_gfx_backend_bind_vertex_input(w[0]);
+            nt_gfx_backend_bind_vertex_input(w[0], 0, 0, 0);
             w += 1;
             break;
-        case NT_GFX_CMD_BIND_INSTANCE_BUFFER:
-            nt_gfx_backend_bind_instance_buffer(w[0], w[1], w[2]);
-            w += 3;
+        case NT_GFX_CMD_BIND_VERTEX_INPUT_INSTANCED:
+            nt_gfx_backend_bind_vertex_input(w[0], w[1], w[2], w[3]);
+            w += 4;
             break;
         case NT_GFX_CMD_BIND_TEXTURE_UNIT:
             nt_gfx_backend_bind_texture_unit(w[0], w[1], w[2]);

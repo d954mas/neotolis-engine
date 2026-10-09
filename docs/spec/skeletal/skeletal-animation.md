@@ -246,11 +246,11 @@ A binding is valid until the context's next `begin_frame` or graphics invalidati
 
 ## 13. Renderer (implemented, #523)
 
-`nt_skinned_mesh_renderer_draw_list(items, count)` consumes existing 16-byte
+`nt_skinned_mesh_renderer_draw_list(stream, items, count)` consumes existing 16-byte
 render items in the given order; through entity it reads
-mesh/material/world/color and `skin_comp`, packs each run's instances into vertex
-frame storage and records its draw. `nt_skinned_mesh_renderer_draw(mesh, material,
-deformation, offset, count)` draws instances the caller packed, with no entity
+mesh/material/world/color and `skin_comp`, packs each run's instances into frame
+vertex stream `stream` and records its draw. `nt_skinned_mesh_renderer_draw(mesh, material,
+deformation, stream, offset, count)` draws instances the caller packed, with no entity
 component ([Mesh draws](../render/architecture.md#mesh-draws)). No sampling, FK,
 mode selection, culling or sorting.
 

@@ -9,6 +9,8 @@ nt_declare_interface(nt_gfx)
 target_link_libraries(nt_gfx_interface INTERFACE nt_core)
 target_compile_definitions(nt_gfx_interface INTERFACE NT_GFX_GPU_TIMING_ENABLED=$<BOOL:${NT_GFX_GPU_TIMING_ENABLED}>)
 target_compile_definitions(nt_gfx_interface INTERFACE NT_GFX_CAPTURE_ENABLED=$<BOOL:${NT_GFX_CAPTURE_ENABLED}>)
+# Sizes public enums and structs: every gfx composition (real, stub, test fake) reads it here.
+target_compile_definitions(nt_gfx_interface INTERFACE NT_GFX_MAX_VERTEX_STREAMS=${NT_GFX_MAX_VERTEX_STREAMS} NT_GFX_MAX_INSTANCE_ATTRS=${NT_GFX_MAX_INSTANCE_ATTRS})
 
 if(EMSCRIPTEN)
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"

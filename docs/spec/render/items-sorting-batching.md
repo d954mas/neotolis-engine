@@ -166,7 +166,7 @@ SpriteRenderer ignores those flags.
 
 MeshRenderer draws consecutive equal-key runs with GPU instancing. Each run
 shares one mesh and material; different meshes are not merged. A run is never
-split: `draw_list` packs each run into one vertex frame storage allocation.
+split: `draw_list` packs each run into one allocation of the frame vertex stream it is given.
 
 ### Mesh instancing
 

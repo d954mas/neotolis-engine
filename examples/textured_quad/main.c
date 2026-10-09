@@ -353,7 +353,7 @@ static void frame(void) {
         nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
 
         /* ---- Draw: mesh renderer handles pipeline, instancing, batching ---- */
-        nt_mesh_renderer_draw_list(items, item_count);
+        nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, item_count);
 
         /* One-time log to verify batching */
         static bool s_stats_logged;

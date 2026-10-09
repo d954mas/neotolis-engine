@@ -59,16 +59,17 @@ void nt_mesh_renderer_shutdown(void);
 void nt_mesh_renderer_restore_gpu(void);
 
 /* Records one instanced draw in the current pass: count > 0 instances (nt_mesh_instance_t) at
- * byte offset in NT_GFX_FRAME_VERTEX, filled before nt_gfx_end_frame; one allocation may be
- * drawn in any number of passes. Records nothing while the program is not ready or a pipeline
- * or vertex input cannot be created. */
-void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t offset, uint32_t count);
+ * byte offset in frame vertex stream `stream` (the one they were allocated from), filled before
+ * nt_gfx_end_frame; one allocation may be drawn in any number of passes. Records nothing while
+ * the program is not ready or a pipeline or vertex input cannot be created. */
+void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t stream, uint32_t offset, uint32_t count);
 
-/* ECS adapter: adjacent equal batch keys form one run, packed from transform and drawable and
- * drawn as one instanced draw in the current pass. The caller filters visibility
- * (nt_render_is_visible) and order. batch_key must come from each item's current bindings;
- * items may be NULL only when count is 0. */
-void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
+/* ECS adapter: adjacent equal batch keys form one run, packed into frame vertex stream `stream`
+ * from transform and drawable and drawn as one instanced draw in the current pass. A pass with
+ * its own stream keeps its runs' offsets, and so its instance pointers, while counts stay. The
+ * caller filters visibility (nt_render_is_visible) and order. batch_key must come from each
+ * item's current bindings; items may be NULL only when count is 0. */
+void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, uint32_t count);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

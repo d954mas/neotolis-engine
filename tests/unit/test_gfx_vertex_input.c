@@ -25,6 +25,22 @@ static void test_assert_handler(const char *expr, const char *file, int line) {
     longjmp(s_assert_jmp, 1);
 }
 
+/* Instance binds must point inside this frame's allocations: 64 bytes in every sized vertex stream. */
+static void alloc_instance_bytes(void) {
+    for (uint32_t s = NT_GFX_FRAME_VERTEX; s < NT_GFX_FRAME_STREAM_COUNT; s++) {
+        uint32_t offset = 0;
+        if (g_nt_gfx_frame_storage[s].capacity >= 64U) {
+            memset(nt_gfx_frame_alloc(s, 64, 4, &offset), 0, 64);
+        }
+    }
+}
+
+/* Program links finish across frames, so the bytes are allocated in the frame of the pass. */
+static void begin_test_pass(void) {
+    alloc_instance_bytes();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+}
+
 #define EXPECT_ASSERT(code)                                                                                                                                                                            \
     do {                                                                                                                                                                                               \
         nt_assert_handler = test_assert_handler;                                                                                                                                                       \
@@ -65,6 +81,22 @@ static nt_vertex_layout_t pos_layout(void) { return (nt_vertex_layout_t){.attr_c
 static nt_vertex_layout_t inst_layout(void) { return (nt_vertex_layout_t){.attr_count = 1, .stride = 16, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 4}}}; }
 
 static nt_vertex_input_t make_vi(nt_buffer_t vbo, nt_buffer_t ibo) { return nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .vertex_buffer = vbo, .index_buffer = ibo}); }
+
+static nt_vertex_input_t make_inst_vi(nt_buffer_t vbo) { return nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo}); }
+
+/* Re-inits gfx with `count` sized vertex streams and opens a frame, as setUp does. */
+static void init_with_streams(uint32_t count) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS,
+                                          .max_render_targets = 4);
+    for (uint32_t k = 1; k < count; k++) {
+        desc.frame_capacity[NT_GFX_FRAME_VERTEX + k] = 1024;
+    }
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+    nt_gfx_fake_reset();
+}
 
 static nt_pipeline_t make_test_pipeline(void) {
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
@@ -185,11 +217,11 @@ void test_vi_creation_asserts_webgl2_rules(void) {
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "NT_GFX_MAX_INSTANCE_ATTRS"));
     /* Exactly NT_GFX_MAX_INSTANCE_ATTRS is accepted and survives the
      * backend's compact per-slot copy. */
-    nt_vertex_layout_t inst_full = {.attr_count = NT_GFX_MAX_INSTANCE_ATTRS, .stride = 32};
+    nt_vertex_layout_t inst_full = {.attr_count = NT_GFX_MAX_INSTANCE_ATTRS, .stride = (uint16_t)(4 * NT_GFX_MAX_INSTANCE_ATTRS)};
     for (uint8_t i = 0; i < NT_GFX_MAX_INSTANCE_ATTRS; i++) {
-        inst_full.attrs[i] = (nt_vertex_attr_t){.location = (uint8_t)(8 + i), .type = NT_VERTEX_FLOAT, .count = 1, .offset = (uint16_t)(i * 4)};
+        inst_full.attrs[i] = (nt_vertex_attr_t){.location = i, .type = NT_VERTEX_FLOAT, .count = 1, .offset = (uint16_t)(i * 4)};
     }
-    nt_vertex_input_t max_inst = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_full, .vertex_buffer = vbo});
+    nt_vertex_input_t max_inst = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.instance_layout = inst_full});
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(max_inst));
     nt_gfx_destroy_vertex_input(max_inst);
 }
@@ -259,7 +291,7 @@ void test_deactivate_mesh_cascades_to_vi(void) {
 void test_bind_vi_reaches_backend(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    begin_test_pass();
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -267,39 +299,37 @@ void test_bind_vi_reaches_backend(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_fake_last_bound_vertex_input());
 }
 
-void test_bind_invalid_vi_clears_mirror(void) {
+/* A destroyed vertex input traps in both bind forms; the bound one stays. */
+void test_bind_of_a_stale_vi_asserts(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
+    nt_vertex_input_t stale_inst = make_inst_vi(vbo);
     nt_vertex_input_t live = make_vi(vbo, (nt_buffer_t){0});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
     nt_gfx_destroy_vertex_input(vi);
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_destroy_vertex_input(stale_inst);
+    begin_test_pass();
     nt_gfx_bind_vertex_input(live);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
-    nt_gfx_bind_vertex_input(vi); /* stale: clears the mirror instead of trapping */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    const uint32_t bound = nt_gfx_test_bound_vertex_input();
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale vertex input"));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(stale_inst, NT_GFX_FRAME_VERTEX, 0));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale vertex input"));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input(NT_VERTEX_INPUT_INVALID));
+    TEST_ASSERT_EQUAL_UINT32(bound, nt_gfx_test_bound_vertex_input());
     nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_bind_vertex_input_count());
 }
 
 void test_bind_pipeline_preserves_bound_vi(void) {
     nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
+    nt_vertex_input_t vi = make_inst_vi(vbo);
     nt_pipeline_t pip = make_test_pipeline();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input(vi);
+    begin_test_pass();
+    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX, 16);
     uint32_t bound = nt_gfx_test_bound_vertex_input();
     TEST_ASSERT_NOT_EQUAL_UINT32(0, bound);
     nt_gfx_bind_pipeline(pip);
     /* Orthogonal state: a pipeline change must not disturb the geometry bind. */
     TEST_ASSERT_EQUAL_UINT32(bound, nt_gfx_test_bound_vertex_input());
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_gfx_bind_instance_buffer(stream, 16); /* still points into the bound vertex input */
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_instance_offset());
@@ -308,43 +338,128 @@ void test_bind_pipeline_preserves_bound_vi(void) {
 /* Bound state is pass-scoped: the next pass starts with nothing bound. */
 void test_begin_pass_clears_bound_vi(void) {
     nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
+    nt_vertex_input_t vi = make_inst_vi(vbo);
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(stream, 0); /* bound this pass: passes */
+    begin_test_pass();
+    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX, 0);
     nt_gfx_end_pass();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 0)); /* mirror cleared, no pipeline */
+    begin_test_pass();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    /* The equal bind of the previous pass records again. */
+    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX, 0);
+    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.accepted[NT_GFX_OP_VERTEX_INPUT]);
     nt_gfx_end_pass();
 }
 
-/* --- Instance buffer via bound vertex input --- */
+/* --- Instanced binds --- */
 
-void test_bind_instance_buffer_uses_bound_vi(void) {
+void test_bind_vertex_input_instanced_reaches_backend(void) {
     nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(stream, 16); /* no pipeline needed on this path */
+    nt_vertex_input_t vi = make_inst_vi(vbo);
+    begin_test_pass();
+    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX, 16); /* no pipeline needed on this path */
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_instance_offset());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_instance_clone());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_bound_vertex_input(), nt_gfx_fake_last_instance_vertex_input());
 }
 
-void test_bind_instance_buffer_asserts_without_instance_layout(void) {
+/* The backend VAO follows the stream: vertex stream k selects clone k. */
+void test_instanced_bind_selects_the_stream_clone(void) {
+    init_with_streams(3);
     nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input(vi);
-    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 0));
+    nt_vertex_input_t vi = make_inst_vi(vbo);
+    begin_test_pass();
+    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX + 2, 32);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_last_instance_clone());
+    TEST_ASSERT_EQUAL_UINT32(32, nt_gfx_fake_last_instance_offset());
+}
+
+/* Each bind form asserts the layout it binds, also right after the other form cached the vertex input. */
+void test_bind_forms_assert_the_instance_layout(void) {
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t plain = make_vi(vbo, (nt_buffer_t){0});
+    nt_vertex_input_t inst = make_inst_vi(vbo);
+    begin_test_pass();
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(plain, NT_GFX_FRAME_VERTEX, 0));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input(inst));
+    nt_gfx_bind_vertex_input_instanced(inst, NT_GFX_FRAME_VERTEX, 0);
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input(inst));
     nt_gfx_end_pass();
 }
+
+/* An instanced bind points inside this frame's allocations of the stream; a plain-bound vertex
+ * input without an instance layout still asserts in the instanced form. */
+void test_instanced_bind_asserts_outside_allocations_and_after_a_plain_bind(void) {
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t inst = make_inst_vi(vbo);
+    nt_vertex_input_t plain = make_vi(vbo, (nt_buffer_t){0});
+    begin_test_pass();
+    nt_gfx_bind_vertex_input_instanced(inst, NT_GFX_FRAME_VERTEX, 60);
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(inst, NT_GFX_FRAME_VERTEX, 64));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "outside this frame's allocations"));
+    nt_gfx_bind_vertex_input(plain);
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(plain, NT_GFX_FRAME_VERTEX, 0));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "declares no instance layout"));
+    nt_gfx_end_pass();
+}
+
+/* Only a sized frame vertex stream holds instances. */
+void test_instanced_bind_asserts_on_a_bad_stream(void) {
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t vi = make_inst_vi(vbo);
+    begin_test_pass();
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_INDEX, 0));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_UNIFORM, 0));
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX + 2, 0)); /* zero frame_capacity */
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_STREAM_COUNT, 0));
+    nt_gfx_end_pass();
+}
+
+/* An equal binding in the same pass ends CACHE; another offset, stream or vertex input binds. */
+void test_equal_instance_binding_is_dropped(void) {
+    init_with_streams(2);
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t a = make_inst_vi(vbo);
+    nt_vertex_input_t b = make_inst_vi(vbo);
+
+    begin_test_pass();
+    nt_gfx_bind_vertex_input_instanced(a, NT_GFX_FRAME_VERTEX, 0);
+    nt_gfx_bind_vertex_input_instanced(a, NT_GFX_FRAME_VERTEX, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_VERTEX_INPUT]);
+    nt_gfx_bind_vertex_input_instanced(a, NT_GFX_FRAME_VERTEX, 16);
+    nt_gfx_bind_vertex_input_instanced(a, NT_GFX_FRAME_VERTEX + 1, 16);
+    nt_gfx_bind_vertex_input_instanced(b, NT_GFX_FRAME_VERTEX + 1, 16);
+    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.counters.accepted[NT_GFX_OP_VERTEX_INPUT]);
+    nt_gfx_end_pass();
+}
+
+/* A plain vertex input in between unbinds A's VAO, so binding A again records again. */
+void test_instanced_bind_after_a_plain_vertex_input_records_again(void) {
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t a = make_inst_vi(vbo);
+    nt_vertex_input_t plain = make_vi(vbo, (nt_buffer_t){0});
+    nt_pipeline_t pip = make_test_pipeline();
+
+    begin_test_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input_instanced(a, NT_GFX_FRAME_VERTEX, 0);
+    nt_gfx_bind_vertex_input(plain);
+    nt_gfx_draw(0, 3);
+    nt_gfx_bind_vertex_input_instanced(a, NT_GFX_FRAME_VERTEX, 0);
+    nt_gfx_draw_instanced(0, 3, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.counters));
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_bound_vertex_input(), nt_gfx_fake_last_instance_vertex_input());
+}
+
+/* --- Instance buffer via bound vertex input --- */
 
 /* --- Draw invariants --- */
 
@@ -355,7 +470,7 @@ void test_draw_indexed_asserts_on_non_indexed_vi(void) {
     nt_vertex_input_t non_indexed = make_vi(vbo, (nt_buffer_t){0});
     nt_pipeline_t pip = make_test_pipeline();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    begin_test_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(indexed);
     nt_gfx_draw_indexed(0, 3, 3); /* index type captured from the IBO */
@@ -367,96 +482,10 @@ void test_draw_indexed_asserts_on_non_indexed_vi(void) {
     nt_gfx_end_pass();
 }
 
-void test_instanced_draw_asserts_before_instance_pointing(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_pipeline_t pip = make_test_pipeline();
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(vi);
-    /* Enabled-but-unpointed instance attribs would fail silently in GL --
-     * for ANY draw with this VAO, not only instanced ones. */
-    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
-    EXPECT_ASSERT(nt_gfx_draw(0, 3));
-    nt_gfx_bind_instance_buffer(stream, 0);
-    nt_gfx_draw_instanced(0, 3, 2);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
-    nt_gfx_end_pass();
-}
-
-/* Instance pointers are pass state: a later pass, or another vertex input's
- * pointing in between, needs a fresh bind_instance_buffer. */
-void test_instance_pointing_is_pass_scoped(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t a = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_vertex_input_t b = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_pipeline_t pip = make_test_pipeline();
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(a);
-    nt_gfx_bind_instance_buffer(stream, 0);
-    nt_gfx_draw_instanced(0, 3, 2);
-    nt_gfx_end_pass();
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(a);
-    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
-    nt_gfx_bind_instance_buffer(stream, 0);
-    nt_gfx_bind_vertex_input(b);
-    nt_gfx_bind_instance_buffer(stream, 16);
-    nt_gfx_bind_vertex_input(a);
-    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
-    nt_gfx_end_pass();
-}
-
-/* An equal instance binding in the same pass ends CACHE; another offset or vertex input binds. */
-void test_equal_instance_binding_is_dropped(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t a = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_vertex_input_t b = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input(a);
-    nt_gfx_bind_instance_buffer(stream, 0);
-    nt_gfx_bind_instance_buffer(stream, 0);
-    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.accepted[NT_GFX_OP_INSTANCE_BUFFER]);
-    nt_gfx_bind_instance_buffer(stream, 16);
-    nt_gfx_bind_vertex_input(b);
-    nt_gfx_bind_instance_buffer(stream, 16);
-    TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_INSTANCE_BUFFER]);
-    nt_gfx_end_pass();
-}
-
-/* A vertex input without instance attributes in between leaves A's pointer in its VAO. */
-void test_instance_pointing_survives_a_plain_vertex_input_in_between(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t a = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_vertex_input_t plain = make_vi(vbo, (nt_buffer_t){0});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_pipeline_t pip = make_test_pipeline();
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(a);
-    nt_gfx_bind_instance_buffer(stream, 0);
-    nt_gfx_bind_vertex_input(plain);
-    nt_gfx_draw(0, 3);
-    nt_gfx_bind_vertex_input(a);
-    nt_gfx_draw_instanced(0, 3, 2);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_draw_calls(&g_nt_gfx.counters));
-    nt_gfx_end_pass();
-}
-
 void test_attributeless_vi_draws(void) {
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
     nt_pipeline_t pip = make_test_pipeline();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    begin_test_pass();
     nt_gfx_bind_pipeline(pip);
     nt_gfx_bind_vertex_input(vi);
     nt_gfx_draw(0, 3); /* gl_VertexID path: no buffers, no attribs */
@@ -474,7 +503,7 @@ void test_pipeline_and_vertex_input_bind_orthogonally(void) {
     nt_pipeline_t pip_a = make_test_pipeline();
     nt_pipeline_t pip_b = make_test_pipeline();
 
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    begin_test_pass();
 
     nt_gfx_bind_pipeline(pip_a);
     nt_gfx_bind_vertex_input(vi_indexed);
@@ -493,23 +522,20 @@ void test_pipeline_and_vertex_input_bind_orthogonally(void) {
 }
 
 /* WebGL2 rejects unaligned attrib offsets; the byte offset is asserted. */
-void test_bind_instance_buffer_rejects_unaligned_offset(void) {
+void test_instanced_bind_rejects_unaligned_offset(void) {
     nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(stream, 4);
-    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stream, 1));
+    nt_vertex_input_t vi = make_inst_vi(vbo);
+    begin_test_pass();
+    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX, 4);
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX, 1));
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_last_instance_offset()); /* only the aligned offset reached the backend */
 }
-
 /* Every draw variant requires a bound vertex input. */
 void test_draw_without_vertex_input_asserts(void) {
     nt_pipeline_t pip = make_test_pipeline();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    begin_test_pass();
     nt_gfx_bind_pipeline(pip);
     EXPECT_ASSERT(nt_gfx_draw(0, 3));
     EXPECT_ASSERT(nt_gfx_draw_indexed(0, 3, 3));
@@ -529,64 +555,8 @@ void test_vi_make_during_context_loss_returns_invalid(void) {
     nt_gfx_fake_set_context_lost(false);
 }
 
-/* Destroying a pointed instance buffer between frames does not cascade to the vertex
- * input: it stays valid and draws again once the next pass points it at a live buffer. */
-void test_destroying_instance_buffer_keeps_dependents_valid(void) {
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_buffer_t stream = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_pipeline_t pip = make_test_pipeline();
-
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(stream, 0);
-    nt_gfx_draw_instanced(0, 3, 2);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-
-    nt_gfx_begin_frame();
-    nt_gfx_destroy_buffer(stream);
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi)); /* instance buffers do not cascade-destroy */
-    nt_buffer_t next = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input(vi);
-    nt_gfx_bind_instance_buffer(next, 16);
-    nt_gfx_draw_instanced(0, 3, 2);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_draw_calls(&g_nt_gfx.counters));
-    TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_instance_offset());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_bound_vertex_input(), nt_gfx_fake_last_instance_vertex_input());
-}
-
-/* Pool slots survive context loss: a stale instance-buffer handle must trap,
- * not silently point the VAO at a zeroed backend. */
-void test_bind_instance_buffer_asserts_on_stale_buffer(void) {
-    nt_buffer_t stale = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
-
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame(); /* latches the loss, wipes backend tables */
-    nt_gfx_fake_set_context_lost(false);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame(); /* recovery completes */
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-
-    nt_buffer_t vbo = make_vbo();
-    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout(), .instance_layout = inst_layout(), .vertex_buffer = vbo});
-    nt_gfx_bind_vertex_input(vi);
-    /* The stale handle is still pool-valid; only its backend is gone. */
-    EXPECT_ASSERT(nt_gfx_bind_instance_buffer(stale, 0));
-    nt_gfx_end_pass();
-}
-
-/* Loss frees vertex-input slots outright: the handle goes stale, the bind is
- * the ordinary invalid-handle path, and every slot is allocatable again. */
+/* Loss frees vertex-input slots outright: the handle goes stale, binding it traps, and
+ * every slot is allocatable again. */
 void test_vi_slots_freed_by_context_loss(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
@@ -599,9 +569,8 @@ void test_vi_slots_freed_by_context_loss(void) {
     nt_gfx_begin_frame(); /* recovery completes */
 
     TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input(vi); /* stale: ordinary invalid path, no trap */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_test_bound_vertex_input());
+    begin_test_pass();
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input(vi)); /* stale: the owner recreates it first */
     nt_gfx_end_pass();
     nt_gfx_destroy_vertex_input(vi); /* stale: tolerated no-op, also after a pass */
     nt_gfx_end_frame();
@@ -636,23 +605,22 @@ int main(void) {
     RUN_TEST(test_destroy_ibo_cascades_to_vi);
     RUN_TEST(test_deactivate_mesh_cascades_to_vi);
     RUN_TEST(test_bind_vi_reaches_backend);
-    RUN_TEST(test_bind_invalid_vi_clears_mirror);
+    RUN_TEST(test_bind_of_a_stale_vi_asserts);
     RUN_TEST(test_bind_pipeline_preserves_bound_vi);
     RUN_TEST(test_begin_pass_clears_bound_vi);
-    RUN_TEST(test_bind_instance_buffer_uses_bound_vi);
-    RUN_TEST(test_bind_instance_buffer_asserts_without_instance_layout);
+    RUN_TEST(test_bind_vertex_input_instanced_reaches_backend);
+    RUN_TEST(test_instanced_bind_selects_the_stream_clone);
+    RUN_TEST(test_bind_forms_assert_the_instance_layout);
+    RUN_TEST(test_instanced_bind_asserts_on_a_bad_stream);
+    RUN_TEST(test_instanced_bind_asserts_outside_allocations_and_after_a_plain_bind);
     RUN_TEST(test_draw_indexed_asserts_on_non_indexed_vi);
-    RUN_TEST(test_instanced_draw_asserts_before_instance_pointing);
-    RUN_TEST(test_instance_pointing_is_pass_scoped);
-    RUN_TEST(test_instance_pointing_survives_a_plain_vertex_input_in_between);
     RUN_TEST(test_equal_instance_binding_is_dropped);
+    RUN_TEST(test_instanced_bind_after_a_plain_vertex_input_records_again);
     RUN_TEST(test_attributeless_vi_draws);
     RUN_TEST(test_pipeline_and_vertex_input_bind_orthogonally);
-    RUN_TEST(test_bind_instance_buffer_rejects_unaligned_offset);
+    RUN_TEST(test_instanced_bind_rejects_unaligned_offset);
     RUN_TEST(test_draw_without_vertex_input_asserts);
     RUN_TEST(test_vi_make_during_context_loss_returns_invalid);
-    RUN_TEST(test_destroying_instance_buffer_keeps_dependents_valid);
-    RUN_TEST(test_bind_instance_buffer_asserts_on_stale_buffer);
     RUN_TEST(test_vi_slots_freed_by_context_loss);
     return UNITY_END();
 }

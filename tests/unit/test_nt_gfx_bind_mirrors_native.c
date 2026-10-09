@@ -56,6 +56,7 @@ void setUp(void) {
 }
 
 static void remove_state_counters(void);
+static void init_with_vertex_streams(uint32_t count);
 static void disarm_get_error_counter(void);
 
 void tearDown(void) {
@@ -330,6 +331,7 @@ static void GLAD_API_PTR counting_vertex_attrib_pointer(GLuint index, GLint size
  * the only pointer calls left are the per-draw instance re-points, and VAO
  * binds stay one per vertex-input switch (delta-checked). */
 static void test_second_frame_issues_no_static_attrib_pointers(void) {
+    init_with_vertex_streams(1);
     nt_pipeline_t pip = make_red_pipeline();
     nt_vertex_input_t vi_full = make_vi(make_vbo(s_full), (nt_buffer_t){0});
     nt_vertex_input_t vi_empty = make_vi(make_vbo(s_empty), (nt_buffer_t){0});
@@ -338,7 +340,6 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
         .instance_layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}}},
         .vertex_buffer = make_vbo(s_full),
     });
-    nt_buffer_t inst_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 64});
 
     begin_black_pass();
     nt_gfx_bind_pipeline(pip);
@@ -358,8 +359,9 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     nt_gfx_draw(0, 3);
     nt_gfx_bind_vertex_input(vi_empty);
     nt_gfx_draw(0, 3);
-    nt_gfx_bind_vertex_input(vi_inst);
-    nt_gfx_bind_instance_buffer(inst_buf, 0);
+    uint32_t inst_offset = 0;
+    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 8, 4, &inst_offset), 0, 8);
+    nt_gfx_bind_vertex_input_instanced(vi_inst, NT_GFX_FRAME_VERTEX, inst_offset);
     nt_gfx_draw_instanced(0, 3, 1);
     nt_gfx_end_pass();
     nt_gfx_frame_execute();
@@ -372,6 +374,235 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     TEST_ASSERT_EQUAL_UINT32(2, frame_vao_binds);
     TEST_ASSERT_EQUAL_UINT32(1, frame_attrib_pointers);       /* just the instance re-point */
     TEST_ASSERT_EQUAL_UINT32(1, s_real_attrib_pointer_calls); /* just the instance re-point */
+}
+
+static nt_vertex_input_t make_instanced_vi(void) {
+    return nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = pos2_layout(),
+        .instance_layout = {.attr_count = 2, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}, {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8}}},
+        .vertex_buffer = make_vbo(s_full),
+    });
+}
+
+/* Re-inits gfx with `count` sized frame vertex streams; instance data lives only there. */
+static void init_with_vertex_streams(uint32_t count) {
+    nt_gfx_end_frame();
+    nt_gfx_shutdown();
+    nt_gfx_desc_t desc = nt_gfx_desc_defaults();
+    for (uint32_t k = 0; k < count; k++) {
+        desc.frame_capacity[NT_GFX_FRAME_VERTEX + k] = 4096;
+    }
+    nt_gfx_init(&desc);
+    nt_gfx_begin_frame();
+}
+
+typedef struct {
+    nt_vertex_input_t vi;
+    uint32_t stream;
+    uint32_t offset;
+} instanced_run_t;
+
+/* One frame of instanced draws; returns that frame's glVertexAttribPointer count
+ * (counters are per frame) and stores its glBindBuffer count. */
+static uint32_t s_frame_buffer_binds;
+static uint32_t instanced_frame(nt_pipeline_t pip, const instanced_run_t *runs, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t offset = 0;
+        if (g_nt_gfx_frame_storage[runs[i].stream].used == 0) {
+            memset(nt_gfx_frame_alloc(runs[i].stream, 64, 4, &offset), 0, 64);
+        }
+    }
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    for (uint32_t i = 0; i < count; i++) {
+        nt_gfx_bind_vertex_input_instanced(runs[i].vi, runs[i].stream, runs[i].offset);
+        nt_gfx_draw_instanced(0, 3, 1);
+    }
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const uint32_t pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
+    s_frame_buffer_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindBuffer];
+    nt_gfx_begin_frame();
+    return pointers;
+}
+
+/* A VAO keeps its instance pointers across passes and frames: the same stream and
+ * offset re-point nothing; a new offset re-points every attribute and binds the
+ * stream's buffer only when the ARRAY_BUFFER binding differs. */
+static void test_repeated_instance_offset_skips_re_point(void) {
+    init_with_vertex_streams(1);
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_vertex_input_t vi_a = make_instanced_vi();
+    nt_vertex_input_t vi_b = make_instanced_vi();
+    const uint32_t s0 = NT_GFX_FRAME_VERTEX;
+    instanced_frame(pip, &(instanced_run_t){vi_a, s0, 0}, 1); /* also counts the creation-time pointers */
+    TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, &(instanced_run_t){vi_a, s0, 0}, 1));
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, &(instanced_run_t){vi_a, s0, 32}, 1));
+    TEST_ASSERT_EQUAL_UINT32(0, s_frame_buffer_binds);                                      /* the stream's buffer is still bound */
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, &(instanced_run_t){vi_b, s0, 32}, 1)); /* another VAO has its own pointers */
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+/* One vertex input drawn from two streams keeps a VAO per stream: a steady frame re-points
+ * nothing, and a run that moves in one stream re-points only that stream's VAO. */
+static void test_each_stream_keeps_its_own_pointers(void) {
+    init_with_vertex_streams(2);
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_vertex_input_t vi = make_instanced_vi();
+    const uint32_t s0 = NT_GFX_FRAME_VERTEX;
+    const uint32_t s1 = NT_GFX_FRAME_VERTEX + 1;
+    const instanced_run_t steady[2] = {{vi, s0, 0}, {vi, s1, 0}};
+    instanced_frame(pip, steady, 2);
+    TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, steady, 2));
+    const instanced_run_t moved[2] = {{vi, s0, 16}, {vi, s1, 0}}; /* stream 0 grew before this run */
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, moved, 2));
+    TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, moved, 2));
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+/* Consecutive vertex-input slots crossed with consecutive streams name four distinct VAOs:
+ * once all four are pointed, moving one run re-points only its own VAO. */
+static void test_vertex_input_and_stream_keys_do_not_alias(void) {
+    init_with_vertex_streams(2);
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_vertex_input_t vi_a = make_instanced_vi();
+    nt_vertex_input_t vi_b = make_instanced_vi();
+    const uint32_t s0 = NT_GFX_FRAME_VERTEX;
+    const uint32_t s1 = NT_GFX_FRAME_VERTEX + 1;
+    const instanced_run_t first[2] = {{vi_a, s0, 0}, {vi_b, s1, 0}};
+    const instanced_run_t swapped[2] = {{vi_a, s1, 0}, {vi_b, s0, 0}};
+    instanced_frame(pip, first, 2);
+    instanced_frame(pip, swapped, 2);
+    TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, first, 2));
+    TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, swapped, 2));
+    const instanced_run_t moved[2] = {{vi_a, s1, 16}, {vi_b, s0, 0}};
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, moved, 2));
+    TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, first, 2));
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+static const char *s_vs_offset_src = "precision mediump float;\n"
+                                     "layout(location = 0) in vec2 a_position;\n"
+                                     "layout(location = 1) in vec2 a_offset;\n"
+                                     "void main() { gl_Position = vec4(a_position + a_offset, 0.0, 1.0); }\n";
+
+/* Places two instance offsets at byte `at` of a stream, after off-screen filler. */
+static void write_instance_offsets(uint32_t stream, uint32_t at, float x0, float x1) {
+    uint32_t offset = 0;
+    float *dst = (float *)nt_gfx_frame_alloc(stream, at + 16U, 4, &offset);
+    TEST_ASSERT_EQUAL_UINT32(0, offset);
+    for (uint32_t i = 0; i < at / 4U; i++) {
+        dst[i] = 9.0F;
+    }
+    const float pairs[4] = {x0, 0.0F, x1, 0.0F};
+    memcpy(dst + (at / 4U), pairs, sizeof(pairs));
+}
+
+/* A clone made on first bind of another stream carries the static half (positions, indices,
+ * divisors) and reads that stream's buffer. One pass draws stream 0 (both instances off-screen),
+ * then stream 1 (instance 0 off-screen, instance 1 on the center) through one vertex input at
+ * equal offsets: the center is red only if the second draw binds the stream 1 VAO and its
+ * attribute advances per instance, not per vertex. */
+static void test_stream_clone_draws_its_own_stream(void) {
+    init_with_vertex_streams(2);
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_offset_src});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_buffer_t ibo =
+        nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = s_tri_indices, .size = sizeof(s_tri_indices), .index_type = NT_INDEX_UINT16});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = pos2_layout(),
+        .instance_layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}}},
+        .vertex_buffer = make_vbo(s_full),
+        .index_buffer = ibo,
+    });
+    const uint32_t s0 = NT_GFX_FRAME_VERTEX;
+    const uint32_t s1 = NT_GFX_FRAME_VERTEX + 1;
+
+    for (int indexed = 1; indexed >= 0; indexed--) {
+        write_instance_offsets(s0, 8, 5.0F, 5.0F);
+        write_instance_offsets(s1, 8, 5.0F, 0.0F);
+        begin_black_pass();
+        nt_gfx_bind_pipeline(pip);
+        nt_gfx_bind_vertex_input_instanced(vi, s0, 8);
+        if (indexed) {
+            nt_gfx_draw_indexed_instanced(0, 3, 3, 2);
+        } else {
+            nt_gfx_draw_instanced(0, 3, 2);
+        }
+        TEST_ASSERT_EQUAL_UINT8(0, center_red_in_pass());
+        nt_gfx_bind_vertex_input_instanced(vi, s1, 8);
+        if (indexed) {
+            nt_gfx_draw_indexed_instanced(0, 3, 3, 2);
+        } else {
+            nt_gfx_draw_instanced(0, 3, 2);
+        }
+        TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
+    }
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+/* Destroying a vertex input while a stream clone is bound grounds the VAO cache, so a
+ * recycled GL name still binds. */
+static void test_destroying_vertex_input_with_a_bound_clone(void) {
+    init_with_vertex_streams(2);
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_vertex_input_t vi_a = make_instanced_vi();
+    instanced_frame(pip, &(instanced_run_t){vi_a, NT_GFX_FRAME_VERTEX + 1, 0}, 1);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_vao());
+    nt_gfx_destroy_vertex_input(vi_a);
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_gl_test_cached_vao());
+
+    nt_vertex_input_t vi_b = make_vi(make_vbo(s_full), (nt_buffer_t){0});
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi_b);
+    nt_gfx_draw(0, 3);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
+    /* An instanced vertex input reusing the freed slot starts unpointed in every stream: its
+     * first bind points both instance attributes, after the static pointer of each new VAO. */
+    nt_gfx_destroy_vertex_input(vi_b);
+    nt_vertex_input_t vi_c = make_instanced_vi();
+    TEST_ASSERT_EQUAL_UINT32(1 + 1 + 2, instanced_frame(pip, &(instanced_run_t){vi_c, NT_GFX_FRAME_VERTEX + 1, 0}, 1));
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+/* Index uploads go through the service VAO and rebind the cached one: a stream clone keeps
+ * its own index binding. */
+static void test_index_upload_keeps_a_bound_clone(void) {
+    init_with_vertex_streams(2);
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_vs_offset_src});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_fs_src});
+    nt_program_t program = nt_gfx_make_program(vs, fs);
+    nt_test_gfx_link_wait(program);
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){.program = program});
+    nt_buffer_t ibo_a =
+        nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = s_tri_indices, .size = sizeof(s_tri_indices), .index_type = NT_INDEX_UINT16});
+    nt_buffer_t ibo_b =
+        nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_DYNAMIC, .data = s_tri_indices, .size = sizeof(s_tri_indices), .index_type = NT_INDEX_UINT16});
+    nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = pos2_layout(),
+        .instance_layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}}},
+        .vertex_buffer = make_vbo(s_full),
+        .index_buffer = ibo_a,
+    });
+    write_instance_offsets(NT_GFX_FRAME_VERTEX + 1, 0, 0.0F, 0.0F);
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX + 1, 0);
+    nt_gfx_draw_indexed_instanced(0, 3, 3, 1);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
+
+    nt_gfx_update_buffer(ibo_b, 0, s_degenerate_indices, sizeof(s_degenerate_indices)); /* clone k stays the cached VAO */
+    write_instance_offsets(NT_GFX_FRAME_VERTEX + 1, 0, 0.0F, 0.0F);
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input_instanced(vi, NT_GFX_FRAME_VERTEX + 1, 0);
+    nt_gfx_draw_indexed_instanced(0, 3, 3, 1);
+    TEST_ASSERT_UINT8_WITHIN(1, 255, end_frame_center_red());
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
 /* GL_ELEMENT_ARRAY_BUFFER binding is VAO state: data ops on OTHER index
@@ -1487,6 +1718,12 @@ int main(void) {
     RUN_TEST(test_vec4_cache_compares_bytes_and_last_value);
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);
     RUN_TEST(test_second_frame_issues_no_static_attrib_pointers);
+    RUN_TEST(test_repeated_instance_offset_skips_re_point);
+    RUN_TEST(test_each_stream_keeps_its_own_pointers);
+    RUN_TEST(test_vertex_input_and_stream_keys_do_not_alias);
+    RUN_TEST(test_stream_clone_draws_its_own_stream);
+    RUN_TEST(test_destroying_vertex_input_with_a_bound_clone);
+    RUN_TEST(test_index_upload_keeps_a_bound_clone);
     RUN_TEST(test_index_data_ops_do_not_rewire_bound_vertex_input);
     RUN_TEST(test_empty_vertex_input_draws_fullscreen);
     RUN_TEST(test_rejected_pipeline_bind_preserves_vertex_input);

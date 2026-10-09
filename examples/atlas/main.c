@@ -204,7 +204,7 @@ static void frame(void) {
 
     if (can_render) {
         nt_gfx_bind_uniform_block(0, &uniforms, sizeof(uniforms));
-        nt_mesh_renderer_draw_list(items, item_count);
+        nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, item_count);
     }
 
     nt_gfx_end_pass();
