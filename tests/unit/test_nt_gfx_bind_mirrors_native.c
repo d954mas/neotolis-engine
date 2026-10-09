@@ -374,6 +374,60 @@ static void test_second_frame_issues_no_static_attrib_pointers(void) {
     TEST_ASSERT_EQUAL_UINT32(1, s_real_attrib_pointer_calls); /* just the instance re-point */
 }
 
+static nt_vertex_input_t make_instanced_vi(void) {
+    return nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
+        .layout = pos2_layout(),
+        .instance_layout = {.attr_count = 2, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}, {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8}}},
+        .vertex_buffer = make_vbo(s_full),
+    });
+}
+
+/* One frame with one instanced draw; returns that frame's glVertexAttribPointer count
+ * (counters are per frame) and stores its glBindBuffer count. */
+static uint32_t s_frame_buffer_binds;
+static uint32_t instanced_frame(nt_pipeline_t pip, nt_vertex_input_t vi, nt_buffer_t buf, uint32_t offset) {
+    begin_black_pass();
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_bind_vertex_input(vi);
+    nt_gfx_bind_instance_buffer(buf, offset);
+    nt_gfx_draw_instanced(0, 3, 1);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    const uint32_t pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
+    s_frame_buffer_binds = g_nt_gfx.counters.gl[NT_GFX_GL_glBindBuffer];
+    nt_gfx_begin_frame();
+    return pointers;
+}
+
+/* A VAO keeps its instance pointers across passes and frames: the same buffer and
+ * offset re-point nothing; a new offset re-points every attribute and binds the
+ * shared buffer only when the ARRAY_BUFFER binding differs. */
+static void test_repeated_instance_offset_skips_re_point(void) {
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_vertex_input_t vi_a = make_instanced_vi();
+    nt_vertex_input_t vi_b = make_instanced_vi();
+    nt_buffer_t inst = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
+    instanced_frame(pip, vi_a, inst, 0);                              /* also counts the creation-time pointers */
+    TEST_ASSERT_EQUAL_UINT32(0, instanced_frame(pip, vi_a, inst, 0)); /* same offset next frame */
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, vi_a, inst, 32));
+    TEST_ASSERT_EQUAL_UINT32(0, s_frame_buffer_binds);                 /* the shared buffer is still bound */
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, vi_b, inst, 32)); /* another VAO has its own pointers */
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
+/* A destroyed instance buffer forgets every VAO's mirror of it, so a recycled GL
+ * name at the same offset still re-points. */
+static void test_destroyed_instance_buffer_re_points_its_successor(void) {
+    nt_pipeline_t pip = make_red_pipeline();
+    nt_vertex_input_t vi = make_instanced_vi();
+    nt_buffer_t first = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
+    instanced_frame(pip, vi, first, 0);
+    nt_gfx_destroy_buffer(first);
+    nt_buffer_t second = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = 256});
+    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, vi, second, 0));
+    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
+}
+
 /* GL_ELEMENT_ARRAY_BUFFER binding is VAO state: data ops on OTHER index
  * buffers must not silently rewire the bound vertex input's index binding. */
 static void test_index_data_ops_do_not_rewire_bound_vertex_input(void) {
@@ -1487,6 +1541,8 @@ int main(void) {
     RUN_TEST(test_vec4_cache_compares_bytes_and_last_value);
     RUN_TEST(test_vertex_inputs_alternate_under_one_pipeline);
     RUN_TEST(test_second_frame_issues_no_static_attrib_pointers);
+    RUN_TEST(test_repeated_instance_offset_skips_re_point);
+    RUN_TEST(test_destroyed_instance_buffer_re_points_its_successor);
     RUN_TEST(test_index_data_ops_do_not_rewire_bound_vertex_input);
     RUN_TEST(test_empty_vertex_input_draws_fullscreen);
     RUN_TEST(test_rejected_pipeline_bind_preserves_vertex_input);

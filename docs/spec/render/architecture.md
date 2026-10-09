@@ -156,7 +156,11 @@ the front-end. The GL backend keeps caches for
 physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
-viewport, clear values and the active unit.
+viewport, clear values, the active unit, the `GL_ARRAY_BUFFER` binding, and the
+instance buffer and offset each vertex input last received: a recorded
+`nt_gfx_bind_instance_buffer` that repeats them issues no GL call, so a frame
+layout that repeats keeps its pointers. Destroying a buffer forgets it in every
+vertex input, so a recycled GL name re-points.
 
 Draws are whole triangle lists: every draw asserts that its vertex or index
 count is a multiple of 3, index data never holds the primitive-restart value
