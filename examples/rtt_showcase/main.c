@@ -50,7 +50,7 @@ typedef struct {
 
 _Static_assert(sizeof(rtt_quad_vertex_t) == 16, "rtt quad vertex size");
 
-static const char *s_quad_vs_src = "precision mediump float;\n"
+static const char *s_quad_vs_src = "precision highp float;\n"
                                    "layout(location = 0) in vec2 a_position;\n"
                                    "layout(location = 3) in vec2 a_uv;\n"
                                    "out vec2 v_uv;\n"
@@ -59,8 +59,9 @@ static const char *s_quad_vs_src = "precision mediump float;\n"
                                    "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
                                    "}\n";
 
-static const char *s_quad_fs_src = "precision mediump float;\n"
-                                   "uniform sampler2D u_texture;\n"
+/* highp: the depth view reads DEPTH24 through this sampler, which fp16 cannot hold. */
+static const char *s_quad_fs_src = "precision highp float;\n"
+                                   "uniform highp sampler2D u_texture;\n"
                                    "uniform vec4 u_tint;\n"
                                    "uniform int u_mode;\n"
                                    "uniform float u_zoom;\n"

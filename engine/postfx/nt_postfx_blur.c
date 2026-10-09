@@ -12,7 +12,7 @@ typedef struct {
 
 _Static_assert(sizeof(nt_postfx_blur_vertex_t) == 16, "blur vertex size");
 
-static const char *s_blur_vs_src = "precision mediump float;\n"
+static const char *s_blur_vs_src = "precision highp float;\n"
                                    "layout(location = 0) in vec2 a_position;\n"
                                    "layout(location = 3) in vec2 a_uv;\n"
                                    "out highp vec2 v_uv;\n"
@@ -21,8 +21,9 @@ static const char *s_blur_vs_src = "precision mediump float;\n"
                                    "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
                                    "}\n";
 
+/* mediump sampler, not the lowp default: float sources carry values beyond lowp's +-2 range. */
 static const char *s_blur_fs_src = "precision mediump float;\n"
-                                   "uniform sampler2D u_source;\n"
+                                   "uniform mediump sampler2D u_source;\n"
                                    "uniform vec4 u_direction;\n"
                                    "uniform int u_radius;\n"
                                    "uniform vec4 u_kernel0;\n"

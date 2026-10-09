@@ -24,7 +24,8 @@ void nt_postfx_blur_shutdown(void);
 /* Rebuilds GPU resources after context restore; a loss during it is retried by the next restore. */
 void nt_postfx_blur_restore_gpu(void);
 /* Borrows a ready source texture and valid temp/dest targets of matching dimensions; source must be
- * R8/RG8/RGB8/RGBA8/RGBA16F/RGBA32F (sampler2D).
+ * R8/RG8/RGB8/RGBA8/RGBA16F/RGBA32F (sampler2D); the blur runs at mediump, so float values beyond
+ * +-65504 are not preserved.
  * The source is sampled NEAREST with clamped edges; taps land on texel centres.
  * Runs outside a pass; its own passes start with scissor disabled. Pass and binding state are not restored.
  * The helper never creates, destroys, or stores caller handles.

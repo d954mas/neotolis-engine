@@ -10,8 +10,8 @@ layout(location = 3) in vec4 a_tangent;
 
 out vec2 v_uv;
 out vec3 v_world_pos;
-out mat3 v_tbn;
-out vec4 v_color;
+out mediump mat3 v_tbn;
+out mediump vec4 v_color;
 
 void main() {
     mat4 world = mat4(
