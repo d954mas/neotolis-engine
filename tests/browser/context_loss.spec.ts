@@ -122,8 +122,8 @@ test('context loss: both renderers restore their pixels after two loss cycles', 
   const spriteRect = { x: Math.round(canvas!.x + field.x + field.w / 2 - 32), y: Math.round(canvas!.y + field.y - 5), width: 20, height: 10 };
   const textRect = { x: Math.round(canvas!.x + 24), y: Math.round(canvas!.y + 24), width: 230, height: 24 };
   // The wasm app's mesh probe: two instanced colored quads in the bottom-right
-  // corner drawn through one owned vertex input from two frame vertex streams (a
-  // WebGL2 VAO per stream). One rect per quad: the lower one is instance 0 of the
+  // corner drawn through two owned vertex inputs, one over each of two frame
+  // vertex streams' buffers. One rect per quad: the lower one is instance 0 of the
   // stream 0 draw, the upper one (y 688..728) instance 1 of the stream 1 draw.
   const meshRect = { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 748), width: 40, height: 24 };
   const meshRect2 = { x: Math.round(canvas!.x + 1194), y: Math.round(canvas!.y + 696), width: 40, height: 24 };

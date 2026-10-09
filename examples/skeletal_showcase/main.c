@@ -1532,9 +1532,9 @@ static void init_mesh_scene(void) {
     NT_ASSERT(result == NT_OK);
     nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 3 * SKELETAL_SHOWCASE_MAX_PALETTE, .height = SKELETAL_SHOWCASE_MAX_INSTANCES});
     /* Static meshes are only the CPU reference: one body and one shirt. */
-    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_layouts = 4});
+    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_vertex_inputs = 4});
     NT_ASSERT(result == NT_OK);
-    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_layouts = 4});
+    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_vertex_inputs = 4});
     NT_ASSERT(result == NT_OK);
     for (uint32_t i = 0; i < SHOWCASE_ENTITY_COUNT; ++i) {
         const nt_entity_t e = nt_entity_create();

@@ -130,12 +130,12 @@ void nt_gfx_frame_execute(void) {
             w += 1;
             break;
         case NT_GFX_CMD_BIND_VERTEX_INPUT:
-            nt_gfx_backend_bind_vertex_input(w[0], 0, 0, 0);
+            nt_gfx_backend_bind_vertex_input(w[0], 0);
             w += 1;
             break;
         case NT_GFX_CMD_BIND_VERTEX_INPUT_INSTANCED:
-            nt_gfx_backend_bind_vertex_input(w[0], w[1], w[2], w[3]);
-            w += 4;
+            nt_gfx_backend_bind_vertex_input(w[0], w[1]);
+            w += 2;
             break;
         case NT_GFX_CMD_BIND_TEXTURE_UNIT:
             nt_gfx_backend_bind_texture_unit(w[0], w[1], w[2]);

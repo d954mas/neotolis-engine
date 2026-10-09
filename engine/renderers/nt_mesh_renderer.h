@@ -42,14 +42,13 @@ static inline void nt_mesh_instance_world_rows(float rows[3][4], const float wor
 
 typedef struct {
     uint16_t max_pipelines; /* pipeline cache capacity, default: 64 */
-    /* Vertex-input versions kept per mesh (one per distinct derived layout
-     * drawing that mesh). Exceeding it ASSERTS -- silent eviction would hide
-     * re-creation thrash as an invisible perf regression; raise the knob
-     * instead. Default: 4. */
-    uint16_t max_mesh_layouts;
+    /* Vertex-input versions kept per mesh: one per (derived layout, frame vertex stream) that
+     * draws it. Exceeding it ASSERTS -- silent eviction would hide re-creation thrash as an
+     * invisible perf regression; raise the knob instead. Default: 4. */
+    uint16_t max_mesh_vertex_inputs;
 } nt_mesh_renderer_desc_t;
 
-static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_pipelines = 64, .max_mesh_layouts = 4}; }
+static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_pipelines = 64, .max_mesh_vertex_inputs = 4}; }
 
 /* desc is required, non-NULL and borrowed for the duration of the call. */
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);

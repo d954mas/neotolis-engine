@@ -24,13 +24,13 @@ _Static_assert(sizeof(nt_skinned_mesh_instance_t) == 64 && offsetof(nt_skinned_m
 
 typedef struct {
     uint16_t max_pipelines;
-    uint16_t max_mesh_layouts;
+    uint16_t max_mesh_vertex_inputs; /* as nt_mesh_renderer_desc_t */
 } nt_skinned_mesh_renderer_desc_t;
 
 static inline nt_skinned_mesh_renderer_desc_t nt_skinned_mesh_renderer_desc_defaults(void) {
     return (nt_skinned_mesh_renderer_desc_t){
         .max_pipelines = 64,
-        .max_mesh_layouts = 4,
+        .max_mesh_vertex_inputs = 4,
     };
 }
 

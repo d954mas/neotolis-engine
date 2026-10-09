@@ -638,7 +638,7 @@ void test_skinned_mesh_stream_cannot_overlap_the_color_location(void) {
 }
 
 void test_static_mesh_stream_cannot_overlap_the_color_location(void) {
-    nt_mesh_renderer_desc_t desc = {.max_pipelines = 4, .max_mesh_layouts = 2};
+    nt_mesh_renderer_desc_t desc = {.max_pipelines = 4, .max_mesh_vertex_inputs = 2};
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&desc));
     nt_program_t program = nt_gfx_fake_make_program(NULL, 0);
     nt_mesh_t mesh = make_mesh();
@@ -659,7 +659,7 @@ void test_static_mesh_stream_cannot_overlap_the_color_location(void) {
 }
 
 void test_static_mesh_renderer_ignores_unmapped_skin_streams(void) {
-    nt_mesh_renderer_desc_t desc = {.max_pipelines = 2, .max_mesh_layouts = 2};
+    nt_mesh_renderer_desc_t desc = {.max_pipelines = 2, .max_mesh_vertex_inputs = 2};
     TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&desc));
     nt_mesh_t mesh = make_skin_stream_mesh();
     nt_material_t material = make_material_without_skin(nt_gfx_fake_make_program(NULL, 0));
@@ -747,7 +747,7 @@ void test_restore_drops_caches_and_the_next_draw_rebuilds_them(void) {
     nt_skinned_mesh_renderer_shutdown();
     nt_skinned_mesh_renderer_restore_gpu();
     TEST_ASSERT_FALSE(nt_skinned_mesh_renderer_test_initialized());
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 2, .max_mesh_layouts = 2}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 2, .max_mesh_vertex_inputs = 2}));
     nt_test_frame_open();
 }
 
@@ -796,11 +796,29 @@ void test_skinned_draws_route_to_their_stream(void) {
     TEST_ASSERT_EQUAL_UINT32(general, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used);
     TEST_ASSERT_EQUAL_UINT32(sizeof(nt_skinned_mesh_instance_t), g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX + 1].used);
     NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw(mesh, material, texture, NT_GFX_FRAME_VERTEX + 1, 0, 2));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "outside this frame's allocations"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "instances lie outside"));
     NT_TEST_EXPECT_ASSERT(nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_INDEX, &item, 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "not a frame vertex stream"));
     nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_last_instance_clone());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)), nt_gfx_fake_last_instance_buffer());
+}
+
+/* The skinned cache keys versions by stream too: two streams make two versions, each reading its
+ * own buffer, and returning to a stream reuses its version. */
+void test_skinned_vertex_input_versions_per_stream(void) {
+    nt_mesh_t mesh = make_mesh();
+    nt_texture_t texture = make_deformation_texture();
+    nt_material_t material = make_material(nt_gfx_fake_make_program((const char *const[]){"u_skin_matrices"}, 1));
+    nt_render_item_t item = {.entity = make_entity(mesh, material, (nt_deformation_binding_t){.texture = texture}).id, .batch_key = nt_mesh_renderer_batch_key(material, mesh)};
+    for (uint32_t pass = 0; pass < 2; pass++) {
+        for (uint32_t k = 0; k < 2; k++) {
+            nt_test_frame_next();
+            nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + k, &item, 1);
+            nt_test_frame_next();
+            TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + k)), nt_gfx_fake_last_instance_buffer());
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, nt_skinned_mesh_renderer_test_vertex_input_count());
 }
 
 void test_core_draw_asserts_on_a_zero_deformation_texture(void) {
@@ -919,6 +937,7 @@ int main(void) {
     RUN_TEST(test_core_draw_supplies_the_deformation_texture_across_passes);
     RUN_TEST(test_core_draw_asserts_on_a_zero_deformation_texture);
     RUN_TEST(test_skinned_draws_route_to_their_stream);
+    RUN_TEST(test_skinned_vertex_input_versions_per_stream);
     RUN_TEST(test_lists_read_the_deformation_texture_at_the_call);
     RUN_TEST(test_deformation_change_reapplies_textures_not_uniforms);
     RUN_TEST(test_empty_list_reserves_nothing);

@@ -69,10 +69,9 @@ typedef struct {
     uint32_t id;
 } nt_mesh_t;
 
-/* Owned vertex-input object (GL: a VAO per vertex stream it reads instances from):
- * vertex layout + optional instance layout baked against a VBO [+ IBO]. The static
- * half (vertex attrs + index buffer) is immutable after creation; the instance
- * attribute pointers follow nt_gfx_bind_vertex_input_instanced. */
+/* Owned vertex-input object (GL: one VAO): vertex layout + optional instance layout
+ * baked against a VBO [+ IBO] [+ instance buffer]. Everything is immutable after
+ * creation except the instance byte offset, which nt_gfx_bind_vertex_input_instanced sets. */
 typedef struct {
     uint32_t id;
 } nt_vertex_input_t;
@@ -317,7 +316,7 @@ typedef enum {
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
 /* NT_GFX_MAX_INSTANCE_ATTRS comes from CMake (default 8, at most 16): the GL backend keeps
- * a packed copy of both layouts per vertex-input slot to build a VAO per stream, and
+ * a packed copy of the instance layout per vertex-input slot to re-point it, and
  * max_vertex_inputs slots exist. */
 #if NT_GFX_MAX_INSTANCE_ATTRS < 1 || NT_GFX_MAX_INSTANCE_ATTRS > NT_GFX_MAX_VERTEX_ATTRS
 #error "NT_GFX_MAX_INSTANCE_ATTRS must be 1-16"
@@ -349,9 +348,12 @@ typedef struct {
     uint16_t max_buffers;   /* default: 128; each enabled frame storage stream takes one */
     uint16_t max_textures;  /* default: 64 */
     uint16_t max_meshes;    /* default: 128 */
-    /* default: 560 = max_meshes(128) * max_mesh_layouts(4) + 48 other vertex inputs (one bufferless
-     * per mesh renderer among them). Add max_meshes * skinned.max_mesh_layouts when using both mesh renderers;
-     * raise the extra budget near the 64-layout sprite limit. */
+    /* default: 560 = max_meshes(128) * max_mesh_vertex_inputs(4) + 48 other vertex inputs. A mesh takes
+     * one per (material layout, frame vertex stream) it is drawn with. The other budget also holds
+     * 4 per sized vertex stream for shapes and one bufferless per used stream and mesh renderer:
+     * raise it with the sized streams (8 streams take about 48 alone). Add
+     * max_meshes * skinned.max_mesh_vertex_inputs when using both mesh renderers; raise the extra
+     * budget near the 64-layout sprite limit and for the game's own vertex inputs. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
@@ -444,9 +446,11 @@ static inline bool nt_gfx_pipeline_key_equal(const nt_gfx_pipeline_key_t *a, con
 
 typedef struct {
     nt_vertex_layout_t layout;          /* per-vertex attrs, divisor 0; attr_count 0 = attribute-less (gl_VertexID) */
-    nt_vertex_layout_t instance_layout; /* optional per-instance attrs, divisor 1; pointed by nt_gfx_bind_vertex_input_instanced */
+    nt_vertex_layout_t instance_layout; /* optional per-instance attrs, divisor 1; offset set by nt_gfx_bind_vertex_input_instanced */
     nt_buffer_t vertex_buffer;          /* NT_BUFFER_VERTEX; required iff layout.attr_count > 0 */
     nt_buffer_t index_buffer;           /* optional ({0} = non-indexed); NT_BUFFER_INDEX with index_type != NT_INDEX_NONE */
+    nt_buffer_t instance_buffer;        /* NT_BUFFER_VERTEX; required iff instance_layout.attr_count > 0: a frame vertex stream
+                                           buffer (nt_gfx_frame_buffer) or a caller-owned buffer */
     const char *label;                  /* optional debug name; borrowed for the call */
 } nt_vertex_input_desc_t;
 
@@ -922,8 +926,7 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 /* Invalid and stale handles are no-ops because buffer destruction also
  * destroys dependent vertex inputs (see nt_gfx_destroy_buffer). */
 void nt_gfx_destroy_vertex_input(nt_vertex_input_t vi);
-/* Destroys VIs that borrow this vertex/index buffer. A captured instance buffer is not
- * cascade-destroyed; GL retains its storage until the next re-point or the VI's destruction. */
+/* Destroys VIs that borrow this buffer as their vertex, index or instance buffer. */
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 /* Destroys render targets that borrow this texture. */
 void nt_gfx_destroy_texture(nt_texture_t tex);
@@ -981,12 +984,13 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
  * vertex input (asserted); attribute-less draws bind an empty one. The vertex
  * input must declare no instance layout (asserted). */
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
-/* Binds a vertex input that declares an instance layout (asserted) with its instance
- * attributes at byte_offset in frame vertex stream `stream` (NT_GFX_FRAME_VERTEX + k,
- * nonzero capacity; asserted), inside this frame's allocations of the stream (asserted). The
- * offset must be 4-byte aligned (WebGL2 rejects unaligned attrib offsets); asserted. Each vertex stream has its own GL VAO per vertex
- * input, so a run that keeps its stream and offset from frame to frame re-points nothing. */
-void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t stream, uint32_t byte_offset);
+/* Binds a vertex input that declares an instance layout (asserted) with its instances at
+ * byte_offset of its instance buffer. The offset must be 4-byte aligned (WebGL2 rejects
+ * unaligned attrib offsets); asserted. The GL VAO keeps the pointers of its last offset, so a
+ * vertex input bound at the same offset every frame re-points nothing; one bound at two
+ * offsets in a frame re-points between them. Instanced draws assert that their instances lie
+ * inside the buffer, or inside this frame's allocations when it is a frame vertex stream. */
+void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t byte_offset);
 /* Applies the complete active sampler interface of the bound pipeline's program.
  * `bindings` is borrowed only for this call and may be NULL iff count is zero.
  * Inactive names are ignored before their handles are read. Contract violations

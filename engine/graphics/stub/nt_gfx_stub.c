@@ -157,9 +157,8 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) { (void)pip; }
 
 void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) { (void)vi; }
 
-void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t stream, uint32_t byte_offset) {
+void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t byte_offset) {
     (void)vi;
-    (void)stream;
     (void)byte_offset;
 }
 

@@ -101,8 +101,26 @@ void test_shape_set_stream_routes_instances(void) {
     TEST_ASSERT_GREATER_THAN_UINT32(0, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX + 1].used);
     TEST_ASSERT_GREATER_THAN_UINT32(general, g_nt_gfx_frame_storage[NT_GFX_FRAME_VERTEX].used); /* the triangle */
     nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_last_instance_clone());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)), nt_gfx_fake_last_instance_buffer());
     NT_TEST_EXPECT_ASSERT(nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 2)); /* unsized */
+}
+
+/* Restore rebuilds the instanced vertex inputs of every sized stream over its buffer. */
+void test_shape_restore_rebuilds_stream_vertex_inputs(void) {
+    const float c[3] = {0, 0, 0};
+    const float size[3] = {1, 1, 1};
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    nt_shape_renderer_restore_gpu();
+    nt_gfx_end_frame(); /* program links finish in begin_frame */
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_shape_renderer_set_stream(NT_GFX_FRAME_VERTEX + 1);
+    nt_shape_renderer_cube(c, size, NULL, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_flush();
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)), nt_gfx_fake_last_instance_buffer());
 }
 
 void test_shape_set_depth_auto_flush(void) {
@@ -772,5 +790,6 @@ int main(void) {
     RUN_TEST(test_shape_loss_during_restore_is_retried_by_the_next_one);
     RUN_TEST(test_shape_restore_on_inactive_renderer_does_nothing);
     RUN_TEST(test_shape_set_stream_routes_instances);
+    RUN_TEST(test_shape_restore_rebuilds_stream_vertex_inputs);
     return UNITY_END();
 }

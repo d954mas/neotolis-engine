@@ -68,7 +68,7 @@ Draw-phase calls are deferred. At the call, the front-end validates and updates
 its logical state and geometry counters, then records the
 backend-resolved arguments of the backend call into one command stream: begin
 and end pass, clear, pipeline and vertex-input binds (an instanced one carries its
-instance stream and offset),
+instance offset),
 texture-unit and uniform-block binds, the mat4, vec4, float
 and int uniform setters, scissor rectangle and enable, viewport, the plain and
 indexed draws (both carry an instance count; the indexed draw also carries the
@@ -134,7 +134,7 @@ only skips repeated physical state (below). Every binding call except a uniform
 block compares with a front-end mirror; an equal value ends `NT_GFX_RESULT_CACHE`
 and records nothing. A mirror lives exactly as long as the contract keeps its state:
 
-- pipeline, vertex input with its instance stream and offset, the texture set
+- pipeline, vertex input with its instance offset, the texture set
   (per unit: texture and sampler) and the viewport live for one pass:
   `begin_pass` discards them, so the first bind of each in a pass records;
 - the scissor rectangle carries over passes and frames; a context loss clears it;
@@ -159,8 +159,8 @@ physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
 viewport, clear values, the active unit, the `GL_ARRAY_BUFFER` binding, and the
-instance offset each VAO of a vertex input last received: a recorded instanced
-bind that repeats its VAO's stream and offset issues no `glBindBuffer` or
+instance offset each vertex input's VAO last received: a recorded instanced
+bind that repeats its offset issues no `glBindBuffer` or
 `glVertexAttribPointer` (only the VAO bind, when another VAO is bound), so a
 stream whose layout repeats from frame to frame keeps its pointers.
 
@@ -183,29 +183,50 @@ what is adjacent.
 
 Vertex-input state is a public gfx object referenced by `nt_vertex_input_t`.
 The caller that creates it owns the handle and destroys it with
-`nt_gfx_destroy_vertex_input`; the object borrows its vertex and optional
-index buffer handles. It bakes those buffers together with a vertex layout
-and an optional per-instance layout (GL: a VAO). One bind selects the whole
-geometry for the following draws: `nt_gfx_bind_vertex_input(vi)` for a vertex
-input without an instance layout, `nt_gfx_bind_vertex_input_instanced(vi,
-stream, offset)` for one with an instance layout, its instances at byte
-`offset` of frame vertex stream `stream` (see Frame storage); each form
-asserts the layout it binds. Per mesh switch that is a single
+`nt_gfx_destroy_vertex_input`; the object borrows its vertex, optional index and
+optional instance buffer handles. It bakes those buffers together with a vertex
+layout and an optional per-instance layout (GL: one VAO). The instance buffer is
+any `NT_BUFFER_VERTEX` buffer, required exactly when the instance layout has
+attributes: a frame vertex stream's buffer (`nt_gfx_frame_buffer`, see Frame
+storage) or one the caller owns. gfx does not care who fills it or when. One bind
+selects the whole geometry for the following draws: `nt_gfx_bind_vertex_input(vi)`
+for a vertex input without an instance layout,
+`nt_gfx_bind_vertex_input_instanced(vi, offset)` for one with an instance layout,
+its instances at byte `offset` of its instance buffer; each form asserts the
+layout it binds, also on a cache hit. Per mesh switch that is a single
 `glBindVertexArray` instead of buffer re-binds plus per-attribute
-`glVertexAttribPointer` rewrites. The object's *static* half — vertex
-attributes and the index binding — is immutable after creation. WebGL2 has no
-baseInstance, so instances are located by pointing the instance attributes at
-their offset. The GL backend keeps one VAO per frame vertex stream a vertex
-input is bound with: the first bind with a stream builds that VAO from the
-stored layouts, and each VAO keeps the pointers of its last offset in its
-stream. A pass whose instances live in their own stream keeps every run's
-offset, and so its pointers, while its counts stay; in one shared stream a
-count change shifts every later run of the frame. A VAO holds one offset: a
-vertex input drawn at two offsets of one stream in a frame re-points between
-them every frame. A vertex input with
-instance attributes is always bound together with its instance source, so no
-draw reads unpointed attributes. An empty layout with no buffers is the
-attribute-less `gl_VertexID` path; every draw asserts a bound vertex input.
+`glVertexAttribPointer` rewrites. Everything but the instance offset is
+immutable after creation. WebGL2 has no baseInstance, so instances are located
+by pointing the instance attributes at their offset. Creation points them at
+offset 0, so no draw reads an enabled attribute without a buffer; the VAO keeps
+the pointers of its last offset. A vertex input bound at one offset every frame
+re-points nothing; one bound at two offsets in a frame re-points between them
+every frame. For frame data, a pass whose instances live in their own stream
+keeps every run's offset, and so its pointers, while its counts stay; in one
+shared stream a count change shifts every later run of the frame. An empty
+layout with no buffers is the attribute-less `gl_VertexID` path; every draw
+asserts a bound vertex input.
+
+A draw over a vertex input with an instance layout asserts that its instances
+lie in the instance buffer: `offset + (count - 1) * stride + extent` is at most
+the buffer size, or, for a frame vertex stream's buffer, the bytes allocated in
+that stream this frame (bytes past them are not uploaded and would draw the
+previous frame's data); a plain draw reads one instance. `extent` is the bytes
+one instance reads (the furthest attribute end), so attributes past the stride
+are covered. An instance layout needs a nonzero stride (asserted): GL reads
+stride 0 as tightly packed per attribute. The vertex input records at creation
+whether its instance buffer is a frame stream's.
+
+**Persistent instance data.** Instance data that does not change every frame
+can live in a caller-owned buffer: write it once (or rewrite a range with
+`nt_gfx_update_buffer` when it changes) and bind a vertex input over it at the
+offset to draw from. Nothing is packed, uploaded or re-pointed per frame. How
+to lay the data out is the game's choice: one vertex input per buffer re-points
+when its offset changes (cheap after per-pass streams), drawing the whole range
+needs no re-point at all, and a vertex input per offset removes re-points
+entirely at the cost of a VAO each. Writes follow queue semantics: a region
+holds one content for the whole frame, so two different contents in one frame
+need two regions.
 
 A vertex attribute is the raw GL triple `(type, count 1-4,
 normalized)` plus location and byte offset (`nt_vertex_attr_t`) — no enum of
@@ -226,15 +247,15 @@ vertex inputs are created on a cache miss and then reused, so validation is
 absent from the steady-state hot path.
 
 **Lifetime and the destroy cascade.** `nt_gfx_destroy_buffer` destroys every
-live vertex input referencing that buffer as its vertex or index buffer
-(precedent: destroying a program destroys its pipelines). Mesh deactivation
+live vertex input referencing that buffer as its vertex, index or instance
+buffer (precedent: destroying a program destroys its pipelines). The cascade
+runs before the buffer's GL name is freed, so a recycled name never meets a
+vertex input that still points at it. Mesh deactivation
 destroys the mesh's buffers and reaches no renderer, so this cascade is what
 keeps renderer-cached vertex inputs from outliving mesh buffers; mesh caches
 revalidate handles with `nt_gfx_vertex_input_valid` on lookup. Because the
 cascade makes stale handles routine, `nt_gfx_destroy_vertex_input` tolerates
-stale and INVALID handles as no-ops. Instance attributes read frame storage,
-whose buffers only a context restore or shutdown replaces, and both free every
-vertex input.
+stale and INVALID handles as no-ops.
 Buffer *contents* may change at any time (queue semantics, see Draw-phase
 command stream) — an update keeps the GL name, so baked attachments survive it;
 what a write costs depends on when it happens (see Dynamic data lifetime) — and
@@ -371,13 +392,17 @@ and nothing can replace a material's program inside the call.
 Vertex-input caches use exact identity for *derived* layouts too. The mesh and
 skinned mesh renderers each instantiate the shared internal per-mesh versions
 cache from `nt_renderer_shared.h`; the tables are independent because their
-instance layouts differ. Each row stores its mesh's full generation-checked
-handle. A different generation zeroes the row and destroys nothing: the old
-mesh's deactivation destroyed its buffers, and the cascade took every version
-built on its VBO or IBO. The one version the cascade cannot reach, an empty
-derived layout on a non-indexed mesh (no VBO, no IBO), holds nothing
-mesh-specific, so each renderer creates one and every row that needs it shares
-it; a cache reset destroys it once. Within the row the mesh's
+instance layouts differ. A version's identity is (mesh row, derived layout,
+frame vertex stream): its instance buffer is that stream's, fixed within a
+context, and a restore frees every vertex input. Both lookups (the last
+material's fast path and the layout key) compare the stream. Each row stores
+its mesh's full generation-checked handle. A different generation zeroes the
+row and destroys nothing: the old mesh's deactivation destroyed its buffers,
+and the cascade took every version built on its VBO or IBO. The versions the
+cascade cannot reach, an empty derived layout on a non-indexed mesh (no VBO, no
+IBO), hold nothing mesh-specific, so each renderer creates one per stream and
+every row that needs it shares it; a cache reset destroys them once. Within the
+row the mesh's
 stream types, counts, offsets and stride are fixed, so entry identity packs only
 what varies: per stream a presence bit and the mapped location (mesh streams ×
 material attr_map — attr_map entries matching no stream do not split; a
@@ -387,9 +412,10 @@ The sprite renderer packs the attr_map count and every location the same
 way. Handles are revalidated on lookup because buffer destruction can invalidate
 cached versions. Exhausting a mesh's version row asserts, naming the knob —
 silent eviction would hide VAO re-creation thrash as an invisible perf
-regression. The default `max_vertex_inputs` budgets one mesh cache; a game using
-both mesh renderers adds
-`max_meshes * skinned.max_mesh_layouts` to that base budget explicitly.
+regression. A mesh takes one version per (derived layout, stream) it is drawn
+with, so `max_mesh_vertex_inputs` counts those pairs. The default
+`max_vertex_inputs` budgets one mesh cache; a game using both mesh renderers adds
+`max_meshes * skinned.max_mesh_vertex_inputs` to that base budget explicitly.
 
 The sprite renderer's vertex inputs sit on the vertex and index frame buffers,
 one per layout key; `nt_sprite_renderer_shutdown` destroys them, and it runs
@@ -475,10 +501,12 @@ The vertex streams come last in the enum, so the game names its streams with
 its own enum starting at `NT_GFX_FRAME_VERTEX`, and a stream past the range
 fails the stream assert. Several vertex streams exist for instance layout:
 every stream starts at offset 0 each frame, so a pass that writes its
-instances to its own stream keeps their offsets, and the GL backend its
+instances to its own stream keeps their offsets, and its vertex inputs their
 instance pointers, while that pass's counts stay (see Vertex inputs). A stream
-belongs to its allocations, not to a pass: a draw names the stream its
-instances were allocated from, and one allocation may serve several passes.
+belongs to its allocations, not to a pass: a draw uses vertex inputs over the
+stream its instances were allocated from, and one allocation may serve several
+passes. Instance data that persists across frames belongs in a caller-owned
+buffer instead (see Vertex inputs, Persistent instance data).
 
 One `STREAM` buffer per stream, rewritten from offset 0 every frame, is the
 policy the phone measurements selected: rotating several buffers showed no
@@ -512,8 +540,8 @@ Alignment follows the reader:
   reads only blocks bound in its own frame.
 
 `nt_gfx_frame_buffer(stream)` returns an ordinary buffer handle, for vertex inputs
-over the general stream and game-side binds; `nt_gfx_bind_uniform_block` and
-`nt_gfx_bind_vertex_input_instanced` name streams instead of buffers. The handle is borrowed: never update
+over a stream's vertex or instance data; `nt_gfx_bind_uniform_block` names a
+stream instead of a buffer. The handle is borrowed: never update
 or destroy it, and read it again every frame, because a context restore
 replaces it (vertex inputs over it die with the context anyway). Each enabled
 stream's buffer counts against `nt_gfx_desc_t.max_buffers`.
@@ -549,8 +577,9 @@ call, in the current pass. Each has two entry points:
   offset, count)`), records one instanced draw of `count` instances
   (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`) that the caller wrote
   into frame vertex stream `stream` at byte `offset`. It reads no entity
-  component, and asserts that the instances lie inside the stream's
-  allocations of the frame (bounds only: the caller owns the stream choice);
+  component; the instanced draw asserts that the instances lie inside the
+  stream's allocations of the frame (bounds only: the caller owns the stream
+  choice);
 - the ECS adapter, `draw_list(stream, items, count)`, splits the items into
   runs of adjacent equal batch keys (the skinned renderer also splits on the
   deformation texture), allocates and packs each run's instances in `stream`
@@ -1022,16 +1051,16 @@ zero for an absent attachment, and the size of those textures.
 Shader, program and vertex-input definitions carry result `UNKNOWN`: the frontend
 retains no shader stage or source, program stage pair or vertex-input layout, so
 those fields are absent, not zero. A vertex input created during a recorded frame
-follows its definition with `DEFINITION/ATTRIBUTE` records. The backend defines
-each VAO of a vertex input with its stream index (`stream -
-NT_GFX_FRAME_VERTEX`) in `backend.args[2]` and the instance offset its pointers
-hold in `args[3]` (`UINT32_MAX` before the first instanced bind); a VAO built on
-the first bind with another stream is defined during the replay. An upload that
+follows its definition with `DEFINITION/ATTRIBUTE` records; instance attribute
+records name the instance buffer. A vertex-input definition relates its vertex,
+index and instance buffer handles in `related[0..2]`. The backend defines the
+vertex input's VAO with the GL name of its instance buffer (0 without one) in
+`backend.args[2]` and the instance offset its pointers hold in `args[3]` (0
+from creation). An upload that
 finds its buffer already bound to `GL_ARRAY_BUFFER` records a `SKIP` of
 `glBindBuffer`. Instance attribute definitions
 stay one set per vertex input. Both bind forms are `NT_GFX_OP_VERTEX_INPUT`;
-the instanced one carries the stream in `binding.slot` and the offset in
-`binding.offset`.
+the instanced one carries the offset in `binding.offset`.
 Restore defines no resource. Primary resources survive a loss as husks and get
 no fresh definition; pipelines, vertex inputs and render targets that the first
 detection frees get no DESTROY record. Samplers are re-defined when lazily recreated. Definitions

@@ -491,8 +491,8 @@ void setUp(void) {
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 32});
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
     s_initialized = true;
-    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_layouts = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 4}));
 
     const bool sources_ready = compose_skin_vertex_source(&skin_source) && read_text("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
                                read_text("tests/fixtures/skinned_mesh_renderer_native.frag", &fragment_source);
