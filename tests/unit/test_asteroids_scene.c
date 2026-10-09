@@ -755,7 +755,7 @@ static void test_content_is_generated_once_and_levels_reselect_instances(void) {
     select_level(9);
     select_level(2);
     TEST_ASSERT_EQUAL_UINT32(2, s_level);
-    TEST_ASSERT_EQUAL_INT(2, s_ui_staged_level);
+    TEST_ASSERT_EQUAL_INT(2, s_ui_level);
     TEST_ASSERT_EQUAL_UINT32(rocks.id, s_rocks.vbo.id);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_texture_create_count());
     drop_generated();
@@ -811,7 +811,7 @@ static uint32_t expected_instance(asteroid_instance_t *expected, const asteroid_
     const float dx = s_camera.eye[0] - world[12];
     const float dy = s_camera.eye[1] - world[13];
     const float dz = s_camera.eye[2] - world[14];
-    const uint32_t lod = asteroid_lod(source->scale, sqrtf((dx * dx) + (dy * dy) + (dz * dz)), s_min_screen_size);
+    const uint32_t lod = asteroid_lod(source->scale, sqrtf((dx * dx) + (dy * dy) + (dz * dz)), AST_MIN_SCREEN_SIZE);
     memset(expected, 0, sizeof(*expected));
     for (uint32_t row = 0; row < 3; row++) {
         for (uint32_t column = 0; column < 4; column++) {

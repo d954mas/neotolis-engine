@@ -131,7 +131,6 @@ then exit.
 - Wheel or `-` / `=`: zoom; `,` / `.`: roll
 - Touch: one finger orbits; two-finger pinch zooms
 - Alt+P: camera pivot; Alt+R: reset camera; Ctrl+L: reset light
-- `;` / `'`: double / halve the minimum screen size for LOD
 - F1/F2: help; F3: controls panel; F4: hide all overlays
 - Ctrl+F: fullscreen (native); Escape or Ctrl+Q: exit (native)
 - Web: the page's Fullscreen button

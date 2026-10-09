@@ -65,6 +65,8 @@ in the source; the sky and Mars images come from packs. See CREDITS.md.
 
 #define AST_MAX 50000U
 #define AST_SUBDIVISIONS 4U
+/* The source's default LOD threshold: smaller selects finer meshes. */
+#define AST_MIN_SCREEN_SIZE 0.06F
 #define AST_MAX_TEXTURES 50U
 /* The noise textures are tiles of one atlas; rock.frag hardcodes this grid. */
 #define AST_NOISE_COLUMNS 8U
@@ -188,7 +190,6 @@ static bool s_paused, s_lod_colors, s_hide_hud, s_ready, s_generated;
 #ifndef NT_PLATFORM_WEB
 static bool s_fullscreen;
 #endif
-static float s_min_screen_size = 0.06F;
 static double s_elapsed, s_last_tick, s_frame_ms, s_cpu_ms, s_update_ms, s_render_ms, s_generate_ms, s_gpu_ms = -1.0;
 static uint64_t s_mem_used, s_triangles;
 static bool s_memory_sampled;
@@ -218,7 +219,7 @@ static const char s_upstream_url[] = "https://github.com/MethanePowered/MethaneA
 
 static bool s_ui_panel_open, s_ui_built, s_ui_atlas_bound;
 static bool s_ui_escape_consumed, s_ui_keyboard_blocked;
-static int s_ui_staged_level, s_ui_tab;
+static int s_ui_level, s_ui_tab;
 static void *s_ui_arena;
 static size_t s_ui_arena_size;
 static nt_ui_context_t *s_ui;
@@ -1059,7 +1060,7 @@ static void select_level(uint32_t level) {
     generate_instances(&s_complexities[level]);
     s_slot_count = 0;
     s_level = level;
-    s_ui_staged_level = (int)level;
+    s_ui_level = (int)level;
 }
 // #endregion
 
@@ -1307,38 +1308,21 @@ static void ui_metric(const char *label, const char *value) {
 static void ui_settings(float width) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Mouse: drag to orbit, wheel to zoom.\nTouch: one finger orbit, pinch zoom.", &s_ui_caption);
     char text[128];
-    const complexity_t *preview = &s_complexities[s_ui_staged_level];
-    (void)snprintf(text, sizeof(text), "COMPLEXITY  %d / 9", s_ui_staged_level);
+    const complexity_t *preview = &s_complexities[s_ui_level];
+    (void)snprintf(text, sizeof(text), "COMPLEXITY  %d / 9", s_ui_level);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), text, &s_ui_section);
     (void)snprintf(text, sizeof(text), "%u asteroids\n%u unique meshes / %u textures", preview->instances, preview->unique_meshes, preview->textures);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), text, &s_ui_body);
     s_ui_slider.track_w = width - 48;
-    (void)nt_ui_slider_int(s_ui, NT_UI_DATA_LAYER(1), 2, CLAY_ID("asteroids.complexity").id, NULL, &s_ui_staged_level, 0, 9, 1, &s_ui_slider,
-                           &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}, true);
-    const bool changed = (uint32_t)s_ui_staged_level != s_level;
-    (void)snprintf(text, sizeof(text), changed ? "Apply complexity %d" : "Complexity %d active", s_ui_staged_level);
-    if (ui_action("asteroids.apply", s_ready ? text : "Loading scene...", true, changed && s_ready, 0)) {
-        s_requested_level = (uint32_t)s_ui_staged_level;
+    /* A level change only regenerates instances, so the slider applies as it moves. */
+    if (nt_ui_slider_int(s_ui, NT_UI_DATA_LAYER(1), 2, CLAY_ID("asteroids.complexity").id, NULL, &s_ui_level, 0, 9, 1, &s_ui_slider,
+                         &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}, true)) {
+        s_requested_level = (uint32_t)s_ui_level;
     }
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Preview freely. Apply loads one preset.", &s_ui_caption);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "SIMULATION", &s_ui_section);
     const Clay_ElementDeclaration toggle = {.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44)}}};
     (void)nt_ui_toggle(s_ui, NT_UI_DATA_LAYER(1), 2, CLAY_ID("asteroids.pause").id, "Pause animations", &s_paused, &s_ui_toggle, &toggle, true);
     (void)nt_ui_toggle(s_ui, NT_UI_DATA_LAYER(1), 2, CLAY_ID("asteroids.lod_colors").id, "Color by mesh LOD", &s_lod_colors, &s_ui_toggle, &toggle, true);
-    (void)snprintf(text, sizeof(text), "%.5g", (double)s_min_screen_size);
-    ui_metric("Min. screen size", text);
-    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 8}}) {
-        if (ui_action("asteroids.lod_half", "/ 2", false, true, 0)) {
-            s_min_screen_size = fmaxf(0.00001F, s_min_screen_size / 2.0F);
-        }
-        if (ui_action("asteroids.lod_double", "x 2", false, true, 0)) {
-            s_min_screen_size = fminf(1000.0F, s_min_screen_size * 2.0F);
-        }
-        if (ui_action("asteroids.lod_reset", "Reset", false, true, 0)) {
-            s_min_screen_size = 0.06F;
-        }
-    }
-    nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "Smaller threshold selects finer meshes.", &s_ui_caption);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "CAMERA & LIGHT", &s_ui_section);
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 8}}) {
         if (ui_action("asteroids.camera_reset", "Reset view", false, true, 0)) {
@@ -1894,12 +1878,6 @@ static void handle_input(float dt) {
         case ']':
             s_requested_level = s_requested_level < 9 ? s_requested_level + 1U : 9;
             break;
-        case ';':
-            s_min_screen_size *= 2.0F;
-            break;
-        case '\'':
-            s_min_screen_size /= 2.0F;
-            break;
         case '-':
             zoom_camera(1.1F);
             break;
@@ -1916,7 +1894,6 @@ static void handle_input(float dt) {
             break;
         }
     }
-    s_min_screen_size = glm_clamp(s_min_screen_size, 0.00001F, 1000.0F);
     if (g_nt_window.fb_width == 0 || g_nt_window.fb_height == 0) {
         return;
     }
@@ -2025,7 +2002,7 @@ static uint32_t prepare_instances(void) {
         }
         asteroid_world_rows_sincos(instances[i].world_rows, asteroid, sincos[i & 3U]);
         const float difference[3] = {s_camera.eye[0] - instances[i].world_rows[3], s_camera.eye[1] - instances[i].world_rows[7], s_camera.eye[2] - instances[i].world_rows[11]};
-        const uint32_t lod = asteroid_lod(asteroid->scale, glm_vec3_norm((float *)difference), s_min_screen_size);
+        const uint32_t lod = asteroid_lod(asteroid->scale, glm_vec3_norm((float *)difference), AST_MIN_SCREEN_SIZE);
         s_lod_counts[lod]++;
         s_triangles += s_lod_indices[lod] / 3U;
         memcpy(instances[i].deep, s_lod_colors ? s_lod_deep[lod] : asteroid->deep, sizeof(asteroid->deep));
@@ -2234,7 +2211,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     s_level = s_requested_level;
-    s_ui_staged_level = (int)s_level;
+    s_ui_level = (int)s_level;
     s_hide_hud = hide_hud != 0;
     s_paused = paused != 0;
     s_camera = s_initial_camera;
