@@ -1,5 +1,5 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: 6b9555a
+# Commit: 9cbf58b
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 8 B
 Export                89 B
 Elem                  72 B
-Code               86839 B
-Data                9756 B
+Code               86861 B
+Data                9812 B
 Custom              4855 B
 ---------------- ----------
-TOTAL             102561 B
+TOTAL             102639 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-27644 B   frame
+27647 B   frame
  8841 B   main
  4946 B   nt_gfx_activate_mesh
  3047 B   nt_gfx_make_texture
@@ -55,7 +55,7 @@ TOTAL             102561 B
   434 B   nt_resource_request
 
 Total functions: 134
-Total code size: 86628 B
+Total code size: 86650 B
 
 ## Built Engine Archives
 
@@ -77,7 +77,7 @@ libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a                99368 B
+libnt_gfx.a                99710 B
 libnt_gfx_stub.a            6136 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2964792 B
+TOTAL (archives)         2965134 B
 
 ## Data Segments Summary
 
 Segments: 23
-Total data size: 9597 B
+Total data size: 9653 B

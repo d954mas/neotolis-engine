@@ -1,61 +1,61 @@
-# Size Report: ui_3d_demo (wasm-analysis-paired)
+# Size Report: asteroids (wasm-analysis-paired)
 # Commit: 9cbf58b
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 311 B
-Import               598 B
-Function             188 B
+Type                 413 B
+Import               682 B
+Function             262 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
-Export                89 B
-Elem                  54 B
-Code              242233 B
-Data               19457 B
-Custom              6498 B
+Export                95 B
+Elem                  70 B
+Code              396525 B
+Data              219079 B
+Custom             13224 B
 ---------------- ----------
-TOTAL             269449 B
+TOTAL             630371 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-71980 B   frame
-17026 B   dispatch_command
-15637 B   create_gpu
-10994 B   main
- 8787 B   Clay__ConfigureOpenElementPtr
- 6038 B   Clay__SizeContainersAlongAxis
- 5616 B   Clay__InitializeEphemeralMemory
- 5288 B   nt_ui_button_begin
- 4146 B   upload_glyph
- 3992 B   Clay__MeasureTextCached
- 3461 B   nt_sprite_renderer_set_material
- 3353 B   Clay__CloseElement
- 3127 B   nt_ui_label
+79859 B   frame
+31662 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
+27440 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
+20949 B   ui_panel
+20364 B   dispatch_command
+17841 B   nt_gfx_activate_texture
+12512 B   main
+ 8829 B   Clay__ConfigureOpenElementPtr
+ 6059 B   Clay__SizeContainersAlongAxis
+ 5766 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
+ 5643 B   Clay__InitializeEphemeralMemory
+ 4892 B   nt_gfx_end_frame
+ 4538 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
+ 4163 B   upload_glyph
+ 4005 B   Clay__MeasureTextCached
+ 3920 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
+ 3819 B   init_ui_styles
+ 3463 B   nt_sprite_renderer_set_material
+ 3365 B   Clay__CloseElement
+ 3319 B   void std::__2::__introsort<std::__2::_ClassicAlgPolicy, std::__2::ranges::less, unsigned int*, true>(unsigned int*, unsigned int*, std::__2::ranges::less, std::__2::iterator_traits<unsigned int*>::difference_type, bool)
+ 3134 B   nt_ui_label
  3123 B   nt_gfx_make_texture
- 3007 B   fmt_fp
- 2605 B   nt_http_request
- 2428 B   printf_core
- 2367 B   atlas_on_resolve
- 2336 B   nt_gfx_apply_texture_bindings
- 2105 B   nt_gfx_make_vertex_input
- 2020 B   nt_text_renderer_draw_n
- 1931 B   wire_template_path
- 1887 B   Clay__InitializePersistentMemory
- 1851 B   __rem_pio2f
- 1747 B   nt_hash64
- 1678 B   nt_font_lookup_glyph_offset
- 1596 B   nt_shape_renderer_flush
- 1465 B   emit_glyph_pass
- 1366 B   ui_hit_test
- 1340 B   nt_ui_measure_text_cb
+ 3009 B   fmt_fp
+ 2629 B   nt_http_request_ex
+ 2610 B   scrollbar_emit_axis
+ 2608 B   basist::huffman_decoding_table::init(unsigned int, unsigned char const*, unsigned int)
+ 2540 B   basist::pack_eac_high_quality(basist::eac_block&, unsigned char const*, unsigned int)
+ 2476 B   basist::unpack_uastc(unsigned int, unsigned int, basist::color32 const&, basist::astc_block_desc const&, basist::color32*, bool)
+ 2456 B   select_level
+ 2429 B   printf_core
 
-Total functions: 186
-Total code size: 241911 B
+Total functions: 260
+Total code size: 396072 B
 
 ## Built Engine Archives
 
@@ -126,5 +126,5 @@ TOTAL (archives)         2965134 B
 
 ## Data Segments Summary
 
-Segments: 49
-Total data size: 19111 B
+Segments: 177
+Total data size: 217744 B

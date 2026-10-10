@@ -1,5 +1,5 @@
 # Size Report: skeletal_showcase (wasm-analysis-paired)
-# Commit: 6b9555a
+# Commit: 9cbf58b
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                89 B
 Elem                 157 B
-Code              346270 B
-Data               26011 B
+Code              346294 B
+Data               26067 B
 Custom              9976 B
 ---------------- ----------
-TOTAL             383884 B
+TOTAL             383964 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL             383884 B
  2368 B   atlas_on_resolve
 
 Total functions: 326
-Total code size: 345730 B
+Total code size: 345754 B
 
 ## Built Engine Archives
 
@@ -77,7 +77,7 @@ libnt_debug_overlay.a       2218 B
 libnt_drawable_comp.a       3210 B
 libnt_entity.a              6348 B
 libnt_font.a               94006 B
-libnt_gfx.a                99368 B
+libnt_gfx.a                99710 B
 libnt_gfx_stub.a            6136 B
 libnt_hash.a                4108 B
 libnt_http.a               16110 B
@@ -122,9 +122,9 @@ libnt_utf8.a                1098 B
 libnt_window.a              4608 B
 libnt_window_stub.a         2468 B
 ------------------------ ----------
-TOTAL (archives)         2964792 B
+TOTAL (archives)         2965134 B
 
 ## Data Segments Summary
 
 Segments: 86
-Total data size: 25403 B
+Total data size: 25459 B

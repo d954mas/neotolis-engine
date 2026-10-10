@@ -1,0 +1,19 @@
+[{
+  "commit": "9cbf58b",
+  "date": "2026-10-10T10:22:25Z",
+  "files": {
+    "CREDITS.md": { "raw": 6749, "gzip": 3000 },
+    "README.md": { "raw": 7545, "gzip": 3691 },
+    "index.html": { "raw": 2841, "gzip": 1380 },
+    "index_simd.wasm": { "raw": 650956, "gzip": 287362 },
+    "index.wasm": { "raw": 617186, "gzip": 281090 },
+    "index_simd.js": { "raw": 22969, "gzip": 9299 },
+    "index.js": { "raw": 22969, "gzip": 9294 },
+    "assets/asteroids_core.ntpack": { "raw": 24080, "gzip": 10356 },
+    "assets/asteroids_space.ntpack": { "raw": 3528044, "gzip": 3527212 },
+    "assets/asteroids_ui.ntpack": { "raw": 17760, "gzip": 1102 }
+  },
+  "engine": { "raw": 691060, "gzip": 304732 },
+  "resources": { "raw": 3569884, "gzip": 3538670 },
+  "total": { "raw": 4260944, "gzip": 3843402 }
+}]
