@@ -320,6 +320,14 @@ pipelines, and a context loss frees every pipeline slot; renderers remove
 dead cache records during insertion after a miss or when resetting their
 caches.
 
+**Depth comparison.** `nt_pipeline_desc_t.depth_func` selects any of the eight
+comparisons: `NT_DEPTH_LESS` (zero/default), `LEQUAL`, `ALWAYS`, `GEQUAL`,
+`GREATER`, `EQUAL`, `NOTEQUAL` or `NEVER`. The shared native GL/WebGL 2 backend
+uses the corresponding GL comparison unchanged. Reversed depth is game-owned: use `GEQUAL` with a projection that
+maps nearer surfaces to larger depth values and a pass `clear_depth` of 0.
+Selecting the comparison does not change the projection, clear value, clip
+range, or depth-sampling comparison state.
+
 **Cache identity.** Renderers key their pipeline caches on the exact
 identity of the descriptor, `nt_gfx_pipeline_key_t` from
 `nt_gfx_pipeline_key(desc)`: every enum and bool field packed bit-exact into
@@ -331,7 +339,10 @@ involved, so identity does not rest on a collision argument. Two
 canonicalisations apply, both in the packer: a disabled blend packs as opaque
 (factors, ops and constant ignored) and a disabled polygon offset packs its
 factor/units as zero; nothing else is normalised, so depth lanes are exact even
-when depth test is off. Lane inputs are range-asserted: material-owned lanes at
+when depth test is off. The depth-function lane is three bits wide (bits 36–38)
+and keeps the earlier values `LESS=0`, `LEQUAL=1`, `ALWAYS=2`; the later lanes
+start at bit 39, and bit 63 is the only spare.
+Lane inputs are range-asserted: material-owned lanes at
 `nt_material_create` and again in the packer, renderer-owned lanes (`depth_func`,
 polygon offset) in the packer alone — unconditionally, a disabled blend included:
 canonicalisation is about identity, validity has no exceptions. So an
@@ -782,9 +793,11 @@ requires `NEAREST` in its descriptor.
 Depth comparison lives on the sampler object (`nt_sampler_desc_t.compare_func`),
 not on the texture, because one depth target is read two ways: through a
 comparison sampler for the shadow lookup, and through a plain sampler for a
-raw-depth debug view. The field is a single tri-state — `NONE`, `LEQUAL`,
-`LESS` — so a zero-filled descriptor is a plain sampler and there is exactly one
-spelling of "no comparison". Sampler state supersedes texture state, so a
+raw-depth debug view. The field is `NONE` or one of the eight comparisons
+(`LEQUAL`, `LESS`, `GEQUAL`, `GREATER`, `EQUAL`, `NOTEQUAL`, `ALWAYS`, `NEVER`),
+so a zero-filled descriptor is a plain sampler and there is exactly one spelling
+of "no comparison". Reversed-depth shadow maps compare with `GEQUAL` or
+`GREATER`. Sampler state supersedes texture state, so a
 comparison sampler makes `LINEAR` legal on that binding while the attachment
 texture is untouched. A comparison sampler is rejected on non-depth storage,
 where the comparison would make every lookup undefined; a sampler without one

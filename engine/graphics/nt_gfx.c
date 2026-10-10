@@ -1944,7 +1944,7 @@ static inline nt_sampler_desc_t sampler_normalize(const nt_sampler_desc_t *desc)
     if ((uint32_t)out.wrap_v > (uint32_t)NT_WRAP_MIRRORED_REPEAT) {
         out.wrap_v = NT_WRAP_CLAMP_TO_EDGE;
     }
-    if ((uint32_t)out.compare_func > (uint32_t)NT_COMPARE_LESS) {
+    if ((uint32_t)out.compare_func > (uint32_t)NT_COMPARE_NEVER) {
         out.compare_func = NT_COMPARE_NONE;
     }
     return out;
@@ -1954,7 +1954,7 @@ static inline nt_sampler_desc_t sampler_normalize(const nt_sampler_desc_t *desc)
 static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
     return (uint32_t)desc->min_filter | ((uint32_t)desc->mag_filter << 3) | ((uint32_t)desc->wrap_u << 4) | ((uint32_t)desc->wrap_v << 6) | ((uint32_t)desc->compare_func << 8);
 }
-_Static_assert(NT_FILTER_LINEAR_MIPMAP_LINEAR < 8 && NT_FILTER_LINEAR < 2 && NT_WRAP_MIRRORED_REPEAT < 4 && NT_COMPARE_LESS < 4,
+_Static_assert(NT_FILTER_LINEAR_MIPMAP_LINEAR < 8 && NT_FILTER_LINEAR < 2 && NT_WRAP_MIRRORED_REPEAT < 4 && NT_COMPARE_NEVER < 16,
                "sampler_pack_key field widths — a new enum value would overlap the next field");
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — cache hit / miss / lazy-recreate paths
@@ -1963,7 +1963,7 @@ static nt_gfx_result_t make_sampler(const nt_sampler_desc_t *desc, nt_sampler_t 
     /* Unsigned: nt_compare_func_t and nt_texture_filter_t are signed under the
      * MSVC ABI, where a negative cast would pass an upper-bound-only check. */
     NT_ASSERT((uint32_t)desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
-    NT_ASSERT((uint32_t)desc->compare_func <= NT_COMPARE_LESS && "sampler compare_func out of range");
+    NT_ASSERT((uint32_t)desc->compare_func <= NT_COMPARE_NEVER && "sampler compare_func out of range");
 
     nt_sampler_desc_t normalized = sampler_normalize(desc);
     uint32_t key = sampler_pack_key(&normalized);

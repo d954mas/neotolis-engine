@@ -141,7 +141,7 @@ static uint32_t s_fake_last_update_buffer_size;
 static uint32_t s_fake_last_instance_offset;
 static uint32_t s_fake_last_instance_vertex_input; /* recorder: last VI handle an instanced bind named */
 static uint32_t s_fake_last_instance_buffer;       /* recorder: instance buffer backend of the last instanced bind */
-static uint32_t s_fake_vi_instance_buffer[1024];   /* instance buffer backend per vertex-input slot, set at create */
+static uint32_t s_fake_vi_instance_buffer[8192];   /* instance buffer backend per vertex-input slot, set at create; covers a scene with one per draw key */
 static nt_blend_state_t s_fake_last_pipeline_blend;
 static uint32_t s_fake_vertex_input_create_count;
 static uint32_t s_fake_bind_vertex_input_count;

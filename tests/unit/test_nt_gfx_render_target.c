@@ -650,6 +650,17 @@ static void test_comparison_state_participates_in_sampler_dedupe(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(b.id, c.id);
     TEST_ASSERT_NOT_EQUAL_UINT32(a.id, c.id);
     TEST_ASSERT_EQUAL_UINT32(b.id, nt_gfx_make_sampler(&leq).id);
+
+    /* Every comparison keys its own sampler: no lane truncation folds two together. */
+    uint32_t ids[NT_COMPARE_NEVER + 1];
+    for (uint32_t f = 0; f <= NT_COMPARE_NEVER; f++) {
+        nt_sampler_desc_t desc = plain;
+        desc.compare_func = (nt_compare_func_t)f;
+        ids[f] = nt_gfx_make_sampler(&desc).id;
+        for (uint32_t g = 0; g < f; g++) {
+            TEST_ASSERT_NOT_EQUAL_UINT32(ids[g], ids[f]);
+        }
+    }
 }
 
 /* Pack headers cast raw bytes into these enums, so an out-of-range value has to

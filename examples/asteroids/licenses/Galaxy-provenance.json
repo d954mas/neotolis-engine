@@ -1,0 +1,79 @@
+{
+  "checked_utc": "2026-10-09T06:09:00Z",
+  "source_repository": "https://github.com/MethanePowered/MethaneAsteroids",
+  "source_commit": "16a5751e835dd0776d976e51438604dc8de27d16",
+  "original_addition_commit": "https://github.com/MethanePowered/MethaneKit/commit/2d8028d770d809ddea41efa29aa26898e8e53184",
+  "downsize_commit": "https://github.com/MethanePowered/MethaneKit/commit/6893b4bccda970cdf78a01b5617a2d3a5a7990fe",
+  "demo_credit": "Evgeny Gorodetskiy",
+  "upstream_declared_license": "Apache-2.0",
+  "underlying_panorama_identification": {
+    "source": "https://www.eso.org/public/images/eso0932a/",
+    "image": "https://cdn.eso.org/images/large/eso0932a.jpg",
+    "credit": "ESO/S. Brunier",
+    "license": "CC-BY-4.0",
+    "rights": "https://www.eso.org/public/outreach/copyright/",
+    "basis": "Independent geometric image comparison; no explicit upstream ESO credit was found. Correlations are similarities, not probabilities or evidence of an exact byte match.",
+    "comparisons": [
+      {
+        "face": "PositiveX.jpg",
+        "grayscale_correlation": 0.9855873403582479,
+        "yaw_degrees": -32.874811208394505,
+        "pitch_degrees": -1.628559634258187,
+        "roll_degrees": -0.23072269831583558,
+        "fov_scale": [
+          0.996857192818852,
+          0.8193874059851225
+        ]
+      },
+      {
+        "face": "NegativeZ.jpg",
+        "grayscale_correlation": 0.9765049709469031,
+        "yaw_degrees": 57.11972795398961,
+        "pitch_degrees": -1.628322813757153,
+        "roll_degrees": 0.2079708309836339,
+        "fov_scale": [
+          0.9941245965927131,
+          0.8230581050053594
+        ]
+      }
+    ]
+  },
+  "files": [
+    {
+      "name": "NegativeX.jpg",
+      "size": 798751,
+      "git_blob_sha1": "4ace6722c93b5bb51c031f7775e216786e0b89b0",
+      "sha256": "fcf4fa1d29f32768bbffc34bcc6ffc703c1318acb29d9e35a248b201ee506fb3"
+    },
+    {
+      "name": "NegativeY.jpg",
+      "size": 622498,
+      "git_blob_sha1": "f5212b2fd03586f08d6a09e80c88dd4b5e159934",
+      "sha256": "0a39f716b1bce3f28e54388cac6ec5eb0c7d7dd0d10b62c633140f31bab1348c"
+    },
+    {
+      "name": "NegativeZ.jpg",
+      "size": 807250,
+      "git_blob_sha1": "baef864755d9edb6165163c4949300e6df08658e",
+      "sha256": "ac9b1dbb71462e79cb686c83784e8e7201bce2859bacb2adb3ae77e5531b2ecf"
+    },
+    {
+      "name": "PositiveX.jpg",
+      "size": 756789,
+      "git_blob_sha1": "d0be2868a941e76239f871c42da57667f1398fc4",
+      "sha256": "b2d0caa3057465ac5f806e0594f4c930508d69363967f4f52d33748eb5a57ff8"
+    },
+    {
+      "name": "PositiveY.jpg",
+      "size": 610868,
+      "git_blob_sha1": "3b4507e1006af1b655f44072f591ba8f60d14658",
+      "sha256": "8a63be89aa8d267d9a474a7b3a909ce1125b710e6890dcd5a2274d92c30709d3"
+    },
+    {
+      "name": "PositiveZ.jpg",
+      "size": 750837,
+      "git_blob_sha1": "e99c048e31a28d63ff75bcf4c868e51f30d66b3b",
+      "sha256": "59f8c2f88966bf7586a36dd0bcba8d5662280eb4a1d39daaac950f911d8761f3"
+    }
+  ]
+}

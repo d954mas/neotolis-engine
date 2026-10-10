@@ -567,6 +567,16 @@ if(NOT EMSCRIPTEN)
     )
     nt_setup_test_target(test_sponza_program_assignment)
 
+    # Exercise the asteroid demo's real generation, LOD selection, instance packing and submission.
+    add_executable(test_asteroids_scene unit/test_asteroids_scene.c)
+    target_link_libraries(test_asteroids_scene PRIVATE
+        nt_text_renderer nt_font nt_app_stub nt_input_stub nt_window_stub
+        nt_ui nt_atlas nt_sprite_renderer nt_mem_scratch
+        nt_resource nt_material nt_hash nt_math nt_time nt_shared nt_core nt_platform
+        nt_gfx_fake nt_clipboard_stub nt_basisu_transcoder_stub nt_meshwire_stub nt_http_stub nt_fs_stub nt_log_stub unity
+    )
+    nt_setup_test_target(test_asteroids_scene)
+
     # Exercise the skeletal showcase's real game-owned mixing controller.
     add_executable(test_skeletal_showcase_mixing unit/test_skeletal_showcase_mixing.c unit/test_helpers/nt_assert_trap.c)
     target_include_directories(test_skeletal_showcase_mixing PRIVATE

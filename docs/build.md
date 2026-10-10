@@ -397,3 +397,20 @@ specified in the UI chapters linked above.
 - **Windows spawn exhaustion:** random Emscripten subprocess failures with
   `3221225794` (`0xC0000142`) can be transient during parallel links. Retry once
   before investigating further.
+
+## Asteroids
+
+The [Asteroids example](../examples/asteroids/README.md) generates its meshes,
+noise textures and scene at startup; its packs hold only shaders, the font, the
+UI atlas, and Basis-compressed Mars and sky (about 3.4 MiB).
+
+```bash
+cmake --preset native-release -DNT_GFX_GPU_TIMING_ENABLED=ON -DNT_SKIP_EXAMPLE_PACKS=sponza
+cmake --build --preset native-release --target asteroids
+(cd build/examples/asteroids/native-release && ./asteroids --complexity 8)
+```
+
+The default complexity is 1 (2,000 asteroids); 8 is the original screenshot's
+35,000 and 9 the 50,000 maximum. GPU timing is opt-in, as above. Attribution is
+copied beside both native and web outputs; retain the Methane Asteroids Apache
+notices and the Mars/Galaxy credits in CREDITS.md when distributing the demo.

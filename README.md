@@ -12,6 +12,13 @@ packed offline so the runtime carries no parsers. The full statement with its
 engine/game ownership boundary is
 [docs/spec/core/principles.md](docs/spec/core/principles.md).
 
+## Examples
+
+[Asteroids](examples/asteroids/README.md): a Neotolis port of
+[Evgeny Gorodetskiy’s Methane Asteroids](https://github.com/MethanePowered/MethaneAsteroids),
+with 1,000–50,000 objects, procedural shapes and textures in four LODs, and grouped indexed instancing.
+[Original demo and asset credits](examples/asteroids/CREDITS.md).
+
 ## Prerequisites
 
 - **CMake** 3.25+

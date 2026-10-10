@@ -1,0 +1,46 @@
+set(AST_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/examples/asteroids/${NT_PRESET_NAME}")
+set(AST_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/asteroids")
+add_executable(asteroids main.c)
+target_link_libraries(asteroids PRIVATE nt_core nt_platform nt_app nt_input nt_window nt_math nt_log nt_time nt_resource nt_material nt_shared nt_hash nt_font nt_text_renderer
+    nt_ui nt_atlas nt_sprite_renderer nt_mem_scratch nt_clipboard)
+if(EMSCRIPTEN)
+    target_link_libraries(asteroids PRIVATE nt_platform_web nt_gfx nt_http nt_basisu_transcoder nt_meshwire_stub)
+else()
+    target_link_libraries(asteroids PRIVATE nt_gfx nt_http_stub nt_fs nt_basisu_transcoder nt_meshwire_stub)
+endif()
+nt_set_warning_flags(asteroids)
+nt_set_sanitizer_flags(asteroids)
+set_target_properties(asteroids PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${AST_OUTPUT_DIR}")
+if(NOT EMSCRIPTEN)
+    add_executable(build_asteroids_packs build_packs.c)
+    target_link_libraries(build_asteroids_packs PRIVATE nt_builder nt_log nt_meshwire)
+    target_compile_definitions(build_asteroids_packs PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_set_static_crt(build_asteroids_packs)
+    nt_set_warning_flags(build_asteroids_packs)
+    nt_set_sanitizer_flags(build_asteroids_packs)
+    set_target_properties(build_asteroids_packs PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${AST_OUTPUT_DIR}")
+endif()
+nt_example_packs(NAME asteroids TARGET asteroids BUILDER build_asteroids_packs
+    PACK_DIR "${AST_PACK_DIR}" ASSETS_DIR "${AST_OUTPUT_DIR}/assets"
+    PACKS asteroids_core.ntpack asteroids_space.ntpack asteroids_ui.ntpack
+    INPUT_DIRS raw shaders "${NT_ENGINE_ROOT}/assets/shaders")
+if(EMSCRIPTEN AND NT_CDN_URL)
+    target_compile_definitions(asteroids PRIVATE NT_CDN_URL="${NT_CDN_URL}")
+endif()
+nt_configure_shell(asteroids TITLE "Asteroids - Neotolis Engine" FULLSCREEN_BUTTON)
+if(EMSCRIPTEN)
+    # Emscripten 4.0.19's fullscreen restore helper omits this dependency;
+    # keep Closure enabled and explicitly link the existing SDK helper.
+    target_link_options(asteroids PRIVATE "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['$getFullscreenElement']")
+    target_link_options(asteroids PRIVATE "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/web_controls.js")
+    set_property(TARGET asteroids APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web_controls.js")
+endif()
+
+# Keep attribution beside both native and web distributions, not just in source.
+configure_file(CREDITS.md "${AST_OUTPUT_DIR}/CREDITS.md" COPYONLY)
+configure_file(README.md "${AST_OUTPUT_DIR}/README.md" COPYONLY)
+file(GLOB AST_LICENSES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/licenses/*")
+foreach(AST_LICENSE IN LISTS AST_LICENSES)
+    get_filename_component(AST_LICENSE_NAME "${AST_LICENSE}" NAME)
+    configure_file("${AST_LICENSE}" "${AST_OUTPUT_DIR}/licenses/${AST_LICENSE_NAME}" COPYONLY)
+endforeach()

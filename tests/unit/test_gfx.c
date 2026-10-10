@@ -1276,13 +1276,18 @@ static uint32_t key_variants(uint32_t program_id, nt_gfx_pipeline_key_t *out) {
     VARIANT(d.blend.constant_color[2] = 0.5F);
     VARIANT(d.blend.constant_color[3] = 0.5F);
     VARIANT(d.depth_func = NT_DEPTH_ALWAYS);
+    VARIANT(d.depth_func = NT_DEPTH_GEQUAL);
+    VARIANT(d.depth_func = NT_DEPTH_GREATER);
+    VARIANT(d.depth_func = NT_DEPTH_EQUAL);
+    VARIANT(d.depth_func = NT_DEPTH_NOTEQUAL);
+    VARIANT(d.depth_func = NT_DEPTH_NEVER);
     VARIANT(d.polygon_offset = true; d.polygon_offset_factor = 2.0F);
     VARIANT(d.polygon_offset = true; d.polygon_offset_units = 2.0F);
 #undef VARIANT
     return n;
 }
 
-#define KEY_VARIANT_COUNT 21
+#define KEY_VARIANT_COUNT 26
 
 void test_gfx_pipeline_key_neighbouring_programs_never_alias(void) {
     nt_gfx_pipeline_key_t keys[4 * KEY_VARIANT_COUNT];
@@ -1295,6 +1300,26 @@ void test_gfx_pipeline_key_neighbouring_programs_never_alias(void) {
     for (uint32_t i = 0; i < n; i++) {
         for (uint32_t j = 0; j < i; j++) {
             TEST_ASSERT_FALSE_MESSAGE(nt_gfx_pipeline_key_equal(&keys[i], &keys[j]), "two distinct descs share a key");
+        }
+    }
+}
+
+void test_gfx_pipeline_key_preserves_depth_lane_values(void) {
+    static const nt_depth_func_t functions[] = {NT_DEPTH_LESS, NT_DEPTH_LEQUAL, NT_DEPTH_ALWAYS, NT_DEPTH_GEQUAL, NT_DEPTH_GREATER, NT_DEPTH_EQUAL, NT_DEPTH_NOTEQUAL, NT_DEPTH_NEVER};
+    for (uint32_t enabled = 0; enabled < 2; enabled++) {
+        for (uint32_t depth = 0; depth < 8; depth++) {
+            const nt_pipeline_desc_t desc = {
+                .program.id = UINT32_C(0xABCD1234),
+                .depth_test = enabled != 0,
+                .depth_write = true,
+                .depth_func = functions[depth],
+                .cull_mode = 2,
+            };
+            const nt_gfx_pipeline_key_t key = nt_gfx_pipeline_key(&desc);
+            const uint64_t expected = UINT64_C(0xABCD1234) | (uint64_t)enabled << 32 | UINT64_C(1) << 33 | (uint64_t)depth << 36 | UINT64_C(2) << 39;
+            TEST_ASSERT_EQUAL_UINT64(expected, key.bits);
+            const uint32_t zero_payload[6] = {0};
+            TEST_ASSERT_EQUAL_UINT32_ARRAY(zero_payload, key.float_bits, 6);
         }
     }
 }
@@ -1347,7 +1372,7 @@ void test_gfx_pipeline_key_asserts_out_of_range_lanes(void) {
     d.cull_mode = 3;
     EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
     d = key_base_desc(3);
-    const int bad_depth_func = NT_DEPTH_ALWAYS + 1; /* memcpy: an enum cast of a literal trips the analyzer */
+    const int bad_depth_func = NT_DEPTH_NEVER + 1; /* memcpy: an enum cast of a literal trips the analyzer */
     memcpy(&d.depth_func, &bad_depth_func, sizeof(d.depth_func));
     EXPECT_ASSERT((void)nt_gfx_pipeline_key(&d));
     d = key_base_desc(3);
@@ -3858,6 +3883,7 @@ int main(void) {
     RUN_TEST(test_gfx_pipeline_rejects_invalid_alpha_blend_operation);
     RUN_TEST(test_gfx_pipeline_rejects_invalid_blend_constant_color);
     RUN_TEST(test_gfx_pipeline_key_neighbouring_programs_never_alias);
+    RUN_TEST(test_gfx_pipeline_key_preserves_depth_lane_values);
     RUN_TEST(test_gfx_pipeline_key_canonicalizes_disabled_blend_and_offset);
     RUN_TEST(test_gfx_pipeline_key_ignores_label_and_splits_on_float_payloads);
     RUN_TEST(test_gfx_pipeline_key_asserts_out_of_range_lanes);
