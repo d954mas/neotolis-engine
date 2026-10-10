@@ -126,6 +126,7 @@ then exit.
 
 - 0–9 or `[` / `]`: complexity
 - Ctrl+P: pause animation; L: LOD colors
+- V: 10-second fly-through for recording (complexity 1 to 9, pull back, dive into the ring)
 - WASD / Page Up / Page Down: move the camera; arrow keys: rotate it
 - Left drag: orbit; middle drag: pan; right drag: rotate the light
 - Wheel or `-` / `=`: zoom; `,` / `.`: roll

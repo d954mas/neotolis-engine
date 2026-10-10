@@ -173,6 +173,8 @@ _Static_assert(sizeof(asteroid_instance_t) == 80, "Asteroid vertex attributes AB
 static const camera_orientation_t s_initial_camera = {{-110.0F, 75.0F, 210.0F}, {0.0F, -60.0F, 25.0F}, {0.0F, 1.0F, 0.0F}};
 static const camera_orientation_t s_initial_light = {{-100.0F, 120.0F, 0.0F}, {0.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}};
 static camera_orientation_t s_camera, s_light;
+/* Fly-through start in wall-clock seconds; negative while it is off. */
+static double s_tour_begin = -1.0;
 static camera_drag_t s_camera_drag[NT_INPUT_MAX_POINTERS], s_light_drag[NT_INPUT_MAX_POINTERS];
 static float s_key_elapsed[NT_KEY_COUNT];
 static bool s_key_active[NT_KEY_COUNT];
@@ -1418,7 +1420,7 @@ static void ui_help(void) {
                 &s_ui_body);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "KEYBOARD SHORTCUTS", &s_ui_section);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2),
-                "0-9 / [ ]   Load complexity\nCtrl+P      Pause animations\nL           LOD colors\n; / '       Coarser / finer LOD\nF1 / F2     Help / CLI options\nF3          Collapse controls\nF4 "
+                "0-9 / [ ]   Load complexity\nCtrl+P      Pause animations\nL           LOD colors\nV           Fly-through (10 s)\nF1 / F2     Help / CLI options\nF3          Collapse controls\nF4 "
                 "         Hide all overlays\nCtrl+F      Fullscreen (native)\nWeb         Fullscreen button\nCtrl+Q      Quit (native)\nEscape      Close modal / quit",
                 &s_ui_body);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "COMMAND LINE", &s_ui_section);
@@ -1701,6 +1703,44 @@ static void drag_camera(camera_orientation_t *camera, camera_drag_t *drag, const
     }
 }
 
+#define AST_TOUR_SECONDS 10.0F
+
+static float tour_ease(float x) {
+    x = glm_clamp(x, 0.0F, 1.0F);
+    return x * x * x * (x * (x * 6.0F - 15.0F) + 10.0F);
+}
+
+/* A scripted camera for recording: it rises and pulls back while the count
+ * grows to 50,000, then dives into the ring. Wall-clock time keeps the path
+ * speed constant when a level change costs a frame. */
+static void tour_update(void) {
+    if (s_tour_begin < 0) {
+        return;
+    }
+    const float t = (float)(nt_time_now() - s_tour_begin);
+    if (t > AST_TOUR_SECONDS) {
+        s_tour_begin = -1.0;
+        return;
+    }
+    static const uint32_t levels[] = {1, 3, 5, 7, 9};
+    s_requested_level = levels[(uint32_t)fminf(t, 4.0F)];
+    s_ui_level = (int)s_requested_level;
+    const float rise = tour_ease(t / 5.5F);
+    const float dive = tour_ease((t - 5.5F) / 4.5F);
+    const float yaw = glm_rad(-30.0F + (70.0F * tour_ease(t / AST_TOUR_SECONDS)));
+    const float pitch = glm_rad(30.0F + (15.0F * rise) - (39.0F * dive));
+    const float distance = 250.0F + (150.0F * rise) - (250.0F * dive);
+    s_camera.aim[0] = 0;
+    s_camera.aim[1] = -30.0F + (30.0F * dive);
+    s_camera.aim[2] = 0;
+    s_camera.eye[0] = distance * cosf(pitch) * sinf(yaw);
+    s_camera.eye[1] = s_camera.aim[1] + (distance * sinf(pitch));
+    s_camera.eye[2] = distance * cosf(pitch) * cosf(yaw);
+    s_camera.up[0] = 0;
+    s_camera.up[1] = 1.0F;
+    s_camera.up[2] = 0;
+}
+
 static void zoom_camera(float factor) {
     float direction[3];
     glm_vec3_sub(s_camera.aim, s_camera.eye, direction);
@@ -1853,6 +1893,9 @@ static void handle_input(float dt) {
     }
     if (alt && nt_input_key_is_pressed(NT_KEY_R)) {
         reset_camera_input(false);
+    }
+    if (!ctrl && !alt && nt_input_key_is_pressed(NT_KEY_V)) {
+        s_tour_begin = s_tour_begin < 0 ? nt_time_now() : -1.0;
     }
 #ifndef NT_PLATFORM_WEB
     if (ctrl && nt_input_key_is_pressed(NT_KEY_F)) {
@@ -2122,6 +2165,7 @@ static void frame(void) {
     }
     build_ui();
     handle_input(g_nt_app.dt);
+    tour_update();
     if (ready && s_ready && !s_paused) {
         s_elapsed += (double)g_nt_app.dt;
     }
