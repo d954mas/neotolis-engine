@@ -1313,7 +1313,7 @@ static void ui_settings(float width) {
     const complexity_t *preview = &s_complexities[s_ui_level];
     (void)snprintf(text, sizeof(text), "COMPLEXITY  %d / 9", s_ui_level);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), text, &s_ui_section);
-    (void)snprintf(text, sizeof(text), "%u asteroids\n%u unique meshes / %u textures", preview->instances, preview->unique_meshes, preview->textures);
+    (void)snprintf(text, sizeof(text), "%u asteroids\n%u unique meshes", preview->instances, preview->unique_meshes);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), text, &s_ui_body);
     s_ui_slider.track_w = width - 48;
     /* A level change only regenerates instances, so the slider applies as it moves. */
@@ -1383,8 +1383,8 @@ static void ui_statistics(void) {
     ui_metric("Generation (startup)", s_generated ? value : "pending");
     (void)snprintf(value, sizeof(value), "%u", s_complexities[s_level].instances);
     ui_metric("Asteroids", value);
-    (void)snprintf(value, sizeof(value), "%u / %u", s_complexities[s_level].unique_meshes, s_complexities[s_level].textures);
-    ui_metric("Meshes / textures", value);
+    (void)snprintf(value, sizeof(value), "%u", s_complexities[s_level].unique_meshes);
+    ui_metric("Unique meshes", value);
     ui_metric("Mesh subdivisions", "4");
     for (uint32_t i = 0; i < AST_SUBDIVISIONS; i++) {
         char label[16];
@@ -1408,7 +1408,7 @@ static void ui_statistics(void) {
 static void ui_help(void) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "ABOUT THIS DEMO", &s_ui_section);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2),
-                "Rendering stress test: every asteroid animates and draws each frame, no culling.\nUp to 1000 shapes x 4 LODs, 50 textures. One instanced draw per shape+LOD "
+                "Rendering stress test: every asteroid animates and draws each frame, no culling.\nUp to 1000 shapes x 4 LODs. One instanced draw per shape+LOD "
                 "pair: DC ~3000 at complexity 9.\nPhones are limited by draw submission, not asteroid count.",
                 &s_ui_body);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), "CONTROLS", &s_ui_section);
