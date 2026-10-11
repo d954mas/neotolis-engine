@@ -405,7 +405,8 @@ specified in the UI chapters linked above.
   buffers, not heap allocations abandoned by the jump.
 - **Shared display:** ctest runs in parallel locally and in CI. Tests that touch
   the display carry `RESOURCE_LOCK gl_display` (`cmake/test_target.cmake`), so
-  they never overlap on the CI xvfb display; add a new display test to that list.
+  they never overlap on the CI xvfb display: every `*_native` test and
+  `test_clipboard`. Name a new display test `*_native`.
 - **Assertion tests:** suites using `NT_TEST_EXPECT_ASSERT` require FULL (2),
   selected by `native-debug` and `native-release-test`. TRAP (1) bypasses
   the test handler. Configure the linked engine and tests together; a target-local
