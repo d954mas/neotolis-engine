@@ -13,7 +13,9 @@ static NtBuilderContext *start_pack(const char *directory, const char *name) {
     NtBuilderContext *ctx = nt_builder_start_pack(path);
     NT_BUILD_ASSERT(ctx);
     nt_builder_set_header_dir(ctx, "examples/asteroids/generated");
-    nt_builder_set_threads(ctx, 2);
+    (void)snprintf(path, sizeof(path), "%s/_cache", directory);
+    nt_builder_set_cache_dir(ctx, path);
+    nt_builder_set_threads_auto(ctx);
     return ctx;
 }
 

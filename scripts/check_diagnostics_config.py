@@ -2,6 +2,8 @@
 """Check diagnostics macros, required defines, and external CMake consumers."""
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -10,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,11 +37,19 @@ DEFINES = {
 }
 
 
+def parallel(tasks):
+    """Run independent checks concurrently; raise the first failure in submission order."""
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+        for future in [pool.submit(task) for task in tasks]:
+            future.result()
+
+
 class Checks:
     def __init__(self, args, output):
         self.args = args
         self.output = output
         self.count = 0
+        self.count_lock = threading.Lock()
         self.cc = [args.cc, "-std=c17", "-O0", "-g0", "-Werror", "-Wformat=2",
                    "-I", str(ROOT / "engine"), "-I", str(ROOT / "shared" / "include")]
 
@@ -52,7 +63,8 @@ class Checks:
                 raise RuntimeError(f"{label}: unexpected failure\n{result.stdout[-6000:]}")
         elif result.returncode == 0 or not re.search(expected_error, result.stdout, re.I | re.S):
             raise RuntimeError(f"{label}: expected failure /{expected_error}/\n{result.stdout[-6000:]}")
-        self.count += 1
+        with self.count_lock:
+            self.count += 1
         return result.stdout
 
     def compile(self, label, source, defines, expected_error=None):
@@ -65,7 +77,8 @@ class Checks:
 
     def macros(self):
         source = (FIXTURE / "log_calls.c").read_text(encoding="utf-8")
-        for floor in range(4):
+
+        def check_floor(floor):
             obj = self.compile(f"macros-{floor}", source, {"NT_LOG_MIN_LEVEL": floor})
             data = obj.read_bytes()
             for level, name in enumerate(LEVELS):
@@ -81,10 +94,12 @@ class Checks:
             for symbol in ("diagnostics_argument", "nt_log_write", "nt_log_write_unique"):
                 if bool(re.search(rf"\b{symbol}\b", undefined)) != (floor < 3):
                     raise RuntimeError(f"floor {floor}: incorrect reference to {symbol}")
+
+        parallel(partial(check_floor, floor) for floor in range(4))
         print("PASS: all 18 macro forms at floors 0..3; exact marker/latch/reference presence")
 
     def headers(self):
-        self.compile("resource-header-without-timing", '#include "resource/nt_resource.h"\n', DEFINES)
+        checks = [partial(self.compile, "resource-header-without-timing", '#include "resource/nt_resource.h"\n', DEFINES)]
         headers = {
             "NT_ASSERT_MODE": "core/nt_assert.h",
             "NT_SKELETAL_CHECKS": "skeletal/nt_skeletal.h",
@@ -102,25 +117,25 @@ class Checks:
         }
         for define, header in headers.items():
             source = f'#include "{header}"\n'
-            self.compile(f"present-{define}", source, DEFINES)
+            checks.append(partial(self.compile, f"present-{define}", source, DEFINES))
             missing = dict(DEFINES)
             del missing[define]
-            self.compile(f"missing-{define}", source, missing, rf"error:[^\n]*{define}[^\n]*defined")
+            checks.append(partial(self.compile, f"missing-{define}", source, missing, rf"error:[^\n]*{define}[^\n]*defined"))
         for mode in (1, 2):
-            for checks in (0, 1):
+            for skeletal in (0, 1):
                 source = ('#include "skeletal/nt_skeletal.h"\n'
                           f'_Static_assert(NT_ASSERT_MODE == {mode}, "explicit assert mode");\n'
-                          f'_Static_assert(NT_SKELETAL_CHECKS == {checks}, "explicit skeletal checks");\n')
+                          f'_Static_assert(NT_SKELETAL_CHECKS == {skeletal}, "explicit skeletal checks");\n')
                 for build_define in ("NT_DEBUG", "NDEBUG"):
-                    defines = dict(DEFINES, NT_ASSERT_MODE=mode, NT_SKELETAL_CHECKS=checks)
+                    defines = dict(DEFINES, NT_ASSERT_MODE=mode, NT_SKELETAL_CHECKS=skeletal)
                     defines[build_define] = 1
-                    self.compile(f"asserts-{mode}-skeletal-{checks}-{build_define}", source, defines)
+                    checks.append(partial(self.compile, f"asserts-{mode}-skeletal-{skeletal}-{build_define}", source, defines))
         for mode in (0, -1, 3):
-            self.compile(f"invalid-asserts-{mode}", '#include "core/nt_assert.h"\n',
-                         {"NT_ASSERT_MODE": mode}, r"error:[^\n]*NT_ASSERT_MODE must be")
+            checks.append(partial(self.compile, f"invalid-asserts-{mode}", '#include "core/nt_assert.h"\n',
+                                  {"NT_ASSERT_MODE": mode}, r"error:[^\n]*NT_ASSERT_MODE must be"))
         for floor in (-1, 4):
-            self.compile(f"invalid-floor-{floor}", '#include "log/nt_log.h"\n',
-                         {"NT_LOG_MIN_LEVEL": floor}, r"error:[^\n]*NT_LOG_MIN_LEVEL must be in 0\.\.3")
+            checks.append(partial(self.compile, f"invalid-floor-{floor}", '#include "log/nt_log.h"\n',
+                                  {"NT_LOG_MIN_LEVEL": floor}, r"error:[^\n]*NT_LOG_MIN_LEVEL must be in 0\.\.3"))
         for floor in (0, 3):
             for level in LEVELS:
                 for suffix in ("", "_ONCE", "_UNIQUE"):
@@ -129,10 +144,11 @@ class Checks:
                     # ONCE is a statement macro, so its positive control must be a statement.
                     if suffix == "_ONCE":
                         source = f'#include "log/nt_log.h"\nvoid probe(void) {{ {macro}("domain"); }}\n'
-                    self.compile(f"domain-missing-{floor}-{macro}", source,
-                                 {"NT_LOG_MIN_LEVEL": floor}, r"NT_LOG_DOMAIN not defined")
-                    self.compile(f"domain-present-{floor}-{macro}", '#define NT_LOG_DOMAIN "probe"\n' + source,
-                                 {"NT_LOG_MIN_LEVEL": floor})
+                    checks.append(partial(self.compile, f"domain-missing-{floor}-{macro}", source,
+                                          {"NT_LOG_MIN_LEVEL": floor}, r"NT_LOG_DOMAIN not defined"))
+                    checks.append(partial(self.compile, f"domain-present-{floor}-{macro}", '#define NT_LOG_DOMAIN "probe"\n' + source,
+                                          {"NT_LOG_MIN_LEVEL": floor}))
+        parallel(checks)
         print("PASS: required configuration, explicit assert/skeletal modes under NT_DEBUG/NDEBUG, invalid floors and missing domains")
 
     def cmake(self):
@@ -158,7 +174,8 @@ class Checks:
                    "NT_METRICS_ENABLED": "ON", "NT_LOG_RING_ENABLED": "ON"},
         }
         policies["trap"] = dict(policies["on"], NT_ASSERT_MODE="1", NT_UI_CHECKS="ON")
-        for name, settings in policies.items():
+
+        def check_policy(name, settings):
             build = work / name
             args = [f"-D{k}={v}" for k, v in settings.items()]
             output = self.command(f"configure-{name}", common + ["-S", str(source), "-B", str(build), f"-DNT_PRESET_NAME=diagnostics-{name}"] + args)
@@ -184,14 +201,13 @@ class Checks:
                     raise RuntimeError("NONE logger retains runtime logger storage")
                 if re.search(r"printf|nt_hash|malloc|calloc", undefined):
                     raise RuntimeError("NONE logger retains formatting/hash/allocation references")
+
         defaults = {"NT_ASSERT_MODE": "1", "NT_UI_CHECKS": "OFF", "NT_SKELETAL_CHECKS": "OFF", "NT_GFX_NATIVE_GL_DEBUG": "OFF",
                     "NT_LOG_RING_ENABLED": "OFF", "NT_METRICS_ENABLED": "OFF", "NT_INTROSPECT_ENABLED": "OFF",
                     "NT_INTROSPECT_WRITE_ENABLED": "OFF", "NT_HTTP_CURL": "OFF",
                     "NT_GFX_CAPTURE_ENABLED": "OFF"}
-        for name, project, build_type, settings in (
-                ("defaults-debug", ROOT, "Debug", {}),
-                ("defaults-release-ui", source, "Release", {"NT_UI_DEBUG_TOOLS": "ON", "NT_METRICS_ENABLED": "ON"}),
-                ("defaults-debug-introspect", source, "Debug", {"NT_INTROSPECT_ENABLED": "ON"})):
+
+        def check_defaults(name, project, build_type, settings):
             build = work / name
             self.command(f"configure-{name}", common + ["-S", str(project), "-B", str(build), f"-DCMAKE_BUILD_TYPE={build_type}"]
                          + [f"-D{k}={v}" for k, v in settings.items()])
@@ -199,6 +215,12 @@ class Checks:
             for key, value in dict(defaults, **settings).items():
                 if not re.search(rf"^{key}:[^=\n]+={value}$", cache, re.M):
                     raise RuntimeError(f"{name}: expected independent {key}={value}")
+
+        checks = [partial(check_policy, name, settings) for name, settings in policies.items()]
+        checks += [partial(check_defaults, *row) for row in (
+            ("defaults-debug", ROOT, "Debug", {}),
+            ("defaults-release-ui", source, "Release", {"NT_UI_DEBUG_TOOLS": "ON", "NT_METRICS_ENABLED": "ON"}),
+            ("defaults-debug-introspect", source, "Debug", {"NT_INTROSPECT_ENABLED": "ON"}))]
         invalid = [
             ("ui-input", {"NT_DEVAPI_GROUP_INPUT": "OFF"}, r"NT_DEVAPI_GROUP_UI requires NT_DEVAPI_GROUP_INPUT"),
             ("ui-debug", {}, r"NT_DEVAPI_GROUP_UI requires NT_UI_DEBUG_TOOLS"),
@@ -208,14 +230,15 @@ class Checks:
         ]
         for name, settings, expected in invalid:
             build = work / f"invalid-{name}"
-            self.command(f"configure-invalid-{name}", common + ["-S", str(source), "-B", str(build), "-DNT_DEVAPI_ENABLED=ON"]
-                         + [f"-D{k}={v}" for k, v in settings.items()], expected)
+            checks.append(partial(self.command, f"configure-invalid-{name}", common + ["-S", str(source), "-B", str(build), "-DNT_DEVAPI_ENABLED=ON"]
+                                  + [f"-D{k}={v}" for k, v in settings.items()], expected))
         for value in ("-1", "4", "WARN", "1x"):
-            self.command(f"configure-floor-{value}", common + ["-S", str(source), "-B", str(work / f"invalid-floor-{value}"),
-                         f"-DNT_LOG_MIN_LEVEL={value}"], r"NT_LOG_MIN_LEVEL must be 0")
+            checks.append(partial(self.command, f"configure-floor-{value}", common + ["-S", str(source), "-B", str(work / f"invalid-floor-{value}"),
+                                  f"-DNT_LOG_MIN_LEVEL={value}"], r"NT_LOG_MIN_LEVEL must be 0"))
         for index, value in enumerate(("", "0", "-1", "3", "FULL", "1x")):
-            self.command(f"configure-asserts-{index}", common + ["-S", str(source), "-B", str(work / f"invalid-asserts-{index}"),
-                         f"-DNT_ASSERT_MODE={value}"], r"NT_ASSERT_MODE must be")
+            checks.append(partial(self.command, f"configure-asserts-{index}", common + ["-S", str(source), "-B", str(work / f"invalid-asserts-{index}"),
+                                  f"-DNT_ASSERT_MODE={value}"], r"NT_ASSERT_MODE must be"))
+        parallel(checks)
         if work.parent != self.output.resolve():
             raise RuntimeError(f"refusing to remove build directory outside evidence: {work}")
         shutil.rmtree(work)

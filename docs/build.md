@@ -197,21 +197,21 @@ same files and never regenerate them. The examples require the default set
 `NT_SKIP_EXAMPLE_PACKS`:
 
 ```bash
-cmake --preset native-debug-test
-cmake --build --preset native-debug-test --target test_basisu_golden_produce
-ctest --preset native-debug-test --no-tests=error -R '^test_basisu_golden_produce$'
-skip="atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase;skeletal_showcase"
+cmake --preset native-debug
+cmake --build --preset native-debug --target test_basisu_golden_produce
+ctest --preset native-debug --no-tests=error -R '^test_basisu_golden_produce$'
+skip="asteroids;atlas;bunnymark;rtt_showcase;skeletal_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
 tests='^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
 # UASTC only (the smallest transcoder)
-cmake --preset native-debug-test -B build/_cmake/basisu-uastc-only -DNT_BASISU_HAS_ETC1S=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --preset native-debug -B build/_cmake/basisu-uastc-only -DNT_BASISU_HAS_ETC1S=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
 cmake --build build/_cmake/basisu-uastc-only --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
 ctest --test-dir build/_cmake/basisu-uastc-only --output-on-failure --no-tests=error -R "$tests"
 # ETC1S with ETC2 as the only compressed target
-cmake --preset native-debug-test -B build/_cmake/basisu-etc1s-etc2 -DNT_BASISU_HAS_UASTC=OFF -DNT_BASISU_HAS_BC7=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --preset native-debug -B build/_cmake/basisu-etc1s-etc2 -DNT_BASISU_HAS_UASTC=OFF -DNT_BASISU_HAS_BC7=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
 cmake --build build/_cmake/basisu-etc1s-etc2 --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
 ctest --test-dir build/_cmake/basisu-etc1s-etc2 --output-on-failure --no-tests=error -R "$tests"
 # Both codecs with BC7 as the only compressed target
-cmake --preset native-debug-test -B build/_cmake/basisu-bc7-only -DNT_BASISU_HAS_ETC2=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
+cmake --preset native-debug -B build/_cmake/basisu-bc7-only -DNT_BASISU_HAS_ETC2=OFF -DNT_BASISU_HAS_ASTC=OFF -DNT_SKIP_EXAMPLE_PACKS="$skip"
 cmake --build build/_cmake/basisu-bc7-only --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
 ctest --test-dir build/_cmake/basisu-bc7-only --output-on-failure --no-tests=error -R "$tests"
 ```
@@ -222,8 +222,8 @@ through the runner's software GL. A single admitted target leaves nothing of
 the per-codec order
 ([runtime formats](spec/assets/runtime-formats.md#texture-activation-ttex)) to
 observe, so only the default set and the UASTC-only row pin it: the browser
-fixture pins the first candidate, `test_gfx_basis_activate` the full orders. The native job runs
-the five suites per row, the browser job drives the two `basis fixture:` tests
+fixture pins the first candidate, `test_gfx_basis_activate` the full orders. The `native-variants`
+job runs the five suites per row, the browser job drives the two `basis fixture:` tests
 per row in wasm Debug, and the default wasm ctest runs `test_basisu_trimmed`
 with the production transcoder under Node. The default browser run still
 covers all smoke tests. The runner's SwiftShader reports every compressed cap;
@@ -248,7 +248,7 @@ the capacity and base pointer of the shared activation staging buffer.
 Basis coverage splits by backend. `test_gfx_basis_activate` drives the texture
 activator on the fake backend with the real transcoder and the builder's encoder.
 `test_nt_gfx_basis_native` (label `native`, `RESOURCE_LOCK gl_display`) uploads and
-samples real compressed storage through GL; the `native-debug-test` and
+samples real compressed storage through GL; the `native-debug` and
 `native-release-test` ctest runs both cover it. A format the host GPU lacks is
 reported as IGNORE in the Unity test log; ctest still counts the executable as
 passed, so read the log rather than the ctest summary for per-format coverage.
@@ -280,7 +280,8 @@ check with exit 2; remove it only after confirming the owner is dead.
 The default gate checks module composition, EM_JS_DEPS, doc links/spec-index
 coverage, CRT pins, the GL call funnel (`scripts/check_gl_calls.py`) and test registration; builds native-debug; runs ctest; and
 checks changed files with clang-format/clang-tidy. Changed headers trigger full
-tidy. The three atlas benchmark guards run when builder/atlas paths change, or
+tidy. The check scripts' own tests run when `scripts/`, `cmake/` or
+`tools/devapi/` change; CI runs them on every push. The three atlas benchmark guards run when builder/atlas paths change, or
 always with `--push`/`--full`. Warm checks are much faster than the initial pack
 encode. Vendored dependencies follow upstream style and are excluded from
 format/tidy; review changes to them separately.
@@ -292,9 +293,26 @@ missed. Rebuild native-debug after adding a C source to refresh its compile DB;
 new-file and platform-`#if` clangd diagnostics need confirmation by a real build.
 
 The push gate additionally builds native-release, wasm-debug and wasm-release,
-then runs submodule consumption and the diagnostics matrices. These catch
+then runs submodule consumption and the diagnostics matrices (their independent
+builds run in parallel). These catch
 NDEBUG-only warnings, Emscripten-specific warnings and Closure failures that the
 native Debug build cannot catch. The full mode checks whole-tree format/tidy.
+
+### CI jobs
+
+`.github/workflows/ci.yml` keeps one dependency edge: the three wasm jobs
+(`wasm-debug`, `wasm-release`, `wasm-analysis`) wait for `packs` (production
+native-release build, example packs from the release builder, pack guards) and
+`goldens` (the Basis baseline). Every other job starts at once:
+`native-release` (release-test ctest, diagnostics matrices),
+`native-debug` (devapi-enabled ctest, submodule consumption),
+`native-variants` (optional features OFF, Basis rows, font and Clay mirrors),
+`lint`, `devapi-smoke`, `web-smoke` and `browser-test`. Deploy requires all of
+them. Native test configures pass `NT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"`:
+tests read their own fixtures, so only `packs` runs the example builders. Add a
+new example to `NT_ALL_EXAMPLE_PACKS`; the `packs` guard fails until it is listed.
+Shared job setup (LFS, toolchain, emsdk, ccache) lives in
+`.github/actions/setup`.
 
 ### Optional-feature checks
 
@@ -385,11 +403,11 @@ specified in the UI chapters linked above.
 - **ASan/LeakSanitizer:** an assert test that longjmps past live heap allocations
   leaks even if Unity prints OK. Assert-trip paths must use stack/preallocated
   buffers, not heap allocations abandoned by the jump.
-- **Shared display:** CI ctest stays serial because real-GL tests share xvfb.
-  Local parallel runs use the desktop display; GL tests have `RESOURCE_LOCK
-  gl_display` in `cmake/test_target.cmake`.
+- **Shared display:** ctest runs in parallel locally and in CI. Tests that touch
+  the display carry `RESOURCE_LOCK gl_display` (`cmake/test_target.cmake`), so
+  they never overlap on the CI xvfb display; add a new display test to that list.
 - **Assertion tests:** suites using `NT_TEST_EXPECT_ASSERT` require FULL (2),
-  selected by `native-debug-test` and `native-release-test`. TRAP (1) bypasses
+  selected by `native-debug` and `native-release-test`. TRAP (1) bypasses
   the test handler. Configure the linked engine and tests together; a target-local
   override conflicts with the `NT_ASSERT_MODE` exported by `nt_core`.
 - **Release test warnings:** production `--push` does not compile test TUs under

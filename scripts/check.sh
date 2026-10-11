@@ -167,9 +167,15 @@ python scripts/check_gl_calls.py
 # so devapi-gated tests are visible) — keep the DB fresh first.
 ensure_tidy_ci
 bash scripts/check_tests_registered.sh "$TIDY_CI_DIR"
-python -m unittest discover -s scripts/tests -p 'test_*.py'
-bash scripts/tests/test_check.sh
-bash scripts/tests/test_tidy.sh
+# The check scripts' own tests (~12 s) cover scripts/, the pack CMake graph and the
+# devapi client only; CI's lint job runs them on every push.
+if printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE '^(scripts/|cmake/|tools/devapi/)'; then
+    python -m unittest discover -s scripts/tests -p 'test_*.py'
+    bash scripts/tests/test_check.sh
+    bash scripts/tests/test_tidy.sh
+else
+    echo "(no scripts/, cmake/ or tools/devapi/ changes — check-script tests defer to CI)"
+fi
 ok
 
 step "build (native-debug)"
@@ -252,7 +258,7 @@ if [ "$MODE" = "push" ]; then
     # Release compiles the ENGINE TUs with NDEBUG and explicit TRAP asserts (NT_ASSERT_FULL-only code drops
     # out) and -O2: a variable only an assert reads is -Wunused under -Werror here and nowhere in the
     # debug builds. tests/ is NOT in this build (NT_BUILD_TESTS=OFF) -- test TUs meet NDEBUG only in
-    # ci.yml's native-release-test job. Mirrors ci.yml's native-release job.
+    # ci.yml's native-release job (native-release-test preset). Mirrors ci.yml's packs job.
     step "build (native-release)"
     NR_CACHE="build/_cmake/native-release/CMakeCache.txt"
     if [ ! -f "$NR_CACHE" ]; then
