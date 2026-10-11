@@ -16,9 +16,16 @@ in vec2 v_local;
 out vec4 frag_color;
 
 void main() {
-    // Both paths run unconditionally: texture() and fwidth() need uniform control flow.
+    // texture() and fwidth() stay in uniform control flow; only the derivative-free wedge
+    // math branches, per emit (v_layout is constant across an emit), so plain sprites skip it.
     vec4 texel = texture(u_texture, v_texcoord); // premultiplied, see sprite.frag
-    float coverage = radial_coverage(v_radial, v_layout.x, v_local);
+    vec2 p = v_local * vec2(1.0, v_layout.x);
+    float r = length(p);
+    float dr = fwidth(r);
     vec4 c = vec4(v_color.rgb * v_color.a, v_color.a);
-    frag_color = (v_layout.y < 0.5) ? texel * c : c * coverage;
+    if (v_layout.y < 0.5) {
+        frag_color = texel * c;
+    } else {
+        frag_color = c * radial_coverage_at(v_radial, p, r, 1.0 / max(dr, 1e-6));
+    }
 }
