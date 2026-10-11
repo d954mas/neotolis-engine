@@ -291,7 +291,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_window_native PRIVATE nt_window nt_input_stub nt_log unity)
     target_compile_definitions(test_window_native PRIVATE NT_TEST_HYBRID_HPG=$<BOOL:${NT_HYBRID_HPG}>)
     nt_setup_test_target(test_window_native)
-    set_tests_properties(test_window_native PROPERTIES LABELS "native")
+    set_property(TEST test_window_native APPEND PROPERTY LABELS native)
 
     # --- Input module tests ---
     add_executable(test_input unit/test_input.c)
@@ -376,35 +376,35 @@ if(NOT EMSCRIPTEN)
     add_executable(test_nt_gfx_bind_mirrors_native unit/test_nt_gfx_bind_mirrors_native.c)
     target_link_libraries(test_nt_gfx_bind_mirrors_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_bind_mirrors_native)
-    set_tests_properties(test_nt_gfx_bind_mirrors_native PROPERTIES LABELS "native")
+    set_property(TEST test_nt_gfx_bind_mirrors_native APPEND PROPERTY LABELS native)
 
     add_executable(test_nt_gfx_frame_storage_native unit/test_nt_gfx_frame_storage_native.c)
     target_link_libraries(test_nt_gfx_frame_storage_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_frame_storage_native)
-    set_tests_properties(test_nt_gfx_frame_storage_native PROPERTIES LABELS "native")
+    set_property(TEST test_nt_gfx_frame_storage_native APPEND PROPERTY LABELS native)
 
     add_executable(test_nt_gfx_observe_native unit/test_nt_gfx_observe_native.c)
     target_link_libraries(test_nt_gfx_observe_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_observe_native)
-    set_tests_properties(test_nt_gfx_observe_native PROPERTIES LABELS "native")
+    set_property(TEST test_nt_gfx_observe_native APPEND PROPERTY LABELS native)
 
     add_executable(test_nt_gfx_render_target_native unit/test_nt_gfx_render_target_native.c unit/test_helpers/nt_assert_trap.c)
     target_include_directories(test_nt_gfx_render_target_native PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
     target_link_libraries(test_nt_gfx_render_target_native PRIVATE nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_gfx_render_target_native)
-    set_tests_properties(test_nt_gfx_render_target_native PROPERTIES LABELS "native")
+    set_property(TEST test_nt_gfx_render_target_native APPEND PROPERTY LABELS native)
 
     # Real OpenGL shape-renderer ring: multi-flush uploads at ring offsets render pixel-correct.
     # Real GL + real transcoder + builder encoder. No nt_gfx_fake here: it bundles nt_gfx.c.
     add_executable(test_nt_gfx_basis_native unit/test_nt_gfx_basis_native.c)
     target_link_libraries(test_nt_gfx_basis_native PRIVATE nt_gfx nt_builder nt_basisu_transcoder_full nt_window nt_input_stub nt_log unity glad nt_meshwire)
     nt_setup_test_target(test_nt_gfx_basis_native TIMEOUT 300)
-    set_tests_properties(test_nt_gfx_basis_native PROPERTIES LABELS "native")
+    set_property(TEST test_nt_gfx_basis_native APPEND PROPERTY LABELS native)
 
     add_executable(test_shape_renderer_native unit/test_shape_renderer_native.c)
     target_link_libraries(test_shape_renderer_native PRIVATE nt_shape_renderer nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_shape_renderer_native)
-    set_tests_properties(test_shape_renderer_native PROPERTIES LABELS "native")
+    set_property(TEST test_shape_renderer_native APPEND PROPERTY LABELS native)
 
     add_executable(test_skinned_mesh_renderer_native unit/test_skinned_mesh_renderer_native.c)
     target_link_libraries(test_skinned_mesh_renderer_native PRIVATE
@@ -415,7 +415,7 @@ if(NOT EMSCRIPTEN)
     )
     target_compile_definitions(test_skinned_mesh_renderer_native PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_skinned_mesh_renderer_native WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    set_tests_properties(test_skinned_mesh_renderer_native PROPERTIES LABELS "native")
+    set_property(TEST test_skinned_mesh_renderer_native APPEND PROPERTY LABELS native)
 
     add_executable(test_sprite_renderer_native unit/test_sprite_renderer_native.c unit/test_helpers/ui_atlas.c)
     target_link_libraries(test_sprite_renderer_native PRIVATE
@@ -426,7 +426,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_sprite_renderer_native PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_include_directories(test_sprite_renderer_native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_sprite_renderer_native)
-    set_tests_properties(test_sprite_renderer_native PROPERTIES LABELS "native")
+    set_property(TEST test_sprite_renderer_native APPEND PROPERTY LABELS native)
 
     add_executable(test_text_renderer_native unit/test_text_renderer_native.c unit/test_helpers/nt_test_font_blob.c)
     target_link_libraries(test_text_renderer_native PRIVATE
@@ -436,7 +436,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_text_renderer_native PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_include_directories(test_text_renderer_native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     nt_setup_test_target(test_text_renderer_native)
-    set_tests_properties(test_text_renderer_native PROPERTIES LABELS "native")
+    set_property(TEST test_text_renderer_native APPEND PROPERTY LABELS native)
 
     # --- Post-FX blur tests ---
     add_executable(test_nt_postfx_blur unit/test_nt_postfx_blur.c unit/test_helpers/nt_assert_trap.c)
@@ -450,7 +450,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_nt_postfx_blur_native unit/test_nt_postfx_blur_native.c)
     target_link_libraries(test_nt_postfx_blur_native PRIVATE nt_postfx_blur nt_gfx nt_basisu_transcoder_stub nt_window nt_input_stub nt_log unity glad nt_meshwire_stub)
     nt_setup_test_target(test_nt_postfx_blur_native)
-    set_tests_properties(test_nt_postfx_blur_native PROPERTIES LABELS "native")
+    set_property(TEST test_nt_postfx_blur_native APPEND PROPERTY LABELS native)
 
     # --- base64 util (standalone nt_base64 module, no devapi) ---
     add_executable(test_base64 unit/test_base64.c)

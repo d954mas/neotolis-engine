@@ -412,10 +412,12 @@ specified in the UI chapters linked above.
 - **ASan/LeakSanitizer:** an assert test that longjmps past live heap allocations
   leaks even if Unity prints OK. Assert-trip paths must use stack/preallocated
   buffers, not heap allocations abandoned by the jump.
-- **Shared display:** ctest runs in parallel locally and in CI. Tests that touch
-  the display carry `RESOURCE_LOCK gl_display` (`cmake/test_target.cmake`), so
-  they never overlap on the CI xvfb display: every `*_native` test and
-  `test_clipboard`. Name a new display test `*_native`.
+- **Shared display:** display tests (every `*_native` test and `test_clipboard`)
+  carry `RESOURCE_LOCK gl_display` and the `display` label
+  (`cmake/test_target.cmake`); name a new display test `*_native`. CI runs
+  ctest through `scripts/ci_ctest.sh`: everything else in parallel, then the
+  display tests alone, because `glfwInit` on the shared xvfb display fails
+  sporadically while sanitizer tests load every core.
 - **Assertion tests:** suites using `NT_TEST_EXPECT_ASSERT` require FULL (2),
   selected by `native-debug` and `native-release-test`. TRAP (1) bypasses
   the test handler. Configure the linked engine and tests together; a target-local

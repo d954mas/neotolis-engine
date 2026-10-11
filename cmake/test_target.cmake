@@ -34,8 +34,10 @@ function(nt_setup_test_target target_name)
     endif()
     set_tests_properties(${target_name} PROPERTIES TIMEOUT ${ARG_TIMEOUT})
     # Display-touching tests (real GLFW/GL) share one xvfb display on headless
-    # runners: never run two concurrently. Name a new display test *_native.
+    # runners: never run two concurrently. CI runs the `display` label in its own
+    # serial pass (scripts/ci_ctest.sh). Name a new display test *_native.
     if(target_name MATCHES "_native$" OR target_name STREQUAL "test_clipboard")
         set_tests_properties(${target_name} PROPERTIES RESOURCE_LOCK gl_display)
+        set_property(TEST ${target_name} APPEND PROPERTY LABELS display)
     endif()
 endfunction()

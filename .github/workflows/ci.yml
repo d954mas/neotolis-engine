@@ -363,8 +363,8 @@ jobs:
   # #endregion
 
   # #region native tests
-  # GL tests carry RESOURCE_LOCK gl_display (cmake/test_target.cmake), so ctest runs in
-  # parallel on the shared xvfb display.
+  # scripts/ci_ctest.sh runs every test but the `display` label in parallel, then the
+  # display tests alone on the shared xvfb display.
   native-release:
     name: Native Release Tests
     runs-on: ubuntu-latest
@@ -381,7 +381,7 @@ jobs:
           cmake --build --preset native-release-test
 
       - name: Run tests (release)
-        run: xvfb-run -a ctest --preset native-release-test -j "$(nproc)"
+        run: xvfb-run -a bash scripts/ci_ctest.sh --preset native-release-test
 
       - name: Check diagnostics configuration and runtime matrix
         run: |
@@ -392,7 +392,7 @@ jobs:
         run: |
           cmake --preset native-release-test -B build/_cmake/native-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
           cmake --build build/_cmake/native-release-ui-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom
-          xvfb-run -a ctest --test-dir build/_cmake/native-release-ui-on --output-on-failure -j "$(nproc)" -R '^test_(font|text_renderer|nt_ui_(label|rich_(build|wrap|emit|parse|custom)|clay_debug_view|begin_end|walker_custom))$'
+          xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-release-ui-on -R '^test_(font|text_renderer|nt_ui_(label|rich_(build|wrap|emit|parse|custom)|clay_debug_view|begin_end|walker_custom))$'
 
   # devapi + ui/obs/entity_write/capture groups ON so the devapi test targets build and run.
   native-debug:
@@ -417,7 +417,7 @@ jobs:
       # The hull visual report renders the research acceptance sheet: 155 s under sanitizers,
       # 7 s in native-release (FULL asserts), which runs it.
       - name: Run tests (debug)
-        run: xvfb-run -a ctest --preset native-debug -j "$(nproc)" -E '^test_atlas_hull_visual_report$'
+        run: xvfb-run -a bash scripts/ci_ctest.sh --preset native-debug -E '^test_atlas_hull_visual_report$'
 
       - name: Submodule consumption test
         run: |
@@ -448,7 +448,7 @@ jobs:
       # The atlas bench guards check builder geometry, not optional features; native-debug
       # (sanitizers) and native-release run them.
       - name: Run tests (optional features OFF)
-        run: xvfb-run -a ctest --test-dir build/_cmake/native-debug-off --output-on-failure -j "$(nproc)" -E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$'
+        run: xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-debug-off -E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$'
 
       # Each admission row (NT_BASISU_ROWS) consumes the Basis baseline through the trimmed
       # mirror and runs the Basis suites with the restricted set; the producer runs first.
@@ -463,14 +463,14 @@ jobs:
             flags="${row#*:}"
             cmake --preset native-debug -B "build/_cmake/$name" ${flags//,/ } -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "build/_cmake/$name" --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
-            xvfb-run -a ctest --test-dir "build/_cmake/$name" --output-on-failure --no-tests=error -j "$(nproc)" -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+            xvfb-run -a bash scripts/ci_ctest.sh --test-dir "build/_cmake/$name" --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
           done
 
       - name: Test optional font geometry (FULL asserts)
         run: |
           cmake --preset native-debug -B build/_cmake/native-debug-embolden-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
           cmake --build build/_cmake/native-debug-embolden-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom
-          xvfb-run -a ctest --test-dir build/_cmake/native-debug-embolden-on --output-on-failure -j "$(nproc)" -R '^test_(font|text_renderer|nt_ui_label|nt_ui_rich_(build|wrap|emit|parse|custom))$'
+          xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-debug-embolden-on -R '^test_(font|text_renderer|nt_ui_label|nt_ui_rich_(build|wrap|emit|parse|custom))$'
 
       # Rows: Clay view OFF (the arena baseline), then ON with the inspector ON and OFF.
       - name: Test Clay view with both inspector settings
@@ -480,7 +480,7 @@ jobs:
             build_dir="build/_cmake/native-debug-clay-${view}-${inspector}"
             cmake --preset native-debug -B "$build_dir" -DNT_UI_CLAY_DEBUG_VIEW="$view" -DNT_UI_DEBUG_TOOLS="$inspector" -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "$build_dir" --target test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom test_nt_ui_inspector test_nt_ui_debug_hit_zones test_nt_ui_probe
-            xvfb-run -a ctest --test-dir "$build_dir" --output-on-failure -j "$(nproc)" -R '^test_nt_ui_(clay_debug_view|begin_end|walker_custom|inspector|debug_hit_zones|probe)$'
+            xvfb-run -a bash scripts/ci_ctest.sh --test-dir "$build_dir" -R '^test_nt_ui_(clay_debug_view|begin_end|walker_custom|inspector|debug_hit_zones|probe)$'
           done
           python3 scripts/check_clay_arena.py build/_cmake/native-debug-clay-OFF-ON build/_cmake/native-debug-clay-ON-ON
   # #endregion
