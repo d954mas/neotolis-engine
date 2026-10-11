@@ -279,8 +279,9 @@ check with exit 2; remove it only after confirming the owner is dead.
 
 The default gate checks module composition, EM_JS_DEPS, doc links/spec-index
 coverage, CRT pins, the GL call funnel (`scripts/check_gl_calls.py`) and test registration; builds native-debug; runs ctest; and
-checks changed files with clang-format/clang-tidy. Changed headers trigger full
-tidy. The check scripts' own tests run when `scripts/`, `cmake/` or
+checks changed files with clang-format/clang-tidy. A changed header also lints
+every TU that includes it (native-debug's ninja deps) plus the DevAPI-only TUs;
+a header no deps mention, and `--full`, lint the whole tree. The check scripts' own tests run when `scripts/`, `cmake/` or
 `tools/devapi/` change; CI runs them on every push. The three atlas benchmark guards run when builder/atlas paths change, or
 always with `--push`/`--full`. Warm checks are much faster than the initial pack
 encode. Vendored dependencies follow upstream style and are excluded from
@@ -307,12 +308,14 @@ native-release build, example packs from the release builder, pack guards) and
 `native-release` (release-test ctest, diagnostics matrices),
 `native-debug` (devapi-enabled ctest, submodule consumption),
 `native-variants` (optional features OFF, Basis rows, font and Clay mirrors),
-`lint`, `devapi-smoke`, `web-smoke` and `browser-test`. Deploy requires all of
+`lint`, `devapi-smoke`, `web-smoke` and `browser-test` (smoke, Basis rows and
+release diagnostics as three parallel parts). Deploy requires all of
 them. Native test configures pass `NT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"`:
 tests read their own fixtures, so only `packs` runs the example builders. Add a
 new example to `NT_ALL_EXAMPLE_PACKS`; the `packs` guard fails until it is listed.
 Shared job setup (LFS, toolchain, emsdk, ccache) lives in
-`.github/actions/setup`.
+`.github/actions/setup`; emsdk installs into a cached `~/emsdk`, a fixed path
+that keeps wasm ccache keys stable across runs.
 
 ### Optional-feature checks
 

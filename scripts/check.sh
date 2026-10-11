@@ -106,7 +106,7 @@ FORMAT_FILES="$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(c|h)$' | grep -v 'd
 TIDY_FILES="$(printf '%s\n' "$CHANGED_FILES" \
     | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
     | grep -v 'deps/\|/web/\|_web\.c\|tools/research/' || true)"
-# Any changed header invalidates unchanged .c files -> full tidy.
+# A changed header also lints the unchanged .c files that include it (run_tidy_gate).
 CHANGED_HEADERS="$(printf '%s\n' "$CHANGED_FILES" | grep '\.h$' | grep -v 'deps/' || true)"
 # #endregion
 
@@ -139,13 +139,28 @@ ensure_tidy_ci() {
     fi
 }
 
-# A changed header can affect any configured variant, so lint the full tree.
+# A changed header lints every TU that includes it, from the just-built
+# native-debug's ninja deps, plus the TUs only the tidy-ci DB compiles (devapi).
+# A header no deps mention falls back to the full tree; CI lints the full tree.
 run_tidy_gate() {
     local build_dir="$1"
     if [ -n "$CHANGED_HEADERS" ]; then
-        echo "Changed headers detected — running FULL clang-tidy:"
+        echo "Changed headers:"
         printf '  %s\n' $CHANGED_HEADERS
-        bash scripts/tidy.sh "$build_dir"
+        local dependents
+        # shellcheck disable=SC2086 — newline-split into file args; repo paths have no spaces
+        dependents="$(python scripts/tidy_dependents.py "$NATIVE_BUILD_DIR" "$build_dir" $CHANGED_HEADERS | tr -d '\r')"
+        if [ "$dependents" = "FULL" ]; then
+            echo "A changed header is in no recorded deps — running FULL clang-tidy"
+            bash scripts/tidy.sh "$build_dir"
+            return
+        fi
+        local files
+        files="$(printf '%s\n%s\n' "$TIDY_FILES" "$dependents" | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
+            | grep -v 'deps/\|/web/\|_web\.c\|tools/research/' | sort -u || true)"
+        echo "clang-tidy on $(printf '%s\n' "$files" | grep -c .) TUs that include them or changed"
+        # shellcheck disable=SC2086
+        bash scripts/tidy.sh "$build_dir" $files
     elif [ -n "$TIDY_FILES" ]; then
         echo "Changed .c files:"
         printf '  %s\n' $TIDY_FILES

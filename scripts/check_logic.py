@@ -52,3 +52,39 @@ def cmake_generated_value(build_dir, filename, variable):
         if match:
             return match.group(1)
     return ""
+
+
+def _norm(path):
+    return path.strip().replace("\\", "/").lower()
+
+
+def tidy_dependents(deps_lines, db_sources, headers):
+    """Sources to lint after `headers` changed, from `ninja -t deps` output.
+
+    Returns None (lint everything) when a header appears in no recorded deps:
+    a header no compiled TU includes cannot be narrowed safely. DB sources the
+    deps never mention (TUs only the tidy configure compiles) are always kept.
+    """
+    wanted = {_norm(h) for h in headers}
+    seen_headers = set()
+    compiled = set()
+    selected = set()
+    source = None
+    for line in deps_lines:
+        if not line.strip():
+            continue
+        if not line[0].isspace():
+            source = None
+            continue
+        path = _norm(line)
+        if source is None:
+            source = path
+            compiled.add(source)
+        if path in wanted:
+            seen_headers.add(path)
+            selected.add(source)
+    if seen_headers != wanted:
+        return None
+    by_norm = {_norm(s): s for s in db_sources}
+    keep = {n for n in by_norm if n in selected or n not in compiled}
+    return {by_norm[n] for n in keep}

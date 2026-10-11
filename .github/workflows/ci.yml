@@ -470,8 +470,10 @@ jobs:
           cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -G Ninja
           cmake --build build/_cmake/native-debug-off
 
+      # The atlas bench guards check builder geometry, not optional features; native-debug
+      # (sanitizers) and native-release run them.
       - name: Run tests (optional features OFF)
-        run: xvfb-run -a ctest --test-dir build/_cmake/native-debug-off --output-on-failure -j "$(nproc)"
+        run: xvfb-run -a ctest --test-dir build/_cmake/native-debug-off --output-on-failure -j "$(nproc)" -E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$'
 
       # Each admission row (NT_BASISU_ROWS) consumes the Basis baseline through the trimmed
       # mirror and runs the Basis suites with the restricted set; the producer runs first.
@@ -618,16 +620,22 @@ jobs:
       - name: Run devapi web smoke test
         run: cd tests/browser && npx playwright test devapi.spec.ts
 
+  # Three parts in parallel: the default smoke specs, the Basis admission rows and the
+  # release diagnostics rows.
   browser-test:
-    name: Browser Smoke (input)
+    name: Browser (${{ matrix.part }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [smoke, basis, diagnostics]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
           emsdk: "true"
-          ccache-key: browser-test
+          ccache-key: browser-${{ matrix.part }}
 
       # browser_smoke reuses the ui_showcase example pack (RAW atlas) and its own Basis fixture
       # pack for the configured NT_BASISU_* set. Build both natively before ANY wasm configure
@@ -639,6 +647,7 @@ jobs:
           cmake --build --preset native-debug --target browser_smoke_packs
 
       - name: Build browser_smoke wasm (debug)
+        if: matrix.part == 'smoke'
         run: |
           emcmake cmake --preset wasm-debug
           cmake --build --preset wasm-debug --target browser_smoke
@@ -660,6 +669,7 @@ jobs:
 
       # Only the specs that target browser_smoke; devapi.spec.ts needs devapi_host (Web Smoke job).
       - name: Run browser smoke test
+        if: matrix.part == 'smoke'
         run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts observation.spec.ts pass_actions.spec.ts mesh_color.spec.ts shape_strokes.spec.ts program_link.spec.ts
 
       # Each admission row (NT_BASISU_ROWS) activates its own fixture pack in wasm Debug (FULL
@@ -667,6 +677,7 @@ jobs:
       # decision path (same selector, same SwiftShader caps). SwiftShader reports every
       # compressed cap, so the build set decides the target and real GPUs stay unverified here.
       - name: Basis admission rows (browser activation)
+        if: matrix.part == 'basis'
         run: |
           for row in $NT_BASISU_ROWS; do
             name="${row%%:*}"
@@ -682,6 +693,7 @@ jobs:
           done
 
       - name: Check release diagnostics with independent UI and GPU timing
+        if: matrix.part == 'diagnostics'
         run: |
           for timing in "0 0" "0 1" "1 0"; do
             read -r ui gpu <<< "$timing"

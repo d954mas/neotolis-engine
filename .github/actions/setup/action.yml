@@ -58,11 +58,30 @@ runs:
       shell: bash
       run: echo "version=$(cat .emsdk-version)" >> "$GITHUB_OUTPUT"
 
-    - uses: mymindstorm/setup-emsdk@v14
+    # A fixed install path keeps sysroot header paths, and so ccache keys, stable across
+    # runs; the per-job key also keeps the Emscripten system libraries that job built.
+    - uses: actions/cache@v4
       if: inputs.emsdk == 'true'
       with:
-        version: ${{ steps.emsdk-version.outputs.version }}
-        actions-cache-folder: emsdk-cache
+        path: ~/emsdk
+        key: emsdk-${{ steps.emsdk-version.outputs.version }}-${{ inputs.ccache-key }}
+        restore-keys: emsdk-${{ steps.emsdk-version.outputs.version }}-
+
+    - name: Install emsdk
+      if: inputs.emsdk == 'true'
+      shell: bash
+      run: |
+        version="${{ steps.emsdk-version.outputs.version }}"
+        if [ ! -f "$HOME/emsdk/.activated-$version" ]; then
+          [ -d "$HOME/emsdk/.git" ] || git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install "$version"
+          "$HOME/emsdk/emsdk" activate "$version"
+          touch "$HOME/emsdk/.activated-$version"
+        fi
+        echo "EMSDK=$HOME/emsdk" >> "$GITHUB_ENV"
+        echo "EM_CONFIG=$HOME/emsdk/.emscripten" >> "$GITHUB_ENV"
+        echo "$HOME/emsdk" >> "$GITHUB_PATH"
+        echo "$HOME/emsdk/upstream/emscripten" >> "$GITHUB_PATH"
 
     - uses: actions/setup-node@v4
       if: inputs.emsdk == 'true'
