@@ -34,6 +34,8 @@ env:
   # single-codec decoders and upload+sample every compressed target through the runner's software GL.
   NT_BASISU_ROWS: "basisu-uastc-only:-DNT_BASISU_HAS_ETC1S=OFF basisu-etc1s-etc2:-DNT_BASISU_HAS_UASTC=OFF,-DNT_BASISU_HAS_BC7=OFF,-DNT_BASISU_HAS_ASTC=OFF basisu-bc7-only:-DNT_BASISU_HAS_ETC2=OFF,-DNT_BASISU_HAS_ASTC=OFF"
   # Every example pack set; the packs job fails when an example is missing here.
+  # Narrow configures (Basis/font/Clay rows, goldens) also pass -DNT_HTTP_CURL=OFF: none of
+  # their tests use HTTP, and configuring vendored curl doubles the configure time.
   NT_ALL_EXAMPLE_PACKS: "asteroids;atlas;bunnymark;rtt_showcase;skeletal_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
 
 jobs:
@@ -117,7 +119,7 @@ jobs:
 
       - name: Produce and check the Basis goldens
         run: |
-          cmake --preset native-release-test -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          cmake --preset native-release-test -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
           cmake --build --preset native-release-test --target test_basisu_golden_produce
           ctest --preset native-release-test --no-tests=error -R '^test_basisu_golden_produce$'
 
@@ -158,25 +160,8 @@ jobs:
           name: basisu-goldens
           path: build/tests/basisu_golden
 
-      - name: Build baseline WASM debug
-        run: |
-          emcmake cmake --preset wasm-debug
-          cmake --build --preset wasm-debug
-          test -f build/examples/hello/wasm-debug/index.html
-          test -f build/examples/hello/wasm-debug/index.js
-          test -f build/examples/hello/wasm-debug/index.wasm
-          test -f build/engine/wasm-debug/libnt_core.a
-          test -f build/engine/wasm-debug/libnt_log.a
-          test -f build/engine/wasm-debug/libnt_log_stub.a
-
-      # The ctest includes test_basisu_trimmed: the production wasm transcoder decodes the
-      # native goldens under Node.
-      - name: Test baseline WASM debug
-        run: |
-          node tests/wasm/simd_loader_test.js
-          node tests/wasm/smoke_test.js wasm-debug
-          ctest --preset wasm-debug
-
+      # The paired preset's index.wasm is the baseline build (it differs from wasm-debug only
+      # by the SIMD path in the HTML shell), so CI links each configuration once.
       - name: Build paired WASM debug (baseline + SIMD)
         run: |
           ./scripts/build_wasm_paired.sh wasm-debug-paired
@@ -195,8 +180,11 @@ jobs:
             test -f "build/examples/$example/wasm-debug-paired/index_simd.wasm"
           done
 
+      # The ctest includes test_basisu_trimmed: the production wasm transcoder decodes the
+      # native goldens under Node.
       - name: Test paired WASM debug
         run: |
+          node tests/wasm/simd_loader_test.js
           node tests/wasm/smoke_test.js wasm-debug-paired
           node tests/wasm/smoke_test.js wasm-debug-simd
           ctest --preset wasm-debug-paired
@@ -225,34 +213,6 @@ jobs:
           name: basisu-goldens
           path: build/tests/basisu_golden
 
-      - name: Build baseline WASM release
-        run: |
-          emcmake cmake --preset wasm-release
-          cmake --build --preset wasm-release
-          test -f build/examples/hello/wasm-release/index.html
-          test -f build/examples/hello/wasm-release/index.js
-          test -f build/examples/hello/wasm-release/index.wasm
-          test -f build/engine/wasm-release/libnt_core.a
-          test -f build/engine/wasm-release/libnt_log.a
-          test -f build/engine/wasm-release/libnt_log_stub.a
-
-      - name: Test baseline WASM release
-        run: |
-          node tests/wasm/smoke_test.js wasm-release
-          ctest --preset wasm-release
-
-      - name: Verify gfx capture producers are absent in WASM release
-        run: |
-          symbols="$("$EMSDK/upstream/bin/llvm-nm" --defined-only build/engine/wasm-release/libnt_gfx.a)"
-          # Positive control: the listing must see ordinary gfx symbols.
-          grep -q "nt_gfx_init" <<< "$symbols"
-          for producer in g_nt_gfx_capture nt_gfx_backend_capture_initial_state nt_gfx_gl_call_name; do
-            if grep -q "$producer" <<< "$symbols"; then
-              echo "wasm-release nt_gfx retains capture producer: $producer"
-              exit 1
-            fi
-          done
-
       - name: Verify optional UI composition in WASM release
         run: |
           emcmake cmake -S tests/submodule -B build/_cmake/ui-composition-wasm-release -G Ninja -DENGINE_ROOT="$PWD" -DCMAKE_BUILD_TYPE=Release -DNT_BUILD_TESTS=OFF -DNT_FONT_EMBOLDEN_ENABLED=OFF -DNT_UI_CLAY_DEBUG_VIEW=OFF -DNT_UI_DEBUG_TOOLS=OFF
@@ -263,6 +223,7 @@ jobs:
           emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
           cmake --build build/_cmake/wasm-release-ui-on --target ui_showcase
 
+      # The paired index.wasm is the wasm-release baseline (only the shell differs).
       - name: Build paired WASM release (baseline + SIMD)
         run: |
           ./scripts/build_wasm_paired.sh wasm-release-paired
@@ -281,6 +242,18 @@ jobs:
             test -f "build/examples/$example/wasm-release-paired/index_simd.wasm"
           done
 
+      - name: Verify gfx capture producers are absent in WASM release
+        run: |
+          symbols="$("$EMSDK/upstream/bin/llvm-nm" --defined-only build/engine/wasm-release-paired/libnt_gfx.a)"
+          # Positive control: the listing must see ordinary gfx symbols.
+          grep -q "nt_gfx_init" <<< "$symbols"
+          for producer in g_nt_gfx_capture nt_gfx_backend_capture_initial_state nt_gfx_gl_call_name; do
+            if grep -q "$producer" <<< "$symbols"; then
+              echo "wasm-release nt_gfx retains capture producer: $producer"
+              exit 1
+            fi
+          done
+
       - name: Test paired WASM release
         run: |
           node tests/wasm/smoke_test.js wasm-release-paired
@@ -291,7 +264,7 @@ jobs:
       # The size chart measures these dirs: the effective cache, not the preset text, must carry no dev tooling.
       - name: Verify release dirs carry no dev tooling
         run: |
-          for p in wasm-release wasm-release-paired wasm-release-simd; do
+          for p in wasm-release-paired wasm-release-simd; do
             for v in NT_UI_DEBUG_TOOLS NT_LOG_RING_ENABLED NT_METRICS_ENABLED NT_INTROSPECT_ENABLED NT_INTROSPECT_WRITE_ENABLED; do
               grep -qx "$v:BOOL=OFF" "build/_cmake/$p/CMakeCache.txt" || { echo "::error::$p: $v is not OFF"; exit 1; }
             done
@@ -417,7 +390,7 @@ jobs:
 
       - name: Test optional UI features under NDEBUG
         run: |
-          cmake --preset native-release-test -B build/_cmake/native-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          cmake --preset native-release-test -B build/_cmake/native-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
           cmake --build build/_cmake/native-release-ui-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom
           xvfb-run -a ctest --test-dir build/_cmake/native-release-ui-on --output-on-failure -j "$(nproc)" -R '^test_(font|text_renderer|nt_ui_(label|rich_(build|wrap|emit|parse|custom)|clay_debug_view|begin_end|walker_custom))$'
 
@@ -441,8 +414,10 @@ jobs:
           test -f build/engine/native-debug/libnt_log_stub.a
           ./build/tools/builder/native-debug/builder
 
+      # The hull visual report renders the research acceptance sheet: 155 s under sanitizers,
+      # 7 s in native-release (FULL asserts), which runs it.
       - name: Run tests (debug)
-        run: xvfb-run -a ctest --preset native-debug -j "$(nproc)"
+        run: xvfb-run -a ctest --preset native-debug -j "$(nproc)" -E '^test_atlas_hull_visual_report$'
 
       - name: Submodule consumption test
         run: |
@@ -480,20 +455,20 @@ jobs:
       - name: Basis admission rows (FULL asserts)
         run: |
           base=build/_cmake/basisu-full
-          cmake --preset native-debug -B "$base" -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          cmake --preset native-debug -B "$base" -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
           cmake --build "$base" --target test_basisu_golden_produce
           ctest --test-dir "$base" --output-on-failure --no-tests=error -R '^test_basisu_golden_produce$'
           for row in $NT_BASISU_ROWS; do
             name="${row%%:*}"
             flags="${row#*:}"
-            cmake --preset native-debug -B "build/_cmake/$name" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+            cmake --preset native-debug -B "build/_cmake/$name" ${flags//,/ } -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "build/_cmake/$name" --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
             xvfb-run -a ctest --test-dir "build/_cmake/$name" --output-on-failure --no-tests=error -j "$(nproc)" -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
           done
 
       - name: Test optional font geometry (FULL asserts)
         run: |
-          cmake --preset native-debug -B build/_cmake/native-debug-embolden-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          cmake --preset native-debug -B build/_cmake/native-debug-embolden-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
           cmake --build build/_cmake/native-debug-embolden-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom
           xvfb-run -a ctest --test-dir build/_cmake/native-debug-embolden-on --output-on-failure -j "$(nproc)" -R '^test_(font|text_renderer|nt_ui_label|nt_ui_rich_(build|wrap|emit|parse|custom))$'
 
@@ -503,7 +478,7 @@ jobs:
           for row in "OFF ON" "ON ON" "ON OFF"; do
             read -r view inspector <<< "$row"
             build_dir="build/_cmake/native-debug-clay-${view}-${inspector}"
-            cmake --preset native-debug -B "$build_dir" -DNT_UI_CLAY_DEBUG_VIEW="$view" -DNT_UI_DEBUG_TOOLS="$inspector" -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+            cmake --preset native-debug -B "$build_dir" -DNT_UI_CLAY_DEBUG_VIEW="$view" -DNT_UI_DEBUG_TOOLS="$inspector" -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "$build_dir" --target test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom test_nt_ui_inspector test_nt_ui_debug_hit_zones test_nt_ui_probe
             xvfb-run -a ctest --test-dir "$build_dir" --output-on-failure -j "$(nproc)" -R '^test_nt_ui_(clay_debug_view|begin_end|walker_custom|inspector|debug_hit_zones|probe)$'
           done
@@ -682,7 +657,7 @@ jobs:
           for row in $NT_BASISU_ROWS; do
             name="${row%%:*}"
             flags="${row#*:}"
-            cmake --preset native-debug -B "build/_cmake/$name-native" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+            cmake --preset native-debug -B "build/_cmake/$name-native" ${flags//,/ } -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "build/_cmake/$name-native" --target browser_smoke_packs
             dir="$name-wasm-debug"
             emcmake cmake --preset wasm-debug -B "build/_cmake/$dir" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"

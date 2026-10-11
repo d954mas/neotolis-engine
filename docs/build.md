@@ -313,6 +313,12 @@ release diagnostics as three parallel parts). Deploy requires all of
 them. Native test configures pass `NT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"`:
 tests read their own fixtures, so only `packs` runs the example builders. Add a
 new example to `NT_ALL_EXAMPLE_PACKS`; the `packs` guard fails until it is listed.
+The wasm jobs build only the paired presets: a paired `index.wasm` is the
+baseline build, so smoke, ctest and symbol checks run there. Narrow configures
+whose tests never use HTTP (Basis, font and Clay rows, goldens, the runtime
+diagnostics matrix) pass `-DNT_HTTP_CURL=OFF`: vendored curl doubles configure time.
+`test_atlas_hull_visual_report` runs in `native-release` only; under the debug
+sanitizers it takes minutes.
 Shared job setup (LFS, toolchain, emsdk, ccache) lives in
 `.github/actions/setup`; emsdk installs into a cached `~/emsdk`, a fixed path
 that keeps wasm ccache keys stable across runs.

@@ -59,7 +59,9 @@ def main():
                      "-DNT_LOG_RING_ENABLED=ON", "-DNT_INTROSPECT_ENABLED=ON",
                      "-DNT_INTROSPECT_WRITE_ENABLED=ON", f"-DNT_DEVAPI_ENABLED={obs}",
                      "-DNT_DEVAPI_GROUP_UI=OFF", f"-DNT_DEVAPI_GROUP_OBS={obs}",
-                     f"-DNT_ASSERT_MODE={asserts}"]
+                     f"-DNT_ASSERT_MODE={asserts}",
+                     # No target uses HTTP; vendored curl would double each configure.
+                     "-DNT_HTTP_CURL=OFF"]
         summary = (f"floor={floor}, UI={ui}, GPU={gpu}, capture={capture}, resource={resource}, metrics={metrics}, "
                    f"inspector={ui_debug}, UI checks={ui_checks}, asserts={asserts}; {len(targets)} tests")
         rows.append((name, args.output / name, targets, capture, configure, summary))
