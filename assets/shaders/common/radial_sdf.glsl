@@ -5,20 +5,13 @@
 
 const float TAU = 6.28318530717958647692;
 
-float radial_coverage(vec4 radial, float aspect, vec2 local) {
+// Coverage from a precomputed point: p = aspect-corrected local, r = length(p), ppu = pixels
+// per r-unit. Derivative-free, so a caller may run it under non-uniform control flow.
+float radial_coverage_at(vec4 radial, vec2 p, float r, float ppu) {
     float angle_start = radial.x;
     float angle_end = radial.y;
     float inner = radial.z;
 
-    // Oval squash: aspect = w/h re-rounds the test so 0 stays +X on a non-square
-    // bbox. r in [0,1] across the disc.
-    vec2 p = local * vec2(1.0, aspect);
-    float r = length(p);
-
-    // Edge coverage in PIXELS (mirrors slug_text.frag pixelsPerEm): a 1px linear
-    // box-filter centred on each edge, so AA stays crisp at any radius and never
-    // bleeds outward into a halo. ppu = pixels per r-unit.
-    float ppu = 1.0 / max(fwidth(r), 1e-6);
     float outer = clamp((1.0 - r) * ppu + 0.5, 0.0, 1.0);
     float ring = (inner > 0.0) ? clamp((r - inner) * ppu + 0.5, 0.0, 1.0) : 1.0;
     float radial_mask = outer * ring;
@@ -35,4 +28,17 @@ float radial_coverage(vec4 radial, float aspect, vec2 local) {
     float wedge = full_turn ? 1.0 : (lead * trail);
 
     return radial_mask * wedge;
+}
+
+float radial_coverage(vec4 radial, float aspect, vec2 local) {
+    // Oval squash: aspect = w/h re-rounds the test so 0 stays +X on a non-square
+    // bbox. r in [0,1] across the disc.
+    vec2 p = local * vec2(1.0, aspect);
+    float r = length(p);
+
+    // Edge coverage in PIXELS (mirrors slug_text.frag pixelsPerEm): a 1px linear
+    // box-filter centred on each edge, so AA stays crisp at any radius and never
+    // bleeds outward into a halo.
+    float ppu = 1.0 / max(fwidth(r), 1e-6);
+    return radial_coverage_at(radial, p, r, ppu);
 }
