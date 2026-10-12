@@ -106,7 +106,7 @@ FORMAT_FILES="$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(c|h)$' | grep -v 'd
 TIDY_FILES="$(printf '%s\n' "$CHANGED_FILES" \
     | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
     | grep -v 'deps/\|/web/\|_web\.c\|tools/research/' || true)"
-# Any changed header invalidates unchanged .c files -> full tidy.
+# A changed header also lints the unchanged .c files that include it (run_tidy_gate).
 CHANGED_HEADERS="$(printf '%s\n' "$CHANGED_FILES" | grep '\.h$' | grep -v 'deps/' || true)"
 # #endregion
 
@@ -139,13 +139,28 @@ ensure_tidy_ci() {
     fi
 }
 
-# A changed header can affect any configured variant, so lint the full tree.
+# A changed header lints every TU that includes it, from the just-built
+# native-debug's ninja deps, plus the TUs only the tidy-ci DB compiles (devapi).
+# A header no deps mention falls back to the full tree; CI lints the full tree.
 run_tidy_gate() {
     local build_dir="$1"
     if [ -n "$CHANGED_HEADERS" ]; then
-        echo "Changed headers detected — running FULL clang-tidy:"
+        echo "Changed headers:"
         printf '  %s\n' $CHANGED_HEADERS
-        bash scripts/tidy.sh "$build_dir"
+        local dependents
+        # shellcheck disable=SC2086 — newline-split into file args; repo paths have no spaces
+        dependents="$(python scripts/tidy_dependents.py "$NATIVE_BUILD_DIR" "$build_dir" $CHANGED_HEADERS | tr -d '\r')"
+        if [ "$dependents" = "FULL" ]; then
+            echo "A changed header is in no recorded deps — running FULL clang-tidy"
+            bash scripts/tidy.sh "$build_dir"
+            return
+        fi
+        local files
+        files="$(printf '%s\n%s\n' "$TIDY_FILES" "$dependents" | grep -E '^(engine|shared|tools|examples|tests)/.*\.c$' \
+            | grep -v 'deps/\|/web/\|_web\.c\|tools/research/' | sort -u || true)"
+        echo "clang-tidy on $(printf '%s\n' "$files" | grep -c .) TUs that include them or changed"
+        # shellcheck disable=SC2086
+        bash scripts/tidy.sh "$build_dir" $files
     elif [ -n "$TIDY_FILES" ]; then
         echo "Changed .c files:"
         printf '  %s\n' $TIDY_FILES
@@ -167,9 +182,15 @@ python scripts/check_gl_calls.py
 # so devapi-gated tests are visible) — keep the DB fresh first.
 ensure_tidy_ci
 bash scripts/check_tests_registered.sh "$TIDY_CI_DIR"
-python -m unittest discover -s scripts/tests -p 'test_*.py'
-bash scripts/tests/test_check.sh
-bash scripts/tests/test_tidy.sh
+# The check scripts' own tests (~12 s) cover scripts/, the pack CMake graph and the
+# devapi client only; CI's lint job runs them on every push.
+if printf '%s\n' "$CHANGED_NAMES_ALL" | grep -qE '^(scripts/|cmake/|tools/devapi/)'; then
+    python -m unittest discover -s scripts/tests -p 'test_*.py'
+    bash scripts/tests/test_check.sh
+    bash scripts/tests/test_tidy.sh
+else
+    echo "(no scripts/, cmake/ or tools/devapi/ changes — check-script tests defer to CI)"
+fi
 ok
 
 step "build (native-debug)"
@@ -252,7 +273,7 @@ if [ "$MODE" = "push" ]; then
     # Release compiles the ENGINE TUs with NDEBUG and explicit TRAP asserts (NT_ASSERT_FULL-only code drops
     # out) and -O2: a variable only an assert reads is -Wunused under -Werror here and nowhere in the
     # debug builds. tests/ is NOT in this build (NT_BUILD_TESTS=OFF) -- test TUs meet NDEBUG only in
-    # ci.yml's native-release-test job. Mirrors ci.yml's native-release job.
+    # ci.yml's native-release job (native-release-test preset). Mirrors ci.yml's packs job.
     step "build (native-release)"
     NR_CACHE="build/_cmake/native-release/CMakeCache.txt"
     if [ ! -f "$NR_CACHE" ]; then

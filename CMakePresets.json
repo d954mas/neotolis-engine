@@ -185,15 +185,6 @@
             }
         },
         {
-            "name": "native-debug-test",
-            "displayName": "Native Debug Test (FULL asserts)",
-            "inherits": "native-debug",
-            "binaryDir": "${sourceDir}/build/_cmake/native-debug-test",
-            "cacheVariables": {
-                "NT_ASSERT_MODE": "2"
-            }
-        },
-        {
             "name": "native-release-test",
             "displayName": "Native Release Test (FULL asserts, dev tools ON)",
             "inherits": "native-release",
@@ -281,10 +272,6 @@
             "configurePreset": "native-release-linux-openssl"
         },
         {
-            "name": "native-debug-test",
-            "configurePreset": "native-debug-test"
-        },
-        {
             "name": "native-release-test",
             "configurePreset": "native-release-test"
         },
@@ -368,13 +355,6 @@
         {
             "name": "native-debug",
             "configurePreset": "native-debug",
-            "output": {
-                "outputOnFailure": true
-            }
-        },
-        {
-            "name": "native-debug-test",
-            "configurePreset": "native-debug-test",
             "output": {
                 "outputOnFailure": true
             }

@@ -23,6 +23,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Job graph: only the wasm jobs wait, for the release packs and the Basis goldens.
+# Every other job starts at once; native test configures skip pack generation
+# (tests read their own fixtures) so no debug builder re-encodes the examples.
 env:
   # Basis admission rows shared by the native and browser jobs: `name:flags`, rows separated
   # by spaces, several -D flags inside one row by commas (expanded with ${flags//,/ }).
@@ -30,350 +33,23 @@ env:
   # target, and both codecs with BC7 as the only compressed target. Together they cover both
   # single-codec decoders and upload+sample every compressed target through the runner's software GL.
   NT_BASISU_ROWS: "basisu-uastc-only:-DNT_BASISU_HAS_ETC1S=OFF basisu-etc1s-etc2:-DNT_BASISU_HAS_UASTC=OFF,-DNT_BASISU_HAS_BC7=OFF,-DNT_BASISU_HAS_ASTC=OFF basisu-bc7-only:-DNT_BASISU_HAS_ETC2=OFF,-DNT_BASISU_HAS_ASTC=OFF"
-  # Examples require the default set (sponza uses both codecs), so restricted rows skip them.
-  NT_BASISU_SKIP_PACKS: "atlas;bunnymark;rtt_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase;skeletal_showcase"
+  # Every example pack set; the packs job fails when an example is missing here.
+  # Narrow configures (Basis/font/Clay rows, goldens) also pass -DNT_HTTP_CURL=OFF: none of
+  # their tests use HTTP, and configuring vendored curl doubles the configure time.
+  NT_ALL_EXAMPLE_PACKS: "asteroids;atlas;bunnymark;rtt_showcase;skeletal_showcase;slice9_demo;sponza;text;textured_quad;ui_3d_demo;ui_showcase"
 
 jobs:
-  wasm:
-    name: WASM Build & Test
-    runs-on: ubuntu-latest
-    needs: native
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Create LFS file list
-        run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
-
-      - uses: actions/cache@v4
-        with:
-          path: .git/lfs/objects
-          key: lfs-${{ hashFiles('.lfs-assets-id') }}
-
-      - name: Pull LFS files
-        run: git lfs pull
-
-      - name: Read emsdk version
-        id: emsdk-version
-        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
-
-      - uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: ${{ steps.emsdk-version.outputs.version }}
-          actions-cache-folder: 'emsdk-cache'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ github.job }}
-          max-size: "600M"
-
-      # CCACHE_COMPILERCHECK=content — emcc is a python wrapper; mtime compiler check is unreliable across emsdk cache restores
-      - name: Enable ccache compiler launcher
-        run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
-
-      # Restores build/examples/<name>/<pack>.ntpack — upload-artifact roots the
-      # archive at the pre-wildcard prefix of its glob (build/examples).
-      - name: Download example packs
-        uses: actions/download-artifact@v4
-        with:
-          name: example-packs
-          path: build/examples
-
-      - name: Download Basis goldens
-        uses: actions/download-artifact@v4
-        with:
-          name: basisu-goldens
-          path: build/tests/basisu_golden
-
-      - name: Build baseline WASM debug artifacts
-        run: |
-          emcmake cmake --preset wasm-debug
-          cmake --build --preset wasm-debug
-
-      - name: Verify baseline WASM debug output
-        run: |
-          test -f build/examples/hello/wasm-debug/index.html
-          test -f build/examples/hello/wasm-debug/index.js
-          test -f build/examples/hello/wasm-debug/index.wasm
-          test -f build/engine/wasm-debug/libnt_core.a
-          test -f build/engine/wasm-debug/libnt_log.a
-          test -f build/engine/wasm-debug/libnt_log_stub.a
-          echo "Baseline WASM debug build verified"
-
-      - name: Run SIMD loader test
-        run: node tests/wasm/simd_loader_test.js
-
-      - name: Run baseline WASM smoke test (debug)
-        run: node tests/wasm/smoke_test.js wasm-debug
-
-      # Includes test_basisu_trimmed: the production wasm transcoder decodes the native
-      # goldens under Node (the download step above).
-      - name: Run baseline WASM debug ctest
-        run: ctest --preset wasm-debug
-
-      - name: Build standalone WASM debug SIMD artifacts
-        run: |
-          emcmake cmake --preset wasm-debug-simd
-          cmake --build --preset wasm-debug-simd
-
-      - name: Verify standalone WASM debug SIMD output
-        run: |
-          test -f build/examples/hello/wasm-debug-simd/index.html
-          test -f build/examples/hello/wasm-debug-simd/index.js
-          test -f build/examples/hello/wasm-debug-simd/index.wasm
-          test -f build/engine/wasm-debug-simd/libnt_core.a
-          test -f build/engine/wasm-debug-simd/libnt_log.a
-          test -f build/engine/wasm-debug-simd/libnt_log_stub.a
-          echo "Standalone WASM debug SIMD build verified"
-
-      - name: Run standalone WASM smoke test (debug SIMD)
-        run: node tests/wasm/smoke_test.js wasm-debug-simd
-
-      - name: Run standalone WASM debug SIMD ctest
-        run: ctest --preset wasm-debug-simd
-
-      - name: Build paired WASM debug artifacts
-        run: ./scripts/build_wasm_paired.sh wasm-debug-paired
-
-      - name: Verify paired WASM debug output
-        run: |
-          test -f build/examples/hello/wasm-debug-paired/index.html
-          test -f build/examples/hello/wasm-debug-paired/index.js
-          test -f build/examples/hello/wasm-debug-paired/index.wasm
-          test -f build/examples/hello/wasm-debug-paired/index_simd.wasm
-          test -f build/examples/hello/wasm-debug-paired/index_simd.js
-          test -f build/engine/wasm-debug-paired/libnt_core.a
-          test -f build/engine/wasm-debug-paired/libnt_log.a
-          test -f build/engine/wasm-debug-paired/libnt_log_stub.a
-          echo "Paired WASM debug build verified"
-
-      - name: Run paired WASM smoke test (debug baseline shell)
-        run: node tests/wasm/smoke_test.js wasm-debug-paired
-
-      - name: Run paired WASM debug ctest
-        run: ctest --preset wasm-debug-paired
-
-      - name: Build baseline WASM release artifacts
-        run: |
-          emcmake cmake --preset wasm-release
-          cmake --build --preset wasm-release
-
-      - name: Verify gfx capture producers are absent in WASM release
-        run: |
-          symbols="$("$EMSDK/upstream/bin/llvm-nm" --defined-only build/engine/wasm-release/libnt_gfx.a)"
-          # Positive control: the listing must see ordinary gfx symbols.
-          grep -q "nt_gfx_init" <<< "$symbols"
-          for producer in g_nt_gfx_capture nt_gfx_backend_capture_initial_state nt_gfx_gl_call_name; do
-            if grep -q "$producer" <<< "$symbols"; then
-              echo "wasm-release nt_gfx retains capture producer: $producer"
-              exit 1
-            fi
-          done
-
-      - name: Verify optional UI composition in WASM release
-        run: |
-          emcmake cmake -S tests/submodule -B build/_cmake/ui-composition-wasm-release -G Ninja -DENGINE_ROOT="$PWD" -DCMAKE_BUILD_TYPE=Release -DNT_BUILD_TESTS=OFF -DNT_FONT_EMBOLDEN_ENABLED=OFF -DNT_UI_CLAY_DEBUG_VIEW=OFF -DNT_UI_DEBUG_TOOLS=OFF
-          python3 scripts/check_ui_composition.py build/_cmake/ui-composition-wasm-release --nm "$EMSDK/upstream/bin/llvm-nm"
-
-      - name: Build optional UI features in WASM release
-        run: |
-          emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
-          cmake --build build/_cmake/wasm-release-ui-on --target ui_showcase
-
-      - name: Verify baseline WASM release output
-        run: |
-          test -f build/examples/hello/wasm-release/index.html
-          test -f build/examples/hello/wasm-release/index.js
-          test -f build/examples/hello/wasm-release/index.wasm
-          test -f build/engine/wasm-release/libnt_core.a
-          test -f build/engine/wasm-release/libnt_log.a
-          test -f build/engine/wasm-release/libnt_log_stub.a
-          echo "Baseline WASM release build verified"
-
-      - name: Run baseline WASM smoke test (release)
-        run: node tests/wasm/smoke_test.js wasm-release
-
-      - name: Run baseline WASM release ctest
-        run: ctest --preset wasm-release
-
-      - name: Build paired WASM release artifacts
-        run: ./scripts/build_wasm_paired.sh wasm-release-paired
-
-      - name: Verify paired WASM release output
-        run: |
-          test -f build/examples/hello/wasm-release-paired/index.html
-          test -f build/examples/hello/wasm-release-paired/index.js
-          test -f build/examples/hello/wasm-release-paired/index.wasm
-          test -f build/examples/hello/wasm-release-paired/index_simd.wasm
-          test -f build/examples/hello/wasm-release-paired/index_simd.js
-          test -f build/examples/hello/wasm-release-simd/index.html
-          test -f build/examples/hello/wasm-release-simd/index.js
-          test -f build/examples/hello/wasm-release-simd/index.wasm
-          test -f build/engine/wasm-release-paired/libnt_core.a
-          test -f build/engine/wasm-release-paired/libnt_log.a
-          test -f build/engine/wasm-release-paired/libnt_log_stub.a
-          test -f build/engine/wasm-release-simd/libnt_core.a
-          test -f build/engine/wasm-release-simd/libnt_log.a
-          test -f build/engine/wasm-release-simd/libnt_log_stub.a
-          echo "Paired WASM release build verified"
-
-      - name: Run paired WASM smoke test (release baseline shell)
-        run: node tests/wasm/smoke_test.js wasm-release-paired
-
-      - name: Run standalone WASM smoke test (release SIMD)
-        run: node tests/wasm/smoke_test.js wasm-release-simd
-
-      - name: Run paired WASM release ctest
-        run: ctest --preset wasm-release-paired
-
-      - name: Run standalone WASM release SIMD ctest
-        run: ctest --preset wasm-release-simd
-
-      - name: Build paired WASM analysis artifacts
-        run: ./scripts/build_wasm_paired.sh wasm-analysis-paired
-
-      - name: Verify paired WASM analysis output
-        run: |
-          test -f build/examples/hello/wasm-analysis-paired/index.html
-          test -f build/examples/hello/wasm-analysis-paired/index.js
-          test -f build/examples/hello/wasm-analysis-paired/index.wasm
-          test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
-          test -f build/examples/hello/wasm-analysis-paired/index_simd.js
-          test -f build/examples/hello/wasm-analysis-simd/index.html
-          test -f build/examples/hello/wasm-analysis-simd/index.js
-          test -f build/examples/hello/wasm-analysis-simd/index.wasm
-          test -f build/engine/wasm-analysis-paired/libnt_core.a
-          test -f build/engine/wasm-analysis-paired/libnt_log.a
-          test -f build/engine/wasm-analysis-paired/libnt_log_stub.a
-          test -f build/engine/wasm-analysis-simd/libnt_core.a
-          test -f build/engine/wasm-analysis-simd/libnt_log.a
-          test -f build/engine/wasm-analysis-simd/libnt_log_stub.a
-          echo "Paired WASM analysis build verified"
-
-      - name: Run paired WASM smoke test (analysis baseline shell)
-        run: node tests/wasm/smoke_test.js wasm-analysis-paired
-
-      - name: Run standalone WASM smoke test (analysis SIMD)
-        run: node tests/wasm/smoke_test.js wasm-analysis-simd
-
-      - name: Run paired WASM analysis ctest
-        run: ctest --preset wasm-analysis-paired
-
-      - name: Run standalone WASM analysis SIMD ctest
-        run: ctest --preset wasm-analysis-simd
-
-      - name: Verify packaged example SIMD artifacts
-        run: |
-          test -f build/examples/hello/wasm-debug-paired/index_simd.wasm
-          test -f build/examples/hello/wasm-debug-paired/index_simd.js
-          test -f build/examples/bench_shapes/wasm-debug-paired/index_simd.wasm
-          test -f build/examples/spinning_cube/wasm-debug-paired/index_simd.wasm
-          test -f build/examples/textured_quad/wasm-debug-paired/index_simd.wasm
-          test -f build/examples/sponza/wasm-debug-paired/index_simd.wasm
-          test -f build/examples/text/wasm-debug-paired/index_simd.wasm
-          test -f build/examples/bunnymark/wasm-debug-paired/index_simd.wasm
-          test -f build/examples/hello/wasm-release-paired/index_simd.wasm
-          test -f build/examples/bench_shapes/wasm-release-paired/index_simd.wasm
-          test -f build/examples/spinning_cube/wasm-release-paired/index_simd.wasm
-          test -f build/examples/textured_quad/wasm-release-paired/index_simd.wasm
-          test -f build/examples/sponza/wasm-release-paired/index_simd.wasm
-          test -f build/examples/text/wasm-release-paired/index_simd.wasm
-          test -f build/examples/bunnymark/wasm-release-paired/index_simd.wasm
-          test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
-          test -f build/examples/bench_shapes/wasm-analysis-paired/index_simd.wasm
-          test -f build/examples/spinning_cube/wasm-analysis-paired/index_simd.wasm
-          test -f build/examples/textured_quad/wasm-analysis-paired/index_simd.wasm
-          test -f build/examples/sponza/wasm-analysis-paired/index_simd.wasm
-          test -f build/examples/text/wasm-analysis-paired/index_simd.wasm
-          test -f build/examples/bunnymark/wasm-analysis-paired/index_simd.wasm
-          echo "Packaged example SIMD artifacts verified"
-
-      - name: Install wabt
-        run: sudo apt-get update && sudo apt-get install -y wabt
-
-      # Assert a devapi-OFF WASM has zero nt_devapi_* symbols. Runs on wasm-analysis-paired
-      # (names retained, devapi off) so the symbol-absence check is real, not vacuous.
-      - name: DevAPI zero-delta check (devapi-OFF WASM has no devapi surface)
-        run: PRESET=wasm-analysis-paired bash scripts/devapi-zero-delta.sh hello
-
-      # The size chart measures these dirs: the effective cache, not the preset text, must carry no dev tooling.
-      - name: Verify release dirs carry no dev tooling
-        run: |
-          for p in wasm-release wasm-release-paired wasm-release-simd wasm-analysis-paired wasm-analysis-simd; do
-            for v in NT_UI_DEBUG_TOOLS NT_LOG_RING_ENABLED NT_METRICS_ENABLED NT_INTROSPECT_ENABLED NT_INTROSPECT_WRITE_ENABLED; do
-              grep -qx "$v:BOOL=OFF" "build/_cmake/$p/CMakeCache.txt" || { echo "::error::$p: $v is not OFF"; exit 1; }
-            done
-          done
-
-      - name: Measure sizes (all examples)
-        run: |
-          source scripts/wasm_examples.sh
-          for example in "${WASM_EXAMPLES[@]}"; do
-            PRESET=wasm-release-paired bash scripts/size.sh "$example" --json > "/tmp/size_${example}.json"
-          done
-
-      - name: Generate size reports (all examples)
-        run: |
-          # tee would otherwise mask a size-report.sh failure behind its own exit status.
-          set -o pipefail
-          source scripts/wasm_examples.sh
-          for example in "${WASM_EXAMPLES[@]}"; do
-            PRESET=wasm-analysis-paired bash scripts/size-report.sh "$example" | tee "/tmp/report_${example}.txt"
-          done
-
-      - name: Upload size data
-        uses: actions/upload-artifact@v4
-        with:
-          name: wasm-size-data
-          path: |
-            /tmp/size_*.json
-            /tmp/report_*.txt
-          retention-days: 1
-
-  native:
-    name: Native Build & Test
+  # #region producers
+  packs:
+    name: Native Release & Packs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create LFS file list
-        run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
-
-      - uses: actions/cache@v4
+      - uses: ./.github/actions/setup
         with:
-          path: .git/lfs/objects
-          key: lfs-${{ hashFiles('.lfs-assets-id') }}
+          lfs: "true"
+          ccache-key: packs
 
-      - name: Pull LFS files
-        run: git lfs pull
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y clang llvm ninja-build \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev xvfb
-
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ github.job }}
-          max-size: "400M"
-
-      - name: Enable ccache compiler launcher
-        run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-
-      # Release first — its all-targets build produces every example's packs
-      # (pack builders are wired into the build graph; see cmake/nt_example_packs.cmake).
-      # The debug build later re-runs builders warm (seconds, thanks to _cache).
       - name: Configure native release
         run: cmake --preset native-release
 
@@ -393,22 +69,15 @@ jobs:
 
       - name: Verify native release output
         run: |
-          test -f build/tools/builder/native-release/builder
           test -f build/engine/native-release/libnt_core.a
           test -f build/engine/native-release/libnt_log.a
           test -f build/engine/native-release/libnt_log_stub.a
-          echo "Native release build verified"
+          ./build/tools/builder/native-release/builder
 
-      - name: Smoke test builder (release)
-        run: ./build/tools/builder/native-release/builder
-
-      # Guard + upload run HERE, before any debug preset builds, so the artifact
-      # carries release-builder bytes. Missing or partial packs already failed the
-      # all-targets build (copy edges + success stamp, cmake/nt_example_packs.cmake);
-      # the two drifts that WOULD stay silent are an example whose build_packs.c was
-      # never wired (the original #331 class — no manifest, no edges, no artifact)
-      # and stale committed codegen headers (native compiles against the fresh
-      # regeneration, wasm/deploy against the committed copies).
+      # Missing or partial packs already failed the build (copy edges + success stamp,
+      # cmake/nt_example_packs.cmake). Silent drifts: an example whose build_packs.c was
+      # never wired, one missing from NT_ALL_EXAMPLE_PACKS (test jobs would re-encode it),
+      # and stale committed codegen headers (wasm/deploy compile against the committed copies).
       - name: Verify example packs wired + headers fresh
         run: |
           bad=0
@@ -416,6 +85,10 @@ jobs:
             name=$(basename "$(dirname "$src")")
             if [ ! -f "build/examples/$name/.expected_packs" ]; then
               echo "::error::examples/$name has build_packs.c but nt_example_packs was never wired"
+              bad=1
+            fi
+            if [[ ";$NT_ALL_EXAMPLE_PACKS;" != *";$name;"* ]]; then
+              echo "::error::examples/$name is missing from NT_ALL_EXAMPLE_PACKS in ci.yml"
               bad=1
             fi
           done
@@ -433,68 +106,23 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-      - name: Configure native release tests (FULL asserts)
-        run: cmake --preset native-release-test
+  # The full Basis baseline feeds every wasm test_basisu_trimmed run.
+  goldens:
+    name: Basis Goldens
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          lfs: "true"
+          ccache-key: goldens
 
-      - name: Build native release tests
-        run: cmake --build --preset native-release-test
-
-      - name: Run tests (release)
-        run: xvfb-run ctest --preset native-release-test
-
-      - name: Check diagnostics configuration and runtime matrix
+      - name: Produce and check the Basis goldens
         run: |
-          python3 scripts/check_diagnostics_config.py
-          xvfb-run python3 scripts/check_diagnostics_runtime.py
+          cmake --preset native-release-test -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          cmake --build --preset native-release-test --target test_basisu_golden_produce
+          ctest --preset native-release-test --no-tests=error -R '^test_basisu_golden_produce$'
 
-      - name: Test optional UI features under NDEBUG
-        run: |
-          cmake --preset native-release-test -B build/_cmake/native-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
-          cmake --build build/_cmake/native-release-ui-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom
-          xvfb-run ctest --test-dir build/_cmake/native-release-ui-on --output-on-failure -R '^test_(font|text_renderer|nt_ui_(label|rich_(build|wrap|emit|parse|custom)|clay_debug_view|begin_end|walker_custom))$'
-
-      # Debug after release — packs already on disk from release build
-      - name: Configure native debug
-        run: cmake --preset native-debug
-
-      - name: Build native debug (all targets)
-        run: cmake --build --preset native-debug
-
-      - name: Verify native debug output
-        run: |
-          test -f build/tools/builder/native-debug/builder
-          test -f build/engine/native-debug/libnt_core.a
-          test -f build/engine/native-debug/libnt_log.a
-          test -f build/engine/native-debug/libnt_log_stub.a
-          echo "Native debug build verified"
-
-      - name: Smoke test builder (debug)
-        run: ./build/tools/builder/native-debug/builder
-
-      # devapi + ui/obs/entity_write groups ON so the devapi test targets (incl. the ui.* + obs.* +
-      # entity.set tests) build + run. GROUP_UI / GROUP_OBS / GROUP_ENTITY_WRITE are opt-in (default OFF).
-      - name: Configure native debug tests (FULL asserts, devapi ON)
-        run: cmake --preset native-debug-test -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
-
-      - name: Build native debug tests
-        run: cmake --build --preset native-debug-test
-
-      - name: Run tests (debug)
-        run: xvfb-run ctest --preset native-debug-test
-
-      # Each admission row (NT_BASISU_ROWS) consumes the full native baseline through the
-      # trimmed mirror and runs the Basis suites with the restricted set.
-      - name: Basis admission rows (FULL asserts)
-        run: |
-          for row in $NT_BASISU_ROWS; do
-            name="${row%%:*}"
-            flags="${row#*:}"
-            cmake --preset native-debug-test -B "build/_cmake/$name" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_BASISU_SKIP_PACKS"
-            cmake --build "build/_cmake/$name" --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
-            xvfb-run ctest --test-dir "build/_cmake/$name" --output-on-failure --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
-          done
-
-      # The full baseline feeds the WASM job's test_basisu_trimmed run.
       - name: Upload Basis goldens
         uses: actions/upload-artifact@v4
         with:
@@ -504,35 +132,292 @@ jobs:
             build/tests/basisu_golden/*.bin
           retention-days: 1
           if-no-files-found: error
+  # #endregion
 
-      - name: Test optional font geometry (FULL asserts)
+  # #region wasm
+  wasm-debug:
+    name: WASM Debug
+    runs-on: ubuntu-latest
+    needs: [packs, goldens]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          lfs: "true"
+          native: "false"
+          emsdk: "true"
+          ccache-key: wasm-debug
+          ccache-size: 600M
+
+      # Restores build/examples/<name>/<pack>.ntpack — upload-artifact roots the
+      # archive at the pre-wildcard prefix of its glob (build/examples).
+      - uses: actions/download-artifact@v4
+        with:
+          name: example-packs
+          path: build/examples
+      - uses: actions/download-artifact@v4
+        with:
+          name: basisu-goldens
+          path: build/tests/basisu_golden
+
+      # The paired preset's index.wasm is the baseline build (it differs from wasm-debug only
+      # by the SIMD path in the HTML shell), so CI links each configuration once.
+      - name: Build paired WASM debug (baseline + SIMD)
         run: |
-          cmake --preset native-debug-test -B build/_cmake/native-debug-embolden-on -DNT_FONT_EMBOLDEN_ENABLED=ON
-          cmake --build build/_cmake/native-debug-embolden-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom
-          xvfb-run ctest --test-dir build/_cmake/native-debug-embolden-on --output-on-failure -R '^test_(font|text_renderer|nt_ui_label|nt_ui_rich_(build|wrap|emit|parse|custom))$'
-
-      # NT_UI_DEBUG_TOOLS=OFF under Debug + FULL asserts + sanitizers: the release
-      # presets build the stub bodies too, but only this mirror runs ctest over them.
-      - name: Configure native debug (NT_UI_DEBUG_TOOLS=OFF)
-        run: cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -G Ninja
-
-      - name: Build native debug (NT_UI_DEBUG_TOOLS=OFF)
-        run: cmake --build build/_cmake/native-debug-off
-
-      - name: Run tests (NT_UI_DEBUG_TOOLS=OFF)
-        run: xvfb-run ctest --test-dir build/_cmake/native-debug-off --output-on-failure
-
-      - name: Test Clay view with both inspector settings
-        run: |
-          for inspector in ON OFF; do
-            build_dir="build/_cmake/native-debug-clay-on-${inspector}"
-            cmake --preset native-debug-test -B "$build_dir" -DNT_UI_CLAY_DEBUG_VIEW=ON -DNT_UI_DEBUG_TOOLS="$inspector"
-            cmake --build "$build_dir" --target test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom test_nt_ui_inspector test_nt_ui_debug_hit_zones test_nt_ui_probe
-            xvfb-run ctest --test-dir "$build_dir" --output-on-failure -R '^test_nt_ui_(clay_debug_view|begin_end|walker_custom|inspector|debug_hit_zones|probe)$'
+          ./scripts/build_wasm_paired.sh wasm-debug-paired
+          for f in index.html index.js index.wasm index_simd.wasm index_simd.js; do
+            test -f "build/examples/hello/wasm-debug-paired/$f"
+          done
+          for f in index.html index.js index.wasm; do
+            test -f "build/examples/hello/wasm-debug-simd/$f"
+          done
+          for p in wasm-debug-paired wasm-debug-simd; do
+            for lib in libnt_core.a libnt_log.a libnt_log_stub.a; do
+              test -f "build/engine/$p/$lib"
+            done
+          done
+          for example in hello bench_shapes spinning_cube textured_quad sponza text bunnymark; do
+            test -f "build/examples/$example/wasm-debug-paired/index_simd.wasm"
           done
 
-      - name: Verify Clay debug arena exclusion
-        run: python3 scripts/check_clay_arena.py build/_cmake/native-debug-test build/_cmake/native-debug-clay-on-ON
+      # The ctest includes test_basisu_trimmed: the production wasm transcoder decodes the
+      # native goldens under Node.
+      - name: Test paired WASM debug
+        run: |
+          node tests/wasm/simd_loader_test.js
+          node tests/wasm/smoke_test.js wasm-debug-paired
+          node tests/wasm/smoke_test.js wasm-debug-simd
+          ctest --preset wasm-debug-paired
+          ctest --preset wasm-debug-simd
+
+  wasm-release:
+    name: WASM Release & Sizes
+    runs-on: ubuntu-latest
+    needs: [packs, goldens]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          lfs: "true"
+          native: "false"
+          emsdk: "true"
+          ccache-key: wasm-release
+          ccache-size: 600M
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: example-packs
+          path: build/examples
+      - uses: actions/download-artifact@v4
+        with:
+          name: basisu-goldens
+          path: build/tests/basisu_golden
+
+      - name: Verify optional UI composition in WASM release
+        run: |
+          emcmake cmake -S tests/submodule -B build/_cmake/ui-composition-wasm-release -G Ninja -DENGINE_ROOT="$PWD" -DCMAKE_BUILD_TYPE=Release -DNT_BUILD_TESTS=OFF -DNT_FONT_EMBOLDEN_ENABLED=OFF -DNT_UI_CLAY_DEBUG_VIEW=OFF -DNT_UI_DEBUG_TOOLS=OFF
+          python3 scripts/check_ui_composition.py build/_cmake/ui-composition-wasm-release --nm "$EMSDK/upstream/bin/llvm-nm"
+
+      - name: Build optional UI features in WASM release
+        run: |
+          emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
+          cmake --build build/_cmake/wasm-release-ui-on --target ui_showcase
+
+      # The paired index.wasm is the wasm-release baseline (only the shell differs).
+      - name: Build paired WASM release (baseline + SIMD)
+        run: |
+          ./scripts/build_wasm_paired.sh wasm-release-paired
+          for f in index.html index.js index.wasm index_simd.wasm index_simd.js; do
+            test -f "build/examples/hello/wasm-release-paired/$f"
+          done
+          for f in index.html index.js index.wasm; do
+            test -f "build/examples/hello/wasm-release-simd/$f"
+          done
+          for p in wasm-release-paired wasm-release-simd; do
+            for lib in libnt_core.a libnt_log.a libnt_log_stub.a; do
+              test -f "build/engine/$p/$lib"
+            done
+          done
+          for example in hello bench_shapes spinning_cube textured_quad sponza text bunnymark; do
+            test -f "build/examples/$example/wasm-release-paired/index_simd.wasm"
+          done
+
+      - name: Verify gfx capture producers are absent in WASM release
+        run: |
+          symbols="$("$EMSDK/upstream/bin/llvm-nm" --defined-only build/engine/wasm-release-paired/libnt_gfx.a)"
+          # Positive control: the listing must see ordinary gfx symbols.
+          grep -q "nt_gfx_init" <<< "$symbols"
+          for producer in g_nt_gfx_capture nt_gfx_backend_capture_initial_state nt_gfx_gl_call_name; do
+            if grep -q "$producer" <<< "$symbols"; then
+              echo "wasm-release nt_gfx retains capture producer: $producer"
+              exit 1
+            fi
+          done
+
+      - name: Test paired WASM release
+        run: |
+          node tests/wasm/smoke_test.js wasm-release-paired
+          node tests/wasm/smoke_test.js wasm-release-simd
+          ctest --preset wasm-release-paired
+          ctest --preset wasm-release-simd
+
+      # The size chart measures these dirs: the effective cache, not the preset text, must carry no dev tooling.
+      - name: Verify release dirs carry no dev tooling
+        run: |
+          for p in wasm-release-paired wasm-release-simd; do
+            for v in NT_UI_DEBUG_TOOLS NT_LOG_RING_ENABLED NT_METRICS_ENABLED NT_INTROSPECT_ENABLED NT_INTROSPECT_WRITE_ENABLED; do
+              grep -qx "$v:BOOL=OFF" "build/_cmake/$p/CMakeCache.txt" || { echo "::error::$p: $v is not OFF"; exit 1; }
+            done
+          done
+
+      - name: Measure sizes (all examples)
+        run: |
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
+            PRESET=wasm-release-paired bash scripts/size.sh "$example" --json > "/tmp/size_${example}.json"
+          done
+
+      - name: Upload size data
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-size-sizes
+          path: /tmp/size_*.json
+          retention-days: 1
+
+  wasm-analysis:
+    name: WASM Analysis & Reports
+    runs-on: ubuntu-latest
+    needs: [packs, goldens]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          lfs: "true"
+          native: "false"
+          extra-packages: wabt
+          emsdk: "true"
+          ccache-key: wasm-analysis
+          ccache-size: 600M
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: example-packs
+          path: build/examples
+      - uses: actions/download-artifact@v4
+        with:
+          name: basisu-goldens
+          path: build/tests/basisu_golden
+
+      - name: Build paired WASM analysis (baseline + SIMD)
+        run: |
+          ./scripts/build_wasm_paired.sh wasm-analysis-paired
+          for f in index.html index.js index.wasm index_simd.wasm index_simd.js; do
+            test -f "build/examples/hello/wasm-analysis-paired/$f"
+          done
+          for f in index.html index.js index.wasm; do
+            test -f "build/examples/hello/wasm-analysis-simd/$f"
+          done
+          for p in wasm-analysis-paired wasm-analysis-simd; do
+            for lib in libnt_core.a libnt_log.a libnt_log_stub.a; do
+              test -f "build/engine/$p/$lib"
+            done
+          done
+          for example in hello bench_shapes spinning_cube textured_quad sponza text bunnymark; do
+            test -f "build/examples/$example/wasm-analysis-paired/index_simd.wasm"
+          done
+
+      - name: Test paired WASM analysis
+        run: |
+          node tests/wasm/smoke_test.js wasm-analysis-paired
+          node tests/wasm/smoke_test.js wasm-analysis-simd
+          ctest --preset wasm-analysis-paired
+          ctest --preset wasm-analysis-simd
+
+      # Names are retained and devapi is off, so the symbol-absence check is real, not vacuous.
+      - name: DevAPI zero-delta check (devapi-OFF WASM has no devapi surface)
+        run: PRESET=wasm-analysis-paired bash scripts/devapi-zero-delta.sh hello
+
+      - name: Verify analysis dirs carry no dev tooling
+        run: |
+          for p in wasm-analysis-paired wasm-analysis-simd; do
+            for v in NT_UI_DEBUG_TOOLS NT_LOG_RING_ENABLED NT_METRICS_ENABLED NT_INTROSPECT_ENABLED NT_INTROSPECT_WRITE_ENABLED; do
+              grep -qx "$v:BOOL=OFF" "build/_cmake/$p/CMakeCache.txt" || { echo "::error::$p: $v is not OFF"; exit 1; }
+            done
+          done
+
+      - name: Generate size reports (all examples)
+        run: |
+          # tee would otherwise mask a size-report.sh failure behind its own exit status.
+          set -o pipefail
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
+            PRESET=wasm-analysis-paired bash scripts/size-report.sh "$example" | tee "/tmp/report_${example}.txt"
+          done
+
+      - name: Upload size reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-size-reports
+          path: /tmp/report_*.txt
+          retention-days: 1
+  # #endregion
+
+  # #region native tests
+  # scripts/ci_ctest.sh runs every test but the `display` label in parallel, then the
+  # display tests alone on the shared xvfb display.
+  native-release:
+    name: Native Release Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          lfs: "true"
+          ccache-key: native-release
+
+      - name: Build native release tests (FULL asserts)
+        run: |
+          cmake --preset native-release-test -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          cmake --build --preset native-release-test
+
+      - name: Run tests (release)
+        run: xvfb-run -a bash scripts/ci_ctest.sh --preset native-release-test
+
+      - name: Check diagnostics configuration and runtime matrix
+        run: |
+          python3 scripts/check_diagnostics_config.py
+          xvfb-run -a python3 scripts/check_diagnostics_runtime.py
+
+      - name: Test optional UI features under NDEBUG
+        run: |
+          cmake --preset native-release-test -B build/_cmake/native-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          cmake --build build/_cmake/native-release-ui-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom
+          xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-release-ui-on -R '^test_(font|text_renderer|nt_ui_(label|rich_(build|wrap|emit|parse|custom)|clay_debug_view|begin_end|walker_custom))$'
+
+  # devapi + ui/obs/entity_write/capture groups ON so the devapi test targets build and run.
+  native-debug:
+    name: Native Debug Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          lfs: "true"
+          ccache-key: native-debug
+
+      - name: Build native debug (FULL asserts, devapi ON)
+        run: |
+          cmake --preset native-debug -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
+          cmake --build --preset native-debug
+          test -f build/engine/native-debug/libnt_core.a
+          test -f build/engine/native-debug/libnt_log.a
+          test -f build/engine/native-debug/libnt_log_stub.a
+          ./build/tools/builder/native-debug/builder
+
+      # The hull visual report renders the research acceptance sheet: 155 s under sanitizers,
+      # 7 s in native-release (FULL asserts), which runs it.
+      - name: Run tests (debug)
+        run: xvfb-run -a bash scripts/ci_ctest.sh --preset native-debug -E '^test_atlas_hull_visual_report$'
 
       - name: Submodule consumption test
         run: |
@@ -542,34 +427,114 @@ jobs:
           cmake --build build/submodule-test
           ./build/submodule-test/submodule_test
 
+  # Debug configurations that differ from native-debug in one feature set.
+  native-variants:
+    name: Native Feature Variants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          lfs: "true"
+          ccache-key: native-variants
+
+      # Plain CMake defaults (inspector, ring, metrics, introspect, timing, capture OFF) under
+      # Debug + FULL asserts + sanitizers: the only ctest over every stub body.
+      - name: Build native debug with optional features OFF
+        run: |
+          cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -G Ninja
+          cmake --build build/_cmake/native-debug-off
+
+      # The atlas bench guards check builder geometry, not optional features; native-debug
+      # (sanitizers) and native-release run them.
+      - name: Run tests (optional features OFF)
+        run: xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-debug-off -E '^(test_atlas_hull_visual_report|test_atlas_transform_sweep_guard|test_bench_hull_tolerance_guard)$'
+
+      # Each admission row (NT_BASISU_ROWS) consumes the Basis baseline through the trimmed
+      # mirror and runs the Basis suites with the restricted set; the producer runs first.
+      - name: Basis admission rows (FULL asserts)
+        run: |
+          base=build/_cmake/basisu-full
+          cmake --preset native-debug -B "$base" -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          cmake --build "$base" --target test_basisu_golden_produce
+          ctest --test-dir "$base" --output-on-failure --no-tests=error -R '^test_basisu_golden_produce$'
+          for row in $NT_BASISU_ROWS; do
+            name="${row%%:*}"
+            flags="${row#*:}"
+            cmake --preset native-debug -B "build/_cmake/$name" ${flags//,/ } -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+            cmake --build "build/_cmake/$name" --target test_basisu_trimmed test_basisu_roundtrip test_gfx_basis_activate test_nt_gfx_basis_native test_builder
+            xvfb-run -a bash scripts/ci_ctest.sh --test-dir "build/_cmake/$name" --no-tests=error -R '^test_(basisu_trimmed|basisu_roundtrip|gfx_basis_activate|nt_gfx_basis_native|builder)$'
+          done
+
+      - name: Test optional font geometry (FULL asserts)
+        run: |
+          cmake --preset native-debug -B build/_cmake/native-debug-embolden-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+          cmake --build build/_cmake/native-debug-embolden-on --target test_font test_text_renderer test_nt_ui_label test_nt_ui_rich_build test_nt_ui_rich_wrap test_nt_ui_rich_emit test_nt_ui_rich_parse test_nt_ui_rich_custom
+          xvfb-run -a bash scripts/ci_ctest.sh --test-dir build/_cmake/native-debug-embolden-on -R '^test_(font|text_renderer|nt_ui_label|nt_ui_rich_(build|wrap|emit|parse|custom))$'
+
+      # Rows: Clay view OFF (the arena baseline), then ON with the inspector ON and OFF.
+      - name: Test Clay view with both inspector settings
+        run: |
+          for row in "OFF ON" "ON ON" "ON OFF"; do
+            read -r view inspector <<< "$row"
+            build_dir="build/_cmake/native-debug-clay-${view}-${inspector}"
+            cmake --preset native-debug -B "$build_dir" -DNT_UI_CLAY_DEBUG_VIEW="$view" -DNT_UI_DEBUG_TOOLS="$inspector" -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+            cmake --build "$build_dir" --target test_nt_ui_clay_debug_view test_nt_ui_begin_end test_nt_ui_walker_custom test_nt_ui_inspector test_nt_ui_debug_hit_zones test_nt_ui_probe
+            xvfb-run -a bash scripts/ci_ctest.sh --test-dir "$build_dir" -R '^test_nt_ui_(clay_debug_view|begin_end|walker_custom|inspector|debug_hit_zones|probe)$'
+          done
+          python3 scripts/check_clay_arena.py build/_cmake/native-debug-clay-OFF-ON build/_cmake/native-debug-clay-ON-ON
+  # #endregion
+
+  # #region lint and smoke
+  lint:
+    name: Format & Tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          extra-packages: clang-tidy
+
+      - name: Check formatting
+        run: |
+          find engine shared tools examples -name '*.c' -o -name '*.h' | \
+            xargs clang-format --dry-run --Werror
+
+      # Module composition (no engine module links a real swappable impl; omitting an impl is a
+      # loud unresolved-symbol error) and EM_JS_DEPS (Closure strips undeclared helpers in release).
+      - name: Run module-composition and EM_JS_DEPS gates
+        run: |
+          bash scripts/check_no_real_impl_links.sh
+          bash scripts/check_link_failure_loud.sh
+          bash scripts/check_emjs_deps.sh
+
+      # devapi groups ON so every devapi TU is in compile_commands.json with its real flags.
+      - name: Configure
+        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
+
+      # The registration gate reads this job's compile DB / CTestTestfiles (devapi-gated tests visible).
+      - name: Run CRT-pin, GL-funnel, test-registration and check-script gates
+        run: |
+          bash scripts/check_crt_pins.sh
+          python3 scripts/check_gl_calls.py
+          bash scripts/check_tests_registered.sh build/_cmake/native-debug
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          bash scripts/tests/test_check.sh
+          bash scripts/tests/test_tidy.sh
+
+      - name: Run clang-tidy
+        run: bash scripts/tidy.sh build/_cmake/native-debug
+
   devapi-smoke:
     name: DevAPI Smoke (live socket UAT)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # No git-LFS pull: devapi_host renders no asset packs (native inits a window but no GL/capture
-      # render — capture.frame answers capture_unavailable there), so this job never reads the
-      # LFS-tracked assets (Sponza). Checkout's pointer files suffice.
-
-      # libgl1-mesa-dri provides the llvmpipe software GL driver so xvfb's headless X server gives the
-      # host a real X/GL context for nt_window_init() — the live socket UAT runs under a headless X.
-      - name: Install dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y clang ninja-build python3 python3-pip \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libgl1-mesa-dri libssl-dev xvfb
-
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+      # No LFS: devapi_host renders no asset pack (native capture.frame answers capture_unavailable).
+      - uses: ./.github/actions/setup
         with:
-          key: ${{ github.job }}
-          max-size: "400M"
-
-      - name: Enable ccache compiler launcher
-        run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+          extra-packages: python3-pip
+          ccache-key: devapi-smoke
 
       # Pillow + numpy are the capture-path-only decode deps, pinned + installed ONLY here.
       - name: Install capture-path Python deps (Pillow + numpy)
@@ -581,70 +546,34 @@ jobs:
       - name: Pixel-health self-test (hermetic)
         run: python3 tools/devapi/scenarios/pixel_health_selftest.py
 
-      # devapi_host serves every group the canonical scenario touches (see -DNT_DEVAPI_GROUP_* below);
-      # CAPTURE answers capture_unavailable on the native no-GL host, OBS supplies the perf.stats mem read.
-      # NT_PRESET_NAME pins the binary at build/examples/devapi_host/native-debug so devapi_demo.py's
-      # self-launch finds it with no --host-bin. Default presets keep these groups OFF (zero release delta).
+      # devapi_host serves every group the canonical scenario touches. NT_PRESET_NAME pins the binary at
+      # build/examples/devapi_host/native-debug so devapi_demo.py's self-launch finds it with no --host-bin.
       # This raw configure selects OBS's dependencies explicitly: log ring, metrics and introspect.
-      - name: Configure devapi host (groups the canonical scenario needs)
-        run: cmake -B build/examples/devapi_host/native-debug -DNT_PRESET_NAME=native-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -G Ninja -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_UI_DEBUG_TOOLS=ON -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_INTROSPECT_WRITE_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_GFX_CAPTURE_ENABLED=ON -DNT_GFX_GPU_TIMING_ENABLED=ON
+      - name: Build devapi host (groups the canonical scenario needs)
+        run: |
+          cmake -B build/examples/devapi_host/native-debug -DNT_PRESET_NAME=native-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -G Ninja -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_UI_DEBUG_TOOLS=ON -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_INTROSPECT_WRITE_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_GFX_CAPTURE_ENABLED=ON -DNT_GFX_GPU_TIMING_ENABLED=ON
+          cmake --build build/examples/devapi_host/native-debug --target devapi_host
 
-      - name: Build devapi_host
-        run: cmake --build build/examples/devapi_host/native-debug --target devapi_host
-
-      # devapi_demo.py self-launches devapi_host over the native socket and drives the canonical
-      # run(client) — discovery + game.* + observe + deferred capture + deferred items. xvfb-run supplies
-      # the headless X for nt_window_init(); exit 0 gates that the scenario passed over the native transport.
+      # Self-launches devapi_host over the native socket and drives the canonical run(client);
+      # xvfb-run supplies the headless X for nt_window_init().
       - name: Run devapi live-socket UAT
         run: xvfb-run -a python3 tools/devapi/scenarios/devapi_demo.py
 
+  # The deferred-capture-over-web drain race is invisible to unit tests — only a real headless Chromium
+  # proves it; devapi.spec.ts pumps frames deterministically via time.step, not rAF cadence.
   web-smoke:
     name: Web Smoke (devapi, blocking)
     runs-on: ubuntu-latest
-    needs: wasm
-    # The deferred-capture-over-web drain race is invisible to unit tests — only a real headless Chromium
-    # proves it, and devapi.spec.ts pumps frames deterministically via time.step (not rAF cadence) so it
-    # does not flake. NO git-LFS pull / pack-builder: the devapi_host loads no asset pack (capture renders
-    # a deterministic glClear+scissor pattern), unlike browser_smoke.
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install native build deps
-        run: |
-          sudo apt-get update && sudo apt-get install -y clang ninja-build \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev
-
-      - name: Read emsdk version
-        id: emsdk-version
-        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
-
-      - uses: mymindstorm/setup-emsdk@v14
+      # No LFS / pack builder: devapi_host loads no asset pack.
+      - uses: ./.github/actions/setup
         with:
-          version: ${{ steps.emsdk-version.outputs.version }}
-          actions-cache-folder: 'emsdk-cache'
+          emsdk: "true"
+          ccache-key: web-smoke
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ github.job }}
-          max-size: "400M"
-
-      # CCACHE_COMPILERCHECK=content — emcc is a python wrapper; mtime compiler check is unreliable across emsdk cache restores
-      - name: Enable ccache compiler launcher
-        run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
-
-      # Build the devapi_host wasm with the capture group ON so the web host arms the pre-swap seam
-      # (NT_DEVAPI_HOST_WEB_CAPTURE) — the deferred capture.frame resolves to a REAL PNG, the exact
-      # behavior the live spec asserts. FPNG_NO_SSE keeps the WASM fpng build on its scalar path.
-      # No pack-builder: devapi_host loads no asset pack.
+      # Capture group ON arms the web host's pre-swap seam (NT_DEVAPI_HOST_WEB_CAPTURE): the deferred
+      # capture.frame resolves to a REAL PNG, the behavior the live spec asserts.
       - name: Build devapi_host wasm (debug, capture ON)
         run: |
           emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_DISCOVERY=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON
@@ -662,124 +591,38 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
-      # The devapi-chromium project's server defaults to build/examples/devapi_host/wasm-debug
-      # (NT_DEVAPI_DIR overrides); the spec drives window.__devapi deterministically and asserts
-      # the deferred capture is a decodable non-blank PNG.
+      # The devapi-chromium project's server defaults to build/examples/devapi_host/wasm-debug.
       - name: Run devapi web smoke test
         run: cd tests/browser && npx playwright test devapi.spec.ts
 
-  lint:
-    name: Format & Tidy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y clang clang-tidy ninja-build \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev
-
-      - name: Check formatting
-        run: |
-          find engine shared tools examples -name '*.c' -o -name '*.h' | \
-            xargs clang-format --dry-run --Werror
-
-      # Module-composition gates: no engine module may link a real swappable impl, and omitting an
-      # impl must be a loud unresolved-symbol error. Both exit non-zero on a violation (clang is
-      # installed above for the loud-link check's throwaway compile).
-      - name: Run module-composition gates
-        run: |
-          bash scripts/check_no_real_impl_links.sh
-          bash scripts/check_link_failure_loud.sh
-
-      # An EM_JS body using a JS runtime helper must self-declare EM_JS_DEPS, else Closure strips it in
-      # wasm-release (invisible to debug/native). Caught here at lint time, not at release runtime.
-      - name: Run EM_JS_DEPS guard
-        run: bash scripts/check_emjs_deps.sh
-
-      # devapi + ui/obs groups ON so all devapi TUs (incl. nt_devapi_ui.c + nt_devapi_obs.c) are in compile_commands.json.
-      # tidy.sh lints every .c, but devapi uses CMake subdir-exclusion, so at the default (devapi off,
-      # GROUP_UI / GROUP_OBS opt-in off) they would be linted with wrong flags or missing.
-      - name: Configure
-        run: cmake --preset native-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_CAPTURE=ON
-
-      # CRT-pin centralization + every test source built AND ctest-registered.
-      # The registration gate reads this job's compile DB / CTestTestfiles
-      # (devapi ON above, so devapi-gated tests are visible).
-      - name: Run CRT-pin, GL-funnel and test-registration gates
-        run: |
-          bash scripts/check_crt_pins.sh
-          python3 scripts/check_gl_calls.py
-          bash scripts/check_tests_registered.sh build/_cmake/native-debug
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-          bash scripts/tests/test_tidy.sh
-
-      - name: Run clang-tidy
-        run: bash scripts/tidy.sh build/_cmake/native-debug
-
+  # Three parts in parallel: the default smoke specs, the Basis admission rows and the
+  # release diagnostics rows.
   browser-test:
-    name: Browser Smoke (input)
+    name: Browser (${{ matrix.part }})
     runs-on: ubuntu-latest
-    needs: wasm
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [smoke, basis, diagnostics]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create LFS file list
-        run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
-
-      - uses: actions/cache@v4
+      - uses: ./.github/actions/setup
         with:
-          path: .git/lfs/objects
-          key: lfs-${{ hashFiles('.lfs-assets-id') }}
-
-      - name: Pull LFS files
-        run: git lfs pull
-
-      - name: Install native build deps
-        run: |
-          sudo apt-get update && sudo apt-get install -y clang ninja-build \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libssl-dev
-
-      - name: Read emsdk version
-        id: emsdk-version
-        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
-
-      - uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: ${{ steps.emsdk-version.outputs.version }}
-          actions-cache-folder: 'emsdk-cache'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ github.job }}
-          max-size: "400M"
-
-      # CCACHE_COMPILERCHECK=content — emcc is a python wrapper; mtime compiler check is unreliable across emsdk cache restores
-      - name: Enable ccache compiler launcher
-        run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
+          lfs: "true"
+          emsdk: "true"
+          ccache-key: browser-${{ matrix.part }}
 
       # browser_smoke reuses the ui_showcase example pack (RAW atlas) and its own Basis fixture
       # pack for the configured NT_BASISU_* set. Build both natively before ANY wasm configure
       # below: the showcase copy rule only exists when the pack does at configure time.
-      - name: Configure native debug
-        run: cmake --preset native-debug
-
       - name: Build browser_smoke packs
         run: |
+          cmake --preset native-debug
           cmake --build --preset native-debug --target ui_showcase_packs
           cmake --build --preset native-debug --target browser_smoke_packs
 
       - name: Build browser_smoke wasm (debug)
+        if: matrix.part == 'smoke'
         run: |
           emcmake cmake --preset wasm-debug
           cmake --build --preset wasm-debug --target browser_smoke
@@ -799,10 +642,9 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
-      # This job serves the browser_smoke (ui_showcase) wasm, so run only the specs that target it.
-      # devapi.spec.ts needs the devapi_host wasm and has its own job (Web Smoke) — running it here
-      # would time out waiting for a window.__devapi bridge the ui_showcase app never installs.
+      # Only the specs that target browser_smoke; devapi.spec.ts needs devapi_host (Web Smoke job).
       - name: Run browser smoke test
+        if: matrix.part == 'smoke'
         run: cd tests/browser && npx playwright test input.spec.ts rich.spec.ts rich_composition.spec.ts context_loss.spec.ts http.spec.ts diagnostics.spec.ts observation.spec.ts pass_actions.spec.ts mesh_color.spec.ts shape_strokes.spec.ts program_link.spec.ts
 
       # Each admission row (NT_BASISU_ROWS) activates its own fixture pack in wasm Debug (FULL
@@ -810,14 +652,15 @@ jobs:
       # decision path (same selector, same SwiftShader caps). SwiftShader reports every
       # compressed cap, so the build set decides the target and real GPUs stay unverified here.
       - name: Basis admission rows (browser activation)
+        if: matrix.part == 'basis'
         run: |
           for row in $NT_BASISU_ROWS; do
             name="${row%%:*}"
             flags="${row#*:}"
-            cmake --preset native-debug -B "build/_cmake/$name-native" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_BASISU_SKIP_PACKS"
+            cmake --preset native-debug -B "build/_cmake/$name-native" ${flags//,/ } -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "build/_cmake/$name-native" --target browser_smoke_packs
             dir="$name-wasm-debug"
-            emcmake cmake --preset wasm-debug -B "build/_cmake/$dir" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_BASISU_SKIP_PACKS"
+            emcmake cmake --preset wasm-debug -B "build/_cmake/$dir" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "build/_cmake/$dir" --target browser_smoke
             test -f "build/tests/browser/app/$dir/assets/ui_showcase.ntpack"
             test -f "build/tests/browser/app/$dir/assets/basis_fixture.ntpack"
@@ -825,6 +668,7 @@ jobs:
           done
 
       - name: Check release diagnostics with independent UI and GPU timing
+        if: matrix.part == 'diagnostics'
         run: |
           for timing in "0 0" "0 1" "1 0"; do
             read -r ui gpu <<< "$timing"
@@ -837,11 +681,12 @@ jobs:
             if [[ "$ui $gpu" == "0 0" ]]; then pass_specs="pass_actions.spec.ts"; fi
             (cd tests/browser && NT_SHOWCASE_DIR="$GITHUB_WORKSPACE/build/tests/browser/app/$name" NT_SHOWCASE_PORT=8430 NT_DEVAPI_PORT=8431 NT_DIAGNOSTICS_PRESET="$name" NT_DIAGNOSTICS_LOG=1 NT_DIAGNOSTICS_UI="$ui" NT_DIAGNOSTICS_GPU="$gpu" NT_DIAGNOSTICS_METRICS=0 NT_DIAGNOSTICS_TIMER_BASE=4294967296 npx playwright test diagnostics.spec.ts context_loss.spec.ts $pass_specs --project=chromium --workers=1)
           done
+  # #endregion
 
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    needs: [native, wasm]
+    needs: [packs, wasm-debug, wasm-release, wasm-analysis, native-release, native-debug, native-variants, lint, devapi-smoke, web-smoke, browser-test]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: write
@@ -856,30 +701,12 @@ jobs:
           name: example-packs
           path: build/examples
 
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
-          node-version: '20'
-
-      - name: Read emsdk version
-        id: emsdk-version
-        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
-
-      - uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: ${{ steps.emsdk-version.outputs.version }}
-          actions-cache-folder: 'emsdk-cache'
-
-      - uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ github.job }}
-          max-size: "600M"
-
-      - name: Enable ccache launcher
-        run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-          # emcc is a python wrapper; mtime-based compiler check is unreliable across emsdk cache restores
-          echo "CCACHE_COMPILERCHECK=content" >> $GITHUB_ENV
+          native: "false"
+          emsdk: "true"
+          ccache-key: deploy
+          ccache-size: 600M
 
       - name: Upload asset packs to R2
         env:
@@ -970,7 +797,7 @@ jobs:
   persist-sizes:
     name: Persist Size Data
     runs-on: ubuntu-latest
-    needs: wasm
+    needs: [wasm-release, wasm-analysis]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: write
@@ -982,7 +809,8 @@ jobs:
       - name: Download size data
         uses: actions/download-artifact@v4
         with:
-          name: wasm-size-data
+          pattern: wasm-size-*
+          merge-multiple: true
           path: /tmp
 
       - name: Checkout gh-pages branch
@@ -1055,7 +883,7 @@ jobs:
   pr-size-comment:
     name: PR Size Comment
     runs-on: ubuntu-latest
-    needs: wasm
+    needs: [wasm-release, wasm-analysis]
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: write
@@ -1067,7 +895,8 @@ jobs:
       - name: Download size data
         uses: actions/download-artifact@v4
         with:
-          name: wasm-size-data
+          pattern: wasm-size-*
+          merge-multiple: true
           path: /tmp
 
       - name: Fetch baseline from gh-pages

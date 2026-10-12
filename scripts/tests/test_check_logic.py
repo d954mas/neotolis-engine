@@ -4,6 +4,7 @@ from scripts.check_logic import (
     allowed_missing_tests,
     ctest_command_stems,
     missing_registered_targets,
+    tidy_dependents,
 )
 
 
@@ -33,6 +34,18 @@ class CheckLogicTests(unittest.TestCase):
         targets = {"test_log_real", "test_log_stub"}
 
         self.assertEqual({"test_log_stub"}, missing_registered_targets(targets, {"test_log_real"}))
+
+    def test_tidy_dependents_keeps_includers_and_uncompiled_tus(self):
+        deps = ["a.obj: #deps 2, deps mtime 1 (VALID)", "    C:/r/a.c", "    C:/r/x.h", "",
+                "b.obj: #deps 2, deps mtime 1 (VALID)", "    C:/r/b.c", "    C:/r/y.h"]
+        db = {"C:/r/a.c", "C:/r/b.c", "C:/r/devapi_only.c"}
+
+        self.assertEqual({"C:/r/a.c", "C:/r/devapi_only.c"}, tidy_dependents(deps, db, ["C:\\R\\x.h"]))
+
+    def test_tidy_dependents_falls_back_to_full_for_unknown_header(self):
+        deps = ["a.obj: #deps 2, deps mtime 1 (VALID)", "    C:/r/a.c", "    C:/r/x.h"]
+
+        self.assertIsNone(tidy_dependents(deps, {"C:/r/a.c"}, ["C:/r/x.h", "C:/r/new.h"]))
 
 if __name__ == "__main__":
     unittest.main()

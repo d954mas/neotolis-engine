@@ -1,0 +1,106 @@
+name: Set up build job
+description: LFS assets, native toolchain, emsdk and ccache shared by the CI jobs.
+
+inputs:
+  lfs:
+    description: Pull git-LFS assets (cached by object list).
+    default: "false"
+  native:
+    description: Install clang, ninja, the GLFW/GL/X headers and xvfb.
+    default: "true"
+  extra-packages:
+    description: Additional apt packages.
+    default: ""
+  emsdk:
+    description: Activate the emsdk pinned by .emsdk-version, plus Node.
+    default: "false"
+  ccache-key:
+    description: ccache key; empty disables ccache.
+    default: ""
+  ccache-size:
+    description: ccache max size.
+    default: "400M"
+
+runs:
+  using: composite
+  steps:
+    - name: Create LFS file list
+      if: inputs.lfs == 'true'
+      shell: bash
+      run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
+
+    - uses: actions/cache@v4
+      if: inputs.lfs == 'true'
+      with:
+        path: .git/lfs/objects
+        key: lfs-${{ hashFiles('.lfs-assets-id') }}
+
+    - name: Pull LFS files
+      if: inputs.lfs == 'true'
+      shell: bash
+      run: git lfs pull
+
+    # libgl1-mesa-dri: llvmpipe, the software GL behind xvfb for the real-GL tests.
+    - name: Install native toolchain
+      if: inputs.native == 'true' || inputs.extra-packages != ''
+      shell: bash
+      run: |
+        packages="${{ inputs.extra-packages }}"
+        if [ "${{ inputs.native }}" = "true" ]; then
+          packages="clang llvm ninja-build libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libgl1-mesa-dri libssl-dev xvfb $packages"
+        fi
+        sudo apt-get update && sudo apt-get install -y $packages
+
+    - name: Read emsdk version
+      if: inputs.emsdk == 'true'
+      id: emsdk-version
+      shell: bash
+      run: echo "version=$(cat .emsdk-version)" >> "$GITHUB_OUTPUT"
+
+    # A fixed install path keeps sysroot header paths, and so ccache keys, stable across
+    # runs; the per-job key also keeps the Emscripten system libraries that job built.
+    - uses: actions/cache@v4
+      if: inputs.emsdk == 'true'
+      with:
+        path: ~/emsdk
+        key: emsdk-${{ steps.emsdk-version.outputs.version }}-${{ inputs.ccache-key }}
+        restore-keys: emsdk-${{ steps.emsdk-version.outputs.version }}-
+
+    - name: Install emsdk
+      if: inputs.emsdk == 'true'
+      shell: bash
+      run: |
+        version="${{ steps.emsdk-version.outputs.version }}"
+        if [ ! -f "$HOME/emsdk/.activated-$version" ]; then
+          [ -d "$HOME/emsdk/.git" ] || git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install "$version"
+          "$HOME/emsdk/emsdk" activate "$version"
+          touch "$HOME/emsdk/.activated-$version"
+        fi
+        echo "EMSDK=$HOME/emsdk" >> "$GITHUB_ENV"
+        echo "EM_CONFIG=$HOME/emsdk/.emscripten" >> "$GITHUB_ENV"
+        echo "$HOME/emsdk" >> "$GITHUB_PATH"
+        echo "$HOME/emsdk/upstream/emscripten" >> "$GITHUB_PATH"
+
+    - uses: actions/setup-node@v4
+      if: inputs.emsdk == 'true'
+      with:
+        node-version: "20"
+
+    - uses: hendrikmuhs/ccache-action@v1.2
+      if: inputs.ccache-key != ''
+      with:
+        key: ${{ inputs.ccache-key }}
+        max-size: ${{ inputs.ccache-size }}
+
+    # emcc is a python wrapper: an mtime compiler check is unreliable across emsdk cache restores.
+    - name: Enable ccache compiler launcher
+      if: inputs.ccache-key != ''
+      shell: bash
+      run: |
+        echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+        if [ "${{ inputs.emsdk }}" = "true" ]; then
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+        fi
