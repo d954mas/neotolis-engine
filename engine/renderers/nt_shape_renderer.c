@@ -322,8 +322,8 @@ static const nt_vertex_layout_t k_batch_layout = {
     .stride = (uint16_t)sizeof(nt_shape_vertex_t),
     .attrs =
         {
-            {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-            {.location = NT_ATTR_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 12},
+            {.location = NT_LOC_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+            {.location = NT_LOC_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 12},
         },
 };
 

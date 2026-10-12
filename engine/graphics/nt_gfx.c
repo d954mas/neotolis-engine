@@ -175,8 +175,6 @@ static struct {
 } s_gfx;
 
 _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
-_Static_assert(NT_GFX_FRAME_STREAM_COUNT < UINT8_MAX, "frame_stream holds stream + 1 in a byte");
-_Static_assert(NT_GFX_MAX_VERTEX_ATTRS <= 16, "location masks are uint16_t");
 
 static void discard_texture_set(void) { s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_NONE; }
 
@@ -779,7 +777,7 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     s_gfx.bound_pipeline = 0;
     discard_texture_set();
     s_gfx.bound_vertex_input = 0;
-    s_gfx.bound_instance_buffer = 0;
+    s_gfx.bound_instance_buffer = UINT32_MAX; /* matches no handle, {0} included, so the first bind validates it */
     s_gfx.bound_index_type = NT_INDEX_NONE;
     memset(s_gfx.bound_units, 0, sizeof(s_gfx.bound_units));
     s_gfx.viewport_rect[2] = -1; /* the backend sets the whole target at execution */
@@ -979,14 +977,11 @@ static bool blend_state_valid(const nt_blend_state_t *blend) {
 /* A location used twice (within a layout, or across a vertex input and the instance layout
  * bound with it) means glVertexAttribPointer runs twice on one slot -- last bind wins, silently
  * wrong data. Locations are asserted < NT_GFX_MAX_VERTEX_ATTRS first. */
-#define NT_GFX_LOCATIONS_DUPLICATED UINT32_MAX
 static uint32_t layout_location_mask(const nt_vertex_layout_t *layout) {
     uint32_t mask = 0;
     for (uint8_t i = 0; i < layout->attr_count; i++) {
         const uint32_t bit = 1U << layout->attrs[i].location;
-        if ((mask & bit) != 0) {
-            return NT_GFX_LOCATIONS_DUPLICATED;
-        }
+        NT_ASSERT((mask & bit) == 0 && "attribute location used twice in a layout");
         mask |= bit;
     }
     return mask;
@@ -1066,7 +1061,6 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
     /* After the attr_count asserts -- the loops read attr_count entries. */
     assert_layout_webgl2_rules(&desc->layout);
     const uint32_t vertex_mask = layout_location_mask(&desc->layout);
-    NT_ASSERT(vertex_mask != NT_GFX_LOCATIONS_DUPLICATED && "attribute location used twice in the vertex layout");
     /* attr_count 0 with no buffers is the attribute-less gl_VertexID path. */
     NT_ASSERT((desc->layout.attr_count > 0) == (desc->vertex_buffer.id != 0) && "make_vertex_input: vertex_buffer is required iff layout has attrs");
 
@@ -1154,7 +1148,6 @@ static nt_gfx_result_t make_instance_layout(const nt_vertex_layout_t *layout, nt
     NT_ASSERT(layout->stride > 0 && layout->stride <= 255 && "instance layout stride must be 1..255 (WebGL2 cap)");
     assert_layout_webgl2_rules(layout);
     const uint32_t mask = layout_location_mask(layout);
-    NT_ASSERT(mask != NT_GFX_LOCATIONS_DUPLICATED && "attribute location used twice in the instance layout");
     for (uint32_t i = 1; i <= s_gfx.instance_layout_count; i++) {
         if (instance_layout_equal(&s_gfx.instance_layouts[i], layout)) {
             out->id = i;
@@ -1772,10 +1765,7 @@ void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout
     NT_GFX_END(bind_vertex_input_instanced(vi, layout, instance_buffer, byte_offset));
 }
 
-void nt_gfx_set_buffer_frame_stream(nt_buffer_t buf, uint32_t stream) {
-    NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, buf.id) && stream < NT_GFX_FRAME_STREAM_COUNT);
-    s_gfx.buffer_metas[nt_pool_slot_index(buf.id)].frame_stream = (uint8_t)(stream + 1U);
-}
+void nt_gfx_set_buffer_frame_stream(nt_buffer_t buf, uint32_t stream) { s_gfx.buffer_metas[nt_pool_slot_index(buf.id)].frame_stream = (uint8_t)(stream + 1U); }
 
 static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_desc_t *desc) {
     const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];

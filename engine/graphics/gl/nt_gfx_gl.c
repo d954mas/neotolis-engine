@@ -133,6 +133,7 @@ typedef struct {
     GLuint instance_buffer;
     uint32_t instance_offset;
     uint8_t instance_layout; /* registered layout slot; 0 = none */
+    _Static_assert(NT_GFX_MAX_INSTANCE_LAYOUTS <= UINT8_MAX, "instance layout slot is a byte");
 } nt_gfx_gl_vertex_input_t;
 
 typedef struct {
@@ -670,7 +671,6 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_programs = (nt_gfx_gl_program_t *)calloc(s_init_desc.max_programs + 1, sizeof(nt_gfx_gl_program_t));
     s_pipelines = (nt_gfx_gl_pipeline_t *)calloc(s_init_desc.max_pipelines + 1, sizeof(nt_gfx_gl_pipeline_t));
     s_vertex_inputs = (nt_gfx_gl_vertex_input_t *)calloc(s_init_desc.max_vertex_inputs + 1, sizeof(nt_gfx_gl_vertex_input_t));
-    memset(s_instance_layouts, 0, sizeof(s_instance_layouts));
     s_buffer_gl = (GLuint *)calloc(s_init_desc.max_buffers + 1, sizeof(GLuint));
     s_buffer_targets = (GLenum *)calloc(s_init_desc.max_buffers + 1, sizeof(GLenum));
     s_texture_gl = (GLuint *)calloc(s_init_desc.max_textures + 1, sizeof(GLuint));

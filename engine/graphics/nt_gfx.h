@@ -178,13 +178,6 @@ static inline uint16_t nt_vertex_type_size(nt_vertex_type_t type) {
     return ((uint32_t)type < 6) ? sizes[type] : 0;
 }
 
-typedef enum {
-    NT_ATTR_POSITION = NT_LOC_POSITION,
-    NT_ATTR_NORMAL = NT_LOC_NORMAL,
-    NT_ATTR_COLOR = NT_LOC_COLOR,
-    NT_ATTR_TEXCOORD0 = NT_LOC_UV0,
-} nt_attr_location_t;
-
 typedef uint8_t nt_blend_factor_t;
 enum {
     NT_BLEND_ZERO = 0,
@@ -343,7 +336,7 @@ typedef enum {
 #endif
 /* Registered instance layouts: renderers register a few each at init, and an equal layout
  * returns the existing handle, so re-init never grows the table. */
-#define NT_GFX_MAX_INSTANCE_LAYOUTS 32
+#define NT_GFX_MAX_INSTANCE_LAYOUTS 32 /* a slot fits a byte: the GL VAO mirror and the bind command store it so */
 #define NT_GFX_MAX_TEXTURE_SLOTS 8
 /* WebGL2's minimum MAX_UNIFORM_BUFFER_BINDINGS, so every slot works on every device. */
 #define NT_GFX_MAX_UNIFORM_BUFFER_SLOTS 24

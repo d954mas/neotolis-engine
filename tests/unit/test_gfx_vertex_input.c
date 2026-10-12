@@ -3,6 +3,7 @@
 #include "graphics/nt_gfx_internal.h"
 #include "nt_mesh_format.h"
 #include "nt_vertex_locations.h"
+#include "pool/nt_pool.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_gfx_test_desc.h"
 #include "test_helpers/nt_gfx_test_frame.h"
@@ -187,7 +188,7 @@ void test_vi_creation_asserts_on_caller_errors(void) {
         .layout = {.attr_count = 2, .stride = 12, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 3}, {.location = 0, .type = NT_VERTEX_FLOAT, .count = 1}}},
         .vertex_buffer = vbo,
     }));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "used twice in the vertex layout"));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "used twice in a layout"));
     /* Nonempty layout without a vertex buffer, and the reverse. */
     EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = pos_layout()}));
     EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.vertex_buffer = vbo}));
@@ -221,14 +222,19 @@ void test_instanced_bind_asserts_on_caller_errors(void) {
     EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_INSTANCE_LAYOUT_INVALID, (nt_buffer_t){0}, 0));
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid instance layout"));
     bind_inst(other, frame0(), 16);
+    nt_gfx_end_pass();
+    begin_test_pass();
+    /* No buffer counts as bound at pass start, so a zero handle is validated, not skipped. */
+    EXPECT_ASSERT(bind_inst(other, (nt_buffer_t){0}, 0));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale instance buffer"));
     nt_gfx_bind_vertex_input(make_vi(vbo, (nt_buffer_t){0}));
     EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_INSTANCE_LAYOUT_INVALID, frame0(), 16));
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid instance layout"));
     nt_gfx_end_pass();
 }
 
-/* Frame storage buffers bound by this frame's `used`; after a restore replaces them, a game
- * buffer that may reuse an old frame buffer's slot bounds by its size. */
+/* Frame storage buffers bound by this frame's `used`, also the new ones a restore makes; a game
+ * buffer bounds by its size. */
 void test_instance_range_follows_frame_buffer_replacement(void) {
     nt_gfx_end_frame();
     nt_gfx_fake_lose_and_restore_context();
@@ -245,6 +251,24 @@ void test_instance_range_follows_frame_buffer_replacement(void) {
     nt_gfx_draw_instanced(0, 3, 1);
     EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "instances lie outside"));
+    nt_gfx_end_pass();
+}
+
+/* Destroying a buffer drops its frame stream tag: a game buffer that takes the slot bounds by
+ * its own size, not by the stream's allocations this frame. */
+void test_reused_buffer_slot_drops_the_frame_stream_tag(void) {
+    nt_buffer_t tagged = make_instance_buffer();
+    nt_gfx_set_buffer_frame_stream(tagged, NT_GFX_FRAME_VERTEX);
+    nt_gfx_destroy_buffer(tagged);
+    nt_buffer_t own = make_instance_buffer();
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(tagged.id), nt_pool_slot_index(own.id));
+    nt_vertex_input_t vi = make_vi(make_vbo(), (nt_buffer_t){0});
+    nt_pipeline_t pip = make_test_pipeline();
+    begin_test_pass();
+    nt_gfx_bind_pipeline(pip);
+    bind_inst(vi, own, 48);
+    nt_gfx_draw_instanced(0, 3, 1); /* 64 bytes; a stale tag would bound it by the empty stream */
+    EXPECT_ASSERT(nt_gfx_draw_instanced(0, 3, 2));
     nt_gfx_end_pass();
 }
 
@@ -274,7 +298,7 @@ void test_vi_creation_asserts_webgl2_rules(void) {
     EXPECT_ASSERT(nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 16, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 2}}}));
     EXPECT_ASSERT(nt_gfx_make_instance_layout(
         &(nt_vertex_layout_t){.attr_count = 2, .stride = 16, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 2}, {.location = 4, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8}}}));
-    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "used twice in the instance layout"));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "used twice in a layout"));
     /* Attr-count caps. The expr checks pin WHICH assert fired: without them
      * a removed cap would still trap downstream on the zeroed attrs. */
     EXPECT_ASSERT(nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = {.attr_count = NT_GFX_MAX_VERTEX_ATTRS + 1, .stride = 4}, .vertex_buffer = vbo}));
@@ -908,6 +932,7 @@ int main(void) {
     RUN_TEST(test_vi_creation_asserts_on_caller_errors);
     RUN_TEST(test_instanced_bind_asserts_on_caller_errors);
     RUN_TEST(test_instance_range_follows_frame_buffer_replacement);
+    RUN_TEST(test_reused_buffer_slot_drops_the_frame_stream_tag);
     RUN_TEST(test_vi_creation_asserts_on_untyped_index_buffer);
     RUN_TEST(test_vi_creation_asserts_webgl2_rules);
     RUN_TEST(test_vi_stride_255_boundary);

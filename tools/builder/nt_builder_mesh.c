@@ -12,8 +12,12 @@
 static nt_build_result_t nt_validate_layout_alignment(const char *label, const NtStreamLayout *layout, uint32_t stream_count);
 
 /* Checks stream s of a layout whose earlier streams already passed. */
-static nt_build_result_t nt_validate_stream_location(const char *label, const NtStreamLayout *layout, uint32_t s) {
+static nt_build_result_t nt_validate_stream_entry(const char *label, const NtStreamLayout *layout, uint32_t s) {
     const NtStreamLayout *st = &layout[s];
+    if (st->gltf_name == NULL) {
+        NT_LOG_ERROR("%s: stream[%u] gltf_name is NULL", label, s);
+        return NT_BUILD_ERR_VALIDATION;
+    }
     if (st->location >= NT_LOC_VERTEX_END) {
         NT_LOG_ERROR("%s: stream[%u] '%s': location %u out of range [0, %d)", label, s, st->gltf_name, (uint32_t)st->location, NT_LOC_VERTEX_END);
         return NT_BUILD_ERR_VALIDATION;
@@ -24,14 +28,6 @@ static nt_build_result_t nt_validate_stream_location(const char *label, const Nt
                          (uint32_t)st->location);
             return NT_BUILD_ERR_VALIDATION;
         }
-    }
-    return NT_BUILD_OK;
-}
-
-static nt_build_result_t nt_validate_stream_entry(const char *label, uint32_t s, const NtStreamLayout *st) {
-    if (st->gltf_name == NULL) {
-        NT_LOG_ERROR("%s: stream[%u] gltf_name is NULL", label, s);
-        return NT_BUILD_ERR_VALIDATION;
     }
     if (st->count < 1 || st->count > 4) {
         NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", label, s, st->count);
@@ -64,7 +60,7 @@ nt_build_result_t nt_builder_validate_stream_layout(const char *label, const NtS
 
     bool has_position = false;
     for (uint32_t s = 0; s < stream_count; s++) {
-        if (nt_validate_stream_entry(label, s, &layout[s]) != NT_BUILD_OK || nt_validate_stream_location(label, layout, s) != NT_BUILD_OK) {
+        if (nt_validate_stream_entry(label, layout, s) != NT_BUILD_OK) {
             return NT_BUILD_ERR_VALIDATION;
         }
         /* One source attribute -> one stream: duplicates make behavior order-dependent

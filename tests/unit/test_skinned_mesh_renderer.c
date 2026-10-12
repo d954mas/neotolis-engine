@@ -232,7 +232,7 @@ void setUp(void) {
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 8, .max_pipelines = 16, /* skinned 8 + static 2 + headroom */
                                   .max_buffers = 32, .max_textures = 16, .max_meshes = 8,
-                                  /* 48 non-mesh inputs + 8 meshes * (2 static + 4 skinned layouts). */
+                                  /* 48 non-mesh inputs + the per-(mesh, stream) vertex inputs of 8 meshes. */
                                   .max_vertex_inputs = 96, .max_render_targets = 4));
     nt_gfx_begin_frame();
     nt_resource_init(&(nt_resource_desc_t){0});
