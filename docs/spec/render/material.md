@@ -31,15 +31,14 @@ to; `nt_material_create` asserts a non-NULL name for both and keeps its
 param without a name is a declaration nothing can bind, so presence is decided
 by `index < count` and consumers never test the name for NULL.
 
-A material declares every sampler its program uses. A specialized renderer may
-document that it supplies the runtime texture and sampler for one named
-declaration, but the declaration still belongs to the material/program contract
-and counts toward the material limit. The renderer substitutes that slot and
-applies one complete combined set; it does not add a hidden binding. The
-implemented example is `u_skin_matrices`: a skinned material declares it within
-its four slots, while `nt_skinned_mesh_renderer` supplies the current
-deformation texture and its default sampler. That slot's descriptor resource may
-therefore be invalid, and its resource and sampler are ignored by this renderer.
+A material declares every sampler its program uses that the material owns. A
+mesh draw adds 0..`NT_MESH_MAX_DRAW_TEXTURES` (8 − 4) draw textures: bindings
+owned by the draw, not declared by the material, applied together with the
+material's textures as one complete name-keyed set. gfx validates that set: a
+duplicate name or an active sampler it does not cover asserts. The implemented
+example is `u_skin_matrices`: a skinned material does not declare it, and the
+skinned list draws the run's deformation texture with its default sampler as a
+draw texture ([Mesh draws](architecture.md#mesh-draws)).
 
 Normally each active slot must resolve to a texture, so register a placeholder
 with `nt_resource_set_placeholder_texture` for slots that load asynchronously.
@@ -47,15 +46,13 @@ A declared name the program does not sample is ignored before its handle is
 inspected, so one material can over-declare for a family of shaders. The slot
 index is not the texture unit: gfx resolves the semantic name through immutable
 program reflection, and two materials may list the same samplers in any order.
-A material carries at most `NT_MATERIAL_MAX_TEXTURES` (4) slots, including
-renderer-supplied declarations, so a material-driven program may sample at most
-4 of the 8 units a program can link.
+A material carries at most `NT_MATERIAL_MAX_TEXTURES` (4) slots of the 8 units
+a program can link; a mesh draw's draw textures take the other 4.
 
 Sprite and text keep two legacy renderer-specific exceptions until the material bind group (planned, #600). Sprite
 declares its atlas-page sampler in slot 0 but substitutes the page resource per
 emit and run. Text declares no material textures and supplies its font samplers
-outside the material declaration. New specialized renderers follow the declared
-renderer-supplied semantic rule above.
+outside the material declaration.
 
 `nt_material_create` asserts that no two slots name the same sampler uniform:
 two slots on one unit would fight over it at every draw.
@@ -141,7 +138,7 @@ Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at run
 `attr_map` names custom per-vertex attributes of the sprite path (UI widgets,
 sprite custom-attr blocks). A mesh feeds every stream at the location its pack
 carries ([shader, Attribute locations](shader.md#attribute-locations)), so a
-mesh or skinned mesh material declares no `attr_map`; the mesh renderers assert
+mesh or skinned mesh material declares no `attr_map`; the mesh renderer asserts
 that the material has no `attr_map` when a run changes material.
 
 ## Attr defaults
@@ -151,17 +148,16 @@ that the material has no `attr_map` when a run changes material.
 block bakes for attr *i* ([Sprite custom-attr block](items-sorting-batching.md#sprite-custom-attr-block)).
 Zero-init means no defaults. What the values mean is the shader's contract. Defaults are values: they
 never enter pipeline or vertex-input keys. Only the sprite renderer reads them;
-mesh renderers ignore them.
+the mesh renderer ignores them.
 
 ## Texture resolve
 
 A material stores the declared `nt_resource_t` for each texture slot and never a
 resolved handle. Renderers call `nt_resource_get` where they already transition
-material state: the mesh renderers at each material or supplied-texture change inside a draw call,
-the sprite renderer at `set_material` and at each `draw_list` material change. A documented renderer-supplied
-semantic is not resolved: for `u_skin_matrices` the skinned path supplies the
-run's deformation texture and its default sampler instead of the declared
-resource and sampler, then applies the full declared set. A sprite emit
+material state: the mesh renderer at each material or draw-texture change inside a draw call,
+the sprite renderer at `set_material` and at each `draw_list` material change. Draw
+textures are no material slots and are not resolved: the draw passes texture
+handles and samplers, applied with the resolved declarations as one set. A sprite emit
 records the params current at the call. Slot 0 of a sprite material is the atlas
 page: the renderer substitutes the page of each emit, and of each `draw_list`
 run's first item, so the declared slot-0 resource is never resolved. A text material declares no textures, so the text renderer resolves no

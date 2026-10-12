@@ -137,12 +137,15 @@ implementation. `engine/postfx` is optional and currently starts with
 selects the concrete gfx implementation (`nt_gfx` or `nt_gfx_stub`) at the link
 layer.
 
-`engine/renderers/nt_skinned_mesh_renderer` is another fixed optional module.
-It consumes the existing render components plus `skin_comp`; it does not sample
-animation or select a graphics implementation. Its current `PUBLIC` CMake
-dependencies include the chain
+`engine/renderers/nt_mesh_renderer` is one source built as two link-selected
+variant targets: `nt_mesh_renderer` and `nt_skinned_mesh_renderer`. Each target
+sets the variant for its consumers; an executable links exactly one (both give
+duplicate symbols). The skinned target is not a separate module: it adds the
+skinned instance layout and list, consumes the existing render components plus
+`skin_comp`, and does not sample animation or select a graphics implementation.
+Its current `PUBLIC` CMake dependencies include the chain
 `nt_skinned_mesh_renderer → nt_skin_comp → nt_skeletal_gpu → nt_skeletal`.
-Both mesh renderers pack instances into gfx frame storage; they link no extra module for it.
+Both variants pack instances into gfx frame storage; they link no extra module for it.
 Static archive linking can still discard unused CPU kernel objects. The
 composition-symbol checks that prove the intended variants without LTO are
 planned (#488).

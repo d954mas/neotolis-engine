@@ -322,19 +322,18 @@ sources inside their restore entry points. Until those links finish (at startup 
 after a restore), shape flush drops its queued shapes and `nt_postfx_blur_gaussian`
 validates its pass, records nothing and returns false, leaving `dest` unwritten. A loss during a restore latches in
 gfx, and the next context restore calls the entry points again; owners keep no
-retry state. `nt_mesh_renderer`,
-`nt_skinned_mesh_renderer`,
+retry state. `nt_mesh_renderer` (either target),
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
 the game relinks them. The
-mesh, skinned mesh, sprite and text renderers have no restore entry point: they
+mesh, sprite and text renderers have no restore entry point: they
 own no buffer, their pipeline caches and the sprite and text vertex-input
 caches validate on lookup and recreate what the loss freed, and meshes make
 their vertex inputs again on first use
 ([render architecture, Vertex inputs](../render/architecture.md#vertex-inputs)).
 Frame storage needs no game restore: the `nt_gfx_begin_frame` that restores the
 context makes new frame buffers, and that frame's allocations reach them.
-Draw entry points that check handles before gfx (`nt_mesh_renderer` and
-`nt_skinned_mesh_renderer` `draw`/`draw_list`, `nt_postfx_blur_gaussian`) return at
+Draw entry points that check handles before gfx (`nt_mesh_renderer_draw`,
+`nt_mesh_renderer_draw_list`, `nt_mesh_renderer_draw_list_skinned`, `nt_postfx_blur_gaussian`) return at
 once while `g_nt_gfx.context_lost`, so a game may keep calling them through a loss,
 including after a restore that met a second loss and left handles 0.
 `nt_sprite_renderer_set_material` accepts a material whose relink met that loss;

@@ -100,7 +100,7 @@ alive, neither binding changes, and neither referenced live resource is
 destroyed or has its slot reused. The material, its textures and the mesh stay
 live until the frame executes (see [Mesh draws](architecture.md#mesh-draws)).
 
-`nt_skinned_mesh_renderer` uses the same material/mesh token, then additionally
+`nt_mesh_renderer_draw_list_skinned` uses the same material/mesh token, then additionally
 splits runs when the deformation texture changes. Frame origins and alpha stay
 per-instance; equal tokens do not require them to match. See
 [Skeletal animation — Renderer](../skeletal/skeletal-animation.md#renderer).

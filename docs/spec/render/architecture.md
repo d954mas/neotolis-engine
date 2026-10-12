@@ -306,7 +306,7 @@ state that *borrows* a program handle — it owns no vertex-input state, and
 pipeline and vertex-input binding are orthogonal: either may change without
 re-binding the other. Two pipelines on one program
 share every uniform value, and binding one does not reset what the other set.
-The mesh renderers replay declared material params on each material transition inside one draw
+The mesh renderer replays declared material params on each material transition inside one draw
 call and discard that tracking at the end of the call; across calls the front-end drops equal binds and the GL backend
 drops repeated physical state (see Binding dedup and draw merge). The sprite
 renderer instead writes a material's params only when the program, the material or
@@ -387,21 +387,19 @@ merges the contiguous draws. Its one memo is the params memo above, keyed by the
 program the pipeline was built on, so a program replaced behind an unchanged
 material handle writes its params again.
 
-The mesh renderers keep no bind tracking: every run binds its pipeline and
-vertex input, and the front-end drops the equal ones. They skip only material
+The mesh renderer keeps no bind tracking: every run binds its pipeline and
+vertex input, and the front-end drops the equal ones. It skips only material
 work — the vec4 param loop and the texture set — between runs of one call that
-keep the material. In the skinned renderer a deformation-only change applies the
+keep the material. In the skinned list a deformation-only change applies the
 texture set, not the params. Inside one call the pipeline follows from the material, so a program change is
 a material change. A core draw call applies its material every time.
 Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a material
 without an override selects the texture's asset default. At every material
 transition the renderer resolves the material's declared `nt_resource_t` texture
-handles, and every sprite emit and run submits the complete semantic set. The
-skinned renderer replaces the declared `u_skin_matrices` resource and sampler
-with the run's deformation texture and its default sampler, resolves the other
-declarations, and submits the same complete set. The skin declaration still
-counts toward the material's four slots; there is no renderer-only fifth
-binding. The sprite batch key packs the material pool slot and the currently published GPU
+handles, and every sprite emit and run submits the complete semantic set. A
+mesh draw submits the resolved declarations together with its draw textures as
+one complete set (see Mesh draws); the skinned list's draw texture is the run's
+deformation texture as `u_skin_matrices` with its default sampler. The sprite batch key packs the material pool slot and the currently published GPU
 texture pool slot, resolved from the stable page resource index; a run draws with
 its first item's page. Both bindings
 remain live and unchanged from list construction through draw completion; a new
@@ -413,7 +411,7 @@ texture or sampler changed in the pass. The text renderer records its font's
 complete set with every draw; gfx drops it when unchanged, so consecutive draws
 of one font and material merge.
 
-The material-driven mesh, skinned mesh, sprite, and text renderer caches build the
+The material-driven mesh, sprite, and text renderer caches build the
 `nt_pipeline_desc_t` from the material's render state and key on its
 `nt_gfx_pipeline_key_t`. Layouts live on vertex-input objects, so materials
 never split pipelines by layout. The sprite renderer resolves the pipeline once per material change
@@ -431,14 +429,14 @@ every other buffer. The identity is (mesh, frame stream): materials do not
 shape vertex inputs, so every material on a mesh shares them, and the renderers
 keep no vertex-input cache. They die with the mesh (the destroy cascade) and
 with a context loss; the next use makes them again, also after the caller
-destroys one. The mesh and skinned renderers bind them with their own instance
-layouts, which share the instance head (`NT_INST_LOC_*`, see
+destroys one. The mesh renderer binds them with the draw's instance layout; the
+engine layouts share the instance head (`NT_INST_LOC_*`, see
 [shader, Attribute locations](shader.md#attribute-locations)). A mesh's vertex
-input is pinned to the instance layout of the first renderer that draws it, so
-a mesh drawn by both renderers uses a different frame stream for each
-(asserted). From game buffers both would share the base vertex input, and the
-second layout asserts; such a game builds its own vertex inputs over the mesh's
-`vbo`/`ibo` and draws them with `nt_gfx_*` directly.
+input is pinned to the first instance layout drawn through it, so two instance
+layouts of one mesh use different frame streams (asserted). From game buffers
+they would share the base vertex input, so at most one layout draws a mesh from
+game buffers and a second asserts; a game that needs more builds its own vertex
+inputs over the mesh's `vbo`/`ibo` and draws them with `nt_gfx_*` directly.
 `max_vertex_inputs` budgets the vertex inputs of the meshes (frame streams they
 are drawn from, plus one if drawn from any other buffer) and the others, such
 as the shape renderer's four per frame stream it draws from.
@@ -475,7 +473,7 @@ Every mesh and skinned mesh instance carries the entity's drawable color
 (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`), so every render item needs
 a drawable component. A shader that ignores color does not declare the color
 input; the instance layout still provides it. Instance locations are reserved:
-the `NT_INST_LOC_*` head (world rows and color for both renderers, frame
+the `NT_INST_LOC_*` head (world rows and color for both instance layouts, frame
 origins and alpha for skinned meshes; values in
 [shader, Attribute locations](shader.md#attribute-locations)). A mesh stream at
 a location the bound instance layout uses (a hand-built mesh may use any
@@ -597,14 +595,31 @@ asserts.
 
 ### Mesh draws
 
-`nt_mesh_renderer` and `nt_skinned_mesh_renderer` record their draws at the
-call, in the current pass. Each has two entry points:
+The mesh renderer records its draws at the call, in the current pass. One
+source builds two link-selected targets: `nt_mesh_renderer` and
+`nt_skinned_mesh_renderer`, which adds the skinned instance layout and list and
+links `skin_comp`; an executable links exactly one, and its whole API is in
+`renderers/nt_mesh_renderer.h`. `nt_mesh_renderer_init()` runs after
+`nt_gfx_init` and registers the instance layouts; a new `nt_gfx_init`
+invalidates them, so the game calls `nt_mesh_renderer_shutdown()` before it and
+init again after. Plain and skinned draws share one pipeline cache of
+`NT_MESH_RENDERER_MAX_PIPELINES` entries (compile-time, default 64; exhaustion
+asserts). The entry points:
 
-- the core, `nt_mesh_renderer_draw(mesh, material, buffer, offset, count)`
-  (skinned: `nt_skinned_mesh_renderer_draw(mesh, material, deformation, buffer,
-  offset, count)`), records one instanced draw of `count` instances
-  (`nt_mesh_instance_t`, `nt_skinned_mesh_instance_t`) at byte `offset` of
-  `buffer`: a frame vertex stream's buffer (`nt_gfx_frame_buffer`, the
+- the core, `nt_mesh_renderer_draw(mesh, material, layout, buffer, offset,
+  count, draw_textures, draw_texture_count)`, records one instanced draw of
+  `count` instances of `layout` at byte `offset` of `buffer`. `layout` is any
+  registered instance layout: `nt_mesh_renderer_instance_layout()`
+  (`nt_mesh_instance_t`), `nt_mesh_renderer_skinned_instance_layout()`
+  (`nt_skinned_mesh_instance_t`, skinned target only) or the game's own.
+  `draw_textures` are 0..`NT_MESH_MAX_DRAW_TEXTURES` (8 − 4) bindings owned by
+  the draw, borrowed for the call and applied together with the material's
+  textures as one complete name-keyed set; gfx validates the set (a duplicate
+  name or missing coverage asserts; see
+  [material, MaterialAsset purpose](material.md#materialasset-purpose)). A
+  skinned core draw passes the skinned layout and one draw texture
+  `{nt_hash32_str("u_skin_matrices"), deformation, NT_SAMPLER_DEFAULT}`.
+  `buffer` is a frame vertex stream's buffer (`nt_gfx_frame_buffer`, the
   instances the caller wrote this frame) or a caller-owned `NT_BUFFER_VERTEX`
   buffer (persistent instance data). It reads no entity component; the
   instanced draw asserts that the instances lie inside the stream's
@@ -613,14 +628,16 @@ call, in the current pass. Each has two entry points:
   one mesh drawn from more than one (game buffer, offset) re-points between
   them; a game that does that every frame builds its own per-offset vertex
   inputs over the mesh buffers and draws them with `nt_gfx_*` directly (see
-  Vertex inputs, Persistent instance data). A mesh drawn by both renderers uses
-  a different frame stream for each (asserted; see Vertex inputs, Mesh vertex
+  Vertex inputs, Persistent instance data). Two instance layouts of one mesh
+  use different frame streams (asserted; see Vertex inputs, Mesh vertex
   inputs). After a context loss the caller recreates and refills its buffer;
-- the ECS adapter, `draw_list(stream, items, count)`, splits the items into
-  runs of adjacent equal batch keys (the skinned renderer also splits on the
-  deformation texture), allocates and packs each run's instances in `stream`
-  from the transform, drawable (and skin) components, and records it as the
-  core does;
+- the ECS adapters, `nt_mesh_renderer_draw_list(stream, items, count)` and, in
+  the skinned target, `nt_mesh_renderer_draw_list_skinned(stream, items,
+  count)`, split the items into runs of adjacent equal batch keys (the skinned
+  list also splits on the deformation texture), allocate and pack each run's
+  instances in `stream` from the transform, drawable (and skin) components, and
+  record it as the core does with the engine layout (the skinned list: the
+  run's deformation texture as its `u_skin_matrices` draw texture);
 
 The core's instances are filled before `nt_gfx_end_frame` (see Frame
 storage). One allocation may be drawn any number of times in any passes of the
@@ -670,14 +687,14 @@ bind_shadow_materials();
 for (uint32_t c = 0; c < CASCADES; c++) {
     nt_gfx_begin_pass(&shadow_pass[c]);
     nt_gfx_bind_uniform_block(0, &views[c], sizeof(view_t)); /* copied into frame storage */
-    nt_skinned_mesh_renderer_draw_list(GAME_STREAM_SHADOW + c, shadow_items, shadow_count);
+    nt_mesh_renderer_draw_list_skinned(GAME_STREAM_SHADOW + c, shadow_items, shadow_count);
     nt_gfx_end_pass();
 }
 bind_surface_materials();
 nt_gfx_begin_pass(&main_pass);
 nt_gfx_bind_uniform_block(0, &views[CASCADES], sizeof(view_t));
-/* One stream serves both renderers only because no mesh is in both lists. */
-nt_skinned_mesh_renderer_draw_list(GAME_STREAM_MAIN, skinned_items, skinned_count);
+/* One stream serves both instance layouts only because no mesh is in both lists. */
+nt_mesh_renderer_draw_list_skinned(GAME_STREAM_MAIN, skinned_items, skinned_count);
 nt_mesh_renderer_draw_list(GAME_STREAM_MAIN, static_items, static_count);
 nt_gfx_end_pass();
 nt_gfx_end_frame(); /* uploads frame storage, then executes the passes */
@@ -1255,12 +1272,11 @@ geometry.
 Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
 
 **Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`,
-`nt_mesh_renderer`, optional `nt_skinned_mesh_renderer`). Single pipeline, fixed
+`nt_mesh_renderer` or its skinned target `nt_skinned_mesh_renderer`). Single pipeline, fixed
 pattern, one instanced draw per compatible run (see items-sorting-batching.md),
 packed into frame storage or a caller buffer and recorded at the call. Use for 3D
 meshes, custom geometry, anything where the game owns batching strategy. Stay
-minimal. The mesh renderers share one resolve-and-record body in
-`nt_renderer_shared.h`.
+minimal. Plain and skinned mesh draws share one core and one pipeline cache.
 
 **Batched dynamic** — high-throughput renderers (`nt_sprite_renderer`; future particles). Many small items per frame (1k–60k): geometry is written straight into frame storage, `draw_list` records one draw per run of equal batch keys, and immediate emits rely on the front-end's bind dedup and draw merge instead of a command queue. Multi-page atlas resolution and the SIMD quad path stay. Measured on bunnymark at 60k sprites: 2 draws, 24 GL calls and 4 buffer uploads per frame, 8.5 ms whole-frame CPU in Chrome (ANGLE D3D11). The whole frame's geometry goes up in one upload (6.3 MB with `uint32_t` indices); at that size the frame storage does not stay in the CPU cache, which dominates the frame cost on native desktop GL at 60k sprites.
 

@@ -222,16 +222,15 @@ programs silently: a linking program is a normal state of every cold start. The
 immediate-mode `nt_sprite_renderer_set_material` / `nt_text_renderer_set_material`
 entry points assert only that a program was assigned.
 
-Every material declares a slot for every sampler its program uses. A specialized
-renderer may document that it supplies the runtime resource and sampler for a
-named slot. The declaration still counts toward `NT_MATERIAL_MAX_TEXTURES`, and
-the renderer submits one complete name-keyed set rather than appending a hidden
-binding. `nt_skinned_mesh_renderer` implements this rule for
-`u_skin_matrices`: it ignores that slot's descriptor resource and sampler,
-substitutes the entity's deformation texture with its default sampler, and
-resolves the other declared resources normally. The supplied slot may therefore
-carry an invalid placeholder resource. A declared name the program does not
-sample is ignored before its descriptor handle is inspected.
+Every material declares a slot for every sampler its program uses that the
+material owns. A mesh draw may add draw textures (0..`NT_MESH_MAX_DRAW_TEXTURES`):
+bindings owned by the draw, applied with the material's resolved slots as one
+complete name-keyed set; gfx validates the set, so a duplicate name or missing
+coverage asserts. A skinned draw supplies `u_skin_matrices` this way, so a
+skinned material does not declare it. The sprite and text renderers keep their
+documented exceptions until the material bind group (planned, #600); see
+[material](../render/material.md#materialasset-purpose). A declared name the
+program does not sample is ignored before its descriptor handle is inspected.
 
 Every other active declared slot must resolve to a texture. Register a
 placeholder with `nt_resource_set_placeholder_texture` to survive async load
