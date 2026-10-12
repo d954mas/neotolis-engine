@@ -239,7 +239,7 @@ static bool mesh_probe_create(void) {
         .index_buffer = info->ibo,
         .label = "mesh_probe_vi",
     };
-    s_mesh_instance_layout = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 8, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 2}}}, "mesh_probe_instance");
+    s_mesh_instance_layout = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 8, .attrs = {{.location = 4, .type = NT_VERTEX_FLOAT, .count = 2}}});
     s_mesh_vi = nt_gfx_make_vertex_input(&vi_desc);
     s_mesh_vi_high = nt_gfx_make_vertex_input(&vi_desc);
     return s_mesh_pipeline.id != 0 && s_mesh_vi.id != 0 && s_mesh_vi_high.id != 0;

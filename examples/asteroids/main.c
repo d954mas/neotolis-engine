@@ -1043,7 +1043,7 @@ static bool s_noise_pending;
  * collected after its end_frame. */
 static void start_content(nt_program_t noise_program) {
     s_generate_begin = nt_time_now();
-    s_instance_layout_handle = nt_gfx_make_instance_layout(&s_instance_layout, "asteroid_instance");
+    s_instance_layout_handle = nt_gfx_make_instance_layout(&s_instance_layout);
     generate_environment();
     generate_rocks();
     record_noise_atlas(noise_program);

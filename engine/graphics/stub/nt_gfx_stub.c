@@ -61,9 +61,8 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
     return (nt_vertex_input_t){0};
 }
 
-nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout, const char *label) {
+nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout) {
     (void)layout;
-    (void)label;
     return (nt_instance_layout_t){0};
 }
 

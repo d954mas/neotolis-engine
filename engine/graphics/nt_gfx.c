@@ -146,7 +146,7 @@ static struct {
     nt_pool_t mesh_pool;
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
 
-    /* Handle = epoch << 16 | slot (1-based), as pool handles: nt_pool_slot_index applies. */
+    /* A layout handle is its slot, 1-based; init and shutdown empty the table. */
     nt_gfx_instance_layout_meta_t instance_layouts[NT_GFX_MAX_INSTANCE_LAYOUTS + 1];
     uint32_t instance_layout_count;
 
@@ -171,11 +171,7 @@ static struct {
 
 _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
 _Static_assert(NT_GFX_FRAME_STREAM_COUNT < UINT8_MAX, "frame_stream holds stream + 1 in a byte");
-_Static_assert(NT_GFX_MAX_INSTANCE_LAYOUTS <= NT_POOL_SLOT_MASK, "instance layout handles keep the slot in the pool slot bits");
 _Static_assert(NT_GFX_MAX_VERTEX_ATTRS <= 16, "location masks are uint16_t");
-
-/* Outside s_gfx, which init and shutdown clear: a handle kept across a gfx re-init goes stale. */
-static uint16_t s_instance_layout_epoch;
 
 static void discard_texture_set(void) { s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_NONE; }
 
@@ -311,7 +307,7 @@ static void capture_attributes(nt_gfx_object_kind_t kind, uint32_t id, const nt_
 }
 
 static void capture_instance_layout(uint32_t id) {
-    const nt_gfx_instance_layout_meta_t *meta = &s_gfx.instance_layouts[nt_pool_slot_index(id)];
+    const nt_gfx_instance_layout_meta_t *meta = &s_gfx.instance_layouts[id];
     capture_resource_definition(NT_GFX_OBJECT_INSTANCE_LAYOUT, id);
     capture_attributes(NT_GFX_OBJECT_INSTANCE_LAYOUT, id, meta->attrs, meta->attr_count, meta->stride, 0, 1);
 }
@@ -341,7 +337,7 @@ static void capture_initial_state(void) {
         capture_resource_definition(NT_GFX_OBJECT_SAMPLER, i);
     }
     for (uint32_t i = 1; i <= s_gfx.instance_layout_count; i++) {
-        capture_instance_layout(((uint32_t)s_instance_layout_epoch << 16U) | i);
+        capture_instance_layout(i);
     }
     nt_gfx_backend_capture_initial_state();
 }
@@ -371,7 +367,6 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     }
     uint16_t max_render_targets = desc->max_render_targets;
     memset(&s_gfx, 0, sizeof(s_gfx));
-    s_instance_layout_epoch = (uint16_t)((s_instance_layout_epoch % UINT16_MAX) + 1U); /* never 0: a handle is never 0 */
     s_gfx.scissor_rect[2] = -1;
     s_gfx.viewport_rect[2] = -1;
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
@@ -1153,7 +1148,7 @@ static nt_gfx_result_t make_instance_layout(const nt_vertex_layout_t *layout, nt
     NT_ASSERT(mask != NT_GFX_LOCATIONS_DUPLICATED && "attribute location used twice in the instance layout");
     for (uint32_t i = 1; i <= s_gfx.instance_layout_count; i++) {
         if (instance_layout_equal(&s_gfx.instance_layouts[i], layout)) {
-            out->id = ((uint32_t)s_instance_layout_epoch << 16U) | i;
+            out->id = i;
             return NT_GFX_RESULT_CACHE;
         }
     }
@@ -1168,26 +1163,23 @@ static nt_gfx_result_t make_instance_layout(const nt_vertex_layout_t *layout, nt
         meta->extent = end > meta->extent ? end : meta->extent;
     }
     nt_gfx_backend_register_instance_layout(slot, layout);
-    out->id = ((uint32_t)s_instance_layout_epoch << 16U) | slot;
+    out->id = slot;
 #if NT_GFX_CAPTURE_ENABLED
     capture_instance_layout(out->id);
 #endif
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout, const char *label) {
-    (void)label; /* a layout owns no GPU object to name */
+nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout) {
     NT_GFX_BEGIN(NT_GFX_OP_CREATE, NT_GFX_OBJECT_INSTANCE_LAYOUT, 0);
     nt_instance_layout_t result = {0};
     NT_GFX_END_OBJECT(make_instance_layout(layout, &result), result.id);
     return result;
 }
 
-/* Slot of a live instance layout handle from this gfx init. */
 static uint32_t instance_layout_slot(nt_instance_layout_t layout) {
-    const uint32_t slot = nt_pool_slot_index(layout.id);
-    NT_ASSERT((layout.id >> 16U) == s_instance_layout_epoch && slot >= 1 && slot <= s_gfx.instance_layout_count && "invalid or stale instance layout");
-    return slot;
+    NT_ASSERT(layout.id >= 1 && layout.id <= s_gfx.instance_layout_count && "invalid instance layout");
+    return layout.id;
 }
 
 static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {

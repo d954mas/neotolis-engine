@@ -919,10 +919,10 @@ void nt_shape_renderer_init(void) {
     s_shape.line_width = 0.02F;
     s_shape.depth_enabled = true;
     s_shape.stream = NT_GFX_FRAME_VERTEX;
-    s_shape.fill_layout = nt_gfx_make_instance_layout(&k_shape_instance_layout, "shape_fill");
-    s_shape.wire_layout = nt_gfx_make_instance_layout(&k_wire_instance_layout, "shape_wire");
-    s_shape.line_layout = nt_gfx_make_instance_layout(&k_line_instance_layout, "shape_line");
-    s_shape.stroke_layout = nt_gfx_make_instance_layout(&k_stroke_instance_layout, "shape_stroke");
+    s_shape.fill_layout = nt_gfx_make_instance_layout(&k_shape_instance_layout);
+    s_shape.wire_layout = nt_gfx_make_instance_layout(&k_wire_instance_layout);
+    s_shape.line_layout = nt_gfx_make_instance_layout(&k_line_instance_layout);
+    s_shape.stroke_layout = nt_gfx_make_instance_layout(&k_stroke_instance_layout);
     create_gpu();
     s_shape.initialized = true;
 }

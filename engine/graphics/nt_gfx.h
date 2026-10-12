@@ -922,8 +922,9 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc);
 /* Registers a per-instance layout (divisor 1) for nt_gfx_bind_vertex_input_instanced, or returns
  * the handle of an equal one. Works while the context is lost; layout errors and a full table
- * (NT_GFX_MAX_INSTANCE_LAYOUTS) assert. The handle is valid until nt_gfx_shutdown. */
-nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout, const char *label);
+ * (NT_GFX_MAX_INSTANCE_LAYOUTS) assert. The handle is valid until nt_gfx_shutdown; owners
+ * register again after the next nt_gfx_init. */
+nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 /* A nonzero handle means upload commands were issued, not that GPU storage
  * allocation or upload succeeded; creation does not poll GPU errors. */

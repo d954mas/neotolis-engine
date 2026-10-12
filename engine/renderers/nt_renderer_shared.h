@@ -312,7 +312,7 @@ typedef struct {
 static inline nt_result_t nt_renderer_mesh_caches_init(nt_renderer_mesh_caches_t *c, uint16_t max_pipelines, uint16_t max_mesh_vertex_inputs, const nt_vertex_layout_t *instance_layout,
                                                        const char *label) {
     NT_ASSERT(max_pipelines > 0);
-    *c = (nt_renderer_mesh_caches_t){.instance_layout = nt_gfx_make_instance_layout(instance_layout, label), .label = label, .max_pipelines = max_pipelines};
+    *c = (nt_renderer_mesh_caches_t){.instance_layout = nt_gfx_make_instance_layout(instance_layout), .label = label, .max_pipelines = max_pipelines};
     c->pipelines = (nt_renderer_pipeline_entry_t *)calloc(max_pipelines, sizeof(nt_renderer_pipeline_entry_t));
     if (c->pipelines == NULL) {
         NT_LOG_ERROR("failed to allocate pipeline cache");

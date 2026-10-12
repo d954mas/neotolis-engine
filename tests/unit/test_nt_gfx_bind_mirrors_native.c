@@ -328,13 +328,13 @@ static void GLAD_API_PTR counting_vertex_attrib_pointer(GLuint index, GLint size
 
 /* One float2 instance attribute at location 1, stride 8. */
 static nt_instance_layout_t offset_layout(void) {
-    return nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 8, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}}}, NULL);
+    return nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 8, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}}});
 }
 
 /* Two float2 instance attributes at locations 1 and 2, stride 16. */
 static nt_instance_layout_t pair_layout(void) {
     return nt_gfx_make_instance_layout(
-        &(nt_vertex_layout_t){.attr_count = 2, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}, {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8}}}, NULL);
+        &(nt_vertex_layout_t){.attr_count = 2, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 2}, {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8}}});
 }
 
 /* Steady state: vertex and index buffers are baked at creation and each instanced vertex input
