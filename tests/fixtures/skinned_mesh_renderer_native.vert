@@ -3,9 +3,10 @@ precision highp int;
 
 #include "../../assets/shaders/common/skin.glsl"
 
-layout(location = 0) in vec3 a_position;
-layout(location = 1) in vec3 a_normal;
-layout(location = 2) in vec4 a_tangent;
+#include "nt/locations.glsl"
+layout(location = NT_LOC_POSITION) in vec3 a_position;
+layout(location = NT_LOC_NORMAL) in vec3 a_normal;
+layout(location = NT_LOC_TANGENT) in vec4 a_tangent;
 
 out vec3 v_position_probe;
 out vec3 v_normal_probe;

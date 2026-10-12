@@ -42,37 +42,24 @@ static inline void nt_mesh_instance_world_rows(float rows[3][4], const float wor
 
 typedef struct {
     uint16_t max_pipelines; /* pipeline cache capacity, default: 64 */
-    /* Vertex-input versions kept per mesh: one per (derived layout, frame vertex stream) that
-     * draws it. Exceeding it ASSERTS -- silent eviction would hide re-creation thrash as an
-     * invisible perf regression; raise the knob instead. Default: 4. */
-    uint16_t max_mesh_vertex_inputs;
 } nt_mesh_renderer_desc_t;
 
-static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_pipelines = 64, .max_mesh_vertex_inputs = 4}; }
+static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_pipelines = 64}; }
 
 /* desc is required, non-NULL and borrowed for the duration of the call. */
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
-/* Retains CPU storage and initialization; drops pipeline and vertex-input
- * caches. Inactive modules are unchanged. */
+/* Retains CPU storage and initialization; drops the pipeline cache. Inactive modules are unchanged. */
 void nt_mesh_renderer_restore_gpu(void);
 
 /* Records one instanced draw in the current pass: count > 0 instances (nt_mesh_instance_t) at
- * byte offset in frame vertex stream `stream` (the one they were allocated from), filled before
- * nt_gfx_end_frame; one allocation may be drawn in any number of passes. Records nothing while
- * the program is not ready or a pipeline or vertex input cannot be created. */
-void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, uint32_t stream, uint32_t offset, uint32_t count);
-
-/* Caller-owned vertex input for `mesh` with `material`'s layout (live mesh and material asserted;
- * INVALID on a lost context or backend failure). Lifetime and recovery: render/architecture.md,
- * Mesh draws. */
-nt_vertex_input_t nt_mesh_renderer_make_vertex_input(nt_mesh_t mesh, nt_material_t material);
-
-/* nt_mesh_renderer_draw over a valid `vi` (asserted) made for this mesh and a material with the
- * same layout (not checked): count > 0 nt_mesh_instance_t at byte offset of `instances`
- * (NT_BUFFER_VERTEX). Records nothing while the program is not ready; creates no cached vertex
- * input. A vi drawn from one buffer at one offset re-points nothing. */
-void nt_mesh_renderer_draw_vertex_input(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, nt_buffer_t instances, uint32_t offset, uint32_t count);
+ * byte offset of `instances` (NT_BUFFER_VERTEX): a frame vertex stream's buffer
+ * (nt_gfx_frame_buffer of the stream they were allocated from, filled before nt_gfx_end_frame;
+ * one allocation may be drawn in any number of passes) or a game-owned buffer. The mesh owns one
+ * vertex input per frame stream and one for every other buffer (nt_gfx_mesh_vertex_input), so
+ * draws of one mesh from one game buffer at several offsets re-point between them. Records
+ * nothing while the program is not ready or a pipeline or vertex input cannot be created. */
+void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_buffer_t instances, uint32_t offset, uint32_t count);
 
 /* ECS adapter: adjacent equal batch keys form one run, packed into frame vertex stream `stream`
  * from transform and drawable and drawn as one instanced draw in the current pass. A pass with
@@ -84,8 +71,6 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
 // #region test_access
 #ifdef NT_TEST_ACCESS
 uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
-/* Live entries across the whole vertex-input versions table. */
-uint32_t nt_mesh_renderer_test_vertex_input_count(void);
 bool nt_mesh_renderer_test_initialized(void);
 #endif
 // #endregion

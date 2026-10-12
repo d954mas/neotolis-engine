@@ -84,37 +84,6 @@ static nt_mesh_t create_test_mesh(void) {
     return (nt_mesh_t){.id = handle};
 }
 
-/* Non-indexed variant: 3 vertices, no index data (index_type NONE). */
-static nt_mesh_t create_test_mesh_nonindexed(void) {
-    uint32_t vdata_size = 3 * 3 * (uint32_t)sizeof(float);
-    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + (uint32_t)sizeof(NtStreamDesc) + vdata_size;
-    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 36];
-    memset(blob, 0, sizeof(blob));
-
-    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
-    hdr->magic = NT_MESH_MAGIC;
-    hdr->version = NT_MESH_VERSION;
-    hdr->stream_count = 1;
-    hdr->index_type = 0; /* none */
-    hdr->vertex_count = 3;
-    hdr->index_count = 0;
-    hdr->vertex_data_size = vdata_size;
-    hdr->index_data_size = 0;
-
-    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = nt_hash32_str("position").value;
-    sd->type = NT_STREAM_FLOAT32;
-    sd->count = 3;
-    sd->location = NT_LOC_POSITION;
-
-    float *verts = (float *)(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc));
-    verts[3] = 1.0F;
-    verts[7] = 1.0F;
-
-    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
-    return (nt_mesh_t){.id = handle};
-}
-
 /* Two streams (position, normal), non-indexed: for tests that map a subset. */
 static nt_mesh_t create_test_mesh_two_streams(void) {
     uint32_t vdata_size = 3 * 6 * (uint32_t)sizeof(float);
@@ -907,9 +876,9 @@ void test_draw_list_packs_into_its_stream(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_last_instance_offset());
 }
 
-/* Vertex-input identity is (mesh, layout, stream): one mesh+material drawn from two streams gets a
- * version per stream, and returning to a stream reuses its version through the material fast path. */
-void test_vertex_input_versions_per_stream(void) {
+/* The mesh owns one vertex input per frame stream: drawn from two streams it gets two, made once
+ * each, and every bind reads its own stream's buffer. */
+void test_mesh_vertex_input_per_stream(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
     nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
@@ -922,16 +891,19 @@ void test_vertex_input_versions_per_stream(void) {
             TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + k)), nt_gfx_fake_last_instance_buffer());
         }
     }
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
+    const nt_vertex_input_t vi0 = nt_gfx_mesh_vertex_input(mesh, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX));
+    const nt_vertex_input_t vi1 = nt_gfx_mesh_vertex_input(mesh, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1));
+    TEST_ASSERT_NOT_EQUAL_UINT32(vi0.id, vi1.id);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
 }
 
-/* The layout-key path: a second material deriving the same layout reuses each stream's version. */
-void test_same_layout_material_reuses_each_stream_version(void) {
+/* Materials do not shape vertex inputs: two materials on different programs and attr_maps draw
+ * the mesh through the same vertex input of each stream. */
+void test_materials_share_the_mesh_vertex_input(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_program_t program = create_test_program();
-    nt_material_t mat_a = create_test_material_with_attr(program, "position", 0, nt_blend_opaque());
-    nt_material_t mat_b = create_test_material_with_attr(program, "position", 0, nt_blend_opaque());
+    nt_material_t mat_a = create_test_material_with_attr(create_test_program(), "position", 0, nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_with_attr(create_test_program(), "position", 3, nt_blend_opaque());
     nt_gfx_fake_reset();
     const nt_material_t mats[2] = {mat_a, mat_b};
     for (uint32_t m = 0; m < 2; m++) {
@@ -946,8 +918,8 @@ void test_same_layout_material_reuses_each_stream_version(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
 }
 
-/* Consecutive mesh slots crossed with two streams name four versions; a layout change on one
- * stream adds exactly one, and every bind reads its own stream's buffer. */
+/* Consecutive mesh slots crossed with two streams own four vertex inputs; another material on
+ * one of them adds none, and every bind reads its own stream's buffer. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_consecutive_meshes_and_streams_do_not_alias(void) {
     nt_mesh_t meshes[2] = {create_test_mesh(), create_test_mesh()};
@@ -967,54 +939,30 @@ void test_consecutive_meshes_and_streams_do_not_alias(void) {
             }
         }
     }
-    TEST_ASSERT_EQUAL_UINT32(4, nt_mesh_renderer_test_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_vertex_input_create_count());
     nt_render_item_t item = {.entity = create_test_entity(meshes[1], moved).id, .batch_key = nt_mesh_renderer_batch_key(moved, meshes[1])};
     nt_test_frame_next();
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
     nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_fake_vertex_input_create_count());
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_vertex_input_create_count());
 }
 
-/* Bufferless versions are shared per stream: one mesh drawn from two streams reads each stream's
- * buffer, a second mesh reuses both, and a reused mesh slot destroys neither. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_bufferless_vertex_input_per_stream(void) {
-    nt_material_t mat = create_test_material_with_attr(create_test_program(), "not_a_mesh_stream", 0, nt_blend_opaque());
-    nt_mesh_t meshes[2] = {create_test_mesh_nonindexed(), create_test_mesh_nonindexed()};
-    nt_gfx_fake_reset();
-    for (uint32_t m = 0; m < 2; m++) {
-        nt_render_item_t item = {.entity = create_test_entity(meshes[m], mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, meshes[m])};
-        for (uint32_t k = 0; k < 2; k++) {
-            nt_test_frame_next();
-            nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + k, &item, 1);
-            nt_test_frame_next();
-            TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + k)), nt_gfx_fake_last_instance_buffer());
-        }
-    }
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
-    nt_test_frame_close();
-    nt_gfx_deactivate_mesh(meshes[0].id);
-    nt_test_frame_open();
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
-}
-
-/* After restore_gpu the cache rebuilds a version over each stream's buffer. */
-void test_restore_rebuilds_versions_per_stream(void) {
+/* restore_gpu drops only pipelines: the mesh keeps its vertex input, and the next draw reads the
+ * same stream buffer through it. */
+void test_restore_gpu_keeps_mesh_vertex_inputs(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
     nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+    nt_gfx_fake_reset();
     nt_test_frame_next();
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
     nt_test_frame_close();
     nt_mesh_renderer_restore_gpu();
     nt_test_frame_open();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_vertex_input_count());
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)), nt_gfx_fake_last_instance_buffer());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
 }
 
 /* ---- Caller-owned instance data ---- */
@@ -1023,131 +971,125 @@ static nt_buffer_t make_owned_instances(uint32_t count) {
     return nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = count * (uint32_t)sizeof(nt_mesh_instance_t)});
 }
 
-/* A caller-owned vertex input draws the given buffer at the given offset; drawing it goes through
- * the material's pipeline and creates no cached vertex input. */
+/* The core draw takes a game-owned buffer: the mesh's base vertex input draws it at the given
+ * offset through the material's pipeline, and the same layout as a stream's vertex input. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_owned_vertex_input_draws_from_its_buffer(void) {
+void test_core_draw_from_a_game_buffer(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
     nt_buffer_t instances = make_owned_instances(4);
     nt_gfx_fake_reset();
-    nt_vertex_input_t vi = nt_mesh_renderer_make_vertex_input(mesh, mat);
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
     nt_test_frame_next();
     mark_draws();
-    nt_mesh_renderer_draw_vertex_input(mesh, mat, vi, instances, (uint32_t)sizeof(nt_mesh_instance_t), 3);
+    nt_mesh_renderer_draw(mesh, mat, instances, (uint32_t)sizeof(nt_mesh_instance_t), 3);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(3, drawn_instances());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(instances), nt_gfx_fake_last_instance_buffer());
     TEST_ASSERT_EQUAL_UINT32(sizeof(nt_mesh_instance_t), nt_gfx_fake_last_instance_offset());
-    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(vi.id), nt_gfx_fake_last_instance_vertex_input());
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(nt_gfx_mesh_vertex_input(mesh, instances).id), nt_gfx_fake_last_instance_vertex_input());
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    /* The same derived layout as the cache's version of this mesh and material. */
     const nt_vertex_layout_t owned = nt_gfx_fake_last_vertex_input_layout();
     nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
     draw_list(&item, 1);
-    const nt_vertex_layout_t cached = nt_gfx_fake_last_vertex_input_layout();
-    TEST_ASSERT_EQUAL_UINT8(cached.attr_count, owned.attr_count);
-    TEST_ASSERT_EQUAL_UINT16(cached.stride, owned.stride);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
+    const nt_vertex_layout_t streamed = nt_gfx_fake_last_vertex_input_layout();
+    TEST_ASSERT_EQUAL_UINT8(streamed.attr_count, owned.attr_count);
+    TEST_ASSERT_EQUAL_UINT16(streamed.stride, owned.stride);
     for (uint8_t a = 0; a < owned.attr_count; a++) {
-        TEST_ASSERT_EQUAL_UINT8(cached.attrs[a].location, owned.attrs[a].location);
-        TEST_ASSERT_EQUAL_UINT8(cached.attrs[a].count, owned.attrs[a].count);
-        TEST_ASSERT_EQUAL_INT(cached.attrs[a].type, owned.attrs[a].type);
-        TEST_ASSERT_EQUAL_UINT16(cached.attrs[a].offset, owned.attrs[a].offset);
+        TEST_ASSERT_EQUAL_UINT8(streamed.attrs[a].location, owned.attrs[a].location);
+        TEST_ASSERT_EQUAL_UINT8(streamed.attrs[a].count, owned.attrs[a].count);
+        TEST_ASSERT_EQUAL_INT(streamed.attrs[a].type, owned.attrs[a].type);
+        TEST_ASSERT_EQUAL_UINT16(streamed.attrs[a].offset, owned.attrs[a].offset);
     }
 }
 
 /* The instance range is the buffer size: one instance past it asserts. */
-void test_owned_vertex_input_asserts_past_its_buffer(void) {
+void test_core_draw_asserts_past_its_game_buffer(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
     nt_buffer_t instances = make_owned_instances(4);
-    nt_vertex_input_t vi = nt_mesh_renderer_make_vertex_input(mesh, mat);
     nt_test_frame_next();
-    nt_mesh_renderer_draw_vertex_input(mesh, mat, vi, instances, (uint32_t)sizeof(nt_mesh_instance_t), 3);
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_vertex_input(mesh, mat, vi, instances, (uint32_t)sizeof(nt_mesh_instance_t), 4));
+    nt_mesh_renderer_draw(mesh, mat, instances, (uint32_t)sizeof(nt_mesh_instance_t), 3);
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, instances, (uint32_t)sizeof(nt_mesh_instance_t), 4));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "instances lie outside"));
     nt_test_frame_next();
 }
 
-/* The destroy cascade reaches a caller-owned vertex input through the mesh's buffers it
- * references, never through the instance buffer it was drawn from (instances are bound per draw);
- * a material mapping no mesh stream over a non-indexed mesh references none, so mesh
- * deactivation leaves it valid (and it still draws, attribute-less). */
+/* Every game buffer shares the mesh's base vertex input: a second buffer makes none, destroying a
+ * buffer leaves it alive, and mesh deactivation takes it along. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_owned_vertex_input_lifetime(void) {
+void test_game_buffers_share_the_base_vertex_input(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
-    nt_buffer_t instances = make_owned_instances(2);
-    nt_vertex_input_t by_mesh = nt_mesh_renderer_make_vertex_input(mesh, mat);
-    nt_material_t bufferless_mat = create_test_material_with_attr(create_test_program(), "not_a_mesh_stream", 0, nt_blend_opaque());
-    nt_mesh_t bufferless_mesh = create_test_mesh_nonindexed();
-    nt_buffer_t bufferless_instances = make_owned_instances(2);
-    nt_vertex_input_t bufferless = nt_mesh_renderer_make_vertex_input(bufferless_mesh, bufferless_mat);
+    nt_buffer_t first = make_owned_instances(2);
+    nt_buffer_t second = make_owned_instances(2);
+    nt_gfx_fake_reset();
     nt_test_frame_next();
     mark_draws();
-    nt_mesh_renderer_draw_vertex_input(mesh, mat, by_mesh, instances, 0, 2);
-    nt_mesh_renderer_draw_vertex_input(bufferless_mesh, bufferless_mat, bufferless, bufferless_instances, 0, 2);
+    nt_mesh_renderer_draw(mesh, mat, first, 0, 2);
+    nt_mesh_renderer_draw(mesh, mat, second, 0, 2);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(bufferless_instances), nt_gfx_fake_last_instance_buffer());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
+    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(second), nt_gfx_fake_last_instance_buffer());
+    const nt_vertex_input_t base = nt_gfx_mesh_vertex_input(mesh, second);
     nt_test_frame_close();
-    nt_gfx_destroy_buffer(instances);
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(by_mesh));
+    nt_gfx_destroy_buffer(first);
+    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(base));
     nt_gfx_deactivate_mesh(mesh.id);
-    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(by_mesh));
-    nt_gfx_deactivate_mesh(bufferless_mesh.id);
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(bufferless));
-    nt_gfx_destroy_buffer(bufferless_instances);
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(bufferless));
+    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(base));
     nt_test_frame_open();
 }
 
-/* A backend failure returns INVALID and the next make succeeds; a failed pipeline create and an
- * unready program record nothing, and the next ready call draws. */
+/* A failed pipeline create, a failed vertex input create and an unready program record nothing;
+ * the next ready call retries and draws. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_owned_vertex_input_failures_record_nothing(void) {
+void test_core_draw_failures_record_nothing(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
     nt_buffer_t instances = make_owned_instances(2);
-    nt_gfx_fake_fail_next_vertex_input_create();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_make_vertex_input(mesh, mat).id);
-    nt_vertex_input_t vi = nt_mesh_renderer_make_vertex_input(mesh, mat);
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
     nt_gfx_fake_fail_next_pipeline_create();
     nt_test_frame_next();
     mark_draws();
-    nt_mesh_renderer_draw_vertex_input(mesh, mat, vi, instances, 0, 1);
+    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
+    nt_mesh_t fresh = create_test_mesh(); /* the first draw already made the other mesh's vertex input */
+    nt_gfx_fake_fail_next_vertex_input_create();
+    mark_draws();
+    nt_mesh_renderer_draw(fresh, mat, instances, 0, 1);
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
+    mark_draws();
+    nt_mesh_renderer_draw(fresh, mat, instances, 0, 1);
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls()); /* the next draw retries the create */
     nt_gfx_fake_hold_program_links(true);
     nt_material_set_program(mat, create_test_program());
     nt_test_frame_next();
     mark_draws();
-    nt_mesh_renderer_draw_vertex_input(mesh, mat, vi, instances, 0, 1);
+    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
     nt_gfx_fake_hold_program_links(false);
     nt_test_frame_next(); /* the link finishes */
     mark_draws();
-    nt_mesh_renderer_draw_vertex_input(mesh, mat, vi, instances, 0, 1);
+    nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
 }
 
-/* An unsized stream has no buffer to bake: the draw names the missing capacity. */
+/* An unsized stream has no buffer to draw from: the list names the missing instance buffer. */
 void test_draw_from_an_unsized_stream_asserts(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t mat = create_test_material();
+    nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
     nt_test_frame_next();
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, NT_GFX_FRAME_VERTEX + 2, 0, 1));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "no frame_capacity"));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 2, &item, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "invalid or stale instance buffer"));
     nt_test_frame_next();
 }
 
@@ -1160,7 +1102,6 @@ void test_real_restore_rebinds_new_stream_and_owned_buffers(void) {
     nt_entity_t e = create_test_entity(mesh, mat);
     nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
     nt_buffer_t owned = make_owned_instances(2);
-    nt_vertex_input_t vi = nt_mesh_renderer_make_vertex_input(mesh, mat);
     nt_test_frame_next();
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
     nt_test_frame_next();
@@ -1171,8 +1112,7 @@ void test_real_restore_rebinds_new_stream_and_owned_buffers(void) {
     nt_gfx_fake_lose_and_restore_context();
     nt_gfx_begin_frame(); /* restores: every vertex input is freed, frame buffers are new */
     TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
-    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));
-    /* The game reloads what it owns: mesh, program, its instance buffer, then the vertex input. */
+    /* The game reloads what it owns: mesh, program and its instance buffer. */
     nt_gfx_deactivate_mesh(mesh.id);
     nt_gfx_destroy_buffer(owned);
     mesh = create_test_mesh();
@@ -1180,8 +1120,6 @@ void test_real_restore_rebinds_new_stream_and_owned_buffers(void) {
     item.batch_key = nt_mesh_renderer_batch_key(mat, mesh);
     nt_material_set_program(mat, create_test_program());
     owned = make_owned_instances(2);
-    vi = nt_mesh_renderer_make_vertex_input(mesh, mat);
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
     nt_gfx_end_frame();
     nt_test_frame_open();
 
@@ -1191,7 +1129,7 @@ void test_real_restore_rebinds_new_stream_and_owned_buffers(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(old_stream, new_stream);
     TEST_ASSERT_EQUAL_UINT32(new_stream, nt_gfx_fake_last_instance_buffer());
     mark_draws();
-    nt_mesh_renderer_draw_vertex_input(mesh, mat, vi, owned, 0, 2);
+    nt_mesh_renderer_draw(mesh, mat, owned, 0, 2);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(owned), nt_gfx_fake_last_instance_buffer());
@@ -1204,13 +1142,13 @@ void test_core_draw_asserts_on_instances_outside_the_stream(void) {
     nt_test_frame_next();
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX + 1, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, NT_GFX_FRAME_VERTEX + 1, offset, 2));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), offset, 2));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "instances lie outside"));
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, NT_GFX_FRAME_INDEX, 0, 1));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "not a frame vertex stream"));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_INDEX), 0, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "not vertex type"));
     NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(NT_GFX_FRAME_UNIFORM, NULL, 0));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "not a frame vertex stream"));
-    nt_mesh_renderer_draw(mesh, mat, NT_GFX_FRAME_VERTEX + 1, offset, 1);
+    nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), offset, 1);
     nt_test_frame_next();
 }
 
@@ -1231,10 +1169,10 @@ void test_state_three_materials_same_mesh(void) {
     nt_gfx_fake_reset();
     draw_list(items, 3);
 
-    /* Same program + same render state => one pipeline; same derived layout => one VI, bound
+    /* Same program + same render state => one pipeline; one mesh and stream => one VI, bound
      * once per run because each run has its own instance offset. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_bind_pipeline_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_bind_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_fake_uniform_int_count());
     TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_uniform_vec4_count());
@@ -1595,10 +1533,9 @@ void test_draw_list_asserts_on_an_item_without_transform(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
-/* Neighbour test for the mesh vertex-input key: one-step changes of each lane
- * (which stream, its location, the presence bit) are four distinct vertex
- * inputs on one pipeline. {normal->0} vs {position->0} is the presence bit alone. */
-void test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines(void) {
+/* Materials that once derived four vertex-input layouts from one mesh (each attr_map lane one
+ * step apart) now share the mesh's single vertex input and one pipeline. */
+void test_attr_map_changes_never_split_the_mesh_vertex_input(void) {
     nt_mesh_t mesh = create_test_mesh_two_streams();
     nt_program_t shared = create_test_program();
     nt_material_t mats[4];
@@ -1626,13 +1563,14 @@ void test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelin
         items[i] = (nt_render_item_t){.sort_key = i, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mats[i], mesh)};
     }
 
+    nt_gfx_fake_reset();
     draw_list(items, 4);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(4, nt_mesh_renderer_test_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
 }
 
-/* Equal program/state share a pipeline; distinct attr_maps derive separate VIs. */
+/* Equal program/state share a pipeline, and distinct attr_maps share the mesh's vertex input. */
 void test_pipeline_cache_different_material_attr_maps(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t shared = create_test_program();
@@ -1645,13 +1583,14 @@ void test_pipeline_cache_different_material_attr_maps(void) {
         {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)},
     };
 
+    nt_gfx_fake_reset();
     draw_list(items, 2);
 
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
 }
 
-/* ---- Vertex-input versions: reuse, dedup, identity, overflow ---- */
+/* ---- Mesh vertex inputs: reuse, identity ---- */
 
 void test_vertex_input_reused_across_draw_list_calls(void) {
     nt_mesh_t mesh = create_test_mesh();
@@ -1664,7 +1603,6 @@ void test_vertex_input_reused_across_draw_list_calls(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
     draw_list(items, 1);
     TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
 }
 
 void test_vertex_input_distinct_per_mesh(void) {
@@ -1678,147 +1616,16 @@ void test_vertex_input_distinct_per_mesh(void) {
         {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_b)},
     };
 
+    nt_gfx_fake_reset();
     draw_list(items, 2);
 
     /* One material state: one pipeline; two meshes: two vertex inputs. */
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
-}
-
-/* An attr_map entry matching none of the mesh's streams must not split the
- * vertex input: the DERIVED layout (streams x attr_map) is the identity. */
-void test_vertex_input_shared_for_same_derived_layout(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_program_t shared = create_test_program();
-    nt_material_t mat_a = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
-
-    nt_material_create_desc_t desc;
-    memset(&desc, 0, sizeof(desc));
-    desc.program = shared;
-    desc.attr_map[0].stream_name = "position";
-    desc.attr_map[0].location = 0;
-    desc.attr_map[1].stream_name = "not_a_mesh_stream";
-    desc.attr_map[1].location = 5;
-    desc.attr_map_count = 2;
-    desc.depth_test = true;
-    desc.depth_write = true;
-    desc.blend = nt_blend_opaque();
-    desc.cull_mode = NT_CULL_BACK;
-    desc.label = "extra_attr_material";
-    nt_material_t mat_b = nt_material_create(&desc);
-
-    nt_entity_t e0 = create_test_entity(mesh, mat_a);
-    nt_entity_t e1 = create_test_entity(mesh, mat_b);
-    nt_render_item_t items[2] = {
-        {.sort_key = 0, .entity = e0.id, .batch_key = nt_mesh_renderer_batch_key(mat_a, mesh)},
-        {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)},
-    };
-
-    draw_list(items, 2);
-
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
-}
-
-/* A material mapping none of the mesh's streams derives an empty layout: the
- * attribute-less gl_VertexID path draws through a vertex input with no VBO. */
-void test_vertex_input_empty_derived_layout_draws(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_with_attr(create_test_program(), "not_a_mesh_stream", 0, nt_blend_opaque());
-    nt_entity_t e = create_test_entity(mesh, mat);
-    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
-
-    draw_list(items, 1);
-
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
-}
-
-/* The attribute-less version (no VBO, no IBO) escapes the destroy-buffer cascade, so every mesh
- * shares one; a reused mesh slot drops its row without destroying anything. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_bufferless_vertex_input_shared_and_slot_reuse_destroys_nothing(void) {
-    nt_program_t program = create_test_program();
-    nt_material_t mat = create_test_material_with_attr(program, "not_a_mesh_stream", 0, nt_blend_opaque());
-    nt_material_t buffered = create_test_material_with_attr(program, "position", 0, nt_blend_opaque());
-    nt_mesh_t mesh = create_test_mesh_nonindexed();
-    nt_entity_t e = create_test_entity(mesh, mat);
-    nt_entity_t e_buffered = create_test_entity(mesh, buffered);
-    nt_mesh_t neighbor = create_test_mesh_nonindexed();
-    nt_entity_t e_neighbor = create_test_entity(neighbor, mat);
-    nt_render_item_t neighbor_item = {.entity = e_neighbor.id, .batch_key = nt_mesh_renderer_batch_key(mat, neighbor)};
-    nt_gfx_fake_reset();
-    draw_list(&neighbor_item, 1);
-
-    for (uint32_t cycle = 0; cycle < 6; cycle++) {
-        nt_render_item_t items[2] = {
-            {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)},
-            {.entity = e_buffered.id, .batch_key = nt_mesh_renderer_batch_key(buffered, mesh)},
-        };
-        draw_list(items, 2); /* its frame ends before the next opens: last_frame holds only this list */
-        TEST_ASSERT_EQUAL_UINT32(0, g_nt_gfx.last_frame.accepted[NT_GFX_OP_DESTROY]);
-        draw_list(&neighbor_item, 1);
-        TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
-        TEST_ASSERT_EQUAL_UINT32(2 + cycle, nt_gfx_fake_vertex_input_create_count());
-        const uint32_t old_id = mesh.id;
-        nt_test_frame_close();
-        nt_gfx_deactivate_mesh(mesh.id);
-        nt_test_frame_open();
-        mesh = create_test_mesh_nonindexed(); /* reuses the freed pool slot */
-        TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(old_id), nt_pool_slot_index(mesh.id));
-        TEST_ASSERT_NOT_EQUAL(old_id, mesh.id);
-        *nt_mesh_comp_handle(e) = mesh;
-        *nt_mesh_comp_handle(e_buffered) = mesh;
-    }
-
-    /* Only the shared bufferless version is live; all other slots must be free. */
-    for (uint32_t i = 1; i < TEST_MAX_VERTEX_INPUTS; i++) {
-        nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){0});
-        TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
-    }
-}
-
-/* An empty derived layout on an indexed mesh keeps the mesh's IBO, so it is a per-mesh version
- * that dies with the mesh's buffers. */
-void test_empty_layout_with_index_buffer_is_per_mesh(void) {
-    nt_material_t mat = create_test_material_with_attr(create_test_program(), "not_a_mesh_stream", 0, nt_blend_opaque());
-    nt_mesh_t mesh_a = create_test_mesh();
-    nt_mesh_t mesh_b = create_test_mesh();
-    nt_render_item_t items[2] = {
-        {.entity = create_test_entity(mesh_a, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_a)},
-        {.entity = create_test_entity(mesh_b, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_b)},
-    };
-    nt_gfx_fake_reset();
-    draw_list(items, 2);
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
-    nt_test_frame_close();
-    nt_gfx_deactivate_mesh(mesh_a.id);
-    nt_test_frame_open();
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
-}
-
-/* restore_gpu destroys the shared bufferless version once; the next draw makes a new one. */
-void test_bufferless_vertex_input_recreated_after_restore(void) {
-    nt_material_t mat = create_test_material_with_attr(create_test_program(), "not_a_mesh_stream", 0, nt_blend_opaque());
-    nt_mesh_t mesh_a = create_test_mesh_nonindexed();
-    nt_mesh_t mesh_b = create_test_mesh_nonindexed();
-    nt_render_item_t items[2] = {
-        {.entity = create_test_entity(mesh_a, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_a)},
-        {.entity = create_test_entity(mesh_b, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh_b)},
-    };
-    nt_gfx_fake_reset();
-    draw_list(items, 2);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
-    nt_test_frame_close();
-    nt_mesh_renderer_restore_gpu();
-    nt_test_frame_open();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_vertex_input_count());
-    draw_list(items, 2);
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
-    TEST_ASSERT_EQUAL_UINT32(2, drawn_calls());
 }
 
-/* Mesh slot reuse must not alias the stale vertex input: the versions table
- * stores the full generation-checked handle. */
+/* Mesh slot reuse must not alias the stale vertex input: deactivation takes the mesh's vertex
+ * inputs along, and a new mesh in the same slot gets a fresh one. */
 void test_vertex_input_survives_mesh_slot_reuse(void) {
     nt_mesh_t mesh_a = create_test_mesh();
     nt_material_t mat = create_test_material();
@@ -1827,12 +1634,12 @@ void test_vertex_input_survives_mesh_slot_reuse(void) {
 
     nt_gfx_fake_reset();
     draw_list(items, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
+    const nt_vertex_input_t old = nt_gfx_mesh_vertex_input(mesh_a, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX));
+    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(old));
 
-    /* Deactivation destroys the mesh buffers; the cascade kills the vi. */
     nt_test_frame_close();
     nt_gfx_deactivate_mesh(mesh_a.id);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_vertex_input_count());
+    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(old));
     nt_test_frame_open();
 
     nt_mesh_t mesh_b = create_test_mesh(); /* reuses the freed pool slot */
@@ -1842,35 +1649,7 @@ void test_vertex_input_survives_mesh_slot_reuse(void) {
 
     draw_list(items, 1);
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_vertex_input_count());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count()); /* fresh vi, not the stale one */
-}
-
-/* Exceeding max_mesh_vertex_inputs asserts (crash-early over silent eviction). */
-void test_vertex_input_versions_overflow_asserts(void) {
-    nt_test_frame_close();
-    nt_mesh_renderer_shutdown();
-    nt_mesh_renderer_desc_t small = {.max_pipelines = 8, .max_mesh_vertex_inputs = 2};
-    TEST_ASSERT_EQUAL_INT(0, (int)nt_mesh_renderer_init(&small));
-    nt_test_frame_open();
-
-    nt_mesh_t mesh = create_test_mesh();
-    nt_program_t shared = create_test_program();
-    /* One layout from two streams fills the two versions: streams count like layouts. */
-    nt_material_t mat = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
-    nt_render_item_t item = {.sort_key = 0, .entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
-    for (uint32_t k = 0; k < 2; k++) {
-        nt_test_frame_next();
-        nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + k, &item, 1);
-        nt_test_frame_next();
-    }
-    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_vertex_input_count());
-
-    nt_material_t mat3 = create_test_material_with_attr(shared, "position", 2, nt_blend_opaque());
-    nt_entity_t e3 = create_test_entity(mesh, mat3);
-    item = (nt_render_item_t){.sort_key = 0, .entity = e3.id, .batch_key = nt_mesh_renderer_batch_key(mat3, mesh)};
-    NT_TEST_EXPECT_ASSERT(draw_list(&item, 1));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "versions exhausted"));
 }
 
 /* ---- Test 9: restore_gpu clears cache and subsequent draw still works ---- */
@@ -1918,16 +1697,6 @@ void test_restore_on_inactive_renderer_does_nothing(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_stream_to_vertex_type_total(void) {
-    TEST_ASSERT_EQUAL(NT_VERTEX_FLOAT, nt_renderer_stream_to_vertex_type(NT_STREAM_FLOAT32));
-    TEST_ASSERT_EQUAL(NT_VERTEX_HALF, nt_renderer_stream_to_vertex_type(NT_STREAM_FLOAT16));
-    TEST_ASSERT_EQUAL(NT_VERTEX_INT16, nt_renderer_stream_to_vertex_type(NT_STREAM_INT16));
-    TEST_ASSERT_EQUAL(NT_VERTEX_UINT16, nt_renderer_stream_to_vertex_type(NT_STREAM_UINT16));
-    TEST_ASSERT_EQUAL(NT_VERTEX_INT8, nt_renderer_stream_to_vertex_type(NT_STREAM_INT8));
-    TEST_ASSERT_EQUAL(NT_VERTEX_UINT8, nt_renderer_stream_to_vertex_type(NT_STREAM_UINT8));
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_vertex_type_sizes(void) {
     TEST_ASSERT_EQUAL_UINT16(4, nt_vertex_type_size(NT_VERTEX_FLOAT));
     TEST_ASSERT_EQUAL_UINT16(2, nt_vertex_type_size(NT_VERTEX_HALF));
@@ -1960,7 +1729,7 @@ void test_core_draw_reuses_one_allocation_across_passes(void) {
     TEST_ASSERT_EQUAL_UINT32(16, offset);
     for (int pass = 0; pass < 2; pass++) {
         nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-        nt_mesh_renderer_draw(mesh, mat, NT_GFX_FRAME_VERTEX, offset, 2);
+        nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 2);
         nt_gfx_end_pass();
     }
     TEST_ASSERT_EQUAL_UINT32(updates, nt_gfx_fake_update_buffer_count()); /* recording writes no buffer */
@@ -1973,7 +1742,7 @@ void test_core_draw_reuses_one_allocation_across_passes(void) {
 }
 
 void test_core_draw_asserts_on_zero_count(void) {
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(create_test_mesh(), create_test_material(), NT_GFX_FRAME_VERTEX, 0, 0));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(create_test_mesh(), create_test_material(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), 0, 0));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "count > 0"));
 }
 
@@ -1984,7 +1753,7 @@ void test_core_draw_asserts_outside_a_pass(void) {
     begin_storage_frame();
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
-    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, NT_GFX_FRAME_VERTEX, offset, 1));
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "must be called inside a pass"));
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
@@ -1999,10 +1768,10 @@ void test_core_draw_applies_the_material_every_call(void) {
     nt_gfx_fake_reset();
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, sizeof(nt_mesh_instance_t), 4, &offset), 0, sizeof(nt_mesh_instance_t));
-    nt_mesh_renderer_draw(mesh, mat, NT_GFX_FRAME_VERTEX, offset, 1);
+    nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
     const float tint2[4] = {2.0F, 3.0F, 4.0F, 5.0F};
     nt_material_set_param(mat, "u_tint", tint2);
-    nt_mesh_renderer_draw(mesh, mat, NT_GFX_FRAME_VERTEX, offset, 1);
+    nt_mesh_renderer_draw(mesh, mat, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset, 1);
     nt_test_frame_next();
 
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_uniform_vec4_count());
@@ -2046,8 +1815,8 @@ void test_draw_list_of_a_new_mesh_after_a_draw_executes_nothing(void) {
     TEST_ASSERT_EQUAL_UINT32(updates + 1, nt_gfx_fake_update_buffer_count());
 }
 
-/* A mesh in the slot of a deactivated one finds the cascade-killed vertex inputs in the cache row:
- * dropping them destroys nothing and executes no recorded draw mid-frame. */
+/* A mesh in the slot of a deactivated one starts with no vertex inputs: making one destroys
+ * nothing and executes no recorded draw mid-frame. */
 void test_draw_list_of_a_mesh_in_a_reused_slot_destroys_nothing(void) {
     nt_material_t mat = create_test_material();
     nt_mesh_t mesh_a = create_test_mesh();
@@ -2172,10 +1941,8 @@ static void test_draws_on_a_lost_context_skip_their_handle_checks(void) {
     (void)nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 8}); /* the failed create latches the loss */
     TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
     const nt_render_item_t item = {.entity = 0xFFFFU};
-    nt_mesh_renderer_draw((nt_mesh_t){0}, (nt_material_t){0}, NT_GFX_FRAME_VERTEX, 0, 1);
+    nt_mesh_renderer_draw((nt_mesh_t){0}, (nt_material_t){0}, (nt_buffer_t){0}, 0, 1);
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_make_vertex_input((nt_mesh_t){0}, (nt_material_t){0}).id);
-    nt_mesh_renderer_draw_vertex_input((nt_mesh_t){0}, (nt_material_t){0}, (nt_vertex_input_t){0}, (nt_buffer_t){0}, 0, 0);
     nt_gfx_fake_set_context_lost(false);
 }
 
@@ -2205,7 +1972,7 @@ int main(void) {
     RUN_TEST(test_runs_of_one_list_pack_each_entity_world_and_color);
     RUN_TEST(test_draw_list_asserts_on_an_item_without_drawable);
     RUN_TEST(test_draw_list_asserts_on_an_item_without_transform);
-    RUN_TEST(test_mesh_vertex_input_key_one_step_changes_split_vertex_inputs_not_pipelines);
+    RUN_TEST(test_attr_map_changes_never_split_the_mesh_vertex_input);
     RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
     RUN_TEST(test_texture_published_after_material_create_binds_at_next_draw);
     RUN_TEST(test_declared_sampler_unknown_to_the_program_is_ignored);
@@ -2227,17 +1994,10 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_different_material_attr_maps);
     RUN_TEST(test_vertex_input_reused_across_draw_list_calls);
     RUN_TEST(test_vertex_input_distinct_per_mesh);
-    RUN_TEST(test_vertex_input_shared_for_same_derived_layout);
-    RUN_TEST(test_vertex_input_empty_derived_layout_draws);
-    RUN_TEST(test_bufferless_vertex_input_shared_and_slot_reuse_destroys_nothing);
-    RUN_TEST(test_empty_layout_with_index_buffer_is_per_mesh);
-    RUN_TEST(test_bufferless_vertex_input_recreated_after_restore);
     RUN_TEST(test_vertex_input_survives_mesh_slot_reuse);
-    RUN_TEST(test_vertex_input_versions_overflow_asserts);
     RUN_TEST(test_restore_gpu);
     RUN_TEST(test_restore_on_inactive_renderer_does_nothing);
     /* Stream format mapping */
-    RUN_TEST(test_stream_to_vertex_type_total);
     RUN_TEST(test_vertex_type_sizes);
 
     RUN_TEST(test_core_draw_reuses_one_allocation_across_passes);
@@ -2253,15 +2013,14 @@ int main(void) {
     RUN_TEST(test_core_draw_applies_the_material_every_call);
     RUN_TEST(test_draws_on_a_lost_context_skip_their_handle_checks);
     RUN_TEST(test_draw_list_packs_into_its_stream);
-    RUN_TEST(test_vertex_input_versions_per_stream);
-    RUN_TEST(test_same_layout_material_reuses_each_stream_version);
+    RUN_TEST(test_mesh_vertex_input_per_stream);
+    RUN_TEST(test_materials_share_the_mesh_vertex_input);
     RUN_TEST(test_consecutive_meshes_and_streams_do_not_alias);
-    RUN_TEST(test_bufferless_vertex_input_per_stream);
-    RUN_TEST(test_restore_rebuilds_versions_per_stream);
-    RUN_TEST(test_owned_vertex_input_draws_from_its_buffer);
-    RUN_TEST(test_owned_vertex_input_asserts_past_its_buffer);
-    RUN_TEST(test_owned_vertex_input_lifetime);
-    RUN_TEST(test_owned_vertex_input_failures_record_nothing);
+    RUN_TEST(test_restore_gpu_keeps_mesh_vertex_inputs);
+    RUN_TEST(test_core_draw_from_a_game_buffer);
+    RUN_TEST(test_core_draw_asserts_past_its_game_buffer);
+    RUN_TEST(test_game_buffers_share_the_base_vertex_input);
+    RUN_TEST(test_core_draw_failures_record_nothing);
     RUN_TEST(test_draw_from_an_unsized_stream_asserts);
     RUN_TEST(test_real_restore_rebinds_new_stream_and_owned_buffers);
     RUN_TEST(test_core_draw_asserts_on_instances_outside_the_stream);

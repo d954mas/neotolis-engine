@@ -1506,8 +1506,6 @@ static nt_material_t make_mesh_material(nt_resource_t texture, bool skinned) {
     nt_material_create_desc_t desc = {
         .textures = {{.name = "u_texture", .resource = texture}, {.name = "u_skin_matrices"}},
         .texture_count = skinned ? 2 : 1,
-        .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv0", .location = 1}, {.stream_name = "joints", .location = 8}, {.stream_name = "weights", .location = 9}},
-        .attr_map_count = skinned ? 4 : 2,
         .blend = nt_blend_opaque(),
         .cull_mode = NT_CULL_NONE,
         .depth_test = true,
@@ -1533,9 +1531,9 @@ static void init_mesh_scene(void) {
     NT_ASSERT(result == NT_OK);
     nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 3 * SKELETAL_SHOWCASE_MAX_PALETTE, .height = SKELETAL_SHOWCASE_MAX_INSTANCES});
     /* Static meshes are only the CPU reference: one body and one shirt. */
-    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_vertex_inputs = 4});
+    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8});
     NT_ASSERT(result == NT_OK);
-    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_vertex_inputs = 4});
+    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 8});
     NT_ASSERT(result == NT_OK);
     for (uint32_t i = 0; i < SHOWCASE_ENTITY_COUNT; ++i) {
         const nt_entity_t e = nt_entity_create();

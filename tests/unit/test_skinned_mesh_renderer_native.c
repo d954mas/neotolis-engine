@@ -207,6 +207,24 @@ static bool read_text(const char *path, char **out_text) {
     return true;
 }
 
+/* Stands in for the builder's virtual include: every "nt/locations.glsl" line becomes blanks and
+ * NT_LOCATIONS_GLSL goes first. Takes ownership of source. */
+static char *expand_locations(char *source) {
+    static const char include[] = "#include \"" NT_LOCATIONS_GLSL_INCLUDE "\"";
+    for (char *at = strstr(source, include); at != NULL; at = strstr(at, include)) {
+        memset(at, ' ', sizeof(include) - 1U);
+    }
+    const size_t head = sizeof(NT_LOCATIONS_GLSL) - 1U;
+    const size_t body = strlen(source);
+    char *expanded = (char *)malloc(head + body + 1U);
+    if (expanded != NULL) {
+        memcpy(expanded, NT_LOCATIONS_GLSL, head);
+        memcpy(expanded + head, source, body + 1U);
+    }
+    free(source);
+    return expanded;
+}
+
 static bool compose_skin_vertex_source(char **out_source) {
     static const char marker[] = "#include \"../../assets/shaders/common/skin.glsl\"";
     static const char pragma[] = "#pragma once";
@@ -242,8 +260,8 @@ static bool compose_skin_vertex_source(char **out_source) {
     memcpy(combined + prefix_size + body_size, insert + sizeof(marker) - 1U, suffix_size + 1U);
     free(fixture);
     free(skin);
-    *out_source = combined;
-    return true;
+    *out_source = expand_locations(combined);
+    return *out_source != NULL;
 }
 
 static nt_mesh_t make_mesh(const test_vertex_t vertices[VERTEX_COUNT]) {
@@ -279,15 +297,6 @@ static nt_material_t make_skinned_material(float probe_mode) {
         .texture_count = 1,
         .params = {{.name = "u_probe_mode", .value = {probe_mode, 0.0F, 0.0F, 0.0F}}},
         .param_count = 1,
-        .attr_map =
-            {
-                {.stream_name = "position", .location = 0},
-                {.stream_name = "normal", .location = 1},
-                {.stream_name = "tangent", .location = 2},
-                {.stream_name = "joints", .location = 8},
-                {.stream_name = "weights", .location = 9},
-            },
-        .attr_map_count = 5,
         .cull_mode = NT_CULL_NONE,
         .label = "native_skinned_probe",
     });
@@ -298,13 +307,6 @@ static nt_material_t make_reference_material(float probe_mode) {
         .program = s_reference_program,
         .params = {{.name = "u_probe_mode", .value = {probe_mode, 0.0F, 0.0F, 0.0F}}},
         .param_count = 1,
-        .attr_map =
-            {
-                {.stream_name = "position", .location = 0},
-                {.stream_name = "normal", .location = 1},
-                {.stream_name = "tangent", .location = 2},
-            },
-        .attr_map_count = 3,
         .cull_mode = NT_CULL_NONE,
         .label = "native_skin_cpu_reference",
     });
@@ -492,11 +494,15 @@ void setUp(void) {
     nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 32});
     nt_material_init(&(nt_material_desc_t){.max_materials = 16});
     s_initialized = true;
-    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 4}));
-    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4}));
+    TEST_ASSERT_EQUAL(NT_OK, nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4}));
 
-    const bool sources_ready = compose_skin_vertex_source(&skin_source) && read_text("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
-                               read_text("tests/fixtures/skinned_mesh_renderer_native.frag", &fragment_source);
+    bool sources_ready = compose_skin_vertex_source(&skin_source) && read_text("tests/fixtures/skinned_mesh_renderer_reference_native.vert", &reference_source) &&
+                         read_text("tests/fixtures/skinned_mesh_renderer_native.frag", &fragment_source);
+    if (sources_ready) {
+        reference_source = expand_locations(reference_source);
+        sources_ready = reference_source != NULL;
+    }
     if (!sources_ready) {
         free(skin_source);
         free(reference_source);
@@ -680,11 +686,11 @@ static void draw_tinted_and_white_instances(nt_mesh_t mesh, nt_material_t materi
 static void test_mesh_instances_draw_their_own_colors(void) { draw_tinted_and_white_instances(make_mesh(k_bar), make_reference_material(3.0F), NULL); }
 
 /* Draws caller-owned instances in one frame; returns that frame's glVertexAttribPointer count. */
-static uint32_t render_owned(nt_mesh_t mesh, nt_material_t material, nt_vertex_input_t vi, nt_buffer_t buffer, uint32_t first, uint32_t count, uint8_t out[FRAME_BYTES]) {
+static uint32_t render_owned(nt_mesh_t mesh, nt_material_t material, nt_buffer_t buffer, uint32_t first, uint32_t count, uint8_t out[FRAME_BYTES]) {
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     begin_target_pass();
-    nt_mesh_renderer_draw_vertex_input(mesh, material, vi, buffer, first * (uint32_t)sizeof(nt_mesh_instance_t), count);
+    nt_mesh_renderer_draw(mesh, material, buffer, first * (uint32_t)sizeof(nt_mesh_instance_t), count);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     const uint32_t pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
@@ -701,8 +707,8 @@ static nt_mesh_instance_t owned_instance(float x, float y, const float color[4])
     return instance;
 }
 
-/* Instances in a caller-owned IMMUTABLE buffer: [off-screen, tinted, white, off-screen]. A vertex input
- * drawn from instance 1 shows the tinted and the white bar exactly as the ECS path does; the next
+/* Instances in a caller-owned IMMUTABLE buffer: [off-screen, tinted, white, off-screen]. The core draw
+ * from instance 1 shows the tinted and the white bar exactly as the ECS path does; the next
  * frame at the same offset issues no glVertexAttribPointer; a draw from instance 2 shows only the
  * white bar (an offset error would show an off-screen or the tinted instance). */
 static void test_owned_instances_draw_from_their_offset(void) {
@@ -723,19 +729,15 @@ static void test_owned_instances_draw_from_their_offset(void) {
 
     const nt_mesh_instance_t instances[4] = {owned_instance(9.0F, 0.0F, one), owned_instance(0.0F, 0.45F, tint), owned_instance(0.0F, -0.45F, one), owned_instance(0.0F, 9.0F, tint)};
     nt_buffer_t buffer = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = instances, .size = sizeof(instances)});
-    nt_vertex_input_t vi = nt_mesh_renderer_make_vertex_input(mesh, material);
-    TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
-
-    render_owned(mesh, material, vi, buffer, 1, 2, s_actual);
+    render_owned(mesh, material, buffer, 1, 2, s_actual);
     assert_instance_colors(s_expected, s_second_mask, s_actual);
-    TEST_ASSERT_EQUAL_UINT32(0, render_owned(mesh, material, vi, buffer, 1, 2, s_actual));
+    TEST_ASSERT_EQUAL_UINT32(0, render_owned(mesh, material, buffer, 1, 2, s_actual));
     assert_instance_colors(s_expected, s_second_mask, s_actual);
 
-    TEST_ASSERT_GREATER_THAN_UINT32(0, render_owned(mesh, material, vi, buffer, 2, 1, s_actual));
+    TEST_ASSERT_GREATER_THAN_UINT32(0, render_owned(mesh, material, buffer, 2, 1, s_actual));
     for (uint32_t byte = 0; byte < FRAME_BYTES; byte++) {
         TEST_ASSERT_UINT8_WITHIN(1, s_second_mask[byte], s_actual[byte]); /* the white bar alone */
     }
-    nt_gfx_destroy_vertex_input(vi);
     nt_gfx_destroy_buffer(buffer);
 }
 

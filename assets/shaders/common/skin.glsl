@@ -3,14 +3,15 @@
 precision highp float;
 precision highp int;
 
-layout(location = 8) in vec4 a_joints;
-layout(location = 9) in vec4 a_weights;
-layout(location = 10) in vec4 a_world_row0;
-layout(location = 11) in vec4 a_world_row1;
-layout(location = 12) in vec4 a_world_row2;
-layout(location = 13) in vec4 a_color;
-layout(location = 14) in vec4 a_skin_frames;
-layout(location = 15) in float a_skin_alpha;
+#include "nt/locations.glsl"
+layout(location = NT_LOC_JOINTS) in vec4 a_joints;
+layout(location = NT_LOC_WEIGHTS) in vec4 a_weights;
+layout(location = NT_INST_LOC_WORLD_ROW0) in vec4 a_world_row0;
+layout(location = NT_INST_LOC_WORLD_ROW1) in vec4 a_world_row1;
+layout(location = NT_INST_LOC_WORLD_ROW2) in vec4 a_world_row2;
+layout(location = NT_INST_LOC_COLOR) in vec4 a_color;
+layout(location = NT_INST_LOC_SKIN_FRAMES) in vec4 a_skin_frames;
+layout(location = NT_INST_LOC_SKIN_ALPHA) in float a_skin_alpha;
 
 uniform highp sampler2D u_skin_matrices;
 

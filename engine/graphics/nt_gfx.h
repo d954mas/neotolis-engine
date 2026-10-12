@@ -160,6 +160,9 @@ enum {
     NT_GFX_FRAME_STREAM_COUNT = NT_GFX_FRAME_VERTEX + NT_GFX_MAX_VERTEX_STREAMS,
 };
 
+/* Vertex inputs a mesh can own: one per frame vertex stream and one for any other buffer. */
+#define NT_GFX_MESH_VERTEX_INPUTS (NT_GFX_MAX_VERTEX_STREAMS + 1)
+
 /* Vertex attribute component type. With count (1-4) and normalized this spans
  * the vertexAttribPointer space over float/half/byte/short types -- no enum of
  * allowed combinations. (No int32 or 2_10_10_2 packed types.) */
@@ -371,12 +374,9 @@ typedef struct {
     uint16_t max_buffers;   /* default: 128; each enabled frame storage stream takes one */
     uint16_t max_textures;  /* default: 64 */
     uint16_t max_meshes;    /* default: 128 */
-    /* default: 560 = max_meshes(128) * max_mesh_vertex_inputs(4) + 48 other vertex inputs. A mesh takes
-     * one per (material layout, frame vertex stream) it is drawn with. The other budget also holds
-     * 4 per stream shapes draw from and one bufferless per used stream and mesh renderer:
-     * raise it with the streams in use (8 streams take about 48 alone). Add
-     * max_meshes * skinned.max_mesh_vertex_inputs when using both mesh renderers; raise the extra
-     * budget near the 64-layout sprite limit and for the game's own vertex inputs. */
+    /* default: 560, sized for ~4 vertex inputs per mesh plus 48 others. A mesh takes one per frame
+     * vertex stream it is drawn from, plus one if drawn from any other buffer (nt_gfx_mesh_vertex_input).
+     * The others: 4 per stream shapes draw from, the sprite layouts and the game's own. */
     uint16_t max_vertex_inputs;
     uint16_t max_render_targets; /* default: 16 */
     uint32_t capture_capacity;   /* event records, default: 0; allocated once at init */
@@ -1160,6 +1160,12 @@ void nt_gfx_deactivate_shader(uint32_t handle);
 /* ---- Mesh info query ---- */
 
 const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
+/* The vertex input that draws `mesh` with instances from instance_buffer: one per frame vertex
+ * stream, so each stream's draws keep their own instance offsets, and one shared by every other
+ * buffer. gfx owns it: made on first use with every stream at its NtStreamDesc.location, freed
+ * with the mesh or by a context loss. INVALID while the context is lost or on backend failure;
+ * a live mesh and buffer are asserted. */
+nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_buffer);
 /* Mesh pool capacity from nt_gfx_desc_t (valid after nt_gfx_init) -- sizes
  * renderer-side per-mesh tables; mesh pool slots index [1..max]. */
 uint16_t nt_gfx_max_meshes(void);

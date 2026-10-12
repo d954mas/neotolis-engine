@@ -273,8 +273,6 @@ int main(int argc, char *argv[]) {
     s_material = nt_material_create(&(nt_material_create_desc_t){
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
-        .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv0", .location = 1}},
-        .attr_map_count = 2,
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_BACK,

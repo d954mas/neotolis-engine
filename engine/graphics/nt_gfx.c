@@ -145,6 +145,9 @@ static struct {
 
     nt_pool_t mesh_pool;
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
+    /* Per mesh slot: one vertex input per frame vertex stream, then the base one for any other
+     * buffer; made on first use. [capacity+1][NT_GFX_MESH_VERTEX_INPUTS] */
+    nt_vertex_input_t *mesh_vertex_inputs;
 
     /* A layout handle is its slot, 1-based; init and shutdown empty the table. */
     nt_gfx_instance_layout_meta_t instance_layouts[NT_GFX_MAX_INSTANCE_LAYOUTS + 1];
@@ -409,9 +412,10 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     /* Mesh pool + data table */
     nt_pool_init(&s_gfx.mesh_pool, desc->max_meshes);
     s_gfx.mesh_table = (nt_gfx_mesh_info_t *)calloc((size_t)desc->max_meshes + 1, sizeof(nt_gfx_mesh_info_t));
+    s_gfx.mesh_vertex_inputs = (nt_vertex_input_t *)calloc(((size_t)desc->max_meshes + 1) * NT_GFX_MESH_VERTEX_INPUTS, sizeof(nt_vertex_input_t));
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
     NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.program_pending && s_gfx.pipeline_programs && s_gfx.buffer_backends && s_gfx.texture_backends && s_gfx.buffer_metas &&
-              s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && "gfx init: out of memory");
+              s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && s_gfx.mesh_vertex_inputs && "gfx init: out of memory");
 
     if (!nt_gfx_backend_init(desc)) {
         NT_LOG_ERROR("backend init failed");
@@ -501,6 +505,7 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.texture_metas);
     free(s_gfx.render_target_metas);
     free(s_gfx.mesh_table);
+    free(s_gfx.mesh_vertex_inputs);
     free(s_stage_buf);
     s_stage_buf = NULL;
     s_stage_size = 0;
@@ -2915,6 +2920,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
 
     uint32_t slot = nt_pool_slot_index(mesh_id);
     memset(&s_gfx.mesh_table[slot], 0, sizeof(nt_gfx_mesh_info_t));
+    memset(&s_gfx.mesh_vertex_inputs[(size_t)slot * NT_GFX_MESH_VERTEX_INPUTS], 0, NT_GFX_MESH_VERTEX_INPUTS * sizeof(nt_vertex_input_t));
 
     s_gfx.mesh_table[slot].vbo = vbo;
     s_gfx.mesh_table[slot].ibo = ibo;
@@ -2991,6 +2997,7 @@ void nt_gfx_deactivate_mesh(uint32_t handle) {
         return;
     }
     uint32_t index = nt_pool_slot_index(handle);
+    /* The vertex buffer's destroy cascade takes the mesh's vertex inputs along. */
     nt_gfx_destroy_buffer(s_gfx.mesh_table[index].vbo);
     if (s_gfx.mesh_table[index].ibo.id != 0) {
         nt_gfx_destroy_buffer(s_gfx.mesh_table[index].ibo);
@@ -3014,4 +3021,34 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh) {
     }
     uint32_t index = nt_pool_slot_index(mesh.id);
     return &s_gfx.mesh_table[index];
+}
+
+/* Every stream at the location the builder resolved; activation checked the types. */
+static nt_vertex_input_t make_mesh_vertex_input(const nt_gfx_mesh_info_t *info) {
+    static const nt_vertex_type_t k_types[] = {
+        [NT_STREAM_UINT8] = NT_VERTEX_UINT8, [NT_STREAM_INT8] = NT_VERTEX_INT8,    [NT_STREAM_UINT16] = NT_VERTEX_UINT16,
+        [NT_STREAM_INT16] = NT_VERTEX_INT16, [NT_STREAM_FLOAT16] = NT_VERTEX_HALF, [NT_STREAM_FLOAT32] = NT_VERTEX_FLOAT,
+    };
+    nt_vertex_input_desc_t desc = {.layout = {.attr_count = info->stream_count, .stride = info->stride}, .vertex_buffer = info->vbo, .index_buffer = info->ibo, .label = "mesh"};
+    uint16_t offset = 0;
+    for (uint8_t i = 0; i < info->stream_count; i++) {
+        const NtStreamDesc *stream = &info->streams[i];
+        desc.layout.attrs[i] = (nt_vertex_attr_t){.location = stream->location, .type = k_types[stream->type], .count = stream->count, .normalized = stream->normalized != 0, .offset = offset};
+        offset = (uint16_t)(offset + (nt_stream_type_size(stream->type) * stream->count));
+    }
+    return nt_gfx_make_vertex_input(&desc);
+}
+
+nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_buffer) {
+    NT_ASSERT(nt_pool_valid(&s_gfx.mesh_pool, mesh.id) && "mesh_vertex_input: invalid or stale mesh");
+    NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "mesh_vertex_input: invalid or stale instance buffer");
+    const uint32_t slot = nt_pool_slot_index(mesh.id);
+    const uint32_t frame_stream = s_gfx.buffer_metas[nt_pool_slot_index(instance_buffer.id)].frame_stream;
+    const uint32_t k = frame_stream > NT_GFX_FRAME_VERTEX ? frame_stream - 1U - NT_GFX_FRAME_VERTEX : NT_GFX_MAX_VERTEX_STREAMS;
+    nt_vertex_input_t *vi = &s_gfx.mesh_vertex_inputs[((size_t)slot * NT_GFX_MESH_VERTEX_INPUTS) + k];
+    /* A loss frees every vertex input; the next use after the restore makes it again. */
+    if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi->id)) {
+        *vi = g_nt_gfx.context_lost ? NT_VERTEX_INPUT_INVALID : make_mesh_vertex_input(&s_gfx.mesh_table[slot]);
+    }
+    return *vi;
 }
