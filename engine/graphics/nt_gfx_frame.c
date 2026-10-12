@@ -59,6 +59,9 @@ void nt_gfx_frame_create_buffers(void) {
             .label = labels[s < NT_GFX_FRAME_VERTEX ? s : NT_GFX_FRAME_VERTEX],
         });
         NT_ASSERT((storage->buffer.id != 0 || g_nt_gfx.context_lost) && "frame storage buffer creation failed");
+        if (storage->buffer.id != 0) {
+            nt_gfx_set_buffer_frame_stream(storage->buffer, s);
+        }
     }
 }
 // #endregion
@@ -130,12 +133,12 @@ void nt_gfx_frame_execute(void) {
             w += 1;
             break;
         case NT_GFX_CMD_BIND_VERTEX_INPUT:
-            nt_gfx_backend_bind_vertex_input(w[0], 0);
+            nt_gfx_backend_bind_vertex_input(w[0], 0, 0, 0);
             w += 1;
             break;
         case NT_GFX_CMD_BIND_VERTEX_INPUT_INSTANCED:
-            nt_gfx_backend_bind_vertex_input(w[0], w[1]);
-            w += 2;
+            nt_gfx_backend_bind_vertex_input(w[0] & 0xFFFFU, w[0] >> 16, w[1], w[2]);
+            w += 3;
             break;
         case NT_GFX_CMD_BIND_TEXTURE_UNIT:
             nt_gfx_backend_bind_texture_unit(w[0], w[1], w[2]);

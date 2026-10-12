@@ -51,7 +51,7 @@ A material carries at most `NT_MATERIAL_MAX_TEXTURES` (4) slots, including
 renderer-supplied declarations, so a material-driven program may sample at most
 4 of the 8 units a program can link.
 
-Sprite and text keep two legacy renderer-specific exceptions until #600. Sprite
+Sprite and text keep two legacy renderer-specific exceptions until the material bind group (planned, #600). Sprite
 declares its atlas-page sampler in slot 0 but substitutes the page resource per
 emit and run. Text declares no material textures and supplies its font samplers
 outside the material declaration. New specialized renderers follow the declared
@@ -136,6 +136,14 @@ Per-entity variation (e.g. per-character color, dissolve progress) goes through 
 
 Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. Renderers read params when they record a draw (the sprite renderer compares them with the values it last wrote to the program), so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
 
+## Attr map
+
+`attr_map` names custom per-vertex attributes of the sprite path (UI widgets,
+sprite custom-attr blocks). A mesh feeds every stream at the location its pack
+carries ([shader, Attribute locations](shader.md#attribute-locations)), so a
+mesh or skinned mesh material declares no `attr_map`; the mesh renderers assert
+that the material has no `attr_map` when a run changes material.
+
 ## Attr defaults
 
 `has_attr_defaults` opts a material into per-attr defaults:
@@ -158,7 +166,7 @@ records the params current at the call. Slot 0 of a sprite material is the atlas
 page: the renderer substitutes the page of each emit, and of each `draw_list`
 run's first item, so the declared slot-0 resource is never resolved. A text material declares no textures, so the text renderer resolves no
 material textures; it binds the font's own textures. These sprite/text legacy
-exceptions end with the material bind group (#600). There is no material step.
+exceptions end with the material bind group (planned, #600). There is no material step.
 
 Between `nt_resource_init` and `nt_resource_shutdown`, the published view of a
 handle changes only inside `nt_resource_step`. `nt_resource_shutdown` unpublishes
@@ -187,8 +195,9 @@ and in `[0, 1]`. A zero-filled state disables blending. The complete WebGL 2
 core factor and operation sets are public. `nt_material_create` asserts the
 render-state ranges up front (blend factors and ops, enabled or not,
 `cull_mode`, every `attr_map` location below `NT_GFX_MAX_VERTEX_ATTRS`): the
-renderer cache keys pack them into fixed bit lanes, so the trap belongs at the
-API boundary, not on the first draw. Invalid WebGL combinations assert
+pipeline cache keys pack the render state, and the sprite renderer's
+vertex-input cache key packs the `attr_map` locations, into fixed bit lanes, so
+the trap belongs at the API boundary, not on the first draw. Invalid WebGL combinations assert
 during pipeline creation.
 
 The fragment shader output is the source (`src`); the color already stored in

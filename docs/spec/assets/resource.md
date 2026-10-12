@@ -326,10 +326,11 @@ retry state. `nt_mesh_renderer`,
 `nt_skinned_mesh_renderer`,
 `nt_sprite_renderer`, and `nt_text_renderer` borrow game material programs:
 the game relinks them. The
-mesh renderers own no buffer: their restore only drops the pipeline and
-vertex-input caches and returns void. The sprite and text renderers have no
-restore entry point: they own no buffer, and their pipeline and vertex-input
-caches validate on lookup and recreate what the loss freed.
+mesh, skinned mesh, sprite and text renderers have no restore entry point: they
+own no buffer, their pipeline caches and the sprite and text vertex-input
+caches validate on lookup and recreate what the loss freed, and meshes make
+their vertex inputs again on first use
+([render architecture, Vertex inputs](../render/architecture.md#vertex-inputs)).
 Frame storage needs no game restore: the `nt_gfx_begin_frame` that restores the
 context makes new frame buffers, and that frame's allocations reach them.
 Draw entry points that check handles before gfx (`nt_mesh_renderer` and
@@ -452,7 +453,7 @@ type above it (recoverable pack validation; a mounted type without a registered
 activator still asserts). `NT_RESOURCE_MAX_ASSET_TYPES`
 (`engine/resource/nt_resource_internal.h`) is 12 and a `_Static_assert` there
 keeps it above `NT_ASSET_LAST`. The three skeletal formats are specified in
-[Skeletal animation §16](../skeletal/skeletal-animation.md).
+[Skeletal animation, Builder, codec, wire formats](../skeletal/skeletal-animation.md#builder-codec-wire-formats).
 
 Additional types (material, audio) will be added as needed.
 

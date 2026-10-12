@@ -141,7 +141,7 @@ static uint32_t s_fake_last_update_buffer_size;
 static uint32_t s_fake_last_instance_offset;
 static uint32_t s_fake_last_instance_vertex_input; /* recorder: last VI handle an instanced bind named */
 static uint32_t s_fake_last_instance_buffer;       /* recorder: instance buffer backend of the last instanced bind */
-static uint32_t s_fake_vi_instance_buffer[8192];   /* instance buffer backend per vertex-input slot, set at create; covers a scene with one per draw key */
+static uint32_t s_fake_last_instance_layout;       /* recorder: instance layout slot of the last instanced bind */
 static nt_blend_state_t s_fake_last_pipeline_blend;
 static uint32_t s_fake_vertex_input_create_count;
 static uint32_t s_fake_bind_vertex_input_count;
@@ -238,6 +238,7 @@ uint32_t nt_gfx_fake_last_update_buffer_offset(void) { return s_fake_last_update
 uint32_t nt_gfx_fake_last_instance_offset(void) { return s_fake_last_instance_offset; }
 uint32_t nt_gfx_fake_last_instance_vertex_input(void) { return s_fake_last_instance_vertex_input; }
 uint32_t nt_gfx_fake_last_instance_buffer(void) { return s_fake_last_instance_buffer; }
+uint32_t nt_gfx_fake_last_instance_layout(void) { return s_fake_last_instance_layout; }
 nt_blend_state_t nt_gfx_fake_last_pipeline_blend(void) { return s_fake_last_pipeline_blend; }
 uint32_t nt_gfx_fake_vertex_input_create_count(void) { return s_fake_vertex_input_create_count; }
 uint32_t nt_gfx_fake_bind_vertex_input_count(void) { return s_fake_bind_vertex_input_count; }
@@ -285,7 +286,8 @@ void nt_gfx_fake_reset(void) {
     s_fake_last_update_buffer_size = 0;
     s_fake_last_instance_offset = 0;
     s_fake_last_instance_vertex_input = 0;
-    s_fake_last_instance_buffer = 0; /* the per-slot table follows backend create/destroy, not observation resets */
+    s_fake_last_instance_buffer = 0;
+    s_fake_last_instance_layout = 0;
     s_fake_last_pipeline_blend = (nt_blend_state_t){0};
     s_fake_vertex_input_create_count = 0;
     s_fake_bind_vertex_input_count = 0;
@@ -513,10 +515,9 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
-uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t inst_backend, uint32_t slot) {
+uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, uint32_t vbo_backend, uint32_t ibo_backend, uint32_t slot) {
     (void)vbo_backend;
     (void)ibo_backend;
-    NT_ASSERT(slot < sizeof(s_fake_vi_instance_buffer) / sizeof(s_fake_vi_instance_buffer[0]));
     s_fake_vertex_input_create_count++;
     s_fake_last_vertex_input_layout = desc->layout;
     if (s_fake_context_lost) {
@@ -526,23 +527,25 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
         s_fake_fail_next_vertex_input_create = false;
         return 0;
     }
-    s_fake_vi_instance_buffer[slot] = inst_backend;
     return slot;
 }
 
-void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) {
-    NT_ASSERT(backend_handle < sizeof(s_fake_vi_instance_buffer) / sizeof(s_fake_vi_instance_buffer[0]));
-    s_fake_vi_instance_buffer[backend_handle] = 0;
+void nt_gfx_backend_destroy_vertex_input(uint32_t backend_handle) { (void)backend_handle; }
+
+void nt_gfx_backend_register_instance_layout(uint32_t slot, const nt_vertex_layout_t *layout) {
+    (void)slot;
+    (void)layout;
 }
 
-void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t byte_offset) {
+void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_slot, uint32_t buffer_backend, uint32_t byte_offset) {
     NT_ASSERT(backend_handle != 0 && "bind_vertex_input: requires a live handle");
     s_fake_bind_vertex_input_count++;
     s_fake_last_bound_vertex_input = backend_handle;
-    if (s_fake_vi_instance_buffer[backend_handle] != 0) {
+    if (layout_slot != 0) {
         s_fake_last_instance_offset = byte_offset;
         s_fake_last_instance_vertex_input = backend_handle;
-        s_fake_last_instance_buffer = s_fake_vi_instance_buffer[backend_handle];
+        s_fake_last_instance_buffer = buffer_backend;
+        s_fake_last_instance_layout = layout_slot;
     }
 }
 

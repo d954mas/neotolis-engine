@@ -276,26 +276,17 @@ static void load_scene_from_manifest(void) {
             .cull_mode = NT_CULL_BACK,
         };
 
-        /* Textures and attr_map depend on shader type */
+        /* Textures depend on shader type */
         if (mn->shader_type == SPONZA_SHADER_FULL) {
             /* Full: diffuse + normal + specular, 4 streams */
             mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
             mat_desc.textures[1] = (nt_material_texture_desc_t){.name = "u_normal", .resource = (mn->normal_rid != 0) ? s_tex_handles[tex_base + 1] : s_neutral_normal_handle};
             mat_desc.textures[2] = (nt_material_texture_desc_t){.name = "u_specular", .resource = (mn->specular_rid != 0) ? s_tex_handles[tex_base + 2] : s_neutral_white_handle};
             mat_desc.texture_count = 3;
-            mat_desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "position", .location = 0};
-            mat_desc.attr_map[1] = (nt_material_attr_desc_t){.stream_name = "normal", .location = 1};
-            mat_desc.attr_map[2] = (nt_material_attr_desc_t){.stream_name = "uv0", .location = 2};
-            mat_desc.attr_map[3] = (nt_material_attr_desc_t){.stream_name = "tangent", .location = 3};
-            mat_desc.attr_map_count = 4;
         } else if (mn->shader_type == SPONZA_SHADER_ALPHA) {
             /* Alpha: diffuse only, 3 streams, double-sided */
             mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
             mat_desc.texture_count = 1;
-            mat_desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "position", .location = 0};
-            mat_desc.attr_map[1] = (nt_material_attr_desc_t){.stream_name = "normal", .location = 1};
-            mat_desc.attr_map[2] = (nt_material_attr_desc_t){.stream_name = "uv0", .location = 2};
-            mat_desc.attr_map_count = 3;
             mat_desc.params[0] = (nt_material_param_desc_t){.name = "u_alpha_cutoff", .value = {(float)mn->alpha_cutoff_x100 / 100.0F}};
             mat_desc.param_count = 1;
             mat_desc.blend = nt_blend_opaque();
@@ -304,10 +295,6 @@ static void load_scene_from_manifest(void) {
             /* Diffuse: diffuse only, 3 streams */
             mat_desc.textures[0] = (nt_material_texture_desc_t){.name = "u_diffuse", .resource = (mn->diffuse_rid != 0) ? s_tex_handles[tex_base + 0] : s_neutral_white_handle};
             mat_desc.texture_count = 1;
-            mat_desc.attr_map[0] = (nt_material_attr_desc_t){.stream_name = "position", .location = 0};
-            mat_desc.attr_map[1] = (nt_material_attr_desc_t){.stream_name = "normal", .location = 1};
-            mat_desc.attr_map[2] = (nt_material_attr_desc_t){.stream_name = "uv0", .location = 2};
-            mat_desc.attr_map_count = 3;
         }
 
         mat_desc.label = "sponza_material";
@@ -362,7 +349,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_mesh_renderer_restore_gpu();
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }

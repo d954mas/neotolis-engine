@@ -41,6 +41,7 @@
 #include "meshwire/nt_meshwire.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
+#include "nt_vertex_locations.h"
 #include "render/nt_render_defs.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "renderers/nt_shape_renderer.h"
@@ -1281,15 +1282,15 @@ static void copy_mesh_source(cpu_mesh_t *source, const uint8_t *wire) {
     source->position = source->joints = source->weights = UINT32_MAX;
     for (uint32_t i = 0; i < header->stream_count; ++i) {
         elements[i] = nt_stream_type_size(streams[i].type) * streams[i].count;
-        if (streams[i].name_hash == nt_hash32_str("position").value) {
+        if (streams[i].location == NT_LOC_POSITION) {
             NT_ASSERT(streams[i].type == NT_STREAM_FLOAT32 && streams[i].count == 3);
             source->position = source->stride;
         }
-        if (streams[i].name_hash == nt_hash32_str("joints").value) {
+        if (streams[i].location == NT_LOC_JOINTS) {
             NT_ASSERT(streams[i].type == NT_STREAM_UINT8 && streams[i].count == 4 && !streams[i].normalized);
             source->joints = source->stride;
         }
-        if (streams[i].name_hash == nt_hash32_str("weights").value) {
+        if (streams[i].location == NT_LOC_WEIGHTS) {
             NT_ASSERT(streams[i].type == NT_STREAM_UINT8 && streams[i].count == 4 && streams[i].normalized);
             source->weights = source->stride;
         }
@@ -1396,10 +1397,10 @@ static void make_humanoid_mesh(cpu_mesh_t *source, bool clothes, bool local_spac
                                   .vertex_data_size = vertices * source->stride,
                                   .index_data_size = indices * 2U};
     NtStreamDesc *streams = (NtStreamDesc *)(source->data + sizeof(*header));
-    streams[0] = (NtStreamDesc){.name_hash = nt_hash32_str("position").value, .type = NT_STREAM_FLOAT32, .count = 3};
-    streams[1] = (NtStreamDesc){.name_hash = nt_hash32_str("uv").value, .type = NT_STREAM_FLOAT32, .count = 2};
-    streams[2] = (NtStreamDesc){.name_hash = nt_hash32_str("joints").value, .type = NT_STREAM_UINT8, .count = 4};
-    streams[3] = (NtStreamDesc){.name_hash = nt_hash32_str("weights").value, .type = NT_STREAM_UINT8, .count = 4, .normalized = 1};
+    streams[0] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    streams[1] = (NtStreamDesc){.type = NT_STREAM_FLOAT32, .count = 2, .location = NT_LOC_UV0};
+    streams[2] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .location = NT_LOC_JOINTS};
+    streams[3] = (NtStreamDesc){.type = NT_STREAM_UINT8, .count = 4, .normalized = 1, .location = NT_LOC_WEIGHTS};
     vertex_t *v = (vertex_t *)(source->data + prefix);
     uint16_t *idx = (uint16_t *)(source->data + prefix + header->vertex_data_size);
     uint32_t segment = 0;
@@ -1505,8 +1506,6 @@ static nt_material_t make_mesh_material(nt_resource_t texture, bool skinned) {
     nt_material_create_desc_t desc = {
         .textures = {{.name = "u_texture", .resource = texture}, {.name = "u_skin_matrices"}},
         .texture_count = skinned ? 2 : 1,
-        .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv", .location = 1}, {.stream_name = "joints", .location = 8}, {.stream_name = "weights", .location = 9}},
-        .attr_map_count = skinned ? 4 : 2,
         .blend = nt_blend_opaque(),
         .cull_mode = NT_CULL_NONE,
         .depth_test = true,
@@ -1532,9 +1531,9 @@ static void init_mesh_scene(void) {
     NT_ASSERT(result == NT_OK);
     nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 3 * SKELETAL_SHOWCASE_MAX_PALETTE, .height = SKELETAL_SHOWCASE_MAX_INSTANCES});
     /* Static meshes are only the CPU reference: one body and one shirt. */
-    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_vertex_inputs = 4});
+    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8});
     NT_ASSERT(result == NT_OK);
-    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 8, .max_mesh_vertex_inputs = 4});
+    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 8});
     NT_ASSERT(result == NT_OK);
     for (uint32_t i = 0; i < SHOWCASE_ENTITY_COUNT; ++i) {
         const nt_entity_t e = nt_entity_create();
@@ -1599,8 +1598,6 @@ static void init_mesh_scene(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void restore_mesh_scene(void) {
-    nt_skinned_mesh_renderer_restore_gpu();
-    nt_mesh_renderer_restore_gpu();
     nt_skeletal_gpu_restore_gpu();
     nt_program_ref_drop(&s_skin_program);
     nt_program_ref_drop(&s_static_program);

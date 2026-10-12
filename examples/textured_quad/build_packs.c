@@ -47,8 +47,8 @@ int main(int argc, char *argv[]) {
     MKDIR(HEADER_DIR);
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0},
+        {"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION},
+        {"TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0, NT_LOC_UV0},
     };
 
     /* Per-pack header paths for merge */

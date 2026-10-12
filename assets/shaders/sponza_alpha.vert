@@ -1,8 +1,9 @@
 precision highp float;
 
-layout(location = 0) in vec3 a_position;
-layout(location = 1) in vec3 a_normal;
-layout(location = 2) in vec2 a_uv;
+#include "nt/locations.glsl"
+layout(location = NT_LOC_POSITION) in vec3 a_position;
+layout(location = NT_LOC_NORMAL) in vec3 a_normal;
+layout(location = NT_LOC_UV0) in vec2 a_uv;
 
 #include "common/instance.glsl"
 #include "common/globals.glsl"

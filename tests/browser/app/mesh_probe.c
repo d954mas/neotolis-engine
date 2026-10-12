@@ -7,6 +7,7 @@
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "nt_mesh_format.h"
+#include "nt_vertex_locations.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "renderers/nt_skinned_mesh_renderer.h"
 #include "skin_comp/nt_skin_comp.h"
@@ -33,21 +34,22 @@ uint32_t nt_test_mesh_color_probe(void);
 
 #define MESH_PROBE_NOT_READY 0x80000000U /* programs still linking: the spec polls again */
 
+/* Both renderers share the instance head, so the skinned probe reads the same locations. */
 #define MESH_PROBE_VS_HEAD                                                                                                                                                                             \
+    NT_LOCATIONS_GLSL                                                                                                                                                                                  \
     "precision highp float;\n"                                                                                                                                                                         \
-    "layout(location = 0) in vec3 a_position;\n"
-#define MESH_PROBE_WORLD(r0, r1, r2)                                                                                                                                                                   \
-    "layout(location = " #r0 ") in vec4 a_world_row0;\n"                                                                                                                                               \
-    "layout(location = " #r1 ") in vec4 a_world_row1;\n"                                                                                                                                               \
-    "layout(location = " #r2 ") in vec4 a_world_row2;\n"                                                                                                                                               \
+    "layout(location = NT_LOC_POSITION) in vec3 a_position;\n"                                                                                                                                         \
+    "layout(location = NT_INST_LOC_WORLD_ROW0) in vec4 a_world_row0;\n"                                                                                                                                \
+    "layout(location = NT_INST_LOC_WORLD_ROW1) in vec4 a_world_row1;\n"                                                                                                                                \
+    "layout(location = NT_INST_LOC_WORLD_ROW2) in vec4 a_world_row2;\n"                                                                                                                                \
     "out mediump vec4 v_color;\n"                                                                                                                                                                      \
     "vec4 world_position() { vec4 p = vec4(a_position, 1.0); return vec4(dot(a_world_row0, p), dot(a_world_row1, p), dot(a_world_row2, p), 1.0); }\n"
 
-static const char *s_mesh_vs_src = MESH_PROBE_VS_HEAD MESH_PROBE_WORLD(4, 5, 6) "layout(location = 7) in vec4 a_color;\n"
-                                                                                "void main() { gl_Position = world_position(); v_color = a_color; }\n";
-static const char *s_colorless_vs_src = MESH_PROBE_VS_HEAD MESH_PROBE_WORLD(4, 5, 6) "void main() { gl_Position = world_position(); v_color = vec4(0.0, 1.0, 0.0, 1.0); }\n";
-static const char *s_skinned_vs_src = MESH_PROBE_VS_HEAD MESH_PROBE_WORLD(10, 11, 12) "layout(location = 13) in vec4 a_color;\n"
-                                                                                      "void main() { gl_Position = world_position(); v_color = a_color; }\n";
+static const char *s_mesh_vs_src = MESH_PROBE_VS_HEAD "layout(location = NT_INST_LOC_COLOR) in vec4 a_color;\n"
+                                                      "void main() { gl_Position = world_position(); v_color = a_color; }\n";
+static const char *s_colorless_vs_src = MESH_PROBE_VS_HEAD "void main() { gl_Position = world_position(); v_color = vec4(0.0, 1.0, 0.0, 1.0); }\n";
+static const char *s_skinned_vs_src = MESH_PROBE_VS_HEAD "layout(location = NT_INST_LOC_COLOR) in vec4 a_color;\n"
+                                                         "void main() { gl_Position = world_position(); v_color = a_color; }\n";
 static const char *s_fs_src = "precision mediump float;\n"
                               "in vec4 v_color;\n"
                               "out vec4 frag_color;\n"
@@ -92,9 +94,9 @@ static nt_mesh_t make_quad(void) {
     hdr->vertex_data_size = sizeof(verts);
     hdr->index_data_size = sizeof(indices);
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd->name_hash = nt_hash32_str("position").value;
     sd->type = NT_STREAM_FLOAT32;
     sd->count = 3;
+    sd->location = NT_LOC_POSITION;
     memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc), verts, sizeof(verts));
     memcpy(blob + sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + sizeof(verts), indices, sizeof(indices));
     return (nt_mesh_t){.id = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob))};
@@ -103,8 +105,6 @@ static nt_mesh_t make_quad(void) {
 static nt_material_t make_material(nt_program_t program, bool skinned) {
     nt_material_create_desc_t desc = {
         .program = program,
-        .attr_map = {{.stream_name = "position", .location = 0}},
-        .attr_map_count = 1,
         .cull_mode = NT_CULL_NONE,
         .label = "mesh_color_probe",
     };
@@ -154,8 +154,8 @@ static void start_modules(void) {
     (void)nt_material_comp_init(&(nt_material_comp_desc_t){.capacity = 16});
     (void)nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 16});
     (void)nt_skin_comp_init(&(nt_skin_comp_desc_t){.capacity = 16});
-    (void)nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 2});
-    (void)nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4, .max_mesh_vertex_inputs = 2});
+    (void)nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 4});
+    (void)nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 4});
 }
 
 static void stop_modules(void) {
@@ -190,7 +190,7 @@ static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformati
     const uint64_t instances = g_nt_gfx.counters.instances;
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, mesh_items, 2);
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &colorless_item, 1);
-    nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, skinned_items, 2);
+    nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, skinned_items, 2); /* the quad's vertex input per stream pins one layout */
     /* One instanced draw per list: the two mesh and two skinned instances each share a run. */
     const bool batched = nt_gfx_draw_calls(&g_nt_gfx.counters) == draws + 3 && g_nt_gfx.counters.instances == instances + 5;
     nt_gfx_end_pass();

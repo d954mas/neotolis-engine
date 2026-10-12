@@ -62,13 +62,13 @@ typedef struct {
 /* Packed weights are shared by the GPU shader and the CPU reference. */
 static uint32_t skinned_layout(NtStreamLayout out[5], bool has_normal) {
     uint32_t n = 0;
-    out[n++] = (NtStreamLayout){"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0};
+    out[n++] = (NtStreamLayout){"POSITION", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_POSITION};
     if (has_normal) {
-        out[n++] = (NtStreamLayout){"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false, 0};
+        out[n++] = (NtStreamLayout){"NORMAL", NT_STREAM_FLOAT32, 3, false, 0, NT_LOC_NORMAL};
     }
-    out[n++] = (NtStreamLayout){"uv", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0};
-    out[n++] = (NtStreamLayout){"joints", "JOINTS", NT_STREAM_UINT8, 4, false, 0};
-    out[n++] = (NtStreamLayout){"weights", "WEIGHTS", NT_STREAM_UINT8, 4, true, 0};
+    out[n++] = (NtStreamLayout){"TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0, NT_LOC_UV0};
+    out[n++] = (NtStreamLayout){"JOINTS", NT_STREAM_UINT8, 4, false, 0, NT_LOC_JOINTS};
+    out[n++] = (NtStreamLayout){"WEIGHTS", NT_STREAM_UINT8, 4, true, 0, NT_LOC_WEIGHTS};
     return n;
 }
 

@@ -118,7 +118,6 @@ static void frame(void) {
         nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
 
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_mesh_renderer_restore_gpu();
         nt_program_ref_drop(&s_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }
@@ -273,8 +272,6 @@ int main(int argc, char *argv[]) {
     s_material = nt_material_create(&(nt_material_create_desc_t){
         .textures = {{.name = "u_texture", .resource = s_atlas_tex_handle}},
         .texture_count = 1,
-        .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv0", .location = 1}},
-        .attr_map_count = 2,
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_BACK,

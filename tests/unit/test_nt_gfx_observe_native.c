@@ -753,51 +753,58 @@ static void test_compressed_mips_use_issued_block_sizes(void) {
 }
 
 #if NT_GFX_CAPTURE_ENABLED
-/* A capture that starts after a vertex input was made still names its instance buffer: the
- * frontend definition relates the buffer handle, the backend one the VAO, the instance buffer's
- * GL name and the offset its pointers hold (0 from creation). The bind request carries the offset. */
+/* A capture that starts after an instanced bind names the VAO's instance tuple: the layout is
+ * defined with its stride, the backend VAO record carries the buffer's GL name, the offset its
+ * pointers hold and the layout slot, and the bind request carries layout, buffer and offset. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- one walk checks three record kinds
-static void test_a_captured_vertex_input_names_its_instance_buffer(void) {
+static void test_a_captured_vertex_input_names_its_instance_tuple(void) {
     nt_buffer_t vertices = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 64});
     const nt_buffer_t instances = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1);
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .vertex_buffer = vertices,
         .layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2}}},
-        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 4}}},
-        .instance_buffer = instances,
     });
-    nt_gfx_capture_request();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
+    const nt_instance_layout_t layout = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 4}}});
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX + 1, 32, 4, &offset), 0, 32);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-    nt_gfx_bind_vertex_input_instanced(vi, offset + 16U);
+    nt_gfx_bind_vertex_input_instanced(vi, layout, instances, offset);
+    nt_gfx_end_pass();
+    nt_gfx_capture_request();
+    nt_gfx_end_frame();
+    nt_gfx_begin_frame();
+    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX + 1, 32, 4, &offset), 0, 32);
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_vertex_input_instanced(vi, layout, instances, offset + 16U);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_capture_view_t capture = nt_gfx_capture_read();
-    bool related = false;
-    bool defined = false;
+    bool layout_defined = false;
+    bool vao_defined = false;
     bool requested = false;
     for (uint32_t i = 0; i < capture.count; i++) {
         const nt_gfx_event_t *event = &capture.events[i];
-        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_CREATE && event->object_kind == NT_GFX_OBJECT_VERTEX_INPUT && event->object == vi.id) {
-            TEST_ASSERT_EQUAL_UINT32(instances.id, event->data.resource.related[2]);
-            related = true;
+        if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_CREATE && event->object_kind == NT_GFX_OBJECT_INSTANCE_LAYOUT && event->object == layout.id) {
+            TEST_ASSERT_EQUAL_UINT64(16, event->data.resource.size);
+            layout_defined = true;
         }
         if (event->kind == NT_GFX_EVENT_DEFINITION && event->operation == NT_GFX_OP_STATE && event->detail == NT_GFX_OBJECT_VERTEX_INPUT && event->data.backend.args[0] == nt_pool_slot_index(vi.id)) {
             TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[1]);
             TEST_ASSERT_NOT_EQUAL_UINT32(0, event->data.backend.args[2]);
             TEST_ASSERT_EQUAL_UINT32(0, event->data.backend.args[3]);
-            defined = true;
+            TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(layout.id), event->data.backend.args[4]);
+            vao_defined = true;
         }
-        if (event->operation == NT_GFX_OP_VERTEX_INPUT && event->object == vi.id && event->data.binding.offset == offset + 16U) {
+        if (event->kind == NT_GFX_EVENT_BEGIN && event->operation == NT_GFX_OP_VERTEX_INPUT && event->object == vi.id) {
+            TEST_ASSERT_EQUAL_UINT32(layout.id, event->data.binding.slot);
+            TEST_ASSERT_EQUAL_UINT32(instances.id, event->data.binding.secondary);
+            TEST_ASSERT_EQUAL_UINT32(offset + 16U, event->data.binding.offset);
             requested = true;
         }
     }
-    TEST_ASSERT_TRUE(related);
-    TEST_ASSERT_TRUE(defined);
+    TEST_ASSERT_TRUE(layout_defined);
+    TEST_ASSERT_TRUE(vao_defined);
     TEST_ASSERT_TRUE(requested);
 }
 #endif
@@ -807,22 +814,21 @@ static void test_attribute_pointer_calls_are_counted_per_issue(void) {
     nt_vertex_input_t vi = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){
         .vertex_buffer = vertices,
         .layout = {.attr_count = 1, .stride = 8, .attrs = {{.location = 0, .type = NT_VERTEX_FLOAT, .count = 2}}},
-        .instance_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 4}}},
-        .instance_buffer = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX),
     });
-    /* Creation points the static attribute and the instance attribute at offset 0. */
-    TEST_ASSERT_EQUAL_UINT32(2, g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer]);
-    TEST_ASSERT_EQUAL_UINT32(2, s_attribute_calls);
+    const nt_instance_layout_t layout = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 16, .attrs = {{.location = 1, .type = NT_VERTEX_FLOAT, .count = 4}}});
+    /* Creation points the static attribute; the instance side waits for the first bind. */
+    TEST_ASSERT_EQUAL_UINT32(1, g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer]);
+    TEST_ASSERT_EQUAL_UINT32(1, s_attribute_calls);
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
     uint32_t offset = 0;
     memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 32, 4, &offset), 0, 32);
-    nt_gfx_bind_vertex_input_instanced(vi, offset);
-    nt_gfx_bind_vertex_input_instanced(vi, offset + 16U);
+    nt_gfx_bind_vertex_input_instanced(vi, layout, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset);
+    nt_gfx_bind_vertex_input_instanced(vi, layout, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), offset + 16U);
     nt_gfx_end_pass();
     nt_gfx_end_frame();
     nt_gfx_begin_frame();
     nt_gfx_counters_t counters = g_nt_gfx.last_frame;
-    /* Two pointers at creation, none for the bind at offset 0, one for the move to 16. */
+    /* One pointer at creation, one for the first instanced bind, one for the move to 16. */
     TEST_ASSERT_EQUAL_UINT32(0, offset);
     TEST_ASSERT_EQUAL_UINT32(3, counters.gl[NT_GFX_GL_glVertexAttribPointer]);
     TEST_ASSERT_EQUAL_UINT32(s_attribute_calls, counters.gl[NT_GFX_GL_glVertexAttribPointer]);
@@ -848,7 +854,7 @@ int main(void) {
     RUN_TEST(test_explicit_clear_records_issued_calls_and_skips_empty_selections);
     RUN_TEST(test_pass_actions_capture_values_and_attachment_enums);
     RUN_TEST(test_shutdown_while_recording_writes_no_record);
-    RUN_TEST(test_a_captured_vertex_input_names_its_instance_buffer);
+    RUN_TEST(test_a_captured_vertex_input_names_its_instance_tuple);
 #endif
     RUN_TEST(test_payloads_before_render_land_in_their_frame);
     RUN_TEST(test_texture_mips_storage_and_subrect_payloads);

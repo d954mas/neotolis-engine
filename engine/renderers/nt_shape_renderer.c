@@ -271,6 +271,11 @@ static struct {
         nt_vertex_input_t stroke_vi[NT_GFX_MAX_VERTEX_STREAMS];
         nt_vertex_input_t batch_vi; /* over the frame vertex buffer, which a restore replaces */
     } gpu;
+    /* CPU-only gfx records: registered at init, they survive a restore. */
+    nt_instance_layout_t fill_layout;
+    nt_instance_layout_t wire_layout;
+    nt_instance_layout_t line_layout;
+    nt_instance_layout_t stroke_layout;
     nt_shape_range_t fill_ranges[NT_SHAPE_TYPE_COUNT];
     nt_shape_range_t wire_ranges[NT_WIRE_COUNT];
 
@@ -317,8 +322,8 @@ static const nt_vertex_layout_t k_batch_layout = {
     .stride = (uint16_t)sizeof(nt_shape_vertex_t),
     .attrs =
         {
-            {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
-            {.location = NT_ATTR_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 12},
+            {.location = NT_LOC_POSITION, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+            {.location = NT_LOC_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = 12},
         },
 };
 
@@ -813,43 +818,28 @@ static nt_buffer_t make_static_buffer(nt_buffer_type_t type, const void *data, u
 }
 
 /* Straight line: a loss met on the way latches in gfx, every later create returns 0, and the next restore makes all again. */
-/* The instanced kinds over one sized stream's buffer, made when the stream is selected: an unused
- * stream takes no vertex-input slots. Only missing ones are made, so a failed create is retried
- * without replacing live ones. */
+/* The instanced kinds drawn from one sized stream, made when the stream is selected: one set per
+ * stream keeps each VAO's instance offsets stable, and an unused stream takes no vertex-input
+ * slots. Only missing ones are made, so a failed create is retried without replacing live ones. */
 static void make_stream_vertex_inputs(uint32_t stream) {
     const uint32_t k = stream - NT_GFX_FRAME_VERTEX;
-    const nt_buffer_t instances = nt_gfx_frame_buffer(stream);
     if (!nt_gfx_vertex_input_valid(s_shape.gpu.fill_vi[k])) {
-        s_shape.gpu.fill_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_fill_template_layout,
-                                                                                    .instance_layout = k_shape_instance_layout,
-                                                                                    .vertex_buffer = s_shape.gpu.fill_vbo,
-                                                                                    .index_buffer = s_shape.gpu.fill_ibo,
-                                                                                    .instance_buffer = instances,
-                                                                                    .label = "shape_fill_vi"});
+        s_shape.gpu.fill_vi[k] = nt_gfx_make_vertex_input(
+            &(nt_vertex_input_desc_t){.layout = k_fill_template_layout, .vertex_buffer = s_shape.gpu.fill_vbo, .index_buffer = s_shape.gpu.fill_ibo, .label = "shape_fill_vi"});
     }
     if (!nt_gfx_vertex_input_valid(s_shape.gpu.wire_vi[k])) {
-        s_shape.gpu.wire_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_wire_vertex_layout,
-                                                                                    .instance_layout = k_wire_instance_layout,
-                                                                                    .vertex_buffer = s_shape.gpu.wire_vbo,
-                                                                                    .index_buffer = s_shape.gpu.wire_ibo,
-                                                                                    .instance_buffer = instances,
-                                                                                    .label = "shape_wire_vi"});
+        s_shape.gpu.wire_vi[k] =
+            nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_wire_vertex_layout, .vertex_buffer = s_shape.gpu.wire_vbo, .index_buffer = s_shape.gpu.wire_ibo, .label = "shape_wire_vi"});
     }
     if (!nt_gfx_vertex_input_valid(s_shape.gpu.line_vi[k])) {
-        s_shape.gpu.line_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_line_template_layout,
-                                                                                    .instance_layout = k_line_instance_layout,
-                                                                                    .vertex_buffer = s_shape.gpu.line_vbo,
-                                                                                    .index_buffer = s_shape.gpu.line_ibo,
-                                                                                    .instance_buffer = instances,
-                                                                                    .label = "shape_line_vi"});
+        s_shape.gpu.line_vi[k] = nt_gfx_make_vertex_input(
+            &(nt_vertex_input_desc_t){.layout = k_line_template_layout, .vertex_buffer = s_shape.gpu.line_vbo, .index_buffer = s_shape.gpu.line_ibo, .label = "shape_line_vi"});
     }
+    /* Same buffers as line_vi, but its own VAO: one shared by two instance layouts would switch
+     * layouts on every flush. */
     if (!nt_gfx_vertex_input_valid(s_shape.gpu.stroke_vi[k])) {
-        s_shape.gpu.stroke_vi[k] = nt_gfx_make_vertex_input(&(nt_vertex_input_desc_t){.layout = k_line_template_layout,
-                                                                                      .instance_layout = k_stroke_instance_layout,
-                                                                                      .vertex_buffer = s_shape.gpu.line_vbo,
-                                                                                      .index_buffer = s_shape.gpu.line_ibo,
-                                                                                      .instance_buffer = instances,
-                                                                                      .label = "shape_stroke_vi"});
+        s_shape.gpu.stroke_vi[k] = nt_gfx_make_vertex_input(
+            &(nt_vertex_input_desc_t){.layout = k_line_template_layout, .vertex_buffer = s_shape.gpu.line_vbo, .index_buffer = s_shape.gpu.line_ibo, .label = "shape_stroke_vi"});
     }
 }
 
@@ -931,6 +921,10 @@ void nt_shape_renderer_init(void) {
     s_shape.line_width = 0.02F;
     s_shape.depth_enabled = true;
     s_shape.stream = NT_GFX_FRAME_VERTEX;
+    s_shape.fill_layout = nt_gfx_make_instance_layout(&k_shape_instance_layout);
+    s_shape.wire_layout = nt_gfx_make_instance_layout(&k_wire_instance_layout);
+    s_shape.line_layout = nt_gfx_make_instance_layout(&k_line_instance_layout);
+    s_shape.stroke_layout = nt_gfx_make_instance_layout(&k_stroke_instance_layout);
     create_gpu();
     s_shape.initialized = true;
 }
@@ -954,11 +948,11 @@ void nt_shape_renderer_restore_gpu(void) {
 }
 
 /* Copies one kind's staging into frame storage and draws it instanced from there. */
-static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count, bool stroke) {
+static void draw_instances(nt_pipeline_t pipeline, nt_vertex_input_t vi, nt_instance_layout_t layout, const void *data, uint32_t bytes, nt_shape_range_t range, uint32_t count, bool stroke) {
     uint32_t offset = 0;
     memcpy(nt_gfx_frame_alloc(s_shape.stream, bytes, 4, &offset), data, bytes);
     nt_gfx_bind_pipeline(pipeline);
-    nt_gfx_bind_vertex_input_instanced(vi, offset);
+    nt_gfx_bind_vertex_input_instanced(vi, layout, nt_gfx_frame_buffer(s_shape.stream), offset);
     nt_gfx_set_uniform_mat4(s_u_vp, s_shape.vp);
     if (stroke) {
         nt_gfx_set_uniform_vec4(s_u_eye, s_shape.eye);
@@ -979,7 +973,7 @@ void nt_shape_renderer_flush(void) {
     for (int type = 0; type < NT_SHAPE_TYPE_COUNT; type++) {
         const uint32_t count = s_shape.fill_counts[type];
         if (count > 0) {
-            draw_instances(s_shape.gpu.fill_pip[d], s_shape.gpu.fill_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.fills[type], count * (uint32_t)sizeof(nt_shape_instance_t),
+            draw_instances(s_shape.gpu.fill_pip[d], s_shape.gpu.fill_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.fill_layout, s_shape.fills[type], count * (uint32_t)sizeof(nt_shape_instance_t),
                            s_shape.fill_ranges[type], count, false);
             s_shape.fill_counts[type] = 0;
         }
@@ -998,20 +992,20 @@ void nt_shape_renderer_flush(void) {
     for (int type = 0; type < NT_WIRE_COUNT; type++) {
         const uint32_t count = s_shape.wire_counts[type];
         if (count > 0) {
-            draw_instances(s_shape.gpu.wire_pip[d], s_shape.gpu.wire_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.wires[type], count * (uint32_t)sizeof(nt_shape_instance_t),
+            draw_instances(s_shape.gpu.wire_pip[d], s_shape.gpu.wire_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.wire_layout, s_shape.wires[type], count * (uint32_t)sizeof(nt_shape_instance_t),
                            s_shape.wire_ranges[type], count, true);
             s_shape.wire_counts[type] = 0;
         }
     }
     if (s_shape.stroke_count > 0) {
-        draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.stroke_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.strokes, s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t),
-                       (nt_shape_range_t){0, 12, 7}, s_shape.stroke_count, true);
+        draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.stroke_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.stroke_layout, s_shape.strokes,
+                       s_shape.stroke_count * (uint32_t)sizeof(nt_shape_stroke_instance_t), (nt_shape_range_t){0, 12, 7}, s_shape.stroke_count, true);
         s_shape.stroke_count = 0;
     }
     if (s_shape.line_count > 0) {
         /* Independent lines skip the join triangles of the shared template. */
-        draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.line_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.line_staging.lines, s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t),
-                       (nt_shape_range_t){0, 6, 7}, s_shape.line_count, true);
+        draw_instances(s_shape.gpu.line_pip[d], s_shape.gpu.line_vi[s_shape.stream - NT_GFX_FRAME_VERTEX], s_shape.line_layout, s_shape.line_staging.lines,
+                       s_shape.line_count * (uint32_t)sizeof(nt_shape_line_instance_t), (nt_shape_range_t){0, 6, 7}, s_shape.line_count, true);
         s_shape.line_count = 0;
     }
 }

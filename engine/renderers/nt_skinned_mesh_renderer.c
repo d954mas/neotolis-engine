@@ -8,6 +8,7 @@
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
+#include "nt_vertex_locations.h"
 #include "renderers/nt_renderer_shared.h"
 #include "skin_comp/nt_skin_comp.h"
 #include "transform_comp/nt_transform_comp.h"
@@ -27,12 +28,12 @@ static const nt_vertex_layout_t s_instance_layout = {
     .attr_count = 6,
     .stride = sizeof(nt_skinned_mesh_instance_t),
     .attrs = {
-        {.location = 10, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
-        {.location = 11, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
-        {.location = 12, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
-        {.location = 14, .type = NT_VERTEX_UINT16, .count = 4, .offset = offsetof(nt_skinned_mesh_instance_t, skin_origins)},
-        {.location = 15, .type = NT_VERTEX_FLOAT, .count = 1, .offset = offsetof(nt_skinned_mesh_instance_t, skin_alpha)},
-        {.location = 13, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_skinned_mesh_instance_t, color)},
+        {.location = NT_INST_LOC_WORLD_ROW0, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 0},
+        {.location = NT_INST_LOC_WORLD_ROW1, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 16},
+        {.location = NT_INST_LOC_WORLD_ROW2, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 32},
+        {.location = NT_INST_LOC_SKIN_FRAMES, .type = NT_VERTEX_UINT16, .count = 4, .offset = offsetof(nt_skinned_mesh_instance_t, skin_origins)},
+        {.location = NT_INST_LOC_SKIN_ALPHA, .type = NT_VERTEX_FLOAT, .count = 1, .offset = offsetof(nt_skinned_mesh_instance_t, skin_alpha)},
+        {.location = NT_INST_LOC_COLOR, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_skinned_mesh_instance_t, color)},
     },
 };
 /* clang-format on */
@@ -58,7 +59,7 @@ nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t 
     NT_ASSERT(desc != NULL);
     memset(&s_skinned, 0, sizeof(s_skinned));
     s_skinned.skin_sampler_hash = nt_hash32_str("u_skin_matrices").value;
-    if (nt_renderer_mesh_caches_init(&s_skinned.caches, desc->max_pipelines, desc->max_mesh_vertex_inputs, &s_instance_layout, "skinned_mesh_renderer") != NT_OK) {
+    if (nt_renderer_mesh_caches_init(&s_skinned.caches, desc->max_pipelines, &s_instance_layout, "skinned_mesh_renderer") != NT_OK) {
         memset(&s_skinned, 0, sizeof(s_skinned));
         return NT_ERR_INIT_FAILED;
     }
@@ -74,14 +75,8 @@ void nt_skinned_mesh_renderer_shutdown(void) {
     memset(&s_skinned, 0, sizeof(s_skinned));
 }
 
-void nt_skinned_mesh_renderer_restore_gpu(void) {
-    if (s_skinned.initialized) {
-        nt_renderer_mesh_caches_reset(&s_skinned.caches);
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
-void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, uint32_t stream, uint32_t offset, uint32_t count) {
+void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, nt_buffer_t instances, uint32_t offset, uint32_t count) {
     NT_ASSERT(s_skinned.initialized);
     /* A lost context can leave the deformation texture or a mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
@@ -89,12 +84,11 @@ void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_te
     }
     NT_ASSERT(count > 0);
     NT_ASSERT(deformation.id != 0 && "skinned draw requires a deformation texture");
-    NT_ASSERT(stream >= NT_GFX_FRAME_VERTEX && stream < NT_GFX_FRAME_STREAM_COUNT && "draw: not a frame vertex stream");
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned draw references a destroyed material or mesh");
-    nt_renderer_mesh_draw_t draw = {0};
-    if (nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh, mesh_info, stream)) {
+    nt_renderer_mesh_draw_t draw = {.instance_layout = s_skinned.caches.instance_layout, .instances = instances};
+    if (nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh)) {
         nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, offset, count);
     }
 }
@@ -111,7 +105,7 @@ void nt_skinned_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t 
     /* Transform and drawable by inline sparse reads; the skin binding goes through its asserting accessor. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
-    nt_renderer_mesh_draw_t draw = {0};
+    nt_renderer_mesh_draw_t draw = {.instance_layout = s_skinned.caches.instance_layout, .instances = nt_gfx_frame_buffer(stream)};
     for (uint32_t run_start = 0, run_end = 0; run_start < count; run_start = run_end) {
         const nt_entity_t leader = {.id = items[run_start].entity};
         const nt_texture_t deformation = nt_skin_comp_handle(leader)->texture;
@@ -122,7 +116,7 @@ void nt_skinned_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t 
         const nt_material_info_t *mat_info = nt_material_get_info(material);
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
         NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned render item references a destroyed material or mesh");
-        if (!nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh, mesh_info, stream)) {
+        if (!nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh)) {
             continue;
         }
 
@@ -152,6 +146,5 @@ void nt_skinned_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t 
 
 #ifdef NT_TEST_ACCESS
 uint32_t nt_skinned_mesh_renderer_test_pipeline_cache_count(void) { return s_skinned.caches.pipeline_count; }
-uint32_t nt_skinned_mesh_renderer_test_vertex_input_count(void) { return nt_renderer_mesh_vi_cache_live_count(&s_skinned.caches.vi_cache); }
 bool nt_skinned_mesh_renderer_test_initialized(void) { return s_skinned.initialized; }
 #endif

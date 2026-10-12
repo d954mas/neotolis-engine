@@ -4,7 +4,7 @@ Styled, wrapped, inline-illustrated text under one measured Clay block, with two
 authoring fronts — a code-first push/pop builder and a runtime markup parser —
 producing the same run-list. Covers the wrap/baseline solver, text decoration
 axes, inline images and custom objects, visual-only effects, links, per-atom
-z-layers, and the documented divergences from the original #184 proposal.
+z-layers, and the alternatives the design rejects.
 
 Related: [Scope](../core/scope.md), [Radial Widgets](radial-widgets.md), [Resource System](../assets/resource.md)
 
@@ -179,7 +179,7 @@ panel/scroll automatically — by that scissor, **not** a Clay
 `.floating.clipTo`. Caveat: an `fx.scale > 1` image loses its per-image
 self-clip-to-bbox and **over-draws** past its solved box (same as OBJECT atoms;
 consistent and accepted). Images resolve **by atlas + region name** — the atlas
-IS the registry (see [Spec ↔ #184-proposal divergences](#spec--184-proposal-divergences-per-agentsmd)). The per-band z-ordering / drain model that
+IS the registry (see [Rejected alternatives](#rejected-alternatives)). The per-band z-ordering / drain model that
 sequences these emits is **[Per-atom z-layers](#per-atom-z-layers-explicit-draw-order)**.
 
 ## Effects (visual-only) and links
@@ -302,13 +302,12 @@ z, each atom carries a **layer** (z-order band):
   only where explicit overlap z is needed; non-overlapping content on one default
   layer pays nothing extra. The per-band `set_material` calls stay direct.
 
-## Spec ↔ #184-proposal divergences (per AGENTS.md)
+## Rejected alternatives
 
-The shipped behaviour is the sections above; this table only records where it
-deliberately differs from the original #184 proposal, so a reader of that
-proposal is not misled.
+The contract is the sections above; this table lists the alternatives it
+deliberately rejects, so they are not re-proposed.
 
-| # | Proposal said | Shipped instead |
+| # | Rejected | Contract |
 |---|---|---|
 | D-67-13 | per-image-tag `register_image_tag` call | `<img=region/>` resolves by atlas + region NAME — the atlas IS the registry; the tagset carries only an atlas alias, font family, named color, effect id, object tag |
 | D-67-17 | effects per-glyph, TEXT only | effects per-ATOM via `effect_id`, applying to TEXT, IMAGE and OBJECT (per-glyph explode kept for TEXT as a quality path) |

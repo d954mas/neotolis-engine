@@ -21,6 +21,8 @@ static uint8_t *s_stage_buf = NULL;
 static uint32_t s_stage_size = 0;
 static uint32_t s_stage_idle = 0;
 
+#define NT_GFX_MESH_VERTEX_INPUTS (NT_GFX_MAX_VERTEX_STREAMS + 1) /* per mesh: each frame vertex stream, then the base */
+
 static uint8_t *stage_acquire(uint32_t size) {
     if (size > s_stage_size) {
         free(s_stage_buf);
@@ -52,11 +54,11 @@ static bool s_transcoder_initialized = false;
 /* ---- Buffer metadata (minimal info kept for runtime validation) ---- */
 
 typedef struct {
-    uint8_t type;       /* nt_buffer_type_t */
-    uint8_t usage;      /* nt_buffer_usage_t */
-    uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
-    uint8_t _pad;
-    uint32_t size; /* capacity */
+    uint8_t type;         /* nt_buffer_type_t */
+    uint8_t usage;        /* nt_buffer_usage_t */
+    uint8_t index_type;   /* 0=none, 1=uint16, 2=uint32 */
+    uint8_t frame_stream; /* frame storage stream + 1 (its `used` bounds instance reads); 0 = not frame storage */
+    uint32_t size;        /* capacity */
 } nt_gfx_buffer_meta_t;
 
 /* ---- Vertex input metadata (destroy cascade + draw-invariant checks) ---- */
@@ -64,13 +66,20 @@ typedef struct {
 typedef struct {
     uint32_t vbo_id; /* full buffer handles: destroy_buffer cascades on exact match */
     uint32_t ibo_id;
-    uint32_t instance_buffer_id; /* nonzero iff the vertex input has an instance layout (asserted at make) */
-    uint32_t instance_size;      /* instance buffer capacity: instanced draws assert their range against it */
-    uint32_t instance_extent;    /* bytes one instance reads: max attr offset + attr size (may exceed the stride) */
-    uint16_t instance_stride;
-    uint8_t instance_stream; /* frame stream whose buffer is the instance buffer (its `used` bounds the range); 0 = none */
+    uint16_t vertex_mask;    /* vertex attribute locations; an instance layout may not overlap them */
     uint8_t index_type;      /* captured from the IBO; NT_INDEX_NONE for non-indexed */
+    uint8_t instance_layout; /* pinned by its first instanced bind; 0 = never bound with instances */
 } nt_gfx_vertex_input_meta_t;
+
+/* ---- Instance layout records (CPU only; survive context loss) ---- */
+
+typedef struct {
+    nt_vertex_attr_t attrs[NT_GFX_MAX_INSTANCE_ATTRS];
+    uint32_t extent; /* bytes one instance reads: max attr offset + attr size (may exceed the stride) */
+    uint16_t stride;
+    uint16_t mask; /* attribute locations */
+    uint8_t attr_count;
+} nt_gfx_instance_layout_meta_t;
 
 typedef struct {
     uint32_t texture; /* recorded backend names; 0 = nothing recorded in this pass */
@@ -138,11 +147,22 @@ static struct {
 
     nt_pool_t mesh_pool;
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
+    /* Per mesh slot: one vertex input per frame vertex stream, then the base one for any other
+     * buffer; made on first use. [capacity+1][NT_GFX_MESH_VERTEX_INPUTS] */
+    nt_vertex_input_t *mesh_vertex_inputs;
+
+    /* A layout handle is its slot, 1-based; init and shutdown empty the table. */
+    nt_gfx_instance_layout_meta_t instance_layouts[NT_GFX_MAX_INSTANCE_LAYOUTS + 1];
+    uint32_t instance_layout_count;
 
     nt_gfx_render_state_t render_state;
     uint32_t active_render_target;
     uint32_t bound_pipeline;     /* full handle of the bound pipeline, 0 = none */
     uint32_t bound_vertex_input; /* full handle of the bound vertex input, 0 = none */
+    /* Last fused bind on the bound vertex input; layout 0 = plain bind. A vertex input change
+     * clears the layout; the buffer stays the pass's last validated one (the frame rule keeps it alive). */
+    uint32_t bound_instance_layout;
+    uint32_t bound_instance_buffer;
     uint32_t bound_instance_offset;
     uint8_t bound_index_type;  /* from the bound vertex input; NT_INDEX_NONE = non-indexed or none bound */
     uint8_t texture_set_state; /* nt_gfx_texture_set_state_t for the bound pipeline's program */
@@ -155,8 +175,6 @@ static struct {
 } s_gfx;
 
 _Static_assert(NT_GFX_MAX_TEXTURE_SLOTS <= 8, "texture unit masks are uint8_t");
-/* The index stream's buffer is NT_BUFFER_INDEX and never an instance source, so instance_stream 0 is free. */
-_Static_assert(NT_GFX_FRAME_INDEX == 0 && NT_GFX_FRAME_STREAM_COUNT <= UINT8_MAX, "instance_stream: 0 marks a buffer outside frame storage");
 
 static void discard_texture_set(void) { s_gfx.texture_set_state = NT_GFX_TEXTURE_SET_NONE; }
 
@@ -240,7 +258,6 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 event->data.resource.backend = slot;
                 event->data.resource.related[0] = s_gfx.vertex_input_metas[slot].vbo_id;
                 event->data.resource.related[1] = s_gfx.vertex_input_metas[slot].ibo_id;
-                event->data.resource.related[2] = s_gfx.vertex_input_metas[slot].instance_buffer_id;
                 event->data.resource.type = s_gfx.vertex_input_metas[slot].index_type;
                 event->result = NT_GFX_RESULT_UNKNOWN;
                 break;
@@ -272,11 +289,31 @@ static void capture_resource_definition(nt_gfx_object_kind_t kind, uint32_t id) 
                 event->data.resource.format = render_target_attachment_format(slot, NT_GFX_RT_COLOR);
                 event->data.resource.usage = render_target_attachment_format(slot, NT_GFX_RT_DEPTH);
                 break;
+            case NT_GFX_OBJECT_INSTANCE_LAYOUT:
+                event->data.resource.backend = slot;
+                event->data.resource.size = s_gfx.instance_layouts[slot].stride;
+                event->data.resource.flags = s_gfx.instance_layouts[slot].mask;
+                break;
             case NT_GFX_OBJECT_NONE:
                 break;
         });
 }
 #define NT_GFX_DEFINE_RESOURCE(kind, id) capture_resource_definition(kind, id)
+
+static void capture_attributes(nt_gfx_object_kind_t kind, uint32_t id, const nt_vertex_attr_t *attrs, uint8_t attr_count, uint16_t stride, uint32_t buffer, uint32_t divisor) {
+    for (uint32_t a = 0; a < attr_count; a++) {
+        const nt_vertex_attr_t *attr = &attrs[a];
+        NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->object_kind = kind; event->object = id; event->data.attribute.buffer = buffer; event->data.attribute.offset = attr->offset;
+                      event->data.attribute.stride = stride; event->data.attribute.location = attr->location; event->data.attribute.type = (uint32_t)attr->type;
+                      event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized; event->data.attribute.divisor = divisor;);
+    }
+}
+
+static void capture_instance_layout(uint32_t id) {
+    const nt_gfx_instance_layout_meta_t *meta = &s_gfx.instance_layouts[id];
+    capture_resource_definition(NT_GFX_OBJECT_INSTANCE_LAYOUT, id);
+    capture_attributes(NT_GFX_OBJECT_INSTANCE_LAYOUT, id, meta->attrs, meta->attr_count, meta->stride, 0, 1);
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- diagnostic record macros expand at owning sites
 static void capture_initial_state(void) {
@@ -301,6 +338,9 @@ static void capture_initial_state(void) {
     }
     for (uint32_t i = 1; i <= s_gfx.sampler_count; i++) {
         capture_resource_definition(NT_GFX_OBJECT_SAMPLER, i);
+    }
+    for (uint32_t i = 1; i <= s_gfx.instance_layout_count; i++) {
+        capture_instance_layout(i);
     }
     nt_gfx_backend_capture_initial_state();
 }
@@ -372,9 +412,10 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     /* Mesh pool + data table */
     nt_pool_init(&s_gfx.mesh_pool, desc->max_meshes);
     s_gfx.mesh_table = (nt_gfx_mesh_info_t *)calloc((size_t)desc->max_meshes + 1, sizeof(nt_gfx_mesh_info_t));
+    s_gfx.mesh_vertex_inputs = (nt_vertex_input_t *)calloc(((size_t)desc->max_meshes + 1) * NT_GFX_MESH_VERTEX_INPUTS, sizeof(nt_vertex_input_t));
     /* Init-time OOM on a few KB of tables is not a state a game can recover from. */
     NT_ASSERT(s_gfx.shader_backends && s_gfx.program_backends && s_gfx.program_pending && s_gfx.pipeline_programs && s_gfx.buffer_backends && s_gfx.texture_backends && s_gfx.buffer_metas &&
-              s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && "gfx init: out of memory");
+              s_gfx.vertex_input_metas && s_gfx.texture_metas && s_gfx.render_target_metas && s_gfx.mesh_table && s_gfx.mesh_vertex_inputs && "gfx init: out of memory");
 
     if (!nt_gfx_backend_init(desc)) {
         NT_LOG_ERROR("backend init failed");
@@ -464,6 +505,7 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.texture_metas);
     free(s_gfx.render_target_metas);
     free(s_gfx.mesh_table);
+    free(s_gfx.mesh_vertex_inputs);
     free(s_stage_buf);
     s_stage_buf = NULL;
     s_stage_size = 0;
@@ -735,6 +777,7 @@ static nt_gfx_result_t begin_pass(const nt_pass_desc_t *desc) {
     s_gfx.bound_pipeline = 0;
     discard_texture_set();
     s_gfx.bound_vertex_input = 0;
+    s_gfx.bound_instance_buffer = 0;
     s_gfx.bound_index_type = NT_INDEX_NONE;
     memset(s_gfx.bound_units, 0, sizeof(s_gfx.bound_units));
     s_gfx.viewport_rect[2] = -1; /* the backend sets the whole target at execution */
@@ -931,21 +974,17 @@ static bool blend_state_valid(const nt_blend_state_t *blend) {
            !(uses_constant_color && uses_constant_alpha);
 }
 
-/* A location used twice (within a layout or across vertex/instance layouts) means
- * glVertexAttribPointer runs twice on one slot -- last bind wins, silently wrong data. */
-static bool layout_locations_unique(const nt_vertex_layout_t *a, const nt_vertex_layout_t *b) {
-    uint32_t seen[8] = {0}; /* 256 bits, one per possible location */
-    const nt_vertex_layout_t *layouts[2] = {a, b};
-    for (int l = 0; l < 2; l++) {
-        for (uint8_t i = 0; i < layouts[l]->attr_count; i++) {
-            uint8_t loc = layouts[l]->attrs[i].location;
-            if (seen[loc >> 5U] & (1U << (loc & 31U))) {
-                return false;
-            }
-            seen[loc >> 5U] |= 1U << (loc & 31U);
-        }
+/* A location used twice (within a layout, or across a vertex input and the instance layout
+ * bound with it) means glVertexAttribPointer runs twice on one slot -- last bind wins, silently
+ * wrong data. Locations are asserted < NT_GFX_MAX_VERTEX_ATTRS first. */
+static uint32_t layout_location_mask(const nt_vertex_layout_t *layout) {
+    uint32_t mask = 0;
+    for (uint8_t i = 0; i < layout->attr_count; i++) {
+        const uint32_t bit = 1U << layout->attrs[i].location;
+        NT_ASSERT((mask & bit) == 0 && "attribute location used twice in a layout");
+        mask |= bit;
     }
-    return true;
+    return mask;
 }
 
 /* WebGL2 raises INVALID_OPERATION when an attribute offset or the stride is not a
@@ -1016,14 +1055,12 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     NT_ASSERT(desc->layout.attr_count <= NT_GFX_MAX_VERTEX_ATTRS && "too many vertex attrs");
-    NT_ASSERT(desc->instance_layout.attr_count <= NT_GFX_MAX_INSTANCE_ATTRS && "too many instance attrs (NT_GFX_MAX_INSTANCE_ATTRS)");
     /* WebGL2 caps vertexAttribPointer stride at 255 bytes (INVALID_VALUE beyond).
      * Reachable only from game-declared layouts -- mesh-pack strides max out at 128. */
-    NT_ASSERT(desc->layout.stride <= 255 && desc->instance_layout.stride <= 255 && "WebGL2 caps vertex stride at 255 bytes");
+    NT_ASSERT(desc->layout.stride <= 255 && "WebGL2 caps vertex stride at 255 bytes");
     /* After the attr_count asserts -- the loops read attr_count entries. */
     assert_layout_webgl2_rules(&desc->layout);
-    assert_layout_webgl2_rules(&desc->instance_layout);
-    NT_ASSERT(layout_locations_unique(&desc->layout, &desc->instance_layout) && "attribute location used twice across vertex/instance layouts");
+    const uint32_t vertex_mask = layout_location_mask(&desc->layout);
     /* attr_count 0 with no buffers is the attribute-less gl_VertexID path. */
     NT_ASSERT((desc->layout.attr_count > 0) == (desc->vertex_buffer.id != 0) && "make_vertex_input: vertex_buffer is required iff layout has attrs");
 
@@ -1049,37 +1086,12 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
         ibo_backend = s_gfx.buffer_backends[ibo_slot];
         NT_ASSERT(ibo_backend != 0 && "make_vertex_input: index_buffer has no live backend -- recreate it after context restore");
     }
-    NT_ASSERT((desc->instance_layout.attr_count > 0) == (desc->instance_buffer.id != 0) && "make_vertex_input: instance_buffer is required iff instance_layout has attrs");
-    /* GL reads stride 0 as tightly packed per attribute, which the draw range check cannot bound. */
-    NT_ASSERT((desc->instance_layout.attr_count == 0 || desc->instance_layout.stride > 0) && "make_vertex_input: instance_layout needs a nonzero stride");
-    uint32_t inst_backend = 0;
-    uint32_t instance_size = 0;
-    uint8_t instance_stream = 0;
-    uint32_t instance_extent = 0;
-    if (desc->instance_buffer.id != 0) {
-        NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, desc->instance_buffer.id) && "make_vertex_input: invalid instance_buffer handle");
-        uint32_t inst_slot = nt_pool_slot_index(desc->instance_buffer.id);
-        NT_ASSERT(s_gfx.buffer_metas[inst_slot].type == NT_BUFFER_VERTEX && "make_vertex_input: instance_buffer is not vertex type");
-        inst_backend = s_gfx.buffer_backends[inst_slot];
-        NT_ASSERT(inst_backend != 0 && "make_vertex_input: instance_buffer has no live backend -- recreate it after context restore");
-        instance_size = s_gfx.buffer_metas[inst_slot].size;
-        for (uint32_t stream = 0; stream < NT_GFX_FRAME_STREAM_COUNT; stream++) {
-            if (g_nt_gfx_frame_storage[stream].buffer.id == desc->instance_buffer.id) {
-                instance_stream = (uint8_t)stream;
-            }
-        }
-        for (uint8_t i = 0; i < desc->instance_layout.attr_count; i++) {
-            const nt_vertex_attr_t *attr = &desc->instance_layout.attrs[i];
-            const uint32_t end = attr->offset + (nt_vertex_type_size(attr->type) * attr->count);
-            instance_extent = end > instance_extent ? end : instance_extent;
-        }
-    }
 
     uint32_t id = nt_pool_alloc(&s_gfx.vertex_input_pool);
     NT_ASSERT(id != 0 && "vertex input pool full -- raise nt_gfx_desc_t.max_vertex_inputs");
 
     uint32_t slot = nt_pool_slot_index(id);
-    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, inst_backend, slot);
+    uint32_t backend = nt_gfx_backend_create_vertex_input(desc, vbo_backend, ibo_backend, slot);
     if (backend == 0) {
         nt_pool_free(&s_gfx.vertex_input_pool, id);
         return backend_failed("backend vertex input creation failed");
@@ -1089,27 +1101,14 @@ static nt_gfx_result_t make_vertex_input(const nt_vertex_input_desc_t *desc, nt_
     s_gfx.vertex_input_metas[slot] = (nt_gfx_vertex_input_meta_t){
         .vbo_id = desc->vertex_buffer.id,
         .ibo_id = desc->index_buffer.id,
-        .instance_buffer_id = desc->instance_buffer.id,
-        .instance_size = instance_size,
-        .instance_stride = desc->instance_layout.stride,
-        .instance_extent = instance_extent,
-        .instance_stream = instance_stream,
+        .vertex_mask = (uint16_t)vertex_mask,
         .index_type = index_type,
     };
 
     out->id = id;
     NT_GFX_DEFINE_RESOURCE(NT_GFX_OBJECT_VERTEX_INPUT, id);
 #if NT_GFX_CAPTURE_ENABLED
-    const nt_vertex_layout_t *layouts[] = {&desc->layout, &desc->instance_layout};
-    for (uint32_t layout = 0; layout < 2; layout++) {
-        for (uint32_t a = 0; a < layouts[layout]->attr_count; a++) {
-            const nt_vertex_attr_t *attr = &layouts[layout]->attrs[a];
-            NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->object_kind = NT_GFX_OBJECT_VERTEX_INPUT; event->object = id;
-                          event->data.attribute.buffer = layout == 0 ? desc->vertex_buffer.id : desc->instance_buffer.id; event->data.attribute.offset = attr->offset;
-                          event->data.attribute.stride = layouts[layout]->stride; event->data.attribute.location = attr->location; event->data.attribute.type = (uint32_t)attr->type;
-                          event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized; event->data.attribute.divisor = layout;);
-        }
-    }
+    capture_attributes(NT_GFX_OBJECT_VERTEX_INPUT, id, desc->layout.attrs, desc->layout.attr_count, desc->layout.stride, desc->vertex_buffer.id, 0);
 #endif
     return NT_GFX_RESULT_ACCEPTED;
 }
@@ -1119,10 +1118,64 @@ nt_vertex_input_t nt_gfx_make_vertex_input(const nt_vertex_input_desc_t *desc) {
         NT_GFX_OP_CREATE, NT_GFX_OBJECT_VERTEX_INPUT, 0, if (desc != NULL) {
             event->data.resource.related[0] = desc->vertex_buffer.id;
             event->data.resource.related[1] = desc->index_buffer.id;
-            event->data.resource.related[2] = desc->instance_buffer.id;
         });
     nt_vertex_input_t result = {0};
     NT_GFX_END_OBJECT(make_vertex_input(desc, &result), result.id);
+    return result;
+}
+
+static bool instance_layout_equal(const nt_gfx_instance_layout_meta_t *meta, const nt_vertex_layout_t *layout) {
+    if (meta->stride != layout->stride || meta->attr_count != layout->attr_count) {
+        return false;
+    }
+    for (uint8_t i = 0; i < layout->attr_count; i++) {
+        const nt_vertex_attr_t *a = &meta->attrs[i];
+        const nt_vertex_attr_t *b = &layout->attrs[i];
+        if (a->location != b->location || a->type != b->type || a->count != b->count || a->normalized != b->normalized || a->offset != b->offset) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
+static nt_gfx_result_t make_instance_layout(const nt_vertex_layout_t *layout, nt_instance_layout_t *out) {
+    /* nt_gfx_init empties the registry, so a handle made before it would name nothing. */
+    NT_ASSERT(g_nt_gfx.initialized && "make_instance_layout: call after nt_gfx_init");
+    NT_ASSERT(layout != NULL);
+    NT_ASSERT(layout->attr_count >= 1 && layout->attr_count <= NT_GFX_MAX_INSTANCE_ATTRS && "instance layout needs 1..NT_GFX_MAX_INSTANCE_ATTRS attrs");
+    /* GL reads stride 0 as tightly packed per attribute, which the draw range check cannot bound. */
+    NT_ASSERT(layout->stride > 0 && layout->stride <= 255 && "instance layout stride must be 1..255 (WebGL2 cap)");
+    assert_layout_webgl2_rules(layout);
+    const uint32_t mask = layout_location_mask(layout);
+    for (uint32_t i = 1; i <= s_gfx.instance_layout_count; i++) {
+        if (instance_layout_equal(&s_gfx.instance_layouts[i], layout)) {
+            out->id = i;
+            return NT_GFX_RESULT_CACHE;
+        }
+    }
+    NT_ASSERT(s_gfx.instance_layout_count < NT_GFX_MAX_INSTANCE_LAYOUTS && "instance layout table full -- raise NT_GFX_MAX_INSTANCE_LAYOUTS");
+    const uint32_t slot = ++s_gfx.instance_layout_count;
+    nt_gfx_instance_layout_meta_t *meta = &s_gfx.instance_layouts[slot];
+    *meta = (nt_gfx_instance_layout_meta_t){.stride = layout->stride, .mask = (uint16_t)mask, .attr_count = layout->attr_count};
+    for (uint8_t i = 0; i < layout->attr_count; i++) {
+        const nt_vertex_attr_t *attr = &layout->attrs[i];
+        const uint32_t end = attr->offset + (nt_vertex_type_size(attr->type) * attr->count);
+        meta->attrs[i] = *attr;
+        meta->extent = end > meta->extent ? end : meta->extent;
+    }
+    nt_gfx_backend_register_instance_layout(slot, layout);
+    out->id = slot;
+#if NT_GFX_CAPTURE_ENABLED
+    capture_instance_layout(out->id);
+#endif
+    return NT_GFX_RESULT_ACCEPTED;
+}
+
+nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layout) {
+    NT_GFX_BEGIN(NT_GFX_OP_CREATE, NT_GFX_OBJECT_INSTANCE_LAYOUT, 0);
+    nt_instance_layout_t result = {0};
+    NT_GFX_END_OBJECT(make_instance_layout(layout, &result), result.id);
     return result;
 }
 
@@ -1474,10 +1527,11 @@ static nt_gfx_result_t destroy_buffer(nt_buffer_t buf) {
     }
     /* Dependent vertex inputs baked this buffer into their VAO state and can
      * never draw correctly again -- reclaim them now. Mesh deactivation
-     * reaches no renderer, so renderer caches rely on this cascade. */
+     * reaches no renderer, so renderer caches rely on this cascade. The backend
+     * detaches the buffer from VAOs that only held instances from it. */
     for (uint32_t i = 1; i <= s_gfx.vertex_input_pool.capacity; i++) {
         const nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[i];
-        if (meta->vbo_id == buf.id || meta->ibo_id == buf.id || meta->instance_buffer_id == buf.id) {
+        if (meta->vbo_id == buf.id || meta->ibo_id == buf.id) {
             nt_gfx_destroy_vertex_input((nt_vertex_input_t){s_gfx.vertex_input_pool.slots[i].id});
         }
     }
@@ -1630,6 +1684,7 @@ static uint32_t publish_vertex_input(nt_vertex_input_t vi) {
     uint32_t slot = nt_pool_slot_index(vi.id);
     /* Loss frees vertex-input slots, so a live slot always has a backend. */
     s_gfx.bound_vertex_input = vi.id;
+    s_gfx.bound_instance_layout = 0;
     /* NT_INDEX_NONE for a non-indexed vertex input: cleared, not stale. */
     s_gfx.bound_index_type = s_gfx.vertex_input_metas[slot].index_type;
     return slot;
@@ -1638,12 +1693,13 @@ static uint32_t publish_vertex_input(nt_vertex_input_t vi) {
 /* Instances must lie in the instance buffer, and in a frame stream inside this frame's allocations:
  * bytes past `used` are not uploaded and would draw the previous frame's data. */
 static void assert_instances_in_range(uint32_t instance_count) {
-    const nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[nt_pool_slot_index(s_gfx.bound_vertex_input)];
-    if (meta->instance_buffer_id == 0 || instance_count == 0) {
+    if (s_gfx.bound_instance_layout == 0 || instance_count == 0) {
         return;
     }
-    const uint64_t limit = meta->instance_stream != 0 ? g_nt_gfx_frame_storage[meta->instance_stream].used : meta->instance_size;
-    const uint64_t end = (uint64_t)s_gfx.bound_instance_offset + ((uint64_t)(instance_count - 1U) * meta->instance_stride) + meta->instance_extent;
+    const nt_gfx_instance_layout_meta_t *layout = &s_gfx.instance_layouts[s_gfx.bound_instance_layout];
+    const nt_gfx_buffer_meta_t *buffer = &s_gfx.buffer_metas[nt_pool_slot_index(s_gfx.bound_instance_buffer)];
+    const uint64_t limit = buffer->frame_stream != 0 ? g_nt_gfx_frame_storage[buffer->frame_stream - 1U].used : buffer->size;
+    const uint64_t end = (uint64_t)s_gfx.bound_instance_offset + ((uint64_t)(instance_count - 1U) * layout->stride) + layout->extent;
     NT_ASSERT(end <= limit && "draw: instances lie outside the instance buffer or this frame's allocations in its stream");
 }
 
@@ -1652,11 +1708,12 @@ static nt_gfx_result_t bind_vertex_input(nt_vertex_input_t vi) {
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
-    /* The form asserts before the skip, so the bind cache needs no "was instanced" flag. The bound
-     * vertex input was validated this pass and the frame rule keeps it alive. */
+    /* The form asserts before the skip. The bound vertex input was validated this pass and the
+     * frame rule keeps it alive. */
     const bool same_vi = s_gfx.bound_vertex_input != 0 && vi.id == s_gfx.bound_vertex_input;
     const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
-    NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_buffer_id == 0 && "bind_vertex_input: the vertex input declares an instance layout -- use nt_gfx_bind_vertex_input_instanced");
+    /* Its VAO keeps divisor-1 attribs enabled at another bind's offset; a plain draw would read them. */
+    NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_layout == 0 && "bind_vertex_input: the vertex input was bound with instances -- keep using nt_gfx_bind_vertex_input_instanced");
     if (same_vi) {
         return NT_GFX_RESULT_CACHE;
     }
@@ -1670,29 +1727,51 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion, not real branching
-static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t byte_offset) {
+static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout_t layout, nt_buffer_t instance_buffer, uint32_t byte_offset) {
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS && "bind_vertex_input_instanced: must be called inside a pass");
     if (g_nt_gfx.context_lost) {
         return NT_GFX_RESULT_CONTEXT_LOST;
     }
     const bool same_vi = s_gfx.bound_vertex_input != 0 && vi.id == s_gfx.bound_vertex_input;
-    const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
-    NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_buffer_id != 0 && "bind_vertex_input_instanced: the vertex input declares no instance layout");
-    if (same_vi && byte_offset == s_gfx.bound_instance_offset) {
+    /* A nonzero bound layout passed every check below, so an equal tuple needs none of them. */
+    if (same_vi && s_gfx.bound_instance_layout != 0 && layout.id == s_gfx.bound_instance_layout && instance_buffer.id == s_gfx.bound_instance_buffer && byte_offset == s_gfx.bound_instance_offset) {
         return NT_GFX_RESULT_CACHE;
     }
+    const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
+    const uint32_t layout_slot = layout.id;
+    NT_ASSERT(layout_slot >= 1 && layout_slot <= s_gfx.instance_layout_count && "invalid instance layout");
+    nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[slot];
+    /* The first instanced bind pins the layout, so the overlap check runs once per vertex input. */
+    if (meta->instance_layout != layout_slot) {
+        NT_ASSERT(meta->instance_layout == 0 && "bind_vertex_input_instanced: the vertex input is pinned to another instance layout -- draw each layout through its own vertex input, e.g. "
+                                                "a mesh drawn by both mesh renderers from a different frame stream for each");
+        NT_ASSERT((s_gfx.instance_layouts[layout_slot].mask & meta->vertex_mask) == 0 && "bind_vertex_input_instanced: instance and vertex attribs share a location");
+    }
+    const uint32_t buffer_slot = nt_pool_slot_index(instance_buffer.id);
+    /* Runs of vertex inputs drawn from one buffer validate it once per pass; 0 means none bound yet. */
+    if (instance_buffer.id != s_gfx.bound_instance_buffer || instance_buffer.id == 0) {
+        NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "bind_vertex_input_instanced: invalid or stale instance buffer");
+        NT_ASSERT(s_gfx.buffer_metas[buffer_slot].type == NT_BUFFER_VERTEX && "bind_vertex_input_instanced: instance buffer is not vertex type");
+        NT_ASSERT(s_gfx.buffer_backends[buffer_slot] != 0 && "bind_vertex_input_instanced: instance buffer has no live backend -- recreate it after context restore");
+    }
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_vertex_input_instanced: offset must be 4-byte aligned (WebGL2 attrib rule)");
+    meta->instance_layout = (uint8_t)layout_slot;
+    s_gfx.bound_instance_layout = layout.id;
+    s_gfx.bound_instance_buffer = instance_buffer.id;
     s_gfx.bound_instance_offset = byte_offset;
     /* The first instance: plain draws read only it and need no check of their own. */
     assert_instances_in_range(1);
-    nt_gfx_frame_bind_vertex_input_instanced(slot, byte_offset);
+    nt_gfx_frame_bind_vertex_input_instanced(slot, layout_slot, s_gfx.buffer_backends[buffer_slot], byte_offset);
     return NT_GFX_RESULT_ACCEPTED;
 }
 
-void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, uint32_t byte_offset) {
-    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_VERTEX_INPUT, NT_GFX_OBJECT_VERTEX_INPUT, vi.id, event->data.binding.offset = byte_offset);
-    NT_GFX_END(bind_vertex_input_instanced(vi, byte_offset));
+void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout_t layout, nt_buffer_t instance_buffer, uint32_t byte_offset) {
+    NT_GFX_BEGIN_REQUEST(NT_GFX_OP_VERTEX_INPUT, NT_GFX_OBJECT_VERTEX_INPUT, vi.id, event->data.binding.secondary = instance_buffer.id; event->data.binding.slot = layout.id;
+                         event->data.binding.offset = byte_offset);
+    NT_GFX_END(bind_vertex_input_instanced(vi, layout, instance_buffer, byte_offset));
 }
+
+void nt_gfx_set_buffer_frame_stream(nt_buffer_t buf, uint32_t stream) { s_gfx.buffer_metas[nt_pool_slot_index(buf.id)].frame_stream = (uint8_t)(stream + 1U); }
 
 static bool texture_sampler_compatible(uint32_t texture_slot, const nt_sampler_desc_t *desc) {
     const nt_gfx_texture_meta_t *meta = &s_gfx.texture_metas[texture_slot];
@@ -2602,10 +2681,16 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
 }
 
 /* Per-stream half of the pack mesh safety net: type/count/normalized validity,
- * unique name hashes, and the WebGL2 offset/stride alignment rules. */
+ * unique name hashes and locations, and the WebGL2 offset/stride alignment rules. */
 static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count, uint32_t *out_stride) {
     uint32_t stride = 0;
+    uint32_t location_mask = 0;
     for (uint8_t i = 0; i < stream_count; i++) {
+        if (streams[i].location >= NT_GFX_MAX_VERTEX_ATTRS || (location_mask & (1U << streams[i].location)) != 0) {
+            NT_LOG_ERROR("activate_mesh: stream[%u] location %u out of range or duplicated", i, (uint32_t)streams[i].location);
+            return false;
+        }
+        location_mask |= 1U << streams[i].location;
         if (nt_stream_type_size(streams[i].type) == 0 || streams[i].count < 1 || streams[i].count > 4) {
             NT_LOG_ERROR("activate_mesh: stream[%u] invalid type %u / count %u", i, (uint32_t)streams[i].type, (uint32_t)streams[i].count);
             return false;
@@ -2613,13 +2698,6 @@ static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count
         if (streams[i].normalized != 0 && (streams[i].type == NT_STREAM_FLOAT32 || streams[i].type == NT_STREAM_FLOAT16)) {
             NT_LOG_ERROR("activate_mesh: stream[%u] normalized on a float type", i);
             return false;
-        }
-        /* Duplicate hashes would bind one shader location twice (last wins, silently) */
-        for (uint8_t p = 0; p < i; p++) {
-            if (streams[p].name_hash == streams[i].name_hash) {
-                NT_LOG_ERROR("activate_mesh: stream[%u] duplicates name_hash 0x%08x of stream[%u]", i, streams[i].name_hash, p);
-                return false;
-            }
         }
         if (stride % nt_stream_type_size(streams[i].type) != 0) {
             NT_LOG_ERROR("activate_mesh: stream[%u] offset %u misaligned for type size %u", i, stride, nt_stream_type_size(streams[i].type));
@@ -2831,6 +2909,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
 
     uint32_t slot = nt_pool_slot_index(mesh_id);
     memset(&s_gfx.mesh_table[slot], 0, sizeof(nt_gfx_mesh_info_t));
+    memset(&s_gfx.mesh_vertex_inputs[(size_t)slot * NT_GFX_MESH_VERTEX_INPUTS], 0, NT_GFX_MESH_VERTEX_INPUTS * sizeof(nt_vertex_input_t));
 
     s_gfx.mesh_table[slot].vbo = vbo;
     s_gfx.mesh_table[slot].ibo = ibo;
@@ -2907,6 +2986,7 @@ void nt_gfx_deactivate_mesh(uint32_t handle) {
         return;
     }
     uint32_t index = nt_pool_slot_index(handle);
+    /* The vertex buffer's destroy cascade takes the mesh's vertex inputs along. */
     nt_gfx_destroy_buffer(s_gfx.mesh_table[index].vbo);
     if (s_gfx.mesh_table[index].ibo.id != 0) {
         nt_gfx_destroy_buffer(s_gfx.mesh_table[index].ibo);
@@ -2922,12 +3002,40 @@ void nt_gfx_deactivate_shader(uint32_t handle) {
 
 /* ---- Mesh info query ---- */
 
-uint16_t nt_gfx_max_meshes(void) { return s_gfx.mesh_pool.capacity; }
-
 const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh) {
     if (!nt_pool_valid(&s_gfx.mesh_pool, mesh.id)) {
         return NULL;
     }
     uint32_t index = nt_pool_slot_index(mesh.id);
     return &s_gfx.mesh_table[index];
+}
+
+/* Every stream at the location the builder resolved; activation checked the types. */
+static nt_vertex_input_t make_mesh_vertex_input(const nt_gfx_mesh_info_t *info) {
+    static const nt_vertex_type_t k_types[] = {
+        [NT_STREAM_UINT8] = NT_VERTEX_UINT8, [NT_STREAM_INT8] = NT_VERTEX_INT8,    [NT_STREAM_UINT16] = NT_VERTEX_UINT16,
+        [NT_STREAM_INT16] = NT_VERTEX_INT16, [NT_STREAM_FLOAT16] = NT_VERTEX_HALF, [NT_STREAM_FLOAT32] = NT_VERTEX_FLOAT,
+    };
+    nt_vertex_input_desc_t desc = {.layout = {.attr_count = info->stream_count, .stride = info->stride}, .vertex_buffer = info->vbo, .index_buffer = info->ibo, .label = "mesh"};
+    uint16_t offset = 0;
+    for (uint8_t i = 0; i < info->stream_count; i++) {
+        const NtStreamDesc *stream = &info->streams[i];
+        desc.layout.attrs[i] = (nt_vertex_attr_t){.location = stream->location, .type = k_types[stream->type], .count = stream->count, .normalized = stream->normalized != 0, .offset = offset};
+        offset = (uint16_t)(offset + (nt_stream_type_size(stream->type) * stream->count));
+    }
+    return nt_gfx_make_vertex_input(&desc);
+}
+
+nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_buffer) {
+    NT_ASSERT(nt_pool_valid(&s_gfx.mesh_pool, mesh.id) && "mesh_vertex_input: invalid or stale mesh");
+    NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "mesh_vertex_input: invalid or stale instance buffer (an unsized frame stream has none)");
+    const uint32_t slot = nt_pool_slot_index(mesh.id);
+    const uint32_t frame_stream = s_gfx.buffer_metas[nt_pool_slot_index(instance_buffer.id)].frame_stream;
+    const uint32_t k = frame_stream > NT_GFX_FRAME_VERTEX ? frame_stream - 1U - NT_GFX_FRAME_VERTEX : NT_GFX_MAX_VERTEX_STREAMS;
+    nt_vertex_input_t *vi = &s_gfx.mesh_vertex_inputs[((size_t)slot * NT_GFX_MESH_VERTEX_INPUTS) + k];
+    /* A loss frees every vertex input; the next use after the restore makes it again. */
+    if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi->id)) {
+        *vi = make_mesh_vertex_input(&s_gfx.mesh_table[slot]);
+    }
+    return *vi;
 }

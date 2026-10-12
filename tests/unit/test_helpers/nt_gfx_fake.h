@@ -121,6 +121,7 @@ uint32_t nt_gfx_fake_last_update_buffer_offset(void);
 uint32_t nt_gfx_fake_last_instance_offset(void);
 uint32_t nt_gfx_fake_last_instance_vertex_input(void);
 uint32_t nt_gfx_fake_last_instance_buffer(void); /* instance buffer backend of the last instanced bind */
+uint32_t nt_gfx_fake_last_instance_layout(void); /* instance layout slot of the last instanced bind */
 nt_blend_state_t nt_gfx_fake_last_pipeline_blend(void);
 uint32_t nt_gfx_fake_vertex_input_create_count(void);
 uint32_t nt_gfx_fake_bind_vertex_input_count(void);

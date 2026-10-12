@@ -94,8 +94,9 @@ static inline void nt_gfx_frame_end_pass(void) { (void)nt_gfx_frame_push(NT_GFX_
 static inline void nt_gfx_frame_clear(const nt_clear_desc_t *desc) { *(nt_clear_desc_t *)nt_gfx_frame_push(NT_GFX_CMD_CLEAR, sizeof(*desc)) = *desc; }
 static inline void nt_gfx_frame_bind_pipeline(uint32_t backend_handle) { nt_gfx_frame_u32x4(NT_GFX_CMD_BIND_PIPELINE, 1, backend_handle, 0, 0, 0); }
 static inline void nt_gfx_frame_bind_vertex_input(uint32_t backend_handle) { nt_gfx_frame_u32x4(NT_GFX_CMD_BIND_VERTEX_INPUT, 1, backend_handle, 0, 0, 0); }
-static inline void nt_gfx_frame_bind_vertex_input_instanced(uint32_t vertex_input_backend, uint32_t byte_offset) {
-    nt_gfx_frame_u32x4(NT_GFX_CMD_BIND_VERTEX_INPUT_INSTANCED, 2, vertex_input_backend, byte_offset, 0, 0);
+/* The vertex input slot (max_vertex_inputs is 16-bit) and the layout slot share one word. */
+static inline void nt_gfx_frame_bind_vertex_input_instanced(uint32_t vertex_input_backend, uint32_t layout_slot, uint32_t buffer_backend, uint32_t byte_offset) {
+    nt_gfx_frame_u32x4(NT_GFX_CMD_BIND_VERTEX_INPUT_INSTANCED, 3, vertex_input_backend | (layout_slot << 16), buffer_backend, byte_offset, 0);
 }
 static inline void nt_gfx_frame_bind_texture_unit(uint32_t texture_backend, uint32_t sampler_backend, uint32_t slot) {
     nt_gfx_frame_u32x4(NT_GFX_CMD_BIND_TEXTURE_UNIT, 3, texture_backend, sampler_backend, slot, 0);

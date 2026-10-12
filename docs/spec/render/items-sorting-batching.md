@@ -103,7 +103,7 @@ live until the frame executes (see [Mesh draws](architecture.md#mesh-draws)).
 `nt_skinned_mesh_renderer` uses the same material/mesh token, then additionally
 splits runs when the deformation texture changes. Frame origins and alpha stay
 per-instance; equal tokens do not require them to match. See
-[Skeletal animation — Renderer](../skeletal/skeletal-animation.md#13-renderer-implemented-523).
+[Skeletal animation — Renderer](../skeletal/skeletal-animation.md#renderer).
 
 `nt_sprite_renderer_batch_key(material, page_resource)` packs the material's
 16-bit pool slot and the current GPU texture's 16-bit pool slot. The page resource
@@ -159,7 +159,7 @@ CPU batch: SpriteRenderer consumes consecutive `batch_key` runs, writes their
 vertices and absolute `uint32_t` indices into frame storage, and records one
 indexed draw per run. Rect and polygon sprites share the same generic indexed
 path — see [Sprite batching strategy](#sprite-batching-strategy). Atlas regions still carry `NT_ATLAS_REGION_FLAG_QUAD_*`
-metadata for a future GPU-instanced rect renderer (Issue #176); the current
+metadata for a future GPU-instanced rect renderer (planned, #176); the current
 SpriteRenderer ignores those flags.
 
 #### MeshRenderer

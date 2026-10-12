@@ -29,7 +29,7 @@ static void test_stub_has_no_graphics_resources(void) {
     TEST_ASSERT_FALSE(nt_gfx_texture_ready((nt_texture_t){1}));
     TEST_ASSERT_FALSE(nt_gfx_render_target_valid((nt_render_target_t){1}));
     TEST_ASSERT_NULL(nt_gfx_get_mesh_info((nt_mesh_t){1}));
-    TEST_ASSERT_EQUAL_UINT16(0, nt_gfx_max_meshes());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_mesh_vertex_input((nt_mesh_t){1}, (nt_buffer_t){1}).id);
 }
 
 static void test_stub_returns_empty_queries_without_fabricating_pixels(void) {
@@ -65,7 +65,6 @@ static void test_stub_queries_require_outputs(void) {
 #endif
 
 static void test_stub_drops_draws_and_state_changes(void) {
-    TEST_ASSERT_EQUAL_UINT16(0, nt_gfx_max_meshes());
     nt_gfx_begin_pass(NULL);
     nt_gfx_clear(NULL);
     nt_gfx_clear(&(nt_clear_desc_t){.color = true, .depth = true, .clear_depth = 1.0F});

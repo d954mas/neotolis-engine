@@ -1,7 +1,8 @@
 # Shader System
 
-ShaderAsset defines the interface, not values: vertex input mask, material
-vec4/texture counts, object/global usage masks, and default render state.
+ShaderAsset defines the interface, not values: the attribute locations it reads
+(see Attribute locations), material vec4/texture counts, object/global usage
+masks, and default render state.
 Shader data comes in four levels — vertex inputs, material params, object
 params, and globals.
 
@@ -182,9 +183,34 @@ typedef struct ShaderAsset {
 3. **object params** — from RenderState, Transform
 4. **globals** — from renderer/pass
 
-## Vertex input mask
+## Attribute locations
 
-Possible semantics: POSITION, NORMAL, UV0, COLOR0. Mesh/shader compatibility validated in builder and sanity-checked at runtime.
+A mesh feeds each stream at the location its builder stream layout states and the
+pack carries ([runtime-formats](../assets/runtime-formats.md#mesh-wire-layout)), and
+the mesh and skinned renderers feed instances at a fixed instance head, so a mesh
+shader declares its inputs at those locations. A shader may
+`#include "nt/locations.glsl"`. The builder resolves this include from C
+(`shared/include/nt_vertex_locations.h`), not from a file. It expands at every
+include under its own `#ifndef` guard, so repeated or conditional includes are
+safe. It holds only `#define` constants, never attribute declarations:
+
+- `NT_LOC_*`, the default mesh stream locations: position 0, normal 1, color 2,
+  uv0 3, tangent 4, uv1 5, joints 6, weights 7;
+- `NT_INST_LOC_*`, the instance head: world rows 8-10 and color 11 for both
+  renderers, skin frame origins 12 and skin alpha 13 for skinned meshes.
+
+A shader that reads a stream at an explicitly assigned location writes that
+number, or its own `#define`, matching the stream layout the mesh was built
+with. Shaders that do not include it are unaffected; the engine mesh shaders
+(`common/instance.glsl`, `common/skin.glsl` and their users) include it.
+
+## Mesh streams and shader inputs that do not match
+
+A mesh's vertex input enables every stream of the mesh; streams the shader does
+not read cost nothing per draw. An input that neither a mesh stream nor the
+bound instance layout supplies reads the GL generic default `(0, 0, 0, 1)`.
+Nothing checks mesh/shader compatibility: the mesh family and its shaders agree on locations by
+construction.
 
 ## Object params
 

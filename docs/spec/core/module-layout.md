@@ -144,8 +144,8 @@ dependencies include the chain
 `nt_skinned_mesh_renderer → nt_skin_comp → nt_skeletal_gpu → nt_skeletal`.
 Both mesh renderers pack instances into gfx frame storage; they link no extra module for it.
 Static archive linking can still discard unused CPU kernel objects. The
-composition-symbol checks that prove the intended variants without LTO remain
-#488 scope.
+composition-symbol checks that prove the intended variants without LTO are
+planned (#488).
 
 `nt_postfx_blur` is a gaussian blur helper, not a post-processing graph. It
 borrows a ready source texture and valid temp and destination targets for each

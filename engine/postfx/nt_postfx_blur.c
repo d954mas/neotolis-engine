@@ -194,8 +194,8 @@ static void make_gpu_resources(void) {
                 .attr_count = 2,
                 .attrs =
                     {
-                        {.location = NT_ATTR_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
-                        {.location = NT_ATTR_TEXCOORD0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
+                        {.location = NT_LOC_POSITION, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 0},
+                        {.location = NT_LOC_UV0, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 8},
                     },
             },
         .vertex_buffer = s_blur.triangle_vbo,
