@@ -604,7 +604,7 @@ void test_bind_vertex_input_instanced_reaches_backend(void) {
     nt_gfx_end_frame();
     TEST_ASSERT_EQUAL_UINT32(16, nt_gfx_fake_last_instance_offset());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(frame0()), nt_gfx_fake_last_instance_buffer());
-    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(s_inst.id), nt_gfx_fake_last_instance_layout());
+    TEST_ASSERT_EQUAL_UINT32(s_inst.id, nt_gfx_fake_last_instance_layout());
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_fake_last_bound_vertex_input(), nt_gfx_fake_last_instance_vertex_input());
 }
 
@@ -631,6 +631,25 @@ void test_instanced_bind_names_its_buffer(void) {
 /* Once bound with instances, a vertex input keeps them enabled in its VAO: a plain bind asserts,
  * also right after the instanced bind cached it and in a later frame. A vertex input never bound
  * with instances still draws instanced reading only gl_InstanceID. */
+/* The first instanced bind pins the layout: the same vertex input with another layout asserts,
+ * while another vertex input takes that layout. */
+void test_instance_layout_is_pinned_by_the_first_bind(void) {
+    const nt_vertex_layout_t other_layout = {.attr_count = 1, .stride = 16, .attrs = {{.location = 5, .type = NT_VERTEX_FLOAT, .count = 4}}};
+    const nt_instance_layout_t other = nt_gfx_make_instance_layout(&other_layout);
+    nt_buffer_t vbo = make_vbo();
+    nt_vertex_input_t vi = make_vi(vbo, (nt_buffer_t){0});
+    nt_vertex_input_t second = make_vi(vbo, (nt_buffer_t){0});
+    begin_test_pass();
+    bind_inst(vi, frame0(), 0);
+    bind_inst(vi, frame0(), 16);
+    EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, other, frame0(), 0));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "pinned to another instance layout"));
+    nt_gfx_bind_vertex_input_instanced(second, other, frame0(), 0);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    TEST_ASSERT_EQUAL_UINT32(other.id, nt_gfx_fake_last_instance_layout());
+}
+
 void test_plain_bind_of_an_instanced_vi_asserts(void) {
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t plain = make_vi(vbo, (nt_buffer_t){0});
@@ -731,14 +750,13 @@ void test_every_draw_form_checks_its_own_stream(void) {
     nt_gfx_end_pass();
 }
 
-/* An equal (vertex input, layout, buffer, offset) in the same pass ends CACHE; a change of any
- * one of them binds. */
+/* An equal (vertex input, buffer, offset) in the same pass ends CACHE; a change of any one of them
+ * binds. The layout is pinned per vertex input, so it never changes here. */
 void test_equal_instance_binding_is_dropped(void) {
     init_with_streams(2);
     nt_buffer_t vbo = make_vbo();
     nt_vertex_input_t a = make_vi(vbo, (nt_buffer_t){0});
     nt_vertex_input_t b = make_vi(vbo, (nt_buffer_t){0});
-    const nt_instance_layout_t other = nt_gfx_make_instance_layout(&(nt_vertex_layout_t){.attr_count = 1, .stride = 16, .attrs = {{.location = 5, .type = NT_VERTEX_FLOAT, .count = 4}}});
 
     begin_test_pass();
     bind_inst(a, frame0(), 0);
@@ -748,8 +766,7 @@ void test_equal_instance_binding_is_dropped(void) {
     bind_inst(b, frame0(), 16);
     TEST_ASSERT_EQUAL_UINT32(3, g_nt_gfx.counters.accepted[NT_GFX_OP_VERTEX_INPUT]);
     bind_inst(b, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), 16);
-    nt_gfx_bind_vertex_input_instanced(b, other, nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1), 16);
-    TEST_ASSERT_EQUAL_UINT32(5, g_nt_gfx.counters.accepted[NT_GFX_OP_VERTEX_INPUT]);
+    TEST_ASSERT_EQUAL_UINT32(4, g_nt_gfx.counters.accepted[NT_GFX_OP_VERTEX_INPUT]);
     nt_gfx_end_pass();
 }
 
@@ -950,6 +967,7 @@ int main(void) {
     RUN_TEST(test_begin_pass_clears_bound_vi);
     RUN_TEST(test_bind_vertex_input_instanced_reaches_backend);
     RUN_TEST(test_instanced_bind_names_its_buffer);
+    RUN_TEST(test_instance_layout_is_pinned_by_the_first_bind);
     RUN_TEST(test_plain_bind_of_an_instanced_vi_asserts);
     RUN_TEST(test_instanced_draw_asserts_its_instance_range);
     RUN_TEST(test_instance_range_uses_the_attribute_extent);

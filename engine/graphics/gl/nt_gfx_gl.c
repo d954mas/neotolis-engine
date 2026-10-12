@@ -1776,15 +1776,11 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
         return;
     }
     const nt_gfx_gl_instance_layout_t *layout = &s_instance_layouts[layout_slot];
-    if (vi->instance_layout != layout_slot) {
-        const uint16_t enabled = s_instance_layouts[vi->instance_layout].mask;
-        detach_instance_slots((uint16_t)(enabled & ~layout->mask));
+    /* The frontend pins one layout per vertex input; 0 = first bind, or its buffer was destroyed. */
+    if (vi->instance_layout == 0) {
         for (uint8_t i = 0; i < layout->attr_count; i++) {
-            const uint8_t loc = layout->attrs[i].location;
-            if ((enabled & (1U << loc)) == 0) {
-                NT_GL(glEnableVertexAttribArray, loc);
-                NT_GL(glVertexAttribDivisor, loc, 1);
-            }
+            NT_GL(glEnableVertexAttribArray, layout->attrs[i].location);
+            NT_GL(glVertexAttribDivisor, layout->attrs[i].location, 1);
         }
         vi->instance_layout = (uint8_t)layout_slot;
     }

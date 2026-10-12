@@ -36,8 +36,8 @@ void nt_skinned_mesh_renderer_shutdown(void);
  * common/skin.glsl and declares u_skin_matrices, which deformation replaces. Call after
  * nt_skeletal_gpu_flush: a texture write precedes the draws that sample it (render/architecture.md,
  * Draw-phase command stream). The mesh's vertex input for a frame stream is shared with the mesh
- * renderer: a mesh drawn by both renderers uses a different stream for each, or every switch
- * between their instance layouts re-points. */
+ * renderer and pinned to the first renderer's instance layout: a mesh drawn by both renderers uses
+ * a different stream for each (asserted). */
 void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, nt_buffer_t instances, uint32_t offset, uint32_t count);
 
 /* nt_mesh_renderer_draw_list for skinned items: runs also split on the deformation texture,

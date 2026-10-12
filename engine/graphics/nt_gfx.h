@@ -72,7 +72,8 @@ typedef struct {
 
 /* Owned vertex-input object (GL: one VAO): the per-vertex layout baked against a VBO [+ IBO].
  * Instances come at bind time (nt_gfx_bind_vertex_input_instanced); the VAO keeps the
- * instance pointers of its last bind, so a vertex input bound with one tuple re-points nothing. */
+ * instance pointers of its last bind, so a vertex input bound with one tuple re-points nothing.
+ * Its first instanced bind pins the instance layout. */
 typedef struct {
     uint32_t id;
 } nt_vertex_input_t;
@@ -1006,9 +1007,9 @@ void nt_gfx_bind_vertex_input(nt_vertex_input_t vi);
  * caller-owned buffer (draws stay inside its size) or a frame storage buffer (nt_gfx_frame_buffer;
  * draws stay inside this frame's allocations). The offset must be 4-byte aligned (WebGL2 rejects
  * unaligned attrib offsets), and the instance locations must not overlap vi's vertex ones;
- * asserted. Each VAO keeps the (layout, buffer, offset) of its last bind, so a vertex input bound
- * with the same tuple every frame re-points nothing; one bound with two tuples in a frame
- * re-points between them. The bind asserts that the first instance, and every instanced draw
+ * asserted. The first instanced bind pins `layout` to vi; another layout asserts. The VAO keeps
+ * the buffer and offset of its last bind, so a vertex input bound with the same pair every frame
+ * re-points nothing; one bound with two pairs in a frame re-points between them. The bind asserts that the first instance, and every instanced draw
  * that all its instances, lie inside the buffer or this frame's allocations. */
 void nt_gfx_bind_vertex_input_instanced(nt_vertex_input_t vi, nt_instance_layout_t layout, nt_buffer_t instance_buffer, uint32_t byte_offset);
 /* Applies the complete active sampler interface of the bound pipeline's program.

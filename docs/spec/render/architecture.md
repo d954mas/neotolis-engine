@@ -197,20 +197,21 @@ One bind selects the whole geometry for the following draws:
 of `layout` at byte `offset` of `buffer`, one command. Per mesh switch that is a
 single `glBindVertexArray` instead of buffer re-binds plus per-attribute
 `glVertexAttribPointer` rewrites. WebGL2 has no baseInstance, so instances are
-located by pointing the instance attributes at their offset. Each VAO keeps the
-(layout, buffer, offset) of its last bind: an equal tuple re-points nothing, a
-new offset or buffer re-points the layout's attributes, and a new layout
-disables and detaches the slots it drops and enables the ones it adds, so the
-VAO's attachments always equal its last tuple. A vertex input bound with one
-tuple every frame re-points nothing; one bound with two in a frame re-points
-between them every frame. For frame data, a pass whose instances live in their
+located by pointing the instance attributes at their offset. A vertex input's
+first instanced bind pins its instance layout: it enables the layout's slots
+with divisor 1, and a bind with another layout asserts, so one vertex input
+draws one instance format. Each VAO keeps the buffer and offset of its last
+bind: an equal pair re-points nothing, a new offset or buffer re-points the
+layout's attributes. A vertex input bound with one pair every frame re-points
+nothing; one bound with two in a frame re-points between them every frame. For frame data, a pass whose instances live in their
 own stream keeps every run's offset, and so its pointers, while its counts stay;
 in one shared stream a count change shifts every later run of the frame. An
 empty layout with no buffers is the attribute-less `gl_VertexID` path; every
 draw asserts a bound vertex input.
 
-The fused bind asserts that the instance locations do not overlap the vertex
-input's, and the buffer's type and liveness. A vertex input once bound with
+The first fused bind of a vertex input asserts that the instance locations do
+not overlap its vertex ones; every fused bind asserts the buffer's type and
+liveness. A vertex input once bound with
 instances keeps divisor-1 attributes enabled, so a plain bind of it asserts; a
 vertex input never bound with instances may still draw instanced, reading only
 `gl_InstanceID`.
@@ -426,9 +427,11 @@ inputs, so every material on a mesh shares them, and the renderers keep no
 vertex-input cache. They die with the mesh (the destroy cascade) and with a
 context loss; the next use makes them again. The mesh and skinned renderers
 bind them with their own instance layouts, which share the instance head
-(`NT_INST_LOC_*`, see [shader](shader.md)); a mesh drawn by both renderers from
-one stream shares one VAO whose layout alternates, which stays correct but
-re-points at every switch, so a game draws each renderer from its own stream.
+(`NT_INST_LOC_*`, see [shader](shader.md)). A mesh's vertex input of a stream is
+pinned to the instance layout of the first renderer that draws it, so a mesh
+drawn by both renderers uses a different stream for each (asserted). From game
+buffers both would share the base vertex input; such a game makes its own
+vertex inputs over the mesh's `vbo`/`ibo`.
 `max_vertex_inputs` budgets the vertex inputs of the meshes (frame streams they
 are drawn from, plus one if drawn from any other buffer) and the others.
 

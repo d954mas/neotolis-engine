@@ -190,7 +190,7 @@ static uint32_t draw_and_check(nt_render_target_t target, nt_texture_t deformati
     const uint64_t instances = g_nt_gfx.counters.instances;
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, mesh_items, 2);
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &colorless_item, 1);
-    nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, skinned_items, 2);
+    nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, skinned_items, 2); /* the quad's vertex input per stream pins one layout */
     /* One instanced draw per list: the two mesh and two skinned instances each share a run. */
     const bool batched = nt_gfx_draw_calls(&g_nt_gfx.counters) == draws + 3 && g_nt_gfx.counters.instances == instances + 5;
     nt_gfx_end_pass();

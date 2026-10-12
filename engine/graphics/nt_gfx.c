@@ -66,9 +66,9 @@ typedef struct {
 typedef struct {
     uint32_t vbo_id; /* full buffer handles: destroy_buffer cascades on exact match */
     uint32_t ibo_id;
-    uint16_t vertex_mask; /* vertex attribute locations; an instance layout may not overlap them */
-    uint8_t index_type;   /* captured from the IBO; NT_INDEX_NONE for non-indexed */
-    bool had_instances;   /* set by its first instanced bind: the VAO keeps instance attribs enabled */
+    uint16_t vertex_mask;    /* vertex attribute locations; an instance layout may not overlap them */
+    uint8_t index_type;      /* captured from the IBO; NT_INDEX_NONE for non-indexed */
+    uint8_t instance_layout; /* pinned by its first instanced bind; 0 = never bound with instances */
 } nt_gfx_vertex_input_meta_t;
 
 /* ---- Instance layout records (CPU only; survive context loss) ---- */
@@ -1713,7 +1713,7 @@ static nt_gfx_result_t bind_vertex_input(nt_vertex_input_t vi) {
     const bool same_vi = s_gfx.bound_vertex_input != 0 && vi.id == s_gfx.bound_vertex_input;
     const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
     /* Its VAO keeps divisor-1 attribs enabled at another bind's offset; a plain draw would read them. */
-    NT_ASSERT(!s_gfx.vertex_input_metas[slot].had_instances && "bind_vertex_input: the vertex input was bound with instances -- keep using nt_gfx_bind_vertex_input_instanced");
+    NT_ASSERT(s_gfx.vertex_input_metas[slot].instance_layout == 0 && "bind_vertex_input: the vertex input was bound with instances -- keep using nt_gfx_bind_vertex_input_instanced");
     if (same_vi) {
         return NT_GFX_RESULT_CACHE;
     }
@@ -1740,7 +1740,13 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
     const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
     const uint32_t layout_slot = layout.id;
     NT_ASSERT(layout_slot >= 1 && layout_slot <= s_gfx.instance_layout_count && "invalid instance layout");
-    NT_ASSERT((s_gfx.instance_layouts[layout_slot].mask & s_gfx.vertex_input_metas[slot].vertex_mask) == 0 && "bind_vertex_input_instanced: instance and vertex attribs share a location");
+    nt_gfx_vertex_input_meta_t *meta = &s_gfx.vertex_input_metas[slot];
+    /* The first instanced bind pins the layout, so the overlap check runs once per vertex input. */
+    if (meta->instance_layout != layout_slot) {
+        NT_ASSERT(meta->instance_layout == 0 && "bind_vertex_input_instanced: the vertex input is pinned to another instance layout -- draw each layout through its own vertex input, e.g. "
+                                                "a mesh drawn by both mesh renderers from a different frame stream for each");
+        NT_ASSERT((s_gfx.instance_layouts[layout_slot].mask & meta->vertex_mask) == 0 && "bind_vertex_input_instanced: instance and vertex attribs share a location");
+    }
     const uint32_t buffer_slot = nt_pool_slot_index(instance_buffer.id);
     /* Runs of vertex inputs drawn from one buffer validate it once per pass. */
     if (instance_buffer.id != s_gfx.bound_instance_buffer) {
@@ -1749,7 +1755,7 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
         NT_ASSERT(s_gfx.buffer_backends[buffer_slot] != 0 && "bind_vertex_input_instanced: instance buffer has no live backend -- recreate it after context restore");
     }
     NT_ASSERT((byte_offset & 3U) == 0 && "bind_vertex_input_instanced: offset must be 4-byte aligned (WebGL2 attrib rule)");
-    s_gfx.vertex_input_metas[slot].had_instances = true;
+    meta->instance_layout = (uint8_t)layout_slot;
     s_gfx.bound_instance_layout = layout.id;
     s_gfx.bound_instance_buffer = instance_buffer.id;
     s_gfx.bound_instance_offset = byte_offset;

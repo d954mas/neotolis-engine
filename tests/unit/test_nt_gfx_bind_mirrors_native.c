@@ -643,114 +643,6 @@ static void test_destroying_an_instance_buffer_detaches_it(void) {
     TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
 }
 
-/* A layout change on one VAO disables and detaches the slots the new layout drops, and points
- * the kept ones at the bound buffer even when another ARRAY_BUFFER is bound; switching back
- * enables the dropped slot again. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_layout_switch_detaches_dropped_slots(void) {
-    init_with_vertex_streams(1);
-    nt_pipeline_t pip = make_red_pipeline();
-    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
-    nt_buffer_t foreign = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 8});
-    instanced_frame(pip, &(instanced_run_t){vi, 0, {0}}, 1);
-    const GLuint vao = (GLuint)nt_gfx_gl_test_cached_vao();
-    GLint enabled = 0;
-    GLint general = 0;
-    read_attrib(vao, 1, &enabled, &general);
-    TEST_ASSERT_NOT_EQUAL_INT(0, general);
-
-    nt_gfx_update_buffer(foreign, 0, s_full, 8); /* leaves a foreign ARRAY_BUFFER bound */
-    uint32_t offset = 0;
-    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 64, 4, &offset), 0, 64);
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input_instanced(vi, offset_layout(), nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX), 0);
-    nt_gfx_draw_instanced(0, 3, 1);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    const uint32_t disables = g_nt_gfx.counters.gl[NT_GFX_GL_glDisableVertexAttribArray];
-    const uint32_t pointers = g_nt_gfx.counters.gl[NT_GFX_GL_glVertexAttribPointer];
-    nt_gfx_begin_frame();
-    TEST_ASSERT_EQUAL_UINT32(1, disables);
-    TEST_ASSERT_EQUAL_UINT32(1 + 1, pointers); /* the detach of slot 2, the kept slot 1 */
-    GLint attached = 0;
-    read_attrib(vao, 1, &enabled, &attached);
-    TEST_ASSERT_EQUAL_INT(1, enabled);
-    TEST_ASSERT_EQUAL_INT(general, attached);
-    read_attrib(vao, 2, &enabled, &attached);
-    TEST_ASSERT_EQUAL_INT(0, enabled);
-    TEST_ASSERT_EQUAL_INT(0, attached);
-
-    TEST_ASSERT_EQUAL_UINT32(2, instanced_frame(pip, &(instanced_run_t){vi, 0, {0}}, 1));
-    read_attrib(vao, 2, &enabled, &attached);
-    TEST_ASSERT_EQUAL_INT(1, enabled);
-    TEST_ASSERT_EQUAL_INT(general, attached);
-    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
-}
-
-/* A layout change that drops no slot, replayed right after another VAO pointed a different
- * buffer: the kept and the added slot point at the bound tuple's buffer, not the foreign one.
- * Then A -> B -> A in one deferred frame ends with A's slots only. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_layout_change_after_a_foreign_replay(void) {
-    init_with_vertex_streams(1);
-    nt_pipeline_t pip = make_red_pipeline();
-    nt_vertex_input_t vi = make_vi(make_vbo(s_full), (nt_buffer_t){0});
-    nt_vertex_input_t other = make_vi(make_vbo(s_full), (nt_buffer_t){0});
-    nt_buffer_t own = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_DYNAMIC, .size = 64});
-    const nt_buffer_t general = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX);
-    uint32_t offset = 0;
-    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 64, 4, &offset), 0, 64);
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input_instanced(vi, offset_layout(), general, 0);
-    nt_gfx_draw_instanced(0, 3, 1);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    const GLuint vao = (GLuint)nt_gfx_gl_test_cached_vao();
-    GLint enabled = 0;
-    GLint general_name = 0;
-    read_attrib(vao, 1, &enabled, &general_name);
-
-    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 64, 4, &offset), 0, 64);
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input_instanced(other, offset_layout(), own, 0); /* replay leaves `own` bound */
-    nt_gfx_draw_instanced(0, 3, 1);
-    nt_gfx_bind_vertex_input_instanced(vi, pair_layout(), general, 0);
-    nt_gfx_draw_instanced(0, 3, 1);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    GLint attached = 0;
-    for (GLuint location = 1; location <= 2; location++) {
-        read_attrib(vao, location, &enabled, &attached);
-        TEST_ASSERT_EQUAL_INT(1, enabled);
-        TEST_ASSERT_EQUAL_INT(general_name, attached);
-    }
-
-    memset(nt_gfx_frame_alloc(NT_GFX_FRAME_VERTEX, 64, 4, &offset), 0, 64);
-    begin_black_pass();
-    nt_gfx_bind_pipeline(pip);
-    nt_gfx_bind_vertex_input_instanced(vi, offset_layout(), general, 0);
-    nt_gfx_draw_instanced(0, 3, 1);
-    nt_gfx_bind_vertex_input_instanced(vi, pair_layout(), general, 16);
-    nt_gfx_draw_instanced(0, 3, 1);
-    nt_gfx_bind_vertex_input_instanced(vi, offset_layout(), general, 32);
-    nt_gfx_draw_instanced(0, 3, 1);
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    read_attrib(vao, 1, &enabled, &attached);
-    TEST_ASSERT_EQUAL_INT(1, enabled);
-    TEST_ASSERT_EQUAL_INT(general_name, attached);
-    read_attrib(vao, 2, &enabled, &attached);
-    TEST_ASSERT_EQUAL_INT(0, enabled);
-    TEST_ASSERT_EQUAL_INT(0, attached);
-    TEST_ASSERT_EQUAL_UINT32(GL_NO_ERROR, glGetError());
-}
-
 /* Index uploads go through the service VAO and rebind the cached one: the bound VAO keeps its
  * own index binding. */
 static void test_index_upload_keeps_the_bound_vao(void) {
@@ -1897,8 +1789,6 @@ int main(void) {
     RUN_TEST(test_caller_buffer_draws_without_re_point);
     RUN_TEST(test_destroying_a_bound_vertex_input_grounds_the_vao_cache);
     RUN_TEST(test_destroying_an_instance_buffer_detaches_it);
-    RUN_TEST(test_layout_switch_detaches_dropped_slots);
-    RUN_TEST(test_layout_change_after_a_foreign_replay);
     RUN_TEST(test_index_upload_keeps_the_bound_vao);
     RUN_TEST(test_index_data_ops_do_not_rewire_bound_vertex_input);
     RUN_TEST(test_empty_vertex_input_draws_fullscreen);
