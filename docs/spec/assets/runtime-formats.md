@@ -109,6 +109,9 @@ tangent 4, uv1 5, joints 6, weights 7). Mesh streams use locations below 8; the
 engine instance head starts at 8. Different meshes may number the same name
 differently; one mesh has one numbering. Activation checks structure only:
 every location below `NT_GFX_MAX_VERTEX_ATTRS` and unique within the mesh.
+Temporary deviation: renderers still map streams to shader locations through the
+material `attr_map` and do not read `location` yet; until they do, the instance
+head stays where each renderer puts it.
 
 **Canonicalization.** The meshopt codec preserves triangles up to rotation of
 each triple (same winding, same rasterization). The builder therefore encodes,

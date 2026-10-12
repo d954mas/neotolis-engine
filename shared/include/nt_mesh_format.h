@@ -38,7 +38,7 @@ typedef struct {
     uint8_t count;      /* components per vertex (1-4) */
     uint8_t normalized; /* 1 = normalize integer types to [0,1] (unsigned) or [-1,1] (signed)
                          *     via GL_TRUE in glVertexAttribPointer. Must be 0 for float types. */
-    uint8_t location;   /* vertex attribute location, < NT_GFX_MAX_VERTEX_ATTRS */
+    uint8_t location;   /* builder writes < NT_LOC_VERTEX_END; activation checks < NT_GFX_MAX_VERTEX_ATTRS */
 } NtStreamDesc;
 #pragma pack(pop)
 

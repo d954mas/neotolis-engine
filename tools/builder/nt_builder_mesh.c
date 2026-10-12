@@ -585,7 +585,9 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
         descs[s].type = (uint8_t)layout[s].type;
         descs[s].count = layout[s].count;
         descs[s].normalized = layout[s].normalized ? 1 : 0;
-        descs[s].location = (uint8_t)nt_resolve_stream_location(&layout[s]);
+        const int32_t location = nt_resolve_stream_location(&layout[s]);
+        NT_BUILD_ASSERT(location >= 0 && location < NT_LOC_VERTEX_END && "build_mesh_buffer: layout not validated");
+        descs[s].location = (uint8_t)location;
     }
 
     uint32_t descs_size = stream_count * (uint32_t)sizeof(NtStreamDesc);

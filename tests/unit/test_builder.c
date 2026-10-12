@@ -1790,16 +1790,16 @@ void test_mesh_stream_locations_default_and_explicit(void) {
     write_test_glb_color4(glb_path);
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0, false, 0},
-        {"color", "COLOR_0", NT_STREAM_FLOAT32, 4, false, 0, true, 5},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0, true, 5},
+        {"color", "COLOR_0", NT_STREAM_FLOAT32, 4, false, 0, false, 0},
     };
     uint8_t *data = NULL;
     uint32_t size = 0;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_decode_mesh(glb_path, layout, 2, NT_TANGENT_AUTO, NULL, UINT32_MAX, &data, &size));
 
     const NtStreamDesc *descs = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
-    TEST_ASSERT_EQUAL_UINT8(NT_LOC_POSITION, descs[0].location);
-    TEST_ASSERT_EQUAL_UINT8(5, descs[1].location); /* explicit slot overrides the color default */
+    TEST_ASSERT_EQUAL_UINT8(5, descs[0].location); /* explicit slot overrides the position default */
+    TEST_ASSERT_EQUAL_UINT8(NT_LOC_COLOR, descs[1].location);
     free(data);
 }
 
@@ -2047,8 +2047,8 @@ void test_layout_rejects_duplicate_engine_name(void) {
     /* Same engine_name = same name_hash: both streams would bind one shader location */
     NtStreamLayout layout[] = {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, false, 0, false, 0},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0, false, 0},
-        {"uv0", "COLOR_0", NT_STREAM_FLOAT32, 4, false, 0, false, 0},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false, 0, true, 1},
+        {"uv0", "COLOR_0", NT_STREAM_FLOAT32, 4, false, 0, true, 2},
     };
     TEST_ASSERT_EQUAL(NT_BUILD_ERR_VALIDATION, nt_builder_validate_stream_layout("test", layout, 3));
 }
@@ -2620,7 +2620,9 @@ void test_include_pragma_once(void) {
 
 void test_include_engine_locations(void) {
     write_test_shader(TMP_DIR "/locations_main.vert", "precision mediump float;\n"
+                                                      "#if 0\n"
                                                       "#include \"nt/locations.glsl\"\n"
+                                                      "#endif\n"
                                                       "#include \"nt/locations.glsl\"\n"
                                                       "layout(location = NT_LOC_POSITION) in vec3 a_position;\n"
                                                       "layout(location = NT_LOC_UV0) in vec2 a_uv;\n"
@@ -2637,12 +2639,15 @@ void test_include_engine_locations(void) {
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
-    /* Generated from C with no file on disk, and emitted once per shader */
+    /* Generated from C with no file on disk. Every include expands under a GLSL guard, so the
+     * one after the inactive #if still defines the constants */
     char *source = read_shader_source_from_pack(pack_path, NULL);
     TEST_ASSERT_NOT_NULL(source);
-    const char *first = strstr(source, "#define NT_LOC_UV0 3\n");
+    const char *first = strstr(source, "#ifndef NT_LOC_POSITION\n");
     TEST_ASSERT_NOT_NULL(first);
-    TEST_ASSERT_NULL(strstr(first + 1, "#define NT_LOC_UV0"));
+    const char *second = strstr(first + 1, "#ifndef NT_LOC_POSITION\n");
+    TEST_ASSERT_NOT_NULL(second);
+    TEST_ASSERT_NOT_NULL(strstr(second, "#define NT_LOC_UV0 3\n"));
     free(source);
 }
 

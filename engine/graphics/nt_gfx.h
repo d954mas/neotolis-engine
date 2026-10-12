@@ -25,6 +25,7 @@
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "nt_texture_format.h"
+#include "nt_vertex_locations.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -171,10 +172,10 @@ static inline uint16_t nt_vertex_type_size(nt_vertex_type_t type) {
 }
 
 typedef enum {
-    NT_ATTR_POSITION = 0,
-    NT_ATTR_NORMAL = 1,
-    NT_ATTR_COLOR = 2,
-    NT_ATTR_TEXCOORD0 = 3,
+    NT_ATTR_POSITION = NT_LOC_POSITION,
+    NT_ATTR_NORMAL = NT_LOC_NORMAL,
+    NT_ATTR_COLOR = NT_LOC_COLOR,
+    NT_ATTR_TEXCOORD0 = NT_LOC_UV0,
 } nt_attr_location_t;
 
 typedef uint8_t nt_blend_factor_t;

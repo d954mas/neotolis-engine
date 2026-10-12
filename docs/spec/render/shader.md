@@ -185,8 +185,9 @@ typedef struct ShaderAsset {
 ## Attribute locations
 
 A shader may `#include "nt/locations.glsl"`. The builder resolves this include from
-C (`shared/include/nt_vertex_locations.h`), not from a file, and emits it once per
-shader: only `#define` constants, never attribute declarations. `NT_LOC_*` are the
+C (`shared/include/nt_vertex_locations.h`), not from a file. It expands at every
+include under its own `#ifndef` guard, so repeated or conditional includes are safe.
+It holds only `#define` constants, never attribute declarations. `NT_LOC_*` are the
 default mesh stream locations (`NT_LOC_POSITION` 0 ... `NT_LOC_WEIGHTS` 7). A shader that reads a stream at an explicitly
 assigned location writes that number, or its own `#define`, matching the stream
 layout the mesh was built with ([runtime-formats](../assets/runtime-formats.md#mesh-wire-layout-format-v4)).

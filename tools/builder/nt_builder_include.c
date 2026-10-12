@@ -259,11 +259,9 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
                         memcpy(filename, fname_start, fname_len);
                         filename[fname_len] = '\0';
 
-                        /* Engine attribute locations are generated from C, not read from disk; once per shader. */
+                        /* Engine attribute locations are generated from C, not read from disk. */
                         if (strcmp(filename, NT_LOCATIONS_GLSL_INCLUDE) == 0) {
-                            if (!is_in_once_set(state, filename)) {
-                                ok = add_to_once_set(state, filename) && include_buf_append(&out, NT_LOCATIONS_GLSL, (uint32_t)(sizeof(NT_LOCATIONS_GLSL) - 1));
-                            }
+                            ok = include_buf_append(&out, NT_LOCATIONS_GLSL, (uint32_t)(sizeof(NT_LOCATIONS_GLSL) - 1));
                             free(filename);
                             filename = NULL;
                             if (!ok) {

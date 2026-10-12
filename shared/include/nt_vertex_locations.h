@@ -17,16 +17,11 @@
 #define NT_LOC_STR(x) NT_LOC_STR_(x)
 #define NT_LOC_GLSL_DEFINE(name) "#define " #name " " NT_LOC_STR(name) "\n"
 
-/* Source of the builder's virtual include "nt/locations.glsl": the macros above as GLSL defines. */
+/* Source of the builder's virtual include "nt/locations.glsl": the macros above as GLSL defines.
+ * The GLSL guard, not the include resolver, dedupes it, so an inactive #if branch cannot hide it. */
 #define NT_LOCATIONS_GLSL_INCLUDE "nt/locations.glsl"
 #define NT_LOCATIONS_GLSL                                                                                                                                                                              \
-    NT_LOC_GLSL_DEFINE(NT_LOC_POSITION)                                                                                                                                                                \
-    NT_LOC_GLSL_DEFINE(NT_LOC_NORMAL)                                                                                                                                                                  \
-    NT_LOC_GLSL_DEFINE(NT_LOC_COLOR)                                                                                                                                                                   \
-    NT_LOC_GLSL_DEFINE(NT_LOC_UV0)                                                                                                                                                                     \
-    NT_LOC_GLSL_DEFINE(NT_LOC_TANGENT)                                                                                                                                                                 \
-    NT_LOC_GLSL_DEFINE(NT_LOC_UV1)                                                                                                                                                                     \
-    NT_LOC_GLSL_DEFINE(NT_LOC_JOINTS)                                                                                                                                                                  \
-    NT_LOC_GLSL_DEFINE(NT_LOC_WEIGHTS)
+    "#ifndef NT_LOC_POSITION\n" NT_LOC_GLSL_DEFINE(NT_LOC_POSITION) NT_LOC_GLSL_DEFINE(NT_LOC_NORMAL) NT_LOC_GLSL_DEFINE(NT_LOC_COLOR) NT_LOC_GLSL_DEFINE(NT_LOC_UV0)                                  \
+        NT_LOC_GLSL_DEFINE(NT_LOC_TANGENT) NT_LOC_GLSL_DEFINE(NT_LOC_UV1) NT_LOC_GLSL_DEFINE(NT_LOC_JOINTS) NT_LOC_GLSL_DEFINE(NT_LOC_WEIGHTS) "#endif\n"
 
 #endif /* NT_VERTEX_LOCATIONS_H */

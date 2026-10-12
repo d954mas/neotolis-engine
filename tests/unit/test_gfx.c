@@ -2295,21 +2295,40 @@ void test_activate_mesh_rejects_index_count_with_type_none(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
-void test_activate_mesh_rejects_duplicate_name_hash(void) {
-    /* Two streams with one hash would bind one shader location twice (last wins) */
-    enum { BLOB2 = sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 20 };
-    uint8_t blob[BLOB2];
-    memset(blob, 0, sizeof(blob));
+/* Valid indexed mesh with two streams (f32x3 + f32x2); tests break one field */
+static void fill_two_stream_mesh_blob(uint8_t *blob) {
     NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
     hdr->magic = NT_MESH_MAGIC;
     hdr->version = NT_MESH_VERSION;
     hdr->stream_count = 2;
-    hdr->index_type = 0;
+    hdr->index_type = 1;
     hdr->vertex_count = 1;
-    hdr->vertex_data_size = 20; /* f32x3 + f32x2 */
+    hdr->index_count = 3;
+    hdr->vertex_data_size = 20;
+    hdr->index_data_size = 6;
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd[0] = (NtStreamDesc){.name_hash = 0xABCD1234, .type = NT_STREAM_FLOAT32, .count = 3, .location = 0};
-    sd[1] = (NtStreamDesc){.name_hash = 0xABCD1234, .type = NT_STREAM_FLOAT32, .count = 2, .location = 1};
+    sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_FLOAT32, .count = 2, .location = NT_LOC_UV0};
+}
+
+#define MESH_BLOB2_BYTES (sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 20 + 6)
+
+void test_activate_mesh_two_stream_blob_valid(void) {
+    uint8_t blob[MESH_BLOB2_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_two_stream_mesh_blob(blob);
+    uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    nt_gfx_deactivate_mesh(handle);
+}
+
+void test_activate_mesh_rejects_duplicate_name_hash(void) {
+    /* Two streams with one hash would bind one shader location twice (last wins) */
+    uint8_t blob[MESH_BLOB2_BYTES];
+    memset(blob, 0, sizeof(blob));
+    fill_two_stream_mesh_blob(blob);
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd[1].name_hash = sd[0].name_hash;
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
@@ -2325,24 +2344,20 @@ void test_activate_mesh_rejects_stream_location_out_of_range(void) {
     uint8_t blob[MESH_BLOB_BYTES];
     memset(blob, 0, sizeof(blob));
     fill_valid_mesh_blob(blob);
-    ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->location = 16;
+    ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->location = NT_GFX_MAX_VERTEX_ATTRS;
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
+    ((NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader)))->location = NT_GFX_MAX_VERTEX_ATTRS - 1;
+    uint32_t handle = nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    nt_gfx_deactivate_mesh(handle);
 }
 
 void test_activate_mesh_rejects_duplicate_stream_location(void) {
-    enum { BLOB2 = sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 20 };
-    uint8_t blob[BLOB2];
+    uint8_t blob[MESH_BLOB2_BYTES];
     memset(blob, 0, sizeof(blob));
-    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
-    hdr->magic = NT_MESH_MAGIC;
-    hdr->version = NT_MESH_VERSION;
-    hdr->stream_count = 2;
-    hdr->index_type = 0;
-    hdr->vertex_count = 1;
-    hdr->vertex_data_size = 20; /* f32x3 + f32x2 */
+    fill_two_stream_mesh_blob(blob);
     NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd[0] = (NtStreamDesc){.name_hash = 0x11111111, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
-    sd[1] = (NtStreamDesc){.name_hash = 0x22222222, .type = NT_STREAM_FLOAT32, .count = 2, .location = NT_LOC_POSITION};
+    sd[1].location = sd[0].location;
     TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
 }
 
@@ -3899,6 +3914,7 @@ int main(void) {
     RUN_TEST(test_activate_mesh_rejects_misaligned_offset);
     RUN_TEST(test_activate_texture_bad_version);
     RUN_TEST(test_activate_mesh_rejects_misaligned_stream);
+    RUN_TEST(test_activate_mesh_two_stream_blob_valid);
     RUN_TEST(test_activate_mesh_rejects_duplicate_name_hash);
     RUN_TEST(test_activate_mesh_rejects_normalized_float_stream);
     RUN_TEST(test_activate_mesh_rejects_stream_location_out_of_range);
