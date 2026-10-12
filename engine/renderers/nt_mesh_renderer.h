@@ -64,15 +64,11 @@ void nt_mesh_renderer_shutdown(void);
 nt_instance_layout_t nt_mesh_renderer_instance_layout(void);
 
 /* Records one instanced draw in the current pass: count > 0 instances of `layout` at byte offset
- * of `instances` (NT_BUFFER_VERTEX): a frame vertex stream's buffer (nt_gfx_frame_buffer of the
- * stream they were allocated from, filled before nt_gfx_end_frame; one allocation may be drawn in
- * any number of passes) or a game-owned buffer. The mesh owns one vertex input per frame stream
- * and one for every other buffer (nt_gfx_mesh_vertex_input), pinned to the first layout drawn
- * through it, so two layouts of one mesh use different streams; draws of one mesh from one game
- * buffer at several offsets re-point between them. draw_textures (NULL only when
- * draw_texture_count is 0) are bindings owned by the draw, applied with the material's textures
- * as one set; borrowed for the call. Records nothing while the program is not ready or a pipeline
- * or vertex input cannot be created. */
+ * of `instances`, a frame vertex stream's buffer (filled before nt_gfx_end_frame) or a game-owned
+ * NT_BUFFER_VERTEX buffer; two layouts of one mesh need different streams (render/architecture.md,
+ * Mesh vertex inputs). draw_textures (NULL only when draw_texture_count is 0) join the material's
+ * textures as one set; borrowed for the call. Records nothing while the program is not ready or a
+ * pipeline or vertex input cannot be created. */
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count, const nt_gfx_texture_binding_t *draw_textures,
                            uint8_t draw_texture_count);
 

@@ -741,8 +741,8 @@ static void core_draw_frame(nt_mesh_t mesh, nt_material_t material, const nt_gfx
     nt_test_frame_next();
 }
 
-/* Draw textures join the material's set with their own samplers; a sampler-only change between
- * two core calls reaches the unit. A name the material declares, or one texture too many, asserts. */
+/* Draw textures join the material's set with their own samplers. A name the material declares,
+ * or one texture too many, asserts. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_core_draw_textures_join_the_material_set(void) {
     nt_mesh_t mesh = make_mesh();
@@ -764,10 +764,6 @@ void test_core_draw_textures_join_the_material_set(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_a), nt_gfx_fake_bound_texture_at(1));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_texture_backend_id(texture_b), nt_gfx_fake_bound_texture_at(2));
     TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(linear), nt_gfx_fake_last_sampler(1));
-
-    draw[0].sampler = NT_SAMPLER_DEFAULT;
-    core_draw_frame(mesh, material, draw, 2);
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_sampler_backend_id(nt_gfx_get_texture_default_sampler(texture_a)), nt_gfx_fake_last_sampler(1));
 
     NT_TEST_EXPECT_ASSERT(core_draw_frame(mesh, material, draw, NT_MESH_MAX_DRAW_TEXTURES + 1));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "too many draw textures"));

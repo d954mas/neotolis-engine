@@ -253,11 +253,9 @@ The skinned part of `nt_mesh_renderer.h` exists only in the
 `nt_mesh_renderer_draw_list_skinned(stream, items, count)` consumes existing 16-byte
 render items in the given order; through entity it reads
 mesh/material/world/color and `skin_comp`, packs each run's instances into frame
-vertex stream `stream` and records its draw. A skinned core draw,
-`nt_mesh_renderer_draw` with `nt_mesh_renderer_skinned_instance_layout()` and one
-draw texture `{nt_hash32_str("u_skin_matrices"), deformation, NT_SAMPLER_DEFAULT}`,
-draws instances the caller packed into a frame stream's buffer or a caller-owned
-buffer, with no entity component ([Mesh draws](../render/architecture.md#mesh-draws)).
+vertex stream `stream` and records its draw. A skinned core draw draws
+instances the caller packed, with no entity component
+([Mesh draws](../render/architecture.md#mesh-draws)).
 No sampling, FK, mode selection, culling or sorting. Two instance layouts of one
 mesh use different frame streams (asserted; see
 [render architecture, Vertex inputs](../render/architecture.md#vertex-inputs),
@@ -285,8 +283,7 @@ single-fetch variant (planned, #487); a second program appears only if that numb
 **Sampler set.** The program samples `u_skin_matrices` as a `highp sampler2D`;
 the material does not declare it and declares only its surface textures, within
 `NT_MATERIAL_MAX_TEXTURES` = 4. The run's deformation texture with its default
-sampler is the draw's `u_skin_matrices` draw texture, applied with the
-material's resolved slots as one complete set
+sampler is the draw's `u_skin_matrices` draw texture
 ([Mesh draws](../render/architecture.md#mesh-draws)). Reapply when the material
 or deformation texture changes; nothing is tracked across draw calls.
 

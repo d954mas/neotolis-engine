@@ -28,8 +28,7 @@ static struct {
     nt_instance_layout_t skinned_layout;
     uint32_t skin_name_hash;
 #endif
-    bool initialized;
-} s_mesh_renderer;
+} s_mesh_renderer; /* layout.id != 0 between init and shutdown */
 
 /* clang-format off */
 static const nt_vertex_layout_t s_instance_layout = {
@@ -61,13 +60,12 @@ static const nt_vertex_layout_t s_skinned_instance_layout = {
 /* ---- Lifecycle ---- */
 
 void nt_mesh_renderer_init(void) {
-    NT_ASSERT(!s_mesh_renderer.initialized);
+    NT_ASSERT(s_mesh_renderer.layout.id == 0);
     s_mesh_renderer.layout = nt_gfx_make_instance_layout(&s_instance_layout);
 #if NT_MESH_RENDERER_SKINNED
     s_mesh_renderer.skinned_layout = nt_gfx_make_instance_layout(&s_skinned_instance_layout);
     s_mesh_renderer.skin_name_hash = nt_hash32_str("u_skin_matrices").value;
 #endif
-    s_mesh_renderer.initialized = true;
 }
 
 void nt_mesh_renderer_shutdown(void) {
@@ -84,10 +82,8 @@ nt_instance_layout_t nt_mesh_renderer_skinned_instance_layout(void) { return s_m
 #endif
 
 // #region run
-/* One draw call (a core draw or one draw_list): the instance buffer it draws from, the last
- * resolved run and the material state it applied. It never outlives the call, because a pass or
- * a foreign pipeline between calls invalidates what it remembers. Draw texture names and samplers
- * are fixed for its lifetime, so their texture ids identify what was applied. */
+/* One call's state: a pass or foreign pipeline between calls invalidates it. Draw texture names
+ * and samplers are fixed within a call, so texture ids identify what was applied. */
 typedef struct {
     nt_material_t material;
     nt_mesh_t mesh;
@@ -174,7 +170,7 @@ static void record(mesh_draw_t *d, const nt_material_info_t *mi, const nt_gfx_me
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_instance_layout_t layout, nt_buffer_t instances, uint32_t offset, uint32_t count, const nt_gfx_texture_binding_t *draw_textures,
                            uint8_t draw_texture_count) {
-    NT_ASSERT(s_mesh_renderer.initialized);
+    NT_ASSERT(s_mesh_renderer.layout.id != 0);
     /* A lost context can leave a game-activated mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
         return;
@@ -201,7 +197,7 @@ static uint32_t find_run_end(const nt_render_item_t *items, uint32_t run_start, 
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, uint32_t count) {
-    NT_ASSERT(s_mesh_renderer.initialized);
+    NT_ASSERT(s_mesh_renderer.layout.id != 0);
     /* A lost context can leave a game-activated mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
         return;
@@ -243,17 +239,9 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
 
 #if NT_MESH_RENDERER_SKINNED
 // #region skinned
-static bool run_compatible(const nt_render_item_t *items, uint32_t leader, uint32_t candidate, uint32_t texture_id) {
-    if (items[candidate].batch_key != items[leader].batch_key) {
-        return false;
-    }
-    nt_entity_t entity = {.id = items[candidate].entity};
-    return nt_skin_comp_handle(entity)->texture.id == texture_id;
-}
-
 static uint32_t find_skinned_run_end(const nt_render_item_t *items, uint32_t leader, uint32_t end, uint32_t texture_id) {
     uint32_t run_end = leader + 1;
-    while (run_end < end && run_compatible(items, leader, run_end, texture_id)) {
+    while (run_end < end && items[run_end].batch_key == items[leader].batch_key && nt_skin_comp_handle((nt_entity_t){.id = items[run_end].entity})->texture.id == texture_id) {
         run_end++;
     }
     return run_end;
@@ -261,7 +249,7 @@ static uint32_t find_skinned_run_end(const nt_render_item_t *items, uint32_t lea
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_mesh_renderer_draw_list_skinned(uint32_t stream, const nt_render_item_t *items, uint32_t count) {
-    NT_ASSERT(s_mesh_renderer.initialized);
+    NT_ASSERT(s_mesh_renderer.layout.id != 0);
     /* A lost context can leave the deformation texture or a mesh 0; nothing would draw. */
     if (g_nt_gfx.context_lost) {
         return;

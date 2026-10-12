@@ -396,10 +396,8 @@ a material change. A core draw call applies its material every time.
 Texture and sampler travel together in one `nt_gfx_texture_binding_t`; a material
 without an override selects the texture's asset default. At every material
 transition the renderer resolves the material's declared `nt_resource_t` texture
-handles, and every sprite emit and run submits the complete semantic set. A
-mesh draw submits the resolved declarations together with its draw textures as
-one complete set (see Mesh draws); the skinned list's draw texture is the run's
-deformation texture as `u_skin_matrices` with its default sampler. The sprite batch key packs the material pool slot and the currently published GPU
+handles, and every sprite emit and run submits the complete semantic set; a
+mesh draw adds its draw textures to it (see Mesh draws). The sprite batch key packs the material pool slot and the currently published GPU
 texture pool slot, resolved from the stable page resource index; a run draws with
 its first item's page. Both bindings
 remain live and unchanged from list construction through draw completion; a new
@@ -612,11 +610,9 @@ asserts). The entry points:
   registered instance layout: `nt_mesh_renderer_instance_layout()`
   (`nt_mesh_instance_t`), `nt_mesh_renderer_skinned_instance_layout()`
   (`nt_skinned_mesh_instance_t`, skinned target only) or the game's own.
-  `draw_textures` are 0..`NT_MESH_MAX_DRAW_TEXTURES` (8 − 4) bindings owned by
-  the draw, borrowed for the call and applied together with the material's
-  textures as one complete name-keyed set; gfx validates the set (a duplicate active
-  name or missing coverage asserts; see
-  [material, MaterialAsset purpose](material.md#materialasset-purpose)). A
+  `draw_textures` are 0..`NT_MESH_MAX_DRAW_TEXTURES` bindings owned by the
+  draw, borrowed for the call
+  ([material, MaterialAsset purpose](material.md#materialasset-purpose)). A
   skinned core draw passes the skinned layout and one draw texture
   `{nt_hash32_str("u_skin_matrices"), deformation, NT_SAMPLER_DEFAULT}`.
   `buffer` is a frame vertex stream's buffer (`nt_gfx_frame_buffer`, the
