@@ -21,6 +21,8 @@ static uint8_t *s_stage_buf = NULL;
 static uint32_t s_stage_size = 0;
 static uint32_t s_stage_idle = 0;
 
+#define NT_GFX_MESH_VERTEX_INPUTS (NT_GFX_MAX_VERTEX_STREAMS + 1) /* per mesh: each frame vertex stream, then the base */
+
 static uint8_t *stage_acquire(uint32_t size) {
     if (size > s_stage_size) {
         free(s_stage_buf);
@@ -2703,7 +2705,6 @@ static bool mesh_streams_valid(const NtStreamDesc *streams, uint8_t stream_count
             NT_LOG_ERROR("activate_mesh: stream[%u] normalized on a float type", i);
             return false;
         }
-        /* Duplicate hashes would bind one shader location twice (last wins, silently) */
         for (uint8_t p = 0; p < i; p++) {
             if (streams[p].name_hash == streams[i].name_hash) {
                 NT_LOG_ERROR("activate_mesh: stream[%u] duplicates name_hash 0x%08x of stream[%u]", i, streams[i].name_hash, p);
@@ -3041,14 +3042,14 @@ static nt_vertex_input_t make_mesh_vertex_input(const nt_gfx_mesh_info_t *info) 
 
 nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_buffer) {
     NT_ASSERT(nt_pool_valid(&s_gfx.mesh_pool, mesh.id) && "mesh_vertex_input: invalid or stale mesh");
-    NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "mesh_vertex_input: invalid or stale instance buffer");
+    NT_ASSERT(nt_pool_valid(&s_gfx.buffer_pool, instance_buffer.id) && "mesh_vertex_input: invalid or stale instance buffer (an unsized frame stream has none)");
     const uint32_t slot = nt_pool_slot_index(mesh.id);
     const uint32_t frame_stream = s_gfx.buffer_metas[nt_pool_slot_index(instance_buffer.id)].frame_stream;
     const uint32_t k = frame_stream > NT_GFX_FRAME_VERTEX ? frame_stream - 1U - NT_GFX_FRAME_VERTEX : NT_GFX_MAX_VERTEX_STREAMS;
     nt_vertex_input_t *vi = &s_gfx.mesh_vertex_inputs[((size_t)slot * NT_GFX_MESH_VERTEX_INPUTS) + k];
     /* A loss frees every vertex input; the next use after the restore makes it again. */
     if (!nt_pool_valid(&s_gfx.vertex_input_pool, vi->id)) {
-        *vi = g_nt_gfx.context_lost ? NT_VERTEX_INPUT_INVALID : make_mesh_vertex_input(&s_gfx.mesh_table[slot]);
+        *vi = make_mesh_vertex_input(&s_gfx.mesh_table[slot]);
     }
     return *vi;
 }

@@ -99,8 +99,8 @@ static nt_buffer_t make_instance_buffer(void) { return nt_gfx_make_buffer(&(nt_b
 static void init_with_streams(uint32_t count) {
     nt_gfx_end_frame();
     nt_gfx_shutdown();
-    nt_gfx_desc_t desc = NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 4, .max_meshes = 4, .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS,
-                                          .max_render_targets = 4);
+    nt_gfx_desc_t desc = NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = (uint16_t)(8 + count), .max_textures = 4, .max_meshes = 4,
+                                          .max_vertex_inputs = TEST_MAX_VERTEX_INPUTS, .max_render_targets = 4);
     for (uint32_t k = 1; k < count; k++) {
         desc.frame_capacity[NT_GFX_FRAME_VERTEX + k] = 1024;
     }
@@ -424,6 +424,84 @@ void test_deactivate_mesh_cascades_to_vi(void) {
     TEST_ASSERT_TRUE(nt_gfx_vertex_input_valid(vi));
     nt_gfx_deactivate_mesh(handle);
     TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(vi));
+}
+
+/* A one-vertex, one-triangle RAW mesh with `streams` packed in order. */
+static nt_mesh_t activate_test_mesh(const NtStreamDesc *streams, uint8_t stream_count, uint32_t stride) {
+    static uint8_t blob[sizeof(NtMeshAssetHeader) + (8 * sizeof(NtStreamDesc)) + 64 + 6];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = stream_count;
+    hdr->index_type = 1;
+    hdr->vertex_count = 1;
+    hdr->index_count = 3;
+    hdr->vertex_data_size = stride;
+    hdr->index_data_size = 6;
+    memcpy(blob + sizeof(NtMeshAssetHeader), streams, stream_count * sizeof(NtStreamDesc));
+    const uint32_t size = (uint32_t)(sizeof(NtMeshAssetHeader) + (stream_count * sizeof(NtStreamDesc)) + stride + 6);
+    return (nt_mesh_t){nt_gfx_activate_mesh(blob, size)};
+}
+
+/* Each stream type maps to its vertex type at the pack's location, offsets packed in stream order. */
+void test_mesh_vertex_input_maps_every_stream_type(void) {
+    const NtStreamDesc streams[] = {
+        {.name_hash = 1, .type = NT_STREAM_FLOAT32, .count = 3, .location = 5},
+        {.name_hash = 2, .type = NT_STREAM_FLOAT16, .count = 2, .location = 0},
+        {.name_hash = 3, .type = NT_STREAM_INT16, .count = 4, .normalized = 1, .location = 7},
+        {.name_hash = 4, .type = NT_STREAM_UINT16, .count = 2, .normalized = 1, .location = 2},
+        {.name_hash = 5, .type = NT_STREAM_UINT8, .count = 4, .location = 6},
+        {.name_hash = 6, .type = NT_STREAM_INT8, .count = 4, .normalized = 1, .location = 1},
+    };
+    const nt_mesh_t mesh = activate_test_mesh(streams, 6, 36);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, mesh.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_mesh_vertex_input(mesh, frame0()).id);
+    const nt_vertex_layout_t got = nt_gfx_fake_last_vertex_input_layout();
+    const nt_vertex_attr_t want[] = {
+        {.location = 5, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},
+        {.location = 0, .type = NT_VERTEX_HALF, .count = 2, .offset = 12},
+        {.location = 7, .type = NT_VERTEX_INT16, .count = 4, .normalized = true, .offset = 16},
+        {.location = 2, .type = NT_VERTEX_UINT16, .count = 2, .normalized = true, .offset = 24},
+        {.location = 6, .type = NT_VERTEX_UINT8, .count = 4, .offset = 28},
+        {.location = 1, .type = NT_VERTEX_INT8, .count = 4, .normalized = true, .offset = 32},
+    };
+    TEST_ASSERT_EQUAL_UINT8(6, got.attr_count);
+    TEST_ASSERT_EQUAL_UINT16(36, got.stride);
+    for (uint32_t i = 0; i < 6; i++) {
+        TEST_ASSERT_EQUAL_UINT8(want[i].location, got.attrs[i].location);
+        TEST_ASSERT_EQUAL_INT(want[i].type, got.attrs[i].type);
+        TEST_ASSERT_EQUAL_UINT8(want[i].count, got.attrs[i].count);
+        TEST_ASSERT_EQUAL(want[i].normalized, got.attrs[i].normalized);
+        TEST_ASSERT_EQUAL_UINT16(want[i].offset, got.attrs[i].offset);
+    }
+}
+
+/* Every frame vertex stream, the last included, gets its own vertex input; index, uniform and game
+ * buffers share the base one. */
+void test_mesh_vertex_input_per_buffer(void) {
+    init_with_streams(NT_GFX_MAX_VERTEX_STREAMS);
+    const nt_buffer_t last_stream = nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + NT_GFX_MAX_VERTEX_STREAMS - 1);
+    const NtStreamDesc position = {.name_hash = 1, .type = NT_STREAM_FLOAT32, .count = 3, .location = NT_LOC_POSITION};
+    const nt_mesh_t mesh = activate_test_mesh(&position, 1, 12);
+    const nt_vertex_input_t first = nt_gfx_mesh_vertex_input(mesh, frame0());
+    const nt_vertex_input_t last = nt_gfx_mesh_vertex_input(mesh, last_stream);
+    const nt_vertex_input_t base = nt_gfx_mesh_vertex_input(mesh, make_instance_buffer());
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, first.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, last.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, base.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(first.id, last.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(first.id, base.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(last.id, base.id);
+    TEST_ASSERT_EQUAL_UINT32(base.id, nt_gfx_mesh_vertex_input(mesh, make_instance_buffer()).id);
+    TEST_ASSERT_EQUAL_UINT32(base.id, nt_gfx_mesh_vertex_input(mesh, nt_gfx_frame_buffer(NT_GFX_FRAME_INDEX)).id);
+    TEST_ASSERT_EQUAL_UINT32(base.id, nt_gfx_mesh_vertex_input(mesh, nt_gfx_frame_buffer(NT_GFX_FRAME_UNIFORM)).id);
+    TEST_ASSERT_EQUAL_UINT32(last.id, nt_gfx_mesh_vertex_input(mesh, last_stream).id);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_fake_vertex_input_create_count());
+    nt_gfx_deactivate_mesh(mesh.id);
+    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(first));
+    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(last));
+    TEST_ASSERT_FALSE(nt_gfx_vertex_input_valid(base));
 }
 
 /* --- Binding and mirrors --- */
@@ -840,6 +918,8 @@ int main(void) {
     RUN_TEST(test_destroy_ibo_cascades_to_vi);
     RUN_TEST(test_destroy_instance_buffer_keeps_vi);
     RUN_TEST(test_deactivate_mesh_cascades_to_vi);
+    RUN_TEST(test_mesh_vertex_input_maps_every_stream_type);
+    RUN_TEST(test_mesh_vertex_input_per_buffer);
     RUN_TEST(test_bind_vi_reaches_backend);
     RUN_TEST(test_bind_of_a_stale_vi_asserts);
     RUN_TEST(test_bind_pipeline_preserves_bound_vi);

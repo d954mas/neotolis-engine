@@ -206,7 +206,8 @@ with. Shaders that do not include it are unaffected; the engine mesh shaders
 ## Vertex inputs a shader does not declare
 
 A mesh's vertex input enables every stream of the mesh; streams the shader does
-not read cost nothing. An input the shader declares at a location the mesh has
+not read add no GL call per draw, only their enable and pointer when the vertex
+input is made. An input the shader declares at a location the mesh has
 no stream for reads the GL default `(0, 0, 0, 1)`. Nothing checks mesh/shader
 compatibility: the mesh family and its shaders agree on locations by
 construction.

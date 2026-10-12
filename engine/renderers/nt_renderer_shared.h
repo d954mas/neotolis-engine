@@ -148,7 +148,7 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
     if (material.id != d->material.id) {
         d->pipeline = nt_renderer_mesh_pipeline(c, mi);
     }
-    if (mesh.id != d->mesh.id || d->vertex_input.id == 0) {
+    if (mesh.id != d->mesh.id) {
         d->vertex_input = nt_gfx_mesh_vertex_input(mesh, d->instances);
     }
     if (d->pipeline.id == 0 || d->vertex_input.id == 0) {

@@ -492,7 +492,11 @@ it has no failure result, also on a lost context, and an equal layout returns
 the registered handle. The fused instanced bind asserts the instance/vertex
 location overlap and the instance buffer's type and liveness. The returned vertex input is caller-owned and destroyed with
 `nt_gfx_destroy_vertex_input`; it borrows the referenced buffers, whose
-destruction may invalidate it through the documented cascade. The descriptor
+destruction may invalidate it through the documented cascade.
+`nt_gfx_mesh_vertex_input` returns a vertex input gfx owns: it lives until the
+mesh is deactivated or the context is lost, so the caller asks again rather
+than keeping it across either; one the caller destroys is made again on the
+next request. The descriptor
 and label are borrowed only for the call. Creating a pipeline or a vertex input
 preserves both current bindings (the bound pipeline and the bound vertex
 input); the caller does not need to rebind after creating another object.

@@ -161,7 +161,6 @@ enum {
 };
 
 /* Vertex inputs a mesh can own: one per frame vertex stream and one for any other buffer. */
-#define NT_GFX_MESH_VERTEX_INPUTS (NT_GFX_MAX_VERTEX_STREAMS + 1)
 
 /* Vertex attribute component type. With count (1-4) and normalized this spans
  * the vertexAttribPointer space over float/half/byte/short types -- no enum of
@@ -1163,8 +1162,8 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
 /* The vertex input that draws `mesh` with instances from instance_buffer: one per frame vertex
  * stream, so each stream's draws keep their own instance offsets, and one shared by every other
  * buffer. gfx owns it: made on first use with every stream at its NtStreamDesc.location, freed
- * with the mesh or by a context loss. INVALID while the context is lost or on backend failure;
- * a live mesh and buffer are asserted. */
+ * with the mesh or by a context loss. INVALID when it must be made while the context is lost or
+ * the backend fails; a live mesh and buffer are asserted. */
 nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_buffer);
 /* Mesh pool capacity from nt_gfx_desc_t (valid after nt_gfx_init) -- sizes
  * renderer-side per-mesh tables; mesh pool slots index [1..max]. */

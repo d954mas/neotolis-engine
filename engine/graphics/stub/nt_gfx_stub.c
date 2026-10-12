@@ -321,4 +321,10 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh) {
     return NULL;
 }
 
+nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_buffer) {
+    (void)mesh;
+    (void)instance_buffer;
+    return (nt_vertex_input_t){0};
+}
+
 uint16_t nt_gfx_max_meshes(void) { return 0; }

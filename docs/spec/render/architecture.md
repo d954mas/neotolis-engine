@@ -159,8 +159,8 @@ physical GL state the front-end does not name: the program and VAO behind
 different pipelines and vertex inputs, the fixed-function difference between
 pipelines, the texture and sampler halves of a unit across passes, the
 viewport, clear values, the active unit, the `GL_ARRAY_BUFFER` binding, and the
-instance offset each vertex input's VAO last received: a recorded instanced
-bind that repeats its offset issues no `glBindBuffer` or
+instance layout, buffer and offset each vertex input's VAO last received: a
+recorded instanced bind that repeats all three issues no `glBindBuffer` or
 `glVertexAttribPointer` (only the VAO bind, when another VAO is bound), so a
 stream whose layout repeats from frame to frame keeps its pointers.
 
@@ -237,7 +237,7 @@ entirely at the cost of a VAO each. Writes follow queue semantics: a region
 holds one content for the whole frame, so two different contents in one frame
 need two regions. The mesh renderer's core draw takes such a buffer and draws
 it through the mesh's base vertex input (see [Mesh draws](#mesh-draws)); a game
-that draws one mesh from one buffer at many offsets every frame builds its own
+that draws one mesh from several buffers or offsets every frame builds its own
 vertex inputs over the mesh's `vbo`/`ibo` (`nt_gfx_mesh_info_t`), one per offset,
 and draws with `nt_gfx_*` directly.
 
@@ -465,8 +465,9 @@ Every mesh and skinned mesh instance carries the entity's drawable color
 a drawable component. A shader that ignores color does not declare the color
 input; the instance layout still provides it. Instance locations are reserved:
 8–11 for both renderers (world rows, color) and 12–13 for skinned meshes
-(frame origins, alpha). A mesh stream at one of them (a hand-built mesh may use
-any location below 16) asserts at the instanced bind. The engine sets no
+(frame origins, alpha). A mesh stream at a location the bound instance layout
+uses (a hand-built mesh may use any location below 16) asserts at the
+instanced bind. The engine sets no
 generic (constant) vertex attribute value.
 
 ### Dynamic data lifetime
@@ -596,7 +597,7 @@ call, in the current pass. Each has two entry points:
   instanced draw asserts that the instances lie inside the stream's
   allocations of the frame or the buffer (bounds only: the caller owns the
   stream choice). Game buffers draw through the mesh's base vertex input, so
-  one mesh drawn from one game buffer at several offsets re-points between
+  one mesh drawn from more than one (game buffer, offset) re-points between
   them; a game that does that every frame builds its own per-offset vertex
   inputs over the mesh buffers (see Vertex inputs, Persistent instance data).
   After a context loss the caller recreates and refills its buffer;
@@ -1073,17 +1074,22 @@ zero for an absent attachment, and the size of those textures.
 Shader, program and vertex-input definitions carry result `UNKNOWN`: the frontend
 retains no shader stage or source, program stage pair or vertex-input layout, so
 those fields are absent, not zero. A vertex input created during a recorded frame
-follows its definition with `DEFINITION/ATTRIBUTE` records; its instance
-attribute records name the instance buffer handle. The backend's attribute
-records at capture start name its GL name. A vertex-input definition relates its vertex,
-index and instance buffer handles in `related[0..2]`. The backend defines the
-vertex input's VAO with the GL name of its instance buffer (0 without one) in
-`backend.args[2]` and the instance offset its pointers hold in `args[3]` (0
-from creation). An upload that
+follows its definition with `DEFINITION/ATTRIBUTE` records for its per-vertex
+attributes (divisor 0, naming the vertex buffer handle). A vertex-input
+definition relates its vertex and index buffer handles in `related[0..1]`. An
+instance layout (`NT_GFX_OBJECT_INSTANCE_LAYOUT`) is defined at registration
+and in the initial state: `backend` is its handle, `size` its stride and
+`flags` its location mask, followed by its attribute records (divisor 1, buffer
+0). The backend defines the vertex input's VAO with its GL name in
+`backend.args[1]` and the instance binding its pointers hold: the instance
+buffer's GL name in `args[2]` (0 without one), the offset in `args[3]`, the
+layout slot in `args[4]` and the enabled instance locations in `args[5]` (all
+0 from creation); at capture start that layout's attribute records follow,
+with layout-relative offsets and result `UNKNOWN`. An upload that
 finds its buffer already bound to `GL_ARRAY_BUFFER` records a `SKIP` of
-`glBindBuffer`. Instance attribute definitions
-stay one set per vertex input. Both bind forms are `NT_GFX_OP_VERTEX_INPUT`;
-the instanced one carries the offset in `binding.offset`.
+`glBindBuffer`. Both bind forms are `NT_GFX_OP_VERTEX_INPUT`; the instanced
+one carries the instance buffer in `binding.secondary`, the layout in
+`binding.slot` and the offset in `binding.offset`.
 Restore defines no resource. Primary resources survive a loss as husks and get
 no fresh definition; pipelines, vertex inputs and render targets that the first
 detection frees get no DESTROY record. Samplers are re-defined when lazily recreated. Definitions
@@ -1118,8 +1124,8 @@ record uses the program backend slot and backend enums, and the frontend
 pipeline definition carries the program handle in `related[0]`. Backend
 `DEFINITION/PIPELINE` and `DEFINITION/ATTRIBUTE` records carry the pipeline or
 vertex-input backend slot in `detail`; initial state uses the current raw
-program name. Vertex-input creation copies each static/instance attribute with
-its divisor, layout, and known buffer. The initial SCISSOR record holds the
+program name. Vertex-input creation copies each per-vertex attribute with its
+layout and buffer; instance attributes belong to the instance layout. The initial SCISSOR record holds the
 carried-over rectangle; it is `UNKNOWN` before the first set and after a
 context loss. Uniform-block bindings are not recorded: each block lives one frame. A bind inside the capture that
 ends `CACHE` matches this state or one set earlier in the frame. Inherited

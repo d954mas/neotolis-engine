@@ -110,8 +110,8 @@ engine instance head starts at 8. Different meshes may number the same name
 differently; one mesh has one numbering. Activation checks structure only:
 every location below `NT_GFX_MAX_VERTEX_ATTRS` and unique within the mesh.
 gfx makes the mesh's vertex inputs with every stream at its `location`
-(`nt_gfx_mesh_vertex_input`); a stream on an instance-head location asserts at
-the instanced bind.
+(`nt_gfx_mesh_vertex_input`); a stream at a location the bound instance layout
+uses asserts at the instanced bind.
 
 **Canonicalization.** The meshopt codec preserves triangles up to rotation of
 each triple (same winding, same rasterization). The builder therefore encodes,
