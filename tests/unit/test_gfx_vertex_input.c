@@ -224,8 +224,10 @@ void test_instanced_bind_asserts_on_caller_errors(void) {
     bind_inst(other, frame0(), 16);
     nt_gfx_end_pass();
     begin_test_pass();
-    /* No buffer counts as bound at pass start, so a zero handle is validated, not skipped. */
+    /* No buffer counts as bound at pass start: a zero or garbage handle is validated, not skipped. */
     EXPECT_ASSERT(bind_inst(other, (nt_buffer_t){0}, 0));
+    TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale instance buffer"));
+    EXPECT_ASSERT(bind_inst(other, (nt_buffer_t){UINT32_MAX}, 0));
     TEST_ASSERT_NOT_NULL(strstr(s_last_assert_expr, "invalid or stale instance buffer"));
     nt_gfx_bind_vertex_input(make_vi(vbo, (nt_buffer_t){0}));
     EXPECT_ASSERT(nt_gfx_bind_vertex_input_instanced(vi, NT_INSTANCE_LAYOUT_INVALID, frame0(), 16));
