@@ -453,7 +453,7 @@ type above it (recoverable pack validation; a mounted type without a registered
 activator still asserts). `NT_RESOURCE_MAX_ASSET_TYPES`
 (`engine/resource/nt_resource_internal.h`) is 12 and a `_Static_assert` there
 keeps it above `NT_ASSET_LAST`. The three skeletal formats are specified in
-[Skeletal animation §16](../skeletal/skeletal-animation.md).
+[Skeletal animation, Builder, codec, wire formats](../skeletal/skeletal-animation.md#builder-codec-wire-formats).
 
 Additional types (material, audio) will be added as needed.
 

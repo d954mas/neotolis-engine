@@ -1,8 +1,8 @@
 # Measuring performance on phones
 
-Rules for comparing two engine or game builds on a mobile device. They come from
-the dynamic-upload study (#351, epic #589) on the reference phone, where a naive
-A/B reported an 11% regression that was the GPU clock governor, not the engine.
+Rules for comparing two engine or game builds on a mobile device. On the
+reference phone a naive A/B can report an 11% regression that is the GPU clock
+governor, not the engine.
 
 Reference device: Huawei P40 ANA-NX9 (Kirin 990, Mali-G76 MP16, 600 MHz max,
 Android 10), Chromium 156 (`org.chromium.chrome`), not rooted.
@@ -26,7 +26,7 @@ Android 10), Chromium 156 (`org.chromium.chrome`), not rooted.
 - **A frame locked to the vsync step hides the clock.** On a hot phone with vsync
   on, a frame that misses 60 Hz settles at two intervals (~30-32 FPS, p50 at
   33 ms); FPS then stays put while the governor moves the clock, so FPS per MHz
-  reads the governor (#593: equal FPS, ~5% clock difference between windows).
+  reads the governor (measured: equal FPS, ~5% clock difference between windows).
   Compare GPU work at equal clock in vsync-off windows, and treat FPS per MHz only
   from windows that are GPU-bound and not locked.
 - p95 under vsync is quantized to the refresh interval (16.6 / 33.2 ms here) and
@@ -51,7 +51,7 @@ Android 10), Chromium 156 (`org.chromium.chrome`), not rooted.
 - Chrome's GPU-process main thread (`CrGpuMain`: command-buffer decode and the
   driver calls) is a **CPU** thread on the phone's cores, not GPU time. Fewer GL
   calls shorten it and its long flushes, which line up with dropped frames; they
-  change FPS only when that thread, not the GPU, limits the frame (#593: -24% on
+  change FPS only when that thread, not the GPU, limits the frame (measured: -24% on
   it with FPS per MHz unchanged on a fragment-bound frame).
 - Measure thread times in separate traced windows: tracing perturbs the clean
   FPS and clock windows.
@@ -64,10 +64,10 @@ Android 10), Chromium 156 (`org.chromium.chrome`), not rooted.
 ## Micro-benchmarks
 
 - A micro-benchmark with an idle GPU (clock at its 166 MHz floor) can invert a
-  result: ring appends looked 3x slower than per-frame uploads there and faster
+  result: ring appends measure 3x slower than per-frame uploads there and faster
   under GPU load. Give the benchmark GPU work matching
   the target scene, and **confirm every win in the real game** before designing
-  on it (see also #587).
+  on it.
 - Vsync caps the page at the display rate (60 Hz here), which hides any arm that
   stays above it. Chromium 156 reads
   `/data/local/tmp/chrome-command-line`; the line

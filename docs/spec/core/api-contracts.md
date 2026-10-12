@@ -242,7 +242,7 @@ backend units, validates coverage, and publishes only the full valid set. A
 rejected set discards the logical binding state, so a draw cannot reuse the
 previous material's textures.
 
-Sprite and text retain legacy exceptions until #600. A sprite material that
+Sprite and text retain legacy exceptions until the material bind group (planned, #600). A sprite material that
 samples the atlas declares its page sampler at slot 0, but the renderer
 substitutes the page resource per emit and run; a material declaring no textures
 never receives the page and is for analytical coverage. A text material declares

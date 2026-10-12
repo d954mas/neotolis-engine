@@ -51,7 +51,7 @@ A material carries at most `NT_MATERIAL_MAX_TEXTURES` (4) slots, including
 renderer-supplied declarations, so a material-driven program may sample at most
 4 of the 8 units a program can link.
 
-Sprite and text keep two legacy renderer-specific exceptions until #600. Sprite
+Sprite and text keep two legacy renderer-specific exceptions until the material bind group (planned, #600). Sprite
 declares its atlas-page sampler in slot 0 but substitutes the page resource per
 emit and run. Text declares no material textures and supplies its font samplers
 outside the material declaration. New specialized renderers follow the declared
@@ -166,7 +166,7 @@ records the params current at the call. Slot 0 of a sprite material is the atlas
 page: the renderer substitutes the page of each emit, and of each `draw_list`
 run's first item, so the declared slot-0 resource is never resolved. A text material declares no textures, so the text renderer resolves no
 material textures; it binds the font's own textures. These sprite/text legacy
-exceptions end with the material bind group (#600). There is no material step.
+exceptions end with the material bind group (planned, #600). There is no material step.
 
 Between `nt_resource_init` and `nt_resource_shutdown`, the published view of a
 handle changes only inside `nt_resource_step`. `nt_resource_shutdown` unpublishes
