@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* One GPU instance (locations 10-12 world rows, 14 origins, 15 alpha, 13 color);
+/* One GPU instance (NT_INST_LOC_* world rows 8-10, color 11, skin origins 12, skin alpha 13);
  * the instance buffer stride is its size. */
 typedef struct {
     float world_rows[3][4];

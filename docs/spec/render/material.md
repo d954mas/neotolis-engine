@@ -136,6 +136,13 @@ Per-entity variation (e.g. per-character color, dissolve progress) goes through 
 
 Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. Renderers read params when they record a draw (the sprite renderer compares them with the values it last wrote to the program), so a write needs no bookkeeping beyond the store. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
 
+## Attr map
+
+`attr_map` names custom per-vertex attributes of the sprite path (UI widgets,
+sprite custom-attr blocks). Mesh and skinned mesh draws ignore it: a mesh feeds
+every stream at the location its pack carries ([shader](shader.md), Attribute
+locations), so a mesh material declares no `attr_map`.
+
 ## Attr defaults
 
 `has_attr_defaults` opts a material into per-attr defaults:

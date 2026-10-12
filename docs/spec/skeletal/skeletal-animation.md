@@ -250,8 +250,8 @@ A binding is valid until the context's next `begin_frame` or graphics invalidati
 render items in the given order; through entity it reads
 mesh/material/world/color and `skin_comp`, packs each run's instances into frame
 vertex stream `stream` and records its draw. `nt_skinned_mesh_renderer_draw(mesh, material,
-deformation, stream, offset, count)` draws instances the caller packed, with no entity
-component ([Mesh draws](../render/architecture.md#mesh-draws)). No sampling, FK,
+deformation, buffer, offset, count)` draws instances the caller packed into a frame stream's
+or its own buffer, with no entity component ([Mesh draws](../render/architecture.md#mesh-draws)). No sampling, FK,
 mode selection, culling or sorting.
 
 **One skinning vertex program per pass, always two frames.** The shader fetches
@@ -262,11 +262,12 @@ validator: every material submitted here implements the documented shader ABI.
 `assets/shaders/common/skin.glsl` declares the skin, world and color inputs and
 owns the shared fetch, blend and guarded-vector functions. Skinned vertex
 shaders include it instead of the static renderer's `common/instance.glsl`;
-the material maps the mesh's joints and weights streams to the locations
-declared there. The common shader and renderer implementation own their numeric
-attribute locations and instance offsets, which are not specification ABI.
-`joints`/`weights` reach the program through the material `attr_map` like every
-other stream. Unmapped streams are skipped, so a skinned MESH still draws
+it reads `joints`/`weights` at `NT_LOC_JOINTS`/`NT_LOC_WEIGHTS` (6/7, the
+builder's default slots for those streams) and the instance head at
+`NT_INST_LOC_*` from `nt/locations.glsl` ([shader](../render/shader.md)), and
+the mesh's vertex input feeds every stream at its pack location; no material
+maps them. The instance offsets stay the renderer's implementation. A shader
+that does not read the skin streams ignores them, so a skinned MESH still draws
 through `nt_mesh_renderer`. The program's non-sampler uniforms must fit the
 backend's 16-entry cache. #487 measures always-lerp against a single-fetch
 variant; a second program appears only if that number justifies it.

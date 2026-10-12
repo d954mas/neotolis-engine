@@ -22,7 +22,7 @@ static inline uint32_t nt_mesh_renderer_batch_key(nt_material_t material, nt_mes
     return (material_slot << NT_POOL_SLOT_SHIFT) | mesh_slot;
 }
 
-/* One GPU instance (locations 4-6 world rows, 7 color); the instance buffer stride is its size. */
+/* One GPU instance (NT_INST_LOC_WORLD_ROW0..2 world rows, NT_INST_LOC_COLOR color); the instance buffer stride is its size. */
 typedef struct {
     float world_rows[3][4];
     uint32_t color; /* RGBA8 0xAABBGGRR (nt_color_pack) */

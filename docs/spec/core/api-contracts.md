@@ -484,10 +484,13 @@ NULL descriptor, an unready program, and an exhausted pipeline pool assert, so a
 pipeline handle means a lost context or a failed backend allocation — the two
 recoverable outcomes, both retried on a later frame.
 `nt_gfx_make_vertex_input` applies the same contract to the layout checks: an
-attribute count over `NT_GFX_MAX_VERTEX_ATTRS` (instance layouts over
-`NT_GFX_MAX_INSTANCE_ATTRS`), a stride over the WebGL2 cap of 255, misaligned
-or duplicated attributes, mismatched buffers, and an exhausted pool all
-assert. The returned vertex input is caller-owned and destroyed with
+attribute count over `NT_GFX_MAX_VERTEX_ATTRS`, a stride over the WebGL2 cap of
+255, misaligned or duplicated attributes, mismatched buffers, and an exhausted
+pool all assert. `nt_gfx_make_instance_layout` asserts the same layout rules
+(1..`NT_GFX_MAX_INSTANCE_ATTRS` attributes, stride 1..255) and a full registry;
+it has no failure result, also on a lost context, and an equal layout returns
+the registered handle. The fused instanced bind asserts the instance/vertex
+location overlap and the instance buffer's type and liveness. The returned vertex input is caller-owned and destroyed with
 `nt_gfx_destroy_vertex_input`; it borrows the referenced buffers, whose
 destruction may invalidate it through the documented cascade. The descriptor
 and label are borrowed only for the call. Creating a pipeline or a vertex input

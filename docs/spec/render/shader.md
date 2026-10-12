@@ -184,18 +184,32 @@ typedef struct ShaderAsset {
 
 ## Attribute locations
 
-A shader may `#include "nt/locations.glsl"`. The builder resolves this include from
-C (`shared/include/nt_vertex_locations.h`), not from a file. It expands at every
-include under its own `#ifndef` guard, so repeated or conditional includes are safe.
-It holds only `#define` constants, never attribute declarations. `NT_LOC_*` are the
-default mesh stream locations (`NT_LOC_POSITION` 0 ... `NT_LOC_WEIGHTS` 7). A shader that reads a stream at an explicitly
-assigned location writes that number, or its own `#define`, matching the stream
-layout the mesh was built with ([runtime-formats](../assets/runtime-formats.md#mesh-wire-layout-format-v4)).
-Shaders that do not include it are unaffected.
+A mesh feeds each stream at the location the builder wrote into its pack
+([runtime-formats](../assets/runtime-formats.md#mesh-wire-layout-format-v4)), and
+the mesh and skinned renderers feed instances at a fixed instance head, so a mesh
+shader declares its inputs at those locations. A shader may
+`#include "nt/locations.glsl"`. The builder resolves this include from C
+(`shared/include/nt_vertex_locations.h`), not from a file. It expands at every
+include under its own `#ifndef` guard, so repeated or conditional includes are
+safe. It holds only `#define` constants, never attribute declarations:
 
-## Vertex input mask
+- `NT_LOC_*`, the default mesh stream locations: position 0, normal 1, color 2,
+  uv0 3, tangent 4, uv1 5, joints 6, weights 7;
+- `NT_INST_LOC_*`, the instance head: world rows 8-10 and color 11 for both
+  renderers, skin frame origins 12 and skin alpha 13 for skinned meshes.
 
-Possible semantics: POSITION, NORMAL, UV0, COLOR0. Mesh/shader compatibility validated in builder and sanity-checked at runtime.
+A shader that reads a stream at an explicitly assigned location writes that
+number, or its own `#define`, matching the stream layout the mesh was built
+with. Shaders that do not include it are unaffected; the engine mesh shaders
+(`common/instance.glsl`, `common/skin.glsl` and their users) include it.
+
+## Vertex inputs a shader does not declare
+
+A mesh's vertex input enables every stream of the mesh; streams the shader does
+not read cost nothing. An input the shader declares at a location the mesh has
+no stream for reads the GL default `(0, 0, 0, 1)`. Nothing checks mesh/shader
+compatibility: the mesh family and its shaders agree on locations by
+construction.
 
 ## Object params
 
