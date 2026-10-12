@@ -408,7 +408,7 @@ if(NOT EMSCRIPTEN)
 
     add_executable(test_skinned_mesh_renderer_native unit/test_skinned_mesh_renderer_native.c)
     target_link_libraries(test_skinned_mesh_renderer_native PRIVATE
-        nt_skinned_mesh_renderer nt_mesh_renderer nt_render nt_gfx nt_basisu_transcoder_stub
+        nt_skinned_mesh_renderer nt_render nt_gfx nt_basisu_transcoder_stub
         nt_window nt_input_stub nt_entity nt_transform_comp nt_mesh_comp nt_material_comp
         nt_drawable_comp nt_skin_comp nt_material nt_resource nt_hash nt_http_stub nt_fs_stub
         nt_log unity glad nt_meshwire_stub
@@ -588,7 +588,7 @@ if(NOT EMSCRIPTEN)
         nt_material nt_shared nt_atlas nt_skeletal nt_skeletal_assets
         nt_sprite_renderer nt_text_renderer nt_font nt_ui nt_shape_renderer
         nt_render nt_hash nt_mem_scratch nt_entity nt_transform_comp nt_drawable_comp
-        nt_mesh_comp nt_material_comp nt_skin_comp nt_skeletal_gpu nt_mesh_renderer
+        nt_mesh_comp nt_material_comp nt_skin_comp nt_skeletal_gpu
         nt_skinned_mesh_renderer nt_gfx_fake nt_http_stub nt_fs_stub nt_platform
         nt_basisu_transcoder_stub nt_meshwire_stub unity
     )
@@ -1310,7 +1310,7 @@ if(NOT EMSCRIPTEN)
     # --- Skinned mesh renderer tests ---
     add_executable(test_skinned_mesh_renderer unit/test_skinned_mesh_renderer.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_skinned_mesh_renderer PRIVATE
-        nt_skinned_mesh_renderer nt_mesh_renderer nt_render nt_gfx_fake nt_basisu_transcoder_stub
+        nt_skinned_mesh_renderer nt_render nt_gfx_fake nt_basisu_transcoder_stub
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_skin_comp
         nt_material nt_resource nt_hash nt_http_stub nt_fs_stub nt_log unity nt_meshwire_stub
     )

@@ -5,19 +5,22 @@ nt_add_module(nt_shape_renderer LOG_DOMAIN "shape_renderer"
 target_link_libraries(nt_shape_renderer PUBLIC nt_core nt_math nt_gfx_interface)
 # Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 
+# One source, two link-selected variants; a target links exactly one of them.
 nt_add_module(nt_mesh_renderer LOG_DOMAIN "mesh_renderer"
     nt_mesh_renderer.c
     nt_mesh_renderer.h
 )
+target_compile_definitions(nt_mesh_renderer PUBLIC NT_MESH_RENDERER_SKINNED=0)
 target_link_libraries(nt_mesh_renderer PUBLIC
     nt_core nt_render nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_material nt_resource
 )
 # Note: nt_gfx linkage provided by consumer (game links nt_gfx, tests link nt_gfx_fake)
 
-nt_add_module(nt_skinned_mesh_renderer LOG_DOMAIN "skinned_mesh_renderer"
-    nt_skinned_mesh_renderer.c
-    nt_skinned_mesh_renderer.h
+nt_add_module(nt_skinned_mesh_renderer LOG_DOMAIN "mesh_renderer"
+    nt_mesh_renderer.c
+    nt_mesh_renderer.h
 )
+target_compile_definitions(nt_skinned_mesh_renderer PUBLIC NT_MESH_RENDERER_SKINNED=1)
 target_link_libraries(nt_skinned_mesh_renderer PUBLIC
     nt_core nt_render nt_entity nt_transform_comp nt_mesh_comp nt_material_comp
     nt_drawable_comp nt_material nt_resource nt_skin_comp

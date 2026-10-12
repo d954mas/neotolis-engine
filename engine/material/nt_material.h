@@ -65,7 +65,7 @@ typedef struct {
     uint8_t texture_count;
     nt_material_param_desc_t params[NT_MATERIAL_MAX_PARAMS];
     uint8_t param_count;
-    /* Sprite path only: a mesh feeds every stream at its pack location, so the mesh renderers
+    /* Sprite path only: a mesh feeds every stream at its pack location, so the mesh renderer
      * assert that a mesh material has none. */
     nt_material_attr_desc_t attr_map[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_count;

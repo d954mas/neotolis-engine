@@ -648,8 +648,7 @@ int main(int argc, char **argv) {
     nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 256});
 
     /* 10. Mesh renderer init */
-    nt_mesh_renderer_desc_t mr_desc = nt_mesh_renderer_desc_defaults();
-    nt_mesh_renderer_init(&mr_desc);
+    nt_mesh_renderer_init();
 
     /* 11. Request shader resource handles (6 shaders, 3 permutations) */
     s_programs[SPONZA_SHADER_FULL].vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_VERT, NT_ASSET_SHADER_CODE);

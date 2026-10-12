@@ -45,7 +45,6 @@
 #include "render/nt_render_defs.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "renderers/nt_shape_renderer.h"
-#include "renderers/nt_skinned_mesh_renderer.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -1502,10 +1501,10 @@ static void init_humanoid_meshes(void) {
     }
 }
 
-static nt_material_t make_mesh_material(nt_resource_t texture, bool skinned) {
+static nt_material_t make_mesh_material(nt_resource_t texture) {
     nt_material_create_desc_t desc = {
-        .textures = {{.name = "u_texture", .resource = texture}, {.name = "u_skin_matrices"}},
-        .texture_count = skinned ? 2 : 1,
+        .textures = {{.name = "u_texture", .resource = texture}},
+        .texture_count = 1,
         .blend = nt_blend_opaque(),
         .cull_mode = NT_CULL_NONE,
         .depth_test = true,
@@ -1531,10 +1530,7 @@ static void init_mesh_scene(void) {
     NT_ASSERT(result == NT_OK);
     nt_skeletal_gpu_init(&(nt_skeletal_gpu_desc_t){.width = 3 * SKELETAL_SHOWCASE_MAX_PALETTE, .height = SKELETAL_SHOWCASE_MAX_INSTANCES});
     /* Static meshes are only the CPU reference: one body and one shirt. */
-    result = nt_mesh_renderer_init(&(nt_mesh_renderer_desc_t){.max_pipelines = 8});
-    NT_ASSERT(result == NT_OK);
-    result = nt_skinned_mesh_renderer_init(&(nt_skinned_mesh_renderer_desc_t){.max_pipelines = 8});
-    NT_ASSERT(result == NT_OK);
+    nt_mesh_renderer_init();
     for (uint32_t i = 0; i < SHOWCASE_ENTITY_COUNT; ++i) {
         const nt_entity_t e = nt_entity_create();
         if (i < 2) {
@@ -1586,10 +1582,10 @@ static void init_mesh_scene(void) {
     s_mix_skin_resource = nt_resource_request(ASSET_SKIN_BINDING_SKELETAL_SHOWCASE_KAYKIT_NSKN, NT_ASSET_SKIN_BINDING);
     s_mix_texture_resource = nt_resource_request(ASSET_TEXTURE_SKELETAL_SHOWCASE_KAYKIT_TEXTURE, NT_ASSET_TEXTURE);
     for (uint32_t i = 0; i <= RIG_COUNT; ++i) {
-        s_skin_material[i] = make_mesh_material(s_texture_resource[i], true);
-        s_static_material[i] = make_mesh_material(s_texture_resource[i], false);
+        s_skin_material[i] = make_mesh_material(s_texture_resource[i]);
+        s_static_material[i] = make_mesh_material(s_texture_resource[i]);
     }
-    s_mix_material = make_mesh_material(s_mix_texture_resource, true);
+    s_mix_material = make_mesh_material(s_mix_texture_resource);
     s_skin_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SKINNED_VERT, NT_ASSET_SHADER_CODE);
     s_skin_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
     s_static_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
@@ -1619,7 +1615,6 @@ static void restore_mesh_scene(void) {
 
 #ifndef NT_PLATFORM_WEB
 static void shutdown_mesh_scene(void) {
-    nt_skinned_mesh_renderer_shutdown();
     nt_mesh_renderer_shutdown();
     nt_skeletal_gpu_shutdown();
     for (uint32_t i = 0; i < 3; ++i) {
@@ -2427,7 +2422,7 @@ static void skinned_draw(void) {
     if (s_skinned_frame.cpu) {
         nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, s_skinned_frame.items, s_skinned_frame.count);
     } else {
-        nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, s_skinned_frame.items, s_skinned_frame.count);
+        nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX, s_skinned_frame.items, s_skinned_frame.count);
     }
     if (s_show_bones) {
         draw_skinned_bones();
@@ -2513,7 +2508,7 @@ static void mixing_draw(void) {
         return;
     }
     draw_ground(s_fit_scale);
-    nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, s_mixing_frame.items, s_mixing_frame.count);
+    nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX, s_mixing_frame.items, s_mixing_frame.count);
 }
 
 static bool ordering_ready(void) {
@@ -2572,7 +2567,7 @@ static void ordering_draw(void) {
         }
         const uint32_t draws_before = nt_gfx_draw_calls(&g_nt_gfx.counters);
         const uint64_t instances_before = g_nt_gfx.counters.instances;
-        nt_skinned_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, items, count);
+        nt_mesh_renderer_draw_list_skinned(NT_GFX_FRAME_VERTEX, items, count);
         s_order_stats.draws[pass] = nt_gfx_draw_calls(&g_nt_gfx.counters) - draws_before;
         s_order_stats.instances[pass] = (uint32_t)(g_nt_gfx.counters.instances - instances_before);
         s_order_stats.expected[pass] = s_order_mode == 0 || (pass == 1 && s_order_mode == 2) ? 1U : count;

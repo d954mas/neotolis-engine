@@ -13,7 +13,7 @@
 #define NT_LOC_WEIGHTS 7
 #define NT_LOC_VERTEX_END 8 /* mesh streams use locations below this */
 
-/* Instance head shared by the mesh and skinned renderers; the skinned one adds two. */
+/* Instance head shared by the mesh and skinned instance layouts; the skinned one adds two. */
 #define NT_INST_LOC_WORLD_ROW0 8
 #define NT_INST_LOC_WORLD_ROW1 9
 #define NT_INST_LOC_WORLD_ROW2 10

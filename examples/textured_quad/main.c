@@ -422,8 +422,7 @@ int main(int argc, char *argv[]) {
     nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 64});
 
     /* Init mesh renderer */
-    nt_mesh_renderer_desc_t mr_desc = nt_mesh_renderer_desc_defaults();
-    nt_mesh_renderer_init(&mr_desc);
+    nt_mesh_renderer_init();
 
     /* Request resource handles (instanced shaders) */
     s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
