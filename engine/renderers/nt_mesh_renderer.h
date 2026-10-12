@@ -49,8 +49,6 @@ static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { ret
 /* desc is required, non-NULL and borrowed for the duration of the call. */
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
-/* Retains CPU storage and initialization; drops the pipeline cache. Inactive modules are unchanged. */
-void nt_mesh_renderer_restore_gpu(void);
 
 /* Records one instanced draw in the current pass: count > 0 instances (nt_mesh_instance_t) at
  * byte offset of `instances` (NT_BUFFER_VERTEX): a frame vertex stream's buffer

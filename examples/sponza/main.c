@@ -349,7 +349,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_TEXTURE);
 
         /* Materials keep their handles and draw again once their programs relink. */
-        nt_mesh_renderer_restore_gpu();
         drop_programs(); /* GL objects are gone; this frees the pool slots too */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
     }

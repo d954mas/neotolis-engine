@@ -54,12 +54,6 @@ void nt_mesh_renderer_shutdown(void) {
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
 }
 
-void nt_mesh_renderer_restore_gpu(void) {
-    if (s_mesh_renderer.initialized) {
-        nt_renderer_mesh_caches_reset(&s_mesh_renderer.caches);
-    }
-}
-
 /* ---- Draw ---- */
 
 void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_buffer_t instances, uint32_t offset, uint32_t count) {
@@ -72,7 +66,7 @@ void nt_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_buffer_t i
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "mesh draw references a destroyed material or mesh");
-    nt_renderer_mesh_draw_t draw = nt_renderer_mesh_draw_begin(&s_mesh_renderer.caches, instances);
+    nt_renderer_mesh_draw_t draw = {.instance_layout = s_mesh_renderer.caches.instance_layout, .instances = instances};
     if (nt_renderer_mesh_resolve(&s_mesh_renderer.caches, &draw, material, mat_info, mesh)) {
         nt_renderer_mesh_record(&draw, mat_info, mesh_info, 0, (nt_texture_t){0}, offset, count);
     }
@@ -98,7 +92,7 @@ void nt_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t *items, 
     /* Inline sparse reads, as the sprite emit does: no per-instance accessor call or liveness assert. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
-    nt_renderer_mesh_draw_t draw = nt_renderer_mesh_draw_begin(&s_mesh_renderer.caches, nt_gfx_frame_buffer(stream));
+    nt_renderer_mesh_draw_t draw = {.instance_layout = s_mesh_renderer.caches.instance_layout, .instances = nt_gfx_frame_buffer(stream)};
     for (uint32_t run_start = 0, run_end = 0; run_start < count; run_start = run_end) {
         run_end = find_run_end(items, run_start, count);
         const nt_entity_t leader = {.id = items[run_start].entity};

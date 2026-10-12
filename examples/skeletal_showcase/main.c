@@ -1598,8 +1598,6 @@ static void init_mesh_scene(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void restore_mesh_scene(void) {
-    nt_skinned_mesh_renderer_restore_gpu();
-    nt_mesh_renderer_restore_gpu();
     nt_skeletal_gpu_restore_gpu();
     nt_program_ref_drop(&s_skin_program);
     nt_program_ref_drop(&s_static_program);

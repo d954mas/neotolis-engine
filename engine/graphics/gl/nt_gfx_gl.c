@@ -132,7 +132,6 @@ typedef struct {
     GLuint vao; /* 0 = free slot */
     GLuint instance_buffer;
     uint32_t instance_offset;
-    uint16_t instance_mask;  /* locations the instance layout enabled, divisor 1 */
     uint8_t instance_layout; /* registered layout slot; 0 = none */
 } nt_gfx_gl_vertex_input_t;
 
@@ -320,16 +319,7 @@ void nt_gfx_backend_capture_initial_state(void) {
         }
         const nt_gfx_gl_vertex_input_t *vi = &s_vertex_inputs[i];
         NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_STATE, event->detail = NT_GFX_OBJECT_VERTEX_INPUT; event->data.backend.args[0] = i; event->data.backend.args[1] = vi->vao;
-                      event->data.backend.args[2] = vi->instance_buffer; event->data.backend.args[3] = vi->instance_offset; event->data.backend.args[4] = vi->instance_layout;
-                      event->data.backend.args[5] = vi->instance_mask;);
-        const nt_gfx_gl_instance_layout_t *layout = &s_instance_layouts[vi->instance_layout];
-        for (uint32_t a = 0; vi->instance_layout != 0 && a < layout->attr_count; a++) {
-            const nt_gfx_gl_attr_t *attr = &layout->attrs[a];
-            NT_GFX_RECORD(NT_GFX_EVENT_DEFINITION, NT_GFX_OP_ATTRIBUTE, event->detail = i; event->result = NT_GFX_RESULT_UNKNOWN; event->data.attribute.location = attr->location;
-                          event->data.attribute.type = (uint32_t)attr->type; event->data.attribute.count = attr->count; event->data.attribute.normalized = attr->normalized;
-                          event->data.attribute.offset = attr->offset; event->data.attribute.stride = layout->stride; event->data.attribute.divisor = 1;
-                          event->data.attribute.buffer = vi->instance_buffer;);
-        }
+                      event->data.backend.args[2] = vi->instance_buffer; event->data.backend.args[3] = vi->instance_offset; event->data.backend.args[4] = vi->instance_layout;);
     }
     for (uint32_t i = 1; i <= s_init_desc.max_render_targets; i++) {
         if (s_render_target_gl[i] == 0) {
@@ -1695,7 +1685,6 @@ uint32_t nt_gfx_backend_create_vertex_input(const nt_vertex_input_desc_t *desc, 
 }
 
 void nt_gfx_backend_register_instance_layout(uint32_t slot, const nt_vertex_layout_t *layout) {
-    NT_ASSERT(slot >= 1 && slot <= NT_GFX_MAX_INSTANCE_LAYOUTS && layout->attr_count <= NT_GFX_MAX_INSTANCE_ATTRS);
     nt_gfx_gl_instance_layout_t *dst = &s_instance_layouts[slot];
     *dst = (nt_gfx_gl_instance_layout_t){.stride = layout->stride, .attr_count = layout->attr_count};
     for (uint8_t i = 0; i < layout->attr_count; i++) {
@@ -1737,10 +1726,9 @@ static void detach_instance_buffer(GLuint buf) {
         }
         NT_GL(glBindVertexArray, vi->vao);
         rebound = true;
-        detach_instance_slots(vi->instance_mask);
+        detach_instance_slots(s_instance_layouts[vi->instance_layout].mask);
         vi->instance_buffer = 0;
         vi->instance_offset = 0;
-        vi->instance_mask = 0;
         vi->instance_layout = 0;
     }
     if (rebound) {
@@ -1779,7 +1767,6 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
     if (layout_slot == 0) {
         return;
     }
-    NT_ASSERT(layout_slot <= NT_GFX_MAX_INSTANCE_LAYOUTS && s_instance_layouts[layout_slot].attr_count > 0 && "bind_vertex_input: unregistered instance layout");
     NT_ASSERT(buffer_backend != 0 && buffer_backend <= s_init_desc.max_buffers && s_buffer_gl[buffer_backend] != 0 && "bind_vertex_input: requires a live instance buffer");
     const GLuint buf = s_buffer_gl[buffer_backend];
     /* The tuple this VAO last received: a vertex input bound with one tuple never re-points. */
@@ -1790,15 +1777,15 @@ void nt_gfx_backend_bind_vertex_input(uint32_t backend_handle, uint32_t layout_s
     }
     const nt_gfx_gl_instance_layout_t *layout = &s_instance_layouts[layout_slot];
     if (vi->instance_layout != layout_slot) {
-        detach_instance_slots((uint16_t)(vi->instance_mask & ~layout->mask));
+        const uint16_t enabled = s_instance_layouts[vi->instance_layout].mask;
+        detach_instance_slots((uint16_t)(enabled & ~layout->mask));
         for (uint8_t i = 0; i < layout->attr_count; i++) {
             const uint8_t loc = layout->attrs[i].location;
-            if ((vi->instance_mask & (1U << loc)) == 0) {
+            if ((enabled & (1U << loc)) == 0) {
                 NT_GL(glEnableVertexAttribArray, loc);
                 NT_GL(glVertexAttribDivisor, loc, 1);
             }
         }
-        vi->instance_mask = layout->mask;
         vi->instance_layout = (uint8_t)layout_slot;
     }
     /* Another VAO's replay may have left a foreign ARRAY_BUFFER bound. */

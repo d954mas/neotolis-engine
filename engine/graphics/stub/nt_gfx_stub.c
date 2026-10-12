@@ -326,5 +326,3 @@ nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_
     (void)instance_buffer;
     return (nt_vertex_input_t){0};
 }
-
-uint16_t nt_gfx_max_meshes(void) { return 0; }

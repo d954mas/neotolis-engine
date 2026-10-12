@@ -84,51 +84,17 @@ static nt_mesh_t create_test_mesh(void) {
     return (nt_mesh_t){.id = handle};
 }
 
-/* Two streams (position, normal), non-indexed: for tests that map a subset. */
-static nt_mesh_t create_test_mesh_two_streams(void) {
-    uint32_t vdata_size = 3 * 6 * (uint32_t)sizeof(float);
-    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + (2 * (uint32_t)sizeof(NtStreamDesc)) + vdata_size;
-    uint8_t blob[sizeof(NtMeshAssetHeader) + (2 * sizeof(NtStreamDesc)) + 72];
-    memset(blob, 0, sizeof(blob));
-
-    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
-    hdr->magic = NT_MESH_MAGIC;
-    hdr->version = NT_MESH_VERSION;
-    hdr->stream_count = 2;
-    hdr->index_type = 0;
-    hdr->vertex_count = 3;
-    hdr->index_count = 0;
-    hdr->vertex_data_size = vdata_size;
-    hdr->index_data_size = 0;
-
-    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
-    sd[0].name_hash = nt_hash32_str("position").value;
-    sd[0].type = NT_STREAM_FLOAT32;
-    sd[0].count = 3;
-    sd[0].location = NT_LOC_POSITION;
-    sd[1].name_hash = nt_hash32_str("normal").value;
-    sd[1].type = NT_STREAM_FLOAT32;
-    sd[1].count = 3;
-    sd[1].location = NT_LOC_NORMAL;
-
-    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
-    return (nt_mesh_t){.id = handle};
-}
-
 /* ---- Helper: link a real GFX program, then create a material on it ---- */
 
 static nt_program_t create_test_program(void) { return nt_gfx_fake_make_program(NULL, 0); }
 
 static nt_program_t create_test_tex_program(void) { return nt_gfx_fake_make_program((const char *const[]){"u_tex"}, 1); }
 
-static nt_material_t create_test_material_with_attr(nt_program_t program, const char *stream_name, uint8_t location, nt_blend_state_t blend) {
+static nt_material_t create_test_material_on(nt_program_t program, nt_blend_state_t blend) {
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.program = program;
-    desc.attr_map[0].stream_name = stream_name;
-    desc.attr_map[0].location = location;
-    desc.attr_map_count = 1;
     desc.depth_test = true;
     desc.depth_write = true;
     desc.blend = blend;
@@ -139,9 +105,9 @@ static nt_material_t create_test_material_with_attr(nt_program_t program, const 
     return mat;
 }
 
-static nt_material_t create_test_material(void) { return create_test_material_with_attr(create_test_program(), "position", 0, nt_blend_opaque()); }
+static nt_material_t create_test_material(void) { return create_test_material_on(create_test_program(), nt_blend_opaque()); }
 
-static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) { return create_test_material_with_attr(create_test_program(), "position", 0, blend); }
+static nt_material_t create_test_material_with_blend(nt_blend_state_t blend) { return create_test_material_on(create_test_program(), blend); }
 
 /* Two textures shared by the textured test materials: materials on the same one
  * measure binding deltas, materials on different ones measure slot changes. */
@@ -175,9 +141,6 @@ static nt_material_t create_test_material_on_texture(nt_program_t program, nt_bl
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
     desc.program = program;
-    desc.attr_map[0].stream_name = "position";
-    desc.attr_map[0].location = 0;
-    desc.attr_map_count = 1;
     desc.textures[0].name = "u_tex";
     desc.textures[0].resource = test_texture(tex_index);
     desc.textures[0].sampler = override_sampler;
@@ -326,7 +289,7 @@ void test_draw_list_null_items_asserts_when_nonempty(void) { NT_TEST_EXPECT_ASSE
 
 void test_unready_program_skips_until_a_ready_program_is_assigned(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material_with_attr(NT_PROGRAM_INVALID, "position", 0, nt_blend_opaque());
+    nt_material_t mat = create_test_material_on(NT_PROGRAM_INVALID, nt_blend_opaque());
     nt_entity_t entity = create_test_entity(mesh, mat);
     nt_render_item_t item = {.entity = entity.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
 
@@ -518,25 +481,6 @@ void test_draw_list_skips_a_linking_program_until_its_link_finishes(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
 }
 
-/* Same reset contract as the sprite renderer: a cached pipeline borrows the
- * material's program, so it must not survive into the next epoch. */
-void test_reset_drops_cached_pipelines(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material();
-    nt_entity_t e = create_test_entity(mesh, mat);
-    nt_render_item_t items[1] = {{.sort_key = 0, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)}};
-
-    draw_list(items, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-
-    nt_test_frame_close();
-    nt_mesh_renderer_restore_gpu();
-    nt_test_frame_open();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
-
-    nt_material_set_program(mat, NT_PROGRAM_INVALID);
-}
-
 /* ---- Test 5: 2 items with different materials -> 2 draw calls ---- */
 
 void test_draw_list_different_materials(void) {
@@ -649,9 +593,6 @@ void test_neighbouring_programs_one_cull_step_apart_get_their_own_pipelines(void
 
     nt_material_create_desc_t desc;
     memset(&desc, 0, sizeof(desc));
-    desc.attr_map[0].stream_name = "position";
-    desc.attr_map[0].location = 0;
-    desc.attr_map_count = 1;
     desc.depth_test = true;
     desc.depth_write = true;
     desc.blend = nt_blend_opaque();
@@ -689,8 +630,6 @@ void test_declared_sampler_without_a_resolved_texture_asserts(void) {
     desc.textures[0].name = "u_tex";
     desc.textures[0].resource = nt_resource_request(nt_hash64_str("never_registered"), NT_ASSET_TEXTURE);
     desc.texture_count = 1;
-    desc.attr_map[0].stream_name = "position";
-    desc.attr_map_count = 1;
     desc.label = "unresolved_tex_material";
     nt_material_t mat = nt_material_create(&desc);
 
@@ -726,9 +665,6 @@ void test_texture_published_after_material_create_binds_at_next_draw(void) {
     desc.textures[0].name = "u_tex";
     desc.textures[0].resource = res;
     desc.texture_count = 1;
-    desc.attr_map[0].stream_name = "position";
-    desc.attr_map[0].location = 0;
-    desc.attr_map_count = 1;
     desc.depth_test = true;
     desc.depth_write = true;
     desc.blend = nt_blend_opaque();
@@ -802,8 +738,6 @@ void test_texture_lands_on_the_program_sampler_unit(void) {
     desc.textures[1].name = "u_other";
     desc.textures[1].resource = test_texture(1);
     desc.texture_count = 2;
-    desc.attr_map[0].stream_name = "position";
-    desc.attr_map_count = 1;
     desc.label = "swapped_slot_material";
     nt_material_t mat = nt_material_create(&desc);
 
@@ -898,12 +832,12 @@ void test_mesh_vertex_input_per_stream(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count());
 }
 
-/* Materials do not shape vertex inputs: two materials on different programs and attr_maps draw
- * the mesh through the same vertex input of each stream. */
+/* Materials do not shape vertex inputs: two materials on different programs draw the mesh
+ * through the same vertex input of each stream. */
 void test_materials_share_the_mesh_vertex_input(void) {
     nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat_a = create_test_material_with_attr(create_test_program(), "position", 0, nt_blend_opaque());
-    nt_material_t mat_b = create_test_material_with_attr(create_test_program(), "position", 3, nt_blend_opaque());
+    nt_material_t mat_a = create_test_material_on(create_test_program(), nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_on(create_test_program(), nt_blend_opaque());
     nt_gfx_fake_reset();
     const nt_material_t mats[2] = {mat_a, mat_b};
     for (uint32_t m = 0; m < 2; m++) {
@@ -925,8 +859,8 @@ void test_consecutive_meshes_and_streams_do_not_alias(void) {
     nt_mesh_t meshes[2] = {create_test_mesh(), create_test_mesh()};
     TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(meshes[0].id) + 1U, nt_pool_slot_index(meshes[1].id));
     nt_program_t program = create_test_program();
-    nt_material_t mat = create_test_material_with_attr(program, "position", 0, nt_blend_opaque());
-    nt_material_t moved = create_test_material_with_attr(program, "position", 3, nt_blend_opaque());
+    nt_material_t mat = create_test_material_on(program, nt_blend_opaque());
+    nt_material_t moved = create_test_material_on(program, nt_blend_alpha());
     nt_gfx_fake_reset();
     for (uint32_t round = 0; round < 2; round++) {
         for (uint32_t m = 0; m < 2; m++) {
@@ -945,24 +879,6 @@ void test_consecutive_meshes_and_streams_do_not_alias(void) {
     nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_fake_vertex_input_create_count());
-}
-
-/* restore_gpu drops only pipelines: the mesh keeps its vertex input, and the next draw reads the
- * same stream buffer through it. */
-void test_restore_gpu_keeps_mesh_vertex_inputs(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material();
-    nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
-    nt_gfx_fake_reset();
-    nt_test_frame_next();
-    nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
-    nt_test_frame_close();
-    nt_mesh_renderer_restore_gpu();
-    nt_test_frame_open();
-    nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX + 1, &item, 1);
-    nt_test_frame_next();
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_test_buffer_backend_id(nt_gfx_frame_buffer(NT_GFX_FRAME_VERTEX + 1)), nt_gfx_fake_last_instance_buffer());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
 }
 
 /* ---- Caller-owned instance data ---- */
@@ -1080,6 +996,18 @@ void test_core_draw_failures_record_nothing(void) {
     nt_mesh_renderer_draw(mesh, mat, instances, 0, 1);
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+}
+
+/* Mesh streams feed their pack locations, so a material mapping streams by name is a mistake. */
+void test_mesh_material_with_an_attr_map_asserts(void) {
+    nt_material_create_desc_t desc = {.program = create_test_program(), .attr_map = {{.stream_name = "uv0", .location = 1}}, .attr_map_count = 1, .label = "mapped"};
+    nt_material_t mat = nt_material_create(&desc);
+    nt_mesh_t mesh = create_test_mesh();
+    nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+    nt_test_frame_next();
+    NT_TEST_EXPECT_ASSERT(nt_mesh_renderer_draw_list(NT_GFX_FRAME_VERTEX, &item, 1));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "attr_map is sprite-only"));
+    nt_test_frame_next();
 }
 
 /* An unsized stream has no buffer to draw from: the list names the missing instance buffer. */
@@ -1453,8 +1381,8 @@ void test_pipeline_cache_skips_failed_pipeline(void) {
 void test_pipeline_cache_shared_program_collapses(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_program_t shared = create_test_program();
-    nt_material_t mat_a = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
-    nt_material_t mat_b = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
+    nt_material_t mat_a = create_test_material_on(shared, nt_blend_opaque());
+    nt_material_t mat_b = create_test_material_on(shared, nt_blend_opaque());
     nt_entity_t e0 = create_test_entity(mesh, mat_a);
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
     nt_render_item_t items[2] = {
@@ -1533,63 +1461,6 @@ void test_draw_list_asserts_on_an_item_without_transform(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
 }
 
-/* Materials that once derived four vertex-input layouts from one mesh (each attr_map lane one
- * step apart) now share the mesh's single vertex input and one pipeline. */
-void test_attr_map_changes_never_split_the_mesh_vertex_input(void) {
-    nt_mesh_t mesh = create_test_mesh_two_streams();
-    nt_program_t shared = create_test_program();
-    nt_material_t mats[4];
-    mats[0] = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
-    mats[1] = create_test_material_with_attr(shared, "position", 1, nt_blend_opaque());
-    mats[2] = create_test_material_with_attr(shared, "normal", 0, nt_blend_opaque());
-
-    nt_material_create_desc_t desc;
-    memset(&desc, 0, sizeof(desc));
-    desc.program = shared;
-    desc.attr_map[0].stream_name = "position";
-    desc.attr_map[0].location = 0;
-    desc.attr_map[1].stream_name = "normal";
-    desc.attr_map[1].location = 1;
-    desc.attr_map_count = 2;
-    desc.depth_test = true;
-    desc.depth_write = true;
-    desc.blend = nt_blend_opaque();
-    desc.cull_mode = NT_CULL_BACK;
-    mats[3] = nt_material_create(&desc);
-
-    nt_render_item_t items[4];
-    for (uint32_t i = 0; i < 4; i++) {
-        nt_entity_t e = create_test_entity(mesh, mats[i]);
-        items[i] = (nt_render_item_t){.sort_key = i, .entity = e.id, .batch_key = nt_mesh_renderer_batch_key(mats[i], mesh)};
-    }
-
-    nt_gfx_fake_reset();
-    draw_list(items, 4);
-
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
-}
-
-/* Equal program/state share a pipeline, and distinct attr_maps share the mesh's vertex input. */
-void test_pipeline_cache_different_material_attr_maps(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_program_t shared = create_test_program();
-    nt_material_t mat_a = create_test_material_with_attr(shared, "position", 0, nt_blend_opaque());
-    nt_material_t mat_b = create_test_material_with_attr(shared, "position", 1, nt_blend_opaque());
-    nt_entity_t e0 = create_test_entity(mesh, mat_a);
-    nt_entity_t e1 = create_test_entity(mesh, mat_b);
-    nt_render_item_t items[2] = {
-        {.sort_key = 0, .entity = e0.id, .batch_key = nt_mesh_renderer_batch_key(mat_a, mesh)},
-        {.sort_key = 1, .entity = e1.id, .batch_key = nt_mesh_renderer_batch_key(mat_b, mesh)},
-    };
-
-    nt_gfx_fake_reset();
-    draw_list(items, 2);
-
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_fake_vertex_input_create_count());
-}
-
 /* ---- Mesh vertex inputs: reuse, identity ---- */
 
 void test_vertex_input_reused_across_draw_list_calls(void) {
@@ -1650,50 +1521,6 @@ void test_vertex_input_survives_mesh_slot_reuse(void) {
     draw_list(items, 1);
     TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_vertex_input_create_count()); /* fresh vi, not the stale one */
-}
-
-/* ---- Test 9: restore_gpu clears cache and subsequent draw still works ---- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_restore_gpu(void) {
-    nt_mesh_t mesh = create_test_mesh();
-    nt_material_t mat = create_test_material();
-    nt_entity_t e = create_test_entity(mesh, mat);
-
-    nt_render_item_t items[1];
-    items[0].sort_key = 0;
-    items[0].entity = e.id;
-    items[0].batch_key = nt_mesh_renderer_batch_key(mat, mesh);
-
-    /* Draw to populate cache */
-    draw_list(items, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-
-    /* Restore GPU context */
-    nt_test_frame_close();
-    nt_mesh_renderer_restore_gpu();
-    nt_test_frame_open();
-    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_renderer_test_pipeline_cache_count());
-
-    /* Subsequent draw should still work (rebuilds cache lazily) */
-    draw_list(items, 1);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_pipeline_cache_count());
-    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
-}
-
-/* ---- Test 10: stream -> vertex type mapping is total over all stream types ---- */
-
-/* The restore contract is "every ACTIVE renderer": a game restores all
- * renderers unconditionally, including ones it never initialized. */
-void test_restore_on_inactive_renderer_does_nothing(void) {
-    nt_test_frame_close();
-    nt_mesh_renderer_shutdown();
-    TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
-
-    nt_mesh_renderer_restore_gpu();
-
-    TEST_ASSERT_FALSE(nt_mesh_renderer_test_initialized());
-    nt_test_frame_open();
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1847,7 +1674,7 @@ void test_draw_list_of_a_mesh_in_a_reused_slot_destroys_nothing(void) {
 void test_lists_read_bindings_at_the_call(void) {
     nt_mesh_t mesh = create_test_mesh();
     nt_material_t plain = create_test_material();
-    nt_material_t relocated = create_test_material_with_attr(create_test_program(), "position", 1, nt_blend_opaque());
+    nt_material_t relocated = create_test_material_on(create_test_program(), nt_blend_opaque());
     nt_entity_t e = create_test_entity(mesh, plain);
     nt_render_item_t item = {.entity = e.id, .batch_key = nt_mesh_renderer_batch_key(plain, mesh)};
 
@@ -1963,7 +1790,6 @@ int main(void) {
     RUN_TEST(test_draw_list_skips_a_not_ready_run_without_packing_it);
     RUN_TEST(test_draw_list_skips_a_run_whose_program_was_destroyed);
     RUN_TEST(test_draw_list_skips_a_linking_program_until_its_link_finishes);
-    RUN_TEST(test_reset_drops_cached_pipelines);
     RUN_TEST(test_draw_list_different_materials);
     RUN_TEST(test_draw_list_alternating_materials);
     RUN_TEST(test_pipeline_cache_reuse);
@@ -1972,7 +1798,6 @@ int main(void) {
     RUN_TEST(test_runs_of_one_list_pack_each_entity_world_and_color);
     RUN_TEST(test_draw_list_asserts_on_an_item_without_drawable);
     RUN_TEST(test_draw_list_asserts_on_an_item_without_transform);
-    RUN_TEST(test_attr_map_changes_never_split_the_mesh_vertex_input);
     RUN_TEST(test_declared_sampler_without_a_resolved_texture_asserts);
     RUN_TEST(test_texture_published_after_material_create_binds_at_next_draw);
     RUN_TEST(test_declared_sampler_unknown_to_the_program_is_ignored);
@@ -1991,12 +1816,9 @@ int main(void) {
     RUN_TEST(test_state_same_tex_same_sampler_diff_params);
     RUN_TEST(test_pipeline_cache_skips_failed_pipeline);
     RUN_TEST(test_pipeline_cache_shared_program_collapses);
-    RUN_TEST(test_pipeline_cache_different_material_attr_maps);
     RUN_TEST(test_vertex_input_reused_across_draw_list_calls);
     RUN_TEST(test_vertex_input_distinct_per_mesh);
     RUN_TEST(test_vertex_input_survives_mesh_slot_reuse);
-    RUN_TEST(test_restore_gpu);
-    RUN_TEST(test_restore_on_inactive_renderer_does_nothing);
     /* Stream format mapping */
     RUN_TEST(test_vertex_type_sizes);
 
@@ -2016,12 +1838,12 @@ int main(void) {
     RUN_TEST(test_mesh_vertex_input_per_stream);
     RUN_TEST(test_materials_share_the_mesh_vertex_input);
     RUN_TEST(test_consecutive_meshes_and_streams_do_not_alias);
-    RUN_TEST(test_restore_gpu_keeps_mesh_vertex_inputs);
     RUN_TEST(test_core_draw_from_a_game_buffer);
     RUN_TEST(test_core_draw_asserts_past_its_game_buffer);
     RUN_TEST(test_game_buffers_share_the_base_vertex_input);
     RUN_TEST(test_core_draw_failures_record_nothing);
     RUN_TEST(test_draw_from_an_unsized_stream_asserts);
+    RUN_TEST(test_mesh_material_with_an_attr_map_asserts);
     RUN_TEST(test_real_restore_rebinds_new_stream_and_owned_buffers);
     RUN_TEST(test_core_draw_asserts_on_instances_outside_the_stream);
     return UNITY_END();

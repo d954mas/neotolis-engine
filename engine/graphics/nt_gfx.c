@@ -1184,11 +1184,6 @@ nt_instance_layout_t nt_gfx_make_instance_layout(const nt_vertex_layout_t *layou
     return result;
 }
 
-static uint32_t instance_layout_slot(nt_instance_layout_t layout) {
-    NT_ASSERT(layout.id >= 1 && layout.id <= s_gfx.instance_layout_count && "invalid instance layout");
-    return layout.id;
-}
-
 static nt_gfx_result_t make_buffer(const nt_buffer_desc_t *desc, nt_buffer_t *out) {
     if (!desc) {
         return NT_GFX_RESULT_INVALID_ARGUMENT;
@@ -1748,7 +1743,8 @@ static nt_gfx_result_t bind_vertex_input_instanced(nt_vertex_input_t vi, nt_inst
         return NT_GFX_RESULT_CACHE;
     }
     const uint32_t slot = same_vi ? nt_pool_slot_index(vi.id) : publish_vertex_input(vi);
-    const uint32_t layout_slot = instance_layout_slot(layout);
+    const uint32_t layout_slot = layout.id;
+    NT_ASSERT(layout_slot >= 1 && layout_slot <= s_gfx.instance_layout_count && "invalid instance layout");
     NT_ASSERT((s_gfx.instance_layouts[layout_slot].mask & s_gfx.vertex_input_metas[slot].vertex_mask) == 0 && "bind_vertex_input_instanced: instance and vertex attribs share a location");
     const uint32_t buffer_slot = nt_pool_slot_index(instance_buffer.id);
     /* Runs of vertex inputs drawn from one buffer validate it once per pass. */
@@ -3013,8 +3009,6 @@ void nt_gfx_deactivate_shader(uint32_t handle) {
 }
 
 /* ---- Mesh info query ---- */
-
-uint16_t nt_gfx_max_meshes(void) { return s_gfx.mesh_pool.capacity; }
 
 const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh) {
     if (!nt_pool_valid(&s_gfx.mesh_pool, mesh.id)) {

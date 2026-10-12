@@ -32,9 +32,6 @@ static inline nt_skinned_mesh_renderer_desc_t nt_skinned_mesh_renderer_desc_defa
 nt_result_t nt_skinned_mesh_renderer_init(const nt_skinned_mesh_renderer_desc_t *desc);
 void nt_skinned_mesh_renderer_shutdown(void);
 
-/* Retains CPU storage and initialization; drops the pipeline cache. Inactive modules are unchanged. */
-void nt_skinned_mesh_renderer_restore_gpu(void);
-
 /* nt_mesh_renderer_draw for skinned instances (nt_skinned_mesh_instance_t). The material uses
  * common/skin.glsl and declares u_skin_matrices, which deformation replaces. Call after
  * nt_skeletal_gpu_flush: a texture write precedes the draws that sample it (render/architecture.md,

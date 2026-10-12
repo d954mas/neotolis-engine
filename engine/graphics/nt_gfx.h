@@ -160,8 +160,6 @@ enum {
     NT_GFX_FRAME_STREAM_COUNT = NT_GFX_FRAME_VERTEX + NT_GFX_MAX_VERTEX_STREAMS,
 };
 
-/* Vertex inputs a mesh can own: one per frame vertex stream and one for any other buffer. */
-
 /* Vertex attribute component type. With count (1-4) and normalized this spans
  * the vertexAttribPointer space over float/half/byte/short types -- no enum of
  * allowed combinations. (No int32 or 2_10_10_2 packed types.) */
@@ -1165,9 +1163,6 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
  * with the mesh or by a context loss. INVALID when it must be made while the context is lost or
  * the backend fails; a live mesh and buffer are asserted. */
 nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_buffer);
-/* Mesh pool capacity from nt_gfx_desc_t (valid after nt_gfx_init) -- sizes
- * renderer-side per-mesh tables; mesh pool slots index [1..max]. */
-uint16_t nt_gfx_max_meshes(void);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

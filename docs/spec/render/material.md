@@ -139,9 +139,10 @@ Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at run
 ## Attr map
 
 `attr_map` names custom per-vertex attributes of the sprite path (UI widgets,
-sprite custom-attr blocks). Mesh and skinned mesh draws ignore it: a mesh feeds
-every stream at the location its pack carries ([shader](shader.md), Attribute
-locations), so a mesh material declares no `attr_map`.
+sprite custom-attr blocks). A mesh feeds every stream at the location its pack
+carries ([shader](shader.md), Attribute locations), so a mesh or skinned mesh
+material declares no `attr_map`; the mesh renderers assert it when a run
+changes material.
 
 ## Attr defaults
 

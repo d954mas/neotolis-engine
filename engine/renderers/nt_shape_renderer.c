@@ -835,6 +835,8 @@ static void make_stream_vertex_inputs(uint32_t stream) {
         s_shape.gpu.line_vi[k] = nt_gfx_make_vertex_input(
             &(nt_vertex_input_desc_t){.layout = k_line_template_layout, .vertex_buffer = s_shape.gpu.line_vbo, .index_buffer = s_shape.gpu.line_ibo, .label = "shape_line_vi"});
     }
+    /* Same buffers as line_vi, but its own VAO: one shared by two instance layouts would switch
+     * layouts on every flush. */
     if (!nt_gfx_vertex_input_valid(s_shape.gpu.stroke_vi[k])) {
         s_shape.gpu.stroke_vi[k] = nt_gfx_make_vertex_input(
             &(nt_vertex_input_desc_t){.layout = k_line_template_layout, .vertex_buffer = s_shape.gpu.line_vbo, .index_buffer = s_shape.gpu.line_ibo, .label = "shape_stroke_vi"});

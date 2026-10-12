@@ -98,22 +98,16 @@ static inline nt_result_t nt_renderer_mesh_caches_init(nt_renderer_mesh_caches_t
     return NT_OK;
 }
 
-static inline void nt_renderer_mesh_caches_reset(nt_renderer_mesh_caches_t *c) {
+static inline void nt_renderer_mesh_caches_shutdown(nt_renderer_mesh_caches_t *c) {
     for (uint16_t i = 0; i < c->pipeline_count; i++) {
         nt_gfx_destroy_pipeline(c->pipelines[i].pipeline);
     }
-    c->pipeline_count = 0;
-}
-
-static inline void nt_renderer_mesh_caches_shutdown(nt_renderer_mesh_caches_t *c) {
-    nt_renderer_mesh_caches_reset(c);
     free(c->pipelines);
     c->pipelines = NULL;
 }
 
 /* One mesh draw call (a core draw or one draw_list): the instance buffer it draws from, the last
- * resolved run and the material state it applied. Start it with nt_renderer_mesh_draw_begin; it
- * never outlives the call, because a pass or a foreign pipeline between calls invalidates what it
+ * resolved run and the material state it applied. It never outlives the call, because a pass or a foreign pipeline between calls invalidates what it
  * remembers. */
 typedef struct {
     nt_material_t material;
@@ -125,10 +119,6 @@ typedef struct {
     uint32_t applied_material;
     uint32_t applied_supplied;
 } nt_renderer_mesh_draw_t;
-
-static inline nt_renderer_mesh_draw_t nt_renderer_mesh_draw_begin(const nt_renderer_mesh_caches_t *c, nt_buffer_t instances) {
-    return (nt_renderer_mesh_draw_t){.instance_layout = c->instance_layout, .instances = instances};
-}
 
 /* The pipeline is program x render state; layouts live on the meshes' vertex inputs. 0 = create failed. */
 static inline nt_pipeline_t nt_renderer_mesh_pipeline(nt_renderer_mesh_caches_t *c, const nt_material_info_t *mi) {
@@ -146,6 +136,8 @@ static inline bool nt_renderer_mesh_resolve(nt_renderer_mesh_caches_t *c, nt_ren
         return false;
     }
     if (material.id != d->material.id) {
+        /* A mesh feeds every stream at its pack location; an attr_map would name locations no mesh uses. */
+        NT_ASSERT(mi->attr_map_count == 0 && "mesh material: attr_map is sprite-only");
         d->pipeline = nt_renderer_mesh_pipeline(c, mi);
     }
     if (mesh.id != d->mesh.id) {
@@ -168,9 +160,7 @@ static inline void nt_renderer_mesh_record(nt_renderer_mesh_draw_t *d, const nt_
     nt_gfx_bind_pipeline(d->pipeline);
     const bool material_changed = d->material.id != d->applied_material;
     if (material_changed) {
-        for (uint8_t p = 0; p < mi->param_count; p++) {
-            nt_gfx_set_uniform_vec4((nt_hash32_t){.value = mi->param_name_hashes[p]}, mi->params[p]);
-        }
+        nt_renderer_set_material_uniforms(mi);
     }
     if (material_changed || supplied.id != d->applied_supplied) {
         nt_gfx_texture_binding_t bindings[NT_MATERIAL_MAX_TEXTURES];

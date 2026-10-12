@@ -75,12 +75,6 @@ void nt_skinned_mesh_renderer_shutdown(void) {
     memset(&s_skinned, 0, sizeof(s_skinned));
 }
 
-void nt_skinned_mesh_renderer_restore_gpu(void) {
-    if (s_skinned.initialized) {
-        nt_renderer_mesh_caches_reset(&s_skinned.caches);
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_ASSERT expansion inflates the metric
 void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_texture_t deformation, nt_buffer_t instances, uint32_t offset, uint32_t count) {
     NT_ASSERT(s_skinned.initialized);
@@ -93,7 +87,7 @@ void nt_skinned_mesh_renderer_draw(nt_mesh_t mesh, nt_material_t material, nt_te
     const nt_material_info_t *mat_info = nt_material_get_info(material);
     const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(mesh);
     NT_ASSERT(mat_info != NULL && mesh_info != NULL && "skinned draw references a destroyed material or mesh");
-    nt_renderer_mesh_draw_t draw = nt_renderer_mesh_draw_begin(&s_skinned.caches, instances);
+    nt_renderer_mesh_draw_t draw = {.instance_layout = s_skinned.caches.instance_layout, .instances = instances};
     if (nt_renderer_mesh_resolve(&s_skinned.caches, &draw, material, mat_info, mesh)) {
         nt_renderer_mesh_record(&draw, mat_info, mesh_info, s_skinned.skin_sampler_hash, deformation, offset, count);
     }
@@ -111,7 +105,7 @@ void nt_skinned_mesh_renderer_draw_list(uint32_t stream, const nt_render_item_t 
     /* Transform and drawable by inline sparse reads; the skin binding goes through its asserting accessor. */
     const nt_transform_comp_view_t transform_view = nt_transform_comp_view();
     const nt_drawable_comp_view_t drawable_view = nt_drawable_comp_view();
-    nt_renderer_mesh_draw_t draw = nt_renderer_mesh_draw_begin(&s_skinned.caches, nt_gfx_frame_buffer(stream));
+    nt_renderer_mesh_draw_t draw = {.instance_layout = s_skinned.caches.instance_layout, .instances = nt_gfx_frame_buffer(stream)};
     for (uint32_t run_start = 0, run_end = 0; run_start < count; run_start = run_end) {
         const nt_entity_t leader = {.id = items[run_start].entity};
         const nt_texture_t deformation = nt_skin_comp_handle(leader)->texture;

@@ -1082,10 +1082,9 @@ and in the initial state: `backend` is its handle, `size` its stride and
 `flags` its location mask, followed by its attribute records (divisor 1, buffer
 0). The backend defines the vertex input's VAO with its GL name in
 `backend.args[1]` and the instance binding its pointers hold: the instance
-buffer's GL name in `args[2]` (0 without one), the offset in `args[3]`, the
-layout slot in `args[4]` and the enabled instance locations in `args[5]` (all
-0 from creation); at capture start that layout's attribute records follow,
-with layout-relative offsets and result `UNKNOWN`. An upload that
+buffer's GL name in `args[2]` (0 without one), the offset in `args[3]` and the
+layout slot in `args[4]` (all 0 from creation); the layout's own definition
+names its attributes. An upload that
 finds its buffer already bound to `GL_ARRAY_BUFFER` records a `SKIP` of
 `glBindBuffer`. Both bind forms are `NT_GFX_OP_VERTEX_INPUT`; the instanced
 one carries the instance buffer in `binding.secondary`, the layout in
